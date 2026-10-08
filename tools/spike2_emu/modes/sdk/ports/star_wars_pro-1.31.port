@@ -482,3 +482,16 @@ text block_name_35      Jedi Wizard Mball Ready
 # PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
 callout countdown         765   # Zero! / One!; star_wars_le-1.30's 760 says the same lines
 callout ten_seconds       766   # Hurry up! / Hurry up!
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x0069da60
+data coil_table            0x006ff198
+value magnet_proc          13185
+text gates_label          Left/right control gates
+text gates_drive          9 5 255 250 255 1488
+data gates_obj           0x0068dedc
+value gates_ctl           12
+value gates_off_slot      5
+text held_coils            gates

@@ -249,6 +249,14 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     ball first scores, plus 2 s, is not counted). st3_job now taps a few playfield switches after the plunge and
     waits 6 s; Deadpool LE passed at once (Battle Mystique). chain27 re-runs the builds that did not pass once
     chain26 and the stack batch are done.
+  - chain28 (after chain27): a third media round on two rigs for every build not both screen and clip PROVEN,
+    with `FRESH_NV=1` (proof_job2.sh's prep boot: the title's NVRAM in the slot started fresh and Guided Setup
+    left, then the normal run). D&D LE's retry hit an NVRAM FATAL 256 in its slot (no game ever started); Aerosmith
+    LE's game hit its watchdog during the census presses.
+  - The whole queue, in order: chain18 (media retries, 2 rigs) -> chain19 (scoop, 2 rigs) -> chain21 COILS_DONE;
+    chain23 (rig 2: stack batch) -> RIGS_DONE -> chain24 (Jaws Pro probe) -> chain25 (Batman probe) -> chain26
+    (coil re-runs 2) -> chain27 (stack re-runs) -> chain28 (media round 3). Transcription: idle now, 4 threads after
+    RIGS_DONE.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

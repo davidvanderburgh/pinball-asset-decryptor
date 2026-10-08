@@ -298,7 +298,21 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       own active flag (+0xc) and no OFF of ours when the game takes it. Next, per title.
     * Voice: eight more builds' callouts from their own transcripts (ST LE's countdown by hand); a time-up line on
       eleven builds that have no "time's up" (tu_wide.py): Avengers 635, Iron Maiden 315, JP 915, Mandalorian 768, SoR
-      LE 514, Foo Fighters 878. Sword of Rage Pro gets 514 once its transcript lands (its port still has 1.18's ids).
+      LE 514, Foo Fighters 878; then the last three transcripts (SoR Pro, X-Men Pro, Venom Pro) and SoR Pro's 514.
+      Transcription is DONE for every build (voices_all.log "ALL DONE"). Still no time-up line: Elvira, Turtles, John
+      Wick, Deadpool, Led Zeppelin, Star Wars, Beatles, X-Men, JP the Pin (none among their transcribed lines).
+    * Scoop batch result: 15 more PROVEN (JW LE, KK LE, Mandalorian LE/Pro, Munsters LE/Pro, Rush LE/Pro, Stranger
+      Things Pro/LE, Sword of Rage LE/Pro, Venom LE/Pro, and D&D Pro on its re-run from the staged card). Star Wars
+      LE/Pro held and let go right but the game kept the ball 12.7-15.6 s after the mode (its own) - re-run. LZ Pro
+      and Metallica: the handler was wrapped but never held (another "settled" event) - chain32 probes them with
+      `value scoop_log 1` (f2b66047). chain31 re-runs the builds whose game never started (Guardians, JB LE, JW Pro,
+      KK Pro, LZ LE, Metallica). Elvira: no game on the direct harness.
+    * Staging, the second half of the start crashes: a one-rig rigbatch does not stage at all (now `--stage` in every
+      queued one-rig chain), and a batch's end emptied the SHARED .partial - the scoop batch's end deleted the C
+      batch's card 20 minutes into its copy. Fixed in rigbatch.sh / cardstage.sh (aa960787: each batch's copies under
+      `.inflight/<hash of its out dir>`); chain30 restarted on it. C: is ~98% full (the stage keeps 100 GB).
+    * Yellow census after run 12's landings: shows 50, coils 34, magnet 28, stack 21, sound 18, scoop 15, film 15,
+      clip 14, lights 11, screen 10, own_music 3, no port 2 (Batman 1.14, Jaws Pro: chain24/25 probes), ball_save 2.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

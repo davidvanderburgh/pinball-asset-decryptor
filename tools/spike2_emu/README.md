@@ -1080,6 +1080,18 @@ The playfield's status bar also carries the Emulate tab's **volume and Mute**
 (`PAD_AUDIO_CTL`, which watch.sh forwards to the window): both write the one
 control file the audio player polls, and the tab's slider follows it.
 
+**The player catches up instead of staying late (PAD-456).** The guest and
+the speaker both run at 1x, so a backlog that reaches `padplay.py` never
+drains by itself: a speaker or a socket that stalls for 20 s and then lets
+its bytes go at once leaves the sound 20 s behind the picture for the rest
+of the run (James Bond LE 1.06 on a tester's Windows 11 machine; on the rig
+the guest wrote exactly 1x through a whole game, so the backlog came from
+downstream). The player now watches the least its queue held over each 2 s
+window. Above `PAD_AUDIO_MAX_LATE_MS` (default 750; the queue normally rests
+near 200) it drops the oldest audio back to the 350 ms cushion and logs
+`[padplay] queue stayed above N ms for 2 s - skipped M ms to catch up`. The
+5 s `[padplay] queue` line counts the total `skipped`.
+
 `buildgl.sh` and `buildbridge.sh` **both write `libGLESv2.so.2`**, so whichever
 ran last decides which backend is live. Re-run the one you want before measuring.
 

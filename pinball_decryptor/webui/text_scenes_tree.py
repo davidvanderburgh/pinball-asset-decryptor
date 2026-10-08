@@ -1558,7 +1558,10 @@ class TreeEditMixin:
     # carries, its size is the baked size nearest to it, scaled the rest of the way with its
     # box kept (scene_edit's text_font), and its spacings are the Text's own two numbers.
     #: the edits the Font bar makes, which "Font as shipped" takes off a line
-    _FONT_OPS = ("text_font", "text_spacing", "text_flow", "text_align")
+    _FONT_OPS = ("text_font", "text_spacing", "text_flow", "text_align", "text_slant",
+                 "text_stretch")
+    #: Italic: the slant it gives, in degrees (Photoshop's faux italic leans about as far)
+    _ITALIC_DEG = 12.0
 
     @staticmethod
     def _font_styles(man):
@@ -1576,13 +1579,23 @@ class TreeEditMixin:
                       for name, sizes in styles.items())
 
     def _tree_text_scale(self, nid):
-        """How many glass pixels one of the line's own pixels is, up and down, now."""
+        """How many glass pixels one of the line's own pixels is, up and down, now: the
+        height of its letters' parallelogram (area over width), so a slant or a letter width
+        leaves it alone."""
         d = self._tree_text_draw(nid)
         m = d["m"] if d is not None else (self._tworlds.get(nid) or (None, None))[1]
         if not m:
             return 1.0
-        k = math.hypot(m[2], m[3])
+        w = math.hypot(m[0], m[1])
+        k = abs(m[0] * m[3] - m[1] * m[2]) / w if w > 1e-9 else 0.0
         return k if k > 1e-6 else 1.0
+
+    def _tree_text_hscale(self, nid):
+        """How many glass pixels one of the line's own pixels is, along its lines, now."""
+        d = self._tree_text_draw(nid)
+        m = d["m"] if d is not None else (self._tworlds.get(nid) or (None, None))[1]
+        w = math.hypot(m[0], m[1]) if m else 0.0
+        return w if w > 1e-6 else 1.0
 
     def _tree_text_obj(self, man, n):
         for _s, oid in n["comps"]:
@@ -1613,17 +1626,39 @@ class TreeEditMixin:
         own = own or float(o.get("line") or 0) or float(o.get("font_px") or 0)
         sp = list(o.get("spacing") or (0, 0)) + [0, 0]
         flags = list(o.get("flags") or (0, 0)) + [0, 0]
+        slant, width = self._tree_text_slant_width(n["id"], ops)
         return {"style": style,
                 "styles": [{"value": name, "label": name,
                             "sizes": [round(size * made, 1) for _sid, size in sizes]}
                            for name, sizes in styles],
                 "size": round(own * k, 1),
-                "letter": round(float(sp[1] or 0) * k, 1),
+                "letter": round(float(sp[1] or 0) * self._tree_text_hscale(n["id"]), 1),
                 "line": round(float(sp[0] or 0) * k, 1),
                 "multiline": bool(flags[0]), "wrap": bool(flags[1]),
                 "fit": bool(o.get("fit")), "game_layout": bool(o.get("game_layout")),
+                # PAD-452 round 2: italic (a slant) and the letters' width, from as shipped
+                "slant": round(slant, 1), "italic": abs(slant) >= 0.05,
+                "width": round(width * 100, 1),
+                # its drop shadow: it has one, or it is one
+                "shadow": {"has": any(op["op"] == "shadow" and op.get("node") == n["id"]
+                                      for op in ops),
+                           "is": any(op["op"] == "shadow" and op.get("id") == n["id"]
+                                     for op in ops)},
                 "edited": any(op.get("node") == n["id"] and op["op"] in self._FONT_OPS
                               for op in ops)}
+
+    @staticmethod
+    def _tree_text_slant_width(nid, ops):
+        """``(slant in degrees, width factor)`` the Font bar gave line *nid*."""
+        t, w = 0.0, 1.0
+        for op in ops:
+            if op.get("node") != nid:
+                continue
+            if op["op"] == "text_slant":
+                t += float(op.get("t") or 0.0)
+            elif op["op"] == "text_stretch":
+                w *= float(op.get("sx") or 1.0)
+        return math.degrees(math.atan(t)), w
 
     def _tree_font_target(self, node):
         """``(text object, glass scale, [(style, sizes)], style, own size)`` of a Text node."""
@@ -1696,7 +1731,7 @@ class TreeEditMixin:
         op = {"op": "text_spacing", "node": int(node)}
         try:
             if letter not in (None, ""):
-                op["letter"] = round(float(letter) / k, 3)
+                op["letter"] = round(float(letter) / self._tree_text_hscale(int(node)), 3)
                 op["letter_px"] = round(float(letter), 1)
             if line not in (None, ""):
                 op["line"] = round(float(line) / k, 3)
@@ -1727,6 +1762,78 @@ class TreeEditMixin:
         if len(op) == 2:
             return False
         return self._tree_add(op)
+
+    @rpc
+    def tree_text_slant(self, node, deg):
+        """Italic (DragonRR, PAD-452 round 2: "Italics/Underline etc."): Spike 2 fonts have no
+        italic of their own, so the line is slanted *deg* degrees from as shipped (tops of the
+        letters to the right) by its node's matrix, which the game draws it with, about the
+        middle of its box."""
+        got = self._tree_font_target(node)
+        card, _man = self._tree_card()
+        if got is None or card is None:
+            return False
+        try:
+            want = float(deg)
+        except (TypeError, ValueError):
+            return False
+        if abs(want) > 45:
+            return False
+        cur, _w = self._tree_text_slant_width(int(node), self._tree_ops(card))
+        t = math.tan(math.radians(want)) - math.tan(math.radians(cur))
+        if abs(t) < 1e-5:
+            return False
+        L, T, R, B = (list(got[0].get("rect") or (0, 0, 0, 0)) + [0, 0, 0, 0])[:4]
+        return self._tree_add({"op": "text_slant", "node": int(node), "t": round(t, 6),
+                               "py": round((T + B) / 2.0, 3)})
+
+    @rpc
+    def tree_text_italic(self, node, on):
+        """The Italic box: a slant of :data:`_ITALIC_DEG`, or none."""
+        return self.tree_text_slant(node, self._ITALIC_DEG if on else 0.0)
+
+    @rpc
+    def tree_text_width(self, node, pct):
+        """The letters' width, % of as shipped (condensed below 100, wide above), the box left
+        where it is so the words re-flow in it."""
+        got = self._tree_font_target(node)
+        card, _man = self._tree_card()
+        if got is None or card is None:
+            return False
+        try:
+            want = float(pct) / 100.0
+        except (TypeError, ValueError):
+            return False
+        if not 0.1 <= want <= 10:
+            return False
+        _s, cur = self._tree_text_slant_width(int(node), self._tree_ops(card))
+        sx = want / cur
+        if abs(sx - 1.0) < 1e-4:
+            return False
+        return self._tree_add({"op": "text_stretch", "node": int(node), "sx": round(sx, 6)})
+
+    @rpc
+    def tree_shadow_remove(self, node):
+        """Remove drop shadow (DragonRR, PAD-452 round 2): a line's drop shadows, or the
+        shadow *node* is, with every edit made to them (one undo step).  The line is
+        selected after."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        ops = self._tree_ops(card)
+        shadows = [op for op in ops if op["op"] == "shadow"
+                   and node in (op.get("node"), op.get("id"))]
+        if not shadows:
+            return False
+        gone = {int(op["id"]) for op in shadows}
+        keep = [op for op in ops if op.get("id") not in gone and op.get("node") not in gone]
+        scene_edit.set_ops(self.assets_dir, card, keep)
+        if self._tsel in gone:
+            self._tsel = int(shadows[0]["node"])
+        self._tree_refresh()
+        return True
 
     @rpc
     def tree_text_font_reset(self, node):

@@ -332,7 +332,9 @@ static int word_is(const char *s, const char *w)
 
 static void load_port(void)
 {
-    static char buf[16384];
+    /* 64 KB: James Bond LE 1.06's port is 45 KB and keeps its data lines past the first 16 KB,
+     * so a 16 KB read silently left the channel table and the queue at 0 (PAD-456). */
+    static char buf[65536];
     static const char *const files[] = { "/dump/game.port", "/usr/local/padmode/game.port" };
     long n, tot = 0;
     const char *s;

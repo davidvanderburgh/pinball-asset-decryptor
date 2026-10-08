@@ -75,6 +75,14 @@ Operations (``op`` and its fields)::
                                   SET a Text's Multiline and WordWrap bytes (PAD-412: line
                                   breaks kept; words wrapped at the box's width) and
                                   ScaleToBounds (the words shrink to fit the box)
+    text_slant  node, t, py       the words slanted (italic, DragonRR PAD-452): every node
+                                  drawing the Text sheared ``x -= t * (y - py)`` in its own
+                                  units (*t* the tangent of the slant, clockwise; *py* the
+                                  middle of the rect, which stays put).  Spike 2 fonts have no
+                                  italic of their own; the node's matrix carries the slant
+    text_stretch node, sx         the letters *sx* times as wide, their box left where it is:
+                                  every node drawing the Text scaled (sx, 1) about the rect's
+                                  top-left, the rect's width shrunk by 1/*sx*
 
 ``id`` of an added node is the one it has in the preview; the writer gives it a fresh id in
 the card's own id space.
@@ -90,6 +98,8 @@ RELDIR = ("images", "scene_textures")
 FILENAME = "scene_edits.json"
 BUILT_FILENAME = "scene_edits_built.json"   # the edits as the last successful Write built them
 FIRST_ADDED_ID = 0x7F000000          # preview ids of added nodes (never a stock id)
+#: the edits made to a line of text's own Text (and every node drawing it): PAD-452
+TEXT_OPS = ("text_font", "text_spacing", "text_flow", "text_slant", "text_stretch")
 #: a Text's alignment word (across) and VerticalAlignment (up and down), by value (PAD-433)
 ALIGN_NAMES = ("left", "centre", "right")
 VALIGN_NAMES = ("top", "middle", "bottom")
@@ -164,6 +174,16 @@ def add(assets_dir, card, op):
     elif (last and last.get("node") == op.get("node")
           and last["op"] == op["op"] and op["op"] in ("text_spacing", "text_flow")):
         last.update({k: v for k, v in op.items() if k not in ("op", "node")})
+    elif (last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_slant"
+          and last.get("py") == op.get("py")):
+        last["t"] = round(last["t"] + op["t"], 6)
+        if abs(last["t"]) < 1e-6:
+            ops.pop()
+    elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_stretch":
+        # (about the same corner, as a text_font is)
+        last["sx"] = round(last["sx"] * op["sx"], 6)
+        if abs(last["sx"] - 1.0) < 1e-6:
+            ops.pop()
     elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_font":
         # (about the same corner: a text_font keeps its rect's top-left where it was)
         last["s"] = round(float(last.get("s") or 1.0) * float(op.get("s") or 1.0), 6)
@@ -556,6 +576,10 @@ def describe(op):
     if k == "text_spacing":
         return ", ".join("%s spacing %g px" % (f, op.get(f + "_px", op[f]))
                          for f in ("letter", "line") if f in op)
+    if k == "text_slant":
+        return "slanted %+g°" % round(math.degrees(math.atan(op["t"])), 1)
+    if k == "text_stretch":
+        return "letters %d %% wide" % round(op["sx"] * 100)
     if k == "text_flow":
         words = {"multiline": ("line breaks kept", "line breaks dropped"),
                  "wrap": ("wraps in its box", "does not wrap"),
@@ -634,6 +658,38 @@ def _boxed_rect(rect, s, px, py):
             round(px + (R - px) / s, 3), round(py + (B - py) / s, 3)]
 
 
+def _text_shape(op, rect):
+    """``(affine -> affine, rect -> rect or None)``: what a ``text_font`` / ``text_stretch`` /
+    ``text_slant`` edit does to every node drawing a Text whose (first) rect is *rect*, and to
+    each of its Texts' rects, so the box stays where it is on the glass; None when it changes
+    neither."""
+    L, T, _R, B = _rect4(rect)
+    k = op["op"]
+    if k == "text_slant":
+        t, py = float(op["t"]), float(op.get("py", (T + B) / 2.0))
+        if abs(t) < 1e-9:
+            return None
+        # x -= t * (y - py) in the node's own units: the line at py stays put, the tops of
+        # the letters lean right (y points down)
+        shear = (1.0, 0.0, -t, 1.0, t * py, 0.0)
+        return (lambda m: _composed(m, shear)), None
+    if k == "text_stretch":
+        sx = float(op["sx"])
+        if sx <= 0:
+            raise ValueError("a width of %g" % sx)
+        if abs(sx - 1.0) < 1e-9:
+            return None
+        return ((lambda m: _scaled(m, sx, L, T, 1.0)),
+                lambda r: [round(L + (v - L) / sx, 3) if i in (0, 2) else round(v, 3)
+                           for i, v in enumerate(_rect4(r))])
+    s = float(op.get("s") or 1.0)
+    if s <= 0:
+        raise ValueError("a size of %g" % s)
+    if abs(s - 1.0) < 1e-9:
+        return None
+    return (lambda m: _scaled(m, s, L, T)), (lambda r: _boxed_rect(r, s, L, T))
+
+
 def font_table(man):
     """``{font size id: {font, font_px, ascent, line, variant, face}}``: the font sizes scene
     manifest *man* carries (PAD-452), each named the way a line of text in it is drawn
@@ -708,13 +764,13 @@ def apply_manifest(man, ops):
         try:
             if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
                      "text_rect", "text_align", "parent", "line_colour", "line_font",
-                     "text_font", "text_spacing", "text_flow"):
+                     "text_font", "text_spacing", "text_flow", "text_slant", "text_stretch"):
                 got = index.get(op["node"])
                 if got is None:
                     notes.append("%s: node %s is not in this scene" % (k, op["node"]))
                     continue
                 n, sibs = got
-                if k in ("text_font", "text_spacing", "text_flow"):
+                if k in TEXT_OPS:
                     texts = [(str(oid), man["objects"].get(str(oid)) or {})
                              for _s, oid in n["comps"]]
                     texts = [(oid, o) for oid, o in texts if o.get("kind") == "Text"]
@@ -849,8 +905,8 @@ def apply_manifest(man, ops):
 
 
 def _man_text_op(man, index, op, texts, notes):
-    """A ``text_font`` / ``text_spacing`` / ``text_flow`` edit on the manifest's Texts
-    *texts* (``[(object id, object)]``) of ``op["node"]``."""
+    """A :data:`TEXT_OPS` edit on the manifest's Texts *texts* (``[(object id, object)]``) of
+    ``op["node"]``."""
     k = op["op"]
     if k == "text_spacing":
         for _oid, o in texts:
@@ -866,10 +922,8 @@ def _man_text_op(man, index, op, texts, notes):
                 # (one the game lays out itself always shrinks to fit: PAD-433)
                 o["fit"] = int(bool(op["fit"]))
         return
-    s = float(op.get("s") or 1.0)
-    if s <= 0:
-        raise ValueError("a size of %g" % s)
-    sid = op.get("font")
+    shape = _text_shape(op, texts[0][1].get("rect"))
+    sid = op.get("font") if k == "text_font" else None
     f = None
     if sid is not None:
         f = font_table(man).get(int(sid))
@@ -881,18 +935,19 @@ def _man_text_op(man, index, op, texts, notes):
             o.update(font_id=int(sid), font=f.get("font") or "", font_px=f.get("font_px") or 0,
                      ascent=f.get("ascent") or 0, line=f.get("line") or 0,
                      styled=bool(f.get("variant")), font_name=f.get("variant") or "")
-    if abs(s - 1.0) <= 1e-9:
+    if shape is None:
         return
-    px, py = _rect4(texts[0][1].get("rect"))[:2]
-    for _oid, o in texts:
-        o["rect"] = _boxed_rect(o.get("rect"), s, px, py)
-    # every node drawing these Texts (an outline and fill pair, a drop shadow) grows with
-    # them, about the same corner, so they stay together
+    node_m, rect_of = shape
+    if rect_of is not None:
+        for _oid, o in texts:
+            o["rect"] = rect_of(o.get("rect"))
+    # every node drawing these Texts (an outline and fill pair, a drop shadow) changes with
+    # them, about the same point, so they stay together
     oids = {oid for oid, _o in texts}
     for n2, _sibs in index.values():
         if any(str(c) in oids for _st, c in n2["comps"]):
             base = n2["tr"] or [[1, [1, 0, 0, 1, 0, 0]]]
-            n2["tr"] = [[fr, list(_scaled(m, s, px, py))] for fr, m in base]
+            n2["tr"] = [[fr, list(node_m(m))] for fr, m in base]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1004,7 +1059,7 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
         try:
             if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
                      "text_rect", "text_align", "parent", "line_colour", "line_font",
-                     "text_font", "text_spacing", "text_flow"):
+                     "text_font", "text_spacing", "text_flow", "text_slant", "text_stretch"):
                 nid = fresh.get(op["node"], op["node"])
                 got = index.get(nid)
                 want = names.get(op["node"])
@@ -1013,7 +1068,7 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                                  % (k, op["node"], want or "?"))
                     continue
                 n, sibs = got
-                if k in ("text_font", "text_spacing", "text_flow"):
+                if k in TEXT_OPS:
                     texts = [c.obj for c in n.components if c.obj.kind == "Text"]
                     if not texts:
                         notes.append("%s: node %s draws no text; left alone" % (k, op["node"]))
@@ -1185,8 +1240,8 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
 
 
 def _tree_text_op(scene, index, op, texts, notes):
-    """A ``text_font`` / ``text_spacing`` / ``text_flow`` edit on the card scene's Texts
-    *texts* (:class:`scene_tree.Obj`) of ``op["node"]``; False when it is left alone."""
+    """A :data:`TEXT_OPS` edit on the card scene's Texts *texts* (:class:`scene_tree.Obj`) of
+    ``op["node"]``; False when it is left alone."""
     k = op["op"]
     if k == "text_spacing":
         for o in texts:
@@ -1204,10 +1259,8 @@ def _tree_text_op(scene, index, op, texts, notes):
                 o.body["tail"] = (int(bool(op["fit"])),
                                   int((tuple(o.body.get("tail") or (0, 0)) + (0, 0))[1]))
         return True
-    s = float(op.get("s") or 1.0)
-    if s <= 0:
-        raise ValueError("a size of %g" % s)
-    sid = op.get("font")
+    shape = _text_shape(op, texts[0].body.get("rect"))
+    sid = op.get("font") if k == "text_font" else None
     if sid is not None:
         sid = int(sid)
         size = scene.font_sizes.get(sid)
@@ -1224,14 +1277,15 @@ def _tree_text_op(scene, index, op, texts, notes):
             # stock Text, PAD-452 census of Godzilla's 2,541); a plain size by neither
             b["fonts"] = [(variant, sid)] if variant else []
             b["used"] = [sid] * lines if variant else []
-    if abs(s - 1.0) > 1e-9:
-        px, py = _rect4(texts[0].body.get("rect"))[:2]
-        for o in texts:
-            o.body["rect"] = tuple(_boxed_rect(o.body.get("rect"), s, px, py))
+    if shape is not None:
+        node_m, rect_of = shape
+        if rect_of is not None:
+            for o in texts:
+                o.body["rect"] = tuple(rect_of(o.body.get("rect")))
         ident = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
         for n2, _sibs in index.values():
             if any(c.obj in texts for c in n2.components):
-                n2.tracks = [(fr, _m16_with(m, _scaled(_m6_of16(m), s, px, py)))
+                n2.tracks = [(fr, _m16_with(m, node_m(_m6_of16(m))))
                              for fr, m in (n2.tracks or [(1, ident)])]
     return True
 

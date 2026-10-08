@@ -52,6 +52,7 @@ def _pred(kind, mode, assignments, changed_on_disk):
     setattr(stub, "%s_change_filter_var" % kind, _Var(mode))
     setattr(stub, picks, dict(assignments))
     setattr(stub, changed, set(changed_on_disk))
+    stub._variants = {}                   # no random clips (PAD-446, video)
     return fn(stub)
 
 
@@ -150,6 +151,7 @@ def _picker_tab(order):
         stop_all_preview_playback=lambda: order.append("stop"),
         _ask_path=fake_pick,
         window=SimpleNamespace(ask_open=fake_pick),
+        _u_busy=True,       # the video pick's Undo step is taken (PAD-453)
     )
 
 

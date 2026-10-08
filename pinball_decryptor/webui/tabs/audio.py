@@ -1153,7 +1153,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                 if not query and type_key == "callouts":
                     hint = ("No call-outs identified in this folder yet.\n"
                             "Tick \"Auto-name call-outs\" on the Extract tab "
-                            "to transcribe and name the speech files.")
+                            "and press Auto-name now to transcribe and name "
+                            "the speech files.")
                 elif not query and type_key == "music":
                     hint = ("No music identified in this folder — no music "
                             "banks and no Auto-name music results.")

@@ -2123,7 +2123,8 @@ static void game_show(struct slot *M, const char *name, const char *when)
  * (lit for its start shot, or started) and nothing of this mode's own runs: no clock, screen, lights or sounds. How
  * often it can start still holds, and the start counts as a run that ended at once (its cooldown runs from now).
  * Another of this card's modes running does not stop it; while that one holds the game's modes off, the runtime
- * lights a `start` instead. Refused by the runtime (no game, not this game's), it keeps its trigger count. */
+ * lights a `start` instead (and starts it once that one ends, that ball - as when one of the game's own modes is
+ * in the way, PAD-457). Refused by the runtime (no game, not this game's), it keeps its trigger count. */
 static void hand_off(struct slot *M, const char *why)
 {
     unsigned p = pm_player(), k = M->index;

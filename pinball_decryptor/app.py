@@ -362,6 +362,9 @@ class App:
         # project starts (its edits are parked in .hydrate/), consumed by
         # the done-handler to move them back.  See _start_extract.
         self._pending_post_hydrate = None
+        # An Auto-name now run (PAD-460) is in flight: it borrows the extract
+        # run-state, but none of the extract-completion behaviour applies.
+        self._autoname_active = False
         # The window's last un-maximized "WxH+X+Y", kept by the desktop host
         # as the user resizes (webui.host); saved in settings on the way out.
         self._last_normal_geometry = None
@@ -403,6 +406,7 @@ class App:
             on_manufacturer_change=self._on_manufacturer_change,
             on_extract=self._start_extract,
             on_extract_cancel=self._cancel,
+            on_autoname=self._start_autoname,
             on_write=self._start_write,
             on_write_cancel=self._cancel,
             on_apply_delta=self._start_apply_delta,
@@ -2666,7 +2670,8 @@ class App:
     # ------------------------------------------------------------------
 
     def _start_transcribe(self, assets_dir_override=None,
-                          outer_done_summary=None, outer_done_cb=None):
+                          outer_done_summary=None, outer_done_cb=None,
+                          step_done_cb=None):
         """Run the transcribe pipeline.
 
         Called from ``_start_extract`` (chained) when the user ticked
@@ -2675,6 +2680,8 @@ class App:
         the window's var); ``outer_done_summary`` + ``outer_done_cb`` let us
         defer the Extract's "Complete" modal until transcribe finishes
         so the user sees one terminal dialog instead of two.
+        ``step_done_cb`` (Auto-name now, PAD-460) gets this run's own
+        ``(success, summary)``; its caller owns the run state.
         """
         if not self._current_mfr.capabilities.transcribe:
             return
@@ -2682,7 +2689,7 @@ class App:
             if self._cancel_requested:        # cancelled upstream → don't chain
                 outer_done_cb(False, outer_done_summary or "")
                 return
-        else:
+        elif step_done_cb is None:
             self._cancel_requested = False     # standalone = a fresh run
         assets_dir = (assets_dir_override
                       or self.window.extract_output_var.get().strip()
@@ -2693,6 +2700,8 @@ class App:
                 f"Cannot run transcribe — folder not found:\n{assets_dir}")
             if outer_done_cb:
                 outer_done_cb(True, outer_done_summary or "")
+            elif step_done_cb:
+                step_done_cb(False, f"Folder not found: {assets_dir}")
             return
 
         # Stay in extract mode so the status row keeps its labels.
@@ -2703,7 +2712,7 @@ class App:
         # calling it again would reset the elapsed timer to zero
         # mid-pipeline -- the user just saw Extract take 60s and now
         # the clock would say 00:00 again during transcribe.
-        if outer_done_cb is None:
+        if outer_done_cb is None and step_done_cb is None:
             self.window.set_running(True, mode="extract")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
@@ -2718,7 +2727,9 @@ class App:
         # If we're chained, replace the normal done_cb with one that
         # merges transcribe's summary into the Extract summary and
         # delegates the final "Complete" modal to outer_done_cb.
-        if outer_done_cb is not None:
+        if step_done_cb is not None:
+            done_cb = step_done_cb
+        elif outer_done_cb is not None:
             head = (outer_done_summary or "").rstrip()
             def merged_done(transcribe_success, transcribe_summary):
                 label = ("Auto-transcribe:" if transcribe_success
@@ -2770,7 +2781,8 @@ class App:
         return wrapped
 
     def _start_music_id(self, assets_dir_override=None,
-                        outer_done_summary=None, outer_done_cb=None):
+                        outer_done_summary=None, outer_done_cb=None,
+                        step_done_cb=None):
         """Run the online music-ID pipeline (chained after a successful
         Extract/transcribe).  Mirrors ``_start_transcribe``."""
         if not self._current_mfr.capabilities.music_id:
@@ -2779,7 +2791,7 @@ class App:
             if self._cancel_requested:        # cancelled upstream → don't chain
                 outer_done_cb(False, outer_done_summary or "")
                 return
-        else:
+        elif step_done_cb is None:
             self._cancel_requested = False     # standalone = a fresh run
         assets_dir = (assets_dir_override
                       or self.window.extract_output_var.get().strip()
@@ -2790,10 +2802,12 @@ class App:
                 f"Cannot identify music — folder not found:\n{assets_dir}")
             if outer_done_cb:
                 outer_done_cb(True, outer_done_summary or "")
+            elif step_done_cb:
+                step_done_cb(False, f"Folder not found: {assets_dir}")
             return
 
         self._active_mode = "extract"
-        if outer_done_cb is None:
+        if outer_done_cb is None and step_done_cb is None:
             self.window.set_running(True, mode="extract")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
@@ -2803,7 +2817,9 @@ class App:
         self.window.show_chained_phases(
             getattr(self._current_mfr, "music_id_phases", ()))
 
-        if outer_done_cb is not None:
+        if step_done_cb is not None:
+            done_cb = step_done_cb
+        elif outer_done_cb is not None:
             head = (outer_done_summary or "").rstrip()
 
             def merged_done(ok, summary):
@@ -2815,6 +2831,60 @@ class App:
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
             rename_after=True)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Auto-name now (PAD-460)
+    # ------------------------------------------------------------------
+
+    def _start_autoname(self):
+        """The Extract tab's Auto-name now: the ticked Auto-name options
+        (call-outs, then music) over the sounds an earlier extract left in the
+        project folder, with no new extract.  A tester had extracted without
+        them and the only way to name the sounds afterwards was extracting
+        again.  Call-outs use the quality picked beside the option; files
+        already named keep their names, so a second run names only what the
+        first one missed (the transcribe summary's "run it again" advice)."""
+        mfr = self._current_mfr
+        caps = mfr.capabilities if mfr is not None else None
+        steps = []
+        if (getattr(caps, "transcribe", False)
+                and self.window.transcribe_var.get()):
+            steps.append(("Auto-name call-outs", self._start_transcribe))
+        if (getattr(caps, "music_id", False)
+                and self.window.music_id_var.get()):
+            steps.append(("Auto-name music", self._start_music_id))
+        if not steps or self.window._is_running():
+            return
+        folder = self.window.extract_output_var.get().strip()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror("Invalid Folder",
+                                 f"Project folder not found:\n{folder}")
+            return
+        folder = os.path.normpath(folder)
+        self._active_mode = "extract"
+        self._autoname_active = True
+        self._cancel_requested = False
+        self.window.set_running(True, mode="extract")
+        self.window.append_log(
+            "Auto-naming the sounds already in %s..." % folder, "info")
+        done_cb = self._make_callbacks()[3]
+        results = []
+
+        def run(i):
+            if i == len(steps) or self._cancel_requested:
+                ok = bool(results) and all(r[0] for r in results)
+                done_cb(ok, "\n\n".join(r[1] for r in results))
+                return
+            label, start = steps[i]
+
+            def step_done(ok, summary):
+                # from the step's worker thread: hop to the UI loop
+                results.append((ok, "%s%s:\n%s" % (
+                    label, "" if ok else " failed", summary)))
+                self.root.after(0, lambda: run(i + 1))
+            start(assets_dir_override=folder, step_done_cb=step_done)
+
+        run(0)
 
     # ------------------------------------------------------------------
     # Apply delta
@@ -4611,6 +4681,32 @@ class App:
                 messagebox.showerror("Card Read Failed", summary)
             # Put the tab's own phase row back (this run swapped in its own).
             self.window._refresh_extract_phases()
+            return
+
+        # Auto-name now (PAD-460) borrows the extract run-state as well, and
+        # extracted nothing either: no source to stamp, no "Extract completed"
+        # line, and a failure is not an "Extract Failed".
+        if self._autoname_active:
+            self._autoname_active = False
+            self.window.set_running(False, mode="extract")
+            # the sounds were renamed under the Replace tabs: scan them again
+            self.window.invalidate_asset_scans()
+            if self._cancel_requested:
+                self._cancel_requested = False
+                self.window.set_status("Cancelled")
+                self.window.append_log("Auto-name cancelled.", "info")
+            elif success:
+                self.window.set_phase(
+                    len(getattr(self.window, "_phases", {}).get(
+                        "extract", ())), mode="extract")
+                self.window.set_status(
+                    time.strftime("Completed at %I:%M %p").replace(" 0", " "))
+                self.window.set_progress(1, 1, mode="extract")
+                self.window.append_log(summary, "success")
+            else:
+                self.window.set_status("Failed")
+                self.window.append_log(summary, "error")
+                messagebox.showerror("Auto-name Failed", summary)
             return
 
         is_extract = self._active_mode == "extract"

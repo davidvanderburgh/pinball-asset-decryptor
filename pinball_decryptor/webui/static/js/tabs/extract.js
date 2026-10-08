@@ -16,6 +16,12 @@ const TRANSCRIBE_TIP = "Transcribe each spoken WAV (faster-whisper) and rename i
   + "e.g. “Super jackpot!”. Also writes callouts.csv.";
 const MUSIC_TIP = "Identify each full song online (AcoustID) and rename it by artist + title — "
   + "e.g. “Led Zeppelin - Kashmir”. Needs internet.";
+// PAD-460: the quality used to hide in the ⚙ menu; it sits with the option it
+// tunes now, and Auto-name now names a project that is already extracted.
+const VOICE_TIP = "The voice-recognition model Auto-name call-outs listens with. Higher hears more words "
+  + "right but runs slower, and downloads a bigger model the first time.";
+const AUTONAME_TIP = "Run the ticked Auto-name options on the sounds already in this project folder, "
+  + "without extracting again. Sounds that already have a name keep it.";
 const DURATION_TIP = "Lead each extracted sound's filename with its play length — e.g. "
   + "“01m22s235 - idx0001.wav” — so sorting by name lines the same sounds up across firmware "
   + "versions (slot numbers shift between releases; play lengths rarely do).";
@@ -163,10 +169,12 @@ function projectHint(p) {
   return "";
 }
 
-function Options({ s }) {
+function Options({ s, shell }) {
+  const sx = useNs("shellx");
   const cats = s.categories || [];
   const showNaming = s.opt_transcribe || s.opt_music || s.opt_duration;
   const off = !s.autoname_enabled;
+  const running = !!(shell && shell.running);
   const capturePrimary = s.capture_primary;
   return html`
     ${s.deltas_show ? html`<div class="stack x-sec">
@@ -215,6 +223,16 @@ function Options({ s }) {
           ${s.opt_music ? html`<${Check} ns="extract" k="music_id" checked=${s.music_id} disabled=${off} label="Auto-name music" title=${MUSIC_TIP} />` : null}
           ${s.opt_duration ? html`<${Check} ns="extract" k="duration_names" checked=${s.duration_names} disabled=${off} label="Length-prefix names" title=${DURATION_TIP} />` : null}
         </div>
+        ${s.opt_transcribe ? html`<div class="row wrap x-voice">
+            <label class="small dim" for="x-voice">Voice recognition quality</label>
+            <${Select} id="x-voice" sm value=${sx.voice_quality} options=${sx.voice_choices || []} title=${VOICE_TIP}
+              disabled=${off || !s.transcribe || running} onChange=${(v) => call("ui.settings_action", "voice_quality", v)} />
+          </div>` : null}
+        ${s.opt_transcribe || s.opt_music ? html`<div class="row wrap x-autoname">
+            <${Button} size="sm" icon="edit" disabled=${running || !!s.autoname_reason} title=${AUTONAME_TIP}
+              onClick=${() => call("extract.autoname_now")}>Auto-name now<//>
+            <span class="small dim grow">${s.autoname_reason || "Names the sounds already in this project folder, no new extract."}</span>
+          </div>` : null}
       </div>` : null}`;
 }
 
@@ -283,7 +301,7 @@ function SourceCard({ s, shell }) {
             onClick=${() => call("extract.new_card_project")}>New project…<//>`}</div>`
         : hint ? html`<span class="small muted">${hint}</span>` : null}
     </div>
-    <${Options} s=${s} />
+    <${Options} s=${s} shell=${shell} />
   <//>`;
 }
 

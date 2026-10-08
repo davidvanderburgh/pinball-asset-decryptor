@@ -110,8 +110,11 @@ HELP_CONTENT = {
                  "text": "Where available: `01m22s235 - idx0001.wav`, so the same "
                          "sounds sort together across firmware versions."}]},
             "Results also go to callouts.csv and music_titles.csv. Better call-out "
-            "names: raise **Voice recognition quality** in the ⚙ settings menu (slower; "
-            "bigger model).",
+            "names: pick a higher **Voice recognition quality** under these options "
+            "(slower; bigger model).",
+            "Extracted without them? **Auto-name now** names the sounds already in the "
+            "project folder, no new extract. Sounds that already have a name keep it, so "
+            "running it again names only what is left.",
         ]),
         ("Re-extracting", [
             {"note": "Extracting into a folder with files in it **overwrites your "
@@ -601,15 +604,18 @@ HELP_CONTENT = {
             "- A picture shows its size and scale; **Draw 1:1** draws it pixel for pixel.\n"
             "- Text: a corner or **W px / H px** resizes its box and the words wrap inside "
             "it; **Size %** scales the words.\n"
-            "- Text: **Font, size and spacing…** opens the **Font** bar on the right edge: "
+            "- Text: **Font controls** opens the **Font** bar on the right edge: "
             "the line's font and **Size** (the sizes the scene was made at draw sharpest), "
-            "letter and line **Spacing**, **Across** (Left / Centre / Right) and **Up/down** "
-            "(Top / Middle / Bottom) in its box, wrapping, shrink to fit and line breaks, in "
-            "the preview and in the game. **Font as shipped** puts them back. Lines the "
+            "**Italic**, **Slant** and letter **Width**, letter and line **Spacing**, "
+            "**Across** (Left / Centre / Right) and **Up/down** "
+            "(Top / Middle / Bottom) in its box, wrapping, shrink to fit and line breaks, "
+            "**Fit box to text**, and **Add** / **Remove** a drop shadow, in "
+            "the preview and in the game. **Font as shipped** puts the font and style back. "
+            "Lines the "
             "game fills in itself on Godzilla's mode screens (a battle's title and "
             "instructions) always sit in the middle of their box and shrink to fit it; the "
             "preview shows them that way.\n"
-            "- Text: **Add a drop shadow** and **Fit box to text**. Most text is a font "
+            "- Text: most text is a font "
             "with baked-in colours, so **Tint** recolours it.\n"
             "- **Picture…** and **Text…** add new items.",
             "### Moment and switchable parts\n"
@@ -2967,7 +2973,7 @@ GENERAL_CONTENT = [
      "- light / dark theme\n"
      "- **Check for updates**, and **Check automatically**: at startup only, hourly, "
      "every 6 hours or daily\n"
-     "- disk-space management and voice recognition quality\n"
+     "- disk-space management, and clearing the downloaded voice models\n"
      "- the prerequisite tools: status, re-check, install\n"
      "- **View disclaimer…**, the first-launch disclaimer again"),
     ("Prerequisites",

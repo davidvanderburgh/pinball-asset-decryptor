@@ -228,8 +228,9 @@ which usually clears it. Whatever is left comes back as `error` in the
 CSV — not `non-speech` — keeps its original filename, and is counted on
 its own line in the finish summary, so a run that lost clips to memory
 pressure no longer reads exactly like a run that found that many more
-sound effects. Re-running Auto-name call-outs on the same folder with
-less else running picks them up.
+sound effects. **Auto-name now** on the Extract tab, with less else
+running, names them without extracting again (files that already have a
+name keep it).
 
 ### Group duplicate sounds (Pulp Fiction)
 

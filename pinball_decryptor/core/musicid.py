@@ -69,6 +69,33 @@ def _already_named(fn):
         return False
     return m.group("label").strip().lower() != "music"
 
+
+def _keep_earlier_titles(assets_dir, lines):
+    """*lines* (``music_titles.csv`` rows) plus the rows an earlier
+    ``music_titles.csv`` in *assets_dir* holds for tracks this run did not
+    look up and that are still there, sorted by path.  *lines* alone when
+    there is nothing to keep."""
+    import csv
+    try:
+        with open(os.path.join(assets_dir, MUSIC_IDS_CSV), encoding="utf-8",
+                  newline="") as f:
+            earlier = list(csv.reader(f))[1:]
+    except (OSError, ValueError, csv.Error):
+        return lines
+    seen = {ln[0] for ln in lines}
+    kept = []
+    for row in earlier:
+        if len(row) < 4 or not row[0] or row[0] in seen:
+            continue
+        if not os.path.isfile(os.path.join(assets_dir, *row[0].split("/"))):
+            continue
+        seen.add(row[0])
+        kept.append(row[:4])
+    if not kept:
+        return lines
+    return sorted(lines + kept, key=lambda ln: ln[0].lower())
+
+
 NO_KEY_HINT = (
     "Online music ID needs a free AcoustID application key.\n\n"
     "Get one (lookup-only, ~30 s) at:\n"
@@ -273,6 +300,12 @@ class MusicIdPipeline(BasePipeline):
             self._log("  Skipping %d already-named file(s) — Sound-Test "
                       "SFX and call-outs keep their names." % skipped_named,
                       "info")
+        if not music and skipped_named:
+            # Auto-name now over a folder that is named already (PAD-460)
+            self._done(True,
+                "Every long track in this folder already has a name, so "
+                "there was nothing left to identify.")
+            return
         if not music:
             raise PipelineError("Identify music",
                 "No WAV >= %.0fs found under %s.\nRun Extract first, or lower "
@@ -323,11 +356,14 @@ class MusicIdPipeline(BasePipeline):
         renamed = self._rename(rows) if self.rename_after else 0
         out = os.path.join(self.assets_dir, MUSIC_IDS_CSV)
         import csv
+        # a run over a folder named before (Auto-name now, PAD-460) skips
+        # the tracks it titled then: keep their rows
+        lines = [[rel, t, a, "%.3f" % s] for rel, t, a, s in rows]
+        lines = _keep_earlier_titles(self.assets_dir, lines)
         with open(out, "w", encoding="utf-8", newline="") as f:
             w = csv.writer(f)
             w.writerow(["relative_path", "title", "artist", "score"])
-            for rel, t, a, s in rows:
-                w.writerow([rel, t, a, "%.3f" % s])
+            w.writerows(lines)
         conf = sum(1 for r in rows if r[1] and r[3] >= self.min_score)
         extra = ("\nRenamed %d confident match(es)." % renamed
                  if self.rename_after else "")

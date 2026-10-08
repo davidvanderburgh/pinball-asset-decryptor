@@ -62,6 +62,16 @@ user, PAD-436: "leaving the existing mini wizard mode logic"). A mode of ours th
 modes vetoes Ahoy's start; the runtime now keeps that wizard lit instead of letting the game mark it
 played. MODE_SDK.md "The game's own mini-wizards" has the proof.
 
+## PAD-457: the one handed over is the one that starts
+
+The Bond owner's first game with it: all four films handed their mini-wizard over, From Russia With Love was
+finished, Ahoy Mr. Bond did not start, the Right ramp's inserts cycled and the ramp started Duel on the Disco
+Volante. The game's own lighting lights every one not played and its selection shots cycle among the lit ones; and
+a film's last part is collected inside the henchman / villain / Q Branch mode that awards it, which the game's start
+check counts as in the way. The runtime now keeps the handed-over one the only one lit and selected until it starts,
+gives back what the game lit itself afterwards, retries a refused `start` that ball, and starts several in order.
+MODE_SDK.md "The one handed over is the one that starts" has the detail.
+
 The plan as it was written (PAD-428):
 
 What the user asked first: the game's mini-wizard (its own mode, music and screens) lit

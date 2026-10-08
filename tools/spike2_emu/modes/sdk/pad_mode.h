@@ -623,9 +623,13 @@ void pm_shake_outlast(void);
  * lights them when a part (henchman, villain, Q Branch, gadget) is collected in all six films, and the Right
  * ramp starts the one selected. pm_game_wizard hands the player up one of them, the game's own way:
  *   PM_WIZARD_LIGHT  select it and light it: the game's start shot (the Right ramp) starts it
- *   PM_WIZARD_START  the same, then the game's own start of it at once - only if the game would start one now
- *                    (none running, nothing of its own in the way: its own check); otherwise it stays lit
- * It runs the game's mode: its shots, lights, screens, sounds and award, as when the game starts it. No mode of
+ *   PM_WIZARD_START  the same, then the game's own start of it at once - if the game would start one now (none
+ *                    running, nothing of its own in the way: its own check); otherwise it stays lit and the
+ *                    runtime starts it the moment the game would, that ball (then the start shot does)
+ * Until the game starts it, it is the only one lit and the one selected (PAD-457): the game's own lighting and
+ * its selection shots cannot hand the start shot another; what the game lit itself is lit again once it started.
+ * Several handed over start in the order given. It runs the game's mode: its shots, lights, screens, sounds and
+ * award, as when the game starts it. No mode of
  * yours has to be running, and one that is keeps running beside it. A wizard the player has played this game
  * plays again. PM_WIZARD_LIT (1): lit for the start shot; PM_WIZARD_STARTED (2); 0: not on this game, no game,
  * no such wizard (mode.log says which). pm_game_wizard_named: the same by the port's name for it (`text

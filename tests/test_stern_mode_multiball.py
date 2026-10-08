@@ -147,9 +147,11 @@ def test_the_interpreter_takes_the_keys_and_the_doc_names_them():
     body = src[src.index("static int multiball_line("):]
     body = body[:body.index("\n}\n")]
     assert set(re.findall(r'key_is\(line, "([a-z_]+)"\)', body)) == {"multiball", "add_ball", "multiball_on"}  # PAD-228
-    # a multiball with no clock is valid; a plain mode still needs its seconds
-    assert "cfg.valid = (cfg.seconds || cfg.mball_balls) && cfg.trigger_count;" in src
-    assert "cfg.valid = (cfg.seconds || cfg.mball_balls) && cfg.start_event >= 0;" in src
+    # a multiball with no clock is valid; a plain mode still needs its seconds (PAD-436 named the
+    # rule runs(), which the game's own mini-wizard meets too)
+    assert "return cfg.seconds || cfg.mball_balls || cfg.wizard[0];" in src
+    assert "cfg.valid = runs(M) && cfg.trigger_count;" in src
+    assert "cfg.valid = runs(M) && cfg.start_event >= 0;" in src
     doc = (SDK / "MODE_PARAMETERS.md").read_text(encoding="utf-8")
     for name in ("multiball", "add_ball", "pm_multiball_start", "pm_multiball_add", "pm_balls_in_play",
                  "balls", "ball_save", "add_ball_shot", "add_ball_max"):

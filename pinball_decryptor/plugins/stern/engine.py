@@ -3455,7 +3455,7 @@ def _compute_patches_or_restore(restore_ok, log, *args, **kwargs):
 
 
 def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
-                         grow=None, shader=None):
+                         grow=None, shader=None, clips=None):
     """Resolve game-program (ELF) display-text edits for one firmware file.
 
     Three composition modes, mirroring how the firmware itself reaches the
@@ -3501,6 +3501,14 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
         shader = None
     if shader is not None and not over:
         # the profile alone: the census below needs the extension segment
+        over = [None]
+    if clips is not None and grow is not None and not grow.get("ok"):
+        # PAD-444: a mode's own copy names a clip the bank only gains on a
+        # build that can grow the game program
+        clips.fail(grow.get("why") or "the game program can't grow on this "
+                   "write")
+        clips = None
+    if clips is not None and not over:
         over = [None]
     reloc = None
     # Why longer text has nowhere to go, carried into plan_writes so each
@@ -3551,6 +3559,12 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
             log("Color profile: the corrected shaders don't fit the space the "
                 "game program can grow into; the colors are left as they are.",
                 "warning")
+    if clips is not None:
+        # PAD-444: each mode's own copy of a clip it shares - the new names
+        # after the text and the shaders, that mode's references moved to them
+        blob = _own_clip_program(raw, clips, reloc, file_writes, blob, log)
+        if clips.program is not None:
+            file_writes = list(file_writes) + clips.program.writes
     if blob:
         try:
             grown = _grow_program_text(raw, file_writes, blob, reloc,
@@ -3560,6 +3574,9 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
             log("Program text: couldn't place the longer text in new space "
                 "(%s); those edits are skipped and the rest patched in place."
                 % e, "warning")
+            if clips is not None:
+                clips.fail("placing the new names in the game program failed "
+                           "(%s)" % e)
             file_writes, n, blob = progtext.plan_writes(
                 raw, edits, log,
                 no_grow_why="placing longer text in new space failed (%s)" % e)
@@ -3584,6 +3601,145 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
             payload = payload[cnt:]
         ov.setdefault(ib, (node, {}))[1][off] = b
     return writes, n, ov, None
+
+
+def _own_clip_job(reader, assets_dir, records, log):
+    """PAD-444: this Write's own copies of shared clips as a
+    :class:`.clip_modes.WriteJob`, with the video banks their shared clips
+    are in read off the card; ``None`` (the log says why) when none can be
+    made here."""
+    from . import clip_modes
+    from . import mode_write as _MW
+    from . import video_bank as _VB
+    rows = clip_modes.manifest_rows(assets_dir)
+    banks = {}
+    for rec in records:
+        path = rows.get(rec.get("of") or "") or ""
+        if "/scene.assets/" not in path:
+            continue
+        d = path.split("/scene.assets/", 1)[0]
+        if d in banks:
+            continue
+        node = _MW.lookup(reader, d + "/scene.radium")
+        if node is None:
+            continue
+        try:
+            data = bytes(reader.read_file_bytes(node))
+            _VB.parse(data)
+        except Exception:                       # noqa: BLE001 - not a bank this app can grow
+            continue
+        banks[d] = data
+    if not banks:
+        log("Own clips: %d mode%s left sharing %s clip%s on this write: the "
+            "video bank the shared clips are in isn't on this card, or can't be "
+            "read." % (len(records), "" if len(records) == 1 else "s",
+                       "its" if len(records) == 1 else "their",
+                       "" if len(records) == 1 else "s"), "warning")
+        return None
+    try:
+        return clip_modes.WriteJob(records, rows, banks)
+    except Exception as e:                      # noqa: BLE001
+        log("Own clips: left out of this write (%s)." % e, "warning")
+        return None
+
+
+def _own_clip_files(reader, job, assets_dir, scratch, mode_plan,
+                    radium_overlays, radium_grow_jobs, log):
+    """PAD-444: the bank step of a Write's own copies (*job*, its program
+    part planned by the text step): ``{"replaced": [(card rel, file)],
+    "new": [(card rel, file)]}`` - each bank that gains a copy, rewritten,
+    and each copy's file - or ``None`` when no copy was made.  A bank the
+    modes rewrote in this same build gets the copies in ITS staged file.
+    Raises ``RuntimeError`` (nothing written) when a copy whose program part
+    landed can't be finished: the game would name a clip its bank lacks."""
+    from . import clip_modes
+    for rec, why in job.skipped:
+        log("Own clips: %s's own clip %s is left out: %s."
+            % (clip_modes.mode_label(rec["mode"]), rec["name"], why), "warning")
+    if not job.done:
+        if job.why:
+            log("Own clips: %d mode%s left sharing %s clip%s on this write (%s); "
+                "every mode plays the clips it shares, as the game shipped."
+                % (len(job.records), "" if len(job.records) == 1 else "s",
+                   "its" if len(job.records) == 1 else "their",
+                   "" if len(job.records) == 1 else "s", job.why), "warning")
+        return None
+    staged_banks, mode_src = {}, {}
+    if mode_plan is not None:
+        for rel, src in mode_plan.replaced:
+            d = "/" + rel[:-len("/scene.radium")] if rel.endswith("/scene.radium") else ""
+            if d in job.banks:
+                with open(_lp(src), "rb") as f:
+                    staged_banks[d] = f.read()
+                mode_src[rel] = src
+    # another edit that rewrites a bank the copies go in (a walk of the card
+    # only when some scene is patched in place)
+    touched = {_p.lstrip("/") for _p in (
+        [r for r, _s in radium_grow_jobs]
+        + ([_p for _p, _i, _n in reader.iter_regular_files(min_size=1, max_depth=20)
+            if bytes(_n["i_block"]) in radium_overlays] if radium_overlays else []))}
+    for d in job.banks:
+        if d.strip("/") + "/scene.radium" in touched:
+            raise RuntimeError(
+                "Own clips: another edit in this project changes the video bank "
+                "(%s) the copies are added to. Nothing was written." % d.strip("/"))
+    from ...core import staged_changes as _sc
+    originals = (_sc.load(assets_dir).get("video") or {})
+
+    def source_of(rec, staged):
+        # the user's own file when it can go on as it is (the Video tab's
+        # intact rule), else the copy the project staged for it
+        src = originals.get(rec.get("rel") or "")
+        if src and os.path.isfile(_lp(src)):
+            return _intact_copy_source(src, staged, os.path.basename(staged),
+                                       os.path.getsize(_lp(staged)), log)
+        return staged
+    try:
+        replaced, new, lines = job.bank_files(
+            assets_dir, os.path.join(scratch, "own_clips"), source_of, staged_banks)
+    except (clip_modes.ClipModesError, OSError, ValueError) as e:
+        raise RuntimeError("Own clips: %s. Nothing was written." % e) from None
+    out = []
+    for rel, src in replaced:
+        if rel in mode_src:
+            # the modes' staged bank now carries the copies too
+            with open(_lp(src), "rb") as f:
+                data = f.read()
+            with open(_lp(mode_src[rel]), "wb") as f:
+                f.write(data)
+        else:
+            out.append((rel, src))
+    for line in job.lines + lines:
+        log("Own clips: %s." % line, "info")
+    return {"replaced": out, "new": new}
+
+
+def _own_clip_program(raw, clips, reloc, file_writes, blob, log):
+    """PAD-444: plan a Write's own copies of shared clips (*clips*, a
+    :class:`.clip_modes.WriteJob`) on the game program *raw* as the text edits
+    in *file_writes* leave it, their new names placed after *blob* in the
+    extension segment *reloc* describes.  Returns *blob* with the names
+    appended; the moved references are ``clips.program.writes``.  Never
+    raises: a copy that can't be made leaves every copy out (``clips.fail``),
+    so no mode names a clip the bank won't have."""
+    if reloc is None:
+        clips.fail("the game program has no room for the copies' names")
+        return blob
+    blob = bytes(blob) + bytes(-len(blob) % 4)
+    buf = bytearray(raw)
+    for o, b in file_writes:
+        buf[o:o + len(b)] = b
+    try:
+        plan = clips.plan_program(bytes(buf),
+                                  reloc["base_va"] + reloc["used"] + len(blob))
+    except Exception as e:                      # noqa: BLE001 - never fail a Write over it
+        clips.fail("the game program could not be read for them (%s)" % e)
+        return blob
+    if reloc["used"] + len(blob) + len(plan.blob) > reloc["capacity"]:
+        clips.fail("their names don't fit the space the game program can grow "
+                   "into")
+        return blob
+    return blob + plan.blob
 
 
 def _grow_program_text(raw, file_writes, blob, reloc, patched_fw, grow_dir,
@@ -3922,7 +4078,8 @@ def _padded_text(new_bytes, orig_len, looks=()):
 
 
 def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
-                        grow_dir=None, dest_is_device=False, shader=None):
+                        grow_dir=None, dest_is_device=False, shader=None,
+                        clips=None):
     """Resolve the user's display-text edits to a flat list of in-place writes
     ``[(disk_offset, bytes), ...]`` (same form ``_compute_patches`` collects).
 
@@ -3965,12 +4122,15 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     # PAD-305: *shader* (a color profile) is a game-program edit of its own;
     # the program joins the edits even when no line of its text changed.
     fw_path = None
-    if shader is not None:
+    if shader is not None or clips is not None:
         fw_path, _fw_node = _game_program_path(reader, cancel)
         if fw_path is None:
-            log("Color profile: the game program wasn't found on the card; "
-                "the colors are left as they are.", "warning")
-            shader = None
+            if shader is not None:
+                log("Color profile: the game program wasn't found on the card; "
+                    "the colors are left as they are.", "warning")
+            if clips is not None:
+                clips.fail("the game program wasn't found on the card")
+            shader = clips = None
         else:
             edits = dict(edits)
             edits.setdefault(fw_path, [])
@@ -3982,7 +4142,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     # its original (the ext4 probe reaches for WSL; a write of same-length
     # edits never pays for it).  The color profile always needs it: the
     # corrected shaders are longer than the game's own.
-    over_any = (shader is not None) or any(
+    over_any = (shader is not None) or (clips is not None) or any(
         len(n) > len(o) for prs in edits.values() for o, n in prs)
     if over_any and grow_dir:
         g_ok, g_why = _text_grow_gate(dest_is_device)
@@ -4010,7 +4170,8 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         if is_fw:
             pw, pn, pov, pgrown = _program_text_writes(
                 reader, node, card_path, pairs, patched_fw, log, grow=grow,
-                shader=shader if card_path == fw_path else None)
+                shader=shader if card_path == fw_path else None,
+                clips=clips if card_path == fw_path else None)
             writes += pw
             n_strings += pn
             _merge_radium_overlays(overlays, pov)
@@ -6389,6 +6550,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # patching its drawing shaders (plugins/stern/shader_profile.py) - a game
     # program edit with no file of the project behind it
     shader_prof = _shader_colour_profile(assets_dir)
+    # PAD-444: a mode's own copy of a clip it shares with another mode - a new
+    # clip in the video bank and that mode's references in the game program
+    # moved to its name (plugins/stern/clip_modes.py)
+    from . import clip_modes as _clip_modes
+    own_clips = _clip_modes.records(assets_dir)
     # Recoloured display text (text/colors.tsv) — the colour lives in the scene,
     # not in the font, so this is a radium patch too.
     color_edits = _changed_radium_text_colors(assets_dir)
@@ -6557,7 +6723,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
             and not variant_slots
-            and not stock_mode_edits and shader_prof is None):
+            and not stock_mode_edits and shader_prof is None
+            and not own_clips):
         raise NothingToWrite(
             "Nothing to write: " + _modes_left_out_clause(_modes_left_out)
             + "every sound (idxNNNN.wav / music_catNN_*.wav) "
@@ -6680,6 +6847,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             "across %d radium scene(s) to write."
             % (sum(len(v) for v in layout_edits.values()),
                len(layout_edits)), "info")
+    if own_clips:
+        log("Found %d mode%s to give a clip of its own or put back on a shared "
+            "clip (Video tab, Played in): %s."
+            % (len(own_clips), "" if len(own_clips) == 1 else "s",
+               "; ".join("%s %s %s" % (
+                   _clip_modes.mode_label(r["mode"]),
+                   "plays the shared clip again:" if r.get("state") == "shared"
+                   else "gets a clip of its own instead of",
+                   r["clip"]) for r in own_clips)), "info")
 
     # PAD-176: what this build copies on whole, against the room on the games
     # partition, before the firmware and the sound bank are read out of the
@@ -7362,7 +7538,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # the grow scratch dir and copied onto the card by the grow job, like
         # the cave's firmware.
         grown_text = None
-        if text_edits or shader_prof is not None:
+        # PAD-444: the copies' bank files are read before the program step
+        # that needs their names (a card without the banks: none are made)
+        clip_job = (_own_clip_job(reader, assets_dir, own_clips, log)
+                    if own_clips else None)
+        if text_edits or shader_prof is not None or clip_job is not None:
             if progress:
                 progress(90, 100, "Preparing display text...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
@@ -7370,7 +7550,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
              grown_text) = _radium_text_writes(
                 reader, assets_dir, log, cancel, patched_fw=patched_gr,
                 grow_dir=grow_work, dest_is_device=dest_is_device,
-                shader=shader_prof)
+                shader=shader_prof, clips=clip_job)
             _merge_radium_overlays(radium_overlays, _t_ov)
             if cancel():
                 return None, None, None, None, None
@@ -7629,6 +7809,21 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                               if _modes_on else "adding %d random clip(s)"
                               % len(mode_plan.variants.new)), t0)
 
+        # PAD-444: the own copies' bank entries and files, on the bank the
+        # modes just rewrote when they did.  The program part already landed
+        # (the text step), so a copy that can't be finished stops the Write:
+        # a mode must never name a clip its bank doesn't have.
+        clip_files = None
+        if clip_job is not None:
+            grow_work = grow_work or _work_dir(label, base="spike2_grow_")
+            clip_files = _own_clip_files(reader, clip_job, assets_dir,
+                                         grow_work, mode_plan, radium_overlays,
+                                         radium_grow_jobs, log)
+            for _rel, _src in (clip_files or {}).get("replaced", ()):
+                _node = _MW.lookup(reader, _rel)
+                if _node is not None:
+                    grown_files[bytes(_node["i_block"])] = _src
+
         video_patches = []     # (inode, payload bytes == inode size)
         video_grow_jobs = []   # (card_rel, source_file) — grown via ext4 driver
         if video_edits:
@@ -7695,6 +7890,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 and not radium_grow_jobs
                 and not boot_writes and boot_grow is None
                 and patched_gr is None and mode_plan is None
+                and not clip_files
                 and not stock_mode_edits):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
@@ -7801,37 +7997,54 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # writes, and the whole manifest is copied on after the files it names.
         manifest_job = None
         mode_info = None
-        if mode_plan is not None:
+        # PAD-444: an own copy is a new file too, and its bank is rewritten
+        _c_replaced = list((clip_files or {}).get("replaced", ()))
+        _c_new = list((clip_files or {}).get("new", ()))
+        if mode_plan is not None or _c_replaced or _c_new:
             from . import sidx as _sidx
+            # the modes' (or PAD-446's random clips') plan carries the manifest when
+            # there is one; a build of own clips alone composes it here
+            _who = _who if mode_plan is not None else "Own clips"
+            _m_replaced = list(mode_plan.replaced) if mode_plan else []
+            _m_new = list(mode_plan.new) if mode_plan else []
+            _m_rels = {r for r, _s in _m_replaced}
             try:
                 _man_path, _man_node = _sidx.find_sidx(reader)
                 if _man_node is None:
                     raise _MW.ModeWriteError(
                         "the card has no /spk/index/*.sidx manifest, so the "
                         "%s' new files could not be indexed"
-                        % ("modes" if _modes_on else "random clips"))
+                        % ("modes" if _modes_on else "random clips"
+                           if mode_plan is not None else "own clips"))
                 _folded, writes = _MW.fold_writes(
                     writes, reader.disk_ranges(_man_node, 0,
                                                _man_node["size"]))
                 _new_man = _MW.compose_manifest(
                     bytes(reader.read_file_bytes(_man_node)), inplace=_folded,
-                    refreshed=mode_plan.replaced, new=mode_plan.new)
-                _man_src = os.path.join(grow_work, "modes",
-                                        os.path.basename(_man_path))
+                    refreshed=_m_replaced + [r for r in _c_replaced
+                                             if r[0] not in _m_rels],
+                    new=_m_new + _c_new)
+                _man_src = os.path.join(
+                    grow_work, "modes" if mode_plan is not None else "own_clips",
+                    os.path.basename(_man_path))
+                os.makedirs(_lp(os.path.dirname(_man_src)), exist_ok=True)
                 with open(_lp(_man_src), "wb") as f:
                     f.write(_new_man)
                 manifest_job = (_man_path.lstrip("/"), _man_src)
-                _p3_epoch = _MW.epoch_at(disk_f, reader.base)
-                _p2_off = _MW.p2_offset(disk_f)
-                _p2_epoch = _MW.epoch_at(disk_f, _p2_off)
+                if mode_plan is not None:
+                    _p3_epoch = _MW.epoch_at(disk_f, reader.base)
+                    _p2_off = _MW.p2_offset(disk_f)
+                    _p2_epoch = _MW.epoch_at(disk_f, _p2_off)
             except _MW.ModeWriteError as e:
                 raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
+            _added = [r for r, _s in _m_new + _c_new]
             log("%s: the SD-validation manifest gains %d record(s) (%s) "
                 "and %d in-place record refresh(es) are folded into it; it is "
                 "copied onto the card whole."
-                % (_who, len(mode_plan.new), ", ".join(r for r, _s in mode_plan.new)
-                   or "none", len(_folded)), "info")
+                % (_who, len(_added), ", ".join(_added) or "none",
+                   len(_folded)), "info")
+        if mode_plan is not None:
             mode_info = {
                 "names": ([s.name for _g, s in mode_list]
                           + [c.name for _g, c in code_list]),
@@ -7876,6 +8089,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             # the files before the manifest that names them; the firmware, if
             # any, still goes last
             grow_jobs += mode_plan.jobs
+        if clip_files:
+            # PAD-444: the copies' bank (unless the modes' job carries it
+            # already) and their files
+            _mj = {r for r, _s in (mode_plan.jobs if mode_plan else ())}
+            grow_jobs += [j for j in _c_replaced if j[0] not in _mj]
+            grow_jobs += _c_new
+        if manifest_job is not None:
             grow_jobs.append(manifest_job)
         if patched_gr is not None and fw_node is not None:
             from .valpatch import _game_manifest_path
@@ -7889,7 +8109,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # survive until the caller has copied it onto the card, so the caller
         # removes it (see the note where grow_work is created).
         uses_work = (bool(radium_grow_jobs) or patched_gr is not None
-                     or image_grow_job is not None or mode_plan is not None)
+                     or image_grow_job is not None or mode_plan is not None
+                     or bool(clip_files))
         grow_plan = ({"offset": reader.base, "jobs": grow_jobs,
                       "n_video": len(video_grow_jobs),
                       # Where the grown sound bank sits in the queue, so a
@@ -7906,6 +8127,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                       # fixed clock a mode build delivers with so a second
                       # Write is byte-identical (ext4_grow.grow_files_pinned).
                       "modes": mode_info,
+                      # PAD-444: the own copies' new files and rewritten banks
+                      "own_clips": ({"added": [r for r, _s in _c_new],
+                                     "rewritten": [r for r, _s in _c_replaced]
+                                     + ([manifest_job[0]] if manifest_job
+                                        and mode_plan is None else [])}
+                                    if clip_files else None),
                       "epoch": (_p3_epoch if mode_plan is not None else None)}
                      if grow_jobs or boot_grow else None)
         # Only a plan that actually carries a staged file (the firmware, a
@@ -7920,7 +8147,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # display-text edits, just of the colour / position / size rather
         # than the letters.
         counts = (len(audio_patches) + len(music_patches),
-                  len(video_patches) + len(video_grow_jobs),
+                  len(video_patches) + len(video_grow_jobs) + len(_c_new),
                   len(image_patches) + len(texture_patches) + n_radimg + n_tree
                   + n_boot,
                   n_text + n_color + n_layout)
@@ -9545,8 +9772,10 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                 # files, and the rig binds the set whole over the games tree -
                 # so they go BESIDE the set, in "<set>-modes", for Try it to
                 # hand the rig through PAD_MODE_SO and /dump.
+                own_out = (grow_plan or {}).get("own_clips") or {}
                 modes_out = _write_override_modes(
-                    out_dir, (grow_plan or {}).get("modes"), log)
+                    out_dir, (grow_plan or {}).get("modes"), log,
+                    also_added=own_out.get("added"))
 
                 # AND WHAT THE LAST BUILD LEFT THAT THIS ONE DOES NOT WANT: a
                 # file the user has reverted is absent from the new set, and a
@@ -9607,6 +9836,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         # PAD-305: the color profile the set's pictures and clips carry
         "colour_profile": _colour_signature(assets_dir),
     }
+    if own_out.get("added") or own_out.get("rewritten"):
+        manifest["own_clips"] = own_out
     if modes_out:
         manifest["modes"] = modes_out
     elif modes_left_out:
@@ -9627,9 +9858,10 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     # the set (whole when this build has one, removed when the last one did), so a
     # stage brought forward by overrides.sh never keeps a stale list.
     new_delta, new_removed = [], []
-    if (modes_out or {}).get("added"):
+    if (modes_out or {}).get("added") or own_out.get("added"):
         new_delta.append(("/" + OVERRIDE_NEW, None))
-    elif parent and ((previous or {}).get("modes") or {}).get("added"):
+    elif parent and (((previous or {}).get("modes") or {}).get("added")
+                     or ((previous or {}).get("own_clips") or {}).get("added")):
         new_removed.append("/" + OVERRIDE_NEW)
     _write_override_delta(out_dir, generation, parent, delta + new_delta,
                           removed + new_removed)
@@ -9655,15 +9887,18 @@ OVERRIDE_MODES_SUFFIX = "-modes"
 OVERRIDE_MODES_OBJECT = "pad_mode.so"
 
 
-def _write_override_modes(out_dir, modes, log):
+def _write_override_modes(out_dir, modes, log, also_added=None):
     """Item 149: lay the modes' p2 payload down in ``<out_dir>-modes`` (emptied
     first, removed when this build carries no modes) and return what
     ``overrides.json`` says about it, or ``None``.  The same payload a card
-    build installs on the system partition, built by the same code."""
+    build installs on the system partition, built by the same code.
+    *also_added*: other new files of the set (PAD-444's own clip copies), which
+    the set's new-file list names beside the modes' own."""
     import shutil
     dest = str(out_dir).rstrip("\\/") + OVERRIDE_MODES_SUFFIX
     _rmtree(dest)
-    _write_override_new_list(out_dir, (modes or {}).get("added"))
+    _write_override_new_list(out_dir, list((modes or {}).get("added") or ())
+                             + list(also_added or ()))
     if not modes:
         return None
     os.makedirs(_lp(dest), exist_ok=True)
@@ -9704,6 +9939,11 @@ def _override_whole_why(card_rel, grow_plan):
     rel = str(card_rel).strip("/")
     if rel in [str(r).strip("/") for r in modes.get("added") or ()]:
         return "a new file the modes add"
+    own = (grow_plan or {}).get("own_clips") or {}
+    if rel in [str(r).strip("/") for r in own.get("added") or ()]:
+        return "a mode's own copy of a clip, a new file"
+    if rel in [str(r).strip("/") for r in own.get("rewritten") or ()]:
+        return "rebuilt whole for a mode's own copy of a clip"
     if rel in [str(r).strip("/") for r in modes.get("rewritten") or ()]:
         return "rebuilt whole for the modes"
     return "it outgrew its slot on the card"

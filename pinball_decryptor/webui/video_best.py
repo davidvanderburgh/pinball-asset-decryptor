@@ -395,7 +395,8 @@ class BestQualityMixin:
         if self._is_running():
             return False
         picked = [(r["rel"], r["path"]) for r in self._b_rows
-                  if r["use"] and r["path"] and r["rel"] in self._by_rel]
+                  if r["use"] and r["path"] and r["rel"] in self._by_rel
+                  and r["rel"] not in getattr(self, "_m_virtual", {})]
         longer = [r for r in self._b_rows if r["use"] and r["path"]
                   and r.get("trimmed")]
         if longer and not self.video_trim_var.get():

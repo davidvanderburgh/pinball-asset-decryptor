@@ -4,7 +4,7 @@
 // webui/tabs/video.py (every rule, message and file operation lives there).
 
 import { html, useEffect, useMemo, useRef, useState, PageHead, Button, Field, Check, Seg, Chip,
-         Note, Table, Empty, Modal, Icon, Spinner, openMenu, menuOpen, tip, call, cx, mediaUrl }
+         Note, Table, Empty, Modal, Icon, Spinner, Select, openMenu, menuOpen, tip, call, cx, mediaUrl }
   from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { LookRow } from "../core/look.js";
@@ -30,6 +30,10 @@ const T = {
   specAn: "The -an is deliberate: this slot's clip has no audio track, and one you add will be played.",
   best: "Convert every replaced clip at full quality from your own files, for a card built with room to spare (Write tab → SD card size). If this project doesn't know which files your clips came from, it finds them: point it at a card built with your videos and the folder they are in.",
   compare: "Play the selected clips side by side, big, beside the Color profiles bar: up to 4 (Ctrl-click or Shift-click rows to select them). One clip shows its Original beside its Replacement.\n\nClick a clip there and the bar changes its colors, so you see a profile or a slider on it against the others as you go.",
+  // PAD-444: which of the game's modes plays each clip, read off the card's game program
+  modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it.",
+  modeFilter: "List only the clips one mode of the game plays.",
+  modesBusy: "Reading which mode plays each clip…",
   qTitle: "Check the videos already on a card",
   qIntro: "Measures every clip on a built card image and lists the ones whose bitrate is low enough to look blocky — the same test a Write applies to a replacement, applied after the fact to what is actually on the card. This reads the card image only; nothing is written and nothing is extracted.",
 };
@@ -98,9 +102,12 @@ function clock(pos, dur) {
 // Tk tree's minwidth.  Measured over every slot, not only the filtered view,
 // so typing in Search doesn't make the columns jump.
 const FIT_MAX = 480;
-const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 56, conv: 60 };
+const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 56, conv: 60, modes: 110 };
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
-                aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert" };
+                aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert", modes: "Played in" };
+// PAD-444: a row's Played in cell, in words
+const modesText = (r) => (r.unplayed ? "Not played" : r.other ? "Other parts of the game"
+  : (r.modes || []).join(", "));
 // PAD-312: the chosen-files color profile, baked into this clip as it is converted
 const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build (it is re-encoded for that). Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own clip, never touched (tick Advanced to unlock it). A palette you click is this clip's own setting; the Color profile tab's Every replaced video box sets the rest.";
 // PAD-336: the Advanced box unlocks the game's own clips on this tab only
@@ -134,7 +141,7 @@ const colorTip = (r, cs) => (r.col_lock
 // The long-named columns share the width that is left over (more or less
 // of it); the others keep the width that fits them, so a narrow window
 // shortens names, never "MP4 h264 30fps" or a length.
-const FLEX = ["rel", "rep"];
+const FLEX = ["rel", "rep", "modes"];
 const ROW_H = 34;
 let measurer = null;
 const textCache = new Map();
@@ -163,7 +170,8 @@ function rowFit(r, f) {
   if (!w) {
     w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono),
           res: textWidth(r.res, f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
-          rep: textWidth(r.rep, f.body), col: 0, conv: textWidth(r.conv, f.body) };
+          rep: textWidth(r.rep, f.body), col: 0, conv: textWidth(r.conv, f.body),
+          modes: textWidth(modesText(r), f.body) };
     rowFits.set(r, w);
   }
   return w;
@@ -801,6 +809,8 @@ export default function VideoTab() {
       info.can_clear && { label: "Clear replacement", onClick: () => call("video.clear", [rel]) },
       info.stern && info.scenes && { sep: true },
       info.stern && info.scenes && { label: "Show scene contents…", onClick: () => call("video.scene_contents", rel) },
+      info.back && { sep: true },
+      info.back && { label: `Use the same clip as ${info.back} again…`, onClick: () => call("video.shared_again", rel) },
       { sep: true },
       { label: "This clip's conversion", submenu: [
         { label: `Follow the box below (${info.follow})`, checked: info.asis === "box", onClick: () => call("video.set_asis", rel, null) },
@@ -860,9 +870,12 @@ export default function VideoTab() {
   // stretching column is one the user sized (Tk _pin_tree_columns)
   const convWidth = flexLeft ? `calc(${fit.conv}px)` : `minmax(${fit.conv}px,1fr)`;
   const colorCol = allRows.some((r) => r.col != null || r.col_lock);
-  const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "rep"].reduce((a, k) =>
+  // PAD-444: Played in, once the card's program has been read and names a mode
+  const md = s.modes || {};
+  const modesCol = !!(md.ready && (md.list || []).length);
+  const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "rep"].concat(modesCol ? ["modes"] : []).reduce((a, k) =>
     a + (tuned[k] ? Math.max(36, tuned[k]) : FLEX.includes(k) ? COL_MIN[k] : fit[k]), 0) + fit.conv
-    + (colorCol ? fit.col + 10 : 0) + 7 * 10 + 20;
+    + (colorCol ? fit.col + 10 : 0) + (modesCol ? 8 : 7) * 10 + 20;
   const dragFrom = useRef(null);
   const onGripDown = (e) => {
     const t = e.target;
@@ -894,7 +907,8 @@ export default function VideoTab() {
       render: (r) => html`<button type="button" class="btn sm ghost vid-rowplay" aria-label=${"Play " + r.rel}
         onClick=${(e) => { e.stopPropagation(); playRow(r.rel, "orig"); }}><${Icon} name="play" /></button>` },
     { key: "rel", label: "Original Video", width: width("rel"), sort: "#0",
-      render: (r) => html`<span class="vid-name" ...${tip({ head: r.rel, lines: [profileLine(r, colorNs)] })}>${r.dir
+      render: (r) => html`<span class=${cx("vid-name", (r.follow || r.copy) && "vid-pairrow")} ...${tip({ head: r.rel, lines: [profileLine(r, colorNs)] })}>${r.follow || r.copy
+        ? html`<span class="vid-pairmark" aria-hidden="true">↳</span>` : null}${r.dir
         ? html`<span class="mono muted">${r.dir}</span>` : null}${r.name}</span>` },
     { key: "len", label: "Length", width: width("len"), num: true, sort: "len" },
     { key: "res", label: "Resolution", width: width("res"), sort: "res" },
@@ -908,6 +922,17 @@ export default function VideoTab() {
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>${r.var
         ? html`<span class="vid-var" aria-label=${`${r.var} more clips play at random`} ...${tip({ head: "Random clips", lines: [r.var_tip] })}><${Icon} name="shuffle" />+${r.var}</span>`
         : null}</span>` },
+    modesCol && { key: "modes", label: "Played in", width: width("modes"), title: T.modes,
+      render: (r) => (r.unplayed
+        ? html`<span class="vid-modes-cell unplayed" ...${tip({ head: "Not played", lines: [
+            "Nothing in the game's program asks for this clip, so the machine never shows it."] })}>${modesText(r)}</span>`
+        : (r.modes || []).length || r.other
+          ? html`<span class=${cx("vid-modes-cell", r.pair && "pair", r.other && "other")} ...${tip(r.follow
+            ? { head: r.modes[0], lines: ["Plays the same clip as " + r.follow + " until you choose a replacement in this row."] }
+            : r.copy ? { head: r.modes[0], lines: ["Plays a clip of its own: a new clip on the card after the next image build."] }
+            : r.pair ? { head: r.modes[0], lines: ["Another mode plays this clip too: it has its own row below."] }
+            : modesText(r))}>${modesText(r)}</span>`
+          : "") },
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
       render: (r) => (r.col_lock
         ? html`<span class="vid-color locked" aria-label="The game's own clip: no color profile can be attached" ...${tip(colorTip(r, colorNs))}><${Icon} name="lock" /></span>`
@@ -1008,6 +1033,10 @@ export default function VideoTab() {
           prefix=${html`<${Icon} name="search" />`} />
         <span class="vid-show" ...${tip(T.show)}><${Seg} value=${s.change_filter || "All"} options=${["All", "Changed", "Unchanged"]}
           onChange=${(v) => call("video.set_change_filter", v)} /></span>
+        ${modesCol ? html`<${Select} cls="vid-modefilter" sm value=${md.filter || ""} title=${T.modeFilter}
+          options=${[{ value: "", label: "Every mode" }].concat((md.list || []).map((m) => ({ value: m.id, label: `${m.label} (${m.n})` })))}
+          onChange=${(v) => call("video.set_mode_filter", v)} />`
+          : md.busy ? html`<span class="small muted nw vid-modes-busy"><${Spinner} /> ${T.modesBusy}</span>` : null}
         <span class="sp"></span>
         <span class="vid-opts">
           <${Check} checked=${s.no_conversion} label=${T.noconv} title=${T.noconvTip} cls="small"
@@ -1030,6 +1059,10 @@ export default function VideoTab() {
       </div>
       <div class="vid-preview">
         ${pv.note ? html`<${Note} kind=${pv.note.kind}><b>${pv.note.text.replace(/^[⚠✗]\s*/, "")}</b><//>` : null}
+        ${pv.modes && pv.modes.rel === currentRel ? html`<div class="vid-modes">
+          <${Note} kind="info" action=${pv.modes.back ? html`<${Button} size="sm" onClick=${() => call("video.shared_again", pv.modes.rel)}
+            disabled=${running}>Use the same clip as ${pv.modes.back} again…<//>` : null}>${pv.modes.text}<//>
+        </div>` : null}
         ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
         <div class="vid-panes">
           <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />

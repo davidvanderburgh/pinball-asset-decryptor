@@ -47,6 +47,7 @@ from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
 from .. import look_switches
 from .. import video_helpers as vh
 from ..video_best import BEST_TIP, BestQualityMixin
+from ..video_modes import ModesMixin
 from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ COMPARE_MAX = 4                   # clips side by side in Compare (PAD-440)
 NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
 
 
-class VideoTab(BestQualityMixin, TabService):
+class VideoTab(ModesMixin, BestQualityMixin, TabService):
     ns = "video"
     key = "Replace Video"
     label = "Video"
@@ -158,6 +159,8 @@ class VideoTab(BestQualityMixin, TabService):
         self._q_cancel = False
         self._q_clips = []
         self._q_card = ""
+        self._m_init()                  # PAD-444: Played in (video_modes.py)
+        self._m_select_after = []
         for v in (self.video_search_var, self.video_change_filter_var):
             v.trace_add("write", lambda *_a: self._refresh_list())
         for v in (self.video_trim_var, self.video_no_conversion_var):
@@ -207,6 +210,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._q_clips = []
         self._set_scan_ui(False, log_it=False)
         self._clear_preview()
+        self._m_reset()
         try:
             note = (mfr.video_length_note() or "").strip()
         except Exception:                                   # noqa: BLE001
@@ -392,7 +396,8 @@ class VideoTab(BestQualityMixin, TabService):
             return None
         if not vh.same_dir(assets_dir, self._scan_dir or ""):
             return None
-        by_rel = dict(self._by_rel)
+        by_rel = {rel: s for rel, s in self._by_rel.items()
+                  if rel not in self._m_virtual}
         assignments = {rel: rep for rel, rep in dict(self._assign).items()
                        if rep and rel in by_rel}
         if not assignments:
@@ -651,10 +656,25 @@ class VideoTab(BestQualityMixin, TabService):
         self._foreign = set()
         if folder_changed:
             self._clear_preview()
+            self._m_reset()
+        # the modes the card's program names (read once per card; a card read
+        # before publishes now, so the rows below carry them)
+        self._m_kick(scan_dir)
         self._refresh_list()
-        # Default to the first clip so a poster frame shows on a fresh scan.
+        # Default to the first clip so a poster frame shows on a fresh scan
+        # (PAD-444: the row a copy was just made or dropped for, when it is listed)
         view = self.get("view") or []
-        if view:
+        after = [r for r in self._m_select_after if r in self._index]
+        self._m_select_after = []
+        if after and self._index[after[0]] not in view:
+            self.video_search_var.set("")
+            self._m_filter = ""
+            self._refresh_list()
+            view = self.get("view") or []
+        if after:
+            self._reselect(after[:1])
+            self._load_track(after[0])
+        elif view:
             first = self._rows[view[0]]["rel"]
             self._reselect([first])
             self._load_track(first)
@@ -788,6 +808,7 @@ class VideoTab(BestQualityMixin, TabService):
         i = self._index.get(rel)
         if i is not None:
             self._put_row(i, self._row(slot))
+        self._m_meta(rel)
         if self._assign.get(rel) and not self._conv_kick:
             # its Convert answer can be worked out properly now
             self._conv_kick = True
@@ -826,6 +847,8 @@ class VideoTab(BestQualityMixin, TabService):
             self._mark_change_scan(False)
             return
         self._mark_change_scan(True)
+        # PAD-444: a mode's own copy is the project's file, not the card's
+        copies = {r.get("rel") for r in self._m_records() if r.get("state") != "shared"}
 
         def _work():
             from ...core import folder_match
@@ -837,10 +860,11 @@ class VideoTab(BestQualityMixin, TabService):
                          if r in rel_set}
                 to_hash = [r for r in rels if r not in snaps]
                 changed = snaps | checksums.changed_rels(
-                    path, to_hash, baseline=baseline)
+                    path, [r for r in to_hash if r not in copies],
+                    baseline=baseline)
                 if baseline:
-                    foreign, twins = folder_match.foreign_twins(rels,
-                                                                baseline)
+                    foreign, twins = folder_match.foreign_twins(
+                        [r for r in rels if r not in copies], baseline)
             except Exception:                               # noqa: BLE001
                 changed = set()
 
@@ -916,6 +940,9 @@ class VideoTab(BestQualityMixin, TabService):
     def _rep_pane_empty_text(self, rel, default):
         """MainWindow._rep_pane_empty_text("video", rel, default)."""
         from ...core import staged_originals
+        follow = self._m_follow_text(rel)
+        if follow:
+            return follow
         if rel is None or not self._slot_changed_on_disk(rel):
             return default
         if rel in self._foreign:
@@ -1057,7 +1084,8 @@ class VideoTab(BestQualityMixin, TabService):
                 "col": self._color_state(rel), "col_own": rel in self._color,
                 "col_lock": self._color_locked(rel),
                 "col_stock": bool(self._color_stock
-                                  and not self._assign.get(rel))}
+                                  and not self._assign.get(rel)),
+                **self._m_row(rel)}
 
     # -- the chosen-files colour profile (PAD-312) ------------------------
     def _per_file_colour(self):
@@ -1280,13 +1308,16 @@ class VideoTab(BestQualityMixin, TabService):
         the callout under the preview."""
         if self._restoring:
             return
-        self._publish_rows([self._row(s) for s in self._slots])
+        listed = self._m_slots()            # PAD-444: + the followers' rows
+        self._publish_rows([self._row(s) for s in listed])
         query = (self.video_search_var.get() or "").strip().lower()
-        slots = [s for s in self._slots
-                 if not query or query in s.rel_path.lower()]
+        slots = [s for s in listed
+                 if not query or query in s.rel_path.lower()
+                 or query in self._m_of.get(s.rel_path, "").lower()]
         ok = self._change_pred()
         if ok is not None:
             slots = [s for s in slots if ok(s.rel_path)]
+        slots = [s for s in slots if self._m_keep(s.rel_path)]
         col, desc = self._sort
         slots.sort(key=self._sort_key(col), reverse=desc)
         view = [self._index[s.rel_path] for s in slots
@@ -1308,8 +1339,10 @@ class VideoTab(BestQualityMixin, TabService):
                                 % (changed_total, total, extra)
                                 + (vh.CHANGE_SCAN_NOTE if self._change_running
                                    else ""))
-            values["empty"] = "" if shown else \
-                "No slots match the search and the Show filter."
+            values["empty"] = "" if shown else (
+                "No slots match the search, the Show filter and the mode."
+                if self._m_filter else
+                "No slots match the search and the Show filter.")
         values["counts"] = {"changed": changed_total, "total": total,
                             "shown": len(view)}
         values["color_offered"] = bool(total and self._per_file_colour())
@@ -1541,6 +1574,11 @@ class VideoTab(BestQualityMixin, TabService):
                         "Replace Video: %s — %s; it goes on the card as it "
                         "is. Right-click the row → This clip's conversion to "
                         "change just this one." % (rel, why), "error")
+        if rel in self._m_follow:
+            # PAD-444: a mode that played its shared clip gets a clip of its own
+            if not self._m_materialize(rel):
+                return False
+            self._m_publish()
         self._assign[rel] = path
         self._save_staged()
         note = vh.conversion_note(self._by_rel.get(rel), rel, path,
@@ -1714,6 +1752,7 @@ class VideoTab(BestQualityMixin, TabService):
             if alive:
                 self._reselect(alive)
         self._update_clear_all()
+        self._m_after_clear(gone)
         return len(gone)
 
     def _clear_confirm_text(self, targets, question):
@@ -1783,7 +1822,8 @@ class VideoTab(BestQualityMixin, TabService):
         from ...core import folder_match
         if self._is_running():
             return False
-        slot_rels = [rel for rel in self._by_rel if rel not in self._foreign]
+        slot_rels = [rel for rel in self._by_rel if rel not in self._foreign
+                     and rel not in self._m_virtual]
         if not slot_rels:
             compat.messagebox.showinfo(
                 "Replace from folder",
@@ -1930,7 +1970,8 @@ class VideoTab(BestQualityMixin, TabService):
         into this project and re-scan."""
         from .. import tab_settings_ui
         return tab_settings_ui.load_media(
-            self, "video", self._settings_dir(), set(self._by_rel),
+            self, "video", self._settings_dir(),
+            set(self._by_rel) - set(self._m_virtual),
             self._is_running(), self._save_staged_changes,
             self._scan_async, path)
 
@@ -2016,6 +2057,8 @@ class VideoTab(BestQualityMixin, TabService):
             "partition": bool(self.window.tab_visible("Partition Explorer")
                               and getattr(self.window, "find_in_partition",
                                           None) is not None),
+            # PAD-444: a mode's own clip an earlier build made plays the shared one again
+            "back": (self._m_preview(rel) or {}).get("back") or "",
         }
 
     # -- random clips (PAD-446) ---------------------------------------------
@@ -2028,6 +2071,16 @@ class VideoTab(BestQualityMixin, TabService):
             return None
         offer = offer or {}
         why = offer.get("why") or (offer.get("slots") or {}).get(rel, "")
+        if not why and rel in self._m_follow and not self._assign.get(rel):
+            # PAD-444: a mode's row that plays another mode's clip has no clip of its own
+            # to vary until it is given one; the clip it plays varies in that mode's row
+            why = ("this row plays the same clip as %s's; give it a replacement first, or "
+                   "add the random clips in that row" % self._m_label(self._m_follow[rel]))
+        elif rel in self._m_copy and rel not in ((self._m_clips.name_of if self._m_clips
+                                                   else {}) or {}):
+            why = ("this is %s's own clip, new to the card: random clips go on a clip the card "
+                   "already has, so build it onto the card first"
+                   % self._m_label(self._m_copy[rel]["mode"]))
         return {"why": why or "", "n": len(files),
                 "max": int(offer.get("max") or 0),
                 "files": [{"i": i, "name": os.path.basename(f)}
@@ -2701,9 +2754,11 @@ class VideoTab(BestQualityMixin, TabService):
                 # PAD-446: the slot's random clips, where nothing is wrong
                 note = {"kind": "info", "text": self._variants_words(rel)}
         pv = self.get("preview") or {}
-        if pv.get("note") != note:
+        modes = self._m_preview(rel)
+        if pv.get("note") != note or pv.get("modes") != modes:
             pv = dict(pv)
             pv["note"] = note
+            pv["modes"] = modes
             self.set(preview=pv)
 
     def _reselect(self, rels):

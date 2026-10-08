@@ -278,6 +278,7 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     rows.extend(mode_rows(mfr, assets_path, direct=direct))
     rows.extend(variant_rows(mfr, assets_path))
     rows.extend(stock_mode_rows(mfr, assets_path))
+    rows.extend(own_clip_rows(mfr, assets_path, direct=direct))
     rows.extend(colour_rows(mfr, assets_path))
     rows.extend(chosen_files_rows(mfr, assets_path))
     return rows
@@ -393,6 +394,38 @@ def stock_mode_rows(mfr, assets_path):
     return out
 
 
+#: PAD-444: a mode's own copy of a clip it shares (the Video tab's Played in)
+PENDING_OWN_CLIP = "Pending (a mode's own clip)"
+
+
+def own_clip_rows(mfr, assets_path, *, direct):
+    """PAD-444: each mode the Video tab gave a clip of its own, and each one put back on its
+    shared clip, as a row; a Direct-SD write says it leaves them out (a mode's own clip is a
+    file the card never had)."""
+    if not assets_path or mfr is None or getattr(mfr, "key", "") != "stern":
+        return []
+    try:
+        from ..plugins.stern import clip_modes
+        recs = clip_modes.records(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return []
+    dest_device = bool(getattr(mfr.capabilities, "direct_ssd", False) and direct)
+    out = []
+    for r in recs:
+        label = clip_modes.mode_label(r["mode"])
+        if r.get("state") == "shared":
+            line = "%s plays the shared clip %s again (its own clip %s stays on the card, " \
+                   "unplayed)" % (label, r["clip"], r["name"])
+        else:
+            line = "%s gets a clip of its own instead of sharing %s (%s)" % (
+                label, r["clip"], r.get("rel") or r["name"])
+            if dest_device:
+                line += (" — left out of a Direct-SD write: it adds a clip to the card "
+                         "(build an image file)")
+        out.append((line, "video", PENDING_OWN_CLIP, "pending"))
+    return out
+
+
 def mode_rows(mfr, assets_path, *, direct):
     if not assets_path or not modes_preview_on(mfr):
         return []
@@ -500,6 +533,12 @@ def fingerprint(window, assets_path, epoch, grow_on):
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     parts.append(_modes_fingerprint(assets_path))
+    try:
+        # PAD-444: the modes' own copies of clips
+        from ..plugins.stern import clip_modes
+        parts.append([sorted(r.items()) for r in clip_modes.records(assets_path)])
+    except Exception:                                   # noqa: BLE001
+        parts.append(None)
     try:
         # PAD-446: the Video tab's random clips
         from ..plugins.stern import clip_variants

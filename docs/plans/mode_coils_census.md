@@ -136,3 +136,27 @@ same code), a hit mid-hold on King Kong / Jaws (refused by the same `pm_coil_hol
    the device process); the slot then drafts itself. Only Godzilla, King Kong, Avengers, Venom and D&D name their
    handlers as strings.
 4. **C and D**: a different coil object entirely; a census of their Device/Diverter calls first.
+
+## PAD-420: held by the board address (the newest builds)
+
+PAD-420 built the mechanisms helper's route: a coil held by its BOARD ADDRESS (`text <name>_drive <node> <coil>
+<pulse power> <pulse ms> <hold power>`) through the framework's own `coil_fire` and coil table, with the coil's object
+taken while it holds where the game would otherwise switch it off (`value <name>_ctl`, the title's take/give, and
+`site <name>_get` or `data <name>_obj`), and the operator's "disabled" asked of the object (`value <name>_off_slot`).
+The powers are always the GAME's own for that coil, read off the program:
+
+| generation | class | its "on" | control | disabled | object |
+|---|---|---|---|---|---|
+| B, Iron Maiden 1.18 | `spike::ControlCoil` subclasses `LeftUpPost`, `RightUpPost` | v[42]: 200 for 64 ms, then 64 (up to 20 s) | +0x1c | v[30] | guarded singleton getters |
+| B, Deadpool 1.16, Led Zeppelin 1.22, Sword of Rage 1.19, Star Wars ELG 1.10 | `OrbitControlGates`, `RightControlGate` | v[42]: 255 for 64 ms, then 96 for 6 s (Star Wars ELG: 128) | +0x20 | v[30] | built by a STATIC INITIALIZER, no getter (`data <name>_obj`); calling the initializer builds them again and the game dies (Deadpool Pro, exit 4) |
+| A', Avengers 1.10, Jurassic Park 1.16 | `ControlCoil` (47 virtuals) subclasses: tower magnet and post, T-Rex magnet, raptor / orbit / control room / left inlane posts | v[44] fires the object's own fields: pulse power +0xa, pulse ms +0xc, hold power +0xe (the getter's constants: T-Rex magnet 255 for 300 ms then 128; tower magnet 255 / 300 then 100; posts 255 / 64 or 128 then 64) | +0x28 | v[31] | guarded singleton getters |
+
+Left out on purpose: Iron Maiden's tomb lock gate (holds locked balls), Deadpool LE's up/down ramp (pulse only), Jurassic
+Park LE's T-Rex jaw (its own mechanism). Scratch tools in `C:/tmp/PAD-420/coils` (bderived.py, aderived.py, offslot.py,
+bobj.py, takegive.py, mkstage_b.py, coil_job.sh, coil_verdict.py, coil_land.py).
+
+**C (the Device framework)**: each class has its own take/give at its own offset (Aerosmith LE: +0x18 for its gate and
+diverter classes, +0x14 for its toy box magnet), but the gates are driven through another service (ControlGate v[28]:
+a byte at +4, a time and a callback), not `coil_fire`, so their powers are not in the code. Do not hold a C gate by
+`coil_fire` until that service's powers are read. Its magnets do call `coil_fire` (Aerosmith LE's toy box magnet: 255
+for 1 s, then 16).

@@ -157,6 +157,6 @@ bobj.py, takegive.py, mkstage_b.py, coil_job.sh, coil_verdict.py, coil_land.py).
 
 **C (the Device framework)**: each class has its own take/give at its own offset (Aerosmith LE: +0x18 for its gate and
 diverter classes, +0x14 for its toy box magnet), but the gates are driven through another service (ControlGate v[28]:
-a byte at +4, a time and a callback), not `coil_fire`, so their powers are not in the code. Do not hold a C gate by
+a byte at +4, a time and a callback - run 9: that is a 40-slot TIMER service at 0x332c7c, not a coil driver; the gate's own commands go through a DRIVER object it holds at +0xc, by that object's v[4] (ControlGate v[27] at 0x238b6c), so the powers are that driver class's), not `coil_fire`. Do not hold a C gate by
 `coil_fire` until that service's powers are read. Its magnets do call `coil_fire` (Aerosmith LE's toy box magnet: 255
 for 1 s, then 16).

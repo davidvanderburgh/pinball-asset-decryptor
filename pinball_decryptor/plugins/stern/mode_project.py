@@ -941,6 +941,7 @@ STACK_FLAGS_PROVEN = frozenset({
     "james_bond_le-1.06",             # Bust out (flag 102), and the flag cleared when it ended
     "batman-1.13",                    # Shame (flag 71, its start takes one argument), cleared when it ended
     "james_bond_pro-1.06",            # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; James Bond LE 1.06's mode flags, the same version): Bullshit Scoring started through its block start set flag 141 and a stack no mode was refused for it; with nothing running it had started
+    "stranger_things-1.13",           # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; Stranger Things LE 1.12's flags + 5, each read off its start here): with nothing running a stack no mode started; Bullshit Scoring's block start set flags 116 and 136 and the mode was refused (flag 136)
 })
 
 
@@ -968,6 +969,7 @@ STACK_RECORDS_PROVEN = frozenset({
     "aerosmith-1.16",                 # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; Aerosmith LE 1.15's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 243..245) was named running and the mode refused
     "aerosmith_le-1.16",              # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; Aerosmith LE 1.15's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 243..245) was named running and the mode refused
     "guardians_le-1.15",              # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; Guardians LE 1.14's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 238..240) was named running and the mode refused
+    "guardians-1.15",                 # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; Guardians LE 1.14's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 238..240) was named running and the mode refused
 })
 
 

@@ -344,3 +344,8 @@ data orbit_gates_obj     0x005f19b0
 value orbit_gates_ctl     12
 value orbit_gates_off_slot 5
 text held_coils            orbit_gates
+
+# PAD-420: the other modes' record ids, from guardians_le-1.14's proven port (the game's own ids; proven here by a stack run)
+value mode_records_1       0x00f000ee      # Super Scoring: ids 238..240 (the older build's + 4: its start's mov r0, #id)
+value mode_records_2       0x00ed00ec      # Double Scoring: ids 236..237 (the older build's + 4: its start's mov r0, #id)
+value mode_records_3       0x00eb00ea      # Headphone Hurryup: ids 234..235 (the older build's 230..231 + 4; its start creates its record without asking first)

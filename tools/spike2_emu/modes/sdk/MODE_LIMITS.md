@@ -179,7 +179,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
-| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, waits for multiballs only |
+| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
@@ -208,7 +208,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | no | ✓ | ✓ | shots | scoop, mechanisms |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Stranger Things 1.13 | no | ✓ | ✓ | shots | scoop, mechanisms, waits for multiballs only |
+| Stranger Things 1.13 | no | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
 | Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, waits for multiballs only |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |

@@ -64,6 +64,21 @@ def pick_device():
     return None
 
 
+def catch_up(least, target, ceiling, frame):
+    """Bytes to drop off the head of the queue, or 0 (PAD-456).
+
+    ``least`` is the LEAST the queue held at any moment of the last window, in
+    bytes. That is the queue's standing lateness: jitter in the source fills the
+    queue up and the callback eats it back down, but the bottom of that swing
+    only rises when audio is arriving that the speaker will never catch up on.
+    Above ``ceiling`` the excess over ``target`` is dropped, oldest first, in
+    whole frames so the channels stay paired.
+    """
+    if least is None or least <= ceiling:
+        return 0
+    return max(0, (least - target) // frame * frame)
+
+
 def open_source(argv):
     """Return (read(n), close(), description). See the two forms in the docstring."""
     if argv and argv[0] == "--fifo":
@@ -99,6 +114,24 @@ def main():
     pre_ms = int(os.environ.get("PAD_AUDIO_PREBUFFER_MS", "350"))
     lat_ms = int(os.environ.get("PAD_AUDIO_LATENCY_MS", "60"))
     prebuf = bps * pre_ms // 1000
+
+    # ---- PAD-456: a late queue never comes back on time by itself ----------
+    #
+    # The source and the speaker both run at 1x, so whatever backlog a hiccup
+    # puts in this queue stays there for the rest of the run, as lateness. And
+    # nothing upstream bounds it: the relay and the socket hand over everything
+    # they hold the moment the stall ends, the guest's 1 MB FIFO (~6 s) included.
+    # A tester's James Bond LE ran in sync for 45 s and then 18-20 s behind the
+    # picture for good. A speaker stalled for a while, a transport that held its
+    # bytes and let them go at once, a guest that wrote ahead: from here they
+    # all look the same, the bottom of the queue sitting far above where it
+    # normally rests (~200 ms of the 350 ms cushion). So when the least the
+    # queue held over a 2 s window is above PAD_AUDIO_MAX_LATE_MS, the oldest
+    # audio is dropped back to the cushion. One skip, then on time again: a
+    # pinball machine's sound is an answer to what just happened, and an answer
+    # 20 s late is worse than one with a hole in it.
+    late_ms = int(os.environ.get("PAD_AUDIO_MAX_LATE_MS", "750"))
+    ceiling = bps * max(late_ms, pre_ms + 100) // 1000
 
     # ---- item 56: master PC-side volume + Mute, our level not the game's --
     #
@@ -149,7 +182,11 @@ def main():
     buf = bytearray()
     lock = threading.Lock()
     done = threading.Event()
-    stats = {"under": 0, "fed": 0, "played": 0}
+    stats = {"under": 0, "fed": 0, "played": 0, "skipped": 0}
+    # The least the queue held after any callback since the main loop last
+    # looked, for catch_up(). None until the speaker has asked at least once,
+    # so a speaker that is not asking at all is never judged on it.
+    least = [None]
 
     def reader():
         try:
@@ -188,6 +225,8 @@ def main():
             if n:
                 del buf[:n]
             stats["played"] += n
+            if least[0] is None or have - n < least[0]:
+                least[0] = have - n
         if n:
             g = gain_state["value"]
             if g <= 0.0:
@@ -234,7 +273,7 @@ def main():
     poll_gain()   # so the very first buffers already play at the remembered
                   # level, not at unity for one poll interval
     with stream:
-        last = time.monotonic()
+        last = looked = time.monotonic()
         # No-data watchdog. The guest streams CONTINUOUSLY (silence included),
         # so a feed that stops entirely means the transport died under us —
         # seen live 2026-08-31 as a half-open WSL localhost-proxy connection:
@@ -255,12 +294,26 @@ def main():
                 done.set()
                 close()
                 sys.exit(1)
+            if now - looked >= 2:
+                with lock:
+                    low = least[0]
+                    least[0] = None
+                    cut = catch_up(low, prebuf, ceiling, frame)
+                    if cut:
+                        del buf[:cut]
+                        stats["skipped"] += cut
+                looked = now
+                if cut:
+                    print(f"[padplay] queue stayed above {low * 1000 // bps} ms "
+                          f"for 2 s - skipped {cut * 1000 // bps} ms to catch up",
+                          flush=True)
             if now - last >= 5:
                 with lock:
                     depth = len(buf)
                 print(f"[padplay] queue {depth * 1000 // bps:4d} ms  "
                       f"underruns {stats['under']:4d}  "
-                      f"fed {stats['fed']}  played {stats['played']}", flush=True)
+                      f"fed {stats['fed']}  played {stats['played']}  "
+                      f"skipped {stats['skipped'] * 1000 // bps} ms", flush=True)
                 stats["under"] = 0
                 last = now
     close()

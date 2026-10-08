@@ -2800,6 +2800,12 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
                 { print "[event] " $0; fflush() }
             next }
         /\[play\]/               { print "[event] " $0; fflush(); next }
+        # PAD-456: a report of sound 20 s behind the picture came with no
+        # line in the log that could say where it was held. The player now
+        # says when it skipped to catch up and when its feed went dead, and
+        # the guest says every 30 s how much it wrote and how far ahead.
+        /\[padplay\] (queue stayed above|no data for)/ { print "[event] " $0; fflush(); next }
+        /\[aud\] ---/            { print "[event] " $0; fflush(); next }
         # PAD-204: every Pause press says what happened to it - a pause that
         # did nothing used to leave no trace in the log the user can send
         /\[pause\]/              { print "[event] " $0; fflush(); next }

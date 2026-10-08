@@ -24,6 +24,8 @@
  *   - the header is a fixed PADVID_HDR bytes, frames start there
  *   - channel c's slots start at PADVID_HDR + c * SLOTS * SLOT_BYTES
  *   - nothing is added in the middle; append only, and bump PADVID_VERSION
+ *     when an older reader would MISREAD the change (one it simply never
+ *     reads, like start_ms at the end of the header, needs no bump)
  *
  * EACH CHANNEL'S RING IS SINGLE PRODUCER / SINGLE CONSUMER. The host only
  * ever advances write_idx, the guest only ever advances read_idx, and neither
@@ -106,6 +108,20 @@ struct padvid_shm {
     unsigned version;
     unsigned host_alive;        /* host bumps this so the guest can tell */
     struct padvid_chan ch[PADVID_CHANNELS];
+    /* PAD-456: where in the clip channel c's request starts, in ms. The guest
+     * writes it with the path, before it bumps req_gen; the host starts its
+     * decode there. 0 is the clip's start, which is all the bridge could do
+     * before: James Bond LE seeks its film reels to where its own sound is
+     * (3-39 s in), every seek restarted the reel from frame 0, and the
+     * picture fell out of step with the effects and callouts by the seek.
+     *
+     * APPENDED WITHOUT A VERSION BUMP, on purpose. The version is an equality
+     * gate on all three readers, so bumping it turns any one of them that the
+     * rig failed to rebuild into no video at all. This array sits past every
+     * field an older reader knows, which reads it as nothing: an older host
+     * starts at 0, an older guest leaves it 0, and either way the run gets
+     * exactly what it got before. */
+    unsigned start_ms[PADVID_CHANNELS];
 };
 
 /* The header page must actually hold the header. A negative array size is the

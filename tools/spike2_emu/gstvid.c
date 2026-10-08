@@ -219,6 +219,14 @@ struct stream {
     unsigned hwchan1;
     unsigned long last_seek_us; /* when the previous seek arrived; 0 = never  */
     unsigned last_use;          /* bumped per frame; picks the stealing victim */
+    /* PAD-456: WHERE IN THE CLIP. want_ms is what a seek asks the next
+     * prepare() for (consumed there, 0 = the start); start_ms is where the
+     * run it armed starts, so the position the game reads back counts from
+     * it. James Bond LE keeps its film reels in step with its own sound by
+     * seeking them (3-39 s in) - answered from frame 0, the picture ran up to
+     * half a minute away from the effects and callouts. */
+    unsigned want_ms;
+    unsigned start_ms;
     long long pos_ns;
     void *buf;                  /* this stream's GstBuffer                   */
     /* Our own caps/structure objects. Never handed to real GStreamer - every
@@ -524,6 +532,9 @@ void pad_vid_note_location(void *src, const char *loc)
             if (sp >= 0) {
                 struct padvid_chan *c = &vshm->ch[sp];
                 str_copy(c->path, s->location, PADVID_PATH_MAX);
+                /* A pre-arm is always the clip's start (PAD-456): the spare
+                 * may still hold the offset of a seek it last served. */
+                vshm->start_ms[sp] = 0;
                 c->playing = 1;
                 s->armed_gen = c->req_gen + 1;
                 c->req_gen = s->armed_gen;
@@ -608,6 +619,8 @@ void pad_vid_note_pipeline(void *p)
      * stream's frames. */
     s->told_w = 0; s->told_h = 0;
     s->pos_ns = 0;
+    s->want_ms = 0;
+    s->start_ms = 0;
     /* A BRAND NEW STREAM IS THE MOST RECENTLY USED, NOT THE LEAST, and getting
      * this backwards is worse than not having LRU at all.
      *
@@ -749,6 +762,8 @@ static void *vid_thread(void *arg)
     unsigned consumed = 0;
     unsigned delay = 33333;
     unsigned long t_epoch = 0;   /* set at frame 0; the schedule's zero */
+    /* PAD-456: the run's first frame is the one at start_ms, not frame 0. */
+    long long start_ns = (long long)s->start_ms * 1000000ll;
     if (c->fps_num && c->fps_den)
         delay = (unsigned)(1000000ull * c->fps_den / c->fps_num);
     VLOG("[vid] ch%d streaming %ux%u at %u/%u fps (%u us/frame)\n",
@@ -997,7 +1012,7 @@ static void *vid_thread(void *arg)
             /* Updated per frame rather than on each of the five exit paths:
              * a return that forgot to record it would read as a runaway. */
             s->delivered = consumed;
-            s->pos_ns = (long long)consumed * delay * 1000ll;
+            s->pos_ns = start_ns + (long long)consumed * delay * 1000ll;
             /* Only now may the host reuse this slot. */
             c->read_idx = consumed;
         }
@@ -1072,6 +1087,7 @@ int pad_vid_prepare(void *pipeline)
     struct stream *s = find_pipeline(pipeline);
     struct padvid_chan *c;
     unsigned gen;
+    unsigned start;             /* where this run starts in the clip, ms */
     int spins = 0;
     int adopted = 0;
     if (!s || !vid_on()) return 0;
@@ -1092,8 +1108,9 @@ int pad_vid_prepare(void *pipeline)
      *
      * At a clip-to-clip transition the game re-arms the OUTGOING pipeline
      * (set_state(PAUSED), no stop first - gststub.c) BEFORE it sets the new
-     * location. A real pipeline answers PAUSED by holding position; this
-     * host cannot seek, so prepare() restarts ffmpeg from frame 0 and the
+     * location. A real pipeline answers PAUSED by holding position; a re-arm
+     * carries no position (only a seek does, PAD-456), so prepare() restarts
+     * ffmpeg from frame 0 and the
      * outgoing clip visibly jumps back to its own start. David watched it
      * live 2026-08-06 - "the last 500ms - 1 second of a video stutters
      * before the next one loads in" - and his session log shows ch0 283
@@ -1130,8 +1147,12 @@ int pad_vid_prepare(void *pipeline)
      * loop=1 EOS rewind (ch0's 5.6 s loop) never enters here. eos_defer is
      * the safety net: if a title replays a loop=0 clip with a bare
      * set_state(PLAYING) and no location change, pad_vid_play() honours the
-     * deferred rewind instead of playing a dead channel. */
-    if (!s->playing && s->eos_us && s->eos_loop == 0
+     * deferred rewind instead of playing a dead channel.
+     *
+     * A seek to the MIDDLE of the clip (want_ms, PAD-456) is never a reflex:
+     * it is the game choosing where to play from, and absorbing it would
+     * drop the one request that says where. */
+    if (!s->playing && s->eos_us && s->eos_loop == 0 && !s->want_ms
         && str_eq(s->prep_path, s->location)) {
         long since = (long)(vid_us() - s->eos_us);
         if (since >= 0 && since < EOS_REFLEX_US) {
@@ -1191,16 +1212,24 @@ int pad_vid_prepare(void *pipeline)
      * duration meant it compared a stale position against the new clip's
      * duration, decided the new clip was already finished, and tore the
      * pipeline down - then built it again, ~25 times a second, so nothing ever
-     * played and the video panel stayed black. */
-    s->pos_ns = 0;
+     * played and the video panel stayed black.
+     *
+     * "Reset" means to where this run starts: a seek's offset (PAD-456),
+     * taken here and only here, so a prepare that absorbed above leaves it
+     * for the one that commits. */
+    start = s->want_ms;
+    s->want_ms = 0;
+    s->start_ms = start;
+    s->pos_ns = (long long)start * 1000000ll;
     /* ADOPT THE PRE-ARM. note_location() started this path decoding on a
      * SPARE channel; if nothing has claimed that channel since (its req_gen
      * is still ours), this stream MOVES to it and its old channel goes to
      * the spare's previous owner - hwchan stays a permutation of 0..N, so
      * two streams can never drive one channel. Bumping a fresh generation
      * instead would throw away the 30-70 ms head start the host has had,
-     * which is the entire point of the pre-arm. */
-    if (s->armed_chan1 && s->armed_gen &&
+     * which is the entire point of the pre-arm. A pre-arm decodes from the
+     * clip's start, so a run that starts anywhere else never adopts one. */
+    if (!start && s->armed_chan1 && s->armed_gen &&
         str_eq(s->armed_path, s->location) &&
         vshm->ch[s->armed_chan1 - 1].req_gen == s->armed_gen) {
         int old = hw_of(s);
@@ -1238,6 +1267,9 @@ int pad_vid_prepare(void *pipeline)
                                                     : "location changed");
         }
         str_copy(c->path, s->location, PADVID_PATH_MAX);
+        /* With the path and before req_gen, like the path: the host reads
+         * both when it notices the new generation. */
+        vshm->start_ms[hw_of(s)] = start;
         /* PREROLL: tell the host to start decoding NOW, at PAUSED, not at
          * PLAYING.
          *
@@ -1581,7 +1613,7 @@ void pad_vid_play(void *pipeline)
         pad_vid_seek(pipeline, 0);
         return;
     }
-    s->pos_ns = 0;
+    s->pos_ns = (long long)s->start_ms * 1000000ll;   /* PAD-456: 0 unless sought */
     /* Cleared HERE and not at the top of vid_thread: prepare() reads it to
      * decide whether the previous run got anywhere, and the thread starts
      * after prepare() has already run. Clearing it in the thread would race
@@ -1665,13 +1697,29 @@ int pad_vid_last_state(void *pipeline)
  * through to real GStreamer, which knows nothing about any of this, so a clip
  * played exactly once and the last frame sat frozen on screen.
  *
- * The host decoder cannot seek - it is one ffmpeg per request - so a rewind is
- * served by asking for the same file again, which starts it from frame 0.
- * That is the only position the game ever asks for. */
+ * The host decoder is one ffmpeg per request, so a seek is served by asking
+ * for the same file again, starting at the position asked for.
+ *
+ * ★ PAD-456: "0 is the only position the game ever asks for" was true of every
+ * title until James Bond LE. Its film reels follow its own sound: it seeks a
+ * 264 s reel to 3, 6, 13, 23, 31 and 39 s, each time to how long the reel has
+ * been on (a tester's log, 2026-10-08), and its 28.8 s loops to 2-28 s. This
+ * used to answer every one of them from frame 0, so the picture ran up to half
+ * a minute away from the effects and callouts - "18-20 seconds behind", with
+ * the music, which no picture keeps time with, sounding fine. The offset now
+ * rides with the request (padvid.h start_ms) and the host starts there. */
 int pad_vid_seek(void *pipeline, long long pos_ns)
 {
     struct stream *s = find_pipeline(pipeline);
+    unsigned want;
+    int ok;
     if (!s || !s->ready || !vshm || !s->location[0]) return 0;
+    want = pos_ns > 0 ? (unsigned)(pos_ns / 1000000ll) : 0u;
+    /* A seek inside the first frames IS the start. Bond rewinds some clips
+     * with a 1 ms seek (40 of them in the tester's log), and a rewind has to
+     * stay a rewind: the head cache, the pre-arm and both absorbs below
+     * exist for exactly that request. */
+    if (want < 50) want = 0;
 
     /* ★ ITEM 43: A SEEK ON A TORN-DOWN PIPELINE IS REFUSED, exactly as real
      * GStreamer refuses a seek on a NULL-state pipeline. The turtles (System
@@ -1696,9 +1744,9 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
         return 0;
     }
 
-    if (pos_ns != 0)
-        VLOG("[vid] ch%d seek to %u ms requested; only rewind is supported, "
-             "restarting from 0\n", chan_of(s), (unsigned)(pos_ns / 1000000ll));
+    if (want)
+        VLOG("[vid] ch%d seek to %u ms: starting the clip there\n",
+             chan_of(s), want);
 
     /* ★ ITEM 11'S FIX: A REDUNDANT REWIND IS ABSORBED, NOT SERVED.
      *
@@ -1742,8 +1790,9 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
      * seek on a stream whose decoder said loop=0 is the game rewinding a clip
      * it is about to REPLACE; serving it is the 2-3 head frames David sees at
      * every scene step. The loop=1 EOS seek (the real loop) falls through to
-     * the re-arm exactly as before. */
-    if (!s->playing && s->eos_us && s->eos_loop == 0
+     * the re-arm exactly as before. Only a REWIND is a reflex: a seek to the
+     * middle (PAD-456) is the game choosing where to play from. */
+    if (!want && !s->playing && s->eos_us && s->eos_loop == 0
         && str_eq(s->prep_path, s->location)) {
         long since = (long)(vid_us() - s->eos_us);
         if (since >= 0 && since < EOS_REFLEX_US) {
@@ -1758,14 +1807,22 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
         unsigned long now = vid_us();
         long since = (long)(now - s->last_seek_us);
         int burst = s->last_seek_us != 0 && since >= 0 && since < 100000;
+        /* A storm asks for where the clip already is: a rewind storm repeats
+         * the start the running clip began at, and a game re-seeking a reel
+         * to "now" every tick (PAD-456) asks for about where it has got to.
+         * A burst seek anywhere else is a new place to play from and
+         * re-arms. */
+        long long off = (long long)want - s->pos_ns / 1000000ll;
+        int same = want == s->start_ms || (want && off > -150 && off < 150);
         s->last_seek_us = now;
-        if (burst && s->playing && str_eq(s->prep_path, s->location)) {
+        if (burst && s->playing && same
+                && str_eq(s->prep_path, s->location)) {
             s->seek_absorbed++;
             if (s->seek_absorbed == 1)
                 VLOG("[vid] ch%d seek %ld us after the last one (delivered "
                      "%u); absorbing the burst\n",
                      chan_of(s), since, s->delivered);
-            s->pos_ns = 0;
+            s->pos_ns = (long long)want * 1000000ll;
             return 1;
         }
     }
@@ -1780,7 +1837,10 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
      * the same fault as a clip looping too fast - and the host, which is where
      * the storm is visible as a cost, cannot see which one this is. */
     prepare_why = "rewind";
-    if (!pad_vid_prepare(pipeline)) {
+    s->want_ms = want;          /* prepare() takes it when it commits */
+    ok = pad_vid_prepare(pipeline);
+    s->want_ms = 0;             /* and an absorbed or failed one drops it */
+    if (!ok) {
         prepare_why = "state";
         VLOG("[vid] ch%d rewind failed to re-arm the host\n", chan_of(s));
         return 0;

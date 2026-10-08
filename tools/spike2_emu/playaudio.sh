@@ -253,6 +253,9 @@ if [ "$SINK" = win ]; then
         export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_PREBUFFER_MS"
     [ -n "${PAD_AUDIO_LATENCY_MS:-}" ] && \
         export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_LATENCY_MS"
+    # PAD-456's catch-up ceiling, the same kind of knob and the same trap.
+    [ -n "${PAD_AUDIO_MAX_LATE_MS:-}" ] && \
+        export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_MAX_LATE_MS"
 
     # NO READINESS PROBE HERE, deliberately. The obvious one - connect to the
     # port to see whether it is up yet - IS ITSELF A CLIENT: the relay accepts

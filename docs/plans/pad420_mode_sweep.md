@@ -253,6 +253,11 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     with `FRESH_NV=1` (proof_job2.sh's prep boot: the title's NVRAM in the slot started fresh and Guided Setup
     left, then the normal run). D&D LE's retry hit an NVRAM FATAL 256 in its slot (no game ever started); Aerosmith
     LE's game hit its watchdog during the census presses.
+  - "Clip played but not seen" (run 9-10): King Kong Pro, Rush LE, Stranger Things Pro, John Wick Pro (after its
+    getter fix) log `clip ... played` yet no frame shows it; Stranger Things LE (same route as its Pro) and the
+    others proved. John Wick Pro's retry ran its mode on player 2's turn (Start pressed again before the first game
+    was logged added a player); proof_job2 now waits up to 30 s after each Start. If round 3 still misses them, look
+    at what covers the clip on those builds (the bank drawn under the HUD's own video, or the frame times).
   - The whole queue, in order: chain18 (media retries, 2 rigs) -> chain19 (scoop, 2 rigs) -> chain21 COILS_DONE;
     chain23 (rig 2: stack batch) -> RIGS_DONE -> chain24 (Jaws Pro probe) -> chain25 (Batman probe) -> chain26
     (coil re-runs 2) -> chain27 (stack re-runs) -> chain28 (media round 3). Transcription: idle now, 4 threads after

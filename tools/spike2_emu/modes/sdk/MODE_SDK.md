@@ -2014,6 +2014,19 @@ good. Now, per player, the runtime keeps a list of the ones handed over and not 
 
 `wizards_arm` now also checks each entry's running query is in the game's code.
 
+Proven in the emulator (2026-10-08, rig 3, the stock James Bond LE 1.06 card, muted), `starts_on event film_frwl` +
+`game_wizard start Ahoy Mr. Bond`, PAD-428's instrument calling the game's collect: a henchman in the five other
+films, then From Russia With Love's other three parts, then game flag 139 (Victory Laps active, one of the game's own
+"in the way" checks) set to stand in for the mode that awards the last part, then its henchman. That collect made the
+game light all four itself (lit 0xf) and completed the film. With main's runtime: Ahoy selected, refused, lit 0xf;
+flag cleared, one call of the game's selection cycle moved to Goldfinger's Jackpot, and the Right ramp started
+Goldfinger's Jackpot (the report). With this runtime: lit 0x2 selected 1, the cycle stayed on it, and 134-184 ms after
+the flag cleared the runtime's retry started Ahoy Mr. Bond (running query 1, played 0x2) with the game's own 0xd lit
+again; the cycle and the Right ramp then started nothing else. Two of three runs: the rig's video host stalled on
+Ahoy's intro clip under other rigs' load ("prepare waited 3261 ms for the host", then "host did not answer"; once long
+enough for the game's dispatch watchdog); a control with main's runtime, the game's own Right ramp starting Ahoy, logged
+the same "host did not answer", and the third run played the boat-chase intro clean.
+
 **With a mode of yours that holds the game's modes off.** Ahoy Mr. Bond's start (`block_start_6`) is one a mode of
 yours may refuse (PAD-363). The game's start code goes on after a refused start as if it began: it unlights them all
 and marks it played, so the player would lose it. When the veto refuses a mini-wizard's start, the runtime keeps the

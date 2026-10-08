@@ -190,7 +190,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
 
 # ---- callouts and text ----
-callout countdown           394
 text example_start_shot     Lower left 2 bank target bottom
 
 # ---- events ----
@@ -466,3 +465,6 @@ value control_gates_off_slot 30
 data control_gates_obj   0x0062e46c
 text control_gates_drive  9 0 255 64 96
 text held_coils            control_gates
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         399   # One!; sword_of_rage_le-1.18's 394 says the same lines

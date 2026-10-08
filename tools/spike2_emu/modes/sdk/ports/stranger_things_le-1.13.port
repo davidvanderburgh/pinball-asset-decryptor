@@ -178,9 +178,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  8d4b1e7add4280a7790929a643df09196c28c29f
 
 # ---- callouts and text ----
-callout countdown           628
-callout ten_seconds         396
-callout time_up             294
 text example_start_shot     Demodog target 1 left
 
 # ---- events ----
@@ -306,3 +303,8 @@ site block_start_9      0x0007aaf4 0xe92d4038 0xe3000141
 text block_name_9       Double Scoring
 site block_start_10     0x0018e7d8 0xe92d4010 0xebffffdb
 text block_name_10      Victory Laps
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         633   # Two. / 3. / Four. / Five. (its "One" clip transcribed empty; the Pro's 633 says one-six)
+callout ten_seconds       401   # Hurry up, your time is running out. / You better hurry up.
+callout time_up           299   # Your time is up. / Your time's up.

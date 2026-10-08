@@ -193,9 +193,6 @@ scene video_bank           914f6bd9d17b4173189d7fa751d0cb2daae94d92
 scene hud                  28aff8e66e7c61dc4722a30ee31e22d1afe094d6/efd9321ee61c0467eaaecb1369842d69eed4a6aa
 
 # ---- callouts and text ----
-callout countdown           293
-callout ten_seconds         318
-callout time_up             262
 text example_start_shot     Rt ramp lt target
 
 # ---- events ----
@@ -577,3 +574,8 @@ text block_name_16      Topper Frenzy
 site block_start_35     0x000f5ca0 0xe92d4ff0 0xe1a05000
 data block_obj_35       0x0b6481c0
 text block_name_35      2112 Wizard
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         298   # One. / Two!
+callout ten_seconds       323   # Hurry up, you're gonna miss your flight! / There's a man out there crawling on the wing.
+callout time_up           267   # Better luck next time, dude! / Your time is up, Hozer!

@@ -195,8 +195,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  6742a6fac556d32c1c4ff0f672ab7a513ac8bafd
 
 # ---- callouts and text ----
-callout countdown           788
-callout ten_seconds         713
 text example_start_shot     Left 3 bank target top
 
 # ---- events ----
@@ -375,3 +373,7 @@ site block_rule_10         0x001a1edc 0xe92d40f8 0xe1a06002  # cskill_shot::v[31
 text block_rule_name_10    Skill Shot
 site block_rule_11         0x001b3040 0xe92d41f0 0xe1a04000  # cthe_child_rule::v[31]
 text block_rule_name_11    The Child
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         793   # ONE! / ONE!
+callout ten_seconds       718   # Hurry up! Your time is running out! / You need to hurry.

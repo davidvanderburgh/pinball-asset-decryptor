@@ -180,8 +180,6 @@ scene video_bank           9d57875196c613785a1eee010c55223a0f1aa821
 scene attract              60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
 # ---- callouts and text ----
-callout countdown           611
-callout time_up             616
 text example_start_shot     Lower p/f machine target
 
 # ---- events ----
@@ -295,3 +293,8 @@ text block_name_17      Spot Mode
 site block_start_19     0x00047108 0xe92d40f0 0xe1a04000
 data block_obj_19       0x005a2bcc
 text block_name_19      Eddie Mode
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         611   # One! / 2
+callout ten_seconds       613   # Hurry, Hurry, you've got this! / I think you can do it.
+callout time_up           616   # I apologize, but you run out of time! / I'm sorry, but your time is up!

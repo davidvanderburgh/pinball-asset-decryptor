@@ -12,8 +12,9 @@ node's colour track.  So what a line looks like comes from one of two places:
   a Write onto a card built with them changes nothing;
 * a font whose letters carry their own colours (Godzilla's orange GameFont_Secondary) has
   them in its atlas, a picture shared by every line drawn in that font, in every scene.  Its
-  switch IS that picture's (the Images tab's, with its lock and unlock): a line's colour
-  cannot reach colours that live in the letters (:func:`font_picture`).
+  switch IS that picture's (the Images tab's, with its lock and unlock; every one of the
+  font's pictures, when its letters fill several): a line's colour cannot reach colours that
+  live in the letters (:func:`font_pictures`).
 
 A line's corrected colour is a number in the scene, so a project read again off a card
 built with it would see the corrected number and correct it twice.  The Write keeps what it
@@ -70,8 +71,15 @@ def fonts_by_key(assets_dir):
 
 
 def atlas_rels(font):
-    """The pictures (rels under ``images/``) *font*'s letters are cut from."""
-    return [str(r).replace("\\", "/") for r in (font or {}).get("atlas_rels") or ()]
+    """The pictures (rels under ``images/``) *font*'s letters are cut from, at every size
+    it is drawn at."""
+    out = []
+    for f in [font or {}] + list(((font or {}).get("sizes") or {}).values()):
+        for r in f.get("atlas_rels") or ():
+            r = str(r).replace("\\", "/")
+            if r not in out:
+                out.append(r)
+    return out
 
 
 def _art_coloured(assets_dir, rel):
@@ -111,10 +119,53 @@ def _art_coloured(assets_dir, rel):
 def font_picture(assets_dir, font):
     """The atlas (rel under ``images/``) of a font whose letters carry their own colours, or
     ``None`` for a font of white letters the scene colours."""
+    rels = font_pictures(assets_dir, font)
+    return rels[0] if rels else None
+
+
+def font_pictures(assets_dir, font):
+    """EVERY picture (rels under ``images/``) a font whose letters carry their own colours
+    cuts them from, or ``[]`` for a font of white letters.  A big font fills several:
+    Godzilla's GameFont_Secondary keeps A-F on one, G, H, K and M-Z on the next and most of
+    the small letters on a third (PAD-451), so a line's colours are in all of them."""
     rels = atlas_rels(font)
     if rels and any(_art_coloured(assets_dir, r) for r in rels):
-        return rels[0]
-    return None
+        return rels
+    return []
+
+
+_SCENES = {}       # assets_dir -> ((mtime, size), {atlas rel: number of scenes})
+
+
+def font_scenes(assets_dir, rels):
+    """How many of the card's scenes draw from any of the pictures *rels* (rels under
+    ``images/``): every line in that font, in each, shares their colours (PAD-451).  From
+    the extract's ``radium_images.txt``, one row per picture per scene; 0 without it."""
+    path = os.path.join(assets_dir or "", "images", "scene_textures", "radium_images.txt")
+    try:
+        st = os.stat(path)
+    except OSError:
+        return 0
+    stamp = (st.st_mtime_ns, st.st_size)
+    with _LOCK:
+        got = _SCENES.get(assets_dir)
+    if got is None or got[0] != stamp:
+        by = {}
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    cols = line.rstrip("\r\n").split("\t")
+                    if len(cols) >= 2 and cols[0] and not cols[0].startswith("#"):
+                        by.setdefault(cols[0], set()).add(cols[1])
+        except OSError:
+            return 0
+        got = (stamp, by)
+        with _LOCK:
+            _SCENES[assets_dir] = got
+    cards = set()
+    for r in rels or ():
+        cards |= got[1].get(r) or set()
+    return len(cards)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -212,18 +263,20 @@ def _walk(man):
 def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
     """A line's colour switch, for the Layers list: ``{"line": True, "on", "own", "rel",
     "added" | "stock"}``; ``{"locked": True, "line": True}`` for a game line with the unlock
-    box off; ``{"font_picture": rel, "font": name}`` for a line in a font with colours of its
-    own (its switch is that picture's); ``None`` for a node that draws no line of its own (a
-    drop shadow, which takes the colour of the line it copies)."""
+    box off; ``None`` for a node that draws no line of its own (a drop shadow, which takes the
+    colour of the line it copies).  A line in a font with colours of its own has a switch of
+    its own too (PAD-451: the Write gives it its own copy of the font, :mod:`font_copy`), with
+    ``"art": True``, ``"font"`` (its name) and ``"font_pictures"`` (:func:`font_pictures`, the
+    pictures every other line in the font shares)."""
     from ...core import colour_profile as cp
     oid, o = _text_of(man, n)
     if o is None:
         return None
     fonts = fonts if fonts is not None else fonts_by_key(assets_dir)
     font = fonts.get(o.get("font") or "")
-    pic = font_picture(assets_dir, font) if font is not None else None
-    if pic is not None:
-        return {"font_picture": pic, "font": font.get("name") or o.get("font_name") or ""}
+    pics = font_pictures(assets_dir, font) if font is not None else []
+    art = ({"art": True, "font": font.get("name") or o.get("font_name") or "",
+            "font_pictures": list(pics)} if pics else {})
     rel = cp.text_rel(card, n["id"])
     if n.get("added"):
         op = next((op for op in ops or () if op.get("op") == "add_text"
@@ -231,15 +284,26 @@ def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
         if op is None:
             return None
         own = op.get("color")
-        return {"line": True, "on": bool(own), "own": own is not None, "rel": rel,
-                "added": True}
+        return dict({"line": True, "on": bool(own), "own": own is not None, "rel": rel,
+                     "added": True}, **art)
     if data is None:
         from ...core import staged_changes
         data = staged_changes.load(assets_dir)
     if not data.get(cp.STOCK_IMAGES_KEY):
-        return {"locked": True, "line": True}
-    return {"line": True, "on": rel in cp.text_lines_on(assets_dir, data), "own": True,
-            "rel": rel, "stock": True}
+        return dict({"locked": True, "line": True}, **art)
+    return dict({"line": True, "on": rel in cp.text_lines_on(assets_dir, data), "own": True,
+                 "rel": rel, "stock": True}, **art)
+
+
+def art_map(font):
+    """``{char: picture rel}`` of *font*'s letters at every size: which of its pictures each
+    is cut from, for a copy of it (``line_font``)."""
+    out = {}
+    for f in [font or {}] + list(((font or {}).get("sizes") or {}).values()):
+        for ch, g in (f.get("glyphs") or {}).items():
+            if g.get("atlas_rel"):
+                out.setdefault(str(int(ch)), str(g["atlas_rel"]).replace("\\", "/"))
+    return out
 
 
 def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, bake=True):
@@ -253,7 +317,12 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
     each step's colour goes through the profile.  A plain font's line is its Text's colour
     times the track: with a white track (and no other node drawing the same Text) the Text's
     colour goes through it, size-neutral; otherwise the line's colours move into the track
-    (the Text white), and each other node drawing that Text keeps its look."""
+    (the Text white), and each other node drawing that Text keeps its look.
+
+    A line in a font whose letters carry their own colours (PAD-451) gets a ``line_font``
+    edit instead: its own copy of the font, the profile baked into the copy's pictures, with a
+    constant colour of its own (its track's; a plain font's Text colour) baked in first and
+    set white, so the line looks as a picture of it would through the profile."""
     from ...core import colour_profile as cp, staged_changes
     from . import text_colors
     if not assets_dir or man is None:
@@ -288,7 +357,7 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
             rgb = [c / 255.0 for c in pick[:3]]
         return rgb, _steps(col) if col else []
 
-    edits, written = {}, {}
+    edits, written, own_fonts = {}, {}, {}
 
     def put(nid, rgb=None, col=None, base_rgb=None, base_col=None):
         e = edits.setdefault(nid, {"op": "line_colour", "node": nid})
@@ -311,6 +380,9 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
         if prof is None:
             # off (or nothing to correct): a line a Write corrected gets its colours back
             w = rec.get(str(n["id"])) or {}
+            if w.get("font") and sw and sw.get("art"):
+                # and its font: a card built with its own copy, read again (PAD-451)
+                own_fonts[n["id"]] = {"op": "line_font", "node": n["id"], "off": True}
             if "rgb" in w and _close([float(v) for v in o["rgba"][:3]], w["rgb"]):
                 edits.setdefault(n["id"], {"op": "line_colour", "node": n["id"]})["rgb"] = \
                     [float(v) for v in w["base_rgb"]]
@@ -319,12 +391,29 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
                     w["base_col"]
             continue
         steps = _steps(base_col)
+        shared = len(users.get(oid) or ()) > 1
+        if sw.get("art"):
+            # PAD-451: its own copy of the font; a colour of its own that every frame keeps
+            # is baked into the copy with the profile (a line sharing its Text keeps its own)
+            mul = None
+            if base_col and not shared and not _white(base_col) and len(
+                    {tuple(round(m[i], 5) for i in range(3)) for _f, m, _a in steps}) == 1:
+                mul = [round(v, 5) for v in steps[0][1][:3]]
+                put(n["id"], col=[[f, [1.0, 1.0, 1.0, m[3]], a] for f, m, a in steps],
+                    base_col=base_col)
+            if not o.get("styled") and not shared and not _close(base_rgb, [1.0, 1.0, 1.0]):
+                mul = [round((mul[i] if mul else 1.0) * base_rgb[i], 5) for i in range(3)]
+                put(n["id"], rgb=[1.0, 1.0, 1.0], base_rgb=base_rgb)
+            own_fonts[n["id"]] = {"op": "line_font", "node": n["id"],
+                                  "profile": cp._profile_dict(prof), "mul": mul,
+                                  "art": art_map(fonts.get(o.get("font") or ""))}
+            written.setdefault(n["id"], {})["font"] = True
+            continue
         if o.get("styled"):
             col = [[f, corrected(prof, m[:3]) + [m[3]], a] for f, m, a in steps]
             if base_col or not _white(col):
                 put(n["id"], col=col, base_col=base_col)
             continue
-        shared = len(users.get(oid) or ()) > 1
         if not shared and _white(base_col):
             put(n["id"], rgb=corrected(prof, base_rgb), base_rgb=base_rgb)
             continue
@@ -342,7 +431,7 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
             keep = [[f, [round(base_rgb[i] * m[i], 5) for i in range(3)] + [m[3]], a]
                     for f, m, a in _steps(s_col)]
             put(s["id"], col=keep, base_col=s_col)
-    return list(edits.values()), written
+    return list(edits.values()) + list(own_fonts.values()), written
 
 
 def cards_with_lines(assets_dir, data=None):

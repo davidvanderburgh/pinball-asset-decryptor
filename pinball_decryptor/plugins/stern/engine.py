@@ -4398,10 +4398,12 @@ def _scene_line_colours(assets_dir, card_path, ops, log):
         return []
     if lines:
         _text_colour.remember(assets_dir, card_path, written)
-        n_on = sum(1 for e in lines if e["node"] in written)
+        # (a line may have two edits: its colours, and its own copy of its font, PAD-451)
+        nodes = {e["node"] for e in lines}
+        n_on = len(nodes & set(written))
         msg = "Scene %s: the color profile goes into %d line(s) of text%s." % (
-            card_path, n_on, "" if len(lines) == n_on else
-            "; %d line(s) get their own colors back" % (len(lines) - n_on))
+            card_path, n_on, "" if len(nodes) == n_on else
+            "; %d line(s) get their own colors back" % (len(nodes) - n_on))
         # a scene that grows is worked out twice in one Write (planned, then written whole)
         said = getattr(_LINES_SAID, "v", None)
         if said is None:

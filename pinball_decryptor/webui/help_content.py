@@ -1045,8 +1045,13 @@ HELP_CONTENT = {
          "- Most fonts have white letters the scene colors, so the profile goes into "
          "the color the line is drawn in.\n"
          "- A font whose letters have colors of their own (Godzilla's orange title "
-         "font) keeps them in its font picture. Its lines show that picture's "
-         "palette, shared by every line in the font, as on the Images tab."),
+         "font) keeps them in its font pictures, which every line in that font "
+         "shares, in every scene. A line in it switched on gets its own copy of "
+         "the font when you build, the profile in it, so only that line changes. "
+         "The copy adds to the scene, so it needs an image build.\n"
+         "- To correct every line in such a font at once, attach the profile to "
+         "its pictures on the Images tab; its lines' palettes then show a link "
+         "mark."),
         ("Machine screen (Spike 2, preview only)",
          "Not a correction but your machine's screen itself. It is never written to "
          "the card, and Revert all leaves it alone.\n\n"

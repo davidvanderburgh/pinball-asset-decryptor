@@ -161,6 +161,10 @@
 .ly-color.locked { color: #539bf5; cursor: default; opacity: .75; }
 .ly-color:hover:not(.locked) { opacity: 1; filter: brightness(1.2); }
 .ly-color:focus-visible { outline: 2px solid var(--accent); }
+/* PAD-451: a line whose font's pictures have the profile on the Images tab (every line in the
+   font corrected through them): a link mark on its palette */
+.ly-color.via-font { position: relative; }
+.ly-color .ly-share { position: absolute; right: -6px; bottom: -5px; width: 11px; height: 11px; stroke: var(--ink); stroke-width: 3; background: var(--panel); border-radius: 50%; padding: 1px; }
 .ly-img { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); border-radius: 4px; }
 .ly-img:hover { color: var(--accent); }
 .ly-img:focus-visible, .ly-eye:focus-visible { outline: 2px solid var(--accent); }

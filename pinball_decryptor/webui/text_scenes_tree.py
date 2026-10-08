@@ -2092,8 +2092,8 @@ class TreeEditMixin:
 
     def _text_color(self, card, man, n, ops, on):
         """A line of text's colour switch (PAD-438): its own (an added line's edit, or a game
-        line's behind the unlock), or, for a font with colours of its own, that font
-        picture's."""
+        line's behind the unlock), a line in a font with colours of its own too (PAD-451:
+        the Write gives it its own copy of the font)."""
         from ..core import colour_profile as _cp
         from ..plugins.stern import scene_edit, text_colour
         if not self._colour_unlock()["offered"]:
@@ -2101,8 +2101,6 @@ class TreeEditMixin:
         sw = text_colour.line_switch(self.assets_dir, card, man, n, ops)
         if sw is None or sw.get("locked"):
             return False
-        if sw.get("font_picture"):
-            return self._picture_color("images/" + sw["font_picture"], on)
         if sw.get("added"):
             new = [dict(op) for op in ops]
             for op in new:
@@ -2862,20 +2860,26 @@ def _text_switch(assets_dir, card, man, n, ops, data, fonts, picks, settings, un
     """A line of text's colour switch for the Layers list (PAD-438, DragonRR: "exactly like
     images"): a line added here has its own (``"added"``), a game line is a blue lock until
     the advanced box unlocks it (``"stock"``), each ``"kind": "text"`` with its
-    :func:`colour_profile.text_rel`.  A line in a font whose letters carry their own colours
-    (Godzilla's orange GameFont_Secondary) shows that font picture's switch instead, the
-    Images tab's, ``"font"`` naming it: the colours are in that picture, shared by every line
-    drawn in the font.  ``None`` for a drop shadow (it takes its line's colour)."""
+    :func:`colour_profile.text_rel`.  ``None`` for a drop shadow (it takes its line's colour).
+
+    A line in a font whose letters carry their own colours (Godzilla's orange
+    GameFont_Secondary) has one of its own too (PAD-451, DragonRR: "make it so that we can
+    change each text layer individually"): the Write gives it its own copy of the font.
+    ``"art"`` marks it, with the font's name, its pictures (``"font_pictures"``, rels under
+    images/, which every other line in it shares), ``"scenes"`` drawing from them and
+    ``"font_on"`` when the Images tab has the profile on all of them (every line in the font
+    corrected, this one too)."""
     from ..plugins.stern import text_colour
     sw = text_colour.line_switch(assets_dir, card, man, n, ops, data, fonts)
     if sw is None:
         return None
-    if sw.get("font_picture"):
-        rel = sw["font_picture"]
-        c = _colour_switch(n, "Bitmap", [rel], picks, settings, None, unlocked, built)
-        return dict(c, font=sw["font"], kind="images") if c is not None else None
+    if sw.get("art"):
+        rels = sw.get("font_pictures") or []
+        sw = dict(sw, font_pictures=["images/" + r for r in rels],
+                  scenes=text_colour.font_scenes(assets_dir, rels),
+                  font_on=bool(rels) and all((settings.get("images") or {}).get("images/" + r)
+                                             for r in rels))
     return dict(sw, kind="text")
-
 
 def _kept_size(pick, assets_dir, rel, stock=None):
     """The size a picture is written at when it keeps its own size, else None.  A pick that

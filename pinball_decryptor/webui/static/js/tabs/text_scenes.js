@@ -657,31 +657,42 @@ const gameTip = (l) => ({
     ["Delete", "hide it in the game and the preview, after asking"],
     `The eye on its own hides it here only.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
+// PAD-451 (DragonRR): a line in a font whose letters carry their own colors (c.art) has a
+// palette of its own: the Write gives it its own copy of the font.  What that means, and how
+// to reach every line in the font at once (its pictures, on the Images tab)
+const artLines = (c) => {
+  if (!c.art) return [];
+  const name = c.font || "its font";
+  const n = (c.font_pictures || []).length;
+  const pics = n > 1 ? `its ${n} pictures` : "its picture";
+  return [
+    c.on ? `Its letters carry their own colors (${name}): when you build, this line gets its own copy of that font with the color profile in it, so the other lines in ${name} keep their look.`
+      : `Its letters carry their own colors (${name}): attached, this line gets its own copy of that font, so only this line changes.`,
+    c.font_on ? `Its font's pictures have the color profile attached on the Images tab, so every line in ${name} is corrected, this one too.`
+      : `To correct every line in ${name} at once${c.scenes > 1 ? ` (${c.scenes} scenes)` : ""}, attach the profile to ${pics} on the Images tab.`,
+  ];
+};
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
 // own colours (red), or the game's own picture, which has no switch (blue lock) until the
 // advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
 const colorTip = (l, cs) => {
   const c = l.color || {};
-  // PAD-438: a line of text in a font whose letters carry their own colors: the palette is
-  // that font picture's, shared by every line drawn in the font
-  const font = c.font != null ? `Its colors are in its font's own picture (${c.font || "its font"}), which every line in that font shares, in every scene: this palette is that picture's, the same one the Images tab shows.` : null;
   if (c.locked && c.line) return { head: "Color: the game's own line of text", lines: [
     "Stern made its colors for the machine's screen, so the individual files profile is not offered on it.",
+    ...artLines(c),
     "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too. A line you add has one already." ] };
-  if (c.locked) return { head: font ? "Color: the game's own font picture" : "Color: the game's own picture", lines: [
-    font,
+  if (c.locked) return { head: "Color: the game's own picture", lines: [
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
-    font ? "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too."
-      : "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images and text (Advanced, beside Preview colors)." ] };
+    "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images and text (Advanced, beside Preview colors)." ] };
   if (c.line) return { head: c.on ? "Color profile attached to this line" : "No color profile attached to this line", lines: [
+    ...artLines(c),
     layerProfile(l, cs),
     ["Click", c.on ? "detach the color profile" : "attach the color profile"],
-    c.on ? "Its color profile is baked into the color it is drawn in when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
+    c.on ? `Its color profile is baked into ${c.art ? "its copy of the font" : "the color it is drawn in"} when you build; the preview shows it. Open Colors with the layer selected to give it one of its own.`
       : "It goes on the card in its own colors.",
     c.stock ? "The game's own line, unlocked: corrected from its own color when you build, so never twice."
       : "Set for this line." ] };
   return { head: c.on ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
-    font,
     layerProfile(l, cs),
     ["Click", c.on ? "detach the color profile" : "attach the color profile"],
     c.on ? "Its color profile is baked into this picture when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
@@ -875,10 +886,10 @@ function TreeLayers({ t }) {
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
         <${Icon} name="sd" /></button>
-      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off")}
+      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off", l.color.font_on && "via-font")}
         aria-label=${l.color.line ? "Color profile on this line" : "Color profile on this picture"} aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
         onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on); }}>
-        <${Icon} name=${l.color.locked ? "lock" : "palette"} /></button>` : html`<span></span>`}
+        <${Icon} name=${l.color.locked ? "lock" : "palette"} />${l.color.font_on ? html`<${Icon} name="link" cls="ly-share" />` : null}</button>` : html`<span></span>`}
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}

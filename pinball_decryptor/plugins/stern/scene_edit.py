@@ -51,6 +51,13 @@ Operations (``op`` and its fields)::
                                   its node's whole colour track ``[[frame, mul, add], ...]``.
                                   Never stored: :mod:`text_colour` makes them from the colour
                                   switches each time the scene is drawn or written (PAD-438)
+    line_font node, profile, mul, art | node, off
+                                  a line of text in a font whose letters carry their own colours
+                                  drawn with ITS OWN COPY of its font size, *profile* (a profile
+                                  dict) and *mul* (its colour, or None) baked into the copy's
+                                  pictures, *art* ``{char: picture rel}`` naming them; *off*: back
+                                  to the game's own font (:mod:`font_copy`, PAD-451).  Never
+                                  stored either
     text_font   node, font, s[, style][, px]
                                   a line of text in another of the font sizes its scene carries
                                   (*font*, the size's id, as a Text names it; None keeps its
@@ -541,7 +548,7 @@ def describe(op):
         return "box resized" if op.get("wrap") else "box fitted"
     if k == "text_align":
         return "aligned %s %s" % (VALIGN_NAMES[op["valign"]], ALIGN_NAMES[op["align"]])
-    if k == "line_colour":
+    if k in ("line_colour", "line_font"):
         return "colors corrected"
     if k == "text_font":
         return ", ".join((["font %s" % op["style"]] if op.get("style") else [])
@@ -700,8 +707,8 @@ def apply_manifest(man, ops):
         k = op.get("op")
         try:
             if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
-                     "text_rect", "text_align", "parent", "line_colour", "text_font",
-                     "text_spacing", "text_flow"):
+                     "text_rect", "text_align", "parent", "line_colour", "line_font",
+                     "text_font", "text_spacing", "text_flow"):
                 got = index.get(op["node"])
                 if got is None:
                     notes.append("%s: node %s is not in this scene" % (k, op["node"]))
@@ -794,6 +801,14 @@ def apply_manifest(man, ops):
                                 o["rgba"] = [float(v) for v in op["rgb"][:3]] + [rgba[3]]
                                 # a Text tab recolour is in it already (PAD-438)
                                 o["profiled"] = True
+                elif k == "line_font":
+                    # PAD-451: its letters drawn as its own copy of the font has them
+                    for o in (man["objects"].get(str(oid)) or {} for _s, oid in n["comps"]):
+                        if o.get("kind") == "Text":
+                            if op.get("off"):
+                                o.pop("art", None)
+                            else:
+                                o["art"] = {"profile": op["profile"], "mul": op.get("mul")}
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:
@@ -968,6 +983,15 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
     names = names or {}
     fresh = {}                               # preview id of an added node -> id on this card
     nxt = [_max_id(scene) + 1]
+    made = {}                                # PAD-451: the font copies made, by size and look
+    if any(op.get("op") == "line_font" for op in ops or ()):
+        from . import font_copy
+        try:
+            nxt[0] = max(nxt[0], font_copy.max_id(scene) + 1)
+        except font_copy.FontCopyError as e:
+            notes.append("line_font: the scene's fonts do not walk (%s); its lines keep the "
+                         "game's own font" % e)
+            ops = [op for op in ops if op.get("op") != "line_font"]
 
     def alloc():
         v = nxt[0]
@@ -979,8 +1003,8 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
         index = _tree_index(scene)
         try:
             if k in ("move", "scale", "visible", "order", "remove", "tint", "rotate", "shadow",
-                     "text_rect", "text_align", "parent", "line_colour", "text_font",
-                     "text_spacing", "text_flow"):
+                     "text_rect", "text_align", "parent", "line_colour", "line_font",
+                     "text_font", "text_spacing", "text_flow"):
                 nid = fresh.get(op["node"], op["node"])
                 got = index.get(nid)
                 want = names.get(op["node"])
@@ -1089,6 +1113,14 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                         for o in texts:
                             rgba = list(o.body.get("rgba") or (1.0, 1.0, 1.0, 1.0))
                             o.body["rgba"] = [float(v) for v in op["rgb"][:3]] + [rgba[3]]
+                elif k == "line_font":
+                    from . import font_copy
+                    texts = [c.obj for c in n.components if c.obj.kind == "Text"]
+                    note = (font_copy.give(scene, texts, op, assets_dir, alloc, made) if texts
+                            else "line_font: node %s draws no text" % op["node"])
+                    if note:
+                        notes.append(note)
+                        continue
                 applied += 1
             elif k in ("add_picture", "add_text"):
                 parent = op.get("parent")
@@ -1141,6 +1173,14 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                 notes.append("unknown edit %r" % k)
         except (KeyError, TypeError, ValueError, OSError, ZeroDivisionError) as e:
             notes.append("%s: %s" % (k, e))
+    if made or any(op.get("op") == "line_font" for op in ops or ()):
+        # PAD-451: a copy no line draws with any more (switched off, or made again) goes
+        from . import font_copy
+        try:
+            if font_copy.prune(scene):
+                applied += 1
+        except font_copy.FontCopyError as e:
+            notes.append("line_font: %s" % e)
     return applied, notes
 
 

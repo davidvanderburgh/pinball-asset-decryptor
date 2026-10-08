@@ -98,8 +98,20 @@ value lamp_fade            3
 value node_visible_vfn      0xa8
 value scene_player_scene    0x10
 value game_flags_at         4
-value mode_flag_1           86
-value mode_flag_2           88
+# PAD-420: the game's own modes' flags (set 0x488e90 / clear 0x488e48 / get 0x488f28; 1.13's +5): each start
+# sets its own, its stop clears it; the episodes' starts first ask whether theirs is set
+value mode_flag_1           51    # Catwoman (episodes 19-20) 0x4e968
+value mode_flag_2           52    # an episode the start finder missed (set 0x60e14)
+value mode_flag_3           53    # Catwoman (episode 108) 0x74664
+value mode_flag_4           54    # Joker (episodes 5-6) 0xb1b30
+value mode_flag_5           55    # Joker (episode 104) 0xc0eec
+value mode_flag_6           56    # an episode the start finder missed (set 0xcd208)
+value mode_flag_7           57    # Penguin (episodes 3-4) 0x158b6c
+value mode_flag_8           58    # Penguin (episode 95) 0x16bfcc
+value mode_flag_9           59    # Riddler (episodes 1-2) 0x18ad88
+value mode_flag_10          60    # Riddler (episode 96) 0x199374
+value mode_flag_11          63    # Major villain wizard mode 0x127c4c
+value mode_flag_12          76    # Shame mode 0x1baabc
 # value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
 # value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
 # value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)

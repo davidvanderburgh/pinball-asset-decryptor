@@ -166,7 +166,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | no | scoop, mechanisms |
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | no | mechanisms |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
-| Batman 66 1.14 | no | ✓ | ✓ | shots | mechanisms, waits for multiballs only |
+| Batman 66 1.14 | no | ✓ | ✓ | shots | mechanisms |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
@@ -210,7 +210,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things 1.13 | no | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
-| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, waits for multiballs only |
+| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |

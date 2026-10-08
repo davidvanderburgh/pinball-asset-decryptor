@@ -325,3 +325,13 @@ value magnet_proc          13185
 text left_down_post_label Left down post
 text left_down_post_drive 8 6 255 16 95 416
 text held_coils            left_down_post
+
+# PAD-420: the other modes' flags, Stranger Things LE 1.12's moved up 5 (this build's own: set 0x4836e8 / clear 0x4836a0 / get 0x483780;
+# each start sets its own, its stop clears it)
+value mode_flag_1           83    # Bust out
+value mode_flag_2           85    # What's that
+value mode_flag_3           37    # Upside down hurry-ups
+value mode_flag_4           136   # Double scoring
+value mode_flag_5           116   # Bullshit scoring
+value mode_flag_6           104   # Demogorgon challenge
+value mode_flag_7           114   # Victory laps

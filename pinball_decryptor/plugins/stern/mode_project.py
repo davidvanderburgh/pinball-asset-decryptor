@@ -942,6 +942,8 @@ STACK_FLAGS_PROVEN = frozenset({
     "batman-1.13",                    # Shame (flag 71, its start takes one argument), cleared when it ended
     "james_bond_pro-1.06",            # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; James Bond LE 1.06's mode flags, the same version): Bullshit Scoring started through its block start set flag 141 and a stack no mode was refused for it; with nothing running it had started
     "stranger_things-1.13",           # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; Stranger Things LE 1.12's flags + 5, each read off its start here): with nothing running a stack no mode started; Bullshit Scoring's block start set flags 116 and 136 and the mode was refused (flag 136)
+    "stranger_things_le-1.13",        # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; Stranger Things LE 1.12's flags + 5, each read off its start here): with nothing running a stack no mode started; Bullshit Scoring's block start set flags 116 and 136 and the mode was refused (flag 136)
+    "batman-1.14",                    # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; its own flags, 1.13's + 5 and the episodes', each read off its start here - the draft's 86 / 88 were not modes'): with nothing running a stack no mode started; Catwoman (episodes 19-20)'s start set flag 51 and the mode was refused
 })
 
 

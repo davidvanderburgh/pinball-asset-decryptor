@@ -24,7 +24,8 @@ site find_node        0x004083b4 0xe92d4070 0xe24dd008
 site find_text        0x00407e50 0xe92d4070 0xe24dd008
 site set_text         0x003ebb7c 0xe92d47f0 0xe1a06000
 site video_player     0x00048ca8 0xe92d4010 0xe30c4258
-site video_surface    0x00048ccc 0xe92d4070 0xe30c5258
+# site video_surface: left off (PAD-420) - Sword of Rage LE 1.18's proven port plays its clips without it, and
+# with it the game died as the media proof's mode started (calling the game's own getter)
 site surface_state    0x003fb0e0 0xe5900550 0xe2800008
 site player_advance   0x0011e16c 0xe2501000 0x012fff1e
 site display_draw     0x0034b71c 0xe3520001 0x812fff1e

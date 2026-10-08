@@ -787,6 +787,11 @@ HELD_COILS_PROVEN = frozenset({
     # both down with 489 ms left; no abort
     ("jaws_le-1.02", "left_post"),
     ("jaws_le-1.02", "right_post"),
+    # PAD-420 2026-10-08 coil_job_g (stock Jaws Pro 1.02 card, hidden, muted; Jaws LE's getters found by their code):
+    # both posts up 2000 ms as the mode started (255 for 128 ms, then 51; [coildrive] node 9 coils 6 and 7, the game's
+    # OFF 2016 ms on), a mode stop 1.5 s into a second hold let both down with 490 ms left; no abort
+    ("jaws_pro-1.02", "left_post"),
+    ("jaws_pro-1.02", "right_post"),
     ("led_zeppelin_pro-1.22", "control_gates"),  # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
     ("star_wars_elg-1.10", "right_gate"),        # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 8 coil 2, 255 for 60 ms then 128 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
     ("sword_of_rage_le-1.19", "control_gates"),  # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort

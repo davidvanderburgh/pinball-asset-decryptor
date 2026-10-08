@@ -436,3 +436,16 @@ site block_rule_21         0x00244c3c 0xe92d0030 0xe202433e  # UIBonusScreen::v[
 text block_rule_name_21    UI Bonus Screen
 site block_rule_22         0x00275070 0xe5d01008 0xe3510000  # UIShipWheelSpinSelect::v[27]
 text block_rule_name_22    UI Ship Wheel Spin Select
+
+# ---- held coils (PAD-381's runtime; PAD-394; PAD-420): the inlane up posts, held up by a mode as on Jaws LE 1.02.
+# Each getter is Jaws LE's (the same code, its static object's address and the post's device the only words that
+# differ; coils/jawsposts.py), its device the constructor's r1. The framework calls are in the functions section
+# above. No process call of this program names 13185..13188.
+value magnet_proc          13185
+text held_coils            left_post right_post
+site left_post_get          0x0005010c 0xe92d4030 0xe309460c
+value left_post_dev        12
+text left_post_label       left inlane up post
+site right_post_get         0x000506e4 0xe92d4030 0xe3094670
+value right_post_dev       11
+text right_post_label      right inlane up post

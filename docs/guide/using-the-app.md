@@ -166,7 +166,13 @@ several clips against each other, **Compare** (in the page head, or
 a row's menu) opens up to four players in a grid beside the Colors
 bar: each shows its Original or Replacement with its own color
 switch, the one you click is the bar's target and the only one with
-sound, and Play all / From the start / Loop keep them in step. The Big Lebowski's colour-DMD `.cdmd` clips are supported
+sound, and Play all / From the start / Loop keep them in step. A game's
+own clip is marked **Locked** on its player, and the **Advanced** box at
+the top of Compare unlocks it there as on the list; with its color
+profile attached it shows **With its color profile** (on the list too,
+in the right-hand player). On Spike 2 every player draws its clip
+through its colors the way Scenes draws a picture, color ranges and
+curves included, frame by frame as it plays. The Big Lebowski's colour-DMD `.cdmd` clips are supported
 too — they're re-encoded back into `.cdmd` at the original frame
 count so they stay in sync with their sound. If you would rather
 encode your own clips than let the app convert, right-click a slot

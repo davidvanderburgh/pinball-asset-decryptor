@@ -152,11 +152,14 @@ def test_a_games_own_clip_with_its_profile_attached(tmp_path):
         cp.store_asset_profile(d, RED)
         assert w.call("video.compare_open", [C]) == 1
         assert _tiles(w) == [(C, "orig")]
-        # Advanced, then its switch: the card gets the original through its profile
+        # Advanced, then its switch: the card gets the original through its profile,
+        # and the player turns to it (PAD-448)
         assert w.call("video.set_color_stock", True)
         assert w.call("video.set_color", C, True)
         t = _cmp(w)["tiles"][0]
         assert t["sides"] == [["orig", "Original"], ["rep", "With its color profile"]]
+        assert t["side"] == "rep"
+        assert w.call("video.compare_side", t["id"], "orig")
         assert w.call("video.compare_side", t["id"], "rep")
         t = _cmp(w)["tiles"][0]
         assert t["pane"]["title"] == "With its color profile"

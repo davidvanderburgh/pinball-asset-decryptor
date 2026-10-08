@@ -101,6 +101,9 @@ html.bph-760 .vid-tbl { min-height: 150px; }
 /* PAD-329: As on the machine above the players; the filter defs take no room */
 .vid-look { margin: 0 0 6px; }
 .vid-lookdefs { position: absolute; width: 0; height: 0; overflow: hidden; }
+/* PAD-448: the player drawn through its exact colour table (video_gl.js), over the <video> */
+.vid-screen canvas.vid-gl { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  background: #000; pointer-events: none; }
 /* PAD-369: the Original Video name carries its own tooltip (the clip and its color profile) */
 .vid-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -130,6 +133,14 @@ html.bph-760 .vid-tbl { min-height: 150px; }
 .vcm-color .vid-color svg.i { width: 16px; height: 16px; }
 /* PAD-369's one color for a profile's name */
 .vcm-cp { color: var(--cp-ink); font-weight: 600; }
+/* PAD-448: a game's own clip, marked on its player: blue lock = locked, open = Advanced */
+.vcm-badge { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px 3px 7px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.3;
+  background: rgba(10, 12, 16, .8); border: 1px solid currentColor; cursor: default; }
+.vcm-badge svg.i { width: 14px; height: 14px; }
+.vcm-badge.locked { color: #539bf5; }
+.vcm-badge.unlocked { color: #c9d1d9; border-color: rgba(201, 209, 217, .45); }
+.vcm-adv { display: inline-flex; }
 html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 { grid-template-columns: minmax(0, 1fr); }
 
 /* PAD-444: Played in - which of the game's modes plays a clip, the mode filter, a row for

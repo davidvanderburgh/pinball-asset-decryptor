@@ -1714,15 +1714,7 @@ def machine_view(assets_dir, overlay_on=True, screen_on=True):
     *overlay_on* / *screen_on* are two of the preview's switches (PAD-330;
     the third, the individual files bake, is the picture list's)."""
     display = active(assets_dir) if overlay_on else None
-    stored = screen_profile(assets_dir)
-    if not screen_on:
-        screen, undo = None, False
-    elif stored is not None:
-        screen, undo = (None if stored.is_identity() else stored), False
-    elif screen_follows(assets_dir):
-        screen, undo = asset_active(assets_dir), True
-    else:
-        screen, undo = SCREEN_PRESETS[0][1], False
+    screen = _screen_step(assets_dir) if screen_on else None
     if display is None and screen is None:
         return None
 
@@ -1733,12 +1725,118 @@ def machine_view(assets_dir, overlay_on=True, screen_on=True):
         if display is not None:
             rgb = display.apply_array(rgb)
         if screen is not None:
-            rgb = screen.undo_array(rgb) if undo else screen.apply_array(rgb)
+            rgb = run_steps([screen], rgb)
         return rgb
     # the overlay alone (PAD-328): what a picture that passes the screen by
     # still gets, since the game draws the overlay over everything
     view.overlay = overlay if display is not None else None
     return view
+
+
+def _screen_step(assets_dir):
+    """The machine screen the Scenes preview draws through, as one step of
+    :func:`run_steps`: the stored one, else (following) the individual files
+    profile undone, else the Recommended screen; ``None`` for none."""
+    stored = screen_profile(assets_dir)
+    if stored is not None:
+        return None if stored.is_identity() else ("apply", stored)
+    if screen_follows(assets_dir):
+        files = asset_active(assets_dir)
+        return None if files is None else ("undo", files)
+    return ("apply", SCREEN_PRESETS[0][1])
+
+
+def run_steps(steps, rgb):
+    """uint8 *rgb* through *steps*, ``[("apply" | "undo", Profile), ...]``
+    in turn."""
+    for kind, prof in steps:
+        rgb = prof.undo_array(rgb) if kind == "undo" else prof.apply_array(rgb)
+    return rgb
+
+
+def video_look_exact(assets_dir, switch, own_colours, overlay_on=True,
+                     files_on=True, screen_on=True, rel=None):
+    """:func:`video_look`'s steps as Scenes draws a picture through them
+    (PAD-448): ``{"orig", "rep"}`` lists of :func:`run_steps` steps, each the
+    whole profile (its colour ranges too, which a browser filter has no form
+    for) and the machine screen exactly as :func:`machine_view` has it."""
+    overlay = active(assets_dir) if overlay_on else None
+    screen = _screen_step(assets_dir) if screen_on else None
+    files = ((asset_resolver(assets_dir)("videos", rel) if rel
+              else asset_active(assets_dir)) if files_on else None)
+    over = [("apply", overlay)] if overlay is not None else []
+    orig = over + ([screen] if screen is not None else [])
+    rep = [("apply", files)] if switch and files is not None else []
+    rep += over
+    if screen is not None and not (switch is False and own_colours):
+        rep.append(screen)
+    return {"orig": orig, "rep": rep}
+
+
+#: Grid points per side of a player's colour table (PAD-448): 52 puts a
+#: point on every 5th level, so each is worked out from whole levels by the
+#: same maths as a picture, and the GPU blends between them: a played clip
+#: is within half a level of that maths on average (2 levels at the 99th
+#: percentile; 86 points would cost four times the work for little more)
+LOOK_LUT_SIZE = 52
+
+
+def look_lut_path(steps):
+    """Where :func:`build_look_lut` keeps the table of *steps*, named by
+    every number in them (``None`` for no steps)."""
+    if not steps:
+        return None
+    import hashlib
+    import tempfile
+    key = "%d|" % LOOK_LUT_SIZE + "|".join(
+        "%s:%s" % (kind, prof.key()) for kind, prof in steps)
+    return os.path.join(tempfile.gettempdir(), "pad_colour_luts", "look_%s.lut"
+                        % hashlib.sha1(key.encode()).hexdigest()[:20])
+
+
+def build_look_lut(steps):
+    """The colour table a Video tab player draws through (PAD-448): every
+    grid colour through *steps*, :data:`LOOK_LUT_SIZE` cubed rgb bytes, red
+    fastest, then green, then blue (a WebGL 3D texture's order).  Written
+    once; returns its path (``None`` for no steps)."""
+    path = look_lut_path(steps)
+    if path is None or os.path.isfile(path):
+        return path
+    import numpy as np
+    n = LOOK_LUT_SIZE
+    axis = np.arange(n, dtype=np.uint16) * (255 // (n - 1))
+    b, g, r = np.meshgrid(axis, axis, axis, indexing="ij")
+    grid = np.stack([r, g, b], -1).astype(np.uint8).reshape(-1, 1, 3)
+    out = np.ascontiguousarray(run_steps(steps, grid), np.uint8)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = "%s.%d.%d.tmp" % (path, os.getpid(), threading.get_ident())
+    with open(tmp, "wb") as f:
+        f.write(out.tobytes())
+    os.replace(tmp, path)
+    _prune_look_luts(os.path.dirname(path), keep=path)
+    return path
+
+
+#: the newest tables kept: each slider position dragged writes one (420 KB)
+LOOK_LUT_KEEP = 64
+
+
+def _prune_look_luts(folder, keep):
+    """Drop all but the :data:`LOOK_LUT_KEEP` newest tables (*keep* stays:
+    it is the one just written).  One gone that a player still names is
+    written again the next time it is asked for."""
+    try:
+        names = [n for n in os.listdir(folder)
+                 if n.startswith("look_") and n.endswith(".lut")]
+        if len(names) <= LOOK_LUT_KEEP:
+            return
+        paths = [os.path.join(folder, n) for n in names]
+        paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        for p in paths[LOOK_LUT_KEEP:]:
+            if os.path.normcase(p) != os.path.normcase(keep):
+                os.remove(p)
+    except OSError:
+        pass
 
 
 def asset_counts(assets_dir):

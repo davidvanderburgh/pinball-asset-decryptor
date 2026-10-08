@@ -249,6 +249,13 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     ball first scores, plus 2 s, is not counted). st3_job now taps a few playfield switches after the plunge and
     waits 6 s; Deadpool LE passed at once (Battle Mystique). chain27 re-runs the builds that did not pass once
     chain26 and the stack batch are done.
+    Stack batch result (run 10): 11 of 22 proven (Deadpool LE, D&D LE, Foo Fighters Pro, Iron Maiden LE/Pro, John
+    Wick Pro, Munsters Pro, Rush LE, Sword of Rage LE/Pro). Most of the rest never reached the test: on slot 2 the game
+    died at boot while crun4 waited past its tech alerts (Venom Pro, Mandalorian Pro, Jurassic Park Pro) or right
+    after Start (Star Wars LE), a segv in libpthread (a mutex at a null object + 0x18) from the game's own code, the
+    same address on four titles. Not the port (Venom Pro's media run used the same port and played), no NVRAM error.
+    chain27 re-runs them; if they die again, move st3 onto the coil job's harness (watch.sh direct, its own game
+    start), the one thing they share being crun4's boot.
   - chain28 (after chain27): a third media round on two rigs for every build not both screen and clip PROVEN,
     with `FRESH_NV=1` (proof_job2.sh's prep boot: the title's NVRAM in the slot started fresh and Guided Setup
     left, then the normal run). D&D LE's retry hit an NVRAM FATAL 256 in its slot (no game ever started); Aerosmith

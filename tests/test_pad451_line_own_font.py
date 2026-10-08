@@ -127,10 +127,12 @@ def test_a_line_gets_its_own_copy_of_its_font_size_with_the_profile_in_it(tmp_pa
     fonts = FC.fonts_of(back)
     assert [i for i, _f in fonts] == [0, 1]               # right after the font it copies
     game, mine = fonts[0][1], fonts[1][1]
+    # known by its shape: the game finds fonts by name, so a copy keeps every one of them
+    # (emulator: a copy named apart crashed Godzilla as its screen came up)
     assert game.copied_from is None and mine.copied_from == SIZE
-    assert mine.face.startswith(b"FACE#PAD5.")
+    assert (mine.name, mine.face) == (game.name, game.face) == (b"", b"FACE")
     (variant, size), = mine.sizes
-    assert variant.startswith(b"GameFont_Secondary#PAD5.")
+    assert variant == b"GameFont_Secondary"
     texts = _texts(back)
     assert texts[51]["font"] == size.id and texts[51]["used"] == [size.id]
     assert texts[51]["fonts"] == [(variant.decode(), size.id)]
@@ -139,7 +141,7 @@ def test_a_line_gets_its_own_copy_of_its_font_size_with_the_profile_in_it(tmp_pa
     # its pictures: the profile in them; the game's own are untouched
     want = _grey(BW)
     for tid, (w, h, fmt, name, blob) in mine.pages.items():
-        assert name.startswith(b"page#PAD5.") and fmt == 5
+        assert name == b"" and fmt == 5
         got = dds.decode_bc3(blob, w, h)[..., :3].reshape(-1, 3).astype(int)
         assert np.abs(got - want).max() <= 5               # BC3's 5:6:5 end points
     for tid, (w, h, fmt, name, blob) in game.pages.items():
@@ -163,7 +165,10 @@ def test_lines_with_one_look_share_a_copy_and_a_built_card_is_never_copied_twice
                   a, {})
     fonts = FC.fonts_of(sc)
     assert len(fonts) == 2 and fonts[1][1].copied_from == SIZE
-    assert fonts[1][1].face.endswith(FC.tag(cp._profile_dict(DARK)).encode())
+    from pinball_decryptor.plugins.stern import dds
+    w, h, _fmt, _n, blob = next(iter(fonts[1][1].pages.values()))
+    got = dds.decode_bc3(blob, w, h)[..., :3].reshape(-1, 3).astype(int)
+    assert np.abs(got - _grey(DARK)).max() <= 5           # from the game's orange, not grey
     t = _texts(sc)
     assert t[53]["font"] == SIZE and t[53]["fonts"] == [("GameFont_Secondary", SIZE)]
     # every line off: the scene is the game's again, byte for byte

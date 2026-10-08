@@ -21,12 +21,17 @@ THE FONT ENTRY (:func:`scene_write._walk_font`'s grammar; a copy renumbers every
 Godzilla's battle scenes carry ONE Font entry (face STERN_HelveticaNeueBlack) holding both
 game fonts as style variants, three sizes each over the variant's three 512x512 pictures; a
 Text names the SIZE it draws with (its ``font``, ``used`` and ``fonts`` map).  A copy holds that
-one size (about 100 ids, its pictures re-encoded: some 0.8 MB for GameFont_Secondary), its
-variant's name and its face ending in ``#PAD<size id>.<tag>`` and its pictures named the same
-way, so nothing the game keeps by name across scenes can mix it up with the original, and a
-card built with it, read again, finds the size it was copied from (:func:`original_size`).
-Lines with the same profile in one scene share one copy; a copy no line draws with any more is
-dropped (:func:`prune`).
+one size (about 100 ids, its pictures re-encoded: some 0.8 MB for GameFont_Secondary).
+
+IT KEEPS THE GAME'S NAMES - face, variant, pictures.  The game finds a font by its names: a
+copy named apart (``#PAD`` on its face and variant) crashed Godzilla in the emulator the moment
+its screen came up, where the same copy under the original's names drew its line in the
+profile's colours beside an untouched line in the game's font (2026-10-08, language screen).
+So a card built with a copy, read again, knows it by its shape instead: one size, after a font
+of the same name and face that holds that very size (:func:`fonts_of`), and the line is copied
+from the game's size again, never from the copy (:func:`original_size`).  Lines with the same
+profile in one scene share one copy; a copy no line draws with any more is dropped
+(:func:`prune`).
 """
 from __future__ import annotations
 
@@ -36,7 +41,6 @@ import os
 import struct
 
 FLAG = 0x80000000
-MARK = b"#PAD"
 
 
 class FontCopyError(ValueError):
@@ -83,21 +87,13 @@ class Font:
     """One Font library entry, walked: ``key``, ``cls`` (the class field's bytes), ``fid``,
     ``name``, ``face`` (bytes), ``flags`` (the two bytes after them), ``chars`` (the char
     list's bytes, count included), ``sizes`` ``[(variant bytes, Size)]`` ("" = the base
-    sizes), ``pages`` ``{texture id: (w, h, fmt, name, blob)}`` defined inside it."""
+    sizes), ``pages`` ``{texture id: (w, h, fmt, name, blob)}`` defined inside it;
+    ``copied_from``, set by :func:`fonts_of`: the size id a PAD copy was made from, or
+    ``None`` for a font of the game's."""
 
     def __init__(self):
         self.sizes, self.pages = [], {}
-
-    @property
-    def copied_from(self):
-        """The size id a PAD copy was made from, or ``None`` for a font of the game's."""
-        i = self.face.rfind(MARK)
-        if i < 0:
-            return None
-        try:
-            return int(self.face[i + len(MARK):].split(b".", 1)[0])
-        except ValueError:
-            return None
+        self.copied_from = None
 
     def size(self, sid):
         for variant, s in self.sizes:
@@ -184,12 +180,31 @@ def parse(key, raw):
     return f
 
 
+def _same_size(a, b):
+    return (a.pre == b.pre and a.metrics == b.metrics and len(a.glyphs) == len(b.glyphs)
+            and all(x["char"] == y["char"] and x["body"] == y["body"] and x["kern"] == y["kern"]
+                    for x, y in zip(a.glyphs, b.glyphs)))
+
+
 def fonts_of(scene):
-    """``[(library index, Font)]`` of *scene* (a :class:`scene_tree.Scene`)."""
+    """``[(library index, Font)]`` of *scene* (a :class:`scene_tree.Scene`), each PAD copy's
+    ``copied_from`` set: a font of ONE size after a font of the same name and face holding
+    that size's twin (the same letters, metrics and kerning)."""
     out = []
     for i, (key, _cid, obj) in enumerate(scene.library):
         if isinstance(obj, tuple) and obj[0] == "font":
             out.append((i, parse(key, obj[1])))
+    for n, (_i, f) in enumerate(out):
+        if len(f.sizes) != 1:
+            continue
+        variant, s = f.sizes[0]
+        for _j, g in out[:n]:
+            if g.copied_from is not None or (g.name, g.face) != (f.name, f.face):
+                continue
+            twin = next((t for v, t in g.sizes if v == variant and _same_size(t, s)), None)
+            if twin is not None:
+                f.copied_from = twin.id
+                break
     return out
 
 
@@ -228,22 +243,21 @@ def tag(profile, mul=None):
     return hashlib.sha1(json.dumps([profile, mul], sort_keys=True).encode()).hexdigest()[:8]
 
 
-def build(f, sid, key, alloc, look, page_blob):
+def build(f, sid, key, alloc, page_blob):
     """The library entry (from its class field on) of a copy of size *sid* of font *f* under
-    symbol key *key*, its ids from *alloc*, named for *look* (:func:`tag`), each picture
-    re-encoded by ``page_blob(texture id, (w, h, fmt, name, blob), chars on it)``.  Returns
+    symbol key *key*, its ids from *alloc*, its names the original's, each picture re-encoded
+    by ``page_blob(texture id, (w, h, fmt, name, blob), chars on it)``.  Returns
     ``(entry bytes, new size id, variant name or b"")``."""
     variant, s = f.size(sid)
     if s is None:
         raise FontCopyError("size %d is not in this font" % sid)
-    mark = MARK + (b"%d." % sid) + look.encode()
     on_page = {}
     for g in s.glyphs:
         if g["page"]:
             on_page.setdefault(g["page"], []).append(g["char"])
     out = bytearray(_u32(struct.unpack("<I", f.cls[:4])[0] & ~FLAG))
     out += _u32(FLAG | alloc()) + _u32(key)
-    out += _bstr(f.name) + _bstr(f.face + mark) + f.flags + f.chars
+    out += _bstr(f.name) + _bstr(f.face) + f.flags + f.chars
     body = bytearray(_u32(s.pre))
     new_sid = alloc()
     body += _u32(FLAG | new_sid) + _u32(key) + s.metrics + _u64(len(s.glyphs))
@@ -265,19 +279,19 @@ def build(f, sid, key, alloc, look, page_blob):
                 raise FontCopyError("a re-encoded font picture changed size")
             tid = done[pg] = alloc()
             body += _u32(FLAG | tid) + struct.pack("<3I", w, h, fmt)
-            body += _bstr((name or b"page") + mark + (b".%d" % len(done)))
+            body += _bstr(name)
             body += _u32(len(new)) + new
         body += g["kern"]
     if variant:
-        out += _u64(0) + _u64(1) + _bstr(variant + mark) + _u64(1) + body
+        out += _u64(0) + _u64(1) + _bstr(variant) + _u64(1) + body
     else:
         out += _u64(1) + body + _u64(0)
-    return bytes(out), new_sid, (variant + mark) if variant else b""
+    return bytes(out), new_sid, variant
 
 
 def repoint(text, old, new, variant):
     """Text body *text* drawn with size *new* where it named *old* (its ``fonts`` map entry
-    renamed to *variant* when the copy's size is a named variant)."""
+    named *variant*, the copy's, when its size is a named variant)."""
     if text["font"] == old:
         text["font"] = new
     text["used"] = [new if u == old else u for u in text["used"]]
@@ -384,7 +398,8 @@ def give(scene, text_objs, op, assets_dir, alloc, made):
                     px = decode(blob, w, h)
                 return corrected_blob(px, w, h, fmt, prof, op.get("mul"))
             key = free_key(scene)
-            entry, new_sid, variant = build(font, orig, key, alloc, look, page_blob)
+            entry, new_sid, variant = build(font, orig, key, alloc, page_blob)
+            # right after the font it copies: a Text anywhere after that may name its size
             scene.library.insert(index + 1, (key, struct.unpack("<I", entry[:4])[0],
                                              ("font", entry)))
             got = made[(orig, look)] = (new_sid, variant)

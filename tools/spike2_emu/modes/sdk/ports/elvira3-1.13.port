@@ -601,3 +601,20 @@ site proc_sleep           0x0042df68 0xe30436f8 0xe340308e
 site scoop_handler         0x000f2be4 0xe2403002 0xe92d40f0
 data scoop_slot           0x008244dc
 value scoop_event          2
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c2.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game).
+# The gate is LeftControlGate, built at +0x80 of the static 0x87ed04 (device 15) - James Bond's 24-virtual class
+site adjustment           0x00441d20 0xe92d40f0 0xe2504000
+site coil_fire             0x00456fb8 0xe3500000 0xe52de004
+data coil_count            0x008e46ec
+data coil_table            0x008e7cc8
+value magnet_proc          13185
+text gate_label           Control gate
+text gate_drive           9 5 255 64 96
+data gate_obj            0x0087ed84
+value gate_ctl            28
+value gate_off_slot       3
+value gate_devoff         18
+text held_coils            gate

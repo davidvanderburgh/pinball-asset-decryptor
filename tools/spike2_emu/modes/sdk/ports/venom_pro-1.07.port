@@ -583,3 +583,11 @@ site block_rule_17         0x001a9f1c 0xe92d4010 0xe24dd008  # ctoxin_teamup_rul
 text block_rule_name_17    Toxin Teamup
 site block_rule_18         0x001e0ee0 0xe92d47f0 0xe1c066d8  # cweb_combos::v[40]
 text block_rule_name_18    Web Combos
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+value scoop_event          2
+site scoop_handler         0x0014f9f8 0xe92d4070 0xe3a00006
+data scoop_slot           0x006a5a54
+value scoop_event_arg      1

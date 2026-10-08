@@ -207,12 +207,12 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | no | ✓ | ✓ | shots | never waits |
 | Star Wars Pro 1.31 | no | ✓ | ✓ | shots | never waits |
-| Stranger Things 1.13 | no | ✓ | ✓ | shots | waits for multiballs only |
+| Stranger Things 1.13 | no | ✓ | ✓ | shots | scoop, waits for multiballs only |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
-| Stranger Things LE 1.13 | no | ✓ | ✓ | shots | waits for multiballs only |
+| Stranger Things LE 1.13 | no | ✓ | ✓ | shots | scoop, waits for multiballs only |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
-| Sword of Rage LE 1.19 | no | ✓ | ✓ | shots | mechanisms |
-| Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Sword of Rage LE 1.19 | no | ✓ | ✓ | shots | scoop, mechanisms |
+| Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | TMNT LE 1.59 | ✓ | ✓ | not yet | shots |  |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots |  |
@@ -224,8 +224,8 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | no | scoop |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots |  |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
-| Venom LE 1.07 | ✓ | ✓ | ✓ | shots |  |
-| Venom Pro 1.07 | no | ✓ | ✓ | shots | never waits |
+| Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop |
+| Venom Pro 1.07 | no | ✓ | ✓ | shots | scoop, never waits |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **Ball save not yet:** found in the game, not yet seen working.

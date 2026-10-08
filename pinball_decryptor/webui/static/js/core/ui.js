@@ -29,6 +29,8 @@ const P = {
   emulate: "M6 4l14 8-14 8z",
   play: "M6 4l14 8-14 8z",
   pause: "M7 5h3v14H7zM14 5h3v14h-3z",
+  // PAD-446: a slot's random clips
+  shuffle: "M3 7h3c3.5 0 4.5 2.5 6 5s2.5 5 6 5h3M3 17h3c1.6 0 2.6-.6 3.4-1.6M14.6 8.6C15.4 7.6 16.4 7 18 7h3M18 4l3 3-3 3M18 14l3 3-3 3",
   stop: "M7 6h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5",
   folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",

@@ -346,6 +346,8 @@ HELP_CONTENT = {
          "ffmpeg command ([more](#what-the-machine-can-play)) |\n"
          "| This clip's length | how long this one clip plays ([more](#clip-length)) |\n"
          "| Show scene contents… | the Scenes tab, on the scene that plays it |\n"
+         "| Random clips | more clips for this slot, one played at random each time "
+         "([more](#random-clips)) |\n"
          "| Remove / revert | drops a pick, or puts back a file a build changed "
          "([more](#clearing-and-undoing)) |"),
         ("Clearing and undoing",
@@ -414,6 +416,16 @@ HELP_CONTENT = {
          "- **Original (stock)** shows the factory clip whenever its backup exists, and "
          "Convert measures your file against it, so a clip cut to the machine's real "
          "spec still reads As-is."),
+        ("Random clips",
+         "Spike 2, Godzilla Pro and Premium/LE 1.16. Right-click > **Random clips** > "
+         "**Add clips to play at random…** gives a slot more clips than its own: each "
+         "time the game plays it, one is picked at random, never the same twice in a "
+         "row, and the slot's own clip is one of them.\n\n"
+         "- The row shows a shuffle badge with the count; the same menu takes a clip "
+         "off.\n"
+         "- Only clips the game plays by name (modes, battles, awards, bonuses). A clip "
+         "a scene plays on its own says **Why not this clip?** instead.\n"
+         "- Needs an image build, not a direct SD write."),
         ("Clip length",
          "Right-click > **This clip's length**: follow the **Trim / pad** box (default), "
          "match the stock clip, keep your file's full length, or type seconds.\n\n"

@@ -147,8 +147,15 @@ def _write_summary_with_modes(counts, modes):
     being counted as a replaced sound, so a modes-only project never reads "Wrote no
     changes" or "1 sound(s)"."""
     names = list((modes or {}).get("names") or ())
+    # PAD-446: the slots that play one of several clips at random ride the same record
+    variants = list((modes or {}).get("variants") or ())
+    clips = ("%d clip(s) that play one of several at random" % len(variants)
+             if variants else "")
     if not names:
-        return _write_summary(counts)
+        base = _write_summary(counts)
+        if not clips:
+            return base
+        return clips if base == "no changes" else base + " and " + clips
     counts = list(counts)
     snd = (modes or {}).get("end_sound") or None
     if snd and counts and counts[0] > 0:
@@ -170,6 +177,8 @@ def _write_summary_with_modes(counts, modes):
         extra.append("%s with %d call(s) of its own" % (name, n))
     parts.append("%d mode(s) (%s%s)" % (
         len(names), ", ".join(names), "; " + ", ".join(extra) if extra else ""))
+    if clips:
+        parts.append(clips)
     if len(parts) == 1:
         return parts[0]
     return ", ".join(parts[:-1]) + " and " + parts[-1]

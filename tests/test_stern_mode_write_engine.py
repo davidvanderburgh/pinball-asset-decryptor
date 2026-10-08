@@ -401,7 +401,7 @@ def _modes_info(tmp_path):
 def test_the_p2_install_waits_for_every_file_and_the_log_names_each_one(tmp_path, monkeypatch):
     modes = _modes_info(tmp_path)
     ran = []
-    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None: ran.append((img, epoch)))
+    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None, **k: ran.append((img, epoch)))
     msgs, log = _capture()
     rec, ok = engine._install_modes("out.raw", modes, 3, 4, log)
     assert (rec, ok) == (None, False) and not ran
@@ -561,7 +561,7 @@ def test_a_mode_build_installs_p2_pins_the_clock_and_records_the_modes(card, tmp
                         lambda img, off, jobs, epoch, log=None, timeout=0:
                         pinned.append(epoch) or len(jobs))
     monkeypatch.setattr(MW, "install_p2",
-                        lambda img, pay, epoch, log=None: installed.append((img, epoch)))
+                        lambda img, pay, epoch, log=None, **k: installed.append((img, epoch)))
     card.state["grow"] = _mode_grow(card, tmp_path)
     card.state["counts"] = (0, 0, 0, 0)
     _counts, lines = _build(card, update=False)
@@ -575,7 +575,7 @@ def test_a_mode_build_installs_p2_pins_the_clock_and_records_the_modes(card, tmp
 def test_taking_every_mode_out_writes_the_original_card(card, tmp_path, monkeypatch):
     monkeypatch.setattr(ext4_grow, "grow_files_pinned",
                         lambda img, off, jobs, epoch, log=None, timeout=0: len(jobs))
-    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None: None)
+    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None, **k: None)
     card.state["grow"] = _mode_grow(card, tmp_path)
     _build(card, update=False)
     assert _record(card).get("modes")
@@ -609,7 +609,7 @@ def test_a_missing_file_after_a_mode_build_is_an_error_not_the_original(card, tm
     there and its record are left exactly as they were."""
     monkeypatch.setattr(ext4_grow, "grow_files_pinned",
                         lambda img, off, jobs, epoch, log=None, timeout=0: len(jobs))
-    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None: None)
+    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None, **k: None)
     card.state["grow"] = _mode_grow(card, tmp_path)
     _build(card, update=False)
     assert _record(card).get("modes")
@@ -633,7 +633,7 @@ def test_a_missing_file_after_a_mode_build_is_an_error_not_the_original(card, tm
 def test_a_closed_gate_after_a_mode_build_says_the_modes_were_left_out(card, tmp_path, monkeypatch):
     monkeypatch.setattr(ext4_grow, "grow_files_pinned",
                         lambda img, off, jobs, epoch, log=None, timeout=0: len(jobs))
-    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None: None)
+    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None, **k: None)
     card.state["grow"] = _mode_grow(card, tmp_path)
     _build(card, update=False)
     MP.new_mode(str(card.project), "KAIJU RUSH")    # the project still has a mode ...
@@ -664,7 +664,7 @@ def test_a_whole_build_drops_the_last_builds_p2_checksum(card, tmp_path, monkeyp
     the old checksum goes (a mode build's install writes a fresh one)."""
     monkeypatch.setattr(ext4_grow, "grow_files_pinned",
                         lambda img, off, jobs, epoch, log=None, timeout=0: len(jobs))
-    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None: None)
+    monkeypatch.setattr(MW, "install_p2", lambda img, pay, epoch, log=None, **k: None)
     card.state["grow"] = _mode_grow(card, tmp_path)
     _build(card, update=False)
     side = str(card.out) + engine.P2_SIDECAR_SUFFIX

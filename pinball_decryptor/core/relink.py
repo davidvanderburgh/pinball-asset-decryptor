@@ -33,6 +33,9 @@ import re
 
 #: The sidecar sections that hold a ``{slot rel path: source file}`` map.
 KINDS = ("audio", "video", "image")
+#: The sections that hold a ``{slot rel path: [source file, ...]}`` map: the Video
+#: tab's clips a slot plays one of at random (PAD-446).
+LIST_KINDS = ("video_variants",)
 
 _SEP_RE = re.compile(r"[\\/]+")
 
@@ -78,6 +81,15 @@ def recorded_sources(staged):
             path = section.get(rel)
             if isinstance(path, str) and path.strip():
                 out.setdefault(path, []).append((kind, rel))
+    for kind in LIST_KINDS:
+        section = (staged or {}).get(kind)
+        if not isinstance(section, dict):
+            continue
+        for rel in sorted(section):
+            paths = section.get(rel)
+            for path in paths if isinstance(paths, (list, tuple)) else ():
+                if isinstance(path, str) and path.strip():
+                    out.setdefault(path, []).append((kind, rel))
     return out
 
 
@@ -254,6 +266,20 @@ def apply_plan(staged, found):
             if new:
                 section[rel] = new
                 used.add(path)
+                n_slots += 1
+        data[kind] = section
+    for kind in LIST_KINDS:
+        section = data.get(kind)
+        if not isinstance(section, dict):
+            continue
+        section = dict(section)
+        for rel, paths in list(section.items()):
+            if not isinstance(paths, (list, tuple)):
+                continue
+            moved = [found.get(p) if isinstance(p, str) and found.get(p) else p for p in paths]
+            if moved != list(paths):
+                used.update(p for p in paths if isinstance(p, str) and found.get(p))
+                section[rel] = moved
                 n_slots += 1
         data[kind] = section
     return data, n_slots, len(used)

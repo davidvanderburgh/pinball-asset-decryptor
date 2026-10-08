@@ -1,0 +1,26 @@
+/* The Scenes tab's Font bar (PAD-452, js/tabs/scene_fonts.js): the Color profiles bar's frame
+   (color_pane.css .cpd), its own tab under the Colors one, and its own controls.  The two bars
+   take turns: while this one is open the Colors tab hangs from its edge too (.cpd-beside).
+   Design-system tokens and classes only (css/app.css). */
+
+.cpd-shell { --fnt-w: 340px; }
+html.bp-1180 .cpd-shell { --fnt-w: 320px; }
+.cpd.fnt { --cpd-w: var(--fnt-w); }
+.cpd .cpd-handle { transition: filter .12s, left .28s cubic-bezier(.2, .8, .2, 1); }
+.cpd.cpd-beside .cpd-handle { left: calc(-30px - var(--fnt-w)); }
+@media (prefers-reduced-motion: reduce) { .cpd .cpd-handle { transition: filter .12s; } }
+
+/* its tab: below the Colors tab, paper-white so the two are told apart */
+.fnt .fnt-handle { top: calc(34% + 162px); height: 104px;
+  background: linear-gradient(to bottom, #f7f5ee, #d9d4c6); }
+.fnt-panel::before { background: var(--accent); }
+
+.fnt-body { gap: 12px; }
+.fnt-sec { display: flex; flex-direction: column; gap: 7px; padding-top: 10px; border-top: 1px solid var(--line); }
+.fnt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fnt-row .sp { flex: 1 1 auto; }
+.fnt-row > .lbl { width: 62px; }
+.fnt-num { display: flex; align-items: center; gap: 5px; }
+.fnt-num .field { width: 78px; }
+.fnt-num .lbl { min-width: 44px; }
+.fnt-note { line-height: 1.4; }

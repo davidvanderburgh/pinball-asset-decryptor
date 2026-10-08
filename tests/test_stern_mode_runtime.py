@@ -53,6 +53,7 @@ PORTS = [
     ("james_bond_le", "1.06"),
     ("james_bond_pro", "1.06"),
     ("jaws_le", "1.02"),
+    ("jaws_pro", "1.02"),
     ("john_wick_le", "1.01"),
     ("john_wick_le", "1.02"),
     ("john_wick_pro", "1.02"),

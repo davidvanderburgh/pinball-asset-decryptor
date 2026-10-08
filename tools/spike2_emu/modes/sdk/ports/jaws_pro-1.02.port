@@ -1,0 +1,438 @@
+# jaws_pro 1.02 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-08 by a full build check (modes/gamecheck.sh play full, the stock card, hidden, muted):
+# the runtime hooked the game, 23 of its 24 shots came from their switches, a drain ended a ball,
+# a tilted ball and three balls to the game's end; events seen firing: game_start, ball_start, ball_end, bonus_end, tilt_warning, tilt, game_over.
+# Shots no press made: Mid flipper lane. Jaws LE's upper-playfield shots (Ship wheel, Upper playfield ramp, Upper
+# playfield target) are left out: a Pro has no upper playfield (no UP PF switches in its switch list).
+
+game           jaws_pro
+version        1.02
+
+# ---- functions ----
+site tick             0x00459f88 0xe92d4038 0xe3a00037
+site shot_dispatch    0x0014ff30 0xe92d4ff0 0xe3095e08
+site ball_end         0x001527e0 0xe92d40f8 0xe30f61fc
+site sound_lookup     0x005846a0 0xe92d4038 0xe1a05000
+site score_add        0x0042d324 0xe30e153e 0xe3401089
+site callout          0x004eb720 0xe92d4010 0xe307ef48
+site callout_nth      0x004eb8d4 0xe92d4010 0xe307ef48
+site light_run        0x0028ea74 0xeafffd83 0xe92d40f0
+site lamp_group       0x002f0a1c 0xe92d4038 0xe1a04000
+site award_screen     0x00366dfc 0xe92d4070 0xe24dd008
+site string_new       0x00015bcc 0xe28fc607 0xe28cca93
+site dynamic_cast     0x00016820 0xe28fc607 0xe28cca93
+site resource_get     0x002ff2f8 0xe92d43f0 0xe1a04000
+site find_node        0x00630b44 0xe92d4070 0xe24dd008
+site find_text        0x006305e0 0xe92d4070 0xe24dd008
+site set_text         0x00614a94 0xe92d47f0 0xe1a06000
+site clip_play        0x00052098 0xe92d43f0 0xe24dd014
+site clip_stop        0x000522f8 0xe92d4008 0xebfffeea
+site video_player     0x00051e88 0xe92d4010 0xe30946d8
+site video_surface    0x00051eac 0xe92d4070 0xe30956d8
+site surface_state    0x00623870 0xe5900550 0xe2800008
+site player_advance   0x003671f4 0xe2501000 0x012fff1e
+site display_draw     0x00474ec0 0xe3520001 0x812fff1e
+site sound_play       0x004eb720 0xe92d4010 0xe307ef48
+site sound_nth        0x004eb8d4 0xe92d4010 0xe307ef48
+site sound_active     0x004ebe94 0xe59f3034 0xe2831e62
+site sound_stop       0x004ebfec 0xe92d40f8 0xe1a06000
+site sound_worker     0x004ead0c 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x0040f754 0xe35000cf 0xe92d4038
+site agent_header     0x0067db88 0xe92d40f8 0xe2505000
+site agent_begin      0x006884f4 0xe590c004 0xe1a00001
+site balls_in_play    0x004ac024 0xe92d4010 0xe3064adc
+site multiball_serve  0x004ac1a0 0xe92d41f0 0xe30ee53e
+site coil_fire        0x004b4558 0xe3500000 0xe52de004
+site adjustment       0x00299c90 0xe92d40f0 0xe2504000
+site proc_exists      0x003f3c34 0xe30d2ea8 0xe3402089
+site proc_create      0x003f3604 0xe30dcea8 0xe340c089
+site proc_sleep       0x003f3734 0xe30d3ea8 0xe3403089
+site coil_take        0x0004a8d4 0xe92d40f8 0xe30d7eac
+site coil_give        0x0004a998 0xe3510000 0xe92d4038
+site stock_multiball_running 0x0014f318 0xe92d40f8 0xe3076e80
+site mball_stop       0x00154e44 0xe92d4010 0xe1a04000
+site display_effect_start 0x0045c6d0 0xe92d47f0 0xe2516000
+site display_effect_next 0x0045cab4 0xe30536f0 0xe340308a
+site display_priority_now 0x0045cf48 0xe5d0000e 0xe12fff1e
+site layered_priority 0x0003b444 0xe92d4008 0xe5903068
+site game_event       0x00399764 0xe92d47f0 0xe1a09000
+site event_post_replacing 0x003f3914 0xe92d4070 0xe1a05001
+site event_cancel     0x003f3884 0xe92d40f8 0xe30d6ea8
+site switch_hit       0x0040f5b8 0xe2503000 0x012fff1e
+site switch_hit2      0x0040f658 0xe92d4010 0xe2504000
+site backdrop_draw    0x0003c954 0xe5903054 0xe92d4010
+site scene_show       0x00367220 0xe92d4070 0xe30d4eac
+site frame_end        0x00367428 0xe3500000 0xe92d40f8
+site frame_kick       0x00474774 0xe92d4070 0xe2906008
+site surface_find     0x00630e38 0xe92d4070 0xe24dd008
+site surface_set_video 0x0062851c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00626328 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00625ad8 0xe5d030d4 0xe92d40f0
+site switch_edge      0x00397058 0xe308384c 0xe3403089
+site switch_drain     0x00397d38 0xe92d4ff0 0xe3089504
+site live_records     0x003f3c7c 0xe30d2ea8 0xe3402089
+site layer_add        0x0007a954 0xe30dceac 0xe1a03002
+site layer_remove     0x0007a96c 0xe92d40f8 0xe5913004
+
+# ---- globals ----
+data cur_player             0x007b86c0
+data scores                 0x0089ffd8
+data mode_mask              0x0089e53e
+data event_head             0x0089dea8
+data event_current          0x0089deac
+data resource_manager       0x00892e98
+data typeinfo_resource      0x006d2ac0
+data typeinfo_scene_player  0x0072d244
+data display_holder         0x00892e18
+data message_count          0x006a68cc
+data message_remap          0x00874e88
+data message_table          0x008081e0
+data award_screen_arg       0x007ad130
+data sound_channels         0x008e8054
+data sound_queue            0x008e88c8
+data sound_requests         0x00834300
+data sound_request_count    0x006c720c
+data lamp_layers            0x0086a698
+data light_count            0x0089fe30
+data stock_mode_table       0x0085f310
+data typeinfo_cmode         0x006d9a68
+data stock_mode_manager     0x00859584
+data rule_battle            0x00858950
+data display_effects        0x008a56f0
+data score_mult             0x007bbbec
+data switch_records         0x0089650c
+data switch_count           0x0089884c
+data game_flags             0x00898850
+data game_flag_count        0x006a4fd0
+data typeinfo_cmode_mball   0x006f1f64
+data typeinfo_vmi           0x006d7898
+
+# ---- values ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value display_at            0x7c
+value surface_playing       2
+value clip_layer            0
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      36
+value stock_slot_active     18
+value stock_slot_start      12
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+value stock_slot_shot   42
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+
+# ---- shots ----
+shot 0x2               Left slingshot
+shot 0x4               Right slingshot
+shot 0x8               Left return lane
+shot 0x20              Right return lane
+shot 0x80              Right pop bumper
+shot 0x100             Spinner
+shot 0x400000          Chum bucket target
+shot 0x4000000         Left ramp enter
+shot 0x10000000        Left ramp enter, late
+shot 0x8000000         Left ramp
+shot 0x20000000        Center ramp
+shot 0x40000000        Right ramp
+shot 0x100000000       Target 1
+shot 0x200000000       Target 2
+shot 0x400000000       Target 3
+shot 0x800000000       Bottom right target
+shot 0x4000000000      3 bank bottom
+shot 0x8000000000      3 bank middle
+shot 0x10000000000     3 bank top
+shot 0x20000000000     3 bank complete
+shot 0x400000000000    Mid flipper lane
+shot 0x8000000000000   Quickshot top
+shot 0x10000000000000  Quickshot middle
+shot 0x20000000000000  Quickshot bottom
+
+# ---- scenes ----
+scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
+
+# ---- callouts and text ----
+callout countdown           1386
+callout ten_seconds         1387
+callout time_up             1388
+text example_start_shot     Chum bucket target
+text example_clip           Beach_panic_intro
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47
+
+# ---- lamps ----
+lamp 9            0x10           LEFT OUTLANE  # lamp 6, I/O group 7 index 9, at 31,494
+lamp 10           0x8            LEFT RETURN LANE  # lamp 7, I/O group 7 index 10, at 55,469
+lamp 11           0x20           RIGHT RETURN LANE  # lamp 8, I/O group 7 index 12, at 239,469
+lamp 12           0              SHOOT AGAIN  # lamp 9, I/O group 7 index 11, at 147,615
+lamp 13           0              LEFT RETURN 1  # lamp 10, I/O group 7 index 13, at 84,569
+lamp 14           0              LEFT RETURN 2  # lamp 11, I/O group 7 index 14, at 71,561
+lamp 15           0              LEFT RETURN 3  # lamp 12, I/O group 7 index 15, at 58,552
+lamp 16           0              RIGHT RETURN 1  # lamp 13, I/O group 7 index 16, at 211,569
+lamp 17           0              RIGHT RETURN 2  # lamp 14, I/O group 7 index 17, at 223,561
+lamp 18           0              RIGHT RETURN 3  # lamp 15, I/O group 7 index 18, at 236,552
+lamp 19           0              MAKO SHARK  # lamp 16, I/O group 7 index 8, at 106,452
+lamp 20           0              HAMMERHEAD SHARK  # lamp 17, I/O group 7 index 19, at 126,449
+lamp 21           0              GREAT WHITE  # lamp 18, I/O group 7 index 28, at 147,446
+lamp 22           0              TIGER SHARK  # lamp 19, I/O group 7 index 37, at 168,449
+lamp 23           0              THRESHER SHARK  # lamp 20, I/O group 7 index 38, at 187,452
+lamp 24           0              SEARCH  # lamp 21, I/O group 7 index 47, at 119,482
+lamp 25           0              4TH OF JULY  # lamp 22, I/O group 7 index 42, at 147,476
+lamp 26           0              RESCUE  # lamp 23, I/O group 7 index 39, at 174,482
+lamp 27           0              BARREL HOOK  # lamp 24, I/O group 7 index 46, at 126,502
+lamp 28           0              SHARK CAGE  # lamp 25, I/O group 7 index 43, at 147,497
+lamp 29           0              DART  # lamp 26, I/O group 7 index 40, at 167,502
+lamp 30           0              BINOCULARS  # lamp 27, I/O group 7 index 45, at 132,520
+lamp 31           0              OXYGEN  # lamp 28, I/O group 7 index 44, at 147,516
+lamp 32           0              TRACKER  # lamp 29, I/O group 7 index 41, at 161,520
+lamp 33           0              READY BARREL  # lamp 30, I/O group 7 index 85, at 72,416
+lamp 34           0              PIPIT  # lamp 31, I/O group 7 index 87, at 73,435
+lamp 35           0              LIGHT MACHETE  # lamp 32, I/O group 7 index 86, at 90,426
+lamp 36           0x4000000000   3 BANK BOTTOM  # lamp 33, I/O group 7 index 84, at 79,396
+lamp 37           0x8000000000   3 BANK MID  # lamp 34, I/O group 7 index 83, at 83,379
+lamp 38           0x10000000000  3 BANK TOP  # lamp 35, I/O group 7 index 82, at 86,362
+lamp 39           0              FF SUPER BUOYS  # lamp 36, I/O group 7 index 57, at 103,403
+lamp 40           0              FF SUPER LIFE RING  # lamp 37, I/O group 7 index 58, at 117,399
+lamp 41           0              FF CAST N CATCH  # lamp 38, I/O group 7 index 59, at 124,386
+lamp 42           0              FF LIGHT VIDEO MODE  # lamp 39, I/O group 7 index 61, at 122,372
+lamp 43           0              FF NIGHT SEARCH  # lamp 40, I/O group 7 index 62, at 110,363
+lamp 44           0x7800000000000 QUICKSHOT  # lamp 41, I/O group 7 index 51, at 70,333
+lamp 45           0              HARPOON  # lamp 42, I/O group 7 index 81, at 95,343
+lamp 46           0              QUICKSHOT 1X  # lamp 43, I/O group 7 index 48, at 33,379
+lamp 47           0              QUICKSHOT 2X  # lamp 44, I/O group 7 index 49, at 33,360
+lamp 48           0              QUICKSHOT 4X  # lamp 45, I/O group 7 index 50, at 33,340
+lamp 49           0              COLLECT QUICKSHOT  # lamp 46, I/O group 7 index 29, at 152,331
+lamp 50           0              ATTACH BARREL  # lamp 47, I/O group 7 index 30, at 162,349
+lamp 51,52,53     0x1000000000   FIN  # lamp 48, I/O group 7 index 31, at 179,362
+lamp 54           0              ENCOUNTER JACKPOT  # lamp 49, I/O group 7 index 34, at 200,364
+lamp 55           0              EXTRA BALL  # lamp 50, I/O group 7 index 35, at 220,358
+lamp 56           0              BARREL 1  # lamp 51, I/O group 8 index 48, at 182,313
+lamp 57           0              BARREL 2  # lamp 52, I/O group 8 index 64, at 200,310
+lamp 58           0              BARREL 3  # lamp 53, I/O group 8 index 71, at 211,324
+lamp 59,60,61     0              FIN TARGET 1  # lamp 54, I/O group 8 index 52, at 166,277
+lamp 62,63,64     0              FIN TARGET 2  # lamp 55, I/O group 8 index 49, at 178,272
+lamp 65,66,67     0              FIN TARGET 3  # lamp 56, I/O group 8 index 55, at 197,269
+lamp 68,69,70     0              FIN TARGET 4  # lamp 57, I/O group 8 index 61, at 214,274
+lamp 71,72,73     0              FIN TARGET 5  # lamp 58, I/O group 8 index 58, at 229,283
+lamp 74,75,76     0              FIN TARGET 6  # lamp 59, I/O group 8 index 68, at 244,299
+lamp 77,78,79     0              FIN TARGET 7  # lamp 60, I/O group 8 index 65, at 247,310
+lamp 80           0x400000000000 ADVANCE BOUNTY RIGHT  # lamp 61, I/O group 7 index 23, at 280,348
+lamp 81           0              ACTIVATE FISHFINDER  # lamp 62, I/O group 7 index 24, at 273,375
+lamp 82           0x800000000    LIGHT LIFE RING  # lamp 63, I/O group 7 index 25, at 211,393
+lamp 83,84,85     0x100000000f00 WEST BEACH  # lamp 64, I/O group 8 index 8, at 57,252
+lamp 86           0              WEST BEACH RESCUE TOP  # lamp 65, I/O group 8 index 11, at 61,269
+lamp 87           0              WEST BEACH RESCUE LEFT  # lamp 66, I/O group 8 index 12, at 58,282
+lamp 88           0              WEST BEACH RESCUE RIGHT  # lamp 67, I/O group 8 index 13, at 70,279
+lamp 89           0              WEST BEACH SHARK  # lamp 68, I/O group 8 index 14, at 67,296
+lamp 90           0              WEST BEACH CLOSED X  # lamp 69, I/O group 8 index 15, at 71,312
+lamp 91           0x100000000    TARGET 1  # lamp 70, I/O group 7 index 36, at 84,288
+lamp 92,93,94     0x1c000000     MARINA  # lamp 71, I/O group 8 index 16, at 93,240
+lamp 95           0              MARINA RESCUE TOP  # lamp 72, I/O group 8 index 19, at 97,257
+lamp 96           0              MARINA RESCUE LEFT  # lamp 73, I/O group 8 index 20, at 92,268
+lamp 97           0              MARINA RESCUE RIGHT  # lamp 74, I/O group 8 index 21, at 105,266
+lamp 98           0              MARINA SHARK  # lamp 75, I/O group 8 index 22, at 101,283
+lamp 99           0              MARINA CLOSED X  # lamp 76, I/O group 8 index 23, at 105,299
+lamp 100          0x400000       CHUMLINE ADVANCE  # lamp 77, I/O group 7 index 52, at 120,259
+lamp 101          0              ADVANCE BOUNTY LEFT  # lamp 78, I/O group 7 index 53, at 125,285
+lamp 102,103,104  0x20000000     NORTH BEACH  # lamp 79, I/O group 8 index 24, at 136,195
+lamp 105          0              NORTH BEACH RESCUE TOP  # lamp 80, I/O group 8 index 27, at 136,211
+lamp 106          0              NORTH BEACH RESCUE LEFT  # lamp 81, I/O group 8 index 28, at 131,222
+lamp 107          0              NORTH BEACH RESCUE RIGHT  # lamp 82, I/O group 8 index 29, at 144,220
+lamp 108          0              NORTH BEACH SHARK  # lamp 83, I/O group 8 index 30, at 139,254
+lamp 109          0              NORTH BEACH CLOSED X  # lamp 84, I/O group 8 index 31, at 140,277
+lamp 110          0x800000       BOAT HIT LEFT  # lamp 85, I/O group 8 index 3, at 170,202
+lamp 111          0x1000000      BOAT HIT CENTER  # lamp 86, I/O group 8 index 4, at 179,202
+lamp 112          0x2000000      BOAT HIT RIGHT  # lamp 87, I/O group 8 index 5, at 188,202
+lamp 113          0x200000000    TARGET 2  # lamp 88, I/O group 7 index 26, at 210,234
+lamp 114          0x400000000    TARGET 3  # lamp 89, I/O group 7 index 27, at 250,234
+lamp 115,116,117  0x230000       THE POND  # lamp 90, I/O group 8 index 32, at 241,188
+lamp 118          0              THE POND RESCUE TOP  # lamp 91, I/O group 8 index 35, at 238,206
+lamp 119          0              THE POND RESCUE LEFT  # lamp 92, I/O group 8 index 36, at 230,215
+lamp 120          0              THE POND RESCUE RIGHT  # lamp 93, I/O group 8 index 37, at 242,217
+lamp 121          0              THE POND SHARK  # lamp 94, I/O group 8 index 38, at 233,231
+lamp 122          0              THE POND CLOSED X  # lamp 95, I/O group 8 index 39, at 229,247
+lamp 123,124,125  0x40000000     EAST BEACH  # lamp 96, I/O group 8 index 40, at 277,201
+lamp 126          0              EAST BEACH RESCUE TOP  # lamp 97, I/O group 8 index 43, at 272,217
+lamp 127          0              EAST BEACH RESCUE LEFT  # lamp 98, I/O group 8 index 44, at 265,226
+lamp 128          0              EAST BEACH RESCUE RIGHT  # lamp 99, I/O group 8 index 45, at 277,228
+lamp 129          0              EAST BEACH SHARK  # lamp 100, I/O group 8 index 46, at 266,242
+lamp 130          0              EAST BEACH CLOSED X  # lamp 101, I/O group 8 index 47, at 262,258
+lamp 131          0              SHARK BB 1 TOP  # lamp 102, I/O group 7 index 75, at 156,133
+lamp 132          0              SHARK BB 2  # lamp 103, I/O group 7 index 76, at 156,133
+lamp 133          0              SHARK BB 3  # lamp 104, I/O group 7 index 77, at 156,133
+lamp 134          0              SHARK BB 4 BOT  # lamp 105, I/O group 7 index 78, at 156,133
+lamp 145          0              LOWER LEFT SPOTLIGHT  # lamp 114, I/O group 7 index 20, at 41,447
+lamp 146          0              LOWER RIGHT SPOTLIGHT  # lamp 115, I/O group 7 index 21, at 219,509
+lamp 147          0x20000000000  FISH FINDER MULTIBALL FLASH  # lamp 116, I/O group 7 index 60, at 104,382
+lamp 148          0x80           POP BUMPER  # lamp 117, I/O group 7 index 22, at 256,355
+lamp 149          0              WEST BEACH FLASHER  # lamp 118, I/O group 7 index 54, at 47,206
+lamp 150          0x80000000000  BOAT FLASH  # lamp 119, I/O group 7 index 66, at 179,230
+lamp 151          0xc0000        FISHING REEL FLASH  # lamp 120, I/O group 7 index 55, at 237,137
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+site block_start_12     0x000ad2a4 0xe92d4ff0 0xe24dd014
+data block_obj_12       0x00860170
+text block_name_12      Cast N Catch 1
+site block_start_13     0x000d5b1c 0xe590c0f4 0xe30c36b0
+data block_obj_13       0x00860218
+text block_name_13      Encounter Night Swim
+site block_start_14     0x000cbb68 0xe5901090 0xe3a03000
+data block_obj_14       0x00860338
+text block_name_14      Encounter Beach Panic
+site block_start_15     0x000f2dec 0xe59010d4 0xe30a2120
+data block_obj_15       0x00860400
+text block_name_15      Encounter Scars
+site block_start_16     0x000defe4 0xe92d4ff0 0xe24dd014
+data block_obj_16       0x00860518
+text block_name_16      Encounter Pond Attack
+site block_start_17     0x000e7bbc 0xe59030d4 0xe3a02001
+data block_obj_17       0x008605f0
+text block_name_17      Encounter Raft Attack
+site block_start_18     0x000f6cec 0xe92d4ff0 0xe24dd024
+data block_obj_18       0x008606d8
+text block_name_18      Feeding Frenzy
+site block_start_19     0x001af070 0xe92d4ff0 0xe24dd014
+data block_obj_19       0x00860790
+text block_name_19      Super Life Ring
+site block_start_20     0x001ba1f4 0xe92d4ff0 0xe24dd014
+data block_obj_20       0x00860828
+text block_name_20      Shark Combos
+site block_start_21     0x001a618c 0xe92d4ff0 0xe309b5a4
+data block_obj_21       0x00860a70
+text block_name_21      Say Ah
+site block_start_22     0x00195fb4 0xe92d4ff0 0xe24dd01c
+data block_obj_22       0x00860b10
+text block_name_22      Smile You Sonofa
+site block_start_23     0x00167fac 0xe5901000 0xe30e21c0
+data block_obj_23       0x00860be8
+text block_name_23      Rescue Hurry Up
+site block_start_24     0x00125c4c 0xe92d4038 0xe1a04000
+data block_obj_24       0x00860ca0
+text block_name_24      Jaws Multiball 3 Hurry Up
+site block_start_25     0x0019ebe0 0xe5901000 0xe3042240
+data block_obj_25       0x00860d48
+text block_name_25      Smile You Sonofa Hurry Up
+site block_start_27     0x00164b50 0xe92d4ff0 0xe24dd014
+data block_obj_27       0x00861028
+text block_name_27      Quints Challenge
+site block_start_28     0x0018222c 0xe590c000 0xe30c26c0
+data block_obj_28       0x00861108
+text block_name_28      Search Singleball
+site block_start_29     0x001a2560 0xe92d4ff0 0xe24dd01c
+data block_obj_29       0x008611b8
+text block_name_29      Super Buoys
+site block_start_30     0x001b3dbc 0xe92d4ff0 0xe3a03000
+data block_obj_30       0x00861250
+text block_name_30      Super Spinner
+site block_start_31     0x0018d9bc 0xe92d4ff0 0xe24dd01c
+data block_obj_31       0x008612f0
+text block_name_31      Shark Ramps
+site block_start_32     0x0010244c 0xe92d4ff0 0xe24dd01c
+data block_obj_32       0x00861380
+text block_name_32      Fourth of July
+site block_start_34     0x000a2ff8 0xe92d43f0 0xe24dd00c
+data block_obj_34       0x008617a0
+text block_name_34      Broken Shark
+site block_start_126    0x000c5150 0xe92d4ff0 0xe305438c
+data block_obj_126      0x0085f420
+text block_name_126     Encounter
+site block_start_127    0x00084a0c 0xe5902000 0xe302385c
+data block_obj_127      0x0085f530
+text block_name_127     Jaws
+
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x001d00ec 0xe92d4ff0 0xe24dd02c  # RuleBarrelLocks::v[27]
+text block_rule_name_0     Barrel Locks
+site block_rule_1          0x001d8de0 0xe92d40f0 0xe24dd00c  # RuleBeaches::v[27]
+text block_rule_name_1     Beaches
+site block_rule_2          0x001dedfc 0xe92d43f8 0xe1a08002  # RuleBountyHunt::v[27]
+text block_rule_name_2     Bounty Hunt
+site block_rule_3          0x001e129c 0xe92d4ff0 0xe24dd044  # RuleCharacterCombos::v[27]
+text block_rule_name_3     Character Combos
+site block_rule_4          0x001eaac8 0xe92d4df0 0xe24dd018  # RuleFishFinder::v[27]
+text block_rule_name_4     Fish Finder
+site block_rule_5          0x001ef5b0 0xe92d40d0 0xe1a06002  # RuleFourthOfJuly::v[27]
+text block_rule_name_5     Fourth of July
+site block_rule_6          0x001f8bc4 0xe92d4ff0 0xe24dd00c  # RuleGear::v[27]
+text block_rule_name_6     Gear
+site block_rule_7          0x001fb6fc 0xe92d40f0 0xe2035501  # RuleLifeRing::v[27]
+text block_rule_name_7     Life Ring
+site block_rule_8          0x001fdb08 0xe92d43f0 0xe24dd014  # RuleLookoutTower::v[27]
+text block_rule_name_8     Lookout Tower
+site block_rule_9          0x001ffcf0 0xe92d40f0 0xe1a04002  # RuleMachete::v[27]
+text block_rule_name_9     Machete
+site block_rule_10         0x002050bc 0xe92d4ff0 0xe24dd01c  # RulePipit::v[27]
+text block_rule_name_10    Pipit
+site block_rule_11         0x00209048 0xe92d47f0 0xe24dd018  # RuleQuickshot::v[27]
+text block_rule_name_11    Quickshot
+site block_rule_12         0x0020f03c 0xe92d4070 0xe1a04002  # RuleQuintsShack::v[27]
+text block_rule_name_12    Quints Shack
+site block_rule_13         0x00210834 0xe2033020 0xe3a02000  # RuleRadioTarget::v[27]
+text block_rule_name_13    Radio Target
+site block_rule_14         0x00217020 0xe92d47f0 0xe24dd018  # RuleSharkEncounter::v[27]
+text block_rule_name_14    Shark Encounter
+site block_rule_15         0x0021bf90 0xe92d43f0 0xe2035007  # RuleSharkTowerTargets::v[27]
+text block_rule_name_15    Shark Tower Targets
+site block_rule_16         0x0022322c 0xe92d4ff0 0xe24dd014  # RuleShipWheel::v[27]
+text block_rule_name_16    Ship Wheel
+site block_rule_17         0x00228648 0xe590100c 0xe3510001  # RuleSkillShot::v[27]
+text block_rule_name_17    Skill Shot
+site block_rule_18         0x0022e004 0xe3a00001 0xe12fff1e  # RuleTopper::v[27]
+text block_rule_name_18    Topper
+site block_rule_19         0x0023a0b0 0xe2022201 0xe92d40f8  # RuleTrickshot::v[27]
+text block_rule_name_19    Trickshot
+site block_rule_20         0x00293e8c 0xe92d43d0 0xe2039d07  # RuleVirtualDropTargets::v[27]
+text block_rule_name_20    Virtual Drop Targets
+site block_rule_21         0x00244c3c 0xe92d0030 0xe202433e  # UIBonusScreen::v[27]
+text block_rule_name_21    UI Bonus Screen
+site block_rule_22         0x00275070 0xe5d01008 0xe3510000  # UIShipWheelSpinSelect::v[27]
+text block_rule_name_22    UI Ship Wheel Spin Select

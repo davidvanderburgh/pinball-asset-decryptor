@@ -673,6 +673,19 @@ def test_a_running_job_keeps_its_slot_and_copies_take_turns():
     assert "exec 9> /tmp/pad-cardstage-copy.lock" in c and "flock 9" in c and 'copy_now "$@"' in c
 
 
+def test_a_copy_is_staged_only_whole():
+    """PAD-420: Windows refused to rename a fresh copy out of .inflight for a moment ("Permission denied", the new file
+    still held open), and the touch after the move made an EMPTY card at its place: Munsters Pro's job booted it ("no
+    MBR signature") and the .src stamp offered it to the next batch. The move is retried, a card is staged only when
+    it is there at its full size, and a staged card is reused only at the source's size."""
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    reuse = cs[cs.index('if [ -f "$dest" ] && [ "$(cat "$dest.src"'):cs.index('echo "$(date +%T) reuse $name"')]
+    assert '[ "$(stat -c %s "$dest")" = "$(stat -c %s "$card")" ]' in reuse
+    move = cs[cs.index('until mv -f "$P/$name" "$dest"'):cs.index("copying $card to $STAGE failed: the copy could not")]
+    assert 'if [ ! -e "$P/$name" ] && [ -f "$dest" ] && [ "$(stat -c %s "$dest")" = "$size" ]; then' in move
+    assert move.index("if [ ! -e") < move.index('touch "$dest"') < move.index('echo "$dest" > "$S/$i"')
+
+
 def test_rigbatch_boots_staged_copies_and_reuses_them():
     """cardstage.sh: every rig boots a copy staged off the slow disk; a card
     that cannot be staged fails its build (not the batch); a second sweep

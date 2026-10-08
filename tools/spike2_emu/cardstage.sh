@@ -141,7 +141,7 @@ for i in $(seq 0 $((TOTAL - 1))); do
     name=$(basename "$card")
     dest=$STAGE/$name
     stamp="$card $(stat -c '%s %Y' "$card")"
-    if [ -f "$dest" ] && [ "$(cat "$dest.src" 2>/dev/null)" = "$stamp" ]; then
+    if [ -f "$dest" ] && [ "$(cat "$dest.src" 2>/dev/null)" = "$stamp" ]        && [ "$(stat -c %s "$dest")" = "$(stat -c %s "$card")" ]; then
         touch "$dest"
         echo "$(date +%T) reuse $name"
         echo "$dest" > "$S/$i"
@@ -155,11 +155,25 @@ for i in $(seq 0 $((TOTAL - 1))); do
     t0=$(date +%s)
     rm -f "$P/$name"
     if copy "$card" "$P" && [ -f "$P/$name" ]; then
-        mv -f "$P/$name" "$dest"
-        touch "$dest"             # robocopy keeps the source's date: a fresh copy must not look the oldest (evicted first)
-        echo "$stamp" > "$dest.src"
-        echo "$(date +%T) staged $name  $((size / 1048576)) MB in $(( $(date +%s) - t0 ))s"
-        echo "$dest" > "$S/$i"
+        # THE MOVE CAN BE REFUSED FOR A WHILE (PAD-420): Windows would not rename a fresh copy still held open (a scan
+        # of the new file), "Permission denied" - and the touch after it made an EMPTY card at $dest that a job then
+        # booted ("no MBR signature") and that the .src stamp offered for reuse. Tried for two minutes; staged only
+        # whole.
+        k=0
+        until mv -f "$P/$name" "$dest" 2>/dev/null; do
+            k=$((k + 1))
+            [ "$k" -ge 60 ] && break
+            sleep 2
+        done
+        if [ ! -e "$P/$name" ] && [ -f "$dest" ] && [ "$(stat -c %s "$dest")" = "$size" ]; then
+            touch "$dest"         # robocopy keeps the source's date: a fresh copy must not look the oldest (evicted first)
+            echo "$stamp" > "$dest.src"
+            echo "$(date +%T) staged $name  $((size / 1048576)) MB in $(( $(date +%s) - t0 ))s"
+            echo "$dest" > "$S/$i"
+        else
+            rm -f "$P/$name"
+            echo "copying $card to $STAGE failed: the copy could not be moved into place whole" > "$S/$i.fail"
+        fi
     else
         rm -f "$P/$name"
         echo "copying $card to $STAGE failed" > "$S/$i.fail"

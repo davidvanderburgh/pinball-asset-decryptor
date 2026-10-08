@@ -6,7 +6,8 @@
 
 Reads the card read-only (``plugins/stern/explorer.CardImage``, no mount) and prints how the
 sound functions were found, then each clip's sounds best first (``plugins/stern/clip_sounds.py``
-says what ``next`` / ``function`` / ``table`` / ``mode`` mean). The clips are the ones the
+says what ``record`` / ``next`` / ``name`` / ``function`` mean; the Video tab shows the first
+three, the ones the emulator census proved). The clips are the ones the
 project's ``video/manifest.txt`` names when ``--project`` is given (the Video tab's), else every
 clip of every scene bank under the title's ``assets/lcd``.
 
@@ -18,8 +19,9 @@ clip of every scene bank under the title's ``assets/lcd``.
               image.bin are copied to a temp dir; the params derive is the extract's, cached),
               for a project extracted before Extract wrote sound_requests.tsv
 
-A prototype: none of this is emulator-proven. To check a pairing, play the clip's mode in the
-emulator with ``sdk/sound_census.c`` preloaded and look for the request beside the clip.
+To check a pairing on another build, play the clip's mode in the emulator with every request
+logged (``sdk/sound_census.c``, or stock_probe's ``award`` hooks on the sound worker and inside
+``clip_play``: PAD-455's census) and look for the request within a second of the clip.
 """
 import argparse
 import os
@@ -149,9 +151,8 @@ def main(argv):
     log("%d of %d clips have sounds: %s" % (
         paired, len(names), ", ".join("%s %d" % (h, n) for h, n in by_how.items())))
     for ln in lines:
-        if ln[1] != "mode":
-            print("  %-40s %-8s %4s  req %5s  %-32s %s" % (ln[0][:40], ln[1], ln[2], ln[3],
-                                                          ln[4][:32], ln[6] or ln[5]))
+        print("  %-40s %-8s %4s  req %5s  %-32s %s" % (ln[0][:40], ln[1], ln[2], ln[3],
+                                                      ln[4][:32], ln[6] or ln[5]))
     if a.out:
         with open(a.out, "w", encoding="utf-8", newline="\n") as f:
             f.write("clip\thow\tgap\trequest\tsound_test\tidx\tfiles\tsids\tcall\n")

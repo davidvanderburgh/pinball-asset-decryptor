@@ -1,38 +1,44 @@
-"""Which SOUNDS the game plays with each in-game clip, read off the game program (a prototype).
+"""Which SOUNDS the game plays with each in-game clip, read off the game program (PAD-455).
 
-A Spike 2 card stores no link between a clip and a sound: Extract names a clip after the scene
-element that references it and a sound after its master-directory record (``idxNNNN``). The link
-is in the game's code. The code asks for a clip by NAME (:mod:`.clip_modes`) and for a sound by
-REQUEST id, a constant argument to one of a handful of sound functions (``sound_request_play``,
-``callout`` and their ``_nth`` twins: ``tools/spike2_emu/modes/MODE_API.md``). So the sounds that
-go with a clip are the requests that the code naming the clip asks for. This module reads that
-join statically:
+A Spike 2 card stores no link between a clip and a sound file: Extract names a clip after the
+scene element that references it and a sound after its master-directory record (``idxNNNN``).
+The links are in the game program, three ways:
 
-* the SOUND ENTRIES (:func:`sound_entries`): every function that hands one of its own arguments
-  on as the request a sound plays. Seeded from the build's port (``sound_worker``,
-  ``sound_play``, ``sound_nth``, ``callout``, ``callout_nth``) when there is one, else from the
-  functions that load the request table's address (:func:`table_readers`). Then every function
-  that passes one of its arguments on to an entry on some path (:func:`_flow`), close to its
-  start (:data:`WRAPPER_MAX`), and whose callers' constants there are request ids
-  (:data:`IN_RANGE`);
-* every CALL of an entry with a constant request (:func:`sound_calls`);
-* each clip's references (:func:`.clip_modes.clip_refs`) beside the calls (:func:`pair`), best
-  first: ``next`` - the call is in the function that names the clip, and this clip's name is the
-  one nearest the call there, within :data:`NEAR` instructions; ``function`` - the call is in
-  that function, nearer another clip's name; ``table`` - the clip is a pointer in a table and the
-  call is in code that loads the table; ``mode`` - only the same mode's code makes the call.
+* ``record`` - the game's data keeps the clip and its sound together: a record holding the
+  clip name's pointer and, 4 bytes on, the request (:func:`records`: ``clip_play(rec->name);
+  sound_play(rec->sound)``, rampage1..22 -> 675..696), or a display effect's class whose
+  virtuals answer the name and, three slots on, the sound (:func:`getters`);
+* ``next`` - the code that names the clip asks for the sound right there: the last clip named
+  before a constant-request call in the same function, within :data:`NEAR` instructions, else
+  the first named after it. The sound calls are every call of a SOUND ENTRY with a constant
+  request (:func:`sound_calls`), the entries every function that hands one of its own
+  arguments on as the request a sound plays (:func:`sound_entries`): seeded from the build's
+  port (``sound_worker``, ``sound_play``, ``sound_nth``, ``callout``, ``callout_nth``) when
+  there is one, else from the request table's one reader no game code hands a request (the
+  worker, :func:`table_readers`), then every function that passes one of its arguments on to
+  an entry on some path (:func:`_flow`), close to its start (:data:`WRAPPER_MAX`), whose
+  callers' constants there are request ids (:data:`IN_RANGE`). On all five port builds read
+  (Godzilla Pro 1.15/1.16 and LE 1.16, Beatles, Deadpool) the request table alone finds every
+  sound site the port names and the same calls;
+* ``name`` - the sound's Sound Test name ends with the clip's name (:func:`named`: "SE GZ FX
+  DE BRIDGEATTACK 1" for BridgeAttack_1);
+
+and ``function`` (the call is in that function, nearer another clip's name) is kept for the
+tools only. EMULATOR-PROVEN on Godzilla Premium/LE 1.16 (``docs/architecture/stern.md``):
+pairs whose clip showed and whose request fired within a second of it, record 38 of 38, next 16
+of 18, name 94 of 106; function 7 of 29, and the two kinds dropped here, a table's loader 1 of 23
+and the same mode's code 17 of 478.
 
 A request is named by the Sound Test (the menu's node id IS the request id, MODE_API.md item 150:
 :func:`menu_names`) and, once Extract has written :data:`REQUESTS_TSV`, by the ``idx`` records
 its sound ids resolve to (:func:`resolve_requests`, driven on the codec emulator the extract
 boots anyway).
 
-NOT FOUND, by design: a request the code computes (a table of callouts, a random pick), a sound
-played by a function the clip's code calls rather than by that code itself, a request queued for
-later (``play_delayed`` stores it; the tick plays it), and a clip's own audio track (7 of
-Deadpool's 99 clips carry one). Nothing here is emulator-proven yet: a reading says how it found
-the sound functions (:attr:`SoundReading.origin`, :attr:`SoundReading.entries`) so it can be
-checked against a port and a sound census (``sdk/sound_census.c``).
+NOT FOUND: a request the code computes from parallel tables or a random pick (Godzilla's
+BridgeAttack_N, fighter_awardN, Monster Zero's lock loops: about half of the display-effect
+sounds that played with their clip), a sound played by a function the clip's code calls, a
+request queued for later (``play_delayed``), and a clip's own audio track (7 of Deadpool's 99
+clips carry one).
 """
 from __future__ import annotations
 
@@ -43,7 +49,7 @@ from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes (a cached :class:`.clip_modes.CardClips` is
 #: read again)
-READ_REV = 1
+READ_REV = 2
 #: the port sites that play a sound by request, its id in r0 (MODE_API.md)
 SOUND_SITES = ("sound_worker", "sound_play", "sound_nth", "callout", "callout_nth")
 #: how many wrappers deep the entries are followed past the seeds: a port names the game's own
@@ -53,15 +59,23 @@ DEPTH_PORT = 2
 DEPTH_LOCATED = 3
 #: a wrapper hands its argument on within this many instructions of its start
 WRAPPER_MAX = 200
+#: how many instructions a function's prologue may run before its ``push``
+PROLOGUE = 4
 #: of a wrapper's callers with a constant in the request's register, how many must be a request id
 IN_RANGE = 0.9
 #: a call this many instructions from a clip's name, nearer it than any other clip's, is ``next``
 NEAR = 48
 #: passes of the per-function argument flow before it gives up on a fixed point
 FLOW_PASSES = 16
-#: how far back from a table's pointer the table's start is looked for (words)
-TABLE_BACK = 256
-HOWS = ("next", "function", "table", "mode")
+#: where a clip's record holds the request played with it (bytes past the name's pointer)
+REC_OFF = 4
+#: clip pointers no further apart than this (bytes) are one table of records
+REC_GAP = 64
+#: the fewest letters and digits of a clip's name :func:`named` matches to a Sound Test name
+NAME_MIN = 6
+#: how many vtable slots either side of a clip's name getter are tried for its sound's
+GETTER_SLOTS = 4
+HOWS = ("record", "next", "name", "function")
 _RANK = {h: i for i, h in enumerate(HOWS)}
 #: Extract's sidecar: every request, the ``idx`` records it plays, its sound ids and Sound Test name
 REQUESTS_TSV = "sound_requests.tsv"
@@ -192,13 +206,23 @@ def table_readers(prog, table_va, registry_va=None):
 def _start_of(prog, va):
     """The start of the function holding *va*: the nearer of the last ``push {..., lr}`` and the
     last ``bl`` target at or before it (a leaf wrapper such as ``sound_request_play`` pushes
-    nothing)."""
+    nothing); a ``bl`` target up to :data:`PROLOGUE` instructions before the push, with nothing
+    ending a function between, when the push is the nearer (``callout`` makes and reads a global
+    before its push: Godzilla Pro 1.16 0x187f44, push at +12)."""
     import numpy as np
+    from . import stock_scan as S
     prog._ensure()
     a = prog.func_start(va)
     k = int(np.searchsorted(prog._bl_tgt, va, "right")) - 1
     b = int(prog._bl_tgt[k]) if k >= 0 else 0
-    return b if a < b <= va and prog.in_text(b) else a
+    if a < b <= va and prog.in_text(b):
+        return b
+    k = int(np.searchsorted(prog._bl_tgt, a, "left")) - 1
+    b = int(prog._bl_tgt[k]) if k >= 0 else 0
+    if a - 4 * PROLOGUE <= b < a and prog.in_text(b) and not any(
+            S.ends_flow(S.decode(prog.word(v), v)) for v in range(b, a, 4)):
+        return b
+    return a
 
 
 class _Calls:
@@ -291,6 +315,17 @@ def _join(a, b):
     return out
 
 
+def _extent(prog, start):
+    """:func:`.stock_scan.function_extent`, read on past a ``push`` that ends a prologue (it
+    stops at a push after the start: the next function's, as a rule)."""
+    from . import stock_scan as S
+    end, lits = S.function_extent(prog, start)
+    if end - start <= 4 * PROLOGUE and S.decode(prog.word(end), end)[0] == "pushlr":
+        end, more = S.function_extent(prog, end)
+        lits = lits | more
+    return end, lits
+
+
 def _flow(prog, start, upto=None):
     """``{call VA: {r0..r3: the function's own arguments (0..3) the register may hold there}}``
     for every call (``bl``, ``blx``, a ``b`` that leaves) in the function at *start*, read no
@@ -298,7 +333,7 @@ def _flow(prog, start, upto=None):
     the argument, so ``callout``'s swap of an English request for its Japanese sibling, on one
     path, still hands the request on."""
     from . import stock_scan as S
-    end, lits = S.function_extent(prog, start)
+    end, lits = _extent(prog, start)
     stop = end if upto is None else min(end, upto + 4)
     vas = [va for va in range(start, stop, 4) if va not in lits]
     ins, succ, leaves = {}, {}, set()
@@ -386,15 +421,22 @@ def _tally(prog, calls, va, entry, count):
 
 def sound_entries(prog, seeds, count, depth=DEPTH_PORT, trust=True):
     """``{function VA: Entry}``: the *seeds* (``{VA: name}``, each taking its request in r0;
-    kept as they are when *trust*, else only when their callers' constants look like requests),
-    and every function that hands one of its arguments on to an entry, *depth* wrappers deep."""
+    kept as they are when *trust*, else only the ones no caller hands a constant: the sound
+    worker is reached only through the request functions (MODE_API.md: its 9 callers are every
+    ``sound_request_*`` and ``callout_*``), and a reader of the request table that game code
+    hands a request is a query (``sound_request_variants``: Godzilla Pro 1.16 0x2ad4e0 counts
+    1285's variants before ``callout_nth`` plays one) - or, when that leaves none, the ones
+    whose callers' constants look like requests), and every function that hands one of its
+    arguments on to an entry, *depth* wrappers deep."""
     calls = _Calls(prog)
     flows = {}
     entries = {}
-    for va, name in seeds.items():
-        e = _tally(prog, calls, va, Entry(name, 0), count)
-        if trust or e.plausible():
+    tallied = {va: _tally(prog, calls, va, Entry(name, 0), count) for va, name in seeds.items()}
+    for va, e in tallied.items():
+        if trust or not e.const:
             entries[va] = e
+    if not entries:
+        entries = {va: e for va, e in tallied.items() if e.plausible()}
     frontier = list(entries)
     for _d in range(depth):
         cand = {}
@@ -451,48 +493,17 @@ def sound_calls(prog, entries, count):
 
 
 # ---- a clip's places and its sounds ------------------------------------------------------------
-class _Tables:
-    """The code that loads the table holding a pointer: walk back from the pointer to the
-    nearest word whose address the code makes (``clip_modes._Owners.of_table``'s walk), with
-    the program's referenced values gathered once so the walk is set lookups."""
-
-    def __init__(self, prog):
-        import numpy as np
-        self.prog = prog
-        made = set(np.unique(prog.tw).tolist())
-        for reg in range(13):
-            made.update(prog.movwt_values(reg))
-        self.made = made
-        self._got = {}
-
-    def loaders(self, wva):
-        got = self._got.get(wva)
-        if got is not None:
-            return got
-        got = []
-        for k in range(TABLE_BACK):
-            v = wva - 4 * k
-            if v in self.made:
-                got = [r for r in self.prog.references(v) if self.prog.in_text(r)]
-                if got:
-                    break
-        self._got[wva] = got
-        return got
-
-
-def _places(prog, ref, tables):
-    """``[(function VA, VA of the instruction naming the clip, or None)]`` for one
-    :class:`.clip_modes.Ref`: the ``movw`` of a pair, the ``ldr`` of a literal, or (None) each
-    function that loads the table the clip's pointer is in."""
+def _places(prog, ref):
+    """``[(function VA, VA of the instruction naming the clip)]`` for one
+    :class:`.clip_modes.Ref` in the code: the ``movw`` of a pair, the ``ldr`` of a literal. A
+    pointer in a data table is :func:`records`' (the code that merely loads the table plays
+    the clip's sound 1 time in 23: PAD-455's emulator census)."""
     from . import progreloc
     if ref.kind in (progreloc.KIND_A32, progreloc.KIND_T32):
         return [(_start_of(prog, ref.at), ref.at)]
     if prog.in_text(ref.at):
-        loads = prog.literal_loads(ref.at)
-        if loads:
-            return [(_start_of(prog, v), v) for v in loads]
-        return [(_start_of(prog, ref.at), None)]
-    return [(_start_of(prog, r), None) for r in tables.loaders(ref.at)]
+        return [(_start_of(prog, v), v) for v in prog.literal_loads(ref.at)]
+    return []
 
 
 def _nearest(at, places):
@@ -510,25 +521,148 @@ def _nearest(at, places):
     return None
 
 
-def pair(prog, refs, calls, owners=None):
-    """``{clip name: [[request, how, gap, call VA], ...]}``, best first (:data:`HOWS`; *gap* in
-    instructions, -1 where there is none). *refs* is :func:`.clip_modes.clip_refs`' reading,
-    *calls* :func:`sound_calls`'; *owners* (a :class:`.clip_modes._Owners`) adds ``mode``."""
+def _column(pairs):
+    """Whether ``[(clip, number)]`` read off one column of the game's data are sounds: a number
+    per clip, at least 3 numbers for every 4 clips (two of Jaws' FishFinder clips share 1003; a
+    flag column holds 1 for all of them)."""
+    clips = {c for c, _v in pairs}
+    return bool(clips) and 4 * len({v for _c, v in pairs}) >= 3 * len(clips)
+
+
+def _returns(prog, va):
+    """The constant a leaf function at *va* returns (``mov``/``movw r0`` [+ ``movt r0``],
+    ``bx lr``), or None."""
+    from . import stock_scan as S
+    w = [prog.word(va + 4 * k) for k in range(3)]
+    if None in w:
+        return None
+    d0 = S.decode(w[0], va)
+    if d0[0] not in ("mov", "movw") or d0[1] != 0 or d0[-1] != 0xE:
+        return None
+    if w[1] == _BX_LR:
+        return d0[2]
+    d1 = S.decode(w[1], va + 4)
+    if d1[0] == "movt" and d1[1] == 0 and d1[-1] == 0xE and w[2] == _BX_LR:
+        return d1[2] << 16 | d0[2]
+    return None
+
+
+_BX_LR = 0xE12FFF1E
+
+
+def getters(prog, raw, refs, count):
+    """``{clip: [(request, getter VA)]}``: a display effect's class answers its clip and its
+    sound through virtuals, ``name() { return "adv_fighter2"; }`` and, :data:`GETTER_SLOTS` on in
+    the class's vtable, ``sound() { return 538; }`` (Godzilla LE 1.16 0x159940, played through
+    0x41bcc). Every vtable slot near the name's getter is tried; one whose constant getters
+    are request ids for at least 3 clips and :func:`_column` takes is the sound's (slot +3 on
+    Godzilla and Jaws: 28 and 22 clips; slot +2 holds a flag)."""
+    import numpy as np
+    from . import progreloc
+    named = {}
+    for clip, rs in refs.items():
+        for r in rs:
+            if r.kind == progreloc.KIND_A32 and _returns(prog, r.at) is not None:
+                named[r.at] = clip
+    if not named:
+        return {}
+    words = np.frombuffer(raw, dtype="<u4", count=len(raw) // 4)
+    hits = np.nonzero(np.isin(words, np.array(sorted(named), dtype=np.uint32)))[0].tolist()
+    by_slot = {}
+    for i in hits:
+        clip = named[int(words[i])]
+        for k in range(-GETTER_SLOTS, GETTER_SLOTS + 1):
+            if k == 0 or not 0 <= i + k < len(words):
+                continue
+            f = int(words[i + k])
+            v = _returns(prog, f) if prog.in_text(f) else None
+            if v is not None and 0 < v < count:
+                by_slot.setdefault(k, []).append((clip, v, f))
+    out = {}
+    for k, got in by_slot.items():
+        if len({c for c, _v, _f in got}) >= 3 and _column([(c, v) for c, v, _f in got]):
+            for clip, v, f in got:
+                if (v, f) not in out.get(clip, ()):
+                    out.setdefault(clip, []).append((v, f))
+    return out
+
+
+def records(prog, refs, count):
+    """``{clip: [(request, record VA)]}``: the data records that hold a clip's name and, at
+    :data:`REC_OFF`, the request the code plays with it (Godzilla LE 1.16 0x1260d0:
+    ``clip_play(rec->name)`` then ``sound_play(rec->sound)``, the Xilien table at 0x642828;
+    rampage1..22 hold 675..696, "DE RAMPAGE1..22"). The word there is no address and its low
+    half a request id. A table (clip pointers no more than :data:`REC_GAP` bytes apart, each gap
+    a multiple of the first: Deadpool's Megakrakolodonus table skips a record) is a column of
+    sounds only where most of its records hold one and :func:`_column` takes it
+    (``ATTRACT_LOOP_IC`` and ``_BW`` both hold 1: a flag)."""
+    from . import progreloc
+    rows = sorted((r.at, clip) for clip, rs in refs.items() for r in rs
+                  if r.kind not in (progreloc.KIND_A32, progreloc.KIND_T32)
+                  and not prog.in_text(r.at))
+    out = {}
+    i = 0
+    while i < len(rows):
+        j = i + 1
+        stride = rows[j][0] - rows[i][0] if j < len(rows) else 0
+        while j < len(rows) and 0 < rows[j][0] - rows[j - 1][0] <= REC_GAP and stride and (
+                rows[j][0] - rows[j - 1][0]) % stride == 0:
+            j += 1
+        got = []
+        for at, clip in rows[i:j]:
+            w = prog.word(at + REC_OFF)
+            if w is None or prog.is_address(w) or not 0 < (w & 0xFFFF) < count:
+                continue
+            got.append((at, clip, w & 0xFFFF))
+        if 2 * len(got) >= j - i and _column([(c, v) for _a, c, v in got]):
+            for at, clip, v in got:
+                if (v, at) not in out.get(clip, ()):
+                    out.setdefault(clip, []).append((v, at))
+        i = j
+    return out
+
+
+def named(names, menu):
+    """``{clip: [request]}``: the sounds whose Sound Test name (*menu*, :func:`menu_names`) ends
+    with the clip's name, from a word start, letters and digits only: "SE GZ FX DE BRIDGEATTACK
+    1" for BridgeAttack_1, "SE JAWS BOUNTYHUNT LOOP 1" for bountyhunt_loop_1. A clip's name
+    shorter than :data:`NAME_MIN` is not matched."""
+    ends = {}
+    for r, n in menu.items():
+        words = re.findall(r"[A-Za-z0-9]+", n)
+        for k in range(len(words)):
+            tail = _norm("".join(words[k:]))
+            if len(tail) >= NAME_MIN:
+                ends.setdefault(tail, set()).add(r)
+    out = {}
+    for c in names:
+        got = ends.get(_norm(c))
+        if got:
+            out[c] = sorted(got)
+    return out
+
+
+def _norm(s):
+    return re.sub(r"[^A-Z0-9]", "", s.upper())
+
+
+def pair(prog, refs, calls, count=0, raw=None, extra=None):
+    """``{clip name: [[request, how, gap, VA], ...]}``, best first (:data:`HOWS`; *gap* in
+    instructions, -1 where there is none; VA = the call's, the record's or the getter's, 0 for
+    ``name``). *refs* is :func:`.clip_modes.clip_refs`' reading, *calls* :func:`sound_calls`';
+    *count* (the build's requests) adds ``record``: the clip's data records (:func:`records`)
+    and, with the program's bytes *raw*, its class's sound getter (:func:`getters`); *extra*
+    (``{clip: [request]}``, :func:`named`'s) adds ``name``."""
     by_fn = {}
     for c in calls:
         by_fn.setdefault(c.fn, []).append(c)
-    tables = None
     places, fn_places = {}, {}
     for clip, rs in refs.items():
         pl = []
         for r in rs:
-            if tables is None and r.kind not in ("movw_a32", "movw_t32") \
-                    and not prog.in_text(r.at):
-                tables = _Tables(prog)
-            for fn, va in _places(prog, r, tables):
+            for fn, va in _places(prog, r):
                 pl.append((fn, va))
-                if va is not None:
-                    fn_places.setdefault(fn, []).append((va, clip))
+                fn_places.setdefault(fn, []).append((va, clip))
         places[clip] = pl
     nearest = {}
     for fn, cs in by_fn.items():
@@ -539,33 +673,29 @@ def pair(prog, refs, calls, owners=None):
             got = _nearest(c.at, ps)
             if got is not None:
                 nearest[c.at] = got
-    by_mode = {}
-    if owners is not None:
-        for c in calls:
-            m = owners.of_code(c.at)[0]
-            if m:
-                by_mode.setdefault(m, []).append(c)
+    recs = records(prog, refs, count) if count else {}
+    if count and raw is not None:
+        for clip, got in getters(prog, raw, refs, count).items():
+            recs.setdefault(clip, []).extend(got)
+    extra = extra or {}
     out = {}
-    for clip, pl in places.items():
+    for clip in sorted(set(places) | set(recs) | set(extra)):
         got = {}
 
-        def keep(c, how, gap):
-            cur = got.get(c.request)
+        def keep(req, how, gap, at):
+            cur = got.get(req)
             key = (_RANK[how], gap if gap >= 0 else 1 << 30)
             if cur is None or key < (_RANK[cur[1]], cur[2] if cur[2] >= 0 else 1 << 30):
-                got[c.request] = [c.request, how, gap, c.at]
+                got[req] = [req, how, gap, at]
 
-        for fn, va in pl:
+        for req, at in recs.get(clip, ()):
+            keep(req, "record", -1, at)
+        for fn, va in places.get(clip, ()):
             for c in by_fn.get(fn, ()):
-                if va is None:
-                    keep(c, "table", -1)
-                else:
-                    keep(c, "next" if nearest.get(c.at) == clip else "function",
-                         abs(c.at - va) // 4)
-        for m in sorted({r.mode for r in refs[clip] if r.mode}):
-            for c in by_mode.get(m, ()):
-                if c.request not in got:
-                    got[c.request] = [c.request, "mode", -1, c.at]
+                keep(c.request, "next" if nearest.get(c.at) == clip else "function",
+                     abs(c.at - va) // 4, c.at)
+        for req in extra.get(clip, ()):
+            keep(req, "name", -1, 0)
         if got:
             out[clip] = sorted(got.values(), key=lambda p: (
                 _RANK[p[1]], p[2] if p[2] >= 0 else 1 << 30, p[0]))
@@ -614,8 +744,8 @@ def analyse(elf, names, fragments, game="", version="", refs=None, ctx=None):
     """:class:`SoundReading` of the game program *elf* (bytes) for the clip *names*.
 
     *fragments* is ``image.bin``'s fragment count; *game* and *version* find the build's port.
-    *refs* (``{clip: [Ref]}``) and *ctx* (``prog`` and ``owners``, :func:`.clip_modes.analyse`'s)
-    are reused when given. Read-only; never raises on a program it can't read."""
+    *refs* (``{clip: [Ref]}``) and *ctx* (its ``prog``, :func:`.clip_modes.analyse`'s) are
+    reused when given. Read-only; never raises on a program it can't read."""
     from . import clip_modes as CM
     from . import stock_scan as S
     raw = bytes(elf)
@@ -628,7 +758,6 @@ def analyse(elf, names, fragments, game="", version="", refs=None, ctx=None):
         except S.ScanError as e:
             out.note = "the game program could not be read (%s)" % e
             return out
-    owners = ctx.get("owners")
     count, lists, tva, rva = request_table(raw, fragments) if fragments else (0, [], None, None)
     if not count:
         out.note = "the game's table of sound requests was not found"
@@ -642,21 +771,20 @@ def analyse(elf, names, fragments, game="", version="", refs=None, ctx=None):
         out.origin, depth, trust = "located", DEPTH_LOCATED, False
     entries = sound_entries(prog, seeds, count, depth=depth, trust=trust) if seeds else {}
     if not entries:
-        out.origin = ""
-        out.note = "the game's sound functions were not found in its program"
-        return out
+        out.origin = out.port = ""
     out.entries = {va: e.to_json() for va, e in entries.items()}
-    calls = sound_calls(prog, entries, count)
+    calls = sound_calls(prog, entries, count) if entries else []
     out.calls = len(calls)
     if refs is None:
-        refs = CM.clip_refs(prog, raw, names, owners)
-    out.pairs = pair(prog, refs, calls, owners)
+        refs = CM.clip_refs(prog, raw, names)
+    menu = menu_names(raw, lists)
+    out.pairs = pair(prog, refs, calls, count, raw, named(names, menu))
     paired = sorted({p[0] for ps in out.pairs.values() for p in ps})
-    menu = menu_names(raw, lists) if paired else {}
     out.names = {r: menu[r] for r in paired if r in menu}
     out.sids = {r: list(lists[r]) for r in paired}
     if not out.pairs:
-        out.note = "no clip's code asks for a sound by a fixed number"
+        out.note = ("the game's sound functions were not found in its program" if not entries
+                    else "no clip's code asks for a sound by a fixed number")
     return out
 
 

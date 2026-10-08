@@ -1,11 +1,13 @@
-"""Which sounds the game plays with each in-game clip (plugins.stern.clip_sounds), a prototype.
+"""Which sounds the game plays with each in-game clip (plugins.stern.clip_sounds, PAD-455).
 
-Checked on a synthetic game program built here with the shapes MODE_API.md read off Godzilla:
-a sound worker that bounds-checks the request against the request table's registry, a leaf
-``sound_request_play`` that tail-calls it, a ``callout`` that swaps a request for its Japanese
-sibling on one path and then tail-calls ``sound_request_play``, and game code that names clips
-(a ``movw``/``movt`` pair, a literal, a pointer in a table) and asks for sounds by a constant.
-The real cards are checked where they are on this machine (skipped elsewhere, as on CI)."""
+Checked on a synthetic game program built here with the shapes MODE_API.md and the PAD-455
+emulator census read off Godzilla: a sound worker that bounds-checks the request against the
+request table's registry, a leaf ``sound_request_play`` that tail-calls it, a ``callout`` that
+makes a register before its push, swaps a request for its Japanese sibling on one path and then
+tail-calls ``sound_request_play``, game code that names clips (a ``movw``/``movt`` pair, a
+literal, a pointer in a table) and asks for sounds by a constant, records of a clip and its
+sound, and display-effect classes whose virtuals answer a clip and its sound. The real cards
+are checked where they are on this machine (skipped elsewhere, as on CI)."""
 
 import json
 import os
@@ -25,8 +27,11 @@ FRAGMENTS = 11            # image.bin's fragment count (the sid ceiling)
 
 W, P, C, G, H, T, X, FLAG, LOOKUP, CLIP = (0x100, 0x140, 0x180, 0x200, 0x280, 0x300, 0x340,
                                           0x3c0, 0x3d0, 0x3e0)
-STR, TBL, REQ = 0x900, 0xa00, 0xb00
-CLIPS = ("clipA", "clipB", "clipC", "clipD", "lonely")
+STR, TBL, REQ, REC, FLAGS, VTBL = 0x900, 0xa00, 0xb00, 0xd00, 0xe00, 0xe80
+GET = 0x700               # the display-effect classes' getters
+CLIPS = ("clipA", "clipB", "clipC", "clipD", "lonely", "clipE", "clipF", "fxOne", "fxTwo",
+         "fxThree")
+FX_SOUNDS = (4, 1, 9)     # what fxOne..fxThree's sound getters answer
 
 
 def va(off):
@@ -113,9 +118,11 @@ def program(table_field=2):
                    0xE5911000, 0xE1540001, POP_PC])
     # sound_request_play: a leaf that bumps a serial and tail-calls the worker
     _code(raw, P, [mov(3, 0), 0xE2833001, b(P + 8, W)])
-    # callout: keeps the request in r4, swaps it on one path (the Japanese sibling), plays it
-    _code(raw, C, [PUSH, 0xE1A04000, bl(C + 8, FLAG), 0xE3500000, b(C + 16, C + 28, cond=0),
-                   bl(C + 20, LOOKUP), 0xE1D040B2, 0xE1A00004, POP_LR, b(C + 36, P)])
+    # callout: makes a register BEFORE its push (Godzilla's reads a global there), keeps the
+    # request in r4, swaps it on one path (the Japanese sibling), plays it
+    _code(raw, C, [movw(3, 0x1234), PUSH, 0xE1A04000, bl(C + 12, FLAG), 0xE3500000,
+                   b(C + 20, C + 32, cond=0), bl(C + 24, LOOKUP), 0xE1D040B2, 0xE1A00004,
+                   POP_LR, b(C + 40, P)])
     # game code: clip A, callout 3, clip B, sound 5
     _code(raw, G, [PUSH, movw(0, clip["clipA"] & 0xFFFF), movt(0, clip["clipA"] >> 16),
                    bl(G + 12, CLIP), mov(0, 3), bl(G + 20, C),
@@ -126,6 +133,17 @@ def program(table_field=2):
                    0, 0, clip["clipC"]])
     # clip D is a pointer in a table; the code that loads the table plays sound 6
     struct.pack_into("<II", raw, TBL, clip["clipD"], 0)
+    # records of a clip and the sound played with it (Godzilla's {name, request}: rampage1 -> 675)
+    struct.pack_into("<4I", raw, REC, clip["clipE"], 8, clip["clipF"], 2)
+    # a table of a clip and a FLAG: two clips hold the same number, so it is no sound column
+    struct.pack_into("<4I", raw, FLAGS, clip["clipA"], 1, clip["clipB"], 1)
+    # display effects: name() { return "fxOne"; }, flag() { return 1; }, sound() { return 4; },
+    # each class's vtable [name, other, flag, sound]: the sound three slots past the name
+    for k, (n, snd) in enumerate(zip(("fxOne", "fxTwo", "fxThree"), FX_SOUNDS)):
+        at = GET + 0x20 * k
+        _code(raw, at, [movw(0, clip[n] & 0xFFFF), movt(0, clip[n] >> 16), BX_LR,
+                        mov(0, 1), BX_LR, mov(0, snd), BX_LR])
+        struct.pack_into("<4I", raw, VTBL + 0x10 * k, va(at), 0, va(at + 12), va(at + 20))
     _code(raw, T, [PUSH, movw(0, va(TBL) & 0xFFFF), movt(0, va(TBL) >> 16), bl(T + 12, CLIP),
                    mov(0, 6), bl(T + 20, P), POP_PC])
     # a function that plays a fixed sound itself: an entry's caller, not an entry
@@ -177,8 +195,15 @@ def test_a_function_that_overwrites_its_argument_hands_nothing_on():
     flow = CS._flow(prog, va(X))
     assert flow[va(X + 12)][0] == frozenset()         # mov r0, #9: not X's argument any more
     flow = CS._flow(prog, va(C))
-    assert flow[va(C + 36)][0] == frozenset((0,))     # r4 is the request on the unswapped path
-    assert flow[va(C + 8)][0] == frozenset((0,))      # before the flag call too
+    assert flow[va(C + 40)][0] == frozenset((0,))     # r4 is the request on the unswapped path
+    assert flow[va(C + 12)][0] == frozenset((0,))     # before the flag call too
+
+
+def test_a_function_starts_at_its_callers_target_when_a_register_is_made_before_its_push():
+    raw, prog = _prog()
+    assert prog.func_start(va(C + 40)) == va(C + 4)                 # the push
+    assert CS._start_of(prog, va(C + 40)) == va(C)                  # what callers call
+    assert CS._extent(prog, va(C))[0] > va(C + 40)
 
 
 def test_every_constant_request_is_a_call():
@@ -190,6 +215,15 @@ def test_every_constant_request_is_a_call():
     assert [(c.at - BASE, c.request) for c in calls] == [
         (G + 20, 3), (G + 40, 5), (H + 16, 7), (T + 20, 6), (X + 12, 9)]
     assert {c.fn - BASE for c in calls} == {G, H, T, X}
+
+
+def test_a_request_table_reader_that_game_code_hands_a_request_is_a_query_not_a_seed():
+    raw, prog = _prog()
+    count, _l, tva, reg = CS.request_table(raw, FRAGMENTS)
+    seeds = dict(CS.table_readers(prog, tva, reg))
+    seeds[va(P)] = "request table"         # as if it read the table: game code hands it 5, 6
+    entries = CS.sound_entries(prog, seeds, count, depth=0, trust=False)
+    assert set(entries) == {va(W)}
 
 
 def test_a_ports_sound_sites_seed_the_entries_when_their_words_are_this_programs(tmp_path,
@@ -222,11 +256,48 @@ def test_each_clip_gets_the_sounds_its_code_asks_for_best_first():
     assert got["clipA"] == [(3, "next"), (5, "function")]
     assert got["clipB"] == [(5, "next"), (3, "function")]
     assert got["clipC"] == [(7, "next")]
-    assert got["clipD"] == [(6, "table")]
-    assert "lonely" not in got
-    assert out.sids == {3: [7], 5: [5], 6: [4], 7: [3]}
+    # the code that only loads clip D's table is no lead (1 in 23 in the emulator)
+    assert "clipD" not in got and "lonely" not in got
+    assert got["clipE"] == [(8, "record")] and got["clipF"] == [(2, "record")]
+    assert [got[n] for n in ("fxOne", "fxTwo", "fxThree")] == [
+        [(4, "record")], [(1, "record")], [(9, "record")]]
+    assert out.sids == {1: [9], 2: [8], 3: [7], 4: [6], 5: [5], 7: [3], 8: [2], 9: [1]}
     a = out.sounds_of("clipA")[0]
     assert a["request"] == 3 and a["how"] == "next" and a["gap"] == 4 and a["sids"] == [7]
+
+
+def test_a_display_effects_sound_getter_is_found_three_slots_past_its_name_getter():
+    raw, prog = _prog()
+    refs = CM.clip_refs(prog, raw, CLIPS)
+    got = CS.getters(prog, raw, refs, COUNT)
+    # slot +2 answers 1 for all three classes: a flag, not their sounds
+    assert {c: [v for v, _f in fs] for c, fs in got.items()} == {
+        "fxOne": [4], "fxTwo": [1], "fxThree": [9]}
+    assert got["fxOne"][0][1] == va(GET + 20)
+    # fewer than three classes say nothing
+    two = {c: rs for c, rs in refs.items() if c != "fxThree"}
+    assert CS.getters(prog, raw, two, COUNT) == {}
+
+
+def test_a_sound_named_after_a_clip_is_its_sound():
+    menu = {12: "SE GZ FX DE BRIDGEATTACK 1", 13: "SE GZ VO GAME BRIDGEATTACK 1",
+            14: "SE GZ FX DE BRIDGEATTACK 10", 15: "SE GZ FX MATCH",
+            16: "SE JAWS BOUNTYHUNT LOOP 1"}
+    # "match" is too short to trust; "attack_1" is no whole word of "BRIDGEATTACK 1"
+    assert CS.named(["BridgeAttack_1", "match", "bountyhunt_loop_1", "attack_1"], menu) == {
+        "BridgeAttack_1": [12, 13], "bountyhunt_loop_1": [16]}
+
+
+def test_a_clips_record_names_the_sound_played_with_it_and_a_flag_column_names_none():
+    raw, prog = _prog()
+    refs = CM.clip_refs(prog, raw, CLIPS)
+    assert CS.records(prog, refs, COUNT) == {"clipE": [(8, va(REC))], "clipF": [(2, va(REC + 8))]}
+    # a pointer beside the name is no request
+    raw2 = bytearray(raw)
+    struct.pack_into("<I", raw2, REC + 4, va(STR))
+    prog2 = S.Program(bytes(raw2))
+    assert CS.records(prog2, CM.clip_refs(prog2, bytes(raw2), CLIPS), COUNT) == {
+        "clipF": [(2, va(REC + 8))]}
 
 
 def test_the_nearest_clip_before_a_call_wins_over_a_nearer_one_after_it():
@@ -234,19 +305,6 @@ def test_the_nearest_clip_before_a_call_wins_over_a_nearer_one_after_it():
     assert CS._nearest(0x114, places) == "A"
     assert CS._nearest(0x0f0, places) == "A"                 # nothing before: the first after
     assert CS._nearest(0x100 + 4 * (CS.NEAR + 1), [(0x100, "A")]) is None
-
-
-def test_a_modes_other_calls_are_its_clips_sounds_too():
-    raw, prog = _prog()
-    calls = [CS.Call(va(X + 12), va(X), 9, "sound_play")]
-    refs = {"clipA": [CM.Ref("movw_a32", [G + 4, G + 8], va(G + 4), "cmode_x", "own")]}
-
-    class Owners:
-        def of_code(self, at):
-            return ("cmode_x", "own") if at == va(X + 12) else ("", "")
-
-    assert CS.pair(prog, refs, calls, Owners()) == {"clipA": [[9, "mode", -1, va(X + 12)]]}
-    assert CS.pair(prog, refs, calls) == {}
 
 
 def test_a_reading_survives_its_cache():
@@ -320,9 +378,11 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
         {"input_path": str(card), "input_name": card.name}), encoding="utf-8")
     sounds = CS.SoundReading(
         origin="port", count=10, calls=3,
-        pairs={"intro": [[3, "next", 4, 0x1000], [5, "function", 9, 0x1010],
-                         [7, "mode", -1, 0x2000]]},
-        names={3: "SE GZ VO ROAR", 7: "MUSIC: BATTLE"}, sids={3: [30], 5: [50], 7: [70]})
+        pairs={"intro": [[5, "record", -1, 0x1010], [3, "next", 4, 0x1000],
+                         [8, "name", -1, 0], [7, "function", 90, 0x2000]],
+               "boss": [[9, "function", 50, 0x3000]]},
+        names={3: "SE GZ VO ROAR", 7: "MUSIC: BATTLE", 8: "SE GZ FX DE INTRO"},
+        sids={3: [30], 5: [50], 7: [70], 8: [80], 9: [90]})
     reading = CM.Reading(labels={GIGAN: "Battle vs Gigan"},
                          refs={"intro": [CM.Ref("movw_a32", [1, 2], 1, GIGAN, "own")]})
 
@@ -344,12 +404,14 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
         _scan(w, proj)
         snd = shown(w, INTRO)
         assert snd["head"] == VM.SOUNDS_HEAD
+        # the kinds the emulator proved, best first; "function" (7 in 29) is not shown
         assert [(i["text"], i["how"]) for i in snd["items"]] == [
-            ("SE GZ VO ROAR", "right after the clip"), ("sound request 5", "in the same code")]
-        assert snd["items"][0]["tip"]["lines"] == ["Sound request 3", "Sound Test: SE GZ VO ROAR"]
-        assert snd["more"] == "And 1 sound elsewhere in Battle vs Gigan."
+            ("sound request 5", "kept with the clip"), ("SE GZ VO ROAR", "asked for right after it"),
+            ("SE GZ FX DE INTRO", "named after it")]
+        assert snd["items"][1]["tip"]["lines"] == ["Sound request 3", "Sound Test: SE GZ VO ROAR"]
+        assert snd["more"] == ""
         assert snd["foot"] == VM.SOUNDS_FOOT              # no request map from the extract yet
-        assert shown(w, BOSS) is None                      # its code asks for no sound
+        assert shown(w, BOSS) is None                      # only a "function" lead
         # an extract that wrote the request map: the files themselves
         CS.write_requests(str(proj / CS.REQUESTS_TSV), [[]] * 10, {3: [12], 5: [13, 14]},
                           {3: "SE GZ VO ROAR"})
@@ -358,9 +420,10 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
             (proj / "audio" / n).write_bytes(b"")
         _scan(w, proj)
         snd = shown(w, INTRO)
-        assert [i["text"] for i in snd["items"]] == ["idx0012 - SE GZ VO ROAR.wav",
-                                                     "idx0013.wav (+1)"]
-        assert snd["items"][1]["tip"]["lines"] == ["Sound request 5", "idx0013.wav",
+        assert [i["text"] for i in snd["items"]] == ["idx0013.wav (+1)",
+                                                     "idx0012 - SE GZ VO ROAR.wav",
+                                                     "SE GZ FX DE INTRO"]
+        assert snd["items"][0]["tip"]["lines"] == ["Sound request 5", "idx0013.wav",
                                                    "idx0014.wav"]
         assert snd["foot"] == ""
 
@@ -414,16 +477,23 @@ def _real(card):
 @pytest.mark.slow
 @pytest.mark.parametrize("card", REAL, ids=["pro116", "le116"])
 def test_a_real_godzilla_program_pairs_clips_with_sounds(card):
-    """Not emulator-proven: what this checks is that the request table alone finds the sound
-    functions the build's port names, and that clips get sounds. Each pairing's truth is for a
-    sound census (sdk/sound_census.c) to settle."""
+    """The request table alone finds every sound function the build's port names (callout
+    makes a register before its push) and the same calls, and the clips get the kinds the
+    emulator census proved on these builds (docs/architecture/stern.md)."""
     elf, names, fragments, game, version = _real(card)
     port = CS.analyse(elf, names, fragments, game=game, version=version)
     assert port.origin == "port", port.note
     assert port.count > 1000 and port.calls > 100
-    assert any(p[1] == "next" for ps in port.pairs.values() for p in ps)
     located = CS.analyse(elf, names, fragments)
     assert located.origin == "located", located.note
     named = {va: e[0] for va, e in port.entries.items() if " > " not in e[0]}   # the port's
     missed = {"0x%x" % va: n for va, n in named.items() if va not in located.entries}
     assert not missed, "the request table did not lead to %r" % missed
+    assert located.calls == port.calls and located.pairs == port.pairs
+    got = {how: {c for c, ps in port.pairs.items() for p in ps if p[1] == how}
+           for how in CS.HOWS}
+    # census-proven pairs (emulator, Premium/LE 1.16; the Pro build's in-game bank names them too)
+    assert ("rampage1", 675) in {(c, p[0]) for c, ps in port.pairs.items() for p in ps}
+    assert [p[:2] for p in port.pairs["adv_fighter2"]][0] == [538, "record"]   # its sound getter
+    assert [p[:2] for p in port.pairs["BridgeAttack_1"]] == [[785, "name"]]
+    assert len(got["record"]) > 100 and len(got["next"]) > 25 and len(got["name"]) > 150

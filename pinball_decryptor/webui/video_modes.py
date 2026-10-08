@@ -26,8 +26,8 @@ Store keys (namespace ``video``):
                follower), copy (a mode's own clip), unplayed, other
   preview      + modes: {rel, kind: lead|follow|copy|unplayed, text, back} or None
                + sounds: {rel, head, items: [{text, how, tip}], more, foot} or None - the
-               sounds the clip's code asks for (:mod:`..plugins.stern.clip_sounds`, a
-               prototype), named by the extract's ``sound_requests.tsv`` and audio files
+               sounds the game plays with the clip (:mod:`..plugins.stern.clip_sounds`),
+               named by the extract's ``sound_requests.tsv`` and audio files
 """
 
 import os
@@ -61,11 +61,12 @@ BACK_TEXT = ("%s plays the same clip as %s again after the next Write. Choose a 
              "this row to keep a clip of its own.")
 UNPLAYED_TEXT = ("The game never plays this clip: nothing in its program asks for it by name, "
                  "so a replacement here changes nothing on the machine.")
-#: the callout's sounds part
-SOUNDS_HEAD = "Sounds the code playing this clip asks for (a reading of the game program):"
+#: the callout's sounds part: the kinds of :mod:`..plugins.stern.clip_sounds` pairing the
+#: emulator proved (record 38 of 38, next 16 of 18, name 94 of 106), each in words
+SOUNDS_HEAD = "Sounds the game plays with this clip (read from its program):"
 SOUNDS_MAX = 8
-SOUNDS_HOW = {"next": "right after the clip", "function": "in the same code",
-              "table": "in the code that reads the clip's table"}
+SOUNDS_HOW = {"record": "kept with the clip", "next": "asked for right after it",
+              "name": "named after it"}
 SOUNDS_FOOT = ("Extract the card again to see which sound files these are: the extract writes "
                "sound_requests.tsv.")
 
@@ -380,7 +381,7 @@ class ModesMixin:
             return {"rel": rel, "kind": "unplayed", "back": "", "text": UNPLAYED_TEXT}
         return None
 
-    # -- the sounds a clip's code plays (a prototype) ----------------------------------------
+    # -- the sounds the game plays with a clip -----------------------------------------------
     def _m_sound_reading(self):
         if self._m_sr is None and self._m_clips is not None:
             self._m_sr = self._m_clips.sound_reading
@@ -431,23 +432,19 @@ class ModesMixin:
                 return {"rel": rel, "head": SOUNDS_HEAD, "items": [], "more": "",
                         "foot": "None found: %s." % reading.note}
             return None
-        strong = [snd for snd in sounds if snd["how"] in SOUNDS_HOW]
-        loose = [snd for snd in sounds if snd["how"] not in SOUNDS_HOW]
+        # "function" (a call elsewhere in the code naming the clip) was right 7 times in 29
+        shown = [snd for snd in sounds if snd["how"] in SOUNDS_HOW]
+        if not shown:
+            return None
         items = []
-        for snd in strong[:SOUNDS_MAX]:
+        for snd in shown[:SOUNDS_MAX]:
             text, tip = self._m_sound_words(snd)
             items.append({"text": text, "how": SOUNDS_HOW[snd["how"]], "tip": tip})
-        more = []
-        if len(strong) > SOUNDS_MAX:
-            more.append("%d more in the same code" % (len(strong) - SOUNDS_MAX))
-        if loose:
-            modes = _and([self._m_label(m) for m in self._m_modes.get(rel) or ()]) or "its mode"
-            more.append("%d sound%s elsewhere in %s" % (len(loose), "" if len(loose) == 1 else "s",
-                                                         modes))
+        more = len(shown) - SOUNDS_MAX
         req, _audio = self._m_sound_names()
         return {"rel": rel, "head": SOUNDS_HEAD, "items": items,
-                "more": ("And " + "; ".join(more) + ".") if more else "",
-                "foot": "" if req or not items else SOUNDS_FOOT}
+                "more": "And %d more." % more if more > 0 else "",
+                "foot": "" if req else SOUNDS_FOOT}
 
     # -- the filter ------------------------------------------------------------------------
     @rpc

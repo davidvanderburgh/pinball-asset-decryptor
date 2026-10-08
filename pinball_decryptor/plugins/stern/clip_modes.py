@@ -330,8 +330,8 @@ def _wide_pairs(S, prog, raw, spans, at_name, census):
 
 def analyse(elf, names, ctx=None):
     """:class:`Reading` of the game program *elf* (bytes) for the clip *names*. Read-only.
-    *ctx*, a dict when given, gets the ``prog`` and the mode ``owners`` it read, so
-    :mod:`.clip_sounds` reads the same program without building them again."""
+    *ctx*, a dict when given, gets the ``prog`` it read, so :mod:`.clip_sounds` reads the same
+    program without building it again."""
     from . import stock_scan as S
     elf = bytes(elf)
     out = Reading(sha1=hashlib.sha1(elf).hexdigest())
@@ -347,8 +347,6 @@ def analyse(elf, names, ctx=None):
         return out
     layers = _layers(model, modes)
     owners = _Owners(S, prog, _anchors(S, prog, model, modes, layers), _inits(S, prog))
-    if ctx is not None:
-        ctx["owners"] = owners
     out.refs = clip_refs(prog, elf, names, owners)
     for rs in out.refs.values():
         for r in rs:
@@ -762,8 +760,9 @@ def _cache_path(card):
         st = os.stat(card)
     except OSError:
         return None
-    key = "%s|%d|%d|%d" % (os.path.normcase(os.path.abspath(card)), st.st_size,
-                           int(st.st_mtime), READ_REV)
+    from .clip_sounds import READ_REV as SOUNDS_REV
+    key = "%s|%d|%d|%d|%d" % (os.path.normcase(os.path.abspath(card)), st.st_size,
+                              int(st.st_mtime), READ_REV, SOUNDS_REV)
     return os.path.join(cache_dir("clip_modes"), hashlib.sha1(key.encode()).hexdigest() + ".json")
 
 

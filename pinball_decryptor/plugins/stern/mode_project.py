@@ -1660,6 +1660,9 @@ LAMPS_PROVEN = frozenset((
     "sword_of_rage_pro-1.19",
     "uncanny_xmen_pro-0.98",
     "venom_pro-1.07",
+    # PAD-420 2026-10-08, the same proof on Batman 66 1.14's new port (its 22 block lines in): 6/6 RGB, 82/82 single
+    # (8 and 7 single lit before and after: the game's own)
+    "batman-1.14",
 ))
 
 

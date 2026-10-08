@@ -338,5 +338,7 @@ data coil_count            0x0067463c
 data coil_table            0x0067706c
 value magnet_proc          13185
 text right_return_up_label Right return up post
+text magnet_hold_label    Magnet
 text right_return_up_drive 8 7 a169 0 a169 1250
-text held_coils            right_return_up
+text magnet_hold_drive    9 0 255 a182 82 1200
+text held_coils            right_return_up magnet_hold

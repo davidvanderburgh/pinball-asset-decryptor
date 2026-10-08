@@ -443,3 +443,33 @@ text block_name_127     Escape Nublar
 # PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
 # build's own transcribed voice lines, tu_wide.py)
 callout time_up           915   # You've wasted too much time!
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+data coil_count            0x0073b27c
+data coil_table            0x0072d110
+value magnet_proc          13185
+site coil_take            0x0007da04 0xe92d40f8 0xe30870dc
+site coil_give            0x0007dac8 0xe3510000 0xe92d4038
+text orbit_post_label     Orbit up post
+value orbit_post_dev      13
+value orbit_post_ctl      40
+value orbit_post_devoff   4
+value orbit_post_off_slot 31
+site orbit_post_get       0x0007edb8 0xe92d4030 0xe3064874
+text room_post_label      Control room up post
+value room_post_dev       14
+value room_post_ctl       40
+value room_post_devoff    4
+value room_post_off_slot  31
+site room_post_get        0x0007e148 0xe92d4010 0xe30645f8
+text inlane_post_label    Left inlane up post
+value inlane_post_dev     8
+value inlane_post_ctl     40
+value inlane_post_devoff  4
+value inlane_post_off_slot 31
+site inlane_post_get      0x0007e5e0 0xe92d4010 0xe306467c
+text orbit_post_drive     9 8 255 64 64
+text room_post_drive      9 6 255 64 64
+text inlane_post_drive    8 6 255 128 64
+text held_coils            orbit_post room_post inlane_post

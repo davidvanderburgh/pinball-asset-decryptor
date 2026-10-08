@@ -785,6 +785,9 @@ HELD_COILS_PROVEN = frozenset({
     ("avengers_infinity_pro-1.10", "tower_post"), # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 9 coil 5, 255 for 120 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
     ("munsters_pro-1.28", "up_post"),            # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 150 ms then 64 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("munsters_pro-1.28", "magnet_hold"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 1200 ms then 18 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("jurassic_park_pro-1.16", "orbit_post"),    # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 9 coil 8, 255 for 60 ms then 64 (its own); OFF 2016 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("jurassic_park_pro-1.16", "room_post"),     # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 64 (its own); OFF 2016 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("jurassic_park_pro-1.16", "inlane_post"),   # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 8 coil 6, 255 for 120 ms then 64 (its own); OFF 2016 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
 })
 
 

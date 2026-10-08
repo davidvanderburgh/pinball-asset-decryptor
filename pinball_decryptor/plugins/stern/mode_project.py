@@ -1674,6 +1674,9 @@ LAMPS_PROVEN = frozenset((
     # PAD-420 2026-10-08, the same proof on Batman 66 1.14's new port (its 22 block lines in): 6/6 RGB, 82/82 single
     # (8 and 7 single lit before and after: the game's own)
     "batman-1.14",
+    # PAD-420 2026-10-08 run 16, the ball launched and 15 s settled first: Munsters Pro 1.28 5/5 RGB, 60/60 single
+    # (9 lit before and after: the game's own); light_shots lit its 4 tied RGB and 10 tied single inserts
+    "munsters_pro-1.28",
 ))
 
 

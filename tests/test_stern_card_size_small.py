@@ -270,6 +270,58 @@ def test_the_shrink_runner_bounds_the_loop_to_the_old_partition():
     [script] = shipped
     assert ("losetup -f --show -o 364904448 --sizelimit %d" % (28311550 * 512)
             in script)
-    assert 'resize2fs "$L" %ds' % SMALL_TABLE[0] in script
+    # forced: resize2fs's own minimum is about 2 GB over what is in use on
+    # Stern's 16 GB cards (see _E2fs.shrink); shrink_image checks the room
+    assert 'resize2fs -f "$L" %ds' % SMALL_TABLE[0] in script
     assert 'e2fsck -fp "$L"' in script and 'e2fsck -fn "$L"' in script
     assert "E2FSCK_TIME=5" in script and "?offset" not in script
+    # ...and a grow never is
+    shipped.clear()
+    e2.grow("C:/x/card.raw", 364904448, 28311550 * 512)
+    assert 'resize2fs "$L" 28311550s' in shipped[0]
+    assert "resize2fs -f" not in shipped[0]
+
+
+def test_a_build_too_full_for_the_smaller_card_is_refused_untouched(
+        tmp_path, monkeypatch):
+    """The room checked on the finished build, before the resize: a build
+    that put more on the games partition than the smaller card holds (with
+    the kernel's 16 MB to spare) is refused in words, the card as it was."""
+    monkeypatch.setattr(cs, "_E2fs", _FakeShrink)
+    _FakeShrink.calls = []
+    _stub_reads(monkeypatch)
+    # Bond with 4.37 GB more on it: 1,000 blocks short of the 4,096 to spare
+    _blocks, free, _r = cs.shrunk(BOND_PRO_106, 3375103)
+    full = BOND_PRO_106._replace(free=BOND_PRO_106.free - (free - 3096))
+    monkeypatch.setattr(cs, "read_space", lambda p: full)
+    path = make_card(tmp_path / "c.raw", "16G", marks=False)
+    with pytest.raises(cs.CardSizeError,
+                       match="what this build put on the games partition is "
+                             "4.1 MB more than a smaller 16 GB SD card has "
+                             "room for"):
+        cs.shrink_image(str(path), "16S")
+    assert _FakeShrink.calls == []
+    assert os.path.getsize(path) == cs.CARD_SIZES["16G"]
+    # exactly the room: it goes ahead
+    room = BOND_PRO_106._replace(free=BOND_PRO_106.free - (free - 4096))
+    monkeypatch.setattr(cs, "read_space", lambda p: room)
+    assert cs.shrink_image(str(path), "16S") is True
+
+
+def test_the_room_the_preflight_gives_is_the_room_the_shrink_takes():
+    """A build the pre-flight lets use every usable block of the smaller card
+    leaves exactly the headroom shrink_image asks for."""
+    usable = cs.usable_blocks(BOND_PRO_106, 3375103)
+    after = BOND_PRO_106._replace(free=BOND_PRO_106.free - usable)
+    assert cs.shrunk(after, 3375103)[1] == cs._SHRINK_HEADROOM
+
+
+def test_the_wontfit_from_the_smaller_card_names_the_image_size():
+    e = cs.WontFit(3 * 10 ** 9, 10 ** 9, fits="16G", fits_room=5 * 10 ** 9,
+                   current="16S", at="16S")
+    assert ("Build it for a 16 GB SD card if the SD card in the machine "
+            "holds a 15.49 GB image (SD card size on the Write tab: 5.00 GB "
+            "free there).") in str(e)
+    e8 = cs.WontFit(3 * 10 ** 9, 10 ** 9, fits="16G", fits_room=5 * 10 ** 9,
+                    current="8G")
+    assert "if the SD card in the machine is 16 GB or bigger" in str(e8)

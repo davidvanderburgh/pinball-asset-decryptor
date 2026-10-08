@@ -557,6 +557,11 @@ def _overhead_fn(s, gdt, resv):
 #: Blocks :func:`shrunk` keeps back for the extent blocks the files resize2fs
 #: moves may need (1 MB at 4 KiB blocks; the real shrink took 2).
 _SHRINK_SLACK = 256
+#: Free blocks :func:`shrink_image` wants left on the smaller partition, past
+#: the slack, before it resizes: the kernel's reserve, which the pre-flight
+#: (usable_blocks, mount route) already keeps back from every build, so a
+#: build it let through always has it.
+_SHRINK_HEADROOM = 4096
 
 
 def shrunk(space, new_blocks):
@@ -712,8 +717,9 @@ def candidates(original_path):
     first: its own, then the bigger ones this computer can grow it to
     (:func:`offered`)."""
     with open(_lp(original_path), "rb") as f:
-        own = class_of(read_layout(f).laid_out)
-    return [c for c in CARD_SIZES if c == own or c in offered(original_path)]
+        own = layout_class(read_layout(f).laid_out)
+    return [c for c in LAYOUT_SIZES
+            if c == own or c in offered(original_path)]
 
 
 def room_gained(path, target, route=ROUTE_MOUNT):
@@ -823,11 +829,16 @@ class WontFit(CardSizeError):
                     % (words(self.fits),
                        bigger_card(self.fits, self.fits_room, fixed=True), out))
         elif self.fits:
-            # only a machine whose SD card is that big can take the image
+            # only a machine whose SD card is that big can take the image;
+            # from the smaller 16 GB card, Stern's own 16 GB image is the next
+            # size, which some 16 GB cards can't hold (PAD-465): said in bytes
             msg += (" Build it for a %s SD card if the SD card in the machine "
-                    "is %s or bigger (SD card size on the Write tab%s). "
+                    "%s (SD card size on the Write tab%s). "
                     "Otherwise take something out (%s)."
-                    % (words(self.fits), words(self.fits),
+                    % (words(self.fits),
+                       "holds a %s image" % size_words(CARD_SIZES[self.fits])
+                       if self.current == SMALL and self.fits in CARD_SIZES
+                       else "is %s or bigger" % words(self.fits),
                        ": %s free there" % size_words(self.fits_room)
                        if self.fits_room is not None else "", out))
         elif self.largest and self.largest_room is not None:
@@ -952,11 +963,24 @@ class _E2fs:
         long, shorter than the *size*-byte partition the loop device is
         bounded to (PAD-465, the smaller 16 GB card).  resize2fs moves the
         files past the new end further in, which is why it runs only on a
-        build's finished output (see :func:`shrink_image`)."""
-        return self._resize(image_path, offset, size, new_size, epoch,
-                            timeout)
+        build's finished output (see :func:`shrink_image`).
 
-    def _resize(self, image_path, offset, size, new_size, epoch, timeout):
+        With ``-f``.  resize2fs will not shrink below its own minimum
+        (calculate_minimum_resize_size), which adds a flex group's worth of
+        slack "so the resize operation can be guaranteed to finish" when it
+        has to move inode tables: about 2 GB over what is in use on Stern's
+        16 GB cards (James Bond Pro 1.06: 2,303,145 blocks used, minimum
+        2,771,153), so any build adding more than about 2.4 GB to Bond, and
+        180 MB to Rush, was refused at the very end.  This shrink moves no
+        inode table: it drops groups 103-107, whose metadata flex_bg put in
+        group 96, which stays.  The room it needs is :func:`shrunk`'s, exact
+        to the block, which :func:`shrink_image` checks on the finished build
+        before calling this, and every moved file is read back after."""
+        return self._resize(image_path, offset, size, new_size, epoch,
+                            timeout, force=True)
+
+    def _resize(self, image_path, offset, size, new_size, epoch, timeout,
+                force=False):
         img = self.ex.to_exec_path(image_path)
         env = ["export RESIZE2FS_FORCE_ITABLE_INIT=1"]
         if epoch:
@@ -978,8 +1002,8 @@ class _E2fs:
             'e2fsck -fp "$L" > /tmp/pad_e2.$$ 2>&1; r=$?',
             'sed "s/^/PAD_OUT fsck /" /tmp/pad_e2.$$; echo "PAD_E2 fsck $r"',
             '[ $r -le 1 ] || exit 0',
-            'resize2fs "$L" %ds > /tmp/pad_e2.$$ 2>&1; r=$?'
-            % (int(new_size) // SECTOR),
+            'resize2fs %s"$L" %ds > /tmp/pad_e2.$$ 2>&1; r=$?'
+            % ("-f " if force else "", int(new_size) // SECTOR),
             'sed "s/^/PAD_OUT resize /" /tmp/pad_e2.$$; echo "PAD_E2 resize $r"',
             '[ $r -eq 0 ] || exit 0',
             'e2fsck -fn "$L" > /tmp/pad_e2.$$ 2>&1; r=$?',
@@ -1256,18 +1280,22 @@ def expand_image(path, target, log=None, cancel=None, epoch=None):
 def _files_and_tail(path, blocks, cancel, hash_tail=True):
     """``(sizes, tail)`` of the games partition of the card at *path*:
     ``{path: size}`` for every regular file, and ``{path: (size, sha256)}``
-    for the ones holding a block at or past *blocks* (the ones a resize to
-    that length moves), read whole.  Without *hash_tail*, *tail* holds the
-    paths only (``None`` for the digest)."""
+    for the ones a resize to *blocks* long moves, read whole: a block at or
+    past *blocks*, or an inode in a block group that goes (resize2fs gives
+    it a new number).  Without *hash_tail*, *tail* holds the paths only
+    (``None`` for the digest)."""
     from .ext4 import Ext4Reader
     sizes, tail = {}, {}
     with open(_lp(path), "rb") as f:
         f.seek(0, os.SEEK_END)
         r = Ext4Reader(f, P3_START * SECTOR, f.tell() - P3_START * SECTOR)
-        for p, _ino, node in r.iter_regular_files(min_size=0, max_depth=20):
+        kept = -(-(int(blocks) - int(r.first_data_block))
+                 // int(r.blocks_per_group))
+        last_ino = kept * int(r.inodes_per_group)
+        for p, ino, node in r.iter_regular_files(min_size=0, max_depth=20):
             sizes[p] = int(node.get("size") or 0)
-            if not any(phys + cnt > blocks
-                       for _log, phys, cnt in r._runs(node)):
+            if ino <= last_ino and not any(
+                    phys + cnt > blocks for _log, phys, cnt in r._runs(node)):
                 continue
             if not hash_tail:
                 tail[p] = (sizes[p], None)
@@ -1338,8 +1366,21 @@ def shrink_image(path, target, log=None, cancel=None, epoch=None):
     if dst + n > src:
         raise CardSizeError("the settings and log partitions would overlap "
                             "their own new place")
-    block_size = read_space(path).block_size
-    new_blocks = new.p3_count * SECTOR // block_size
+    space = read_space(path)
+    new_blocks = new.p3_count * SECTOR // space.block_size
+    # The room, on the build as it is: the pre-flight counted it before the
+    # encode, partly by estimate, and resize2fs runs forced (_E2fs.shrink),
+    # so this is the check that a build too full for the smaller card is
+    # refused in words, before anything here is touched.
+    _b, free, _r = shrunk(space, new_blocks)
+    if free < _SHRINK_HEADROOM:
+        raise CardSizeError(
+            "what this build put on the games partition is %s more than a "
+            "%s SD card has room for (with %s to spare); build it at "
+            "Stern's own size, or take something out"
+            % (size_words((_SHRINK_HEADROOM - free) * space.block_size),
+               words(target),
+               size_words(_SHRINK_HEADROOM * space.block_size)))
     log("Making the card fit a %s SD card: the games partition shrinks from "
         "%.2f GB to %.2f GB (the files at its end move further in), and the "
         "two small partitions that hold the machine's settings and logs move "

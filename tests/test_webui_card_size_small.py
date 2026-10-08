@@ -103,18 +103,24 @@ def test_the_flash_dialog_points_at_the_smaller_card(tmp_path, monkeypatch,
         assert w.run(svc._open_flash_dialog) is True
         dlg = svc._flash
         assert dlg._build_size == cs.CARD_SIZES["16G"]
-        assert dlg._build_size_hint == HINT
+        assert dlg._build_hint(15376000000) == HINT
+        # a card too small for the smaller image too gets no such pointer
+        assert dlg._build_hint(14_000_000_000) == ""
         w.run(dlg.set, "build", True)
         w.run(dlg.set, "write", True)
         dlg.selected = short16
         text, kind = dlg.readout()
         assert kind == "err" and text.endswith(", " + HINT + "."), text
+        dlg.selected = SimpleNamespace(size_bytes=7_948_206_080,
+                                       display="8 GB SD card")
+        text, kind = dlg.readout()
+        assert kind == "err" and text.endswith("Use a larger SD card."), text
         w.run(dlg.close)
         w.call("ui.set", "write", "card_size", "16S")
         assert w.run(svc._open_flash_dialog) is True
         dlg = svc._flash
         assert dlg._build_size == cs.LAYOUT_SIZES["16S"]
-        assert dlg._build_size_hint == ""
+        assert dlg._build_hint(15376000000) == ""
         w.run(dlg.set, "build", True)
         w.run(dlg.set, "write", True)
         dlg.selected = short16
@@ -135,9 +141,12 @@ def test_an_image_already_built_at_16g_is_told_to_build_it_smaller(
         point_at(w, big)
         svc = w.window.service("write")
         hint = w.run(svc._image_small_card_hint, str(big),
-                     cs.CARD_SIZES["16G"])
+                     cs.CARD_SIZES["16G"], 15376000000)
         assert hint == ('or build it again with SD card size set to "Smaller '
                         '16 GB card" on the Write tab (a 14.82 GB image)')
+        # a card too small for that as well: no pointer
+        assert w.run(svc._image_small_card_hint, str(big),
+                     cs.CARD_SIZES["16G"], 14_000_000_000) == ""
         assert w.run(svc._image_small_card_hint, str(small),
                      cs.CARD_SIZES["8G"]) == ""
         assert w.run(svc._image_small_card_hint, str(junk), 4096) == ""
@@ -152,8 +161,8 @@ def test_the_dialog_says_the_image_hint_when_the_image_wont_fit(tmp_path,
     img.write_bytes(b"\0" * 4096)
     asked = []
 
-    def hint(path, size):
-        asked.append((path, size))
+    def hint(path, size, card):
+        asked.append((path, size, card))
         return "or do the other thing"
     mfr = SimpleNamespace(key="stern", flash_noun="SD card", capabilities=None)
     try:
@@ -166,7 +175,7 @@ def test_the_dialog_says_the_image_hint_when_the_image_wont_fit(tmp_path,
     text, kind = dlg.readout()
     assert kind == "err"
     assert text.endswith(", or do the other thing."), text
-    assert asked == [(str(img), 4096)]
+    assert asked == [(str(img), 4096, 1024)]
 
 
 def test_the_smaller_card_keeps_its_name_token():
@@ -178,3 +187,51 @@ def test_the_smaller_card_keeps_its_name_token():
     assert name("x.Release.8G.sdcard-modified.raw", "16S") == (
         "x.Release.16G-small.sdcard-modified.raw")
     assert write_mod._norm_card_size("16s") == "16S"
+
+
+def test_a_card_built_for_the_smaller_card_reads_as_that_size(
+        tmp_path, monkeypatch, bond_partition):
+    """A build for the smaller 16 GB card used as the next original: the
+    control knows it (its own size, then 16 GB and 32 GB) instead of hiding,
+    and the engine's no-space hint names the bigger sizes."""
+    from pinball_decryptor.core import ext4_grow
+    from pinball_decryptor.plugins.stern import engine
+    from tests import test_webui_card_size as base
+    from tests.test_stern_card_size_small import SMALL_TABLE
+    monkeypatch.setitem(base.TABLES, "16S", SMALL_TABLE)
+    card = make_card(tmp_path / "bond.Release.16G-small.sdcard-modified.raw",
+                     "16S", size=cs.LAYOUT_SIZES["16S"])
+    with open(card, "rb") as f:
+        assert cs.layout_class(cs.read_layout(f).laid_out) == "16S"
+    with web_app(tmp_path, mfr="stern") as w:
+        point_at(w, card)
+        assert wait_for(w, lambda: w.state("write")["card_size_cap"])
+        s = w.state("write")
+        assert values(s) == ["", "16G", "32G"]
+        assert s["card_size_note"].startswith(
+            "The original is a smaller 16 GB card.")
+    hint = engine._bigger_card_hint(ext4_grow.Ext4GrowNoSpace("full"),
+                                    str(card), 712704 * 512)
+    assert "16 GB" in hint and "32 GB" in hint
+
+
+def test_yes_from_the_smaller_card_goes_back_to_the_originals_size(
+        tmp_path, monkeypatch, bond_partition):
+    """A build too big for the smaller 16 GB card of a 16 GB original: the
+    one click goes to Stern's own size, which for that original is "Same as
+    the original", not a 16 GB choice left saved for the next 8 GB one."""
+    from tests.test_webui_card_size import _refused_run
+    card = make_card(tmp_path / BOND, "16G")
+    refusal = cs.WontFit(5 * 10 ** 9, 4 * 10 ** 9, fits="16G",
+                         fits_room=5 * 10 ** 9, current="16S", at="16S")
+    with web_app(tmp_path, mfr="stern", settings={"card_size": "16S"}) as w:
+        point_at(w, card)
+        msgs, again = _refused_run(w, tmp_path, monkeypatch, refusal, "yes")
+        assert msgs[0]["message"].startswith(
+            "Your assets no longer fit on a smaller 16 GB SD card.")
+        assert "has to hold a 15.49 GB image." in msgs[0]["message"]
+        assert wait_for(w, lambda: again)
+        assert w.run(w.window.card_size_choice) == ""
+        lines = [e["text"] for e in w.window._log.get("stern", [])]
+        assert ("SD card size is now the original's own (16 GB); building "
+                "again.") in lines

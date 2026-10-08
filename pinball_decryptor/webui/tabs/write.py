@@ -237,7 +237,8 @@ def _probe_card_size(path):
             size = f.tell()
             try:
                 layout = cs.read_layout(f, size)
-                own = cs.class_of(layout.laid_out)
+                # (a card built for the smaller 16 GB card is that size)
+                own = cs.layout_class(layout.laid_out)
             except cs.CardSizeError:
                 own = layout = None
         why = {}
@@ -1416,9 +1417,10 @@ class WriteTab(TabService):
     def _small_card_hint(self, build_size):
         """PAD-465: the Build / flash dialog's pointer at the smaller 16 GB
         card, for a build of *build_size* bytes that a 16 GB SD card can be
-        a little short of (Stern's 16 GB image): the words that follow
-        "Use a larger SD card, ", or "" when that size isn't offered for
-        this original, is already picked, or would be no smaller."""
+        a little short of (Stern's 16 GB image): ``(card's size) -> the words
+        that follow "Use a larger SD card, "`` ("" for a card too small for
+        the smaller image too), or "" when that size isn't offered for this
+        original, is already picked, or would be no smaller."""
         from ...plugins.stern.card_size import SMALL, layout_size
         from ..write_dialogs import _fmt_size
         probe = self._current_card_probe() or {}
@@ -1430,20 +1432,24 @@ class WriteTab(TabService):
         if (not builds_at or err or self.card_size_choice() == SMALL
                 or not build_size or build_size <= out):
             return ""
-        return ("or pick \"%s\" under SD card size on the Write tab (a %s "
-                "image)" % (CARD_SIZE_LABELS[SMALL], _fmt_size(out)))
+        words = ("or pick \"%s\" under SD card size on the Write tab (a %s "
+                 "image)" % (CARD_SIZE_LABELS[SMALL], _fmt_size(out)))
+        return lambda card: words if (card or 0) >= out else ""
 
-    def _image_small_card_hint(self, path, size):
+    def _image_small_card_hint(self, path, size, card=None):
         """PAD-465: the Build / flash dialog's pointer for an image ALREADY
         built at Stern's 16 GB size that won't fit the SD card picked:
         build it again for the smaller 16 GB card.  "" for any other image,
-        or where this computer can't build one (macOS).  Read off the image's
+        or for a *card* of fewer bytes than that image, or where this
+        computer can't build one (macOS).  Read off the image's
         table, a sector or three, and kept by path, size and time: the
         dialog asks on every redraw."""
         from ...core.longpath import ext as _lp
         from ...plugins.stern import card_size as cs
         from ..write_dialogs import _fmt_size
         if not self._card_size_applies() or not path:
+            return ""
+        if card and card < cs.layout_size(cs.SMALL):
             return ""
         try:
             key = (path, int(size), os.path.getmtime(path))
@@ -1519,7 +1525,7 @@ class WriteTab(TabService):
             size = int(probe.get("size") or 0)
             note = ("The original is %s %s card"
                     % ("an" if own == "8G" else "a", _class_words(own)))
-            if size > CARD_SIZES[own]:
+            if size > layout_size(own):
                 note += " in a %s file" % _fmt_size(size)
             note += "." + _room_words(probe.get("room") or {}, own, offered)
             if builds_at == SMALL and (out or 0) <= layout_size(SMALL):

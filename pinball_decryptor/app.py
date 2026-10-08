@@ -4961,10 +4961,19 @@ class App:
                 "Not built: the SD card size stays %s. To fit it, use fewer "
                 "or smaller replacements." % cs.words(current), "info")
             return True
-        self.window.write_card_size_var.set(fits)       # saved and applied
+        # From the smaller 16 GB card of a 16 GB original (PAD-465), the size
+        # that fits is the original's own: that is "Same as the original",
+        # not a 16 GB choice that would stay saved and grow the next 8 GB one
+        choice, said = fits, "%s" % cs.words(fits)
+        try:
+            if cs.target_for(self.window.write_upd_var.get().strip(),
+                             fits) is None:
+                choice, said = "", "the original's own (%s)" % cs.words(fits)
+        except (cs.CardSizeError, OSError):
+            pass
+        self.window.write_card_size_var.set(choice)     # saved and applied
         self.window.append_log(
-            "SD card size is now %s; building again." % cs.words(fits),
-            "info")
+            "SD card size is now %s; building again." % said, "info")
         device = chain_flash[0] if chain_flash else None
         verify = chain_flash[2] if chain_flash else True
         self.root.after(0, lambda: self._start_write(

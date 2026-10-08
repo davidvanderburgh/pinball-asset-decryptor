@@ -6133,7 +6133,8 @@ class _SpaceCard:
         self.avail = cs.usable_blocks(self.space, nb, route)
         self.room, self.current = {}, None
         if layout is not None:
-            own = cs.class_of(layout.laid_out)
+            # (a card built for the smaller 16 GB card is that size: PAD-465)
+            own = cs.layout_class(layout.laid_out)
             self.current = grow_to or own
             self.room = cs.room_by_class(layout, self.space,
                                          [own] + list(sizes or ()), route)
@@ -10611,8 +10612,11 @@ def _expand_card(original_path, output_path, parts, target, log, cancel):
     except Exception:  # noqa: BLE001 - an unpinned grow is still a valid one
         epoch = None
     try:
-        _cs.expand_image(output_path, target, log=log, cancel=cancel,
-                         epoch=epoch)
+        if not _cs.expand_image(output_path, target, log=log, cancel=cancel,
+                                epoch=epoch):
+            # the original could grow to it (card_size.preflight), so the
+            # copy of it at the output must: never hand back another size
+            raise _cs.CardSizeError("it did not grow")
         moved = _cs.check_blocks_unmoved(original_path, output_path, parts,
                                          log=log)
         if moved:
@@ -10660,8 +10664,10 @@ def _shrink_card(original_path, output_path, target, log, cancel):
     except Exception:  # noqa: BLE001 - an unpinned resize is still a valid one
         epoch = None
     try:
-        _cs.shrink_image(output_path, target, log=log, cancel=cancel,
-                         epoch=epoch)
+        if not _cs.shrink_image(output_path, target, log=log, cancel=cancel,
+                                epoch=epoch):
+            raise _cs.CardSizeError("it is not a card that is made smaller "
+                                    "for that size")
     except _cs.Cancelled:
         _discard_output(output_path)
         log("Cancelled while making the card fit a %s SD card; nothing was "
@@ -10761,11 +10767,11 @@ def _bigger_card_hint(err, image, part_offset, sizes=None):
         return ""
     try:
         with open(_lp(image), "rb") as f:
-            cls = _cs.class_of(_cs.read_layout(f).laid_out)
+            cls = _cs.layout_class(_cs.read_layout(f).laid_out)
     except Exception:  # noqa: BLE001 - a device, a multi-boot card, unreadable
         return ""
     bigger = [c for c in (_cs.CARD_SIZES if sizes is None else sizes)
-              if _cs.CARD_SIZES[c] > _cs.CARD_SIZES.get(cls, 1 << 62)]
+              if _cs.CARD_SIZES[c] > _cs.LAYOUT_SIZES.get(cls, 1 << 62)]
     if not bigger:
         return ""
     bigger.sort(key=_cs.CARD_SIZES.get)

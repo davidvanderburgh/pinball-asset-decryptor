@@ -261,7 +261,7 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_can(what)` | 1 if every flag is available | T P | item 134 (all flags on Godzilla Pro 1.15); items 136-138 (lights, screens, clips off on Jaws, TMNT, Deadpool) |
 | `pm_game()` | the port's game | T P | items 134-138 |
 | `pm_version()` | the port's version | T P | items 134-138 |
-| `pm_in_game()` | a player is up and no `mode_mask_busy` bit is set | T P F | items 125-138; the busy bits are not fully decoded |
+| `pm_in_game()` | a player is up, no `mode_mask_busy` bit is set and every `mode_mask_game` bit is | T P F | items 125-138; the busy bits are not fully decoded |
 | `pm_player()` | 1-4, 0 with no game | T P F | items 125-138; one player only (no multi-player game measured) |
 | `pm_score(player)` | a player's score | T P F | items 125, 134 (the END line's score before and after) |
 | `pm_shot(name)` | a named shot's mask | T P | items 134-138 |

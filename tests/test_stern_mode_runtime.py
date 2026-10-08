@@ -381,3 +381,14 @@ def test_a_port_value_can_be_negative():
     body = rt[rt.index("static uint64_t number(const char **p, int *ok)"):]
     body = body[:body.index("\n}\n")]
     assert "if (s[0] == '-') { neg = 1; s++; }" in body and "return neg ? (uint64_t)0 - x : x;" in body
+
+
+def test_in_game_takes_the_bits_a_game_sets_as_well():
+    """PAD-420: Jaws Pro 1.02's mode mask reads 0x0010 in attract and 0x0110 in a game (its bit 4 never clears), so
+    no busy bits alone can tell; `value mode_mask_game` names the bits a game sets. Default none: every port as
+    before."""
+    src = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    body = src[src.index("int pm_in_game(void)"):]
+    body = body[:body.index("\n}\n") + 3]
+    assert 'pm_port_value("mode_mask_game", 0)' in body
+    assert "return pm_player() != 0 && (mask & busy) == 0 && (mask & game) == game;" in body

@@ -197,7 +197,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
+| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |

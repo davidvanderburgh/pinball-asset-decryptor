@@ -668,6 +668,20 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         balls stocked in the van (`PAD_BALL_VAN_STOCK=2`; the TMNT LE has 8 balls) is chain130.
       - Own music on Beatles / Deadpool LE / Pro: their carrier census found no stereo music request the game never
         plays (`mode_sounds._SWAP` music = ()): a game limit, with the sound question for David.
+      - Landed later in run 21: held magnets at the game's own grab - Batman (44786692), Rush LE (01b04ad2), Rush Pro
+        (589abac6), Beatles' top magnet (6547e750: its holds 25 s into the game, `coil_job_c3.sh SETTLE=25`; run 18's OFF
+        was the game's ball-start release). Mode > Magnet: Beatles (dbffaa72: a new `switch 71` line for its Top magnet
+        opto, flags 0x1400 like the standups'), Rush LE (2a8941da, the Lift ramp opto). TMNT LE's ball save (e61201a8:
+        `PAD_BALL_VAN_STOCK=2`, `bs_job3.sh MAX_MIN=16`). Foo Fighters Pro's magnet section hidden (16643607: no
+        Overlord magnet on a Pro). **Coils, scoops, screens, clips and ball saves are yellow on no newest build.**
+      - Mode > Magnet where the GAME uses the magnet at that shot (the runtime gives way - "the game wants it" / "the
+        game sent the coil a command of its own" - safe, but no clean hold to prove): Munsters LE / Pro (the Herman
+        opto: the game pulses it), Batman (both the Bat Phone Target and Joker target 1, nearest on the picture), Rush
+        Pro (the Center ramp opto; Rush LE's run happened to meet no grab - chain138 retries 30 s into the ball). Led
+        Zeppelin LE: a `switch 81` line for its magnet opto is hooked but never fires (its descriptor flags do not
+        broadcast it). Metallica: COFFIN MAGNET DOWN may hold the coffin, not a ball (grave marker / electric chair
+        fling) - a question for David whether its magnet section should be hidden. Foo Fighters LE's Overlord magnet
+        (device 16, 9:0, its powers in registers): census chain137.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

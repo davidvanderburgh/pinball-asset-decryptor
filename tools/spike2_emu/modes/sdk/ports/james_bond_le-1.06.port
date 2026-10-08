@@ -601,3 +601,10 @@ text held_coils            jet_pack_magnet gate
 # playfield picture (Tank hood target, 17 px from the jet pack magnet)
 text magnet_coil           jet_pack_magnet
 value magnet_shot          0x20
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN). This game keeps a settled ball ~5 s itself: a hold replaces that keep
+site scoop_handler         0x0010fbfc 0xe2400002 0xe92d4070
+data scoop_slot           0x007d576c
+value scoop_event          2

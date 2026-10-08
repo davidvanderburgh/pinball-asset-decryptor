@@ -43,8 +43,10 @@ def _src():
 def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
     src = _src()
     assert re.search(r'static const char \*const s\[\] = \{ "agent_header", "agent_begin", 0 \};', src)
-    # the gate comes right after the port gate, and a missing gate hooks nothing
-    assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*if \(!insider_arm\(\)\) return;", src)
+    # the gate comes right after the port gate, and a missing gate hooks nothing. Only PAD-446's
+    # clip variants arm between them (a clip variant scores nothing), and a clips-only card stops there
+    assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*clipv_arm\(\);[^\n]*\n"
+                     r"\s*if \(clipv_only\) \{[^{}]*?return;\s*\}\s*\n\s*if \(!insider_arm\(\)\) return;", src)
     assert 'hook(fn("agent_header"), on_agent_header)' in src
     assert 'hook_veto(fn("agent_begin"), on_agent_begin)' in src
 

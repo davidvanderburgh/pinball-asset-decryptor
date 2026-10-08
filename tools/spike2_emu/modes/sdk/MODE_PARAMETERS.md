@@ -258,7 +258,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 124 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 127 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -328,7 +328,8 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_game_show(n)` | PAD-411: plays the game's own light show n of the port's list (`site show_<n>`: a show process's body, run as the runtime's process `value show_proc`, so its timing, colours and clean-up are the game's). One at a time (a new one replaces one still playing); stopped at the port's `value show_secs_<n>` (20 s at most: some run until stopped). Only while the mode runs, or in the first 2 s after it ended (its ending's show), in a game, and not in the 3 s after a ball ends (the game stops every process of its own then). 1 = playing | the ten Godzilla examples (through `kit_game_show`), `show_reel_mode.c` | PAD-411, emulator (stock Premium/LE 1.16: every listed show played from a mode, what each did to the LEDs measured) and David's Premium (two machine tests) |
 | `pm_game_show_named(name)` | the same by the port's name for it (`text show_name_<n>`, any case); 0 when this game names no such show | the ten Godzilla examples | PAD-411 |
 | `pm_game_wizard(n, how)` | PAD-436: hands the player up the game's own mini-wizard n of the port's list (`text wizard_name_<n>`), the game's own way: selects it and ORs its bit into the player's lit mask (`data wizard_state`: [p-1] selected, +0x10 lit, +0x20 played; the bit from `data wizard_table`), sets the lamps' refresh byte (`data lamps_dirty`); `PM_WIZARD_START` then calls the game's start of the selected one (`site wizard_start`, the Right ramp's call), which starts it only when nothing of the game's is in its way. Lit instead of started while a mode of ours holds the game's modes off. PAD-457: until the game starts it, it is the only one lit and the one selected (the game's own lighting and selection shots cannot hand the start shot another; what the game lit itself is lit again once it started), several start in the order handed over, and a `PM_WIZARD_START` the game would not start yet is tried every tick (250 ms apart) until it does, that ball; a new game drops them. Any mode, running or not, in a game. `PM_WIZARD_LIT` 1, `PM_WIZARD_STARTED` 2, 0 refused (mode.log says why) or no `PM_CAN_GAME_WIZARDS`. A start of one that a mode of ours vetoes (`block_start_<id>`) is kept lit: the runtime puts the player's words back on the next tick | `mode_file.c` (`game_wizard`), a blocks mode's C (The game's mini-wizard) | PAD-436, emulator (stock James Bond LE 1.06) |
-| `pm_game_wizard_named(name, how)` | the same by the port's name for it (any case); 0 when this game names no such mini-wizard. `pm_game_wizards()`: how many the port names | `mode_file.c`, blocks | PAD-436 |
+| `pm_game_wizard_named(name, how)` | the same by the port's name for it (any case); 0 when this game names no such mini-wizard | `mode_file.c`, blocks | PAD-436 |
+| `pm_game_wizards()` | how many mini-wizards the port names (0 = none on this game) | none | PAD-436 |
 | `pm_game_show_stop()` | stops the show playing now: the game's own exit hook takes its lights away | `show_reel_mode.c` | PAD-411 |
 | `pm_game_show_playing()` | 1 while a show of the runtime's plays | `show_reel_mode.c` | PAD-411 |
 | `pm_game_shows()` | how many shows the port names (0 = none on this game) | `show_reel_mode.c` | PAD-411 |

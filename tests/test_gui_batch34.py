@@ -152,6 +152,9 @@ class _VideoScan(_TabStub):
     def _assets_path(self):
         return self._assets
 
+    def _m_records(self):
+        return []                         # no mode copies (PAD-444)
+
     def _refresh_list(self):
         self._refreshed.append("video")
 

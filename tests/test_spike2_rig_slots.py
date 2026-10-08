@@ -643,6 +643,17 @@ rm -rf "$t"
 
 
 @needs_proc
+def test_a_batchs_end_leaves_other_batches_copies_in_flight():
+    """PAD-420: several batches stage into one folder at once; each copies into a folder of its own under .partial
+    (named from its out dir) and its end removes only that one. The shared .partial emptied at one batch's end had
+    deleted another batch's card mid-copy (that build then failed staging)."""
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    rb = open(os.path.join(RIG, "rigbatch.sh"), encoding="utf-8").read()
+    own = '$(printf %s "$OUT" | md5sum | cut -c1-12)'
+    assert 'P=$STAGE/.partial/%s' % own in cs and 'copy "$card" "$P"' in cs and '"$STAGE/.partial"' not in cs
+    assert 'rm -rf "$STAGE/.partial/%s"' % own in rb and 'rm -rf "$STAGE/.partial"\n' not in rb
+
+
 def test_rigbatch_boots_staged_copies_and_reuses_them():
     """cardstage.sh: every rig boots a copy staged off the slow disk; a card
     that cannot be staged fails its build (not the batch); a second sweep

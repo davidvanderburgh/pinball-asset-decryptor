@@ -82,7 +82,10 @@ STAGE=${2:?}
 AHEAD=${3:-2}
 KEEP=$(( ${4:-100} * GB ))
 S=$OUT/stage
-mkdir -p "$S" "$STAGE/.partial" || exit 1
+# THIS batch's own folder for copies in flight (PAD-420): several batches stage into one folder at once, and a
+# batch's end used to empty the shared .partial - a copy another batch had in flight vanished under it
+P=$STAGE/.partial/$(printf %s "$OUT" | md5sum | cut -c1-12)
+mkdir -p "$S" "$P" || exit 1
 TOTAL=$(wc -l < "$OUT/queue")
 ROBO=/mnt/c/Windows/System32/robocopy.exe
 
@@ -133,14 +136,14 @@ for i in $(seq 0 $((TOTAL - 1))); do
         continue
     fi
     t0=$(date +%s)
-    rm -f "$STAGE/.partial/$name"
-    if copy "$card" "$STAGE/.partial" && [ -f "$STAGE/.partial/$name" ]; then
-        mv -f "$STAGE/.partial/$name" "$dest"
+    rm -f "$P/$name"
+    if copy "$card" "$P" && [ -f "$P/$name" ]; then
+        mv -f "$P/$name" "$dest"
         echo "$stamp" > "$dest.src"
         echo "$(date +%T) staged $name  $((size / 1048576)) MB in $(( $(date +%s) - t0 ))s"
         echo "$dest" > "$S/$i"
     else
-        rm -f "$STAGE/.partial/$name"
+        rm -f "$P/$name"
         echo "copying $card to $STAGE failed" > "$S/$i.fail"
     fi
 done

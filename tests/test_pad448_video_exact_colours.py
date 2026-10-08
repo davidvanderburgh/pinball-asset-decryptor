@@ -257,7 +257,9 @@ def test_the_players_get_their_exact_colour_tables(tmp_path):
         assert [t["lut"] for t in st["compare"]["tiles"]] == [None, None]
 
 
-def test_a_games_own_clip_shows_its_profile_on_the_replacement_player(tmp_path):
+def test_a_games_own_clip_shows_its_profile_on_its_original_player(tmp_path):
+    """PAD-448 showed it on the Replacement player; PAD-462 (DragonRR: "confusing from a UX
+    perspective") shows it on its own player, the Original, and leaves the other empty."""
     proj = _project(tmp_path)
     d = str(proj)
     with web_app(tmp_path, mfr="stern") as w:
@@ -271,25 +273,27 @@ def test_a_games_own_clip_shows_its_profile_on_the_replacement_player(tmp_path):
         assert w.call("video.set_color", C, True)
         w.drain()
         pv = w.state("video")["preview"]
-        assert pv["rep"]["title"] == "With its color profile"
-        assert os.path.normcase(pv["rep"]["path"]) == os.path.normcase(str(proj / C))
-        assert pv["rep"]["path"] == pv["orig"]["path"]
+        assert pv["rep"]["title"] == "Replacement" and not pv["rep"].get("path")
+        assert "Original player" in pv["rep"]["hint"]
+        assert os.path.normcase(pv["orig"]["path"]) == os.path.normcase(str(proj / C))
         assert not pv["can_clear"] and not pv["has_pick"]
         own = w.run(w.window.service("video")._own_colours)
         want = cp.look_lut_path(cp.video_look_exact(d, True, own, rel=C)["rep"])
-        look = _wait_for(w, lambda s: (s["look"].get("lut") or {}).get("rep") == want)["look"]
-        assert look["rep"][0] == cp.filter_step(WARM)
-        # detached: the player is empty again; Advanced unticked: the same
+        look = _wait_for(w, lambda s: (s["look"].get("lut") or {}).get("orig") == want)["look"]
+        assert look["orig"][0] == cp.filter_step(WARM)
+        assert look["views"]["orig"]["view"] == "profile"
+        # detached: the Original player is the clip as it is; Advanced unticked: the same
         assert w.call("video.set_color", C, False)
         w.drain()
-        assert not w.state("video")["preview"]["rep"].get("path")
+        assert w.state("video")["look"]["views"]["orig"]["view"] == "plain"
         assert w.call("video.set_color", C, True)
         w.drain()
-        assert w.state("video")["preview"]["rep"].get("path")
+        assert w.state("video")["look"]["views"]["orig"]["view"] == "profile"
         assert w.call("video.set_color_stock", False)
         w.drain()
         rep = w.state("video")["preview"]["rep"]
         assert rep["title"] == "Replacement" and not rep.get("path")
+        assert w.state("video")["look"]["views"]["orig"]["view"] == "plain"
 
 
 def test_a_compare_player_turns_to_the_profile_attached_to_it(tmp_path):

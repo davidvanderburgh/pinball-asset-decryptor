@@ -1144,34 +1144,57 @@ class ImagesTab(FindOriginalsMixin, TabService):
         self._color_changed()
         return True
 
-    def color_targets(self):
-        """PAD-439: the pictures the Colors bar's "Apply to all images" gives
-        its profile, ``{rel: attached}``: every replaced picture, and any
-        other with the color profile attached (one built earlier, or a game
-        picture unlocked)."""
+    def color_targets(self, scope="profiled"):
+        """The pictures the Colors bar's Apply to all gives its profile,
+        ``{rel: attached}`` (PAD-439).  *scope* (PAD-462): "profiled", the
+        pictures with a color profile attached (replaced, built earlier, or a
+        game picture unlocked); "all", every picture that is not locked: each
+        replaced or built one, and with the game's own pictures unlocked
+        every one."""
         if not self._per_file_colour():
             return {}
+        rels = (self._by_rel if scope == "all" else set(self._assignments)
+                | {r for r, v in self._color.items() if v})
         out = {}
-        for rel in set(self._assignments) | {
-                r for r, v in self._color.items() if v}:
+        for rel in rels:
             on = self._color_state(rel) if rel in self._by_rel else None
-            if on is not None and (on or self._assignments.get(rel)):
+            if on is not None and (on or scope == "all"):
                 out[rel] = on
         return out
 
     def put_color_switches(self, switches):
-        """PAD-439: replaced pictures' own switches set at once (``True`` /
+        """PAD-439: pictures' own switches set at once (``True`` /
         ``False``, ``None`` = follow the box again), one save and one redraw.
-        Returns what each was, the same way (Apply to all's Undo)."""
-        before = {}
+        Returns what each was, the same way (Apply to all's Undo).  PAD-462:
+        a built or (unlocked) game picture too, which has no box to follow:
+        off is no switch, and one a build already corrected gets its own
+        colors back, as its palette does it (``set_color``)."""
+        from ...core import colour_profile as cp
+        before, stock, built = {}, [], []
         for rel, value in (switches or {}).items():
-            if not (rel in self._by_rel and self._assignments.get(rel)):
+            if rel not in self._by_rel:
+                continue
+            if not self._assignments.get(rel):
+                is_built = self._is_built(rel)
+                if not (is_built or self._color_unlocked):
+                    continue
+                before[rel] = self._color.get(rel)
+                if value:
+                    self._color[rel] = True
+                elif self._color.pop(rel, None):
+                    (built if is_built else stock).append(rel)
                 continue
             before[rel] = self._color.get(rel)
             if value is None:
                 self._color.pop(rel, None)
             else:
                 self._color[rel] = bool(value)
+        if not self._is_running():
+            for rel in built:
+                cp.put_back_uncorrected(self._scan_dir, rel)
+            if stock:
+                self._put_back_originals(
+                    self._applied_replacement_rels(stock))
         if before:
             self._save_staged_changes()
             self._publish_chunks()

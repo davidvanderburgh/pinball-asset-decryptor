@@ -86,9 +86,12 @@ _SCAN_LABEL = "Video"             # MainWindow._SCAN_LABELS["video"]
 NO_PROJECT_TEXT = "Set the project folder on the Extract tab, then click Scan."
 COMPARE_MAX = 4                   # clips side by side in Compare (PAD-440)
 NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
-# a game's own clip with its color profile attached: the Replacement player's
-# title for it (PAD-336, PAD-448)
+# a game's own clip with its color profile attached: Compare's title for it
+# (PAD-336, PAD-448)
 STOCK_COLOURED = "With its color profile"
+# PAD-462: and the main Replacement player's words for it, which stays empty
+STOCK_ON_ORIG = ("no replacement assigned: the game's own clip, its color "
+                 "profile is on the Original player")
 
 
 class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
@@ -314,10 +317,20 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         own, else the project's individual files one), attached or not:
         "plain" is the word for the player as it is, "view" which of the
         two is on show, "name" the profile's, "on" whether it is attached,
-        "stock" a game's own clip on the Replacement player."""
+        "stock" a game's own clip on the Replacement player (never since
+        PAD-462; the page still reads it).
+
+        PAD-462 (DragonRR): the player of the file the profile is on (the
+        Replacement, else for a game's own clip the Original) opens on With
+        its color profile while it is attached, and turns to it when the
+        Colors bar changes the profile (``profile_shown``); the other opens
+        as it is.  Either is the user's to turn after that."""
         key = (rel, switch, self._assign.get(rel) if rel else None)
         if key != self._pview_key:
-            if self._pview_key is None or self._pview_key[0] != rel:
+            old = self._pview_key
+            if old is None or old[0] != rel or not (key[2] and old[2]):
+                # the Original is the file the profile is on when the slot
+                # has no replacement: it follows the switch then
                 self._pview["orig"] = None
             self._pview["rep"] = None
             self._pview_key = key
@@ -333,27 +346,44 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         pv = self.get("preview") or {}
         if prof is None or pv.get("rel") != rel:
             return out
-        stock = self._stock_coloured(rel)
+        mine = self._profile_side(rel)
         for side in ("orig", "rep"):
             pane = pv.get(side) or {}
             if not pane.get("path"):
                 continue
-            plain = ("Original" if side == "rep" and stock
-                     else pane.get("title") or "Original")
-            out[side] = {"plain": plain, "name": prof.name or "",
-                         "on": bool(switch), "stock": side == "rep" and stock,
+            out[side] = {"plain": pane.get("title") or "Original",
+                         "name": prof.name or "", "on": bool(switch),
+                         "stock": False,
                          "view": self._pview[side] or (
-                             "profile" if side == "rep" and switch
+                             "profile" if side == mine and switch
                              else "plain")}
         return out
+
+    def _profile_side(self, rel):
+        """The player of the file *rel*'s color profile is on (PAD-462): its
+        Replacement, else (a game's own clip) its Original."""
+        return "rep" if rel and self._assign.get(rel) else "orig"
+
+    def profile_shown(self, rels):
+        """PAD-462 (DragonRR): the Colors bar changed the color profile of
+        *rels*: the clip on the players, if it is one, is shown with it
+        ("With its color profile" on the player of the file it is on: "the
+        user wants to see what they have just done").  The bar redraws the
+        players after."""
+        rel = self._current
+        if not rel or rel not in set(rels or ()):
+            return False
+        self._pview[self._profile_side(rel)] = "profile"
+        return True
 
     @staticmethod
     def _pane_sources(switch, views):
         """Which of :func:`colour_profile.video_look`'s lists each player
         draws through, and for which Color switch: ``{side: (list,
         switch)}``.  With its color profile is the clip's list with the
-        switch on; a Replacement shown as it is, the one with it off; a game's
-        own clip shown as it is, its Original's."""
+        switch on; a Replacement shown as it is, the one with it off; an
+        Original shown as it is, its own (PAD-462: a game's own clip is only
+        ever on the Original player now)."""
         out = {"orig": ("orig", switch), "rep": ("rep", switch)}
         for side, v in (views or {}).items():
             if not v:
@@ -361,7 +391,7 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
             if v["view"] == "profile":
                 out[side] = ("rep", True)
             elif side == "rep":
-                out[side] = ("orig", switch) if v.get("stock")                     else ("rep", False)
+                out[side] = ("rep", False)
         return out
 
     @rpc
@@ -1354,32 +1384,51 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         self.publish_look()
         return True
 
-    def color_targets(self):
-        """PAD-439: the clips the Colors bar's "Apply to all videos" gives
-        its profile, ``{rel: attached}``: every replaced clip, and the game's
-        own clips attached with Advanced ticked."""
+    def color_targets(self, scope="profiled"):
+        """The clips the Colors bar's Apply to all gives its profile,
+        ``{rel: attached}`` (PAD-439).  *scope* (PAD-462): "profiled", the
+        clips with a color profile attached, replaced or (Advanced) the
+        game's own; "all", every clip that is not locked: each replaced one,
+        and with Advanced ticked every game's own clip."""
         if not self._per_file_colour():
             return {}
+        rels = (self._by_rel if scope == "all" and self._color_stock
+                else set(self._assign) | self._stock_on)
         out = {}
-        for rel in set(self._assign) | self._stock_on:
+        for rel in rels:
             on = self._color_state(rel) if rel in self._by_rel else None
-            if on is not None and (on or self._assign.get(rel)):
+            if on is not None and (on or scope == "all"):
                 out[rel] = on
         return out
 
     def put_color_switches(self, switches):
-        """PAD-439: replaced clips' own switches set at once (``True`` /
-        ``False``, ``None`` = follow the box again), one save and one redraw.
-        Returns what each was, the same way (Apply to all's Undo)."""
-        before = {}
+        """PAD-439: clips' own switches set at once (``True`` / ``False``,
+        ``None`` = follow the box again), one save and one redraw.  Returns
+        what each was, the same way (Apply to all's Undo).  PAD-462: a game's
+        own clip with Advanced ticked too (``True`` / ``False``); one turned
+        off that a build already gave the profile gets its original back."""
+        before, back = {}, []
         for rel, value in (switches or {}).items():
-            if not (rel in self._by_rel and self._assign.get(rel)):
+            if rel not in self._by_rel:
+                continue
+            if not self._assign.get(rel):
+                if not (self._color_stock and self._per_file_colour()):
+                    continue
+                was = rel in self._stock_on
+                before[rel] = was
+                if value and not was:
+                    self._stock_on.add(rel)
+                elif not value and was:
+                    self._stock_on.discard(rel)
+                    back.append(rel)
                 continue
             before[rel] = self._color.get(rel)
             if value is None:
                 self._color.pop(rel, None)
             else:
                 self._color[rel] = bool(value)
+        if back and not self._is_running():
+            self._put_back(back)
         if before:
             self._save_staged()
             self._refresh_list()
@@ -2562,20 +2611,19 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
                     and self._color_state(rel))
 
     def _rep_pane(self, rel):
-        """MainWindow._video_load_rep_pane.  A game's own clip with its
-        color profile attached has no replacement: this player shows its
-        original through the profile, as the card will get it (PAD-448:
-        nothing on the tab showed the profile on such a clip)."""
+        """MainWindow._video_load_rep_pane.  PAD-462 (DragonRR): a game's own
+        clip with its color profile attached has no replacement, and this
+        player says so; its Original player shows it with its profile
+        (``_pane_views``), where PAD-448 put a second copy of it here."""
         from ...core import staged_originals
-        if self._stock_coloured(rel):
-            pane = self._orig_pane(rel)
-            pane.update(side="rep", title=STOCK_COLOURED)
-            return pane
         self._pane_seq += 1
         rpath = self._assign.get(rel) if rel else None
         if rpath and os.path.isfile(rpath):
             pane = self._pane("rep", "Replacement", rpath,
                               label=os.path.basename(rpath))
+        elif self._stock_coloured(rel):
+            # built with its profile or not, it is the game's own clip
+            pane = self._pane("rep", "Replacement", hint=STOCK_ON_ORIG)
         elif rel and staged_originals.snapshot_path(self._scan_dir, rel):
             slot = self._by_rel.get(rel)
             cur = slot.abs_path if slot else None
@@ -2696,6 +2744,12 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         return [["orig", "Original"]]
 
     def _cmp_pane(self, rel, side):
+        if side == "rep" and self._stock_coloured(rel):
+            # PAD-448: a game's own clip with its color profile attached:
+            # Compare's other side is its original through the profile
+            pane = self._orig_pane(rel)
+            pane.update(side="rep", title=STOCK_COLOURED)
+            return pane
         return self._rep_pane(rel) if side == "rep" else self._orig_pane(rel)
 
     def _cmp_tile(self, tid):

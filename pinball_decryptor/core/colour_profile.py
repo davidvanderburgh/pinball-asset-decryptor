@@ -995,17 +995,28 @@ def store_own_profile(assets_dir, kind, rel, prof, follow=False):
     """Give file *rel* a profile of its own: *prof*, or with *follow* the
     Recommended one following the screen; neither puts it back on the
     project's individual files profile."""
+    store_own_profiles(assets_dir, kind, [rel], prof, follow=follow)
+
+
+def store_own_profiles(assets_dir, kind, rels, prof, follow=False):
+    """:func:`store_own_profile` for every file in *rels* at once, one save
+    (PAD-462: several clips selected get the profile picked together)."""
     _profile_kind(kind)
     from . import staged_changes
     data = staged_changes.load(assets_dir)
     key = FILE_PROFILES_KEY[kind]
     m = dict(_own_dicts(data, kind))
     if follow:
-        m[rel] = {"recommended": True}
+        value = {"recommended": True}
     elif prof is None:
-        m.pop(rel, None)
+        value = None
     else:
-        m[rel] = _profile_dict(prof)
+        value = _profile_dict(prof)
+    for rel in rels:
+        if value is None:
+            m.pop(rel, None)
+        else:
+            m[rel] = dict(value)
     if m:
         data[key] = m
     else:

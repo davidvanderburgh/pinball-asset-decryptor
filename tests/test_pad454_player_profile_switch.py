@@ -119,16 +119,19 @@ def test_a_games_own_clip_turns_between_original_and_its_profile(tmp_path):
         assert w.call("video.set_color_stock", True)
         assert w.call("video.set_color", C, True)
         w.drain()
-        rep = w.state("video")["look"]["views"]["rep"]
-        assert rep == {"plain": "Original", "view": "profile", "name": "Warm", "on": True,
-                       "stock": True}
+        # PAD-462: attached, it is shown with its profile on its own (Original) player; the
+        # Replacement player stays empty, where PAD-448 put a second copy of it
+        views = w.state("video")["look"]["views"]
+        assert views["rep"] is None
+        assert views["orig"] == {"plain": "Original", "view": "profile", "name": "Warm",
+                                 "on": True, "stock": False}
         on_steps, on_exact = _looks(w, d, C)[True]
-        st = _wait_for(w, lambda s: s["look"]["lut"]["rep"] == cp.look_lut_path(on_exact["rep"]))
-        assert st["look"]["rep"] == on_steps["rep"]
-        # turned to Original: the same as the Original player
-        assert w.call("video.set_pane_view", "rep", "plain")
-        st = _wait_for(w, lambda s: s["look"]["lut"]["rep"] == s["look"]["lut"]["orig"])
-        assert st["look"]["rep"] == st["look"]["orig"] == on_steps["orig"]
+        st = _wait_for(w, lambda s: s["look"]["lut"]["orig"] == cp.look_lut_path(on_exact["rep"]))
+        assert st["look"]["orig"] == on_steps["rep"]
+        # turned to Original: the clip as it is
+        assert w.call("video.set_pane_view", "orig", "plain")
+        st = _wait_for(w, lambda s: s["look"]["lut"]["orig"] == cp.look_lut_path(on_exact["orig"]))
+        assert st["look"]["orig"] == on_steps["orig"]
 
 
 def test_no_switch_without_a_profile_to_show(tmp_path):

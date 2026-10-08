@@ -815,6 +815,8 @@ export function undoKey(e, flush) {
 
 // PAD-438: the Files mode can be on a line of text in Scenes as well as a file
 const fileWord = (f) => (f && f.kind === "text" ? "line of text" : "file");
+// PAD-462: several clips selected together are one target
+const thisFile = (f) => (f && f.count > 1 ? `these ${f.count} files` : "this " + fileWord(f));
 
 // The line under the modes: what the profile on show does to this project now.
 export function statusNote(s) {
@@ -829,9 +831,9 @@ export function statusNote(s) {
           : html`<${Note} kind="info">${"Scenes uses the Recommended screen, tuned on a real Spike 2. Move a slider or pick a starting point to set this machine's own screen."}<//>`)
     : assets && s.file
       ? (s.file.on === false
-          ? html`<${Note} kind="info">${"No color profile is attached to this " + fileWord(s.file) + ". Pick a starting point or a saved profile, or move a slider, and it is attached."}<//>`
-          : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into this " + fileWord(s.file) + " when you build; the other files keep their own."}<//>`
-          : html`<${Note} kind="info">${"“" + (s.name || "No change") + "” changes nothing: this " + fileWord(s.file) + " goes onto the card as you made it."}<//>`)
+          ? html`<${Note} kind="info">${"No color profile is attached to " + thisFile(s.file) + ". Pick a starting point or a saved profile, or move a slider, and " + (s.file.count > 1 ? "each is attached." : "it is attached.")}<//>`
+          : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + thisFile(s.file) + " when you build; the other files keep their own."}<//>`
+          : html`<${Note} kind="info">${"“" + (s.name || "No change") + "” changes nothing: " + thisFile(s.file) + (s.file.count > 1 ? " go" : " goes") + " onto the card as you made " + (s.file.count > 1 ? "them." : "it.")}<//>`)
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`

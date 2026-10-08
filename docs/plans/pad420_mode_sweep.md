@@ -204,7 +204,7 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     [coildrive] lines need `PAD_COIL_PROBE=1` (the coil and scoop jobs export it).
     And a slot's NVRAM for a title can go bad: Avengers Pro in slot 2 hit FATAL 246 ("NVMigration: REGISTERED_DATA
     hash is NOT UNIQUE") and the game's watchdog ended it before any Start. The coil, scoop, media and stack jobs now
-    wipe the title's NVRAM in their slot (never slot 0) before booting; Guided Setup is then left by guided.sh.
+    wipe the title's NVRAM in their slot (never slot 0) before booting (the coil and scoop jobs only); Guided Setup is then left by guided.sh, and its Save & Exit RESTARTS the game (in the emulator the old one hangs and the watchdog ends it), so those jobs boot the stage again after it. The media and stack jobs keep the slot's NVRAM.
     chain26 (after chain25) runs one more round of coil re-runs (rerun_keys.py).
   - `t2/voices_speedup.py` (detached) restarts the transcription with four threads at normal priority once
     RIGS_DONE appears.

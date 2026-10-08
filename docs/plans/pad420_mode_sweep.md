@@ -189,6 +189,13 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     lines in the port and their `HELD_COILS_PROVEN` entries; then recipes, limits table, tests, commit. A coil
     name is at most 15 characters (the runtime's and mode file's name buffers are 16). chain21 writes
     coils/COILS_DONE only after the scoop batch too: the transcription waits for it.
+    Run 8: on Deadpool, Led Zeppelin, Sword of Rage and Star Wars ELG the gate objects are built by a STATIC
+    INITIALIZER with no getter (Iron Maiden, Avengers and Jurassic Park have guarded getters); calling it as a getter
+    built them again and the game died as the mode started (Deadpool Pro exit 4). The runtime now takes `data
+    <name>_obj` (the object's address, `coils/bobj.py`); `mkstage_b.py STATIC_OBJ`. Never re-run mkstage_b.py on a
+    build whose job is running: it wipes coils/b/<key> (Avengers LE's first run was lost so). chain23 (replaced
+    chain22) re-runs every build `coils/rerun_keys.py` finds not fully PROVEN, then the stack batch, then writes
+    RIGS_DONE (after COILS_DONE); the transcription waits for RIGS_DONE.
   - Run 8 findings: John Wick LE/Pro 1.02's ports had the same wrong video getter as Iron Maiden 1.18 (John Wick
     LE 1.01's port says it answers 60ed7e50's surface): left off, both stages refreshed for chain18's retry.
     Generation C (the Device framework): each class has its own take/give (`coils/takegive.py`: control at +0x18 /
@@ -204,7 +211,7 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     = 288, all "drawn dark"), so the LED view never shows them and judge.py sees a handful of channels (King Kong
     Pro 0 of 9 RGB). Iron Maiden LE's inserts are on nodes 8/9 and pass 42/42. Proving these needs the rig to
     present those LED boards (emulator work, PAD-311's area), not port work.
-  - Stack on the mode-table titles (`C:/tmp/PAD-420/st3`, chain22 after the coil batch, one rig): run 6's starter
+  - Stack on the mode-table titles (`C:/tmp/PAD-420/st3`, chain23 after the coil batch and its re-runs, one rig): run 6's starter
     began with a MULTIBALL entry (Avengers' Thor Multiball), which the game switched off in 0.5 s. st3's
     `stack_starter3.c` starts a BATTLE through the port's block starts (each mode's START slot, never a multiball)
     and drops /dump/mode.start in the same tick; `st3_job.sh` follows item 164's order (WAITER started with nothing

@@ -479,3 +479,10 @@ site tower_post_get       0x0004fbbc 0xe92d4030 0xe3064194
 text tower_magnet_drive   9 0 255 300 100
 text tower_post_drive     9 5 255 128 64
 text held_coils            tower_magnet tower_post
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x0043b2fc 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0x120
+value proc_exit_slots      4

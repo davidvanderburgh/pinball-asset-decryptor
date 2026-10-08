@@ -338,3 +338,10 @@ value mode_flag_4           136   # Double scoring
 value mode_flag_5           116   # Bullshit scoring
 value mode_flag_6           104   # Demogorgon challenge
 value mode_flag_7           114   # Victory laps
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x0034bf50 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4

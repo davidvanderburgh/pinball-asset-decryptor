@@ -1872,7 +1872,19 @@ Godzilla examples then play their own kit show instead.
 **The port lines** (`ports/godzilla_le-1.16.port`, "PAD-411"): `value show_proc`, then a show a block -
 `site show_<n>` (its body), `text show_name_<n>` (the name a mode asks for), `text show_kind_<n>` (`flashy` for a
 start, `subdued` for an end, `accent` for a moment) and `value show_secs_<n>`. The process calls are `site
-proc_create`, `site proc_exists` and `site event_cancel`. PM_CAN_GAME_SHOWS says a port has them all.
+proc_create`, `site proc_exists` and `site event_cancel`, and the clean-up below needs `site lamp_free_owner`,
+`value proc_exit_hooks` and `value proc_exit_slots`. PM_CAN_GAME_SHOWS says a port has them all.
+
+**Each show hands its lights back as it ends (PAD-420).** A show the game starts itself is flagged as one in its
+process record, and the game's process exit then frees the lamp groups the show made (the game's "free every lamp
+group this process owns", `site lamp_free_owner`). A process the runtime starts is not flagged, so until PAD-420 every
+show it played kept its lamp group after it ended; the game has a fixed pool of them, and in the emulator King Kong LE
+0.97 ran out after 26 plays of one 2 s show (groups 22 -> 48), after which every show failed at once - and so would
+every lamp group the game itself asked for. Now the runtime gives its show process an exit hook, as the game gives
+its own processes theirs: a free {fn, arg} slot of the record (`value proc_exit_hooks` is the slots' offset - 0xd0,
+0xe0, 0xf0 or 0x120 by framework - and `value proc_exit_slots` how many, 4 on every build), which the game's exit runs
+as the show ends or is stopped, before the record is reused; it calls `lamp_free_owner` on the record. A port without
+these lines plays no shows.
 
 | Show | Kind | Length | What it is (measured) |
 |---|---|---|---|

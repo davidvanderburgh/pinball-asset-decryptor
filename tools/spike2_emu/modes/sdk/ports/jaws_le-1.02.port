@@ -505,3 +505,10 @@ site block_rule_20         0x002456d0 0xe92d0030 0xe202433e  # UIBonusScreen::v[
 text block_rule_name_20    UI Bonus Screen
 site block_rule_21         0x00275c78 0xe5d01008 0xe3510000  # UIShipWheelSpinSelect::v[27]
 text block_rule_name_21    UI Ship Wheel Spin Select
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x003d808c 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0x120
+value proc_exit_slots      4

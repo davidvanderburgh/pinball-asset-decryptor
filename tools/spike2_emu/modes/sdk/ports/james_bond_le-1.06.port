@@ -608,3 +608,10 @@ value magnet_shot          0x20
 site scoop_handler         0x0010fbfc 0xe2400002 0xe92d4070
 data scoop_slot           0x007d576c
 value scoop_event          2
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x00248ab0 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4

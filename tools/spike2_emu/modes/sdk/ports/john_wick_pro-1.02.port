@@ -524,3 +524,10 @@ callout ten_seconds       354   # Lace, there's still time! / The clock is ticki
 value scoop_event          2
 site scoop_handler         0x00088980 0xe2400002 0xe92d4030
 data scoop_slot           0x0063efb4
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x001344b8 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0x120
+value proc_exit_slots      4

@@ -349,3 +349,10 @@ text held_coils            orbit_gates
 value mode_records_1       0x00f000ee      # Super Scoring: ids 238..240 (the older build's + 4: its start's mov r0, #id)
 value mode_records_2       0x00ed00ec      # Double Scoring: ids 236..237 (the older build's + 4: its start's mov r0, #id)
 value mode_records_3       0x00eb00ea      # Headphone Hurryup: ids 234..235 (the older build's 230..231 + 4; its start creates its record without asking first)
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x00326fac 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4

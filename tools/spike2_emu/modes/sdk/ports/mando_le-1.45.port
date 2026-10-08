@@ -418,3 +418,10 @@ text held_coils            center_ramp_gat diverter_mini_p top_up_post magnet_ho
 # Child opto - the switch named for it (the magnet has no place on the playfield picture)
 text magnet_coil           magnet_hold
 value magnet_shot          0x10000000
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x001e5bd4 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4

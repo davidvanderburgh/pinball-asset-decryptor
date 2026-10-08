@@ -756,3 +756,10 @@ text block_rule_name_20    UI Bonus Screen
 site scoop_handler         0x000acea0 0xe30837fe 0xe2401002
 data scoop_slot           0x008566d0
 value scoop_event          2
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x0059e78c 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0x120
+value proc_exit_slots      4

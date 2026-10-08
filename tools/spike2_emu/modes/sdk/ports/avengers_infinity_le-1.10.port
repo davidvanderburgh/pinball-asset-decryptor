@@ -492,3 +492,10 @@ text held_coils            tower_magnet tower_post
 # PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
 # build's own transcribed voice lines, tu_wide.py)
 callout time_up           635   # This fight is over, but there's still more battles to come.
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x003e8eb8 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0x120
+value proc_exit_slots      4

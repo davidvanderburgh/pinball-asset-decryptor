@@ -745,7 +745,10 @@ def _shield_cannot(key, label, port=None):
 
 #: PAD-418: the game's own light shows (PAD-411, MODE_SDK.md "The game's own light shows"). What pad_mode_runtime.c's
 #: shows_arm needs besides the `site show_<n>` lines before it plays one - (sites, values) - and the kinds a show is.
-SHOWS_NEEDS = (("proc_create", "proc_exists", "event_cancel"), ("show_proc",))
+#: PAD-420: and the game's clean-up of a show's lamp groups as it ends (pad_mode_runtime.c show_exit_hook): without
+#: it every show played kept a lamp group until the game's pool ran out
+SHOWS_NEEDS = (("proc_create", "proc_exists", "event_cancel", "lamp_free_owner"),
+               ("show_proc", "proc_exit_hooks", "proc_exit_slots"))
 SHOW_KINDS = ("flashy", "subdued", "accent")
 #: mode_file.c's show_start / show_end hold this many bytes, the end included
 SHOW_NAME_MAX = 40

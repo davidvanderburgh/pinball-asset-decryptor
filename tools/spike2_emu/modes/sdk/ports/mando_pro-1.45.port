@@ -402,3 +402,10 @@ text center_ramp_gat_drive 9 5 255 64 128 1564
 text diverter_mini_p_drive 9 6 255 64 64 1564
 text top_up_post_drive    9 8 255 64 128 1564
 text held_coils            center_ramp_gat diverter_mini_p top_up_post
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x0025f3c0 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4

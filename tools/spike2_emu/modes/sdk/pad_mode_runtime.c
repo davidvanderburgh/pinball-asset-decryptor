@@ -4846,11 +4846,39 @@ static void shows_tick(void)
         show_kill(show_now.limit < SHOW_MAX_MS ? "its time is up" : "its 20 s are up");
 }
 
+/* PAD-420: a show the game starts itself is flagged as one (0x20 at +2 of its process record), and the game's process
+ * exit then frees the lamp groups the show made (the game's "free every lamp group this process owns", `site
+ * lamp_free_owner`). A process the runtime starts is not flagged, so every show it played kept its lamp group after
+ * it ended - until the game's pool of groups ran out (King Kong LE 0.97 in the emulator: 26 plays of one 2 s show,
+ * groups 22 -> 48, then every show failed at once, and so would every lamp group the game itself asked for). So the
+ * runtime gives its show process an exit hook, as the game gives its own processes theirs (a free {fn, arg} slot of
+ * the record: `value proc_exit_hooks`, the slots' offset, `value proc_exit_slots`, how many): the game's exit runs it
+ * as the show ends or is stopped, before the record is reused, and it frees that record's groups. */
+static void show_exit(unsigned rec, unsigned arg)
+{
+    (void)arg;
+    ((void (*)(unsigned))(unsigned long)fn("lamp_free_owner"))(rec);
+}
+
+static int show_exit_hook(unsigned rec)
+{
+    unsigned off = (unsigned)pm_port_value("proc_exit_hooks", 0), n = (unsigned)pm_port_value("proc_exit_slots", 0), i;
+    if (!rec || !off || n < 1 || n > 8) return 0;
+    for (i = 0; i < n; i++) {
+        unsigned *slot = (unsigned *)(unsigned long)(rec + off + 8u * i);
+        if (slot[0]) continue;
+        slot[1] = 0;
+        slot[0] = (unsigned)(unsigned long)show_exit;
+        return 1;
+    }
+    return 0;
+}
+
 int pm_game_show(int n)
 {
     char key[24];
     const char *name;
-    unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    unsigned id = (unsigned)pm_port_value("show_proc", 0), rec;
     if (!(can & PM_CAN_GAME_SHOWS)) return 0;
     pm_snprintf(key, sizeof key, "show_%d", n);
     if (n < 1 || n >= SHOWS_MAX || !site(key)) {
@@ -4871,9 +4899,15 @@ int pm_game_show(int n)
         return 0;
     }
     if (proc_alive(id)) show_kill("another show begins");
-    if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
-            id, (void (*)(void))(unsigned long)fn(key), 0)) {
+    rec = ((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
+        id, (void (*)(void))(unsigned long)fn(key), 0);
+    if (!rec) {
         say("show %d: not played - the game would not start its process %u", n, id);
+        return 0;
+    }
+    if (!show_exit_hook(rec)) {                         /* none free (a new record has all four): stopped before */
+        ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("event_cancel"))(id, 0xffffu);   /* it makes a group */
+        say("show %d: not played - its process had no free exit hook for the clean-up of its lights", n);
         return 0;
     }
     show_now.n = n;
@@ -4887,8 +4921,8 @@ int pm_game_show(int n)
 
 static void shows_arm(void)
 {
-    static const char *const s[] = { "proc_create", "proc_exists", "event_cancel", 0 };
-    static const char *const v[] = { "show_proc", 0 };
+    static const char *const s[] = { "proc_create", "proc_exists", "event_cancel", "lamp_free_owner", 0 };
+    static const char *const v[] = { "show_proc", "proc_exit_hooks", "proc_exit_slots", 0 };
     char key[24];
     int n;
     for (n = 1; n < SHOWS_MAX; n++) {

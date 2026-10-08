@@ -1720,6 +1720,29 @@ LAMPS_PROVEN = frozenset((
     #   rush_pro-1.19: 17/17 RGB, 64/64 single; shots 14/14
     "rush_le-1.19",
     "rush_pro-1.19",
+    # PAD-420 2026-10-08 (lights/lights_job3.sh with PAD_NB_TRACE=1, lights/busjudge.py; stock card, hidden, muted) -
+    # judged on the NODE BUS, the observable item mode-leds proved Godzilla's lights on: the shim's LED view misses
+    # the bulk frames these games send when a mode holds every insert (it showed King Kong Pro's shot inserts in
+    # the game's blue while the wire had them in ours). Each frame to the insert boards decoded with leddecode;
+    # light_all ff00ff held every playfield insert in magenta (single-colour ones lit) while it ran, not before
+    # nor 1.5 s after; light_shots held every tied insert cyan and no untied one. The cabinet's own lighting
+    # (expressive strip, speaker, topper) is no insert, as above:
+    #   avengers_infinity_le-1.10: 50/50 RGB, 132/132 single; shots 18/18
+    #   avengers_infinity_pro-1.10: 44/44 RGB, 132/132 single; shots 18/18
+    #   foo_fighters_pro-1.04: 24/24 RGB, 64/64 single; shots 8/8
+    #   john_wick_le-1.02: 8/8 RGB, 98/98 single; shots 8/8
+    #   john_wick_pro-1.02: 8/8 RGB, 97/97 single; shots 7/7
+    #   king_kong_pro-0.97: 9/9 RGB, 100/100 single; shots 9/9
+    #   mando_le-1.45: 15/15 RGB, 65/65 single; shots 11/11
+    #   mando_pro-1.45: 13/13 RGB, 56/56 single; shots 9/9
+    "avengers_infinity_le-1.10",
+    "avengers_infinity_pro-1.10",
+    "foo_fighters_pro-1.04",
+    "john_wick_le-1.02",
+    "john_wick_pro-1.02",
+    "king_kong_pro-0.97",
+    "mando_le-1.45",
+    "mando_pro-1.45",
 ))
 
 

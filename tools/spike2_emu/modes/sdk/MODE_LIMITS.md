@@ -163,8 +163,8 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
 | Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
-| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | no | scoop, mechanisms |
-| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | no | mechanisms |
+| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
@@ -175,7 +175,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
 | Elvira 1.13 | ✓ | no | not yet | shots |  |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
-| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | no |  |
+| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots |  |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
@@ -190,13 +190,13 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
-| John Wick LE 1.02 | ✓ | no | ✓ | no | scoop, mechanisms |
-| John Wick Pro 1.02 | ✓ | no | ✓ | no | scoop |
+| John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms |
+| John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| King Kong Pro 0.97 | ✓ | ✓ | ✓ | no | mechanisms |
+| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
@@ -219,8 +219,8 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
-| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | no | magnet, scoop, mechanisms |
-| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | no | scoop, mechanisms |
+| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
+| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | mechanisms |

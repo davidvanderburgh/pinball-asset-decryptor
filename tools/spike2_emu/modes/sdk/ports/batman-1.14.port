@@ -342,7 +342,11 @@ text diverter_power_label Diverter power
 text gate_label           Control gate
 text diverter_power_drive 9 6 255 64 16
 text gate_drive           9 7 255 64 96
-text held_coils            diverter_power gate
+text magnet_hold_label    Magnet
+# PAD-420 run 21: its TurntableMagnet (device 14), held at the GAME's own grab - seen in the magnet census when the
+# Bat Phone Target was hit: 255 for 1000 ms, then 16 (the class asks no draw; the board's own for the coil)
+text magnet_hold_drive    9 0 255 1000 16
+text held_coils            diverter_power gate magnet_hold
 
 # ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
 # calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the

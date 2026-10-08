@@ -2479,7 +2479,7 @@ def modes_games_rows(ports=None):
         if any("button" in n.lower() for n, _m in p.shots):
             also.append("buttons")
         also += [w for k, w in (("magnet", "magnet"), ("scoop", "scoop"), ("coils", "mechanisms"),
-                                ("shield", "shield"))
+                                ("shield", "shield"), ("shows", "light shows"))
                  if p.can(k)]                                       # PAD-381: what a mode may hold; PAD-392
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
@@ -2519,6 +2519,8 @@ def _modes_which_games():
                      "- **Buttons:** the flipper and Action buttons count as shots.\n"
                      "- **Magnet, scoop, mechanisms:** what a mode may hold for a moment: the "
                      "magnet, a ball in the scoop, the Mechagodzilla magnet and the bridge.\n"
+                     "- **Light shows:** the game's own light shows, which a mode can play as it "
+                     "starts or ends.\n"
                      "- **Never waits:** a mode can't be set to wait for the game's modes.\n\n"
                      "> **Not listed?** Pick the card anyway: the app works out its hooks. "
                      "Press Check this game (about two minutes) before trusting them. "

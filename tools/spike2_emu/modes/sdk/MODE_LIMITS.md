@@ -47,7 +47,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Hold a ball in the scoop | Godzilla 1.16: up to 10 s, then the game kicks it out as usual |
 | Hold the Mechagodzilla magnet or the bridge | Godzilla Premium/LE 1.16: up to 5 s, as it starts or on a shot |
 | Turn the shield targets toward the player | Godzilla Premium/LE 1.16: while the mode runs, then back where they were. Only while the game's modes can't start. Tested in the emulator so far |
-| Play one of the game's own light shows as it starts or ends | Godzilla Premium/LE 1.16: ten shows by name (flashy, subdued, accent), a few seconds each; none as the ball drains. Godzilla Pro 1.16: twelve, eight of them the Premium/LE's by the same name (all but Insert chase and Playfield wave). Avengers LE/Pro 1.10, James Bond 007 LE 1.06, Jaws LE/Pro 1.02, John Wick LE 1.02, King Kong LE/Pro 0.97, Rush LE/Pro 1.19: twelve each (a Pro offers its LE's shows by the same names where they are the same show). The others were found by playing every show process of the game's in the emulator and named from what it lit (tested in the emulator so far) |
+| Play one of the game's own light shows as it starts or ends | Godzilla Premium/LE 1.16: ten shows by name (flashy, subdued, accent), a few seconds each; none as the ball drains. Every build marked *light shows* in "Which games" below: up to twelve of its own, found by playing every show process of the game's in the emulator and named from what it lit; a Pro offers its LE's by the same names where they are the same show (Godzilla Pro has eight of the Premium/LE's). Tested in the emulator so far |
 | Move the building | Not yet |
 | Fire a flipper, slingshot, pop bumper, kickback, lock, the trough or any other coil | No |
 | Add a switch or a shot | No. A mode sees the shots the game reports. |
@@ -163,8 +163,8 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
 | Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
-| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
@@ -176,42 +176,42 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
-| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, light shows |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
-| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
+| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, light shows |
 | Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
 | Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms |
-| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
+| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
-| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
+| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
-| John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms |
+| John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, light shows |
 | John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
-| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
-| Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
-| Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
+| Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
-| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |

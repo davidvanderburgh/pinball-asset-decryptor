@@ -58,6 +58,10 @@ READ_REV = 1
 NAME_MAX = 64
 #: how far back from a table's pointer the table's start is looked for (words)
 TABLE_BACK = 256
+#: the most scene directories :func:`read_card` reads for a bank, most clips first (the
+#: in-game bank holds most of a title's clips; a title with a clip in every scene is not
+#: read scene by scene)
+BANKS_MAX = 12
 
 
 class ClipModesError(ValueError):
@@ -458,10 +462,12 @@ class WriteJob:
         self.banks = dict(banks)
         self.names = set()
         self.bank_of = {}                          # clip name -> bank dir
+        self.path_of = {}                          # clip name -> its file below scene.assets
         for d, data in self.banks.items():
             for c in VB.parse(data).library.entries:
                 self.names.add(c.name)
                 self.bank_of.setdefault(c.name, d)
+                self.path_of.setdefault(c.name, c.path)
         self.program = None                        # the ProgramPlan, once planned
         self.done = []
         self.why = ""                              # why no copy was made at all
@@ -498,14 +504,20 @@ class WriteJob:
     def bank_files(self, project, scratch, source_of=None, banks=None):
         """``(replaced, new, lines)`` for the bank step: each bank that gains a copy,
         rewritten into *scratch* (``[(card rel, file)]``, no leading slash), and each copy's
-        file at the path its bank now names. *source_of(rec, staged)* picks the file a copy
-        goes on as (the project's staged file by default); *banks* ``{bank dir: bytes}``
-        overrides a bank the same build already rewrote (the modes' clips). Raises
-        :class:`ClipModesError` when a copy's file is missing."""
+        file at the path its bank now names. A copy the card already has (a build on an
+        earlier build's card) goes over that card's file instead, unless the project's file
+        IS that file (an extract of the card: the Video tab's own slot, written as any other).
+        *source_of(rec, staged)* picks the file a copy goes on as (the project's staged file
+        by default); *banks* ``{bank dir: bytes}`` overrides a bank the same build already
+        rewrote (the modes' clips). Raises :class:`ClipModesError` when a copy's file is
+        missing."""
         banks = dict(self.banks, **(banks or {}))
         wanted = {}
+        replaced, new, lines = [], [], []
         for rec in self.done:
-            if rec.get("state") == "shared" or rec["name"] in self.names:
+            if rec.get("state") == "shared":
+                continue
+            if rec["name"] in self.names and (rec.get("rel") or "") in self.rows:
                 continue
             src = os.path.join(project, *(rec.get("rel") or "").split("/"))
             if not rec.get("rel") or not os.path.isfile(src):
@@ -513,8 +525,14 @@ class WriteJob:
                                      % (mode_label(rec["mode"]), rec.get("rel") or rec["name"]))
             if source_of is not None:
                 src = source_of(rec, src) or src
+            if rec["name"] in self.names:
+                card = "%s/scene.assets/%s" % (self.bank_of[rec["name"]].strip("/"),
+                                               self.path_of[rec["name"]])
+                replaced.append((card, src))
+                lines.append("%s's own copy %s is on this card already; the project's file "
+                             "goes over it (%s)" % (mode_label(rec["mode"]), rec["name"], card))
+                continue
             wanted.setdefault(self.bank_dir(rec), []).append((rec, src))
-        replaced, new, lines = [], [], []
         for d, items in wanted.items():
             data, added = bank_plan(banks[d], [(r["name"], os.path.getsize(s)) for r, s in items])
             rel = d.strip("/") + "/scene.radium"
@@ -624,13 +642,14 @@ def manifest_rows(project):
 
 
 def _bank_dirs(rows):
-    """The scene directories the project's clips come from, most clips first."""
+    """The scene directories the project's clips come from, most clips first (at most
+    :data:`BANKS_MAX`)."""
     count = {}
     for path in rows.values():
         if "/scene.assets/" in path:
             d = path.split("/scene.assets/", 1)[0]
             count[d] = count.get(d, 0) + 1
-    return sorted(count, key=lambda d: -count[d])
+    return sorted(count, key=lambda d: (-count[d], d))[:BANKS_MAX]
 
 
 def _cache_path(card):

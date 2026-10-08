@@ -131,7 +131,16 @@ class ModesMixin:
             if ms:
                 self._m_modes[rel] = list(ms)
         by_name = {n: rel for rel, n in clips.name_of.items()}
-        for rec in self._m_records():
+        from ..plugins.stern import clip_modes as CM
+        recs = self._m_records()
+        named = {r["name"] for r in recs}
+        for rel, name in clips.name_of.items():
+            # a copy an earlier build put on the card, extracted again: still a copy
+            got = None if name in named else CM.copy_of(name, by_name, reading.labels)
+            if got and got[1] in self._m_modes.get(rel, ()):
+                self._m_copy[rel] = {"name": name, "clip": got[0], "mode": got[1], "rel": rel,
+                                     "of": by_name.get(got[0], ""), "state": "own"}
+        for rec in recs:
             of = rec.get("of") or by_name.get(rec["clip"])
             mine = rec.get("rel") or by_name.get(rec["name"])
             if rec.get("state") == "shared":
@@ -228,6 +237,16 @@ class ModesMixin:
         if not clip:
             return ""
         recs = self._m_records()
+        back = next((r for r in recs if r["clip"] == clip and r["mode"] == mode
+                     and r.get("state") == "shared"), None)
+        if back is not None:
+            # the card already has this mode's copy and the project had put it back: the
+            # card's copy again, nothing new to make
+            CM.save_records(project, [r for r in recs if r is not back])
+            self._m_history("video  %s plays its copy %s again" % (self._m_label(mode),
+                                                                  back["name"]))
+            self._m_after_change([back.get("rel") or ""])
+            return back.get("rel") or ""
         taken = set(clips.bank_of) | {r["name"] for r in recs}
         name = CM.own_name(clip, mode, taken)
         ext = os.path.splitext(rel)[1]

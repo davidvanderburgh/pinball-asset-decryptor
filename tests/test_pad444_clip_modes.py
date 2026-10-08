@@ -384,3 +384,53 @@ def test_the_page_draws_played_in_the_filter_and_the_copy_buttons():
                 'call("video.own_copy", pv.modes.rel, m.id)', 'call("video.shared_again", pv.modes.rel)',
                 "Give ${m.label} its own copy…", "Back to the shared clip…"):
         assert bit in js, bit
+
+
+def test_a_copy_an_earlier_build_put_on_the_card_is_still_a_copy(tmp_path, monkeypatch):
+    built = "video/shared_battle_vs_ghidorah_and_gigan.mp4"
+    proj = _project(tmp_path, names=(SHARED, SOLO, built))
+    card = tmp_path / "built.raw"
+    card.write_bytes(b"\0" * 16)
+    (proj / ".extract_source.json").write_text(json.dumps({"input_path": str(card)}),
+                                               encoding="utf-8")
+    reading = CM.Reading(labels={GIGAN: "Battle vs Gigan", TAG: "Battle vs Ghidorah and Gigan"}, refs={
+        "shared": [CM.Ref("movw_a32", [1, 2], 1, GIGAN, "init")],
+        "shared_battle_vs_ghidorah_and_gigan": [CM.Ref("movw_a32", [3, 4], 3, TAG, "init")],
+        "solo": [CM.Ref("movw_a32", [5, 6], 5, GIGAN, "own")]})
+    names = {SHARED: "shared", SOLO: "solo", built: "shared_battle_vs_ghidorah_and_gigan"}
+    monkeypatch.setattr(CM, "read_card", lambda card_path, rows, cancel=None: CM.CardClips(
+        card=card_path, reading=reading, name_of=dict(names),
+        bank_of={n: ["/g/" + BANK_DIR, "2.asset/%d.asset" % i] for i, n in enumerate(names.values())}))
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        st = _wait(w, lambda st: st["modes"]["ready"])
+        assert _row(st, built)["copy"] == "Battle vs Ghidorah and Gigan"
+        assert _row(st, SHARED)["modes"] == ["Battle vs Gigan"]
+        # put back: the card's file stays, the next Write points the battle back
+        w.answers.append("yes")
+        assert w.call("video.shared_again", built) is True
+        st = _wait(w, lambda st: st["rows"] and st["modes"]["ready"] and not st.get("scanning")
+                   and _row(st, SHARED)["shared"])
+        assert (proj / built).exists()
+        rec, = CM.records(str(proj))
+        assert (rec["state"], rec["mode"], rec["of"]) == ("shared", TAG, SHARED)
+        assert _row(st, built)["copy"] == "" and _row(st, built)["modes"] == []
+        # and own again: the card's copy, nothing new made
+        assert w.call("video.own_copy", SHARED, TAG) == built
+        st = _wait(w, lambda st: st["rows"] and st["modes"]["ready"] and not st.get("scanning")
+                   and _row(st, built)["copy"])
+        assert CM.records(str(proj)) == [] and len(st["rows"]) == 3
+
+
+def test_a_copy_the_card_already_has_takes_the_projects_file_over_its_own(tmp_path):
+    rec = {"name": "Delta", "clip": "Alpha", "mode": GIGAN, "rel": "video/Delta_mine.mp4",
+           "of": "video/Alpha.mp4", "state": "own"}
+    proj, job = _job(tmp_path, [rec])
+    job.done = [rec]
+    replaced, new, lines = job.bank_files(str(proj), str(tmp_path / "scratch"))
+    assert new == [] and replaced == [("g/%s/scene.assets/2.asset/1.asset" % BANK_DIR,
+                                       str(proj / rec["rel"]))]
+    assert "on this card already" in lines[0]
+    # an extract of that card: the copy is the extract's own slot, written as any other
+    job.rows["video/Delta_mine.mp4"] = "/g/%s/scene.assets/2.asset/1.asset" % BANK_DIR
+    assert job.bank_files(str(proj), str(tmp_path / "s2")) == ([], [], [])

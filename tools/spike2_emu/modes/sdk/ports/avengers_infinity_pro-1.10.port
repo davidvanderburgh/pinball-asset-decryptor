@@ -451,3 +451,31 @@ callout ten_seconds       571   # You are almost out of time. / Time is running 
 # PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
 # build's own transcribed voice lines, tu_wide.py)
 callout time_up           635   # This fight is over, but there's still more battles to come.
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+data coil_count            0x00757620
+data coil_table            0x0071efa8
+value magnet_proc          13185
+site coil_fire        0x001a9e70 0xe3500000 0xe52de004
+site adjustment       0x00405338 0xe92d40f0 0xe2504000
+site proc_exists      0x0025be94 0xe3032d60 0xe3402072
+site proc_create      0x0025b864 0xe303cd60 0xe340c072
+site proc_sleep       0x0025b994 0xe3033d60 0xe3403072
+site coil_take            0x0004c2cc 0xe92d40f8 0xe3037d64
+site coil_give            0x0004c390 0xe3510000 0xe92d4038
+text tower_magnet_label   Tower magnet
+value tower_magnet_dev    11
+value tower_magnet_ctl    40
+value tower_magnet_devoff 4
+value tower_magnet_off_slot 31
+site tower_magnet_get     0x0004f958 0xe92d4010 0xe3064158
+text tower_post_label     Tower up post
+value tower_post_dev      10
+value tower_post_ctl      40
+value tower_post_devoff   4
+value tower_post_off_slot 31
+site tower_post_get       0x0004fbbc 0xe92d4030 0xe3064194
+text tower_magnet_drive   9 0 255 300 100
+text tower_post_drive     9 5 255 128 64
+text held_coils            tower_magnet tower_post

@@ -71,6 +71,10 @@ html.bp-1020 .cp-grid { grid-template-columns: minmax(0, 1fr); }
 .cp-both b { color: var(--ink); }
 .cp-which .bd { gap: 8px; }
 .cp-which-now { margin: 0; line-height: 1.45; }
+/* PAD-463: All images / All videos, and an old Every replaced box still ticked */
+.cp-which-all { gap: 8px; flex-wrap: wrap; }
+.cp-which-old { gap: 8px; align-items: center; }
+.cp-which-old .small { line-height: 1.4; }
 
 /* the explainer */
 .cp-explain p { margin: 0; color: var(--ink-2); line-height: 1.5; }

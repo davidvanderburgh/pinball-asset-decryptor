@@ -1766,14 +1766,16 @@ def run_steps(steps, rgb):
 
 
 def video_look_exact(assets_dir, switch, own_colours, overlay_on=True,
-                     files_on=True, screen_on=True, rel=None):
+                     files_on=True, screen_on=True, rel=None, kind="videos"):
     """:func:`video_look`'s steps as Scenes draws a picture through them
     (PAD-448): ``{"orig", "rep"}`` lists of :func:`run_steps` steps, each the
     whole profile (its colour ranges too, which a browser filter has no form
-    for) and the machine screen exactly as :func:`machine_view` has it."""
+    for) and the machine screen exactly as :func:`machine_view` has it.
+    *kind* (PAD-463): "images" for a picture on the Images tab, whose own
+    profile is looked up among the pictures'."""
     overlay = active(assets_dir) if overlay_on else None
     screen = _screen_step(assets_dir) if screen_on else None
-    files = ((asset_resolver(assets_dir)("videos", rel) if rel
+    files = ((asset_resolver(assets_dir)(kind, rel) if rel
               else asset_active(assets_dir)) if files_on else None)
     over = [("apply", overlay)] if overlay is not None else []
     orig = over + ([screen] if screen is not None else [])

@@ -663,3 +663,24 @@ text block_name_21      Tour Mode Earls Court
 site block_start_26     0x000feda0 0xe30d17e4 0xe3a02b02
 data block_obj_26       0x0425b668
 text block_name_26      Electric Magic Pre Hurryup
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+site proc_exists          0x001032d8 0xe30d2958 0xe3402425
+site proc_create          0x00102c88 0xe30dc958 0xe340c425
+site proc_sleep           0x00102dd8 0xe30d3958 0xe3403425
+site adjustment           0x00279470 0xe92d40f0 0xe2504000
+site coil_fire             0x002f8754 0xe3500000 0xe52de004
+data coil_count            0x04294e78
+data coil_table            0x0428fa08
+value magnet_proc          13185
+site coil_take            0x000e424c 0xe92d40f8 0xe30d795c
+site coil_give            0x000e4310 0xe3510000 0xe92d4038
+text control_gates_label  Orbit control gates
+value control_gates_dev   11
+value control_gates_ctl   32
+value control_gates_devoff 4
+value control_gates_off_slot 30
+data control_gates_obj   0x04259760
+text control_gates_drive  9 5 255 64 96
+text held_coils            control_gates

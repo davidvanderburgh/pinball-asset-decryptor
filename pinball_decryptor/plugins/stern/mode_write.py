@@ -1146,12 +1146,17 @@ def stock_lines(project, carried, prof=None):
 def conflicts(result, touched_rels=(), audio_idx=(), sound_idx=None):
     """Why this build cannot carry the modes alongside the project's other edits: another
     edit rewrites the HUD or bank scene the modes are built into, or replaces the sound the
-    end sound goes in place of. Empty = none."""
+    end sound goes in place of. Empty = none.
+
+    PAD-469: only a scene this build copies whole (``result.replaced``) counts. Random clips
+    alone, or modes with no screen, leave the HUD as the card has it, so the project's own
+    HUD edits go on beside them."""
     out = []
     hud, bank = scene_rels(result.profile)
     touched = {r.lstrip("/") for r in touched_rels}
+    rewritten = {r.lstrip("/") for r, _s in result.replaced}
     for rel, what in ((hud, "HUD scene"), (bank, "video bank scene")):
-        if rel and rel in touched:
+        if rel and rel in touched and rel in rewritten:
             out.append("another edit in this project changes the %s (%s) the modes' screens "
                        "and clips are built into" % (what, rel))
     if sound_idx is not None and sound_idx in set(audio_idx):

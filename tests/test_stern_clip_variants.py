@@ -461,6 +461,64 @@ def test_modes_and_random_clips_share_one_bank_and_one_runtime(monkeypatch, tmp_
     engine._rmtree_grow_plan(plan)
 
 
+def _hud_colour_edit(monkeypatch, card):
+    """A recoloured line of text in the HUD scene as the Write gets one: an in-place patch of
+    the HUD's own bytes."""
+    from pinball_decryptor.plugins.stern import engine
+    hud = card.nodes["hud"]
+    monkeypatch.setattr(engine, "_changed_radium_text_colors", lambda assets_dir: {
+        "/" + card.rel["hud"]: {"SCORE": ((1.0, 1.0, 1.0), (1.0, 0.0, 0.0))}})
+    monkeypatch.setattr(engine, "_radium_color_writes", lambda reader, a, log, cancel: (
+        [(card.DISK["hud"] + 0x10, b"RED")], 1, {bytes(hud["i_block"]): (hud, {0x10: b"RED"})}))
+
+
+def _disk(card):
+    """The card's files at their disk offsets, for the digests of a file patched in place."""
+    disk = bytearray(max(card.DISK[k] + len(card.data[k]) for k in card.DISK))
+    for k, off in card.DISK.items():
+        disk[off:off + len(card.data[k])] = card.data[k]
+    return io.BytesIO(bytes(disk))
+
+
+def test_random_clips_go_on_beside_an_edit_of_the_hud_scene(monkeypatch, tmp_path, gz_proven):
+    """PAD-469: random clips rewrite the video bank only. A project that also edited the HUD
+    scene was refused ("another edit in this project changes the HUD scene") though nothing of
+    the clips goes in it; now both go on, the HUD patched in place with its manifest record
+    matching the patched bytes."""
+    import hashlib
+    from pinball_decryptor.plugins.stern import engine, sidx
+    from tests.test_stern_audio_grow import _capture, _said
+    card, project = _variant_card(monkeypatch, tmp_path)
+    _hud_colour_edit(monkeypatch, card)
+    msgs, log = _capture()
+    writes, _counts, plan, _mode, _vp = engine._compute_patches(
+        _disk(card), [], project, log=log, progress=None, cancel=lambda: False,
+        dest_is_device=False)
+    assert (card.DISK["hud"] + 0x10, b"RED") in writes
+    rels = [r for r, _s in plan["jobs"]]
+    assert card.rel["hud"] not in rels and card.rel["bank"] in rels
+    hud = bytearray(card.data["hud"])
+    hud[0x10:0x13] = b"RED"
+    man = open(plan["jobs"][-1][1], "rb").read()
+    assert sidx.manifest_files(man)[card.rel["hud"]] == (len(hud), hashlib.md5(hud).hexdigest())
+    assert _said(msgs, "Random clips: video/Delta.mov plays one of 3 clips at random")
+    engine._rmtree_grow_plan(plan)
+
+
+def test_modes_with_a_screen_still_refuse_an_edit_of_the_hud_scene(monkeypatch, tmp_path,
+                                                                   preview_modes_on):
+    """The other side of PAD-469: a mode's screen rewrites the HUD whole from the stock one,
+    which would drop the edit, so that Write still stops and says why."""
+    from tests.test_stern_audio_grow import _capture
+    from tests.test_stern_mode_write_engine import _mode_card
+    card, _staged, project, _enc, _h = _mode_card(monkeypatch, tmp_path, with_sound=False)
+    _hud_colour_edit(monkeypatch, card)
+    _msgs, log = _capture()
+    with pytest.raises(RuntimeError, match=r"^Modes: another edit in this project changes the "
+                                           r"HUD scene \(%s\)" % re.escape(card.rel["hud"])):
+        _compute(str(project), log)
+
+
 def test_random_clips_are_left_out_of_a_direct_sd_write_with_the_reason(monkeypatch, tmp_path,
                                                                        gz_proven):
     from pinball_decryptor.plugins.stern import engine

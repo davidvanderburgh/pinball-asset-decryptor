@@ -174,7 +174,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | scoop |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | scoop |
 | Elvira 1.13 | ✓ | no | not yet | shots |  |
-| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots |  |
+| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | no |  |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
@@ -193,7 +193,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | John Wick LE 1.02 | ✓ | no | ✓ | no | scoop |
 | John Wick Pro 1.02 | ✓ | no | ✓ | no | scoop |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms |
-| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots |  |
+| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | no | mechanisms |
@@ -216,7 +216,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | TMNT LE 1.59 | ✓ | ✓ | not yet | shots |  |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
-| TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots |  |
+| TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | no | scoop, mechanisms |

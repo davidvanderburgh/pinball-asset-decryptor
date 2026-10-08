@@ -823,6 +823,11 @@ HELD_COILS_PROVEN = frozenset({
     ("james_bond_pro-1.06", "gate"),             # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("aerosmith_le-1.16", "upper_gate"),         # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 10 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; when the game raised it mid-hold, let go with no OFF of its own; no abort
     ("guardians-1.15", "orbit_gates"),           # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("foo_fighters_le-1.04", "outlane_up_post"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 8, 255 for 64 ms then 64 (the game's own), at most 2064 ms; held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("foo_fighters_le-1.04", "up_pf_diverter"),  # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 32 ms then 64 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("foo_fighters_le-1.04", "van_up_post"),     # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 32 ms then 128 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("jurassic_park_the_pin-1.05", "gate"),      # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 7, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("turtles_pro-1.59", "pizza_magnet"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 1200 ms then 128 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 

@@ -398,3 +398,18 @@ text block_name_51      Neutrinos
 site block_start_53     0x00110a64 0xe92d4010 0xe1a04000
 data block_obj_53       0x0064c4a8
 text block_name_53      Test
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site proc_exists          0x0032edf8 0xe30429b8 0xe340206c
+site proc_create          0x0032e7a8 0xe304c9b8 0xe340c06c
+site proc_sleep           0x0032e8f8 0xe30439b8 0xe340306c
+site adjustment           0x00428570 0xe92d40f0 0xe2504000
+site coil_fire             0x001fe514 0xe3500000 0xe52de004
+data coil_count            0x00653968
+data coil_table            0x00653b1c
+value magnet_proc          13185
+text pizza_magnet_label   Pizza magnet
+text pizza_magnet_drive   9 6 255 1200 128
+text held_coils            pizza_magnet

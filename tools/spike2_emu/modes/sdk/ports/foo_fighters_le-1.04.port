@@ -759,3 +759,22 @@ text block_rule_name_16    Skill Shot
 # PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
 # build's own transcribed voice lines, tu_wide.py)
 callout time_up           878   # Better luck next time.
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site proc_exists          0x003983d8 0xe3042ab0 0xe34023c3
+site proc_create          0x00397da8 0xe304cab0 0xe340c3c3
+site proc_sleep           0x00397ed8 0xe3043ab0 0xe34033c3
+site adjustment           0x002a31b8 0xe92d40f0 0xe2504000
+site coil_fire             0x00210394 0xe3500000 0xe52de004
+data coil_count            0x03c29c8c
+data coil_table            0x03be2398
+value magnet_proc          13185
+text outlane_up_post_label Outlane up post
+text up_pf_diverter_label Up pf diverter
+text van_up_post_label    Van up post
+text outlane_up_post_drive 8 8 255 64 64 2064
+text up_pf_diverter_drive 9 6 255 32 64
+text van_up_post_drive    9 7 255 32 128
+text held_coils            outlane_up_post up_pf_diverter van_up_post

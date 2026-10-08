@@ -461,3 +461,21 @@ site block_start_4      0x00072bdc 0xe92d4038 0xeb0081ac
 text block_name_4       Brachiosaurus
 site block_start_5      0x00068090 0xe92d4010 0xe1a04000
 text block_name_5       Restore Power
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site proc_exists          0x00186f74 0xe30725d8 0xe3402059
+site proc_create          0x00186924 0xe307c5d8 0xe340c059
+site proc_sleep           0x00186a74 0xe30735d8 0xe3403059
+site adjustment           0x0027e1a8 0xe92d40f0 0xe2504000
+site coil_fire             0x000b1700 0xe3500000 0xe52de004
+data coil_count            0x005a459c
+data coil_table            0x00593d58
+value magnet_proc          13185
+text gate_label           Control gate
+text gate_drive           8 7 255 250 255 1488
+data gate_obj            0x0059300c
+value gate_ctl            12
+value gate_off_slot       5
+text held_coils            gate

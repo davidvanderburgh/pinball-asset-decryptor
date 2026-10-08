@@ -272,8 +272,9 @@ HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "shaker")
 #: version), from the coil names in each newest build's device table: a magnet that catches the ball (not
 #: Metallica's grave marker or electric chair, which fling it), a scoop / VUK / eject the ball settles in, another
 #: mechanism a mode may hold (a second magnet, a diverter, a gate, an up post; not a lock post), the shield
-#: platform's motor, the shaker motor. Foo Fighters' device table carries no coil names: its parts are its
-#: adjustments' (the Overlord magnet, the upper playfield diverter, the outlane up post). Venom's scoops are named
+#: platform's motor, the shaker motor. Foo Fighters' parts were first read off its adjustments (the Overlord magnet,
+#: the upper playfield diverter, the outlane up post); its device tables name them now, and the Pro's has only the
+#: van up post of them. Venom's scoops are named
 #: by its switches and adjustments (the center and 180 scoops), not by a coil. A game directory not listed here
 #: shows every section.
 MACHINE_HARDWARE = {
@@ -289,7 +290,7 @@ MACHINE_HARDWARE = {
     "dungeons_and_dragons_pro": ("magnet", "scoop", "coils"),
     "elvira3": ("scoop", "coils", "shaker"),
     "foo_fighters_le": ("magnet", "coils"),
-    "foo_fighters_pro": ("magnet", "coils"),
+    "foo_fighters_pro": ("coils",),       # run 21: its device table (the names resolve now) has no OVERLORD MAGNET - the LE's only
     "godzilla_le": ("magnet", "scoop", "coils", "shield"),
     "godzilla_pro": ("magnet", "scoop"),
     "guardians": ("magnet", "scoop", "coils", "shaker"),

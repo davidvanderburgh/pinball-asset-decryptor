@@ -225,7 +225,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots |  |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop |
-| Venom Pro 1.07 | no | ✓ | ✓ | shots | scoop, never waits |
+| Venom Pro 1.07 | no | ✓ | ✓ | shots | scoop |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **Ball save not yet:** found in the game, not yet seen working.

@@ -89,7 +89,9 @@ def test_every_shipped_build_gets_a_verdict_with_the_game_named():
             assert p.can("ball_save"), key
         else:
             assert not p.can("ball_save") and p.label in p.why_not("ball_save"), key
-    assert MP.BALL_SAVE_PROVEN <= MP.MULTIBALL_PROVEN     # the same call: never proven without it
+    # the same call: never proven without it - but for Munsters Pro 1.28 (PAD-420), whose serve worked (its ball save
+    # is proven) while its multiball proof fails on the game's own end of it: two drains of four left 2 in play, then 0
+    assert MP.BALL_SAVE_PROVEN - MP.MULTIBALL_PROVEN <= {"munsters_pro-1.28"}
 
 
 def test_the_interpreter_takes_the_key_and_the_runtime_asks_for_no_more_balls():

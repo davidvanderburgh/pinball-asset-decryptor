@@ -4209,14 +4209,19 @@ static struct {
     unsigned long until;                    /* pm_ms() a hold ends; 0 = not holding */
     int release;                            /* the mode let go */
     int armed;                              /* 0 not swapped yet, 1 wrapped, -1 refused */
+    unsigned log, logged;                   /* PAD-420: `value scoop_log 1` - the handler's first 64 calls in mode.log */
 } scoop;
 
 static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
 {
-    unsigned r = scoop.orig(ev, a1, a2, a3);
+    unsigned r, e;
     unsigned long t0;
     const char *why;
-    unsigned e = scoop.event_arg == 1 ? a1 : scoop.event_arg == 2 ? a2 : scoop.event_arg == 3 ? a3 : ev;
+    if (scoop.log && scoop.logged < 64)     /* for whoever finds a title's "settled" event: what the game hands it */
+        say("scoop: the handler's call %u: event %u, args %u %u %u%s", ++scoop.logged, ev, a1, a2, a3,
+            running ? " (a mode runs)" : "");
+    r = scoop.orig(ev, a1, a2, a3);
+    e = scoop.event_arg == 1 ? a1 : scoop.event_arg == 2 ? a2 : scoop.event_arg == 3 ? a3 : ev;
     if (e != scoop.event || !scoop.hold_ms || !running || !pm_in_game()) return r;
     t0 = pm_ms();
     scoop.until = t0 + scoop.hold_ms;
@@ -4288,6 +4293,7 @@ static void scoop_arm(void)
     scoop.slot = data("scoop_slot");
     scoop.event = (unsigned)pm_port_value("scoop_event", 2);
     scoop.event_arg = (unsigned)pm_port_value("scoop_event_arg", 0);
+    scoop.log = pm_port_value("scoop_log", 0) != 0;
     if (scoop.event_arg > 3) return;                /* the game's handler takes four arguments at most */
     can |= PM_CAN_SCOOP;
     say("scoop: a mode may hold a ball there, up to %u ms; the kick-out stays the game's", SCOOP_MAX_MS);

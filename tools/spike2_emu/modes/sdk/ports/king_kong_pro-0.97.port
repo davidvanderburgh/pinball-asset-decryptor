@@ -595,9 +595,11 @@ value proc_exit_slots      4
 # with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
 # commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
 # groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
-# lights coming on in turn (a chase), how much of the playfield next to the build's biggest show (wide /
-# small) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's kinds). show_kind:
-# flashy (a mode's start), subdued (its end), accent (a moment).
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
 value show_proc            13200
 site show_1               0x0004bda4 0xe92d4010 0xeb0da914   # 492 lights in its lamp groups, 5 light-runner commands, no colour given, 4.4 s
 text show_name_1          Wide strobe
@@ -623,20 +625,20 @@ site show_6               0x0028d6ac 0xe92d4ff0 0xe30f4b54   # 168 lights in its
 text show_name_6          Fast strobe
 text show_kind_6          flashy
 value show_secs_6         8
-site show_7               0x000f1a64 0xe92d4038 0xeb0b11e4   # 484 lights in its lamp groups, 88 light-runner commands, white, yellow, 4.0 s
-text show_name_7          Wide white and yellow fade
+site show_7               0x000f1a64 0xe92d4038 0xeb0b11e4   # 484 lights in its lamp groups, 88 light-runner commands, yellow, white, 4.0 s
+text show_name_7          Wide yellow and white fade
 text show_kind_7          subdued
 value show_secs_7         4
-site show_8               0x001c625c 0xe92d4070 0xeb07bfe6   # 476 lights in its lamp groups, 50 light-runner commands, white, red, 6.1 s
-text show_name_8          Wide white and red fade
+site show_8               0x001c625c 0xe92d4070 0xeb07bfe6   # 476 lights in its lamp groups, 50 light-runner commands, red, white, 6.1 s
+text show_name_8          Wide red and white fade
 text show_kind_8          subdued
 value show_secs_8         6
-site show_9               0x0014bc48 0xe92d4010 0xeb09a96b   # 476 lights in its lamp groups, 8 light-runner commands, white, blue, 2.5 s
-text show_name_9          Wide white and blue fade
+site show_9               0x0014bc48 0xe92d4010 0xeb09a96b   # 476 lights in its lamp groups, 8 light-runner commands, blue, white, 2.5 s
+text show_name_9          Wide blue and white fade
 text show_kind_9          subdued
 value show_secs_9         3
 site show_10              0x0013668c 0xe92d4010 0xeb09feda   # 348 lights in its lamp groups, 8 light-runner commands, magenta, 3.5 s
-text show_name_10         Wide magenta fade
+text show_name_10         Magenta fade
 text show_kind_10         subdued
 value show_secs_10        4
 site show_11              0x000c0fa4 0xe92d4010 0xeb0bd494   # 496 lights in its lamp groups, 2 light-runner commands, white, 0.8 s

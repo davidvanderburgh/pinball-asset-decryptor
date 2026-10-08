@@ -675,3 +675,64 @@ text block_name_26      Monster Zero
 site lamp_free_owner      0x00450b58 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0x120
 value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x001cb718 0xe92d41f0 0xeb087946   # Godzilla LE's Strobe burst (PAD-411): its light-runner commands the same; 42 lights in its lamp groups, 142 light-runner commands, red, 6.2 s
+text show_name_1          Strobe burst
+text show_kind_1          flashy
+value show_secs_1         6
+site show_2               0x0011532c 0xe92d4038 0xeb0b5241   # Godzilla LE's Strobe storm (PAD-411): its light-runner commands the same; 184 lights in its lamp groups, 74 light-runner commands, white, 11.2 s
+text show_name_2          Strobe storm
+text show_kind_2          flashy
+value show_secs_2         16
+site show_3               0x000adcc8 0xe92d4ff0 0xe24dd044   # 472 lights in its lamp groups, 0 light-runner commands, yellow, white, 3.4 s
+text show_name_3          Wide yellow and white strobe
+text show_kind_3          flashy
+value show_secs_3         3
+site show_4               0x00082e8c 0xe92d4ff0 0xe304b930   # 335 lights in its lamp groups, 0 light-runner commands, no colour given, 11.2 s
+text show_name_4          Glow
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x00057a64 0xe92d4038 0xeb0e4873   # 335 lights in its lamp groups, 0 light-runner commands, no colour given, 11.7 s
+text show_name_5          Strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x0008e3cc 0xe92d4ff0 0xe24dd034   # 335 lights in its lamp groups, 0 light-runner commands, yellow, 4.1 s
+text show_name_6          Yellow glow
+text show_kind_6          flashy
+value show_secs_6         4
+site show_7               0x001c8e70 0xe92d4010 0xeb088370   # Godzilla LE's Blue fade (PAD-411): its light-runner commands the same; 60 lights in its lamp groups, 3 light-runner commands, cyan, blue, 5.7 s
+text show_name_7          Blue fade
+text show_kind_7          subdued
+value show_secs_7         6
+site show_8               0x001c8f34 0xe92d4010 0xeb08833f   # Godzilla LE's Colour fade (PAD-411): its light-runner commands the same; 101 lights in its lamp groups, 6 light-runner commands, red, yellow, 5.7 s
+text show_name_8          Colour fade
+text show_kind_8          subdued
+value show_secs_8         6
+site show_9               0x001c8ff8 0xe92d4010 0xeb08830e   # Godzilla LE's Red and blue fade (PAD-411): its light-runner commands the same; 97 lights in its lamp groups, 7 light-runner commands, red, blue, 5.7 s
+text show_name_9          Red and blue fade
+text show_kind_9          subdued
+value show_secs_9         6
+site show_10              0x001c90bc 0xe92d4010 0xeb0882dd   # Godzilla LE's Ember fade (PAD-411): its light-runner commands the same; 57 lights in its lamp groups, 7 light-runner commands, red, orange, 5.7 s
+text show_name_10         Ember fade
+text show_kind_10         subdued
+value show_secs_10        6
+site show_11              0x001cb0f4 0xe92d47f0 0xe24dd010   # Godzilla LE's Colour sweep (PAD-411): its light-runner commands the same; 44 lights in its lamp groups, 18 light-runner commands, red, cyan, 1.5 s
+text show_name_11         Colour sweep
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x001cd40c 0xe92d4038 0xeb087209   # Godzilla LE's Cyan flick (PAD-411): its light-runner commands the same; 4 lights in its lamp groups, 2 light-runner commands, cyan, 0.6 s
+text show_name_12         Cyan flick
+text show_kind_12         accent
+value show_secs_12        1

@@ -537,3 +537,7 @@ text right_return_up_drive 8 7 a169 0 a169 1250
 text magnet_hold_drive    9 0 255 a196 82 2500
 text diverter_drive       9 1 a163 a164 a165 1250
 text held_coils            right_return_up magnet_hold diverter
+# PAD-420: Mode > Magnet holds the ball with the held coil magnet_hold, on a hit of the shot nearest it on the
+# playfield picture (Right ramp tgt, 67 px from the magnet; near.py)
+text magnet_coil           magnet_hold
+value magnet_shot          0x20

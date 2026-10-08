@@ -453,6 +453,24 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - Scoop (9 left): six have no scoop lines (Aerosmith Pro, Batman 1.14, Deadpool LE/Pro, James Bond 60th and
         Pro: their handler derivations failed before - the wrong switch, or no settled ball seen); King Kong Pro
         crashes in scoop runs, Metallica's handler is wrong, Elvira has no game on the direct harness.
+    * Run 17 (2026-10-08 08:37-): **ONE RIG** (David, 08:43: other tickets need rigs - slot 2 released at once,
+      slot 1 after its last coil job; everything left runs serially on slot 4: chain56 -> chain58 -> chain59 ->
+      chain60).
+      - Landed: X-Men LE's magnet (255 for adj 196 ms then 82), diverter (adj 163/164/165) and return post (its
+        hold-only command, adj 169 for 0 ms then 169: the runtime wants a draw power), X-Men Pro's return post,
+        Star Wars Pro's screen and clip (round 4, two playfield switches first).
+      - **Stack routes**: the starter (stack_starter3) only started C++ mode objects; a plain-C title's block start
+        has none - st3/stack4.so calls it with r0 0. And the record ids MOVED: each plain-C block start's first word
+        is `mov r0, #<its first record id>`, and on Guardians 1.15 / Aerosmith 1.16 every id is the older build's
+        + 4 (Guardians LE 1.15's first run "passed" naming Super Scoring for a Headphone Hurryup it started) -
+        route_transfer16.py shifts them; nothing lands until a run names the mode it started. chain58 re-runs the
+        failures, chain59 re-runs Guardians LE first.
+      - Rush LE's clip is under its centre song video (its port lacks the clip frame hand-over lines - a full-screen
+        clip is drawn from the tick); Star Wars LE's path/hero choice stayed through two switch presses (round 5:
+        PRE_WAIT=15).
+      - cgen's hold parser takes no adjustment as a TIME (X-Men's magnet/diverter were "no constant hold command");
+        preset_drives.py sets them; X-Men Pro's magnet (dev 13, 255 for adj 182 ms then 82) in chain60 with TMNT
+        LE on its slot's own NVRAM. c_land.py's evidence formats an adjustment time now.
       - Left running for the next run: chain57 (X-Men LE magnet/diverter/return post, X-Men Pro return post),
         chain56 (stack routes: Aerosmith LE, Guardians, Guardians LE, JB Pro, ST, ST LE, X-Men Pro), check13 (Jaws
         Pro event census), chain49 (media round 4). Land with c_verdict/c_land, st3_verdict + prove_set into

@@ -1708,6 +1708,15 @@ LAMPS_PROVEN = frozenset((
     # PAD-420 2026-10-08 run 16, the ball launched and 15 s settled first: Munsters Pro 1.28 5/5 RGB, 60/60 single
     # (9 lit before and after: the game's own); light_shots lit its 4 tied RGB and 10 tied single inserts
     "munsters_pro-1.28",
+    # PAD-420 2026-10-08 (lights/lights_job2.sh + judge2.py, stock card, hidden, muted): a mode file's light_all ff00ff held
+    # every insert the port names; the shim's LED view had every readable playfield insert magenta while it ran and
+    # none before, and light_shots held every tied insert cyan. The cabinet's own lighting (the expressive-lighting
+    # strip on node 2, the speaker lights on node 7) took no colour of ours - only the game's own shows; they are
+    # not inserts, as Rush 1.18's proof counted:
+    #   rush_le-1.19: 17/17 RGB, 79/79 single; shots 16/16
+    #   rush_pro-1.19: 17/17 RGB, 64/64 single; shots 14/14
+    "rush_le-1.19",
+    "rush_pro-1.19",
 ))
 
 

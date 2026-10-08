@@ -14,7 +14,8 @@ import pytest
 
 from pinball_decryptor.plugins.stern.engine import (
     _CACHE_KINDS, _DERIVE_REV, _REV_TAG, _cache_path, _consumed_cache_path,
-    _is_stale_cache_file, _sfx_names_cache_path, clear_stale_params_caches)
+    _is_stale_cache_file, _requests_cache_path, _sfx_names_cache_path,
+    clear_stale_params_caches)
 
 FP = "0123456789abcdef" * 4        # 64 hex chars; only the first 32 are used
 STEM = FP[:32]
@@ -22,14 +23,16 @@ STEM = FP[:32]
 
 def test_current_paths_all_carry_the_revision():
     """Every file kind is tagged, so a later bump can identify all of them."""
-    for p in (_cache_path(FP), _consumed_cache_path(FP), _sfx_names_cache_path(FP)):
+    for p in (_cache_path(FP), _consumed_cache_path(FP), _sfx_names_cache_path(FP),
+              _requests_cache_path(FP)):
         assert os.path.basename(p).startswith(STEM + _REV_TAG), p
 
 
 def test_all_current_paths_land_in_one_directory():
-    """The prune lists a single directory, so the three kinds must be siblings."""
+    """The prune lists a single directory, so every kind must be a sibling."""
     dirs = {os.path.dirname(p) for p in
-            (_cache_path(FP), _consumed_cache_path(FP), _sfx_names_cache_path(FP))}
+            (_cache_path(FP), _consumed_cache_path(FP), _sfx_names_cache_path(FP),
+             _requests_cache_path(FP))}
     assert len(dirs) == 1
 
 
@@ -40,6 +43,7 @@ def test_all_current_paths_land_in_one_directory():
     STEM + ".sfxnames4.json",
     STEM + ".r1.pkl",
     STEM + ".r1.consumed.npy",
+    STEM + ".r1.requests1.json",
 ])
 def test_superseded_files_are_stale(name):
     assert _is_stale_cache_file(name) is True
@@ -49,6 +53,7 @@ def test_superseded_files_are_stale(name):
     STEM + _REV_TAG + ".pkl",
     STEM + _REV_TAG + ".consumed.npy",
     STEM + _REV_TAG + ".sfxnames4.json",
+    STEM + _REV_TAG + ".requests1.json",
 ])
 def test_current_files_are_not_stale(name):
     """The live cache must survive its own prune."""

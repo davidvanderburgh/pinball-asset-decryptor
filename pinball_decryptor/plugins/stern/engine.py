@@ -102,6 +102,7 @@ _CACHE_KINDS = (
     (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
     (_REV_TAG + ".sfxnames4.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
     (_REV_TAG + ".sites1.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
+    (_REV_TAG + ".requests1.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
 )
 
 
@@ -2219,6 +2220,66 @@ def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
     return name_map
 
 
+def _requests_cache_path(fp):
+    """Sibling of the params cache holding ``{request: [idx, ...]}``
+    (:func:`_write_sound_requests`). Carries the derive revision for the same
+    reason the SFX-name map does: the idx it names are the params' records."""
+    return os.path.join(_params_cache_dir(),
+                        fp[:32] + _REV_TAG + ".requests1.json")
+
+
+def _write_sound_requests(emu, game_real_path, image_path, params, output_dir,
+                          log):
+    """Write ``sound_requests.tsv`` at the assets root: every sound REQUEST the
+    game code can ask for, the ``idx`` records its sound ids resolve to, and
+    its Sound Test name (:mod:`.clip_sounds`). The Video tab reads it to name
+    the sound files a clip's code plays.
+
+    Resolved through the firmware's own ``get_asset_descriptor`` while *emu*
+    is still booted (the Sound Test names' chain); cached per card next to the
+    params, so a re-extract is instant. Best-effort: no request table, no
+    resolver or any failure writes nothing and the extract carries on.
+    ``PINBALL_SOUND_REQUESTS=0`` turns it off."""
+    if os.environ.get("PINBALL_SOUND_REQUESTS") == "0":
+        return 0
+    import json
+    try:
+        from . import clip_sounds as _cs
+        from .info import container_counts
+        with open(_lp(image_path), "rb") as f:
+            fragments = container_counts(f.read(0x100))[0]
+        with open(_lp(game_real_path), "rb") as f:
+            fw = f.read()
+        count, lists, _t, _r = _cs.request_table(fw, fragments)
+        if not count:
+            return 0
+        cache = _requests_cache_path(_fingerprint(game_real_path, image_path))
+        idx_of = None
+        if os.path.exists(cache):
+            try:
+                with open(cache, encoding="utf-8") as f:
+                    idx_of = {int(k): v for k, v in json.load(f).items()}
+            except Exception:
+                idx_of = None
+        if idx_of is None:
+            idx_of = _cs.resolve_requests(emu, params, lists, fw)
+            try:
+                with open(cache, "w", encoding="utf-8") as f:
+                    json.dump({str(k): v for k, v in idx_of.items()}, f)
+            except Exception:
+                pass
+        _cs.write_requests(os.path.join(output_dir, _cs.REQUESTS_TSV), lists,
+                           idx_of, _cs.menu_names(fw, lists))
+        if log:
+            log("Mapped %d of the game's %d sound requests to their sounds (%s)."
+                % (len(idx_of), count, _cs.REQUESTS_TSV), "info")
+        return len(idx_of)
+    except Exception as e:
+        if log:
+            log("The sound request map couldn't be written (%s)." % e, "info")
+        return 0
+
+
 SOUND_TEST_NAMES_CSV = "sound_test_names.csv"
 
 
@@ -2471,6 +2532,9 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         # rename the matching slot themselves (right-click -> Rename offers
         # these as suggestions; David's idea after the binding proved wrong).
         _write_sound_test_names(gr_path, output_dir, log)
+        # Which sounds each request plays, for the Video tab's "sounds this
+        # clip's code plays" (clip_sounds); the resolver needs this emu.
+        _write_sound_requests(emu, gr_path, img_path, params, output_dir, log)
         emu.close()
         emu = None   # decode runs in worker processes (or a fresh emu on fallback)
 

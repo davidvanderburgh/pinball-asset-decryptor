@@ -575,6 +575,11 @@ HELP_CONTENT = {
             "- Clear the replacement and the row is the **Same clip as** the first again.\n"
             "- **Not played**: nothing in the game asks for the clip, so the machine never "
             "shows it; a replacement there changes nothing.",
+            "**Sounds with a clip** (Spike 2): under the panes, the sounds the game plays "
+            "with the clip, read from its program: kept with the clip, asked for right after "
+            "it, or named after it. Each is named by its file in the project's audio folder "
+            "once the card is extracted with this version. A sound the game picks at random, "
+            "or a clip's own audio track, is not listed.",
         ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "

@@ -261,6 +261,20 @@ replacement in it, and then only that mode plays yours. That mode's
 clip goes on the card as a new clip, so it takes an image build (not
 a direct SD write); clear the replacement and the row follows the
 first again.
+**Sounds with a clip (Stern Spike 2).** A clip and its sound are
+separate files on a Spike 2 card, named differently, and nothing in
+the file names links them. The game's program does, and under the
+panes the tab lists the sounds the game plays with the selected clip:
+*kept with the clip* (the game stores the clip and its sound
+together), *asked for right after it* (the code that shows the clip
+asks for the sound next to it), or *named after it* (the sound's Sound
+Test name is the clip's name). Each sound is named by its file in the
+project's `audio` folder once the card has been extracted with this
+version (the extract writes `sound_requests.tsv`); before that, by its
+Sound Test name or its request number. Played in the emulator, 110 of
+115 of these sounds played with their clip. Not every clip gets one:
+a sound the game picks at random or works out while it plays, or one
+a clip carries in its own audio track, is not listed.
 **Undo and Redo.** The *Undo* and *Redo* buttons at the top of the
 tab (Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z) take back, or make again, your
 last changes one step at a time: a pick, a clear, Replace from

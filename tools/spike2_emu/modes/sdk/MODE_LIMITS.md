@@ -167,7 +167,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Avengers: Infinity Quest Pro 1.10 | no | ✓ | ✓ | no | never waits |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
-| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | never waits |
+| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms, never waits |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots |  |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.10 | no | ✓ | ✓ | shots | scoop, never waits |

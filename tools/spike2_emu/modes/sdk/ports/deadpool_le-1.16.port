@@ -334,3 +334,24 @@ text block_rule_name_11    Wolverine Spinner
 
 # PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
 callout countdown         967   # 10 / 10; deadpool_le-1.14's 962 says the same lines
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+data coil_count            0x0073b3ac
+data coil_table            0x00730bf4
+value magnet_proc          13300
+site coil_fire        0x002cbdf4 0xe3500000 0xe52de004
+site adjustment       0x003ba724 0xe92d40f0 0xe2504000
+site proc_exists      0x002f69f4 0xe3012480 0xe3402073
+site proc_create      0x002f63a4 0xe301c480 0xe340c073
+site proc_sleep       0x002f64f4 0xe3013480 0xe3403073
+site coil_take            0x00134880 0xe92d40f8 0xe3017484
+site coil_give            0x00134944 0xe3510000 0xe92d4038
+text control_gates_label  Control gates
+value control_gates_dev   18
+value control_gates_ctl   32
+value control_gates_devoff 4
+value control_gates_off_slot 30
+data control_gates_obj   0x006b5b48
+text control_gates_drive  9 6 255 64 96
+text held_coils            control_gates

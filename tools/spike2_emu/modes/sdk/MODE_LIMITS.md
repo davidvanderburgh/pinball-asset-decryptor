@@ -201,7 +201,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots |  |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
-| Rush LE 1.19 | no | ✓ | ✓ | no | never waits |
+| Rush LE 1.19 | no | ✓ | ✓ | no |  |
 | Rush Pro 1.19 | no | ✓ | ✓ | no | never waits |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
@@ -219,9 +219,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | no | never waits |
-| The Mandalorian Pro 1.45 | no | ✓ | ✓ | no | never waits |
+| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | no | never waits |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots |  |
-| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | no | never waits |
+| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | no |  |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots |  |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | waits for multiballs only |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots |  |

@@ -256,6 +256,8 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
     same address on four titles. Not the port (Venom Pro's media run used the same port and played), no NVRAM error.
     chain27 re-runs them; if they die again, move st3 onto the coil job's harness (watch.sh direct, its own game
     start), the one thing they share being crun4's boot.
+    Done in run 10 before chain27 ran: st3_job.sh is now on the direct harness (fresh NVRAM, Guided Setup reboot,
+    credits, the game-loop wait, the ball scored by switch pokes), stack3.so rebuilt on the current runtime.
   - chain28 (after chain27): a third media round on two rigs for every build not both screen and clip PROVEN,
     with `FRESH_NV=1` (proof_job2.sh's prep boot: the title's NVRAM in the slot started fresh and Guided Setup
     left, then the normal run). D&D LE's retry hit an NVRAM FATAL 256 in its slot (no game ever started); Aerosmith

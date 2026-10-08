@@ -166,7 +166,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | no | scoop, mechanisms |
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | no | mechanisms |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
-| Batman 66 1.14 | no | ✓ | ✓ | all | waits for multiballs only |
+| Batman 66 1.14 | no | ✓ | ✓ | shots | waits for multiballs only |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |

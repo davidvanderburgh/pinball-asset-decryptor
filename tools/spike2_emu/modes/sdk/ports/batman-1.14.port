@@ -170,10 +170,14 @@ event tilt           0xc6
 event game_over      0x47
 
 # ---- lamps ----
-lamp 9            0              LEFT OUTLANE  # lamp 6, I/O group 6 index 13, at 37,482
-lamp 10           0              LEFT RETURN LANE  # lamp 7, I/O group 6 index 14, at 60,464
-lamp 11           0              RIGHT RETURN LANE  # lamp 8, I/O group 6 index 18, at 243,466
-lamp 12           0              RIGHT OUTLANE  # lamp 9, I/O group 6 index 17, at 266,483
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
+lamp 9            0x80           LEFT OUTLANE  # lamp 6, I/O group 6 index 13, at 37,482; tie: Left outlane
+lamp 10           0x100          LEFT RETURN LANE  # lamp 7, I/O group 6 index 14, at 60,464; tie: Left return lane
+lamp 11           0x200          RIGHT RETURN LANE  # lamp 8, I/O group 6 index 18, at 243,466; tie: Right return lane
+lamp 12           0x400          RIGHT OUTLANE  # lamp 9, I/O group 6 index 17, at 266,483; tie: Right outlane
 lamp 13           0              SHOOT AGAIN  # lamp 10, I/O group 6 index 22, at 152,599
 lamp 14           0              CATWOMAN STATUS  # lamp 11, I/O group 6 index 12, at 120,463
 lamp 15           0              JOKER STATUS  # lamp 12, I/O group 6 index 11, at 139,444
@@ -183,43 +187,43 @@ lamp 18           0              BATMAN  # lamp 15, I/O group 6 index 16, at 152
 lamp 19           0              SEASON 1  # lamp 16, I/O group 6 index 8, at 131,530
 lamp 20           0              SEASON 2  # lamp 17, I/O group 6 index 23, at 152,530
 lamp 21           0              SEASON 3  # lamp 18, I/O group 6 index 21, at 173,530
-lamp 22           0              (G)ADGET TARGET  # lamp 19, I/O group 7 index 8, at 59,426
-lamp 23           0              G(A)DGET TARGET  # lamp 20, I/O group 7 index 9, at 59,406
-lamp 24           0              GA(D)GET TARGET  # lamp 21, I/O group 7 index 10, at 59,386
-lamp 25           0              GAD(G)ET TARGET  # lamp 22, I/O group 7 index 11, at 59,366
-lamp 26           0              GADG(E)T TARGET  # lamp 23, I/O group 7 index 12, at 59,346
-lamp 27           0              GADGE(T) TARGET  # lamp 24, I/O group 7 index 13, at 59,326
-lamp 28,29,30     0              LEFT LOOP ARROW  # lamp 25, I/O group 7 index 28, at 41,225
+lamp 22           0x1            (G)ADGET TARGET  # lamp 19, I/O group 7 index 8, at 59,426; tie: (G)adget target
+lamp 23           0x2            G(A)DGET TARGET  # lamp 20, I/O group 7 index 9, at 59,406; tie: G(a)dget target
+lamp 24           0x4            GA(D)GET TARGET  # lamp 21, I/O group 7 index 10, at 59,386; tie: Ga(d)get target
+lamp 25           0x8            GAD(G)ET TARGET  # lamp 22, I/O group 7 index 11, at 59,366; tie: Gad(g)et target
+lamp 26           0x10           GADG(E)T TARGET  # lamp 23, I/O group 7 index 12, at 59,346; tie: Gadg(e)t target
+lamp 27           0x20           GADGE(T) TARGET  # lamp 24, I/O group 7 index 13, at 59,326; tie: Gadge(t) target
+lamp 28,29,30     0x40000        LEFT LOOP ARROW  # lamp 25, I/O group 7 index 28, at 41,225; tie: Left loop
 lamp 31           0              LEFT LOOP RIDDLER  # lamp 26, I/O group 7 index 31, at 45,248
 lamp 32           0              MYSTERY  # lamp 27, I/O group 7 index 19, at 49,268
 lamp 33           0              SEASONS  # lamp 28, I/O group 7 index 21, at 51,286
 lamp 34           0              EXTRA BALL  # lamp 29, I/O group 7 index 22, at 55,304
-lamp 35,36,37     0              LEFT RAMP ARROW  # lamp 30, I/O group 7 index 25, at 77,250
-lamp 41           0              BAT COMPUTER TARGET  # lamp 34, I/O group 7 index 34, at 90,203
-lamp 42           0              CRIME ANALYZER TARGET  # lamp 35, I/O group 7 index 35, at 152,194
+lamp 35,36,37     0x80000        LEFT RAMP ARROW  # lamp 30, I/O group 7 index 25, at 77,250; tie: Left ramp exit
+lamp 41           0x800000000    BAT COMPUTER TARGET  # lamp 34, I/O group 7 index 34, at 90,203; tie: Bat computer target
+lamp 42           0x1000000000   CRIME ANALYZER TARGET  # lamp 35, I/O group 7 index 35, at 152,194; tie: Crime analyzer target
 lamp 43           0              (J)OKER  # lamp 36, I/O group 7 index 36, at 100,229
 lamp 44           0              J(O)KER  # lamp 37, I/O group 7 index 33, at 113,239
 lamp 45           0              JO(K)ER  # lamp 38, I/O group 7 index 32, at 128,241
 lamp 46           0              JOK(E)R  # lamp 39, I/O group 7 index 41, at 141,236
 lamp 47           0              JOKE(R)  # lamp 40, I/O group 7 index 40, at 152,225
-lamp 48,49,50     0              TURNTABLE ARROW  # lamp 41, I/O group 7 index 45, at 130,269
-lamp 51,52,53     0              RIGHT RAMP ARROW  # lamp 42, I/O group 6 index 42, at 168,246
-lamp 57           0              SPINNER ARROW  # lamp 46, I/O group 6 index 46, at 195,265
+lamp 48,49,50     0x700000000    TURNTABLE ARROW  # lamp 41, I/O group 7 index 45, at 130,269; tie: Turntable lock 1, Turntable lock 2, Turntable lock 3
+lamp 51,52,53     0x8000000      RIGHT RAMP ARROW  # lamp 42, I/O group 6 index 42, at 168,246; tie: Right ramp exit
+lamp 57           0x200000       SPINNER ARROW  # lamp 46, I/O group 6 index 46, at 195,265; tie: Spinner
 lamp 58           0              COMMISSIONER GORDON  # lamp 47, I/O group 6 index 47, at 210,276
-lamp 60,61,62     0              PENGUIN ARROW  # lamp 49, I/O group 6 index 49, at 229,292
+lamp 60,61,62     0x40           PENGUIN ARROW  # lamp 49, I/O group 6 index 49, at 229,292; tie: Penguin vuk
 lamp 63           0              SUPER JACKPOT  # lamp 50, I/O group 6 index 52, at 217,322
 lamp 64           0              THE PENGUIN  # lamp 51, I/O group 6 index 41, at 208,344
-lamp 65,66,67     0              RIGHT LOOP ARROW  # lamp 52, I/O group 6 index 61, at 267,269
+lamp 65,66,67     0x2000000      RIGHT LOOP ARROW  # lamp 52, I/O group 6 index 61, at 267,269; tie: Right loop
 lamp 68           0              RIGHT LOOP RIDDLER  # lamp 53, I/O group 6 index 54, at 260,290
 lamp 69           0              LOCK 3  # lamp 54, I/O group 6 index 53, at 252,310
 lamp 70           0              LOCK 2  # lamp 55, I/O group 6 index 48, at 245,328
 lamp 71           0              LOCK 1  # lamp 56, I/O group 6 index 40, at 238,347
-lamp 72           0              TV TARGET-TOP  # lamp 57, I/O group 6 index 33, at 237,393
-lamp 73           0              TV TARGET-MID  # lamp 58, I/O group 6 index 34, at 239,413
-lamp 74           0              TV TARGET-BOT  # lamp 59, I/O group 6 index 35, at 242,431
-lamp 75           0              SKILL SHOT 1  # lamp 60, I/O group 6 index 3, at 292,408
-lamp 76           0              SKILL SHOT 2  # lamp 61, I/O group 6 index 4, at 292,382
-lamp 77           0              SKILL SHOT 3  # lamp 62, I/O group 6 index 5, at 292,356
+lamp 72           0x1000         TV TARGET-TOP  # lamp 57, I/O group 6 index 33, at 237,393; tie: Tv target-top
+lamp 73           0x800          TV TARGET-MID  # lamp 58, I/O group 6 index 34, at 239,413; tie: Tv target-mid
+lamp 74           0x4000         TV TARGET-BOT  # lamp 59, I/O group 6 index 35, at 242,431; tie: Tv target-bot
+lamp 75           0x2000         SKILL SHOT 1  # lamp 60, I/O group 6 index 3, at 292,408; tie: Skill shot
+lamp 76           0x2000         SKILL SHOT 2  # lamp 61, I/O group 6 index 4, at 292,382; tie: Skill shot
+lamp 77           0x2000         SKILL SHOT 3  # lamp 62, I/O group 6 index 5, at 292,356; tie: Skill shot
 lamp 78           0              CRANE POS.#2  # lamp 63, I/O group 6 index 32, at 230,369
 lamp 79           0              CRANE POS.#2 MULT.  # lamp 64, I/O group 6 index 38, at 223,387
 lamp 80           0              CRANE POS.#3  # lamp 65, I/O group 6 index 36, at 199,367
@@ -230,12 +234,12 @@ lamp 84           0              CRANE POS.#5  # lamp 69, I/O group 6 index 29, 
 lamp 85           0              CRANE POS.#5 MULT.  # lamp 70, I/O group 6 index 30, at 138,359
 lamp 86           0              CRANE POS.#6 AWAY  # lamp 71, I/O group 7 index 16, at 93,280
 lamp 87           0              CRANE POS.#6 MULT.  # lamp 72, I/O group 7 index 23, at 97,299
-lamp 91           0              LEFT POP BUMPER  # lamp 76, I/O group 6 index 55, at 68,96
-lamp 92           0              RIGHT POP BUMPER  # lamp 77, I/O group 6 index 56, at 131,93
-lamp 93           0              BOTTOM POP BUMPER  # lamp 78, I/O group 6 index 57, at 83,159
-lamp 94           0              POP BUMPER TARGET  # lamp 79, I/O group 6 index 58, at 213,187
-lamp 95           0              BAT SPINNER 1  # lamp 80, I/O group 8 index 0, at 129,100
-lamp 96           0              BAT SPINNER 2  # lamp 81, I/O group 8 index 1, at 129,100
+lamp 91           0x10000000     LEFT POP BUMPER  # lamp 76, I/O group 6 index 55, at 68,96; tie: Left pop bumper
+lamp 92           0x20000000     RIGHT POP BUMPER  # lamp 77, I/O group 6 index 56, at 131,93; tie: Right pop bumper
+lamp 93           0x40000000     BOTTOM POP BUMPER  # lamp 78, I/O group 6 index 57, at 83,159; tie: Bottom pop bumper
+lamp 94           0x80000000     POP BUMPER TARGET  # lamp 79, I/O group 6 index 58, at 213,187; tie: Pop bumper target
+lamp 95           0x2000000000   BAT SPINNER 1  # lamp 80, I/O group 8 index 0, at 129,100; tie: Bat spinner opto 1
+lamp 96           0x4000000000   BAT SPINNER 2  # lamp 81, I/O group 8 index 1, at 129,100; tie: Bat spinner opto 2
 lamp 97           0              BAT SPINNER 3  # lamp 82, I/O group 8 index 2, at 129,100
 lamp 98           0              BAT SPINNER 4  # lamp 83, I/O group 8 index 3, at 129,100
 lamp 99           0              BAT SPINNER 5  # lamp 84, I/O group 8 index 4, at 129,100
@@ -245,7 +249,7 @@ lamp 102          0              BAT COMPUTER 3  # lamp 87, I/O group 8 index 7,
 lamp 103          0              CRIME ANALYZER 1  # lamp 88, I/O group 8 index 8, at 89,94
 lamp 104          0              CRIME ANALYZER 2  # lamp 89, I/O group 8 index 9, at 89,94
 lamp 105          0              CRIME ANALYZER 3  # lamp 90, I/O group 8 index 10, at 89,94
-lamp 106          0              TURNTABLE BATPHONE  # lamp 91, I/O group 8 index 12, at 147,151
+lamp 106          0x8000000000   TURNTABLE BATPHONE  # lamp 91, I/O group 8 index 12, at 147,151; tie: Bat phone target (x2)
 lamp 107          0              BAT SIGNAL (OPTIONAL)  # lamp 92, I/O group 6 index 59, at 279,68
 lamp 109          0              PLAYFIELD GI-LOWER  # lamp 145, I/O group 6 index 0, at 0,0
 lamp 110          0              PLAYFIELD GI-SHOOTER  # lamp 146, I/O group 6 index 1, at 0,0

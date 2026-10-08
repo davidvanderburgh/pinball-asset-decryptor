@@ -656,40 +656,38 @@ const gameTip = (l) => ({
     ["Delete", "hide it in the game and the preview, after asking"],
     `The eye on its own hides it here only.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
+// PAD-451 (DragonRR): a line in a font whose letters carry their own colors (c.art) has a
+// palette of its own: the Write gives it its own copy of the font.  What that means, and how
+// to reach every line in the font at once (its pictures, on the Images tab)
+const artLines = (c) => {
+  if (!c.art) return [];
+  const name = c.font || "its font";
+  const n = (c.font_pictures || []).length;
+  const pics = n > 1 ? `its ${n} pictures` : "its picture";
+  return [
+    c.on ? `Its letters carry their own colors (${name}): when you build, this line gets its own copy of that font with the color profile in it, so the other lines in ${name} keep their look.`
+      : `Its letters carry their own colors (${name}): attached, this line gets its own copy of that font, so only this line changes.`,
+    c.font_on ? `Its font's pictures have the color profile attached on the Images tab, so every line in ${name} is corrected, this one too.`
+      : `To correct every line in ${name} at once${c.scenes > 1 ? ` (${c.scenes} scenes)` : ""}, attach the profile to ${pics} on the Images tab.`,
+  ];
+};
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
 // own colours (red), or the game's own picture, which has no switch (blue lock) until the
 // advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
-// PAD-451 (DragonRR): a line in a font whose letters carry their own colors shares its palette
-// with every line in that font, everywhere: said, and counted (c.lines here, c.scenes in all)
-const fontReach = (c) => {
-  const here = `${c.lines || 1} line${c.lines === 1 ? "" : "s"} in this scene`;
-  return c.scenes > 1 ? `${here}, in ${c.scenes} scenes` : here;
-};
-const fontPics = (c) => ((c.pages || []).length > 1 ? `its ${c.pages.length} pictures` : "its picture");
 const colorTip = (l, cs) => {
   const c = l.color || {};
-  const name = c.font || "its font";
   if (c.locked && c.line) return { head: "Color: the game's own line of text", lines: [
     "Stern made its colors for the machine's screen, so the individual files profile is not offered on it.",
+    ...artLines(c),
     "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too. A line you add has one already." ] };
-  if (c.locked && c.shared) return { head: `Color: the game's own font, ${name}`, lines: [
-    `This line's colors are in ${fontPics(c)}, shared by every line drawn in ${name}: ${fontReach(c)}.`,
-    "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
-    "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too." ] };
   if (c.locked) return { head: "Color: the game's own picture", lines: [
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
     "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images and text (Advanced, beside Preview colors)." ] };
-  if (c.shared) return { head: c.on ? `Shared: color profile attached to the font ${name}` : `Shared: no color profile on the font ${name}`, lines: [
-    `This line's colors are in ${fontPics(c)}, and every line drawn in ${name} shares them: ${fontReach(c)}. A line in this font cannot have a color profile of its own.`,
-    c.part ? `Only ${c.part} of its ${(c.pages || []).length} pictures have it attached now: a click attaches it to all of them.` : null,
-    layerProfile(l, cs),
-    ["Click", c.on ? `detach it from every line in ${name}` : `attach it to every line in ${name}`],
-    "The lines in this scene that share it are lit up in the list, and all turn green or red with this one.",
-    c.on ? "Open Colors with the line selected to give the font a profile of its own." : null ] };
   if (c.line) return { head: c.on ? "Color profile attached to this line" : "No color profile attached to this line", lines: [
+    ...artLines(c),
     layerProfile(l, cs),
     ["Click", c.on ? "detach the color profile" : "attach the color profile"],
-    c.on ? "Its color profile is baked into the color it is drawn in when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
+    c.on ? `Its color profile is baked into ${c.art ? "its copy of the font" : "the color it is drawn in"} when you build; the preview shows it. Open Colors with the layer selected to give it one of its own.`
       : "It goes on the card in its own colors.",
     c.stock ? "The game's own line, unlocked: corrected from its own color when you build, so never twice."
       : "Set for this line." ] };
@@ -814,7 +812,6 @@ function TreeLayers({ t }) {
   const sels = t.sels || [];
   const [drag, setDrag] = useState(null);           // the row being dragged
   const [over, setOver] = useState(null);           // { id, where, ok } of the drop
-  const [hotFont, setHotFont] = useState(null);     // PAD-451: the shared font palette pointed at
   const scroll = useDragScroll(listRef);
   const endDrag = () => { scroll.stop(); setDrag(null); setOver(null); };
   const dropOk = (l, where) => drag.added || (where === "into" ? l.id : l.parent) === drag.parent;
@@ -869,8 +866,7 @@ function TreeLayers({ t }) {
         onClick=${() => call("text_scenes.tree_view_solo", t.solo)}>Showing one layer · show all</button>` : null}</div>
     ${(t.layers || []).map((l) => html`<div key=${l.id} data-node=${l.id}
         class=${cx("sc-item", "ly-item", (t.sel === l.id || sels.includes(l.id)) && "sel", !l.drawn && !l.state_off && "ly-off", l.hidden && "not-in-game",
-          drag && drag.id === l.id && "ly-dragging", over && over.id === l.id && `ly-drop-${over.where}`, over && over.id === l.id && !over.ok && "ly-drop-no",
-          hotFont && l.color && l.color.shared && l.color.pages[0] === hotFont && "ly-font-hot")}
+          drag && drag.id === l.id && "ly-dragging", over && over.id === l.id && `ly-drop-${over.where}`, over && over.id === l.id && !over.ok && "ly-drop-no")}
         style=${`padding-left:${10 + l.depth * 14}px`} ...${tip(rowTip(l, cs))}
         draggable="true"
         onDragStart=${(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", l.name); setDrag(l); scroll.start(); }}
@@ -889,13 +885,10 @@ function TreeLayers({ t }) {
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
         <${Icon} name="sd" /></button>
-      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off", l.color.shared && "shared")}
-        aria-label=${l.color.shared ? `Color profile on the font ${l.color.font || ""}, shared by every line in it` : l.color.line ? "Color profile on this line" : "Color profile on this picture"}
-        aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
-        onMouseEnter=${l.color.shared ? () => setHotFont(l.color.pages[0]) : null}
-        onMouseLeave=${l.color.shared ? () => setHotFont(null) : null}
+      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off", l.color.font_on && "via-font")}
+        aria-label=${l.color.line ? "Color profile on this line" : "Color profile on this picture"} aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
         onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on); }}>
-        <${Icon} name=${l.color.locked ? "lock" : "palette"} />${l.color.shared ? html`<${Icon} name="link" cls="ly-share" />` : null}</button>` : html`<span></span>`}
+        <${Icon} name=${l.color.locked ? "lock" : "palette"} />${l.color.font_on ? html`<${Icon} name="link" cls="ly-share" />` : null}</button>` : html`<span></span>`}
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}

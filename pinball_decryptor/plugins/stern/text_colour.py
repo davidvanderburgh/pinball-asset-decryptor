@@ -263,10 +263,11 @@ def _walk(man):
 def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
     """A line's colour switch, for the Layers list: ``{"line": True, "on", "own", "rel",
     "added" | "stock"}``; ``{"locked": True, "line": True}`` for a game line with the unlock
-    box off; ``{"font_picture": rel, "font_pictures": [rel, ...], "font": name}`` for a line
-    in a font with colours of its own (its switch is those pictures', every one of them:
-    :func:`font_pictures`); ``None`` for a node that draws no line of its own (a drop shadow,
-    which takes the colour of the line it copies)."""
+    box off; ``None`` for a node that draws no line of its own (a drop shadow, which takes the
+    colour of the line it copies).  A line in a font with colours of its own has a switch of
+    its own too (PAD-451: the Write gives it its own copy of the font, :mod:`font_copy`), with
+    ``"art": True``, ``"font"`` (its name) and ``"font_pictures"`` (:func:`font_pictures`, the
+    pictures every other line in the font shares)."""
     from ...core import colour_profile as cp
     oid, o = _text_of(man, n)
     if o is None:
@@ -274,9 +275,8 @@ def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
     fonts = fonts if fonts is not None else fonts_by_key(assets_dir)
     font = fonts.get(o.get("font") or "")
     pics = font_pictures(assets_dir, font) if font is not None else []
-    if pics:
-        return {"font_picture": pics[0], "font_pictures": list(pics),
-                "font": font.get("name") or o.get("font_name") or ""}
+    art = ({"art": True, "font": font.get("name") or o.get("font_name") or "",
+            "font_pictures": list(pics)} if pics else {})
     rel = cp.text_rel(card, n["id"])
     if n.get("added"):
         op = next((op for op in ops or () if op.get("op") == "add_text"
@@ -284,15 +284,26 @@ def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
         if op is None:
             return None
         own = op.get("color")
-        return {"line": True, "on": bool(own), "own": own is not None, "rel": rel,
-                "added": True}
+        return dict({"line": True, "on": bool(own), "own": own is not None, "rel": rel,
+                     "added": True}, **art)
     if data is None:
         from ...core import staged_changes
         data = staged_changes.load(assets_dir)
     if not data.get(cp.STOCK_IMAGES_KEY):
-        return {"locked": True, "line": True}
-    return {"line": True, "on": rel in cp.text_lines_on(assets_dir, data), "own": True,
-            "rel": rel, "stock": True}
+        return dict({"locked": True, "line": True}, **art)
+    return dict({"line": True, "on": rel in cp.text_lines_on(assets_dir, data), "own": True,
+                 "rel": rel, "stock": True}, **art)
+
+
+def art_map(font):
+    """``{char: picture rel}`` of *font*'s letters at every size: which of its pictures each
+    is cut from, for a copy of it (``line_font``)."""
+    out = {}
+    for f in [font or {}] + list(((font or {}).get("sizes") or {}).values()):
+        for ch, g in (f.get("glyphs") or {}).items():
+            if g.get("atlas_rel"):
+                out.setdefault(str(int(ch)), str(g["atlas_rel"]).replace("\\", "/"))
+    return out
 
 
 def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, bake=True):
@@ -306,7 +317,12 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
     each step's colour goes through the profile.  A plain font's line is its Text's colour
     times the track: with a white track (and no other node drawing the same Text) the Text's
     colour goes through it, size-neutral; otherwise the line's colours move into the track
-    (the Text white), and each other node drawing that Text keeps its look."""
+    (the Text white), and each other node drawing that Text keeps its look.
+
+    A line in a font whose letters carry their own colours (PAD-451) gets a ``line_font``
+    edit instead: its own copy of the font, the profile baked into the copy's pictures, with a
+    constant colour of its own (its track's; a plain font's Text colour) baked in first and
+    set white, so the line looks as a picture of it would through the profile."""
     from ...core import colour_profile as cp, staged_changes
     from . import text_colors
     if not assets_dir or man is None:
@@ -341,7 +357,7 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
             rgb = [c / 255.0 for c in pick[:3]]
         return rgb, _steps(col) if col else []
 
-    edits, written = {}, {}
+    edits, written, own_fonts = {}, {}, {}
 
     def put(nid, rgb=None, col=None, base_rgb=None, base_col=None):
         e = edits.setdefault(nid, {"op": "line_colour", "node": nid})
@@ -364,6 +380,9 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
         if prof is None:
             # off (or nothing to correct): a line a Write corrected gets its colours back
             w = rec.get(str(n["id"])) or {}
+            if w.get("font") and sw and sw.get("art"):
+                # and its font: a card built with its own copy, read again (PAD-451)
+                own_fonts[n["id"]] = {"op": "line_font", "node": n["id"], "off": True}
             if "rgb" in w and _close([float(v) for v in o["rgba"][:3]], w["rgb"]):
                 edits.setdefault(n["id"], {"op": "line_colour", "node": n["id"]})["rgb"] = \
                     [float(v) for v in w["base_rgb"]]
@@ -372,12 +391,29 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
                     w["base_col"]
             continue
         steps = _steps(base_col)
+        shared = len(users.get(oid) or ()) > 1
+        if sw.get("art"):
+            # PAD-451: its own copy of the font; a colour of its own that every frame keeps
+            # is baked into the copy with the profile (a line sharing its Text keeps its own)
+            mul = None
+            if base_col and not shared and not _white(base_col) and len(
+                    {tuple(round(m[i], 5) for i in range(3)) for _f, m, _a in steps}) == 1:
+                mul = [round(v, 5) for v in steps[0][1][:3]]
+                put(n["id"], col=[[f, [1.0, 1.0, 1.0, m[3]], a] for f, m, a in steps],
+                    base_col=base_col)
+            if not o.get("styled") and not shared and not _close(base_rgb, [1.0, 1.0, 1.0]):
+                mul = [round((mul[i] if mul else 1.0) * base_rgb[i], 5) for i in range(3)]
+                put(n["id"], rgb=[1.0, 1.0, 1.0], base_rgb=base_rgb)
+            own_fonts[n["id"]] = {"op": "line_font", "node": n["id"],
+                                  "profile": cp._profile_dict(prof), "mul": mul,
+                                  "art": art_map(fonts.get(o.get("font") or ""))}
+            written.setdefault(n["id"], {})["font"] = True
+            continue
         if o.get("styled"):
             col = [[f, corrected(prof, m[:3]) + [m[3]], a] for f, m, a in steps]
             if base_col or not _white(col):
                 put(n["id"], col=col, base_col=base_col)
             continue
-        shared = len(users.get(oid) or ()) > 1
         if not shared and _white(base_col):
             put(n["id"], rgb=corrected(prof, base_rgb), base_rgb=base_rgb)
             continue
@@ -395,7 +431,7 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
             keep = [[f, [round(base_rgb[i] * m[i], 5) for i in range(3)] + [m[3]], a]
                     for f, m, a in _steps(s_col)]
             put(s["id"], col=keep, base_col=s_col)
-    return list(edits.values()), written
+    return list(edits.values()) + list(own_fonts.values()), written
 
 
 def cards_with_lines(assets_dir, data=None):

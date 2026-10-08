@@ -814,9 +814,7 @@ export function undoKey(e, flush) {
 }
 
 // PAD-438: the Files mode can be on a line of text in Scenes as well as a file
-// PAD-451: a font with colors of its own: every line drawn in it
-const fileWord = (f) => (f && f.kind === "text" ? "line of text"
-  : f && f.font ? `font (${f.label}: every line drawn in it)` : "file");
+const fileWord = (f) => (f && f.kind === "text" ? "line of text" : "file");
 
 // The line under the modes: what the profile on show does to this project now.
 export function statusNote(s) {

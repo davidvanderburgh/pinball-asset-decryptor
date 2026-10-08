@@ -340,7 +340,8 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
                             spacing=o.get("spacing", [0, 0]), ascent=o.get("ascent", 0),
                             line=o.get("line", 0), styled=o.get("styled", False),
                             flags=o.get("flags"), fit=o.get("fit", 0),
-                            valign=o.get("valign", 0), profiled=o.get("profiled", False)))
+                            valign=o.get("valign", 0), profiled=o.get("profiled", False),
+                            art=o.get("art")))
         elif k == "Video":
             out.append(dict(common, kind="video", name=o["name"], w=o["w"], h=o["h"]))
         elif k == "Spine":

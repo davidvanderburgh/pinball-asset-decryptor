@@ -870,15 +870,6 @@ class TreeEditMixin:
                                          for op in ops),
                            "view_off": n["id"] in view,
                            "edits": "; ".join(edited_nodes.get(n["id"], []))})
-        # PAD-451: a font's palette says how many lines in this scene it switches with it
-        shared = {}
-        for l in layers:
-            if l["color"] and l["color"].get("shared"):
-                key = l["color"]["pages"][0]
-                shared[key] = shared.get(key, 0) + 1
-        for l in layers:
-            if l["color"] and l["color"].get("shared"):
-                l["color"]["lines"] = shared[l["color"]["pages"][0]]
         sel = self._tsel if self._tsel in index else None
         self._tsel = sel
         sels = self._tree_sels()
@@ -1906,8 +1897,8 @@ class TreeEditMixin:
 
     def _text_color(self, card, man, n, ops, on):
         """A line of text's colour switch (PAD-438): its own (an added line's edit, or a game
-        line's behind the unlock), or, for a font with colours of its own, that font
-        picture's."""
+        line's behind the unlock), a line in a font with colours of its own too (PAD-451:
+        the Write gives it its own copy of the font)."""
         from ..core import colour_profile as _cp
         from ..plugins.stern import scene_edit, text_colour
         if not self._colour_unlock()["offered"]:
@@ -1915,20 +1906,6 @@ class TreeEditMixin:
         sw = text_colour.line_switch(self.assets_dir, card, man, n, ops)
         if sw is None or sw.get("locked"):
             return False
-        if sw.get("font_picture"):
-            # PAD-451: every picture the font's letters are cut from, and it is said that
-            # every line in the font goes with it
-            rels = sw.get("font_pictures") or [sw["font_picture"]]
-            if not self._picture_color(["images/" + r for r in rels], on):
-                return False
-            n_sc = text_colour.font_scenes(self.assets_dir, rels)
-            log.info("Scenes: the font %s %s, so every line drawn in it does too%s (its "
-                     "letters' colors are in %s, which all its lines share)",
-                     sw["font"] or "of this line",
-                     "has the color profile attached" if on else "keeps the game's own colors",
-                     ", in %d scene%s" % (n_sc, "" if n_sc == 1 else "s") if n_sc else "",
-                     "its %d pictures" % len(rels) if len(rels) > 1 else "its picture")
-            return True
         if sw.get("added"):
             new = [dict(op) for op in ops]
             for op in new:
@@ -1966,19 +1943,7 @@ class TreeEditMixin:
 
     def _picture_color(self, rel, on):
         """One picture's colour switch (*rel* under images/), recorded where the Images tab
-        keeps it; a list of rels switches each (PAD-451: a font's pictures), drawn once."""
-        if isinstance(rel, (list, tuple)):
-            done = [self._picture_color_one(r, on) for r in rel]
-            if not any(done):
-                return False
-        elif not self._picture_color_one(rel, on):
-            return False
-        # drawn again here, whichever way the switch was recorded (DragonRR: the palette and
-        # the picture only changed after a tab switch)
-        self.pictures_changed()
-        return True
-
-    def _picture_color_one(self, rel, on):
+        keeps it."""
         images = self.window.service("images")
         here = self._images_here()
         done = False
@@ -2007,6 +1972,9 @@ class TreeEditMixin:
                 images.color_all_changed()
             except Exception:                            # noqa: BLE001
                 pass
+        # drawn again here, whichever way the switch was recorded (DragonRR: the palette and
+        # the picture only changed after a tab switch)
+        self.pictures_changed()
         return True
 
     def pictures_changed(self):
@@ -2697,37 +2665,26 @@ def _text_switch(assets_dir, card, man, n, ops, data, fonts, picks, settings, un
     """A line of text's colour switch for the Layers list (PAD-438, DragonRR: "exactly like
     images"): a line added here has its own (``"added"``), a game line is a blue lock until
     the advanced box unlocks it (``"stock"``), each ``"kind": "text"`` with its
-    :func:`colour_profile.text_rel`.  A line in a font whose letters carry their own colours
-    (Godzilla's orange GameFont_Secondary) shows that font picture's switch instead, the
-    Images tab's, ``"font"`` naming it: the colours are in that picture, shared by every line
-    drawn in the font.  ``None`` for a drop shadow (it takes its line's colour).
+    :func:`colour_profile.text_rel`.  ``None`` for a drop shadow (it takes its line's colour).
 
-    PAD-451 (DragonRR: "make this clear to the user"): that switch is ``"shared"``, and it
-    is EVERY picture of the font's (``"pages"``, rels under images/), for a big font's letters
-    fill several: on only when all of them are, ``"part"`` when only some are.  ``"scenes"``
-    counts the scenes drawing from them (the Layers list adds ``"lines"``, this scene's)."""
+    A line in a font whose letters carry their own colours (Godzilla's orange
+    GameFont_Secondary) has one of its own too (PAD-451, DragonRR: "make it so that we can
+    change each text layer individually"): the Write gives it its own copy of the font.
+    ``"art"`` marks it, with the font's name, its pictures (``"font_pictures"``, rels under
+    images/, which every other line in it shares), ``"scenes"`` drawing from them and
+    ``"font_on"`` when the Images tab has the profile on all of them (every line in the font
+    corrected, this one too)."""
     from ..plugins.stern import text_colour
     sw = text_colour.line_switch(assets_dir, card, man, n, ops, data, fonts)
     if sw is None:
         return None
-    if sw.get("font_picture"):
-        rels = sw.get("font_pictures") or [sw["font_picture"]]
-        cs = [_colour_switch(n, "Bitmap", [r], picks, settings, None, unlocked, built)
-              for r in rels]
-        c = cs[0]
-        if c is None:
-            return None
-        out = dict(c, font=sw["font"], kind="images", shared=True,
-                   pages=["images/" + r for r in rels],
-                   scenes=text_colour.font_scenes(assets_dir, rels))
-        if not c.get("locked"):
-            ons = [bool(x and x.get("on")) for x in cs]
-            out["on"] = all(ons)
-            if any(ons) and not all(ons):
-                out["part"] = sum(ons)
-        return out
+    if sw.get("art"):
+        rels = sw.get("font_pictures") or []
+        sw = dict(sw, font_pictures=["images/" + r for r in rels],
+                  scenes=text_colour.font_scenes(assets_dir, rels),
+                  font_on=bool(rels) and all((settings.get("images") or {}).get("images/" + r)
+                                             for r in rels))
     return dict(sw, kind="text")
-
 
 def _kept_size(pick, assets_dir, rel, stock=None):
     """The size a picture is written at when it keeps its own size, else None.  A pick that

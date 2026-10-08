@@ -67,7 +67,7 @@ const P = {
   undo: "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3",
   redo: "M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3",
   lock: "M6 11h12v9H6zM8 11V7a4 4 0 0 1 8 0v4",
-  // PAD-451: a palette shared by every line in a font
+  // PAD-451: a line of text corrected through its font's pictures
   link: "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7.1 7.1l1.7-1.7",
   // PAD-448: a game's own clip unlocked by Advanced
   unlock: "M6 11h12v9H6zM8 11V7a4 4 0 0 1 7.7-1.5",

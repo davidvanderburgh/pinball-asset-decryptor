@@ -1212,13 +1212,33 @@ def _paged_ink(font, cols, inks, key):
     return ink
 
 
-def _corrected_ink(ink_of, prof, inks, key):
-    """*ink_of* with *prof* applied to the letters (kept in *inks* when given)."""
+def _own_art(art):
+    """``(profile, mul)`` of a line drawn with its own copy of its font (``line_font``,
+    PAD-451), else None."""
+    if not art or not art.get("profile"):
+        return None
+    from ...core import colour_profile as cp
+    prof = cp._from_dict(art["profile"])
+    return (prof, art.get("mul")) if prof is not None else None
+
+
+def _corrected_ink(ink_of, prof, inks, key, mul=None):
+    """*ink_of* with *prof* applied to the letters (kept in *inks* when given); *mul* (a
+    line's own colour baked into its copy of the font, PAD-451) multiplies them first."""
     def ink(s):
-        k = (key, s, "cp", prof.key())
+        k = (key, s, "cp", prof.key()) if mul is None else (key, s, "cp", prof.key(),
+                                                              tuple(mul))
         if inks is not None and k in inks:
             return inks[k]
-        img = prof.apply_image(ink_of(s))
+        img = ink_of(s)
+        if mul is not None:
+            import numpy as np
+            from PIL import Image
+            arr = np.asarray(img.convert("RGBA")).astype(np.float32)
+            arr[..., :3] = np.clip(arr[..., :3] * np.asarray(mul[:3], np.float32) + 0.5,
+                                   0, 255)
+            img = Image.fromarray(arr.astype(np.uint8))
+        img = prof.apply_image(img)
         if inks is not None:
             inks[k] = img
         return img
@@ -1338,7 +1358,12 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                     if (_k, s) not in inks:
                         inks[(_k, s)] = fr.render_text(_f, s)[0]
                     return inks[(_k, s)]
-            if paged:
+            own = _own_art(d.get("art"))
+            if own is not None:
+                # PAD-451: its own copy of the font, the profile baked in (from the font's
+                # pictures as they were, whatever the Images tab does to them)
+                ink_of = _corrected_ink(ink_of, own[0], inks, key, own[1])
+            elif paged:
                 ink_of = _paged_ink(font, cols, inks, key)
             elif cols:
                 ink_of = _corrected_ink(ink_of, next(iter(cols.values())), inks, key)

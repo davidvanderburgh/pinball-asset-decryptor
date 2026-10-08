@@ -76,6 +76,16 @@ def test_an_operator_disabled_coil_is_refused_on_every_route():
     assert "coil_disabled(c)" in _lift(src, "int pm_coil_hold(")
 
 
+def test_a_statically_built_coil_object_is_named_not_built_again():
+    """PAD-420: where a static initializer builds the coil's object (Deadpool, Led Zeppelin, Sword of Rage, Star Wars
+    ELG), the port names the object (`data <name>_obj`); the runtime never calls that initializer as a getter."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    ok = _lift(src, "static int coil_device_ok(")
+    assert ok.index('"%s_get"') < ok.index('"%s_obj"')
+    assert "else if (c->route) {" in ok and "obj = data(key);" in ok
+    assert "if (obj && !maps_has(obj, 4, MAP_R)) obj = 0;" in ok
+
+
 def test_the_interpreter_holds_on_its_shot_or_as_it_starts():
     src = (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert "if (coil_line(M, line)) return;" in src

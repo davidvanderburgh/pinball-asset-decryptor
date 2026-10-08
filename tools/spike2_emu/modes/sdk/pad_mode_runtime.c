@@ -3646,7 +3646,8 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  *     v[30], the 47-virtual ControlCoil v[31]); else `value <name>_off_adj` (an operator adjustment that is not 0
  *     when the coil is disabled) or `value <name>_on_adj` (one that is 0 then). Each refuses it like Godzilla's v[40].
  *   - Where the game's own code switches an uncontrolled coil off (Godzilla's ControlCoil::v[38]), the coil
- *     needs its object taken: `site <name>_get` (the object), `value <name>_ctl` (where it keeps the id of
+ *     needs its object taken: `site <name>_get` (the object's getter) or `data <name>_obj` (the object itself,
+ *     where a static initializer builds it once and nothing gets it), `value <name>_ctl` (where it keeps the id of
  *     the process controlling it), and the take/give calls (`site <name>_take` / `<name>_give`, or the
  *     port's `coil_take` / `coil_give`); `value <name>_devoff` checks the object's device against the
  *     record's. The process takes it, sends, and gives it back (the give's own update switches it off). */
@@ -3915,6 +3916,12 @@ static int coil_device_ok(struct held_coil *c)
     if (c->checked) return c->checked > 0;
     pm_snprintf(key, sizeof key, "%s_get", c->name);
     if (fn(key)) obj = ((unsigned (*)(void))(unsigned long)fn(key))();
+    else if (c->route) {                    /* PAD-420: an object a static initializer built once (no getter to call:
+                                             * calling that initializer again would build it again) - its address */
+        pm_snprintf(key, sizeof key, "%s_obj", c->name);
+        obj = data(key);
+        if (obj && !maps_has(obj, 4, MAP_R)) obj = 0;
+    }
     if (c->route) {
         want = c->dev;
         if (!(c->rec = coil_find_record(c))) {

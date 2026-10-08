@@ -621,6 +621,29 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
       - **Elvira 1.13**: ball save PROVEN (4fb29522), its Crypt VUK scoop (a112d7b1), its control gate (273deb67: the
         same 24-virtual ControlGate as James Bond's, its static object at +0x80 of 0x87ed04). Elvira's frame grab
         works: the old note was wrong. Only shows and sound (David's questions) are yellow there now.
+      - Foo Fighters Pro's van up post PROVEN (e84cb35b: the Pro has one of the LE's three; device 12, its command the
+        twin of the LE's). Mode > Magnet on Uncanny X-Men LE / Pro PROVEN (1d66ce81, 54e94ded: their held magnet on
+        the Right ramp tgt; the Pro's magnet ends at its own 1200 ms, so its stop came 0.4 s in - `STOP_IN`).
+      - **Magnets still to do, and why** (Mode > Magnet needs a held magnet, its shot and a run):
+        * no held magnet yet, the magnet a class of its own: Batman 1.14 TurntableMagnet (device 14), Guardians /
+          Guardians LE OrbMagnet (16; LE 17 + left 15), Sword of Rage LE / Pro MagnaSaveMagnet (15), Rush LE / Pro
+          TimeMachineMagnet (config at +0x24, device from its caller). The class's only constant command is
+          "hold 16 for 5000" with no draw (`coils/magcls.py <key> <Class>`), plus 255-for-20 ms pulses from other
+          functions: a 6% hold is how the game KEEPS a caught ball, not how it grabs one. Do not stage it as the
+          grab: trace what the game sends when it uses the magnet (a rig run with PAD_COIL_PROBE through the
+          feature that uses it) and take that.
+        * held magnet proven, no shot: TMNT LE / Pro (pizza magnet 9:6), Munsters LE / Pro (9:7), Led Zeppelin LE
+          (Electric Magic 9:7: its MAGNET OPTO makes no port shot). No place on the playfield picture. The magnet
+          census (`magnet/magcensus_job.sh` + `magcensus.py`: every playfield switch pressed once in a game, the
+          check object marking each, [coildrive] on the magnet after each press) found the game never fires TMNT
+          LE's pizza magnet on a single press - it uses it inside a feature. Results for the others: chain115.
+        * the game drives it itself (questions for David): Aerosmith Pro / LE toy box, Avengers LE / Pro tower, King
+          Kong LE / Pro spider (pulses), Beatles top magnet (an OFF into our hold). Metallica's coffin magnet is
+          never exposed (it flings the ball).
+      - Metallica 1.04's scoop PROVEN (scoop_job6): its old "wrong handler" note came from a run with no game (fast
+        coins). Its 32 GB card's staging failed once on a Windows lock at the move; the copy (head/tail md5 checked)
+        was filed by hand. Munsters LE's magnet census had no game: 3 of 8 coins counted (CREDITS 3/4, coins a
+        quarter each) with its state still techalerts after 3 min - a title needing more coins and a retry.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

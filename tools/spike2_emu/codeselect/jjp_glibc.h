@@ -16,9 +16,20 @@
  * had its say.  test/check_elf_jjp.sh then proves it: no GLIBC_2.35+
  * version node, and (with a card image mounted) every undefined symbol
  * resolving against the card's own libraries.
+ *
+ * _GNU_SOURCE IS DEFINED HERE, before features.h (PAD-449).  Being first,
+ * this header is where features.h runs, and it runs once: a file's own
+ * `#define _GNU_SOURCE` after it changes nothing.  Without the line below the
+ * whole JJP build compiled with no __USE_GNU at all.  2.39 happens to declare
+ * memmem under __USE_MISC; a Mac's toolbox container (Debian 12, glibc 2.36)
+ * declares it under __USE_GNU only, so colour.c's memmem was an implicit
+ * declaration there and the menu program never built.
  */
 #ifndef CODESELECT_JJP_GLIBC_H
 #define CODESELECT_JJP_GLIBC_H
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <features.h>
 #undef __GLIBC_USE_C2X_STRTOL
 #define __GLIBC_USE_C2X_STRTOL 0

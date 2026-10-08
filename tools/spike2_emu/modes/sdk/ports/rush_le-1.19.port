@@ -618,3 +618,7 @@ text magnet_hold_label    Magnet
 # Lift ramp opto was made: 255 for 80 ms, then 100 (for 20 s; held at most 5 s)
 text magnet_hold_drive    9 7 255 80 100
 text held_coils            up_post magnet_hold
+# PAD-420: Mode > Magnet holds the ball with the held coil magnet_hold, on a hit of the Lift ramp opto: the shot
+# the game's own magnet answers (the magnet census: its make fired the magnet's grab)
+text magnet_coil           magnet_hold
+value magnet_shot          0x400000

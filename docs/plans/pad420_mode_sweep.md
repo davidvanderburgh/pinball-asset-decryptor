@@ -555,6 +555,26 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         after its reboot; its up post / van diverter are not object-driven like D&D's), Jaws Pro (the game never
         serves a ball on the rig), Rush / Stranger Things Pro / Venom Pro clips (clip v2: the game draws the
         surface and the frame hand-over needs the player route's sites, never found on these).
+    * Run 19 (2026-10-08 10:40-, up to three rigs):
+      - **Lights on the LED-heavy builds**: `lights/lights_job2.sh` adds a later light_all window (step C, h_all)
+        and `lights/judge2.py` counts the playfield INSERTS only - the cabinet's own lighting (expressive-lighting
+        strip, speaker, backbox, topper lamps) takes only the game's shows, never ours, as Rush 1.18's proof
+        counted. Rush LE / Pro PROVEN (17/17 RGB, every single-colour insert, shots 16/16 / 14/14), landed. The
+        later window changed nothing elsewhere: it is not the game's top layer for a while. On John Wick LE / Pro,
+        King Kong Pro and Foo Fighters Pro light_all misses inserts that light_shots (the same layer, a few
+        seconds later) lights - King Kong Pro's shot inserts keep the game's blue under light_all and turn cyan
+        under light_shots. Testing whether the cabinet lamp lines in the held set cause it: `lights/stage_ins.py`
+        stages without them, `lights_job3.sh SUFFIX=_ins`, chain81. Avengers LE / Pro 1.10 show almost nothing of
+        ours in any step (1.09 was proven 121/121); Mando Pro this run showed none of ours where run 16 showed
+        8/13 - the LED view's read of it looks flaky.
+      - Scoops via the mechanisms helper's lines on scoop_job4 (`scoop/stage19.py`, the switches mechs_conf now
+        names): Batman 1.14's Penguin VUK and Deadpool LE's Hellhouse eject PROVEN, landed. James Bond 60th: the
+        runtime held 4 s, but the game kicked at 5.1 s anyway - its kick runs outside that handler's event 2.
+      - Batman 1.14 media: its census game ends at the first drain (the serve fault) and the mode game never
+        started; `media/proof_job3.sh NOCENSUS=1` goes straight to the mode game (chain80).
+      - Stranger Things Pro / Venom Pro clips: the clip plays (clip v2) but never shows over the HUD; their HUD
+        profiles have no Video class measured, so the graft (Batman's, Metallica's route) is not open to them yet.
+        Star Wars LE: the ball-start "choose your path / choose a hero" screen stays up over everything.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

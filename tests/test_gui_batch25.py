@@ -258,6 +258,7 @@ class _NoteStub:
     _asis_for = VideoTab._asis_for
     _trim_for = VideoTab._trim_for
     _m_preview = VideoTab._m_preview
+    _m_sounds = VideoTab._m_sounds
 
     def __init__(self, slot, rep=None, mode=None):
         self._state = {"preview": {"note": None}}

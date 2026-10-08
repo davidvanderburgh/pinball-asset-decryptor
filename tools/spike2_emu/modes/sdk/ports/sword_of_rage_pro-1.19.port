@@ -184,7 +184,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
 
 # ---- callouts and text ----
-callout countdown           394
 text example_start_shot     Lower left 2 bank target bottom
 
 # ---- events ----
@@ -530,3 +529,10 @@ text held_coils            control_gates
 value scoop_event          2
 site scoop_handler         0x00053d28 0xe2400002 0xe92d4030
 data scoop_slot           0x005f6bc4
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         399   # One!; sword_of_rage_le-1.18's 394 says the same lines
+
+# PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
+# build's own transcribed voice lines, tu_wide.py)
+callout time_up           514   # You're too slow. / You didn't make it.

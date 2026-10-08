@@ -182,7 +182,6 @@ scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 scene hud                  0da52941985fea0ac31857f47794e990638156bb
 
 # ---- callouts and text ----
-callout countdown           558
 text example_start_shot     X mansion tgt
 text mode_running_name_1   A Fiery Assault
 text mode_running_name_2   Bitter Rivalry
@@ -328,3 +327,6 @@ site block_start_12     0x00066398 0xe92d43f0 0xe30a6228
 text block_name_12      Escape Nimrod
 site block_start_13     0x00095928 0xe92d40f0 0xe24dd014
 text block_name_13      Save Senator Kelly Wizard
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         562   # One! / Two!

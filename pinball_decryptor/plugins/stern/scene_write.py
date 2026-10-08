@@ -795,7 +795,7 @@ PROFILES = {
         font=(196, 'Stern_Impact_Outline_4'), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=1, root_count_at=0x1320F1, root_count=11,
         insert_at=0x13F321, insert_before=(0x80000290, 'Panel_Instance'),
-        first_free_id=0x300, in_game=True),
+        first_free_id=0x300, in_game=True, video=(6, 26)),
     # PAD-420: rush_pro-1.19 - rush_le-1.18's size, byte-identical to it from 0x11c161 to the end (the tree, the root count, the insert point; the profiler reads the same tree)
     '4509258cd7d67da57a14d337ae421721': SceneProfile(
         label='Rush Pro 1.19 in-game 28aff8e6 (PAD-420, read statically)',
@@ -806,7 +806,7 @@ PROFILES = {
         font=(196, 'Stern_Impact_Outline_4'), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=1, root_count_at=0x1320F1, root_count=11,
         insert_at=0x13F321, insert_before=(0x80000290, 'Panel_Instance'),
-        first_free_id=0x300, in_game=True),
+        first_free_id=0x300, in_game=True, video=(6, 26)),
     # PAD-420: star_wars_le-1.31 - star_wars_le-1.30's size, byte-identical to it from 0x1d58ee to the end (the tree, the root count, the insert point; the profiler reads the same tree)
     '9183de0da4e6ed603f16064ec7a8493b': SceneProfile(
         label='Star Wars LE 1.31 in-game 9db420cf (PAD-420, read statically)',

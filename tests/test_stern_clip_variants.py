@@ -244,6 +244,39 @@ def test_stage_names_the_clip_that_could_not_be_made(tmp_path, monkeypatch):
         CV.stage(str(project), "video/Delta.mov", [str(tmp_path / "gone.mp4")])
 
 
+def test_the_space_preflight_counts_each_random_clip_at_its_bound(tmp_path):
+    """Each extra clip whole at the larger of its own size and its length at the slot's stock
+    rate (Best quality's peak when it is on), plus its container - before anything is made."""
+    from pinball_decryptor.core import video as V
+    from pinball_decryptor.plugins.stern import engine
+    mine = _clip_files(tmp_path, "b.mp4", "c.mp4")
+    with open(mine[1], "wb") as f:
+        f.write(b"x" * 3_000_000)                      # a big file: its own size wins
+    project = _project(tmp_path, {"video/Delta.mov": mine}, [("Delta.mov", "c")])
+    info = {mine[0]: V.VideoInfo(mine[0], duration=8.0), mine[1]: V.VideoInfo(mine[1], duration=1.0),
+            os.path.join(project, "video", "Delta.mov"):
+                V.VideoInfo("Delta.mov", width=1360, height=768, fps=30.0, duration=8.0)}
+    probe = lambda p: info.get(p)                      # noqa: E731
+    got = CV.size_bound(project, probe=probe, rate=lambda p: 4e6)
+    assert got == 8 * 4_000_000 // 8 + 3_000_000 + 2 * CV.CONTAINER_BYTES
+    side = json.loads(open(os.path.join(project, ".staged_changes.json")).read())
+    side["video_best_quality"] = True
+    with open(os.path.join(project, ".staged_changes.json"), "w") as f:
+        json.dump(side, f)
+    peak = CV.BEST_PEAK_BPP * 1360 * 768 * 30
+    got = CV.size_bound(project, probe=probe, rate=lambda p: 4e6)
+    assert got == int(8 * peak / 8) + 3_000_000 + 2 * CV.CONTAINER_BYTES
+    assert CV.size_bound(project, variants={}, probe=probe) == 0
+    # the engine's pre-flight adds it to what it counts for the files made after the encode
+    real = CV.size_bound
+    try:
+        CV.size_bound = lambda project, variants=None, **k: 12345
+        assert engine._unsized_bytes(project, [], [], (), variants={"video/Delta.mov": mine}) == 12345
+        assert engine._unsized_bytes(project, [], [], ()) == 0
+    finally:
+        CV.size_bound = real
+
+
 def test_the_write_tab_lists_each_slot_with_random_clips(tmp_path):
     from pinball_decryptor.webui import write_scan
     project = _project(tmp_path, {"video/Delta.mov": ["a.mp4", "b.mp4"]}, [])

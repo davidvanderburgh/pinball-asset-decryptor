@@ -5807,14 +5807,18 @@ def _kept_size_growth(row, sizes):
     return max(0, n - int(length))
 
 
-def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits):
+def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits, variants=None):
     """What the pre-flight counts for the big whole-file copies that are only
     made after the encode, from what is on disk before it: each mode's own
     clip (:data:`_MODE_CLIP_BYTES_PER_S` for as long as it can run), its own
-    screen (:data:`_MODE_SCREEN_BYTES`), and each picture kept at its own
-    size (:func:`_kept_size_growth`).  Each is an upper bound, so a build
-    that passes has room for them."""
+    screen (:data:`_MODE_SCREEN_BYTES`), each picture kept at its own
+    size (:func:`_kept_size_growth`), and (PAD-446) each clip a slot plays
+    at random (:func:`.clip_variants.size_bound`).  Each is an upper bound,
+    so a build that passes has room for them."""
     total = 0
+    if variants:
+        from . import clip_variants as _CV
+        total += _CV.size_bound(assets_dir, variants)
     if mode_list or code_list:
         from . import mode_project as _MP
 
@@ -6234,7 +6238,7 @@ class _SpaceCheck:
 
 def _space_check(space, disk_f, parts, assets_dir, video_edits, log,
                  mode_list=(), code_list=(), radimg_edits=(), margin=0,
-                 cancel=None):
+                 cancel=None, variants=None):
     """The build's :class:`_SpaceCheck`, with its videos counted and settled,
     or None when the build isn't measured (*space* is None) or can't be: a
     card the reader can't size is left to the copy-time check, and the log
@@ -6251,7 +6255,8 @@ def _space_check(space, disk_f, parts, assets_dir, video_edits, log,
     from . import card_size as _cs
     route = _cs.ROUTE_PINNED if sys.platform == "darwin" else _cs.ROUTE_MOUNT
     try:
-        unsized = _unsized_bytes(assets_dir, mode_list, code_list, ())
+        unsized = _unsized_bytes(assets_dir, mode_list, code_list, (),
+                                 variants=variants)
         chk = _SpaceCheck(space, disk_f, parts, route, unsized, margin, log,
                           cancel=cancel, scenes=_kept_size_scenes(radimg_edits))
         if video_edits:
@@ -6687,12 +6692,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     space = getattr(_BUILD_SPACE, "budget", None)
     space_chk = None
     if space is not None and not dest_is_device:
-        _modes_on = bool(mode_list or code_list)
+        _modes_on = bool(mode_list or code_list or variant_slots)
         space_chk = _space_check(
             space, disk_f, parts, assets_dir, video_edits, log,
             # the big files made after the encode, sized from their sources
             mode_list=mode_list, code_list=code_list,
-            radimg_edits=radimg_edits,
+            radimg_edits=radimg_edits, variants=variant_slots,
             # and the small ones (_SPACE_MARGIN)
             margin=(_SPACE_MARGIN if (text_edits or radimg_edits or _modes_on
                                       or shader_prof is not None

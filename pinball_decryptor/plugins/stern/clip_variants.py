@@ -447,6 +447,52 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
     return VariantBuild(bank=bank, slots=slots, new=new, cfg=cfg, lines=lines)
 
 
+#: what an added clip's file holds beyond its frames, at most (the container, a free box)
+CONTAINER_BYTES = 64 << 10
+#: Best quality's peak, in bits per pixel per frame (core.video transcode_video_to: 0.64 bpp
+#: of the slot's pixel rate, 20 Mbps at 1360x768 / 30)
+BEST_PEAK_BPP = 0.64
+#: the stock rate a slot whose clip cannot be measured is taken at: the highest-rate stock clip
+#: measured on Godzilla 1.16 (stern.md "Best quality"), so the bound stays a bound
+STOCK_RATE_FALLBACK = 13.3e6
+
+
+def size_bound(project, variants=None, probe=None, rate=None):
+    """An upper bound of what the project's random clips add to the games partition, in bytes,
+    sized before anything is converted (the build's free-space pre-flight): each extra clip
+    whole at the larger of its own size and its length at the rate its conversion is held to -
+    the slot's stock clip's bitrate, or Best quality's peak - plus its container. *probe*
+    ``path -> VideoInfo`` and *rate* ``path -> bits/s`` are injectable for tests."""
+    from ...core import staged_changes, staged_originals
+    from ...core import video_slots as VS
+    if probe is None:
+        from ...core.video import detect_video_info as probe
+    rate = rate or VS._clip_bitrate
+    variants = load(project) if variants is None else clean(variants)
+    if not variants:
+        return 0
+    best = bool(staged_changes.load(project).get("video_best_quality"))
+    total = 0
+    for rel, files in variants.items():
+        pristine = staged_originals.snapshot_path(project, rel) or ""
+        if not os.path.isfile(pristine):
+            pristine = os.path.join(project, *rel.split("/"))
+        bps = rate(pristine) if os.path.isfile(pristine) else None
+        bps = float(bps or STOCK_RATE_FALLBACK)
+        info = probe(pristine) if os.path.isfile(pristine) else None
+        if best and info is not None and info.width and info.height and info.fps:
+            bps = max(bps, BEST_PEAK_BPP * info.width * info.height * info.fps)
+        for src in files:
+            try:
+                size = os.path.getsize(src)
+            except OSError:
+                continue
+            got = probe(src)
+            seconds = float(getattr(got, "duration", 0) or 0)
+            total += max(size, int(seconds * bps / 8)) + CONTAINER_BYTES
+    return total
+
+
 def describe(vb):
     """One sentence for the build's summary."""
     if vb is None or not vb.slots:

@@ -526,3 +526,13 @@ callout ten_seconds       354   # Lace, there's still time! / The clock is ticki
 value scoop_event          2
 site scoop_handler         0x00088b58 0xe2400002 0xe92d4030
 data scoop_slot           0x0065254c
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x007250f4
+data coil_table            0x006c96f8
+value magnet_proc          13185
+text diverter_label       Diverter
+text diverter_drive       9 0 a209 150 a210
+text held_coils            diverter

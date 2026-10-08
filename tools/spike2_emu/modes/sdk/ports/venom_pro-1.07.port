@@ -142,7 +142,7 @@ value stock_mode_count      94
 value backdrop_video_at      0x54
 value backdrop_scene_at      0x18
 # value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
-# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value clip_surface_hide     1
 # value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
 value game_flags_at         4
 # value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
@@ -187,7 +187,7 @@ switch 94   0x200000000        Top lane-right
 
 # ---- scenes ----
 scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
-scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene video_bank           a5a5ca3d705d93c2e9b3e01a7cd075363f5a6319
 scene hud                  a5a5ca3d705d93c2e9b3e01a7cd075363f5a6319
 
 # ---- callouts and text ----

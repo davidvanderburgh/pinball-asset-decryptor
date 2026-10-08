@@ -839,7 +839,7 @@ PROFILES = {
         font=(293, ''), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=4, root_count_at=0x1BF9F0, root_count=5,
         insert_at=0x1CE7A7, insert_before=(0x8000069E, 'BallAndCredits_Instance'),
-        first_free_id=0x700, in_game=True),
+        first_free_id=0x700, in_game=True, video=(5, 56)),
     # PAD-420: stranger_things_le-1.13 - stranger_things_le-1.12's size, byte-identical to it from 0xc62af to the end (the tree, the root count, the insert point; the profiler reads the same tree)
     '667b28929132f94722c28268ce559de8': SceneProfile(
         label='Stranger Things LE 1.13 in-game 8d4b1e7a (PAD-420, read statically)',
@@ -894,7 +894,7 @@ PROFILES = {
         font=(295, 'Stern_Impact_Outline'), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
         root_frames=1, root_count_at=0x13A773, root_count=2,
         insert_at=0x13B161, insert_before=(0x80000294, 'PopUp1'),
-        first_free_id=0x300, in_game=True),
+        first_free_id=0x300, in_game=True, video=(5, 21)),
 }
 
 

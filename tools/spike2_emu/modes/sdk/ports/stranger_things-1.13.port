@@ -131,7 +131,7 @@ value stock_running_at      0x1b      # + player: running byte
 value stock_level_at        0x3c      # + 4 * player: starts this game
 value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
 # value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
-# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value clip_surface_hide     1
 # value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
 # value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
 # value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
@@ -177,7 +177,7 @@ switch 96   0x800000000        Pop bumper 10 pt switch
 switch 97   0x1000000000       Right orbit
 
 # ---- scenes ----
-scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene video_bank           8d4b1e7add4280a7790929a643df09196c28c29f
 scene hud                  8d4b1e7add4280a7790929a643df09196c28c29f
 
 # ---- callouts and text ----

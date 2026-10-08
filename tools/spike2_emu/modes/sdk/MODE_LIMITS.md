@@ -208,7 +208,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | no | ✓ | ✓ | shots | scoop, mechanisms |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Stranger Things 1.13 | no | ✓ | ✓ | shots | scoop, mechanisms |
+| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
 | Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
@@ -226,7 +226,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Venom Pro 1.07 | no | ✓ | ✓ | shots | scoop, mechanisms |
+| Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **Ball save not yet:** found in the game, not yet seen working.

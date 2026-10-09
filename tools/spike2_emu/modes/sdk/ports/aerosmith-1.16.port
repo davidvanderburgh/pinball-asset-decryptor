@@ -327,3 +327,64 @@ value scoop_event          2
 site lamp_free_owner      0x00321340 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0xd0
 value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x0007862c 0xe92d4008 0xeb06a673   # 100 lights in its lamp groups, 0 light-runner commands, white, 7.7 s
+text show_name_1          Wide white glow
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x00080bf8 0xe92d4ff0 0xe3a0000b   # 88 lights in its lamp groups, 0 light-runner commands, red, 2.8 s
+text show_name_2          Wide fast red strobe
+text show_kind_2          flashy
+value show_secs_2         3
+site show_3               0x001282f8 0xe92d4ff0 0xe3a00008   # 77 lights in its lamp groups, 0 light-runner commands, yellow, white, 6.9 s
+text show_name_3          Yellow and white strobe
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x000398f8 0xe92d4070 0xeb07a1c0   # 76 lights in its lamp groups, 0 light-runner commands, white, 3.0 s
+text show_name_4          White strobe
+text show_kind_4          flashy
+value show_secs_4         3
+site show_5               0x00085e44 0xe92d4ff0 0xe3a0000b   # 74 lights in its lamp groups, 0 light-runner commands, red, 2.8 s
+text show_name_5          Fast red strobe
+text show_kind_5          flashy
+value show_secs_5         3
+site show_6               0x00082940 0xe92d4070 0xeb067dae   # 72 lights in its lamp groups, 0 light-runner commands, red, 8.2 s
+text show_name_6          Red strobe
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x00128240 0xe92d4070 0xeb03e76e   # 68 lights in its lamp groups, 0 light-runner commands, orange, yellow, 7.8 s
+text show_name_7          Orange and yellow strobe
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x00106620 0xe92d4008 0xeb046e76   # 35 lights in its lamp groups, 0 light-runner commands, red, yellow, 7.5 s
+text show_name_8          Red and yellow chase
+text show_kind_8          flashy
+value show_secs_8         8
+site show_9               0x00122ff4 0xe92d41f0 0xe3a04f4e   # 25 lights in its lamp groups, 0 light-runner commands, white, 5.7 s
+text show_name_9          Small white glow
+text show_kind_9          flashy
+value show_secs_9         8
+site show_10              0x000812cc 0xe92d4ff0 0xe3a0000b   # 16 lights in its lamp groups, 0 light-runner commands, red, 7.2 s
+text show_name_10         Small red strobe
+text show_kind_10         flashy
+value show_secs_10        8
+site show_11              0x00099d18 0xe92d4070 0xe24dd020   # 95 lights in its lamp groups, 0 light-runner commands, green, white, 1.9 s
+text show_name_11         Wide green and white strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x00061c80 0xe92d4ff0 0xe3a0000d   # 87 lights in its lamp groups, 0 light-runner commands, blue, 1.0 s
+text show_name_12         Wide blue chase
+text show_kind_12         accent
+value show_secs_12        1

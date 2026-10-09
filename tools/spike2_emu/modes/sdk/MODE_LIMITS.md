@@ -159,7 +159,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
-| Aerosmith 1.16 | ✓ | no | ✓ | shots | scoop |
+| Aerosmith 1.16 | ✓ | no | ✓ | shots | scoop, light shows |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
 | Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms, light shows |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
@@ -174,7 +174,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms |
-| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, light shows |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
@@ -205,7 +205,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |

@@ -1804,7 +1804,7 @@ _BANK = "/godzilla_%s/assets/lcd/auto_loaded/60ed7e50/scene.assets/2.asset/"
 
 
 def test_random_clips_follow_their_slot_across_models(tmp_path):
-    """DoomWalrus666: "Can we make the randomized substitutions come through on a transfer to
+    """A field report: "Can we make the randomized substitutions come through on a transfer to
     another project folder?" A Pro project's slot with random clips (and a replacement) lands on
     the Premium/LE slot, list and all, beside the replacement."""
     src, tgt = str(tmp_path / "pro_mods"), str(tmp_path / "prem_stock")

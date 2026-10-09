@@ -694,10 +694,18 @@ const colorTip = (l, cs) => {
   if (c.locked) return { head: "Color: the game's own picture", lines: [
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
     "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images and text (Advanced, beside Preview colors)." ] };
+  // PAD-471 (DragonRR: "all the palette icons are red as if no profile assigned"): a line its
+  // font's pictures correct is green too, with the link; a click there says where it comes from
+  if (c.line && c.font_on && !c.on) return { head: "Color profile attached through its font", lines: [
+    ...artLines(c),
+    layerProfile(l, cs),
+    ["Click", "see where it comes from: this line cannot be left out on its own, since every line in its font shares those pictures"],
+    "Open Colors with the layer selected to give it a profile of its own." ] };
   if (c.line) return { head: c.on ? "Color profile attached to this line" : "No color profile attached to this line", lines: [
     ...artLines(c),
     layerProfile(l, cs),
-    ["Click", c.on ? "detach the color profile" : "attach the color profile"],
+    ["Click", c.on ? (c.font_on ? "detach its own color profile (its font's pictures still correct it)" : "detach the color profile")
+      : "attach the color profile"],
     c.on ? `Its color profile is baked into ${c.art ? "its copy of the font" : "the color it is drawn in"} when you build; the preview shows it. Open Colors with the layer selected to give it one of its own.`
       : "It goes on the card in its own colors.",
     c.stock ? "The game's own line, unlocked: corrected from its own color when you build, so never twice."
@@ -719,6 +727,10 @@ const UNLOCK_TIP = { head: "Advanced: unlock extracted images and text", lines: 
 export const layerProfile = (l, cs) => {
   const c = l.color;
   if (!c) return null;
+  // PAD-471: a line its font's pictures correct has their profile
+  if (c.font_on && !c.on && !c.locked) {
+    return { profile: ((cs.own_names || {}).images || {})[(c.font_pictures || [])[0]] || cs.asset_name || "Recommended" };
+  }
   if (c.locked || !c.on) return { profile: "None" };
   return { profile: ((cs.own_names || {})[c.kind || "images"] || {})[c.rel] || cs.asset_name || "Recommended" };
 };
@@ -896,9 +908,9 @@ function TreeLayers({ t }) {
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
         <${Icon} name="sd" /></button>
-      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off", l.color.font_on && "via-font")}
-        aria-label=${l.color.line ? "Color profile on this line" : "Color profile on this picture"} aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
-        onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on); }}>
+      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on || l.color.font_on ? "on" : "off", l.color.font_on && "via-font")}
+        aria-label=${l.color.line ? "Color profile on this line" : "Color profile on this picture"} aria-pressed=${l.color.on || l.color.font_on ? "true" : "false"} ...${tip(colorTip(l, cs))}
+        onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on, true); }}>
         <${Icon} name=${l.color.locked ? "lock" : "palette"} />${l.color.font_on ? html`<${Icon} name="link" cls="ly-share" />` : null}</button>` : html`<span></span>`}
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"

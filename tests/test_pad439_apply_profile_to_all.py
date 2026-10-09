@@ -161,5 +161,6 @@ def test_the_button_is_on_the_images_and_video_bars_only():
     assert 'call("color.apply_to_all", "profiled")' in pane
     assert "Apply to all ${all[1]}…" in pane
     assert "Apply to all profiled ${all[1]}…" in pane
-    assert 'ALL_HOSTS = { images: "images", video: "videos" }' in pane
+    # (PAD-471: and the Scenes bar on a line of text, for lines of text)
+    assert 'ALL_HOSTS = { images: "images", video: "videos", scenes: "text" }' in pane
     assert "<${FileLine} s=${s} host=${host} />" in pane

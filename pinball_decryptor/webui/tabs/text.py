@@ -175,6 +175,11 @@ class TextTab(TabService):
         the other tabs reach the editor)."""
         self.scenes.pictures_changed()
 
+    def scenes_lines_changed(self):
+        """PAD-471: lines' colour switches moved from the Colors tab (Apply to all lines of
+        text, or its Undo); a running game gets the scene on show again."""
+        self.scenes.lines_changed()
+
     def on_close(self):
         self.scenes.close()
         self.fonts.close(force=True)

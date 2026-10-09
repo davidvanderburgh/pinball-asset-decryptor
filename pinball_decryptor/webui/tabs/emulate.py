@@ -38,7 +38,7 @@ import tempfile
 import threading
 import time
 
-from ...core import config, rigdata, runtime
+from ...core import config, rigdata, runtime, staging_work
 from .. import compat
 from .. import emulate_rig as rig
 from .base import TabService, rpc
@@ -87,6 +87,17 @@ def write_audio_ctl(gain, muted):
         os.replace(tmp, path)
     except OSError:
         pass
+
+
+#: The State line's ⓘ while the staging converts videos and pictures before
+#: a run (PAD-489).
+_CONVERT_EXPLAIN = (
+    "Before the game can show your videos and pictures, each one is "
+    "converted: a replacement to the card's own format, a game's own video or "
+    "picture with its color profile baked in. A video is one encode, about a "
+    "second for a short one on a fast PC, so a whole game's videos take "
+    "minutes. A converted video is kept, so a later Start converts only what "
+    "you have changed since. The time left is measured as it goes.")
 
 
 def _state_kind(text):
@@ -172,6 +183,7 @@ class EmulateTab(TabService):
         self._preparing = None
         self._preparing_pct = None
         self._preparing_kind = None
+        self._prep_paint_due = False
         self._cancel_prepare = False
         self.last_refusal = ""
         #: "a run this tab started has gone down" (item 127): the Modes
@@ -1843,9 +1855,18 @@ class EmulateTab(TabService):
         self._preparing = "Preparing your edits…"
         self._preparing_kind = "edits"
         self._post(self._repaint_preparing)
+
+        def progress(done, total, words=""):
+            # PAD-489: the build's own bar and words, not a still "Preparing"
+            words = str(words or "").strip().rstrip(".…")
+            self._show_preparing(
+                "Preparing your edits: %s%s" % (words[:1].lower(), words[1:])
+                if words else "Preparing your edits…",
+                int(done * 100 / total) if total else None)
+
         try:
             counts, _mode, _val, files = stern_engine.write_overrides(
-                card, assets, out, scene_edits=scenes_on,
+                card, assets, out, scene_edits=scenes_on, progress=progress,
                 log=lambda msg, level="info": self._log("[emulate] " + msg),
                 cancel=lambda: (self._stopping or self._stopped
                                 or self._cancel_prepare),
@@ -1861,6 +1882,7 @@ class EmulateTab(TabService):
             return None
         finally:
             self._preparing = None
+            self._preparing_pct = None
             self._preparing_kind = None
             # the one button said "Cancel" for this; now it is "Starting…"
             self._post(self._paint_run_btn)
@@ -2001,20 +2023,46 @@ class EmulateTab(TabService):
         stage = self._stage_fn()
         self._preparing = "Applying your replacements…"
         self._post(self._repaint_preparing)
+        # PAD-489: what the staging comes to is counted before it starts,
+        # said (and asked about when it is long), then shown as it goes
+        tracker = []
+
+        def confirm(work):
+            if not self._confirm_staging(work):
+                return False
+            if work:
+                tracker.append(staging_work.Tracker(work))
+                self._preparing_kind = "convert"
+            return True
+
+        def progress(kind, i, total, rel=""):
+            if tracker:
+                self._show_preparing(*tracker[0].step(kind, i, total, rel))
+
         try:
             # "Runs on the caller's worker thread" (App's docstring), as
             # the Tk panel called it
-            pending, staged, failures = stage(
+            got = stage(
                 assets, cancel_cb=lambda: (
-                    self._stopping or self._stopped or self._cancel_prepare))
+                    self._stopping or self._stopped or self._cancel_prepare),
+                progress_cb=progress, confirm_cb=confirm)
         except Exception as exc:                         # noqa: BLE001
             self._overrides_refuse(
                 "The replacements you assigned could not be applied to %s: %s"
                 % (assets, exc))
             return False
         finally:
+            if tracker:
+                tracker[0].finish()
             self._preparing = None
+            self._preparing_pct = None
+            self._preparing_kind = None
             self._post(self._paint_run_btn)
+        if got is None:
+            self._log("[emulate] not started: nothing was converted, and "
+                      "your project is as it was.")
+            return False
+        pending, staged, failures = got
         if pending and not staged:
             self._overrides_refuse(
                 "None of the %d replacement(s) you assigned could be applied, "
@@ -2034,6 +2082,58 @@ class EmulateTab(TabService):
             if callable(notify):
                 self._post(notify, assets)
         return True
+
+    def _confirm_staging(self, work):
+        """PAD-489 (DragonRR: "no warning that there are a huge number of
+        files to process and it will take a long time"): say what the
+        staging is about to convert and about how long that takes, and when
+        it converts clips for a minute or more, ask first.  True to go on."""
+        if not work:
+            return True
+        secs = staging_work.estimate(work)
+        what = work.says()
+        self._log("[emulate] %s to convert before the game starts: %s on "
+                  "this PC" % (what, staging_work.say_time(secs)))
+        if not work.clips or secs < staging_work.ASK_FROM_S:
+            return True
+        n = len(work.clips)
+        if len(work.coloured) == n:
+            how = " with your color profile"
+        elif work.coloured:
+            how = (" (%d of the videos with your color profile)"
+                   % len(work.coloured))
+        else:
+            how = ""
+        one = n + work.pictures == 1
+        ok = compat.messagebox.askyesno(
+            "Before the game starts",
+            "%s %s to be converted%s before this run can start. That "
+            "takes %s on this PC.\n\n"
+            "It is done once: later Starts reuse the converted videos until "
+            "you change them or their color profile. While it runs, the "
+            "Start button is a Cancel button, and the videos done by then "
+            "are kept.\n\n"
+            "Convert %s now?"
+            % (what[:1].upper() + what[1:], "has" if one else "have", how,
+               staging_work.say_time(secs), "it" if one else "them"))
+        if not ok:
+            self._log("[emulate] you chose not to convert them now.")
+        return bool(ok)
+
+    def _show_preparing(self, text, pct):
+        """A long preparation's words and percentage on the State line and
+        the footer's bar (PAD-489).  Painted at most four times a second,
+        and always within a quarter of a second of the latest."""
+        self._preparing = text
+        self._preparing_pct = pct
+        if getattr(self, "_prep_paint_due", False):
+            return
+        self._prep_paint_due = True
+        self._after(250, self._paint_preparing_due)
+
+    def _paint_preparing_due(self):
+        self._prep_paint_due = False
+        self._repaint_preparing()
 
     def _overrides_refuse(self, message, say=True):
         """A refused Start: the reason stays beside the opt-in (orange)
@@ -2073,6 +2173,8 @@ class EmulateTab(TabService):
         self._footer("copy", self._preparing_pct, text)
 
     def _preparing_explain(self):
+        if self._preparing_kind == "convert":
+            return _CONVERT_EXPLAIN
         return rig._MODES_EXPLAIN if self._preparing_kind == "modes" \
             else rig._OVERRIDE_EXPLAIN
 

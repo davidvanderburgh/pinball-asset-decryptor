@@ -947,23 +947,32 @@ def test_the_app_stages_all_three_kinds_the_way_a_build_does():
     seen = []
 
     class _Stub:
+        def _video_staging(self, d):
+            return None
+
+        def _image_staging(self, d):
+            return None
+
         def _stage_pending_audio(self, d):
             seen.append(("audio", d, None))
             return (1, 1, [])
 
-        def _stage_pending_video(self, d, cancel_cb=None):
+        def _stage_pending_video(self, d, cancel_cb=None, progress_cb=None,
+                                 staging=None):
             seen.append(("video", d, cancel_cb))
             return (2, 1, [("video: b.mp4", "too long")])
 
-        def _stage_pending_image(self, d):
-            seen.append(("image", d, None))
+        def _stage_pending_image(self, d, cancel_cb=None, progress_cb=None,
+                                 staging=None):
+            seen.append(("image", d, cancel_cb))
             return (1, 0, [("image: c.png", "not a PNG")])
 
     stop = lambda: False
     got = App.stage_pending_replacements(_Stub(), "D:/gz", cancel_cb=stop)
     assert [kind for kind, _d, _c in seen] == ["audio", "video", "image"]
     assert [d for _k, d, _c in seen] == ["D:/gz"] * 3
-    assert seen[1][2] is stop
+    # PAD-489: the pictures can be cancelled too
+    assert seen[1][2] is stop and seen[2][2] is stop
     assert got == (4, 2, [("video: b.mp4", "too long"),
                           ("image: c.png", "not a PNG")])
 

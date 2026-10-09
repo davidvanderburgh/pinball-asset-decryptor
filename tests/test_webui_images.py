@@ -679,7 +679,7 @@ def test_emulate_start_tells_the_replace_tabs(tmp_path, monkeypatch):
     told, posted = [], []
 
     class _Win:
-        cb = {"on_stage_pending": lambda a, cancel_cb=None: (1, 1, [])}
+        cb = {"on_stage_pending": lambda a, cancel_cb=None, **kw: (1, 1, [])}
 
         def folder_staged(self, folder):
             told.append(folder)

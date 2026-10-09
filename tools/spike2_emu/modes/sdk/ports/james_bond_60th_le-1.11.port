@@ -538,23 +538,19 @@ site show_2               0x000d5f10 0xe92d4070 0xe24dd008   # 76 lights in its 
 text show_name_2          Small fast strobe
 text show_kind_2          flashy
 value show_secs_2         8
-site show_3               0x00041554 0xe92d4070 0xe24dd008   # 3 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
-text show_name_3          Small glow
-text show_kind_3          flashy
-value show_secs_3         8
-site show_4               0x00085aa8 0xe92d4070 0xe3a0000a   # 395 lights in its lamp groups, 0 light-runner commands, no colour given, 2.1 s
-text show_name_4          Wide fast strobe
+site show_3               0x00085aa8 0xe92d4070 0xe3a0000a   # 395 lights in its lamp groups, 0 light-runner commands, no colour given, 2.1 s
+text show_name_3          Wide fast strobe
+text show_kind_3          accent
+value show_secs_3         2
+site show_4               0x000819dc 0xe92d4ff0 0xe24dd024   # 315 lights in its lamp groups, 0 light-runner commands, no colour given, 1.5 s
+text show_name_4          Fast strobe
 text show_kind_4          accent
-value show_secs_4         2
-site show_5               0x000819dc 0xe92d4ff0 0xe24dd024   # 315 lights in its lamp groups, 0 light-runner commands, no colour given, 1.5 s
-text show_name_5          Fast strobe
+value show_secs_4         1
+site show_5               0x00041650 0xe92d40f0 0xe24dd014   # 89 lights in its lamp groups, 0 light-runner commands, no colour given, 2.0 s
+text show_name_5          Small strobe
 text show_kind_5          accent
-value show_secs_5         1
-site show_6               0x00041650 0xe92d40f0 0xe24dd014   # 89 lights in its lamp groups, 0 light-runner commands, no colour given, 2.0 s
-text show_name_6          Small strobe
+value show_secs_5         2
+site show_6               0x00041b50 0xe92d4010 0xe3a00028   # 67 lights in its lamp groups, 0 light-runner commands, no colour given, 1.7 s
+text show_name_6          Small chase
 text show_kind_6          accent
 value show_secs_6         2
-site show_7               0x00041b50 0xe92d4010 0xe3a00028   # 67 lights in its lamp groups, 0 light-runner commands, no colour given, 1.7 s
-text show_name_7          Small chase
-text show_kind_7          accent
-value show_secs_7         2

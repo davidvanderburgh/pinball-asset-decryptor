@@ -385,10 +385,10 @@ site show_9               0x00106894 0xe92d4008 0xeb0364b7   # 35 lights in its 
 text show_name_9          Red and green strobe
 text show_kind_9          flashy
 value show_secs_9         8
-site show_10              0x000c4568 0xe92d4ff0 0xe3a0000a   # 3 lights in its lamp groups, 0 light-runner commands, red, 8.2 s
-text show_name_10         Small slow red fade
-text show_kind_10         subdued
-value show_secs_10        8
+site show_10              0x000fe610 0xe92d4038 0xeb038558   # 19 lights in its lamp groups, 0 light-runner commands, no colour given, 4.5 s
+text show_name_10         Small strobe
+text show_kind_10         flashy
+value show_secs_10        5
 site show_11              0x00099c10 0xe92d4070 0xe24dd020   # 118 lights in its lamp groups, 0 light-runner commands, green, white, 1.9 s
 text show_name_11         Wide green and white strobe
 text show_kind_11         accent

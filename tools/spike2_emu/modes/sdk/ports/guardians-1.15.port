@@ -393,20 +393,20 @@ site show_6               0x00030408 0xe92d4070 0xeb08116e   # 85 lights in its 
 text show_name_6          Red and yellow chase
 text show_kind_6          flashy
 value show_secs_6         8
-site show_7               0x000968e4 0xe92d4ff0 0xe3a0000a   # 10 lights in its lamp groups, 0 light-runner commands, red, 7.2 s
-text show_name_7          Small slow red fade
-text show_kind_7          subdued
+site show_7               0x000cbb7c 0xe92d4070 0xeb05a391   # 85 lights in its lamp groups, 0 light-runner commands, purple, 7.0 s
+text show_name_7          Purple strobe
+text show_kind_7          flashy
 value show_secs_7         8
-site show_8               0x000c3540 0xe92d4ff0 0xe3a06000   # 9 lights in its lamp groups, 0 light-runner commands, no colour given, 7.3 s
-text show_name_8          Small slow fade
-text show_kind_8          subdued
+site show_8               0x000302bc 0xe92d4070 0xeb0811c1   # 84 lights in its lamp groups, 0 light-runner commands, red, 7.8 s
+text show_name_8          Red strobe
+text show_kind_8          flashy
 value show_secs_8         8
-site show_9               0x00090250 0xe92d4ff0 0xe24dd02c   # 5 lights in its lamp groups, 0 light-runner commands, green, 7.3 s
-text show_name_9          Small slow green fade
+site show_9               0x000968e4 0xe92d4ff0 0xe3a0000a   # 10 lights in its lamp groups, 0 light-runner commands, red, 7.2 s
+text show_name_9          Small slow red fade
 text show_kind_9          subdued
 value show_secs_9         8
-site show_10              0x000b00c8 0xe92d4ff0 0xe24dd02c   # 3 lights in its lamp groups, 0 light-runner commands, blue, 7.5 s
-text show_name_10         Small slow blue fade
+site show_10              0x000c3540 0xe92d4ff0 0xe3a06000   # 9 lights in its lamp groups, 0 light-runner commands, no colour given, 7.3 s
+text show_name_10         Small slow fade
 text show_kind_10         subdued
 value show_secs_10        8
 site show_11              0x0003d568 0xe92d4ff0 0xe3a0000a   # 90 lights in its lamp groups, 0 light-runner commands, red, yellow, 0.9 s

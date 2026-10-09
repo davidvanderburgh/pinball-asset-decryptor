@@ -201,7 +201,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
-| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |

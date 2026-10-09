@@ -522,3 +522,64 @@ data scoop_slot           0x00629838
 site lamp_free_owner      0x002b847c 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0xd0
 value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x000b56cc 0xe92d4070 0xeb0aafd5   # star_wars_pro-1.31's Wide blue and white chase: its lit lights 97% alike; 478 lights in its lamp groups, 0 light-runner commands, blue, white, 7.7 s
+text show_name_1          Wide blue and white chase
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x0008e7dc 0xe92d4ff0 0xe24dd044   # star_wars_pro-1.31's Wide red and white glow: its lit lights 91% alike; 483 lights in its lamp groups, 0 light-runner commands, green, blue, 7.7 s
+text show_name_2          Wide red and white glow
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x00057f54 0xe92d4070 0xe24dd010   # star_wars_pro-1.31's Strobe: its lit lights 81% alike; 422 lights in its lamp groups, 0 light-runner commands, no colour given, 7.2 s
+text show_name_3          Strobe
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x000c3ab0 0xe92d4ff0 0xe24dd01c   # 296 lights in its lamp groups, 0 light-runner commands, red, white, 6.6 s
+text show_name_4          Red and white strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x000930b8 0xe92d4070 0xe24dd010   # 281 lights in its lamp groups, 0 light-runner commands, red, blue, 6.0 s
+text show_name_5          Red and blue strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x00341f84 0xe92d4070 0xe3a04000   # 276 lights in its lamp groups, 0 light-runner commands, no colour given, 8.0 s
+text show_name_6          Glow
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x003441c0 0xe92d4ff0 0xe24dd044   # star_wars_pro-1.31's Slow fade: its lit lights 100% alike; 276 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_7          Slow fade
+text show_kind_7          subdued
+value show_secs_7         8
+site show_8               0x000b2764 0xe92d4ff0 0xe3a00031   # star_wars_pro-1.31's Small slow green fade: its lit lights 100% alike; 6 lights in its lamp groups, 0 light-runner commands, green, 7.8 s
+text show_name_8          Small slow green fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x0008d638 0xe92d4ff0 0xe24dd01c   # 353 lights in its lamp groups, 0 light-runner commands, red, 6.4 s
+text show_name_9          Slow red fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x00057a08 0xe92d4ff0 0xe24dd01c   # 171 lights in its lamp groups, 0 light-runner commands, no colour given, 3.2 s
+text show_name_10         Fade
+text show_kind_10         subdued
+value show_secs_10        3
+site show_11              0x000e09a8 0xe92d4010 0xe24dd018   # 209 lights in its lamp groups, 0 light-runner commands, no colour given, 0.6 s
+text show_name_11         Flash
+text show_kind_11         accent
+value show_secs_11        1
+site show_12              0x00092e18 0xe92d4070 0xe3a00005   # 102 lights in its lamp groups, 0 light-runner commands, blue, 0.8 s
+text show_name_12         Small blue strobe
+text show_kind_12         accent
+value show_secs_12        1

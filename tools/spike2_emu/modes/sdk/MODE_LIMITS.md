@@ -187,15 +187,15 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
 | John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, light shows |
 | John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop, light shows |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
-| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms |
-| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
+| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
@@ -207,7 +207,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
-| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |

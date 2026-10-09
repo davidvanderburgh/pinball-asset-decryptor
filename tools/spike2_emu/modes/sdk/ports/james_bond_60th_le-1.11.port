@@ -517,3 +517,44 @@ value scoop_event          2
 site lamp_free_owner      0x002c156c 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0xd0
 value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x000903a8 0xe92d4030 0xe24dd014   # 218 lights in its lamp groups, 0 light-runner commands, no colour given, 2.7 s
+text show_name_1          Strobe
+text show_kind_1          flashy
+value show_secs_1         3
+site show_2               0x000d5f10 0xe92d4070 0xe24dd008   # 76 lights in its lamp groups, 0 light-runner commands, no colour given, 6.0 s
+text show_name_2          Small fast strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x00041554 0xe92d4070 0xe24dd008   # 3 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_3          Small glow
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x00085aa8 0xe92d4070 0xe3a0000a   # 395 lights in its lamp groups, 0 light-runner commands, no colour given, 2.1 s
+text show_name_4          Wide fast strobe
+text show_kind_4          accent
+value show_secs_4         2
+site show_5               0x000819dc 0xe92d4ff0 0xe24dd024   # 315 lights in its lamp groups, 0 light-runner commands, no colour given, 1.5 s
+text show_name_5          Fast strobe
+text show_kind_5          accent
+value show_secs_5         1
+site show_6               0x00041650 0xe92d40f0 0xe24dd014   # 89 lights in its lamp groups, 0 light-runner commands, no colour given, 2.0 s
+text show_name_6          Small strobe
+text show_kind_6          accent
+value show_secs_6         2
+site show_7               0x00041b50 0xe92d4010 0xe3a00028   # 67 lights in its lamp groups, 0 light-runner commands, no colour given, 1.7 s
+text show_name_7          Small chase
+text show_kind_7          accent
+value show_secs_7         2

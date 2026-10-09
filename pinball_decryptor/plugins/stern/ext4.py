@@ -283,6 +283,26 @@ class Ext4Reader:
             remaining -= take
         return out
 
+    def mapped_ranges(self, inode):
+        """Every stretch of a regular file that has blocks on the disk, as
+        ``[(file_off, disk_offset, n), ...]`` in file order, cut at its size.
+
+        What :meth:`disk_ranges` of the whole file would say, except that a
+        HOLE is left out instead of failing the lot.  A file a Linux ``cp`` (or
+        debugfs) wrote onto a card can have one: a block of zeros is left
+        unallocated (PAD-491: a custom Godzilla card's grown game program,
+        which holds two blocks of zeros at 0x795000), and a patch elsewhere in
+        it still has a place on the disk to go."""
+        bs = self.block_size
+        size = inode["size"]
+        out = []
+        for log, phys, cnt in self._runs(inode):
+            start = log * bs
+            n = min(cnt * bs, size - start)
+            if n > 0:
+                out.append((start, self.base + phys * bs, n))
+        return out
+
     def read_range(self, inode, file_off, length):
         """Bytes ``[file_off, file_off+length)`` of a regular file.
 

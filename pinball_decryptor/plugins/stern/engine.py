@@ -9726,14 +9726,23 @@ def _writes_by_file(reader, writes):
     """
     index = []                       # (disk_start, disk_end, path, node, f_off)
     for path, _ino, node in reader.iter_regular_files(min_size=1):
-        f_off = 0
         try:
-            runs = reader.disk_ranges(node, 0, node["size"])
-        except Exception:            # a hole, or an inode we can't map
-            continue
-        for disk, n in runs:
+            runs, f_off = [], 0
+            for disk, n in reader.disk_ranges(node, 0, node["size"]):
+                runs.append((f_off, disk, n))
+                f_off += n
+        except Exception:
+            # A HOLE (PAD-491): a file a Linux cp wrote onto the card can leave
+            # a block of zeros unallocated, and skipping the whole file for it
+            # skipped every patch in it.  On a custom Godzilla card that was its
+            # grown game program, so the validation bypass, so every Emulate
+            # run with edits.  Its patches are in the stretches that have blocks.
+            try:
+                runs = reader.mapped_ranges(node)
+            except Exception:        # an inode we can't map
+                continue
+        for f_off, disk, n in runs:
             index.append((disk, disk + n, path, node, f_off))
-            f_off += n
     index.sort()
     starts = [r[0] for r in index]
 

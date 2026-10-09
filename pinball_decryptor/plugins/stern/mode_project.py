@@ -288,59 +288,64 @@ HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "shaker")
 #: the upper playfield diverter, the outlane up post); its device tables name them now, and the Pro's has only the
 #: van up post of them. Venom's scoops are named
 #: by its switches and adjustments (the center and 180 scoops), not by a coil. A game directory not listed here
-#: shows every section.
+#: shows every section. PAD-474: the shaker is the SHAKER MOTOR device, coil 0 of the cabinet board; the newer titles
+#: name it like any coil, Godzilla and the older ones only in the test menu's record ("an optional accessory for
+#: Premium games, and is included in LE editions"), which the coil names missed. Every title but the Home Editions
+#: has it; it is listed where the latest build's own shake call is ported and proven (not James Bond 60th, whose
+#: newer framework has no such call, nor D&D LE, whose game the emulator does not start: its lines are ported,
+#: unproven).
 MACHINE_HARDWARE = {
     "aerosmith": ("magnet", "scoop", "shaker"),
     "aerosmith_le": ("magnet", "scoop", "coils", "shaker"),
-    "avengers_infinity_le": ("magnet", "scoop", "coils"),
-    "avengers_infinity_pro": ("magnet", "coils"),
-    "batman": ("magnet", "scoop", "coils"),
-    "beatles": ("magnet", "coils"),
-    "deadpool_le": ("scoop", "coils"),
-    "deadpool_pro": ("scoop", "coils"),
+    "avengers_infinity_le": ("magnet", "scoop", "coils", "shaker"),
+    "avengers_infinity_pro": ("magnet", "coils", "shaker"),
+    "batman": ("magnet", "scoop", "coils", "shaker"),
+    "beatles": ("magnet", "coils", "shaker"),
+    "deadpool_le": ("scoop", "coils", "shaker"),
+    "deadpool_pro": ("scoop", "coils", "shaker"),
     "dungeons_and_dragons_le": ("magnet", "scoop", "coils"),
-    "dungeons_and_dragons_pro": ("magnet", "scoop", "coils"),
+    "dungeons_and_dragons_pro": ("magnet", "scoop", "coils", "shaker"),
     "elvira3": ("scoop", "coils", "shaker"),
-    "foo_fighters_le": ("magnet", "coils"),
-    "foo_fighters_pro": ("coils",),       # run 21: its device table (the names resolve now) has no OVERLORD MAGNET - the LE's only
+    "foo_fighters_le": ("magnet", "coils", "shaker"),
+    "foo_fighters_pro": ("coils", "shaker"),       # run 21: its device table (the names resolve now) has no OVERLORD MAGNET - the LE's only
     "godzilla_le": ("magnet", "scoop", "coils", "shield", "shaker"),   # its shaker drive is no coil name: PAD-414 shakes it
     "godzilla_pro": ("magnet", "scoop", "shaker"),   # the shaker kit is optional; the game's own shake call is the LE's
     "guardians": ("magnet", "scoop", "coils", "shaker"),
     "guardians_le": ("magnet", "scoop", "coils", "shaker"),
-    "iron_maiden_le": ("scoop", "coils"),
-    "iron_maiden_pro": ("coils",),
+    "iron_maiden_le": ("scoop", "coils", "shaker"),
+    "iron_maiden_pro": ("coils", "shaker"),
     "james_bond_60th_le": ("scoop", "coils"),
-    "james_bond_le": ("magnet", "scoop", "coils"),
-    "james_bond_pro": ("scoop", "coils"),
-    "jaws_le": ("coils",),
-    "jaws_pro": ("coils",),
-    "john_wick_le": ("scoop", "coils"),
-    "john_wick_pro": ("scoop",),
-    "jurassic_park_le": ("magnet", "coils"),
-    "jurassic_park_pro": ("coils",),
+    "james_bond_le": ("magnet", "scoop", "coils", "shaker"),
+    "james_bond_pro": ("scoop", "coils", "shaker"),
+    "jaws_le": ("coils", "shaker"),
+    "jaws_pro": ("coils", "shaker"),
+    "john_wick_le": ("scoop", "coils", "shaker"),
+    "john_wick_pro": ("scoop", "shaker"),
+    "jurassic_park_le": ("magnet", "coils", "shaker"),
+    "jurassic_park_pro": ("coils", "shaker"),
     "jurassic_park_the_pin": ("coils",),
-    "king_kong_le": ("magnet", "scoop", "coils"),
-    "king_kong_pro": ("magnet", "scoop", "coils"),
+    "king_kong_le": ("magnet", "scoop", "coils", "shaker"),
+    "king_kong_pro": ("magnet", "scoop", "coils", "shaker"),
     "led_zeppelin_le": ("magnet", "scoop", "coils", "shaker"),
     "led_zeppelin_pro": ("scoop", "coils", "shaker"),
     "mando_le": ("magnet", "scoop", "coils", "shaker"),
     "mando_pro": ("scoop", "coils", "shaker"),
-    "metallica_spike": ("magnet", "scoop", "coils"),
+    "metallica_spike": ("magnet", "scoop", "coils", "shaker"),
     "munsters_le": ("magnet", "scoop", "coils", "shaker"),
     "munsters_pro": ("magnet", "scoop", "coils", "shaker"),
     "rush_le": ("magnet", "scoop", "coils", "shaker"),
     "rush_pro": ("magnet", "scoop", "coils", "shaker"),
     "star_wars_elg": ("coils",),
-    "star_wars_le": ("scoop", "coils"),
-    "star_wars_pro": ("scoop", "coils"),
-    "stranger_things": ("scoop", "coils"),
-    "stranger_things_le": ("scoop", "coils"),
+    "star_wars_le": ("scoop", "coils", "shaker"),
+    "star_wars_pro": ("scoop", "coils", "shaker"),
+    "stranger_things": ("scoop", "coils", "shaker"),
+    "stranger_things_le": ("scoop", "coils", "shaker"),
     "sword_of_rage_le": ("magnet", "scoop", "coils", "shaker"),
     "sword_of_rage_pro": ("magnet", "scoop", "coils", "shaker"),
     "turtles_le": ("magnet", "coils", "shaker"),
     "turtles_pro": ("magnet", "coils", "shaker"),
-    "uncanny_xmen_le": ("magnet", "coils"),
-    "uncanny_xmen_pro": ("magnet", "coils"),
+    "uncanny_xmen_le": ("magnet", "coils", "shaker"),
+    "uncanny_xmen_pro": ("magnet", "coils", "shaker"),
     "venom_le": ("scoop", "coils", "shaker"),
     "venom_pro": ("scoop", "coils", "shaker"),
 }
@@ -756,14 +761,69 @@ def _shield_cannot(key, label, port=None):
 
 
 #: PAD-414: the cabinet's shaker motor (Godzilla Premium/LE: optional on a Premium, fitted on an LE). What
-#: pad_mode_runtime.c's shake_arm needs - (sites, values, texts): the game's own shake and stop, the drive's time
-#: left, the adjustment reader; the SHAKER MOTOR setting and the drive; the game's longest shake per strength and
-#: the longest each setting allows.
-SHAKER_NEEDS = (("shake", "shake_stop", "drive_left", "adjustment"), ("shake_adj", "shake_drive"),
+#: pad_mode_runtime.c's shake_arm needs - (sites, values, texts): the game's own shake, the drive's time left, the
+#: adjustment reader; the SHAKER MOTOR setting and the drive; the game's longest shake per strength and the longest
+#: each setting allows. PAD-474: and a stop - the game's own (`site shake_stop`) or its OFF on the drive (`site
+#: coil_fire`); a "drive" build (its shake takes a kind, not a time) the coil call and its power too.
+SHAKER_NEEDS = (("shake", "drive_left", "adjustment"), ("shake_adj", "shake_drive"),
                 ("shake_max_ms", "shake_setting_ms"))
-#: The builds where a mode file's ``shake`` lines were seen reach the board in the emulator.
+#: PAD-474: the shapes of the game's shake call the runtime knows (`text shake_call`; none = the first), and what
+#: each needs besides SHAKER_NEEDS - (sites, values: any one of them; a drive's power is the game's own, or the
+#: operator's adjustment that holds it on Metallica)
+SHAKE_CALLS = {"ms strength force": ((), ()), "ms force": ((), ()),
+               "drive": (("coil_fire",), ("shake_power", "shake_power_adj"))}
+#: The builds where a mode file's ``shake`` lines were seen reach the board in the emulator (PAD-474: every
+#: latest build with a shaker, C:/tmp/PAD-474/shake_job.sh through rigbatch.sh, docs/plans/pad474_shaker.md).
 SHAKER_PROVEN = frozenset({
     "godzilla_le-1.16",                # PAD-414 2026-10-06 rig 1, the stock Premium/LE card, PAD_COIL_PROBE=1: shake start 1500 2 -> node 1 coil 0 31/255 for 1500 ms; the game's jackpot shake on each left ramp (51/255, 500 ms), a hit while it ran refused; shake end 1000 3 ran out after the mode (no OFF); pm_end mid-shake sent the game's OFF with 4001 ms left
+    "aerosmith-1.16",                  # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (524 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
+    "aerosmith_le-1.16",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (524 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
+    "avengers_infinity_le-1.10",       # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (351 ms left); its short shake 51/255 200 ms on a hit; end 23/255 600 ms ran out
+    "avengers_infinity_pro-1.10",      # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (288 ms left); its short shake 51/255 200 ms on a hit; end 23/255 600 ms ran out
+    "batman-1.14",                     # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (521 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "beatles-1.29",                    # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (523 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "deadpool_le-1.16",                # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (526 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "deadpool_pro-1.16",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (524 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "dungeons_and_dragons_pro-1.10",   # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 480 ms, OFF at the stop (351 ms left); its short shake 51/255 200 ms on a hit; end 51/255 480 ms ran out
+    "elvira3-1.13",                    # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 2: start 42/255 1020 ms, OFF at the stop (524 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "foo_fighters_le-1.04",            # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 330 ms, OFF at the stop (134 ms left); its short shake 23/255 200 ms on a hit; end 23/255 600 ms ran out
+    "foo_fighters_pro-1.04",           # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 330 ms, OFF at the stop (184 ms left); its short shake 23/255 200 ms on a hit; end 23/255 600 ms ran out
+    "godzilla_pro-1.16",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1000 ms, OFF at the stop (500 ms left); its hit shake 51/255 200 ms on a hit; end 23/255 600 ms ran out
+    "guardians-1.15",                  # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (526 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
+    "guardians_le-1.15",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (527 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
+    "iron_maiden_le-1.18",             # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (283 ms left); its short shake 51/255 200 ms on a hit; end 32/255 600 ms ran out
+    "iron_maiden_pro-1.18",            # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (232 ms left); its short shake 51/255 200 ms on a hit; end 32/255 600 ms ran out
+    "james_bond_le-1.06",              # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (524 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
+    "james_bond_pro-1.06",             # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (525 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
+    "jaws_le-1.02",                    # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (217 ms left); its short shake 51/255 200 ms on a hit; end 23/255 100 ms ran out
+    "jaws_pro-1.02",                   # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (166 ms left); its short shake 51/255 200 ms on a hit; end 23/255 100 ms ran out
+    "john_wick_le-1.02",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (525 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "john_wick_pro-1.02",              # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (525 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "jurassic_park_le-1.16",           # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (183 ms left); its short shake 51/255 200 ms on a hit; end 23/255 600 ms ran out
+    "jurassic_park_pro-1.16",          # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (233 ms left); its short shake 51/255 200 ms on a hit; end 23/255 600 ms ran out
+    "king_kong_le-0.97",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (167 ms left); its short shake 51/255 200 ms on a hit; end 23/255 200 ms ran out
+    "king_kong_pro-0.97",              # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 500 ms, OFF at the stop (100 ms left); its short shake 51/255 200 ms on a hit; end 23/255 200 ms ran out
+    "led_zeppelin_le-1.22",            # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 42/255 1000 ms, OFF at the stop (501 ms left); its short shake 42/255 200 ms on a hit; end 31/255 600 ms ran out
+    "led_zeppelin_pro-1.22",           # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 42/255 1000 ms, OFF at the stop (499 ms left); its short shake 42/255 200 ms on a hit; end 31/255 600 ms ran out
+    "mando_le-1.45",                   # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1020 ms, OFF at the stop (525 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "mando_pro-1.45",                  # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1020 ms, OFF at the stop (524 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "metallica_spike-1.04",            # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 40/255 1020 ms, OFF at the stop (525 ms left); its short shake 40/255 250 ms on a hit; end 40/255 600 ms ran out
+    "munsters_le-1.28",                # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1530 ms, OFF at the stop (1035 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "munsters_pro-1.28",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1530 ms, OFF at the stop (1037 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "rush_le-1.19",                    # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 42/255 500 ms, OFF at the stop (300 ms left); its short shake 31/255 200 ms on a hit; end 23/255 500 ms ran out
+    "rush_pro-1.19",                   # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 42/255 500 ms, OFF at the stop (316 ms left); its short shake 31/255 200 ms on a hit; end 23/255 500 ms ran out
+    "star_wars_le-1.31",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 2040 ms, OFF at the stop (1548 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "star_wars_pro-1.31",              # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 2040 ms, OFF at the stop (1548 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "stranger_things-1.13",            # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 2810 ms, OFF at the stop (2316 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
+    "stranger_things_le-1.13",         # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 2810 ms, OFF at the stop (2316 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
+    "sword_of_rage_le-1.19",           # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 2000 ms, OFF at the stop (1499 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "sword_of_rage_pro-1.19",          # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 2000 ms, OFF at the stop (1500 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "turtles_le-1.59",                 # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1530 ms, OFF at the stop (1034 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "turtles_pro-1.59",                # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1530 ms, OFF at the stop (1037 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "uncanny_xmen_le-0.98",            # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 2500 ms, OFF at the stop (2000 ms left); its short shake 23/255 200 ms on a hit; end 23/255 600 ms ran out
+    "uncanny_xmen_pro-0.98",           # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1000 ms, OFF at the stop (500 ms left); its short shake 23/255 200 ms on a hit; end 23/255 600 ms ran out
+    "venom_le-1.07",                   # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1530 ms, OFF at the stop (1037 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
+    "venom_pro-1.07",                  # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 1530 ms, OFF at the stop (1036 ms left); its short shake 51/255 200 ms on a hit; end 51/255 600 ms ran out
 })
 #: a shake's strength: the game's own power steps, 0 the hardest (its battle hits and jackpots)
 SHAKE_STRENGTHS = {0: "hard", 1: "strong", 2: "medium", 3: "soft"}
@@ -775,13 +835,28 @@ SHAKES_MAX = 4                                 # mode_file.c holds 4 shake lines
 SHAKE_LABELS = {"hit": "the game's hit (0.2 s)", "big_hit": "the game's big hit (0.33 s)",
                 "jackpot": "the game's jackpot (0.5 s)", "rumble": "the game's rumble (3 s)",
                 "multiball_start": "the game's multiball start (4 s)"}
+#: PAD-474: the names shaker_lines.py gives the game's own shakes by length (the one it calls most in each band);
+#: their label carries the build's own length
+SHAKE_LENGTH_WORDS = {"tap": "tap", "short": "short shake", "medium": "medium shake", "long": "long shake",
+                      "rumble": "rumble"}
+
+
+def _shaker_lines_found(port):
+    """PAD-474: does ``port`` carry every line the runtime's shaker needs for its shape of the game's call?"""
+    sites, values, texts = SHAKER_NEEDS
+    extra = SHAKE_CALLS.get(port["text"].get("shake_call") or "ms strength force")
+    if extra is None:
+        return False
+    sites = sites + extra[0]
+    return (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
+            and (not extra[1] or any(n in port["value"] for n in extra[1]))
+            and all(port["text"].get(n) for n in texts)
+            and ("shake_stop" in port["site"] or "coil_fire" in port["site"]))
 
 
 def _shaker_cannot(key, label, port=None):
     """The ``cannot`` entry for the shaker on build ``key``, or () when it can."""
-    sites, values, texts = SHAKER_NEEDS
-    if not port or not (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
-                        and all(port["text"].get(n) for n in texts)):
+    if not port or not _shaker_lines_found(port):
         return (("shaker", "The app has not found how %s shakes its cabinet, so a mode of yours cannot shake it."
                            % label),)
     if key in SHAKER_PROVEN:
@@ -790,13 +865,28 @@ def _shaker_cannot(key, label, port=None):
                        "in the emulator, so it cannot here yet." % label),)
 
 
+def _shake_secs(steps):
+    """PAD-474: how long a `text shake_<name>` line's steps run, in seconds as the app writes them ("0.2", "1.5")."""
+    try:
+        end = max(int(at) + int(ms) for at, ms, _s in (s.split(":") for s in steps.split()))
+    except ValueError:
+        return ""
+    return ("%.2f" % (end / 1000.0)).rstrip("0").rstrip(".")
+
+
 def _shakes(port):
     """((name, label), ...) the game's own shakes the port names, in the port's order."""
     out = []
-    for k in port["text"]:
-        if k.startswith("shake_") and k not in ("shake_max_ms", "shake_setting_ms"):
+    for k, v in port["text"].items():
+        if k.startswith("shake_") and k not in ("shake_max_ms", "shake_setting_ms", "shake_call"):
             name = k[len("shake_"):]
-            out.append((name, SHAKE_LABELS.get(name, "the game's %s shake" % name.replace("_", " "))))
+            if name in SHAKE_LENGTH_WORDS and _shake_secs(v):                      # PAD-474: its own length
+                label = "the game's %s (%s s)" % (SHAKE_LENGTH_WORDS[name], _shake_secs(v))
+            elif name in SHAKE_LABELS:
+                label = SHAKE_LABELS[name]
+            else:
+                label = "the game's %s shake" % name.replace("_", " ")
+            out.append((name, label))
     return tuple(out)
 
 
@@ -3941,8 +4031,9 @@ def validate_shakes(spec, p):
         else:
             top = shake_max_ms(p, strength if isinstance(strength, int) and not isinstance(strength, bool) else -1)
             n = _int_or_none(what)
-            if not top:
-                out.append("A shake's strength is %s." % ", ".join("%d %s" % kv for kv in SHAKE_STRENGTHS.items()))
+            if not top:                                       # PAD-474: the strengths this game uses
+                out.append("A shake's strength is %s." % ", ".join(
+                    "%d %s" % kv for kv in SHAKE_STRENGTHS.items() if shake_max_ms(p, kv[0])))
             elif n is None or not SHAKE_MIN_MS <= n <= top:
                 out.append("A %s shake lasts %g to %g seconds: the game's own longest at that strength." % (
                     SHAKE_STRENGTHS[strength], SHAKE_MIN_MS / 1000, top / 1000))

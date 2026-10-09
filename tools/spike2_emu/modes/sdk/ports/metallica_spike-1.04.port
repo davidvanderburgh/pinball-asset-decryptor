@@ -664,3 +664,18 @@ site show_12              0x001457a0 0xe92d40f0 0xe24dd014   # 294 lights in its
 text show_name_12         Fast red and white strobe
 text show_kind_12         accent
 value show_secs_12        2
+
+# ---- PAD-474: the shaker motor, read by shaker_lines.py from the game's own shake routine ----------
+# shake(kind 1..4 (128/256/384/1024 ms), min level: one power, the operator's (adjustment 315); a mode's shake is sent as its own are): adjustment 314 (AD_SHAKER_MOTOR), drive 7; 106 constant calls
+site shake              0x0012bcac 0xe92d4070 0xe1a05000
+site drive_left         0x0014a124 0xe3500000 0xe92d4038
+value shake_adj            314
+value shake_drive          7
+value shake_power_adj      315
+text shake_call            drive
+text shake_max_ms          1024 0 0 0
+text shake_setting_ms      0 1024 1024 1024
+text shake_tap              0:128:0
+text shake_short            0:256:0
+text shake_medium           0:384:0
+text shake_long             0:1024:0

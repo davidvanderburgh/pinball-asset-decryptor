@@ -5082,16 +5082,37 @@ static void building_arm(void)
  *   4. At most SHAKE_PER_MIN shakes (a game shake of several steps counts once) and SHAKE_ON_MS of shaking
  *      in any 60 s.
  *   5. Stopped (the game's own stop) when the mode ends, the ball ends, or the game ends or tilts - unless
- *      the game has since asked for a longer shake of its own, which then has the motor. */
+ *      the game has since asked for a longer shake of its own, which then has the motor.
+ *
+ * PAD-474: every other Spike 2 build with the shaker motor has the same ONE routine (shaker_lines.py finds it by
+ * AD_SHAKER_MOTOR and the error text, and reads its lines), in three shapes - `text shake_call`:
+ *   (none)      shake(ms, strength, force), as above: Godzilla, Led Zeppelin, Rush.
+ *   "ms force"  shake(ms, force): the same at ONE power (51/255) - TMNT, Mandalorian, Munsters, Venom. Strength 0
+ *               only (`text shake_max_ms` has 0 for the rest).
+ *   "drive"     shake(kind, min level): Aerosmith, Guardians, Elvira, Sword of Rage. It shakes only with the
+ *               operator's setting (0..3) at least the call's level, for one of its kinds' times, at one power -
+ *               it takes no time, so the runtime sends a shake as the call sends its own: the setting not 0, the
+ *               drive not running a longer one, then coil_fire(drive, `value shake_power`, ms) - the same ONE
+ *               timed command (and its setting table holds 0, then the longest kind for every level above).
+ *               Metallica's call drives at the operator's own SHAKER MOTOR POWER (3..51): `value shake_power_adj`
+ *               names that adjustment, read at each shake as the call reads it.
+ * The two later shapes have no stop of their own beside the call: the stop is then the game's OFF, an all-zero
+ * coil_fire on the drive (what `site shake_stop` sends on the first). */
 #define SHAKE_MIN_MS        100u
 #define SHAKE_STRENGTHS       4u
 #define SHAKE_PER_MIN        20u
 #define SHAKE_ON_MS       15000u   /* the motor's running time a mode may ask for in any 60 s */
 #define SHAKE_STEPS           8u
+#define SHAKE_CALL_STRENGTH   0    /* PAD-474: shake(ms, strength, force) */
+#define SHAKE_CALL_MS         1    /* "ms force": shake(ms, force) */
+#define SHAKE_CALL_DRIVE      2    /* "drive": coil_fire(drive, power, ms), as the game's shake(kind, level) sends */
 
 struct shake_step { unsigned at, ms, strength; };
 
 static struct {
+    int call;                               /* PAD-474: SHAKE_CALL_* */
+    unsigned power;                         /* SHAKE_CALL_DRIVE: the power the game's own shakes use */
+    unsigned power_adj;                     /* ... or the adjustment that holds it (Metallica), 0 none */
     unsigned max_ms[SHAKE_STRENGTHS];       /* the game's own longest shake at each strength */
     unsigned long until;                    /* pm_ms() our shake (or a game shake's last step) runs to; 0 none */
     unsigned long sent_until;               /* pm_ms() the step we sent last runs to: the motor is ours till then */
@@ -5174,13 +5195,34 @@ static unsigned shake_setting_ms(unsigned setting)
     return setting ? 5000u : 0u;
 }
 
+static unsigned shake_power(void)          /* PAD-474: the drive's power: the port's, or the operator's own */
+{
+    unsigned v;
+    if (!shk.power_adj) return shk.power;
+    v = ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(shk.power_adj) & 0xffu;   /* uxtb, as the game */
+    return v ? v : 1u;
+}
+
+static unsigned shake_coil(unsigned power, unsigned ms)    /* PAD-474: the framework's coil call on the drive */
+{
+    return ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("coil_fire"))
+        ((unsigned)pm_port_value("shake_drive", 0), power, ms, 0, 0, 0);
+}
+
 /* One step through the game's own call, limits already passed; the ms it runs (0: the game would not). The game
  * stores the request and its coil service sends it a moment later (emulator: the drive's time left still reads 0
- * straight after), so the length is the request's, cut to what the operator's setting allows, as the game cuts it. */
+ * straight after), so the length is the request's, cut to what the operator's setting allows, as the game cuts it.
+ * PAD-474: a "drive" build's call takes a kind, not a time: the step is sent as that call sends its own (the setting
+ * not 0, the drive not running a longer one, one timed command at its power). */
 static unsigned shake_send(unsigned ms, unsigned strength)
 {
-    unsigned r = ((unsigned (*)(unsigned, unsigned, unsigned))(unsigned long)fn("shake"))(ms, strength, 0) & 0xffu;
-    unsigned cap = shake_setting_ms(shake_setting());
+    unsigned cap = shake_setting_ms(shake_setting()), r;
+    if (shk.call == SHAKE_CALL_DRIVE)
+        r = cap && shake_left() < (ms > cap ? cap : ms) && shake_coil(shake_power(), ms > cap ? cap : ms) != 0;
+    else if (shk.call == SHAKE_CALL_MS)
+        r = ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("shake"))(ms, 0) & 0xffu;
+    else
+        r = ((unsigned (*)(unsigned, unsigned, unsigned))(unsigned long)fn("shake"))(ms, strength, 0) & 0xffu;
     if (!r) return 0;
     if (ms > cap) ms = cap;
     shk.sent_until = pm_ms() + ms;
@@ -5274,7 +5316,8 @@ static void shake_let_go(const char *why)
     if (now >= shk.until) { shk.until = shk.sent_until = 0; return; }
     left = shake_left();
     if (shk.sent_until > now && left <= shk.sent_until - now + 50ul) {
-        ((void (*)(void))(unsigned long)fn("shake_stop"))();
+        if (fn("shake_stop")) ((void (*)(void))(unsigned long)fn("shake_stop"))();
+        else shake_coil(0, 0);                       /* PAD-474: the game's OFF, what its own stop sends */
         say("shaker: %s stopped with %lu ms left (%s)", shk.name, shk.sent_until - now, why);
     } else if (left) {
         say("shaker: %s - the shake running now is the game's own, left to run (%s)", shk.name, why);
@@ -5318,10 +5361,22 @@ static void shake_tick(void)
     if (shk.i_step >= shk.n_step && pm_ms() >= shk.until) shk.until = shk.sent_until = 0, shk.n_step = shk.i_step = 0;
 }
 
+/* PAD-474: `text shake_call` - SHAKE_CALL_*, or -1 for a shape this runtime does not know */
+static int shake_call(const char *t)
+{
+    if (!t) return SHAKE_CALL_STRENGTH;
+    if (str_eq(t, "ms strength force")) return SHAKE_CALL_STRENGTH;
+    if (str_eq(t, "ms force")) return SHAKE_CALL_MS;
+    if (str_eq(t, "drive")) return SHAKE_CALL_DRIVE;
+    return -1;
+}
+
 static void shake_arm(void)
 {
-    static const char *const s[] = { "shake", "shake_stop", "drive_left", "adjustment", 0 };
+    static const char *const s[] = { "shake", "drive_left", "adjustment", 0 };
     static const char *const v[] = { "shake_adj", "shake_drive", 0 };
+    static const char *const how[] = { "the game's own shake", "the game's own shake (one power)",
+                                       "the game's own shake's drive" };
     const char *t = pm_port_text("shake_max_ms");
     unsigned i;
     if (!site("shake")) return;                          /* a port without the shaker lines: silent */
@@ -5330,15 +5385,22 @@ static void shake_arm(void)
         for (shk.max_ms[i] = 0; *t >= '0' && *t <= '9'; t++) shk.max_ms[i] = shk.max_ms[i] * 10 + (unsigned)(*t - '0');
         if (shk.max_ms[i] > 5000u) shk.max_ms[i] = 5000u;
     }
-    if (!have_sites(s) || !have_values(v) || !t || !shk.max_ms[0]) {
+    shk.call = shake_call(pm_port_text("shake_call"));
+    shk.power = (unsigned)pm_port_value("shake_power", 0);
+    shk.power_adj = (unsigned)pm_port_value("shake_power_adj", 0);
+    if (shk.call != SHAKE_CALL_STRENGTH)                 /* one power: strength 0 only */
+        for (i = 1; i < SHAKE_STRENGTHS; i++) shk.max_ms[i] = 0;
+    if (!have_sites(s) || !have_values(v) || !t || !shk.max_ms[0] || shk.call < 0
+        || (!fn("shake_stop") && !fn("coil_fire"))                         /* no stop: neither the game's nor its OFF */
+        || (shk.call == SHAKE_CALL_DRIVE && (!fn("coil_fire") || (!shk.power && !shk.power_adj) || shk.power > 255u))) {
         say("shaker: off - the port's shaker lines are incomplete or do not match this build");
         return;
     }
     can |= PM_CAN_SHAKER;
-    say("shaker: a mode may shake the cabinet through the game's own shake 0x%08x (drive %ld, setting %ld); at most "
+    say("shaker: a mode may shake the cabinet through %s 0x%08x (drive %ld, setting %ld); at most "
         "%u/%u/%u/%u ms at strength 0..3, %u shakes and %u s of shaking a minute, stopped when the mode ends",
-        fn("shake"), pm_port_value("shake_drive", 0), pm_port_value("shake_adj", 0), shk.max_ms[0], shk.max_ms[1],
-        shk.max_ms[2], shk.max_ms[3], SHAKE_PER_MIN, SHAKE_ON_MS / 1000);
+        how[shk.call], fn("shake"), pm_port_value("shake_drive", 0), pm_port_value("shake_adj", 0), shk.max_ms[0],
+        shk.max_ms[1], shk.max_ms[2], shk.max_ms[3], SHAKE_PER_MIN, SHAKE_ON_MS / 1000);
 }
 
 /* ---- the game's own mini-wizards (PAD-436) --------------------------------------------------------

@@ -149,10 +149,25 @@ int main(void)
 def test_only_the_games_own_shake_drives_the_motor_and_never_forced():
     src = _rt()
     sec = src[src.index("/* ---- the shaker (PAD-414)"):src.index("/* ---- the game's own rules: a shot that COUNTS AS")]
-    assert sec.count('fn("shake")') == 2                      # the send, and the arm's log line
-    assert '(ms, strength, 0)' in _lift(sec, "static unsigned shake_send(")          # force 0: never forced
-    assert 'fn("coil_fire")' not in sec                          # never the raw coil
-    assert sec.count('fn("shake_stop")') == 1 and 'fn("shake_stop")' in _lift(sec, "static void shake_let_go(")
+    send = _lift(sec, "static unsigned shake_send(")
+    assert sec.count('fn("shake")') == 3                      # the send's two shapes, and the arm's log line
+    assert '(ms, strength, 0)' in send and '(ms, 0)' in send   # force 0 in both: never forced
+    # PAD-474: the raw coil ONLY where the game's call takes a kind, not a time ("drive"): its own power, after the
+    # setting (cut to its longest, 0 = off) and the drive's time left, as that call sends its own shakes ...
+    assert 'fn("coil_fire")' in _lift(sec, "static unsigned shake_coil(")
+    assert "if (shk.call == SHAKE_CALL_DRIVE)" in send and "cap && shake_left() <" in send
+    assert "shake_coil(shake_power()," in send                # the game's power, or the operator's (Metallica)
+    power = _lift(sec, "static unsigned shake_power(")
+    assert "if (!shk.power_adj) return shk.power;" in power and 'fn("adjustment"))(shk.power_adj) & 0xffu' in power
+    # ... and the OFF (an all-zero coil_fire) only where the port names no stop of the game's beside its call
+    let_go = _lift(sec, "static void shake_let_go(")
+    assert sec.count('fn("shake_stop")') == 3 and 'if (fn("shake_stop"))' in let_go     # the stop, the arm's check
+    assert "else shake_coil(0, 0);" in let_go
+    arm = _lift(sec, "static void shake_arm(")
+    assert '(!fn("shake_stop") && !fn("coil_fire"))' in arm
+    assert '(shk.call == SHAKE_CALL_DRIVE && (!fn("coil_fire") || (!shk.power && !shk.power_adj) || shk.power > 255u))' \
+        in arm
+    assert "shk.max_ms[i] = 0" in arm                           # one power: strength 0 only
     # a strength the game does not use, or a time past its own longest at that strength, never reaches it
     shake = _lift(sec, "int pm_shake(")
     assert "strength >= SHAKE_STRENGTHS" in shake and "shk.max_ms[strength]" in shake
@@ -276,9 +291,11 @@ def test_bad_shake_lines_are_logged_and_ignored(harness_shaker, tmp_path):
 
 
 # ---- the model -----------------------------------------------------------------------------
-def test_only_the_premium_le_can_and_the_rest_say_why():
+def test_the_proven_builds_can_and_the_rest_say_why():
     assert MP.profile("godzilla_le_1_16").can("shaker")
-    assert "shakes its cabinet" in MP.profile("godzilla_pro_1_16").why_not("shaker")
+    for key in sorted(MP.SHAKER_PROVEN):                       # PAD-474: the 20 latest builds with a shaker too
+        assert MP.profile(key.replace("-", "_").replace(".", "_")).can("shaker"), key
+    assert "has not found how Godzilla Pro 1.15 shakes its cabinet" in MP.profile("godzilla_pro_1_15").why_not("shaker")
     assert "shaker" in MP.PARTS
 
 
@@ -304,7 +321,7 @@ def test_the_lines_and_the_refusals():
 
 
 def test_a_new_mode_on_a_pro_has_it_off_and_the_field_round_trips(tmp_path):
-    pro = MP.profile("godzilla_pro_1_16")
+    pro = MP.profile("godzilla_pro_1_15")
     spec = MP.ModeSpec(name="QUAKE", title="godzilla_le_1_16", shakes=[["start", 500, 0, ""]])
     MP._switch_off_what_it_cannot(spec, pro)
     assert spec.shakes == []
@@ -362,12 +379,13 @@ def test_the_docs_name_the_key_the_field_and_the_calls():
     doc = (SDK / "MODE_PARAMETERS.md").read_text(encoding="utf-8")
     for name in ("shake", "shakes", "pm_shake", "pm_shake_game", "pm_shake_outlast", "PM_CAN_SHAKER"):
         assert re.search(r"`%s(?:[ (][^`]*)?`" % re.escape(name), doc), name
-    assert "## The shaker (Godzilla Premium/LE, PAD-414)" in (SDK / "MODE_SDK.md").read_text(encoding="utf-8")
+    assert "## The shaker (Godzilla Premium/LE, PAD-414; every latest title with one, PAD-474)" in (SDK / "MODE_SDK.md").read_text(
+        encoding="utf-8")
     assert "| Shake the cabinet |" in (SDK / "MODE_LIMITS.md").read_text(encoding="utf-8")
 
 
 # ---- the Modes tab -------------------------------------------------------------------------
-def test_the_tab_offers_it_on_the_premium_le_and_greys_it_on_a_pro(tmp_path):
+def test_the_tab_offers_it_on_the_premium_le_and_greys_it_on_a_pro_without_its_lines(tmp_path):
     import json
     from tests.test_webui_modes import _card_project, _project, _wait
     from tests.webui_harness import web_app
@@ -400,14 +418,178 @@ def test_the_tab_offers_it_on_the_premium_le_and_greys_it_on_a_pro(tmp_path):
             w.call("modes.new_blocks_mode", "Quake")
             ch = w.state("modes")["code"]["blocks"]["choices"]
             assert ch["shaker_off"] == "" and "jackpot" in [s["name"] for s in ch["shakes"]]
-        proj = _card_project(tmp_path / "pro", "godzilla_pro-1_16_0.raw")
+        proj = _card_project(tmp_path / "pro", "godzilla_pro-1_15_0.raw")
         with web_app(tmp_path, mfr="stern") as w:
             _project(w, proj)
             w.call("modes.new")
             st = w.state("modes")
-            assert st["dis"]["shaker"] and "Godzilla Pro 1.16" in st["reasons"]["shaker"]
+            assert st["dis"]["shaker"] and "Godzilla Pro 1.15" in st["reasons"]["shaker"]
             w.call("modes.new_blocks_mode", "Quake")
             ch = w.state("modes")["code"]["blocks"]["choices"]
-            assert ch["shaker_off"].startswith("Not on this game: The app has not found how Godzilla Pro 1.16 shakes")
+            assert ch["shaker_off"].startswith("Not on this game: The app has not found how Godzilla Pro 1.15 shakes")
     finally:
         preview.enabled = old
+
+
+@pytest.mark.parametrize("card,want", [
+    ("godzilla_le-1_16_0.raw", ["hard", "game:jackpot", "soft"]),        # PAD-414's defaults, the game has them all
+    ("turtles_le-1_59_0.raw", ["hard", "game:tap", "hard"]),             # one strength; no jackpot shake of its own
+    ("jurassic_park_le-1_16_0.raw", ["hard", "game:tap", "medium"]),     # three strengths, its softest medium
+])
+def test_an_unticked_shake_row_offers_one_of_the_games_own_choices(tmp_path, card, want):
+    """PAD-474: a new mode's three shake rows (unticked) hold a choice the build's own list has - never Godzilla's
+    jackpot shake or soft strength shown raw on a game without them."""
+    from tests.test_webui_modes import _card_project, _project
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import preview
+    old = preview.enabled
+    preview.enabled = lambda feature: feature == "modes"
+    try:
+        proj = _card_project(tmp_path / "p", card)
+        with web_app(tmp_path, mfr="stern") as w:
+            _project(w, proj)
+            w.call("modes.new")
+            st = w.state("modes")
+            got = [st["form"]["shake_what_" + when] for when in ("start", "shot", "end")]
+            assert got == want
+            assert set(got) <= {o["value"] for o in st["profile"]["shakes"]}
+            assert not st["dis"]["shaker"]
+    finally:
+        preview.enabled = old
+
+
+# ---- PAD-474: the other latest builds with a shaker ---------------------------------------------------
+PORTS = SDK / "ports"
+
+
+def _ports_with_shaker():
+    out = {}
+    for path in sorted(PORTS.glob("*.port")):
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"^site shake\s", text, re.M):
+            out[path.stem] = {m.group(1): m.group(2) for m in re.finditer(r"^text (shake_\w+)\s+(.+?)\s*$", text, re.M)}
+            out[path.stem]["_text"] = text
+    return out
+
+
+def test_every_latest_build_with_a_shaker_has_its_lines_and_is_proven():
+    """MACHINE_HARDWARE's shaker titles, each at its newest port: the lines the runtime needs for its shape of the
+    game's call, and SHAKER_PROVEN (a mode file's shakes seen reach the board in the emulator)."""
+    newest = {}
+    for path in PORTS.glob("*.port"):
+        game, ver = path.stem.rsplit("-", 1)
+        if game not in newest or tuple(map(int, ver.split("."))) > tuple(map(int, newest[game].split("."))):
+            newest[game] = ver
+    want = sorted("%s-%s" % (g, newest[g]) for g, parts in MP.MACHINE_HARDWARE.items() if "shaker" in parts)
+    assert len(want) == 49          # Godzilla LE (PAD-414), the twenty the ticket named and 28 more titles (PAD-474)
+    have = _ports_with_shaker()
+    for key in want:
+        assert key in have, key
+        assert MP._shaker_lines_found(MP.read_port(str(PORTS / (key + ".port")))), key
+        assert key in MP.SHAKER_PROVEN, key
+
+
+def test_the_ports_shapes_are_ones_the_runtime_knows_and_their_shakes_fit():
+    for key, t in _ports_with_shaker().items():
+        call = t.get("shake_call", "ms strength force")
+        assert call in MP.SHAKE_CALLS, key
+        top = [int(x) for x in t["shake_max_ms"].split()]
+        setting = [int(x) for x in t["shake_setting_ms"].split()]
+        assert len(top) == 4 and top[0] and setting[0] == 0 and max(top) <= max(setting), key
+        if call != "ms strength force":                       # one power: strength 0 only
+            assert top[1:] == [0, 0, 0], key
+        if call == "drive":                                   # the call takes a kind: the coil call at its power
+            assert re.search(r"^value shake_power(_adj)?\s+(\d+)\b", t["_text"], re.M), key   # Metallica: its adj.
+            assert re.search(r"^site coil_fire\s", t["_text"], re.M), key
+            assert len(setting) == 4 and len(set(setting[1:])) == 1, key      # on (1..3): its longest kind
+        else:
+            assert len(setting) == 5, key                    # the setting (0..4) cuts the time
+        assert re.search(r"^site (shake_stop|coil_fire)\s", t["_text"], re.M), key     # a stop: the game's or its OFF
+        for name, steps in t.items():
+            if name.startswith("shake_") and name not in ("shake_max_ms", "shake_setting_ms", "shake_call"):
+                for at, ms, strength in (tuple(int(v) for v in st.split(":")) for st in steps.split()):
+                    assert top[strength] and ms <= top[strength], (key, name)
+
+
+def test_the_labels_and_the_strengths_follow_the_game():
+    tmnt, aero, lz = MP.profile("turtles_le_1_59"), MP.profile("aerosmith_1_16"), MP.profile("led_zeppelin_le_1_22")
+    assert tmnt.shake_max_ms == (1536, 0, 0, 0) and aero.shake_max_ms == (1024, 0, 0, 0)
+    assert lz.shake_max_ms == (1000, 1500, 0, 0)
+    assert dict(tmnt.shakes)["short"] == "the game's short shake (0.2 s)"
+    assert dict(aero.shakes)["long"] == "the game's long shake (1.02 s)"
+    assert dict(MP.profile("sword_of_rage_le_1_19").shakes)["rumble"] == "the game's rumble (2 s)"
+    assert dict(MP.profile("godzilla_le_1_16").shakes)["rumble"] == "the game's rumble (3 s)"      # PAD-414's own
+    spec = MP.ModeSpec(name="QUAKE", title=tmnt.key, start_shot=tmnt.shots[0][0], scoring_shots=[tmnt.shots[1][0]])
+    spec.shakes = [["start", 800, 0, ""], ["shot", "short", 0, tmnt.shots[1][0]], ["end", 2000, 0, ""]]
+    assert MP.validate(spec) == ["A hard shake lasts 0.1 to 1.536 seconds: the game's own longest at that strength."]
+    spec.shakes = [["start", 800, 3, ""]]
+    assert MP.validate(spec) == ["A shake's strength is 0 hard."]                 # the only one TMNT shakes at
+    spec.shakes = [["start", 800, 0, ""], ["shot", "short", 0, tmnt.shots[1][0]]]
+    assert MP.validate(spec) == []
+    assert MP.shake_lines(spec, tmnt) == ["shake          start 800 0",
+                                          "shake          shot game short 0x%08x" % tmnt.mask([tmnt.shots[1][0]])]
+
+
+def test_blocks_offer_only_the_strengths_the_game_shakes_at():
+    one = {"shakes": ["short", "medium", "long"], "max": [1024, 0, 0, 0]}
+    prog = {"name": "QUAKE", "seconds": 30, "vars": [], "scripts": [{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "shake", "ms": {"k": "num", "v": 800}, "strength": "hard"},
+        {"op": "shake", "ms": {"k": "num", "v": 800}, "strength": "soft"},
+        {"op": "shake_game", "shake": "long"}]}]}
+    assert BM.problems(prog, shaker=one) == [
+        "Script 1 shakes the cabinet with a soft shake, which this card's game does not use: hard."]
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes_blocks.js").read_text("utf-8")
+    assert "options=${shakeStrengths(ed.ch)}" in js and "SHAKE_STRENGTH.filter((_s, i) => m[i])" in js
+
+
+@needs_cc
+def test_the_call_shapes_the_runtime_reads(tmp_path):
+    src = _rt()
+    code = ("#include <stdio.h>\n#define SHAKE_CALL_STRENGTH 0\n#define SHAKE_CALL_MS 1\n#define SHAKE_CALL_DRIVE 2\n"
+            + _lift(src, "static int str_eq(") + "\n" + _lift(src, "static int shake_call(") + "\n"
+            + 'int main(void) { const char *t[] = { 0, "ms strength force", "ms force", "drive", "kind level", "" };\n'
+            + '  for (int i = 0; i < 6; i++) printf("%d\\n", shake_call(t[i])); return 0; }\n')
+    assert _compile_run(tmp_path, code).split() == ["0", "0", "1", "2", "-1", "-1"]
+
+
+@pytest.mark.parametrize("key", ["godzilla_le-1.16", "turtles_le-1.59", "aerosmith-1.16", "led_zeppelin_le-1.22",
+                                 "deadpool_le-1.16", "iron_maiden_le-1.18", "metallica_spike-1.04",
+                                 "dungeons_and_dragons_le-1.10"])
+def test_the_reader_finds_the_ports_lines_in_the_games_program(key):
+    """shaker_lines.py on the game's ELF gives the port's lines (PAD-414 placed Godzilla's by hand; the reader finds
+    the same routine, stop, drive and setting table there)."""
+    elf = os.environ.get("PAD_SHAKER_ELF_DIR", r"C:\tmp\PAD-420\elf")
+    path = os.path.join(elf, key + ".elf")
+    if key == "godzilla_le-1.16" and not os.path.isfile(path):
+        path = os.environ.get("PAD_GZLE116_ELF", r"C:\tmp\gzle116_stock.elf")
+    if not os.path.isfile(path):
+        pytest.skip("game program not present: %s" % path)
+    pytest.importorskip("capstone")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("shaker_lines", SDK / "shaker_lines.py")
+    sl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sl)
+    lines, _r = sl.lines_for(path)
+    port = (PORTS / (key + ".port")).read_text(encoding="utf-8")
+    missing = [ln for ln in sl.missing_from(lines, port) if not ln.startswith("#")]
+    if key == "godzilla_le-1.16":      # PAD-414's own census named its shakes and longest per strength by hand
+        missing = [ln for ln in missing if not ln.startswith("text ")]
+    assert missing == []
+
+
+def test_the_variants_of_the_other_titles():
+    """PAD-474: Iron Maiden's two powers by a branch, Metallica's operator power, D&D's wrapper - their ports."""
+    im = (PORTS / "iron_maiden_le-1.18.port").read_text(encoding="utf-8")
+    assert re.search(r"^site shake_stop\s", im, re.M) and "shake_call" not in im           # Godzilla's shape
+    assert MP.profile("iron_maiden_le_1_18").shake_max_ms == (500, 4000, 0, 0)            # 51/255, else 32/255
+    met = (PORTS / "metallica_spike-1.04.port").read_text(encoding="utf-8")
+    assert re.search(r"^value shake_power_adj\s+315$", met, re.M) and "value shake_power " not in met
+    assert re.search(r"^text shake_call\s+drive$", met, re.M)
+    dnd = (PORTS / "dungeons_and_dragons_le-1.10.port").read_text(encoding="utf-8")
+    assert re.search(r"^site shake\s+0x001c74e0\s", dnd, re.M)                         # the wrapper, not 0x1c7440
+    assert re.search(r"^text shake_call\s+ms force$", dnd, re.M)
+    for title in ("james_bond_60th_le", "jurassic_park_the_pin", "star_wars_elg"):      # no shake call to read
+        assert "shaker" not in MP.MACHINE_HARDWARE[title], title
+    # D&D LE: its lines are ported, but the emulator starts no game on it, so no mode was seen to shake it: hidden
+    assert "shaker" not in MP.MACHINE_HARDWARE["dungeons_and_dragons_le"]
+    assert "dungeons_and_dragons_le-1.10" not in MP.SHAKER_PROVEN

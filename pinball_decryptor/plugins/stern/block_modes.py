@@ -990,6 +990,11 @@ def _check_stack(stack, depth, where, ctx):
                 strength = SHAKE_STRENGTH.get(b.get("strength"))
                 if strength is None:
                     ctx["out"].append("%s shakes the cabinet: hard, strong, medium or soft." % where)
+                elif shaker and any((shaker.get("max") or ())) and not (shaker.get("max") or [0] * 4)[strength]:
+                    # PAD-474: a strength this card's game never shakes at (a one-power shaker: hard only)
+                    ctx["out"].append("%s shakes the cabinet with a %s shake, which this card's game does not use: %s."
+                                      % (where, b.get("strength"), " or ".join(
+                                          w for w, k in SHAKE_STRENGTH.items() if (shaker.get("max") or [0] * 4)[k])))
                 else:
                     top = ((shaker or {}).get("max") or [0] * 4)[strength] or SHAKE_MAX_MS
                     _check_ms(b.get("ms"), SHAKE_MIN_MS, top, "%s shakes the cabinet with a %s shake for" % (

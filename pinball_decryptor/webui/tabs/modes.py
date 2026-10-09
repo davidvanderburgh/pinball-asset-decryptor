@@ -1291,13 +1291,29 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     #: shakes is "game:<name>"
     _SHAKE_OWN = {v: k for k, v in MP.SHAKE_STRENGTHS.items()}
 
+    @staticmethod
+    def _shake_default(p, when):
+        """PAD-474: what an unticked shake row offers on title ``p``: the form's default (Godzilla's hard start,
+        jackpot hit, soft end) when the game has it, else the nearest it does have - its hardest or softest
+        strength, its first shake on a hit."""
+        own = [w for k, w in MP.SHAKE_STRENGTHS.items() if MP.shake_max_ms(p, k)]
+        games = ["game:" + n for n, _l in getattr(p, "shakes", ()) or ()]
+        what = _DEFAULTS["shake_what_" + when]
+        if not own or what in own + games:
+            return what
+        if when == "shot" and games:
+            return games[0]
+        return own[-1] if when == "end" else own[0]
+
     def _load_shakes(self, f, spec):
         """PAD-414: the first shake of each kind (start, shot, end) onto the form's three rows."""
         rows = [r for r in (getattr(spec, "shakes", None) or []) if isinstance(r, (list, tuple)) and len(r) == 4]
+        p = self._shown or self._profile
         for when in MP.SHAKE_WHEN:
             row = next((r for r in rows if r[0] == when), None)
             f["shake_on_" + when] = row is not None
             if row is None:
+                f["shake_what_" + when] = self._shake_default(p, when)
                 continue
             what, strength = row[1], row[2]
             if isinstance(what, str):
@@ -1604,7 +1620,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                for n, lab in getattr(p, "held_coils", ())[:self.COIL_ROWS]],
                 "shield_rule": getattr(p, "shield_rule", ""),                   # PAD-392
                 # PAD-414: what a shake can be - one of the mode's own at a strength, or one of the game's
-                "shakes": ([{"value": w, "label": "a %s shake" % w} for w in MP.SHAKE_STRENGTHS.values()]
+                # (PAD-474: only the strengths the game itself shakes at; a one-power shaker has hard alone)
+                "shakes": ([{"value": w, "label": "a %s shake" % w} for k, w in MP.SHAKE_STRENGTHS.items()
+                            if not any(getattr(p, "shake_max_ms", ()) or ()) or MP.shake_max_ms(p, k)]
                            + [{"value": "game:" + n, "label": lab} for n, lab in getattr(p, "shakes", ())]),
                 "shake_max": list(getattr(p, "shake_max_ms", ()) or ()),
                 "game_shows": self._game_show_rows(p),                           # PAD-418
@@ -2710,6 +2728,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "shaker_off": ("Not on this game: " + p.why_not("shaker")) if p is not None and not p.can("shaker")
                               else "" if p is not None else "No card picked yet.",
                 "shakes": [{"name": n, "label": lab} for n, lab in getattr(p, "shakes", ())] if p is not None else [],
+                # PAD-474: the game's own longest shake per strength (0: a strength it never shakes at)
+                "shake_max": list(getattr(p, "shake_max_ms", ()) or ()) if p is not None else [],
                 # PAD-418: the game's own light shows a block may play, and why the block is greyed if none
                 "game_shows": self._game_show_rows(p) if p is not None else [],
                 "game_shows_off": ("Not on this game: " + p.why_not("shows")) if p is not None and not p.can("shows")

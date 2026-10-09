@@ -279,6 +279,8 @@ test). This is a last line of defence, not a guardrail of ours.
     scrolling trace of the drive power (padled v5's drive table, `coilmap.drive`), time left, shakes this run - and
     the playfield picture jiggles while it runs. The coil is the table's SHAKER MOTOR row, else group 5 index 0 when
     the table has no group 5 at all (godzilla), none on the Home Editions (`coilmap.shaker_address`).
+  - PAD-474 (2026-10-09): the same routine on every other latest build with a shaker, read by `shaker_lines.py`,
+    in three shapes (`text shake_call`); all 20 emulator-proven - docs/plans/pad474_shaker.md.
 
 ## Machine test (2026-10-05, David's Godzilla Premium 1.16)
 

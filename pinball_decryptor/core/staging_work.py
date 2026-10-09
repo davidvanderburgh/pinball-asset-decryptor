@@ -218,9 +218,17 @@ class Tracker:
                    if self._pics_done >= 50 else PICTURE_S)
         return clips + pics_left * per_pic
 
-    def finish(self):
-        """The pass is over (done, cancelled or failed): what its clips
-        took goes into this PC's speed."""
+    @property
+    def converted(self):
+        """How many of the clips were converted so far."""
+        return self._clips_done
+
+    def finish(self, cancelled=False):
+        """The pass is over: what its clips took goes into this PC's speed.
+        *cancelled*: the item under way was cut off, so it is neither
+        counted nor timed."""
+        if cancelled:
+            self._now = None
         self._close(self._clock())
         if self._f > 0:
             remember(self._clip_spent, self._clip_priced / self._f)

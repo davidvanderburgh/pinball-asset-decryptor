@@ -89,6 +89,11 @@ def write_audio_ctl(gain, muted):
         pass
 
 
+#: The State word and the button from Cancel until the preparation has
+#: really stopped (PAD-489: a Cancel that went on "Applying your
+#: replacements..." read as a hang).
+CANCELLING = "Cancelling…"
+
 #: The State line's ⓘ while the staging converts videos and pictures before
 #: a run (PAD-489).
 _CONVERT_EXPLAIN = (
@@ -2035,17 +2040,20 @@ class EmulateTab(TabService):
                 self._preparing_kind = "convert"
             return True
 
+        def cancelled():
+            return self._stopping or self._stopped or self._cancel_prepare
+
         def progress(kind, i, total, rel=""):
-            if tracker:
+            # after a Cancel the staging only winds down: nothing it says
+            # then is a conversion done
+            if tracker and not cancelled():
                 self._show_preparing(*tracker[0].step(kind, i, total, rel))
 
         try:
             # "Runs on the caller's worker thread" (App's docstring), as
             # the Tk panel called it
-            got = stage(
-                assets, cancel_cb=lambda: (
-                    self._stopping or self._stopped or self._cancel_prepare),
-                progress_cb=progress, confirm_cb=confirm)
+            got = stage(assets, cancel_cb=cancelled, progress_cb=progress,
+                        confirm_cb=confirm)
         except Exception as exc:                         # noqa: BLE001
             self._overrides_refuse(
                 "The replacements you assigned could not be applied to %s: %s"
@@ -2053,7 +2061,7 @@ class EmulateTab(TabService):
             return False
         finally:
             if tracker:
-                tracker[0].finish()
+                tracker[0].finish(cancelled=bool(cancelled()))
             self._preparing = None
             self._preparing_pct = None
             self._preparing_kind = None
@@ -2063,6 +2071,24 @@ class EmulateTab(TabService):
                       "your project is as it was.")
             return False
         pending, staged, failures = got
+        if cancelled():
+            # PAD-489 (DragonRR: "cancel ... runs through files quickly for a
+            # few seconds and then hangs"): a Cancel ends the Start HERE.  It
+            # used to go on through every picture and into the override
+            # build, which gave up only after its own scan of the project.
+            if staged:
+                notify = getattr(self.window, "folder_staged", None)
+                if callable(notify):
+                    self._post(notify, assets)
+            done = tracker[0].converted if tracker else 0
+            said = ("Cancelled: the game was not started."
+                    + (" The %d video%s converted before you cancelled %s "
+                       "kept, so the next Start goes on from there."
+                       % (done, "" if done == 1 else "s",
+                          "is" if done == 1 else "are") if done else ""))
+            self._overrides_refuse(said, say=False)
+            self._log_after_staging("[emulate] " + said)
+            return False
         if pending and not staged:
             self._overrides_refuse(
                 "None of the %d replacement(s) you assigned could be applied, "
@@ -2082,6 +2108,17 @@ class EmulateTab(TabService):
             if callable(notify):
                 self._post(notify, assets)
         return True
+
+    def _log_after_staging(self, text):
+        """*text* in the log AFTER the staging's own lines, which travel
+        through the app's message queue (a line posted straight to the log
+        overtook them)."""
+        queue = getattr(getattr(self.window, "app", None), "msg_queue", None)
+        if queue is None:
+            self._log(text)
+            return
+        from ...core.messages import LogMsg
+        queue.put(LogMsg(text, "info"))
 
     def _confirm_staging(self, work):
         """PAD-489 (DragonRR: "no warning that there are a huge number of
@@ -2123,7 +2160,10 @@ class EmulateTab(TabService):
     def _show_preparing(self, text, pct):
         """A long preparation's words and percentage on the State line and
         the footer's bar (PAD-489).  Painted at most four times a second,
-        and always within a quarter of a second of the latest."""
+        and always within a quarter of a second of the latest.  Once Cancel
+        is pressed it says so until the work stops."""
+        if self._cancel_prepare:
+            text = CANCELLING
         self._preparing = text
         self._preparing_pct = pct
         if getattr(self, "_prep_paint_due", False):
@@ -2149,6 +2189,8 @@ class EmulateTab(TabService):
     def set_preparing(self, text, pct=None):
         """The Modes tab's Try it progress, from its worker: the State word,
         its ⓘ and the footer, as the tab's own edits preparation shows."""
+        if text is not None and self._cancel_prepare:
+            text = CANCELLING
         if (text, pct) == (self._preparing, self._preparing_pct) and \
                 self._preparing_kind == ("modes" if text is not None
                                          else None):
@@ -2230,6 +2272,10 @@ class EmulateTab(TabService):
             if not self._cancel_prepare:
                 self._cancel_prepare = True
                 self.log("[emulate] cancelling the preparation…")
+                # PAD-489: said at once, and until the work has really
+                # stopped (the clip being converted, then nothing more)
+                self._preparing = CANCELLING
+                self._repaint_preparing()
             return True
         if self._starting or self._stopping:
             return False
@@ -2259,7 +2305,9 @@ class EmulateTab(TabService):
 
     def _run_label(self, up, busy):
         if self._preparing is not None and not self._stopping:
-            btn = {"label": "Cancel", "enabled": True, "mode": "cancel"}
+            btn = ({"label": CANCELLING, "enabled": False, "mode": "busy"}
+                   if self._cancel_prepare else
+                   {"label": "Cancel", "enabled": True, "mode": "cancel"})
         elif busy:
             btn = {"label": "Stopping…" if self._stopping else "Starting…",
                    "enabled": False, "mode": "busy"}

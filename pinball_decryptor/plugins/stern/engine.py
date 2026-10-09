@@ -3327,6 +3327,8 @@ def _prepare_video_patches(reader, video_edits, work_dir, log, cancel,
             fit.append((fname, card_path, node, staged))
 
     for fname, card_path, node, staged in fit:
+        if cancel():                    # a fit can be a whole re-encode (PAD-489)
+            break
         payload = _fit_video_payload(staged, node["size"], work_dir, log)
         if payload is None:
             skipped += 1
@@ -6826,6 +6828,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     _save_hashcache(assets_dir)
     _stage_done(log, "scanning the assets for changes (checksumming every "
                 "sound and video against the Extract baseline)", t_scan)
+    # PAD-489: a Cancel during the scan stops here, not after the modes are
+    # built and the card's sound bank is read out of the card
+    if cancel():
+        return None, None, None, None, None
 
     # Item 149: the project's MODES (<project>/modes/<slug>/mode.json) are one
     # more change a build applies.  A mode that does not load stops the Write
@@ -7184,6 +7190,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         mode_own_used = []
         if audio_edits or music_edits or mode_sound or mode_own:
             phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
+            if cancel():                # before the sound bank is read (PAD-489)
+                return None, None, None, None, None
             t0 = time.monotonic()
             gr_path, img_path, reader, fw_node, img_node = _extract_inputs_kept(
                 disk_f, parts, work, log, _read_prog)

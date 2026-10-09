@@ -4287,11 +4287,15 @@ class App:
                 staged, failures = stage_replacements(
                     staging["slots_by_rel"], assignments, log_cb=log_cb,
                     cancel_cb=cancel_cb, progress_cb=progress_cb, **options)
+            # a clip cut off by Cancel is not one that could not be converted
+            bad = [f for f in failures if f[1] != "cancelled"]
+            cut = len(bad) < len(failures)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
-                + (f"  {len(failures)} could not be converted (see above)."
-                   if failures else ""),
-                "success" if not failures else "error"))
+                + (f"  {len(bad)} could not be converted (see above)."
+                   if bad else "")
+                + ("  Cancelled before the rest." if cut else ""),
+                "error" if bad else "warning" if cut else "success"))
             from .core import history_log
             history_log.record(assets_dir,
                                "video  applied %d of %d replacement(s) to "
@@ -4495,9 +4499,11 @@ class App:
         pend_v = self._stage_pending_video(assets_dir, cancel_cb=cancel_cb,
                                            progress_cb=kind("videos"),
                                            staging=video)
-        pend_i = self._stage_pending_image(assets_dir, cancel_cb=cancel_cb,
-                                           progress_cb=kind("pictures"),
-                                           staging=image)
+        # cancelled during the videos: the pictures are not begun at all
+        pend_i = ((0, 0, []) if cancel_cb is not None and cancel_cb() else
+                  self._stage_pending_image(assets_dir, cancel_cb=cancel_cb,
+                                            progress_cb=kind("pictures"),
+                                            staging=image))
         return (pend_a[0] + pend_v[0] + pend_i[0],
                 pend_a[1] + pend_v[1] + pend_i[1],
                 pend_a[2] + pend_v[2] + pend_i[2])

@@ -915,7 +915,9 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         else:
             cache.forget(rel)
             failures.append((rel, detail))
-            if log_cb:
+            if log_cb and detail == "cancelled":
+                log_cb(f"  – {rel}: cancelled, left as it was", "warning")
+            elif log_cb:
                 log_cb(f"  ✗ {rel}: {detail}", "error")
         cache.save()
 

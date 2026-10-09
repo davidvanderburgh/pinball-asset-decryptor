@@ -12,7 +12,18 @@ replacements..." over an empty bar for the whole of it.  Now:
 2. the Emulate tab logs that, and asks first when the clips alone come to a minute or more;
 3. while it runs the State line says "Converting videos: 12 of 658 (about 15 minutes
    left)", the footer bar moves, and the time left is measured as it goes;
-4. the override build after it shows its own steps and bar rather than a still word."""
+4. the override build after it shows its own steps and bar rather than a still word.
+
+Round 2 (DragonRR: "cancel in this situation seems to run through files quickly for a few
+seconds and then hangs although my PC is doing 'something'"): Cancel killed the clip being
+converted, but the Start went on through every picture (no cancel there) and into the
+override build, which gave up only after its own scan of the project.  Now:
+
+5. Cancel says "Cancelling…" at once, on the State line and the button, until the work stops;
+6. the pictures are not begun after a Cancel, and a Cancel ends the Start right after the
+   staging: "Cancelled: the game was not started", with the videos already converted kept;
+7. the override build checks for a Cancel after its scan, before reading the sound bank, and
+   between clip fits."""
 
 import os
 
@@ -418,3 +429,160 @@ def test_one_long_video_is_asked_about_in_the_singular(monkeypatch):
     (_title, msg), = asked
     assert msg.startswith("1 video has to be converted with your color profile")
     assert msg.rstrip().endswith("Convert it now?")
+
+
+# --------------------------------------------------------------------------
+# 5-7. round 2: a Cancel that ends the Start
+# --------------------------------------------------------------------------
+
+def test_a_cut_off_clip_is_not_counted_as_converted():
+    clock = _Clock()
+    t = staging_work.Tracker(staging_work.Work(clips={"a": 0, "b": 0, "c": 0}),
+                             factor=1.0, clock=clock)
+    t.step("videos", 0, 3, "a")
+    clock.t += 2.0
+    t.step("videos", 1, 3, "b")            # a done, b under way when Cancel comes
+    clock.t += 0.5
+    t.finish(cancelled=True)
+    assert t.converted == 1
+
+
+def test_cancel_says_so_at_once_and_until_the_work_stops(monkeypatch):
+    tab, logged, painted, asked = _tab(monkeypatch, None)
+    shown = {}
+    monkeypatch.setattr(tab, "set", lambda **kw: shown.update(kw), raising=False)
+    monkeypatch.setattr(tab, "log", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(tab, "_launched", lambda: False, raising=False)
+    monkeypatch.setattr(tab, "_repaint_preparing", lambda: (
+        painted.append(tab._preparing), tab._paint_run_btn()), raising=False)
+    tab._last_up = tab._starting = False
+    tab._preparing = "Converting videos: 3 of 658 (about 15 minutes left)"
+    assert tab.toggle() is True
+    assert tab._cancel_prepare is True
+    assert painted[-1] == "Cancelling…"
+    assert shown["run_btn"] == {"label": "Cancelling…", "enabled": False, "mode": "busy"}
+    # what the staging says while it winds down does not take the words back
+    tab._show_preparing("Converting videos: 4 of 658 (about 15 minutes left)", 1)
+    assert painted[-1] == "Cancelling…"
+    tab.set_preparing("Preparing your modes…")
+    assert tab._preparing == "Cancelling…"
+    # a second press asks nothing more
+    assert tab.toggle() is True
+
+
+def test_a_cancel_ends_the_start_after_the_staging(monkeypatch):
+    work = _game(10, pictures=100)
+    told = []
+
+    def stage(assets, cancel_cb=None, progress_cb=None, confirm_cb=None):
+        assert confirm_cb(work) is True
+        for i in range(3):
+            progress_cb("videos", i, 10, "video/%d.mp4" % i)
+        tab._cancel_prepare = True              # Cancel, with clip 2 under way
+        assert cancel_cb() is True
+        progress_cb("videos", 10, 10, "")       # the staging winding down
+        return (110, 2, [("video: video/2.mp4", "cancelled")])
+
+    tab, logged, painted, asked = _tab(monkeypatch, stage)
+    tab.window.folder_staged = told.append
+    queued = []
+    tab.window.app = type("A", (), {"msg_queue": type("Q", (), {
+        "put": staticmethod(lambda m: queued.append((m.text, m.level)))})()})()
+    monkeypatch.setattr(tab, "_post", lambda fn, *a: fn(*a), raising=False)
+    monkeypatch.setattr(tab, "set", lambda **kw: None, raising=False)
+    monkeypatch.setattr(tab, "_paint_run_btn", lambda: None, raising=False)
+    assert tab._stage_pending("C:/proj") is False
+    # after the staging's own lines, which go through the app's queue
+    assert queued == [("[emulate] Cancelled: the game was not started. The 2 videos "
+                       "converted before you cancelled are kept, so the next Start goes on "
+                       "from there.", "info")]
+    assert not any("Cancelled:" in l for l in logged)
+    assert told == ["C:/proj"]                  # the tabs still learn what changed
+    assert not any("None of the" in l for l in logged)
+
+
+def test_the_pictures_are_not_begun_after_a_cancel():
+    from pinball_decryptor.app import App
+    stub = _Stub(staging_work.Work(clips={"video/a.mp4": 0}))
+    stop = []
+
+    def video(d, cancel_cb=None, progress_cb=None, staging=None):
+        stub.seen.append(("video", staging))
+        stop.append(True)                        # Cancel during the videos
+        return (1, 0, [("video: video/a.mp4", "cancelled")])
+
+    stub._stage_pending_video = video
+    got = App.stage_pending_replacements(stub, "D:/gz", cancel_cb=lambda: bool(stop),
+                                         confirm_cb=lambda w: True,
+                                         progress_cb=lambda *a: None)
+    assert got == (1, 0, [("video: video/a.mp4", "cancelled")])
+    assert not any(s[0] == "image" for s in stub.seen if isinstance(s, tuple))
+
+
+def test_the_build_stops_after_its_scan_when_cancelled(tmp_path, monkeypatch):
+    import io
+    from pinball_decryptor.plugins.stern import engine, mode_write
+    assets = tmp_path / "proj"
+    assets.mkdir()
+    (assets / ".checksums.md5").write_text("audio/idx0000.wav\tabc\n", encoding="utf-8")
+    monkeypatch.setattr(engine, "_select_changed_idx_wavs", lambda a, b: {0: "audio/idx0000.wav"})
+    monkeypatch.setattr(engine, "_mode_family_on", lambda: True)
+
+    def no(*a, **k):
+        raise AssertionError("went on past the scan after a Cancel")
+    monkeypatch.setattr(mode_write, "project_modes", no)
+    monkeypatch.setattr(engine, "_extract_inputs_kept", no)
+    out = engine._compute_patches(io.BytesIO(b""), [], str(assets),
+                                  log=lambda *a, **k: None, progress=None,
+                                  cancel=lambda: True)
+    assert out == (None, None, None, None, None)
+
+
+def test_a_cancel_between_clip_fits_stops_the_fits(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import engine
+
+    class _R:
+        def iter_regular_files(self, min_size=1):
+            for i in range(3):
+                yield "/v%d.asset" % i, i, {"size": 10}
+
+    fitted = []
+    asked = []
+
+    def cancel():
+        asked.append(1)
+        return len(fitted) >= 1
+
+    def fit(staged, size, work, log):
+        fitted.append(staged)
+        return b"x" * size
+    monkeypatch.setattr(engine, "_fit_video_payload", fit)
+    edits = [("v%d.mp4" % i, "/v%d.asset" % i, str(tmp_path / ("v%d.mp4" % i)))
+             for i in range(3)]
+    patches, _skipped, _jobs = engine._prepare_video_patches(
+        _R(), edits, str(tmp_path), lambda *a, **k: None, cancel)
+    assert len(fitted) == 1 and len(patches) == 1
+
+
+def test_a_clip_cut_off_by_cancel_is_not_called_a_failure(tmp_path, monkeypatch):
+    import contextlib
+    from pinball_decryptor.app import App
+    said = []
+
+    class _Q:
+        def put(self, m):
+            said.append((m.text, m.level))
+
+    class _S:
+        msg_queue = _Q()
+
+        def _colour_assets_scope(self):
+            return contextlib.nullcontext()
+
+    monkeypatch.setattr(video_slots, "stage_replacements",
+                        lambda slots, picks, **kw: (2, [("video/c.mp4", "cancelled")]))
+    staging = {"slots_by_rel": {}, "assignments": {"video/a.mp4": "x", "video/b.mp4": "x",
+                                                   "video/c.mp4": "x"},
+               "best_quality": False}
+    App._stage_pending_video(_S(), str(tmp_path), staging=staging)
+    assert said[-1] == ("Applied 2 video replacement(s).  Cancelled before the rest.", "warning")

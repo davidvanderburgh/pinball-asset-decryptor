@@ -120,6 +120,24 @@ def box_score(line, text, name="", group=""):
                & (_box_words(text) | _box_words(name) | _box_words(group)))
 
 
+def filled_index(rows):
+    """The game-program lines a scene's text box can be a stand-in for (PAD-485, DragonRR:
+    "some kind of alert that this item in scenes is subject to being replaced by text"):
+    ``{stand-in words (loose): [(original, [mode label])]}`` over the game-program rows of
+    *rows* (a mode's own rows left out: the main row names every mode).  A box whose own
+    words, a closing ! . ? aside, are in it is filled by the game with that line."""
+    out = {}
+    for r in rows:
+        if row_is_scene(r) or row_part(r):
+            continue
+        words = stand_in_words(r.get("original"), True)
+        if not words:
+            continue
+        labels = [mode_label(m) for m in r.get("modes") or ()]
+        out.setdefault(words, []).append((r["original"], labels))
+    return out
+
+
 def scene_dir_index(dirs):
     """``{scene key: scene dir}`` for the scene directories *dirs*: a game program names a
     scene by the last one or two folders of its card path (PAD-485)."""
@@ -257,11 +275,21 @@ def scene_key(path):
     return "rad::" + (path or "")
 
 
+#: a search that names a mode instead of words (PAD-485): ``in:gigan`` lists the lines
+#: whose Shown in names Battle vs Gigan
+SEARCH_IN = "in:"
+
+
 def row_matches(r, query, want_changed, scene):
     """True when row *r* survives the three filters: *query* (lower-cased,
-    "" = off) against the original or the new text; *want_changed*
+    "" = off) against the original or the new text, or, as ``in:<words>``,
+    against the modes that show the line (:func:`shown_in`); *want_changed*
     True/False/None; *scene* a card path, :data:`SCENE_PROGRAM` or None."""
-    if query:
+    if query.startswith(SEARCH_IN):
+        want = query[len(SEARCH_IN):].strip()
+        if want and want not in shown_in(r).lower():
+            return False
+    elif query:
         if (query not in r["original"].lower()
                 and query not in (r["replacement"] or "").lower()):
             return False

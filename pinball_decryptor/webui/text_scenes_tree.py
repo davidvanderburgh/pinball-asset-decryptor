@@ -79,6 +79,7 @@ class TreeEditMixin:
 
     def _tree_reset(self):
         self._trees = None
+        self._filled_memo = None
         self._tdefault = {}
         self._tcache = {}
         self._tshown_card = None
@@ -823,11 +824,13 @@ class TreeEditMixin:
         from ..plugins.stern import scene_edit, scene_eval
         w, h = int(man["stage"][0]), int(man["stage"][1])
         hits = []
+        filled = self._tree_filled(card, man)
         for d in self._tdraws:
             if d["mul"][3] <= 0.01 or d["kind"] not in ("bitmap", "text", "flip"):
                 continue
             hits.append({"id": d["node"], "name": d["path"][-1], "kind": d["kind"],
                          "path": " › ".join(d["path"]),
+                         "filled": d["node"] in filled,
                          "pts": [[round(x, 1), round(y, 1)] for x, y in
                                  scene_eval.outline(d)]})
         rest = self._tree_default(card)
@@ -892,6 +895,7 @@ class TreeEditMixin:
                            "part_off": n["id"] in self._tpart_off,
                            "shown": n["id"] in (self._tforce.get(card) or ()),
                            "added": bool(n.get("added")),
+                           "filled": filled.get(n["id"]),
                            "hidden": any(op["op"] == "visible" and op.get("node") == n["id"]
                                          for op in ops),
                            "view_off": n["id"] in view,
@@ -959,7 +963,68 @@ class TreeEditMixin:
                 "view_in": self._tree_hidden_in(man, nid, self._tree_view_hidden(card)),
                 "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n),
                 "font": self._tree_font_of(man, n, ops),
+                "filled": self._tree_filled(card, man).get(nid),
                 "words": self._tree_words_of(card, man, n, ops)}
+
+    def _tree_filled(self, card, man):
+        """The text boxes of scene *card* the game fills in as it plays (PAD-485, DragonRR:
+        a new user needs an alert that a box's words get replaced): ``{node id: {"line": the
+        game-program line, or None, "modes": [mode label]}}``.  A box is filled when its own
+        words are a stand-in for a game-program line (the same words, a closing ! . ? aside:
+        the jackpot screen's GIGAN JACKPOT for the game's GIGAN JACKPOT!), or when a mode's
+        code names it with this screen (``engine.program_mode_boxes``: the battle vs Gigan's
+        Award_Textbox.Title_Instance, filled with its award line; the line itself is not
+        known, the mode is).  Memoised per scene until the text edits change."""
+        memo = getattr(self, "_filled_memo", None)
+        if memo is None or memo[0] != self.assets_dir:
+            memo = self._filled_memo = (self.assets_dir, {}, None)
+        if card in memo[1]:
+            return memo[1][card]
+        from . import text_rules as R
+        index = memo[2]
+        if index is None:
+            try:
+                from ..plugins.stern import engine
+                _tab, rows = self._text_rows_here()
+                boxes = {}
+                for cls, per in engine.program_mode_boxes(self.assets_dir).items():
+                    for key, paths in per.items():
+                        for p in paths:
+                            boxes.setdefault(key, {}).setdefault(p, [])
+                            if R.mode_label(cls) not in boxes[key][p]:
+                                boxes[key][p].append(R.mode_label(cls))
+                index = (R.filled_index(rows), boxes)
+            except Exception:                        # noqa: BLE001
+                index = ({}, {})
+            self._filled_memo = (self.assets_dir, memo[1], index)
+        lines, boxes = index
+        d = card.replace("\\", "/").rsplit("/", 1)[0]
+        named = {}
+        for key, per in boxes.items():
+            if d.endswith("/" + key) or d == key:
+                named.update(per)
+        out = {}
+        parent, names = {}, {}
+        for n, p, _depth in _walk_man(man):
+            parent[n["id"]] = p["id"] if p else None
+            names[n["id"]] = n.get("name") or ""
+            if _kind_of(man, n) != "Text" or n.get("added"):
+                continue
+            words = R.stand_in_words(_text_of(man, n, "Text"), True)
+            hit = lines.get(words) if words else None
+            if hit:
+                out[n["id"]] = {"line": hit[0][0], "modes": list(hit[0][1])}
+                continue
+            parts, cur = [], n["id"]
+            while cur is not None:
+                parts.append(names[cur])
+                cur = parent.get(cur)
+            path = ".".join(reversed(parts))
+            labels = named.get(path) or named.get(names[n["id"]])
+            if labels:
+                out[n["id"]] = {"line": None, "modes": list(labels)}
+        memo[1][card] = out
+        return out
 
     def _tree_words_of(self, card, man, n, ops):
         """A line of text's words for the Words box (DragonRR, PAD-468): ``{"text": the words

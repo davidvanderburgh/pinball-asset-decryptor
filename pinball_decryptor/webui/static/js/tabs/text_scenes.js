@@ -645,6 +645,8 @@ function deselectOnBlank(t, e) {
 // through and reads "hidden in game", and its eye shuts with it (PAD-407: a hidden name still
 // drawn over its replacement read as a bug); the eye can open it here again.  Every tooltip in a row
 // is the page's own (tip()), never a title="": the browser's would come up late beside it.
+// PAD-485: where a filled box's T goes: the game's line, else the mode's lines (in:<mode>)
+const filledJump = (f) => f.line ? "prog::" + f.line : "mode::" + ((f.modes || [])[0] || "");
 const eyeTip = (l, solo) => ({
   head: solo === l.id ? "Preview: shown alone" : l.view_off ? "Preview: hidden"
     : l.state_off ? "Preview: off (its part shows another look)" : l.shown ? "Preview: turned on here" : "Preview: shown",
@@ -734,10 +736,27 @@ export const layerProfile = (l, cs) => {
   if (c.locked || !c.on) return { profile: "None" };
   return { profile: ((cs.own_names || {})[c.kind || "images"] || {})[c.rel] || cs.asset_name || "Recommended" };
 };
+// PAD-485 (DragonRR: "some kind of alert that this item in scenes is subject to being
+// replaced by text"): a box the game fills in as it plays - its own words are a stand-in for a
+// game-program line (GIGAN JACKPOT for the game's GIGAN JACKPOT!), or a mode's code names it
+// with this screen (a battle's award box) - is marked, says so, and its T goes to that line
+export const filledLines = (f) => {
+  if (!f) return [];
+  const who = (f.modes || []).join(", ");
+  return [
+    f.line ? `The game fills this box in as it plays, with its own line: ${f.line}${who ? ` (${who})` : ""}. The words here are a stand-in; the game's line is what the machine shows.`
+      : `The game fills this box in as it plays${who ? `, during ${who}` : ""}. The words here are a stand-in; the game's own line is what the machine shows.`,
+    "Its size, place and font set here hold for whatever the game puts in it.",
+  ];
+};
+const filledTip = (f) => ({ head: "Filled in by the game", lines: [
+  ...filledLines(f),
+  ["T", f.line ? "find the game's line on the Replace Text tab" : "list that mode's lines on the Replace Text tab"] ] });
 const rowTip = (l, cs) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
   lines: [
     l.edits || l.kind,
+    ...filledLines(l.filled),
     l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Its eye turns it on here."
       : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on."
       : !l.drawn && !l.view_off ? "Not on the screen at this moment." : null,
@@ -902,8 +921,8 @@ function TreeLayers({ t }) {
       <button type="button" class=${cx("ly-eye", (l.view_off || l.state_off) && "shut", t.solo === l.id && "solo")}
         aria-label="Shown in the preview" ...${tip(eyeTip(l, t.solo))} onClick=${(e) => eyeClick(l, e)}>
         <${Icon} name=${l.view_off || l.state_off ? "eye-off" : "eye"} /></button>
-      <span class="sc-t ellip">${l.name}${l.added ? " (added)" : ""}</span>
-      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")}>${l.edits || l.kind}</span>
+      <span class="sc-t ellip">${l.filled ? html`<span class="ly-filled" aria-label="Filled in by the game" ...${tip(filledTip(l.filled))}><${Icon} name="gear" /></span>` : null}${l.name}${l.added ? " (added)" : ""}</span>
+      <span class=${cx("sc-i small ellip", l.hidden ? "in-game" : "muted")}>${l.edits || (l.filled ? "game fills it" : l.kind)}</span>
       <button type="button" class=${cx("ly-game", l.hidden && "on")} aria-label="Hidden in the game"
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
@@ -916,6 +935,10 @@ function TreeLayers({ t }) {
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
         onClick=${(e) => { e.stopPropagation(); showPics(l.pics, e); }}><${Icon} name="image" /></button>`
+        : l.filled ? html`<button type="button" class="ly-img ly-txt"
+        aria-label="Find the game's line on the Replace Text tab" ...${tip(l.filled.line ? `Find the game's line, ${l.filled.line}, on the Replace Text tab`
+          : `List the lines of ${(l.filled.modes || []).join(", ")} on the Replace Text tab`)}
+        onClick=${(e) => { e.stopPropagation(); call("text_scenes.activate", filledJump(l.filled)); }}><${Icon} name="text" /></button>`
         : l.text ? html`<button type="button" class="ly-img ly-txt"
         aria-label="Find on the Replace Text tab" ...${tip("Find these words on the Replace Text tab")}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.activate", "str::" + l.text); }}><${Icon} name="text" /></button>`
@@ -1275,6 +1298,9 @@ function TreeCanvas({ s }) {
   const busy = !loading && (s.tree_busy || !!(pend && pend.ops.some((o) => o.want == null || o.want > shownRev)));
   const hov = hover != null && !sels.includes(hover) ? (t.hits || []).filter((h) => h.id === hover) : [];
   const selPolys = boxLive ? [] : (t.hits || []).filter((h) => sels.includes(h.id));
+  // PAD-485: the boxes the game fills in as it plays keep their own outline
+  const filledPolys = (t.hits || []).filter((h) => h.filled && !sels.includes(h.id) && h.id !== live);
+  const filledSel = boxLive ? [] : (t.hits || []).filter((h) => h.filled && sels.includes(h.id));
   return html`<div class=${cx("scenes-canvas tree-canvas", loading && "loading")} ref=${box} tabIndex="0" onKeyDown=${key}
       style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}
       onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${() => setHover(null)}>
@@ -1286,9 +1312,11 @@ function TreeCanvas({ s }) {
       : full ? html`<img src=${mediaUrl(full.srcs[0])} alt="" draggable="false" />`
       : html`<span class="scenes-msg">${s.canvas_msg}</span>`}
     ${loading ? null : html`<svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" class="tree-svg">
+      ${filledPolys.map((h, i) => html`<polygon key=${"f" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-filled" />`)}
       ${hov.map((h, i) => html`<polygon key=${"h" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-hover" />`)}
       <g transform=${svgTf(lineOps)}>
         ${selPolys.map((h, i) => html`<polygon key=${"s" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-sel" />`)}
+        ${filledSel.map((h, i) => html`<polygon key=${"fs" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-filled" />`)}
         ${selBox ? html`<rect x=${selBox.x} y=${selBox.y} width=${selBox.w} height=${selBox.h} class="tree-box" />` : null}
         ${multi ? (t.sel_boxes || []).map(([bx, by, bw, bh], i) =>
           html`<rect key=${"b" + i} x=${bx} y=${by} width=${bw} height=${bh} class="tree-box" />`) : null}
@@ -1402,6 +1430,11 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.hidden ? html`<div class="small in-game">Hidden in the game: Write leaves it out of the card.${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
       : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
+      ${p.filled ? html`<div class="small tree-filled-note" ...${tip(filledTip(p.filled))}><${Icon} name="gear" /><span>${p.filled.line
+          ? html`Filled in by the game with <b>${p.filled.line}</b>${(p.filled.modes || []).length ? ` (${p.filled.modes.join(", ")})` : ""}`
+          : html`Filled in by the game during <b>${(p.filled.modes || []).join(", ")}</b>`}</span>
+        <${Button} size="xs" kind="ghost" icon="text" title=${p.filled.line ? "Find the game's line on the Replace Text tab" : "List that mode's lines on the Replace Text tab"}
+          onClick=${() => call("text_scenes.activate", filledJump(p.filled))}>${p.filled.line ? "Its line" : "Its lines"}<//></div>` : null}
       ${p.words ? html`<${Words} p=${p} find=${find} searching=${searching} />` : null}
       ${p.pic ? html`<div class="tree-row">
         <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>

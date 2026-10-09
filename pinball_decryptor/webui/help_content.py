@@ -623,6 +623,12 @@ HELP_CONTENT = {
             "preview shows them that way.\n"
             "- Text: most text is a font "
             "with baked-in colours, so **Tint** recolours it.\n"
+            "- Text the **game fills in** as it plays (a jackpot or award title, a "
+            "battle's name) has a teal dotted outline and a gear on its Layers row; the "
+            "words on the card are a stand-in for the game's own line. Hover the gear to "
+            "see which line (or which mode) fills it; its **T** finds that line on the "
+            "Text tab, where the words are changed. The box's size, place and font set "
+            "here hold for whatever the game puts in it.\n"
             "- **Picture…** and **Text…** add new items.",
             "### Moment and switchable parts\n"
             "- **Moment** picks the point in the timeline; Play runs it, Stop goes back.\n"
@@ -1014,6 +1020,9 @@ HELP_CONTENT = {
          "box, whose own words may be the battle's name.\n"
          "- Other game-program lines have no screen to show."),
         ("Narrowing a big card down",
+         "- **Search** finds words in a line or your new text. Typed as **in:** and a "
+         "mode's name (in:gigan), it lists the game-program lines that mode shows, "
+         "as the **Shown in** column names them.\n"
          "- **Show:** All, Changed or Unchanged. Unchanged is what you haven't done "
          "yet.\n"
          "- **Scene:** the game program or one scene file, each with its line count.\n"

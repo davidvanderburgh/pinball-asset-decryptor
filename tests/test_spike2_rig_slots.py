@@ -656,7 +656,8 @@ def test_a_batchs_end_leaves_other_batches_copies_in_flight():
     # date, which made a card staged a minute ago the oldest file: Jurassic Park Pro's, under a running job)
     assert 'busy=$( [ -n "$out" ] && in_use "$out"; mounted "$dir")' in cs
     assert 'pgrep -a fuse2fs 2>/dev/null | grep -o "$1/[^ ]*"' in cs
-    assert cs.index('mv -f "$P/$name" "$dest"') < cs.index('touch "$dest"             # robocopy keeps')
+    touch = re.search(r'touch "\$dest" +# robocopy keeps', cs)     # any alignment: the line has moved into an if
+    assert touch and cs.index('mv -f "$P/$name" "$dest"') < touch.start()
 
 
 def test_a_running_job_keeps_its_slot_and_copies_take_turns():

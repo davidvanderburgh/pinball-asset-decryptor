@@ -37,7 +37,7 @@ def scene_label(path):
     parts = [p for p in (path or "").replace("\\", "/").split("/") if p]
     if not parts:
         return path or ""
-    name = parts[-1]
+    name = parts[-1].split("#", 1)[0]      # PAD-470: a mode's own text
     if name in ("game", "game_real"):
         return "game program"
     parent = parts[-2] if len(parts) >= 2 else ""
@@ -102,6 +102,34 @@ def is_edited(r):
     return bool(r.get("replacement")) and r["replacement"] != r["original"]
 
 
+def row_part(r):
+    """The mode class of a row that is one mode's own text for a line several
+    of the game's modes show (PAD-470: its path ends ``#<mode class>``), else
+    ``""``."""
+    from ..core.text_manifest import split_part
+    return "" if row_is_scene(r) else split_part(r.get("path"))[1]
+
+
+def mode_label(cls):
+    """``cmode_battle_vs_gigan`` -> ``Battle vs Gigan``, as the Modes and
+    Video tabs name the game's own modes."""
+    try:
+        from ..plugins.stern.clip_modes import mode_label as _ml
+        return _ml(cls)
+    except Exception:                                   # noqa: BLE001
+        return cls[6:].replace("_", " ").title() if cls.startswith("cmode_") \
+            else cls
+
+
+def shown_in(r):
+    """The Shown in cell: the game's own modes that show the row's line, in
+    words (PAD-470); ``""`` when none is known."""
+    part = row_part(r)
+    if part:
+        return mode_label(part)
+    return ", ".join(mode_label(m) for m in r.get("modes") or ())
+
+
 def replace_plan(rows, find, repl, match_case=True):
     """The Replace-everywhere plan: for every row whose ORIGINAL contains
     *find*, ``{"index", "row", "new", "fits"}``.  An empty *find* plans
@@ -127,6 +155,8 @@ def replace_plan(rows, find, repl, match_case=True):
         orig = r["original"]
         if not _hit(orig):
             continue
+        if row_part(r) and not is_edited(r):
+            continue        # a mode's row left blank already follows its line's
         new = _sub(orig)
         out.append({"index": i, "row": r, "new": new,
                     "fits": row_len(r, new) <= row_budget(r)})
@@ -221,8 +251,21 @@ def scene_note(r, name=""):
 
 def program_note(r):
     """The note under the editor for a game-program row."""
+    part = row_part(r)
+    if part:
+        # PAD-470: one mode's own text for a line several modes show
+        label = mode_label(part)
+        return ("%s's own text for this line of the game program. Left "
+                "blank, %s shows the same text as the line's main row; "
+                "given its own, %s alone shows it and every other mode "
+                "keeps the main row's. Unless %s is the only mode that "
+                "shows this string, its own text is a copy placed in a new "
+                "area of the game program, so it needs an image build (not "
+                "a Direct-SD write)." % (label, label, label, label))
     note = ("Game program: %s — drawn by game code (mode titles, battle "
             "names). \\n in a string is a real line break." % r["path"])
+    if r.get("modes"):
+        note += " Shown in: %s." % shown_in(r)
     if r.get("unused"):
         note += (" (not used by the game) — no reference to this line "
                  "was found in the game program, so changing it changes "

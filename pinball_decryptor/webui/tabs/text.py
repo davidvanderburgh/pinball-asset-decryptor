@@ -45,7 +45,7 @@ EMPTY_CANCELLED = "Scan cancelled — click Scan to try again."
 #: Sortable columns: Tk's _text_sort_cfg ids, and whether each starts
 #: descending (Max does).
 SORT_COLS = {"#0": False, "new": False, "max": True, "scene": False,
-             "name": False}
+             "name": False, "in": False}
 
 
 def reveal_in_file_manager(path):
@@ -238,16 +238,19 @@ class TextTab(TabService):
             except Exception as e:                   # noqa: BLE001
                 loaded, err = [], e
             # A project extracted before the tool measured which program
-            # strings can take longer text carries no flag on any of them:
-            # re-read the limits once from the card it came from (best
-            # effort; the rows already show the optimistic default).
+            # strings can take longer text carries no flag on any of them,
+            # and one read before PAD-470 no modes: re-read them once from
+            # the card it came from (best effort; the rows already show the
+            # optimistic default).
             if err is None and any(
                     not (r.get("path") or "").lower().endswith(".radium")
-                    and not r.get("grow") and not r.get("fixed")
                     for r in loaded):
                 try:
                     from ...plugins.stern import engine as _stern_engine
-                    if _stern_engine.refresh_program_text_flags(assets_path):
+                    if (_stern_engine.program_text_needs_refresh(
+                            assets_path, loaded)
+                            and _stern_engine.refresh_program_text_flags(
+                                assets_path)):
                         loaded = text_manifest.load(assets_path)
                 except Exception:                    # noqa: BLE001
                     pass
@@ -308,6 +311,8 @@ class TextTab(TabService):
             for flag in ("grow", "fixed", "unused"):
                 if r.get(flag):
                     row[flag] = True
+            if r.get("modes"):
+                row["modes"] = list(r["modes"])     # PAD-470: Shown in
             rows.append(row)
         self._text_rows = rows
         if not _same_folder(scan_dir, self._text_scan_dir):
@@ -353,10 +358,33 @@ class TextTab(TabService):
         return self._scene_names.get(R.scene_key(path), "")
 
     def _row_view(self, r):
-        return {"o": r["original"], "n": r["replacement"] or "",
-                "mx": R.row_max_label(r), "sc": R.scene_label(r["path"]),
-                "nm": self._scene_name(r["path"]), "ed": R.is_edited(r),
-                "sf": R.row_is_scene(r)}
+        out = {"o": r["original"], "n": r["replacement"] or "",
+               "mx": R.row_max_label(r), "sc": R.scene_label(r["path"]),
+               "nm": self._scene_name(r["path"]), "ed": R.is_edited(r),
+               "sf": R.row_is_scene(r)}
+        # PAD-470: the game's own modes that show the line, and a mode's
+        # own text for a line several of them show
+        shown = R.shown_in(r)
+        if shown:
+            out["in"] = shown
+        if R.row_part(r):
+            out["pt"] = True
+        elif self._has_parts(r):
+            out["pa"] = True
+        return out
+
+    def _has_parts(self, r):
+        """Does the line of program row *r* have a row per mode below it?"""
+        if R.row_is_scene(r) or R.row_part(r):
+            return False
+        rows = self._text_rows
+        got = getattr(self, "_parts_of", None)
+        if got is None or got[0] is not rows or got[1] != len(rows):
+            from ...core.text_manifest import split_part
+            lines = {(split_part(x["path"])[0], x["original"])
+                     for x in rows if R.row_part(x)}
+            got = self._parts_of = (rows, len(rows), lines)
+        return (r["path"] or "", r["original"]) in got[2]
 
     def _rebuild_scene_menu(self):
         values, by_display = R.scene_menu(self._text_rows, self._scene_names)
@@ -421,7 +449,13 @@ class TextTab(TabService):
             if col == "name":
                 name = self._scene_name(r["path"])
                 return (not name, name.lower(), r["original"].lower())
-            return (r["original"].lower(),)
+            if col == "in":
+                shown = R.shown_in(r)
+                return (not shown, shown.lower(), r["original"].lower(),
+                        bool(R.row_part(r)))
+            # a mode's own row right under its line's main row
+            return (r["original"].lower(), bool(R.row_part(r)),
+                    R.shown_in(r).lower())
 
         visible = [i for i, r in enumerate(rows)
                    if R.row_matches(r, query, want_changed, scene)]
@@ -542,12 +576,19 @@ class TextTab(TabService):
                                           R.too_long_message(r, new))
             return False
         eff = "" if new == orig else new
-        if self.text_apply_all_var.get():
-            targets = [rr for rr in self._text_rows if rr["original"] == orig]
+        if self._apply_all(r):
+            targets = [rr for rr in self._text_rows
+                       if rr["original"] == orig and not R.row_part(rr)]
         else:
             targets = [r]
         self._set_replacements([(rr, eff) for rr in targets])
         return True
+
+    def _apply_all(self, r):
+        """Does an edit of row *r* go to every row with its original? Never
+        for one mode's own text (PAD-470): that row is that mode's alone, and
+        the other modes' rows follow the line's main row by being left blank."""
+        return bool(self.text_apply_all_var.get()) and not R.row_part(r)
 
     def _set_replacements(self, changes):
         """The one way an edit lands: set each ``(row, effective)``, save the
@@ -602,9 +643,9 @@ class TextTab(TabService):
             return False
         orig = r["original"]
         prev = r.get("replacement") or ""
-        if self.text_apply_all_var.get():
+        if self._apply_all(r):
             targets = [(n, rr) for n, rr in enumerate(self._text_rows)
-                       if rr["original"] == orig]
+                       if rr["original"] == orig and not R.row_part(rr)]
         else:
             targets = [(i, r)]
         for _n, rr in targets:

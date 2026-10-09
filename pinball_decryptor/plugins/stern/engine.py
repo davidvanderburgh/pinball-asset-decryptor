@@ -1894,11 +1894,17 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
                 progress(len(rads), len(rads) + 1,
                          "Scanning the game program for display text")
             entries = progtext.enumerate_program_strings(
-                reader.read_file_bytes(fw_node))
+                reader.read_file_bytes(fw_node), modes=True)
             prog_rows = []
+            from ...core import text_manifest as _tm
             for e in entries:
-                row = {"path": fw_path, "original": e["text"],
+                # PAD-470: a mode's own text for a line several modes show
+                # is a row of its own, its path naming the mode
+                row = {"path": _tm.join_part(fw_path, e.get("part") or ""),
+                       "original": e["text"],
                        "replacement": "", "budget": e["budget"]}
+                if e.get("modes"):
+                    row["modes"] = list(e["modes"])
                 # The manifest's 5th-column flags (text_manifest.FLAG_*):
                 # a growable row may take longer text (placed in a new
                 # area of the game program on Write); a row with no
@@ -1919,6 +1925,10 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
         if prog_rows:
             log("Found %d editable game-program string(s) in %s."
                 % (len(prog_rows), fw_path), "info")
+            n_own = sum(1 for r in prog_rows if "#" in r["path"])
+            if n_own:
+                log("%d of them are one mode's own text for a line several "
+                    "modes show (Text tab, Shown in)." % n_own, "info")
 
     if not rows and not prog_rows:
         log("No editable display text found in %d .radium file(s)."
@@ -1958,6 +1968,8 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
             log("Kept %d display-text edit(s) already in text/strings.tsv."
                 % n_kept, "info")
         text_manifest.save(output_dir, all_rows)
+        if prog_rows:
+            _program_modes_read(output_dir)
     except Exception as e:
         log("Couldn't write display-text manifest (%s)." % e, "warning")
         return 0
@@ -1979,6 +1991,49 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
     return len(rows) + len(prog_rows)
 
 
+#: PAD-470: beside ``text/strings.tsv``, the :data:`.text_modes.READ_REV` its
+#: game-program rows' modes were read at (a project read before has none)
+_PROGRAM_MODES_FILE = "program_modes.json"
+
+
+def _program_modes_read(assets_dir):
+    """Note that the manifest's game-program rows carry this build's reading
+    of the game's own modes (:mod:`.text_modes`).  Never raises."""
+    import json
+    from . import text_modes
+    from ...core import text_manifest
+    try:
+        with open(os.path.join(assets_dir, text_manifest.RELDIR,
+                               _PROGRAM_MODES_FILE), "w",
+                  encoding="utf-8") as f:
+            json.dump({"rev": text_modes.READ_REV}, f)
+    except OSError:
+        pass
+
+
+def program_text_needs_refresh(assets_dir, rows):
+    """Should :func:`refresh_program_text_flags` re-read the card for the
+    manifest *rows* of the project at *assets_dir*: a game-program row with
+    no limit flag (extracted before they were measured), or game-program
+    rows whose modes were read by an older build (PAD-470)."""
+    import json
+    from . import text_modes
+    from ...core import text_manifest
+    prog = [r for r in rows
+            if not (r.get("path") or "").lower().endswith(_RADIUM_EXT)]
+    if not prog:
+        return False
+    if any(not r.get("grow") and not r.get("fixed") for r in prog):
+        return True
+    try:
+        with open(os.path.join(assets_dir, text_manifest.RELDIR,
+                               _PROGRAM_MODES_FILE), encoding="utf-8") as f:
+            rev = int(json.load(f).get("rev") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        rev = 0
+    return rev < text_modes.READ_REV
+
+
 def refresh_program_text_flags(assets_dir, log=None, cancel=None):
     """Refresh the game-program rows of an existing ``text/strings.tsv`` from
     the card the project was extracted from, and return how many rows were
@@ -1991,6 +2046,9 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
     each one against the card anyway), and this fills in the exact answer:
     the budgets, ``grows`` / ``fixed`` and ``unused`` come from a fresh
     :func:`.progtext.enumerate_program_strings` of the card's own game ELF.
+    So do the modes that show each row and a row per mode for a line several
+    modes show (PAD-470): a mode's row the card no longer offers goes unless
+    it holds a replacement.
 
     Only the program rows are touched -- scene rows, the row order and every
     replacement the user has already typed are preserved -- so this is safe to
@@ -2043,7 +2101,7 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
                 return 0
             raw = reader.read_file_bytes(fw_node)
         from . import progtext
-        entries = progtext.enumerate_program_strings(raw)
+        entries = progtext.enumerate_program_strings(raw, modes=True)
     except Exception as e:
         log("Couldn't re-read the game program's text limits (%s); longer "
             "text is still offered and the Write step checks each string "
@@ -2052,30 +2110,64 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
     if cancel():
         return 0
 
-    by_text = {e["text"]: e for e in entries}
-    n = 0
+    by_key = {(e["text"], e.get("part") or ""): e for e in entries}
+    own = {}                              # text -> [a mode's own row]
+    for e in entries:
+        if e.get("part"):
+            own.setdefault(e["text"], []).append(e)
+    have = set()
     for r in prog:
-        e = by_text.get(r.get("original"))
-        if e is None:
+        base, part = text_manifest.split_part(r.get("path"))
+        have.add((r.get("original"), part))
+    n = 0
+    out = []
+    for r in rows:
+        path = r.get("path") or ""
+        if path.lower().endswith(_RADIUM_EXT):
+            out.append(r)
             continue
+        base, part = text_manifest.split_part(path)
+        e = by_key.get((r.get("original"), part))
+        if e is None:
+            if part and not r.get("replacement"):
+                continue                   # a mode's row the card no longer offers
+            out.append(r)
+            continue
+        out.append(r)
         r["budget"] = e["budget"]
         r.pop("grow", None)
         r.pop("fixed", None)
         r.pop("unused", None)
+        r.pop("modes", None)
         if e.get("growable"):
             r["grow"] = True
         else:
             r["fixed"] = True
         if e.get("unused") or e.get("refs") == 0:
             r["unused"] = True
+        if e.get("modes"):
+            r["modes"] = list(e["modes"])
         n += 1
+        if part:
+            continue
+        for f in own.get(r.get("original"), ()):
+            if (r.get("original"), f["part"]) in have:
+                continue
+            out.append({"path": text_manifest.join_part(base, f["part"]),
+                        "original": f["text"], "replacement": "",
+                        "budget": f["budget"], "grow": True,
+                        "modes": list(f.get("modes") or ())})
+            n += 1
+    _program_modes_read(assets_dir)
     if not n:
         return 0
     try:
-        text_manifest.save(assets_dir, rows)
+        text_manifest.save(assets_dir, out)
     except Exception as e:
         log("Couldn't update the display-text manifest (%s)." % e, "warning")
         return 0
+    prog = [r for r in out
+            if not (r.get("path") or "").lower().endswith(_RADIUM_EXT)]
     n_grow = sum(1 for r in prog if r.get("grow"))
     log("Re-read the game program's text limits from the card: %d string(s), "
         "%d of them able to take longer text." % (n, n_grow), "info")
@@ -3519,7 +3611,7 @@ def _compute_patches_or_restore(restore_ok, log, *args, **kwargs):
 
 
 def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
-                         grow=None, shader=None, clips=None):
+                         grow=None, shader=None, clips=None, parts=None):
     """Resolve game-program (ELF) display-text edits for one firmware file.
 
     Three composition modes, mirroring how the firmware itself reaches the
@@ -3542,6 +3634,10 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
       baked into the same bytes when no cave did that already, and the whole
       grown file is staged 0755 under ``grow["dir"]`` for the ext4 grow job,
       exactly the cave's delivery.  A fitting edit still patches in place.
+
+    *parts* (PAD-470) are the modes' own text for lines several modes show,
+    ``{(original, mode class): replacement}``: a copy for that mode's lines
+    goes in the same extension segment (:func:`.progtext.plan_writes`).
 
     Returns ``(writes, n_strings, overlays, grown)`` — *grown* is ``None``
     unless the firmware was grown, else ``{"node", "path", "valpatch_mode",
@@ -3574,27 +3670,40 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
         clips = None
     if clips is not None and not over:
         over = [None]
+    if parts and not over and grow is not None and grow.get("ok"):
+        # a mode's own copy of a line needs the extension segment, however
+        # long it is
+        over = [None]
     reloc = None
     # Why longer text has nowhere to go, carried into plan_writes so each
     # skipped line names the WRITE's limit instead of blaming itself.
     no_grow_why = ""
+    # the edits really longer than their line (not the profile's, the clips'
+    # or a mode's own copy's need for the segment, each logged by its own)
+    n_over = len([o for o in over if o is not None])
     if over and grow is not None:
         if grow.get("ok"):
             reloc, why = _text_reloc_plan(raw)
             if reloc is None:
                 no_grow_why = why
-                log("Program text: %d edit(s) are longer than the original and "
-                    "can't be placed in new space in %s (%s); they are skipped "
-                    "— same-length edits still land in place."
-                    % (len(over), card_path, why), "warning")
+                if n_over:
+                    log("Program text: %d edit(s) are longer than the original "
+                        "and can't be placed in new space in %s (%s); they are "
+                        "skipped — same-length edits still land in place."
+                        % (n_over, card_path, why), "warning")
         else:
             no_grow_why = grow.get("why") or "growth unavailable"
-            log("Program text: %d edit(s) are longer than the original and "
-                "can't be placed in new space for this write (%s); they are "
-                "skipped — same-length edits still land in place."
-                % (len(over), no_grow_why), "warning")
+            if n_over:
+                log("Program text: %d edit(s) are longer than the original and "
+                    "can't be placed in new space for this write (%s); they "
+                    "are skipped — same-length edits still land in place."
+                    % (n_over, no_grow_why), "warning")
+    if parts and not no_grow_why and reloc is None and grow is not None \
+            and not grow.get("ok"):
+        no_grow_why = grow.get("why") or "growth unavailable"
     file_writes, n, blob = progtext.plan_writes(raw, edits, log, reloc=reloc,
-                                                no_grow_why=no_grow_why)
+                                                no_grow_why=no_grow_why,
+                                                parts=parts)
     if shader is not None and reloc is not None:
         # PAD-305: the drawing shaders, corrected, after any longer text in
         # the same segment (word-aligned, as the copies' readers expect)
@@ -3643,7 +3752,8 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
                            "(%s)" % e)
             file_writes, n, blob = progtext.plan_writes(
                 raw, edits, log,
-                no_grow_why="placing longer text in new space failed (%s)" % e)
+                no_grow_why="placing longer text in new space failed (%s)" % e,
+                parts=parts)
     if not file_writes:
         return [], n, {}, None
     if patched_fw is not None:
@@ -4189,6 +4299,15 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
 
     grown = {"fw": None, "radium": {}}
     edits = _changed_radium_text(assets_dir)
+    # PAD-470: a mode's own text for a line several modes show is a row whose
+    # path names the mode: it goes to the game program as that mode's part
+    parts = {}
+    from ...core import text_manifest as _tm_parts
+    for p in [p for p in edits if _tm_parts.split_part(p)[1]]:
+        base, part = _tm_parts.split_part(p)
+        for o, r in edits.pop(p):
+            parts.setdefault(base, {})[(o, part)] = r
+        edits.setdefault(base, [])
     # PAD-305: *shader* (a color profile) is a game-program edit of its own;
     # the program joins the edits even when no line of its text changed.
     fw_path = None
@@ -4212,7 +4331,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     # its original (the ext4 probe reaches for WSL; a write of same-length
     # edits never pays for it).  The color profile always needs it: the
     # corrected shaders are longer than the game's own.
-    over_any = (shader is not None) or (clips is not None) or any(
+    over_any = (shader is not None) or (clips is not None) or bool(parts) or any(
         len(n) > len(o) for prs in edits.values() for o, n in prs)
     if over_any and grow_dir:
         g_ok, g_why = _text_grow_gate(dest_is_device)
@@ -4241,7 +4360,8 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
             pw, pn, pov, pgrown = _program_text_writes(
                 reader, node, card_path, pairs, patched_fw, log, grow=grow,
                 shader=shader if card_path == fw_path else None,
-                clips=clips if card_path == fw_path else None)
+                clips=clips if card_path == fw_path else None,
+                parts=parts.get(card_path))
             writes += pw
             n_strings += pn
             _merge_radium_overlays(overlays, pov)

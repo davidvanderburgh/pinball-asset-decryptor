@@ -31,7 +31,9 @@ HEADER = (
     "# of the game program on Write (needs an image build); 'fixed' = the game\n"
     "# reads the line in a way the tool can't move, so it is patched in place\n"
     "# and has to fit; 'unused' = no reference to the line was found in the\n"
-    "# game program.\n"
+    "# game program; 'in:<modes>' = the game's own modes that show the line.\n"
+    "# A game-program path ending '#<mode>' is that mode's own text for a line\n"
+    "# several modes show (blank = the same text as the line's main row).\n"
     "# asset_path\toriginal\treplacement\tmax_bytes\tflags\n")
 
 #: 5th-column flag tokens (space-separated; unknown tokens are ignored, and a
@@ -44,6 +46,27 @@ FLAG_UNUSED = "unused"
 #: string is stuck at its original length", which is exactly what made the Text
 #: tab refuse longer text on a project extracted by an older build.
 FLAG_FIXED = "fixed"
+#: PAD-470: ``in:<mode class>,<mode class>`` - the game's own modes that show a
+#: game-program row (``row["modes"]``).
+FLAG_IN = "in:"
+#: PAD-470: a game-program row's path ending ``#<mode class>`` is that mode's
+#: own text for a line several modes show (:func:`split_part`).
+PART_SEP = "#"
+
+
+def split_part(path):
+    """``(card path, mode class)`` of a manifest row's path: the mode is
+    ``""`` for every row but one mode's own text (PAD-470)."""
+    p = path or ""
+    if PART_SEP in p:
+        base, part = p.split(PART_SEP, 1)
+        return base, part
+    return p, ""
+
+
+def join_part(path, part):
+    """The manifest path of *part*'s own text for a line of *path*."""
+    return "%s%s%s" % (path, PART_SEP, part) if part else path
 
 
 def manifest_path(assets_dir):
@@ -174,6 +197,10 @@ def load(assets_dir):
                     row["fixed"] = True
                 if FLAG_UNUSED in flags:
                     row["unused"] = True
+                for fl in flags:
+                    if fl.startswith(FLAG_IN):
+                        row["modes"] = [m for m in fl[len(FLAG_IN):].split(",")
+                                        if m]
             rows.append(row)
     return rows
 
@@ -203,6 +230,8 @@ def save(assets_dir, rows):
                     flags.append(FLAG_FIXED)
                 if r.get("unused"):
                     flags.append(FLAG_UNUSED)
+                if r.get("modes"):
+                    flags.append(FLAG_IN + ",".join(r["modes"]))
             else:
                 seq = list(r) + ["", "", ""]
                 p, original, replacement = seq[0], seq[1], seq[2] or ""

@@ -227,10 +227,15 @@ def _tail_map(raw, spans, census=None):
     return tails
 
 
-def enumerate_program_strings(raw):
+def enumerate_program_strings(raw, modes=False):
     """The editable program-text rows for the manifest:
     ``[{"text", "budget", "tail_of", "growable", "refs"}]`` in file order,
     deduped by text.
+
+    With *modes* (PAD-470, :mod:`.text_modes`) a row also carries ``modes``,
+    the game's own modes that show it, and a text two modes show is followed
+    by a row per mode (``part`` = its mode class): that mode's own text,
+    which leaves every other line of the text as it is.
 
     ``budget`` is the byte length a replacement must fit: :data:`MAX_EDIT_LEN`
     for a *growable* row (every reference to the string is visible to the
@@ -288,7 +293,39 @@ def enumerate_program_strings(raw):
                 # Also exists standalone: keep the standalone budget (an edit
                 # patches both forms; the smaller budget is the safe one).
                 pass
+    if modes:
+        rows = _with_mode_rows(raw, spans, census, rows)
     return rows
+
+
+def _with_mode_rows(raw, spans, census, rows):
+    """*rows* with each one's ``modes`` and, after a text two modes show, a
+    row per mode (PAD-470).  A mode's row is always growable: its lines are
+    references the census sees, and a copy of new text is placed for them
+    alone when the string is not theirs alone."""
+    from . import text_modes
+    reading = text_modes.read(raw, spans, census)
+    if not reading.keys:
+        return rows
+    offs_of = {}
+    for off, text in spans:
+        offs_of.setdefault(text, []).append(off)
+    out = []
+    for r in rows:
+        out.append(r)
+        if r["tail_of"] is not None:
+            continue
+        offs = offs_of.get(decode_text(r["text"]), ())
+        shown, parts = text_modes.text_modes(reading, offs)
+        if shown:
+            r["modes"] = shown
+        for cls in parts:
+            out.append({"text": r["text"], "part": cls, "modes": [cls],
+                        "budget": MAX_EDIT_LEN, "tail_of": None,
+                        "growable": True,
+                        "refs": sum(len(reading.refs_of(o, cls))
+                                    for o in offs)})
+    return out
 
 
 def _settings_captions(table, mode, buf, extra=None):
@@ -437,12 +474,21 @@ class _Blob(object):
         return self.base_va + self.used + off
 
 
-def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
+def plan_writes(raw, edits, log=None, reloc=None, no_grow_why="", parts=None,
+                reading=None):
     """Resolve *edits* (``{original: replacement}``) against the ELF *raw*
     and return ``(writes, n_applied, blob)`` where *writes* is a flat
     ``[(file_offset, bytes)]`` patch list and *blob* the bytes to place in
     the extension segment (``b""`` unless *reloc* is given and an edit
     needed it).
+
+    *parts* (PAD-470) are one mode's own text: ``{(original, mode class):
+    replacement}``.  That mode's references to the line (its numbered lines,
+    :mod:`.text_modes`; *reading* is that module's :class:`Reading` when the
+    caller has one) are pointed at a copy of the replacement in the
+    extension segment, and every other line keeps the string - with
+    *edits*' replacement for it, if any.  A string that mode alone shows is
+    simply its line: the replacement goes over it like any edit.
 
     *no_grow_why* is why the caller could not offer *reloc* (the write's own
     reason: a direct-SD destination, no ext4 growth on this host, an ELF that
@@ -536,8 +582,78 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
             return []
         return progreloc.retarget_writes(raw, ref, new_va)
 
+    # PAD-470: one mode's own text, before the lines every mode shares (the
+    # mode's references leave the census, so a relocation of the shared
+    # line below no longer moves them).
+    span_part = {}         # span offset -> (replacement, mode class)
+    part_found, part_applied = set(), set()
+    parts = {(decode_text(t), c): decode_text(v)
+             for (t, c), v in (parts or {}).items()}
+    if parts:
+        from . import text_modes
+        if reading is None:
+            reading = text_modes.read(raw, spans, census)
+        census = {o: list(rs) for o, rs in census.items()}
+        key = lambda r: (r["kind"], tuple(r["offs"]))          # noqa: E731
+        for off, text in spans:
+            for cls, new in sorted((c, v) for (t, c), v in parts.items()
+                                   if t == text):
+                have = census.get(off, [])
+                own = {key(r) for r in reading.refs_of(off, cls)}
+                mine = [r for r in have if key(r) in own]
+                if not mine:
+                    continue
+                part_found.add((text, cls))
+                label = reading.label(cls)
+                where = "%s's line" % label
+                if not _fmt_ok(text, new, where):
+                    continue
+                if len(new) > MAX_EDIT_LEN:
+                    log('Program text: "%s" -> "%s" (%s) is %d bytes; the '
+                        "longest a line can be is %d bytes. Skipped."
+                        % (enc(text), enc(new), where, len(new),
+                           MAX_EDIT_LEN), "warning")
+                    continue
+                left = [r for r in have if key(r) not in own]
+                if not left:
+                    # every reference to this string is the mode's: the
+                    # string is its line, edited like any other below
+                    span_part[off] = (new, cls)
+                    continue
+                if blob is None:
+                    log('Program text: "%s" -> "%s" for %s only needs a copy '
+                        "of the line of its own, and this write can't place "
+                        "text in new space%s; skipped. Every mode keeps "
+                        "sharing the line until a write that can."
+                        % (enc(text), enc(new), label, why_write), "warning")
+                    continue
+                va = blob.place(new)
+                if va is None:
+                    log('Program text: "%s" -> "%s" for %s only needs new '
+                        "space and the free space for longer text (%d KB) is "
+                        "used up; skipped."
+                        % (enc(text), enc(new), label,
+                           (blob.capacity + 1023) // 1024), "warning")
+                    continue
+                moved = []
+                for r in mine:
+                    moved.extend(_retarget(r, va))
+                writes.extend(moved)
+                census[off] = left
+                part_applied.add((text, cls))
+                log('Program text: "%s" -> "%s" in %s only (a copy in new '
+                    "space, %d reference word(s) repointed; the other "
+                    "modes keep the line)." % (enc(text), enc(new), label,
+                                               len(moved)), "info")
+        for (t, c) in parts:
+            if (t, c) not in part_found:
+                log('Program text: "%s" for %s: this card\'s game program '
+                    "has no line of it that mode alone shows; skipped."
+                    % (enc(t), reading.label(c)), "warning")
+
     for off, text in spans:
-        full_new = edits.get(text)
+        part = span_part.get(off)
+        full_new = part[0] if part else edits.get(text)
         tinfos = tails.get(off, [])
         tail_edits = [(d, tt, refs, edits.get(tt)) for (d, tt, refs) in tinfos]
         if full_new is None and not any(tn is not None
@@ -710,7 +826,10 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
                 moved += len(ws)
 
         writes.extend(span_writes)
-        applied.add(text if full_new is not None else None)
+        if part:
+            part_applied.add((text, part[1]))
+        else:
+            applied.add(text if full_new is not None else None)
         for d, tt, _p, tn in tail_edits:
             if tn is not None and tt in edits:
                 applied.add(tt)
@@ -724,6 +843,8 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
                           moved))
             else:
                 how = " (standalone-name pointer moved)" if moved else ""
+            if part:
+                how += " (%s's line: that mode alone shows it)" % reading.label(part[1])
             log('Program text: "%s" -> "%s"%s.' % (enc(text), enc(new_full), how),
                 "info")
         for tt, tn in followed:
@@ -774,4 +895,4 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
                 "settings and Write again." % encode_text(clashes[0]),
                 "warning")
             return [], 0, b""
-    return writes, len(applied), blob_bytes
+    return writes, len(applied) + len(part_applied), blob_bytes

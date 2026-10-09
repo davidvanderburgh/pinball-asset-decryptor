@@ -20,6 +20,10 @@
 .text-card .toolbar .text-find-n { flex: none; padding-right: 8px; }
 .text-table { flex: 1 1 0; min-height: 132px; }
 .tbl .c.pre { white-space: pre; }
+/* PAD-470: a mode's own text for a line several modes show, and the Shown in cell */
+.text-pairmark { color: var(--accent); margin-right: 6px; }
+.text-in-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.text-in-cell.pair { color: var(--accent); }
 
 /* the editor under the list */
 .text-card > .ft { display: block; padding: 10px 16px; }

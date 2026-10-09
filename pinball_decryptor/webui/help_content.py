@@ -980,6 +980,20 @@ HELP_CONTENT = {
          "BIOLLANTE.\n\n"
          "The app moves the pointer for you. If the two don't agree, the build log "
          "says so and leaves that line alone."),
+        ("Which mode shows a line (Spike 2)",
+         "The **Shown in** column names the battles, multiballs and other modes of "
+         "the game that show each game-program line, read from the card's game "
+         "program (Stern titles whose modes the app can tell apart, such as "
+         "Godzilla).\n\n"
+         "- A line several modes show has a **row for each mode** under it "
+         "(marked ↳). Left blank, that mode shows the line's text; given its own, "
+         "only that mode shows it.\n"
+         "- Two lines that read the same are one row until then: on a card where the "
+         "Gigan and Megalon battles' awards were both renamed to the same words, "
+         "each battle gets its row back.\n"
+         "- When other modes share the string, a mode's own text is a copy placed "
+         "in a new area of the game program, so it needs the card built as an "
+         "image, like longer lines."),
         ("Apply to all",
          "**Apply to every scene with the same original text** makes the same edit "
          "everywhere that exact line appears (many lines repeat once per scene)."),

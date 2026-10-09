@@ -173,9 +173,11 @@ def is_running():
     return any(line.strip().lstrip("﻿") for line in text.splitlines())
 
 
-def registered_distro_names():
-    """Every registered distro's name as WSL spells it, from
-    ``HKCU\\...\\Lxss``; None when the registry cannot be read.
+def registered_distros():
+    """``[(name, base_path)]`` for every registered distro, from
+    ``HKCU\\...\\Lxss``: the name as WSL spells it and the folder its
+    ``ext4.vhdx`` lives in (``""`` when the key has none).  None when the
+    registry cannot be read.
 
     Never runs wsl.exe, which is the point of it: it still answers when WSL
     itself is stuck and every wsl.exe call hangs (PAD-490)."""
@@ -184,7 +186,7 @@ def registered_distro_names():
     except ImportError:
         return None
     base = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
-    names = []
+    out = []
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
             i = 0
@@ -196,13 +198,27 @@ def registered_distro_names():
                 i += 1
                 try:
                     with winreg.OpenKey(k, sub) as dk:
-                        names.append(
-                            winreg.QueryValueEx(dk, "DistributionName")[0])
+                        name = winreg.QueryValueEx(dk, "DistributionName")[0]
+                        try:
+                            path = winreg.QueryValueEx(dk, "BasePath")[0]
+                        except OSError:
+                            path = ""
                 except OSError:
                     continue
+                # BasePath often carries the \\?\ extended-length prefix.
+                if path.startswith("\\\\?\\"):
+                    path = path[4:]
+                out.append((name, path))
     except OSError:
         return None
-    return names
+    return out
+
+
+def registered_distro_names():
+    """Every registered distro's name as WSL spells it; None when the
+    registry cannot be read.  Never runs wsl.exe (:func:`registered_distros`)."""
+    distros = registered_distros()
+    return None if distros is None else [name for name, _path in distros]
 
 
 def _lxss_names():

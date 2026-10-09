@@ -884,27 +884,50 @@ def _diagnose_wsl_silent() -> Tuple[str, str]:
     and the hint still puts un-sticking WSL ahead of an install that would
     not help.
 
-    THE CURE IS THE ONE THAT WORKED FOR HIM.  His Task Manager held a dozen
-    wsl.exe processes, each a call waiting on WSL, and ending every one of
-    them is what brought WSL back - no restart, and no `wsl --shutdown`,
-    which is one more wsl.exe call into the same stuck WSL.  So the message
-    counts them (tasklist never touches WSL) and the hint starts there."""
+    ENDING THE WAITING wsl.exe IS NOT THE CURE.  His Task Manager held a
+    dozen wsl.exe, each a call waiting on WSL; ending them all made the
+    error vanish - and it came back minutes later, because WSL itself was
+    still stuck underneath.  So the message counts them (tasklist never
+    touches WSL), but the fix restarts WSL itself.
+
+    AND IT SAYS HOW FULL THE DRIVE UNDER WSL IS.  A distro's ext4.vhdx grows
+    on a Windows drive as Linux writes, while df inside Linux reports the
+    virtual disk's room (up to 1 TB), so nothing in Linux sees that drive
+    filling - and WSL freezes when it does.  The registry names each disk's
+    folder, so the free space is one disk_usage away, still without WSL."""
     from . import wsl_disk
-    names = wsl_disk.registered_distro_names() or []
+    distros = wsl_disk.registered_distros() or []
+    names = [name for name, _path in distros]
     waiting = _wsl_exe_count()
     stuck = (f", and {waiting} wsl.exe "
              f"{'process is' if waiting == 1 else 'processes are'} stuck "
              f"waiting on it" if waiting else "")
-    cure = ("In Task Manager's Details tab, end every wsl.exe, then click "
-            "'Re-check' above the tabs. If it still does not answer, "
-            "restart Windows.")
+    space = _wsl_host_space(distros)
+    low = space is not None and space[1] < WSL_HOST_LOW_FREE
+    cure = ("Run 'wsl --shutdown' in PowerShell (if that hangs too, restart "
+            "Windows: use Restart, not Shut down), then click 'Re-check' "
+            "above the tabs. Ending the stuck wsl.exe in Task Manager only "
+            "clears them for a while; WSL itself stays stuck until it "
+            "restarts.")
+    if low:
+        drive, free = space
+        why = (f" {drive} has only {free / 1024 ** 3:.1f} GB free, and WSL's "
+               f"disk grows on it: WSL freezes when that drive fills up, so "
+               f"that is the likely cause, not a missing install.")
+        cure = (f"Free some space on {drive} first: WSL's disk cannot grow "
+                f"without it. Then: " + cure)
+    else:
+        why = (" That is WSL stuck, which usually follows a hang or a crash, "
+               "not a missing install.")
+        if space is not None:
+            why += (f" WSL's disk is on {space[0]}, which has "
+                    f"{space[1] / 1024 ** 3:.1f} GB free.")
     if names:
         listed = ", ".join(names)
         return (f"WSL is installed ({listed} "
                 f"{'is' if len(names) == 1 else 'are'} registered), but it "
                 f"is not answering: wsl.exe gave no reply within "
-                f"{PROBE_TIMEOUT}s{stuck}. That is WSL stuck, which usually "
-                f"follows a hang or a crash, not a missing install.",
+                f"{PROBE_TIMEOUT}s{stuck}." + why,
                 "WSL is installed, so do not install it again. " + cure)
     return (f"WSL did not answer: wsl.exe gave no reply within "
             f"{PROBE_TIMEOUT}s{stuck}, so this check could not tell whether "
@@ -912,6 +935,39 @@ def _diagnose_wsl_silent() -> Tuple[str, str]:
             f"a crash), and so can a PC too busy to start it.",
             cure + " 'Install Missing' is only the fix once the check says "
             "WSL is not installed.")
+
+
+#: Below this much free space on a drive that holds a WSL disk, a silent WSL
+#: is most likely that drive filling up: the .vhdx grows on it as Linux
+#: writes (a card copied into the emulator's cache is gigabytes), and WSL
+#: freezes when it cannot (PAD-490).
+WSL_HOST_LOW_FREE = 5 * 1024 ** 3
+
+
+def _wsl_host_space(distros) -> Optional[Tuple[str, int]]:
+    """``(drive, free_bytes)`` for the fullest Windows drive holding one of
+    *distros*' disks (``[(name, base_path)]``); None when none can be read.
+
+    ntpath, not os.path: the registry's paths are Windows paths whatever the
+    tests run on.  disk_usage never asks WSL anything."""
+    import ntpath
+    best = None
+    seen = set()
+    for _name, path in distros:
+        drive = ntpath.splitdrive(path or "")[0].upper()
+        if not drive or drive in seen:
+            continue
+        seen.add(drive)
+        free = None
+        for where in (path, drive + "\\"):
+            try:
+                free = shutil.disk_usage(where).free
+                break
+            except OSError:
+                continue
+        if free is not None and (best is None or free < best[1]):
+            best = (drive, free)
+    return best
 
 
 def _wsl_exe_count() -> int:

@@ -7,7 +7,9 @@ with an 8 s timeout, and under load the spawn/exec blew past it.  Fix: for a
 simple presence probe, resolve via shutil.which (a pure PATH scan, no
 subprocess) first, and only execute when the tool isn't on PATH.
 """
+import shutil
 import subprocess
+import types
 
 import pytest
 
@@ -89,8 +91,9 @@ def _wsl_env(monkeypatch):
     monkeypatch.setattr(prereqs, "_wsl_boot_wait_failed", False)
     monkeypatch.setattr(prereqs, "_wsl_silent", None)
     monkeypatch.setattr(prereqs, "_virtualization_disabled", lambda: False)
-    monkeypatch.setattr(wsl_disk, "registered_distro_names", lambda: [])
+    monkeypatch.setattr(wsl_disk, "registered_distros", lambda: [])
     monkeypatch.setattr(prereqs, "_wsl_exe_count", lambda: 0)
+    monkeypatch.setattr(prereqs, "_wsl_host_space", lambda distros: None)
 
 
 def _scripted_run(monkeypatch, *, registered, probe_outcomes, calls):
@@ -197,7 +200,7 @@ def test_wsl_success_clears_boot_latch(monkeypatch):
 
 def _silent_wsl(monkeypatch, calls, answers_after=None):
     """Every wsl.exe call times out; after *answers_after* calls, every
-    in-VM probe answers 0 instead (WSL un-stuck, its wsl.exe processes ended)."""
+    in-VM probe answers 0 instead (WSL restarted and answering again)."""
     def _run(cmd, *a, **kw):
         assert cmd[0] in ("wsl", "wsl.exe"), cmd
         kind = ("list" if "-l" in cmd else
@@ -212,14 +215,18 @@ def _silent_wsl(monkeypatch, calls, answers_after=None):
     monkeypatch.setattr(prereqs.subprocess, "run", _run)
 
 
+def _registered(monkeypatch, *names, path=""):
+    monkeypatch.setattr(wsl_disk, "registered_distros",
+                        lambda: [(n, path) for n in names])
+
+
 def test_a_stuck_wsl_is_not_called_missing(monkeypatch):
     """The reporter's PC: the registry lists his distro, wsl.exe answers
-    nothing.  Say WSL is installed and stuck, send him to end the stuck
-    wsl.exe processes (what un-stuck his), and never to an install - and do not burn the 90 s boot wait on a
+    nothing.  Say WSL is installed and stuck, send him to restart WSL itself,
+    and never to an install - and do not burn the 90 s boot wait on a
     wsl.exe that could not even list its distros."""
     _wsl_env(monkeypatch)
-    monkeypatch.setattr(wsl_disk, "registered_distro_names",
-                        lambda: ["Ubuntu"])
+    _registered(monkeypatch, "Ubuntu")
     calls = []
     _silent_wsl(monkeypatch, calls)
     ok, msg, hint = prereqs._probe_wsl("echo ok")
@@ -228,7 +235,7 @@ def test_a_stuck_wsl_is_not_called_missing(monkeypatch):
     assert "not answering" in msg
     assert "not installed" not in msg.replace("not a missing install", "")
     assert "do not install it again" in hint
-    assert "end every wsl.exe" in hint and "Re-check" in hint
+    assert "wsl --shutdown" in hint and "Re-check" in hint
     assert "Install Missing" not in hint
     assert calls == [("probe", prereqs.PROBE_TIMEOUT),
                      ("list", prereqs.PROBE_TIMEOUT)]
@@ -245,7 +252,7 @@ def test_a_silent_wsl_with_nothing_registered_is_unknown_not_absent(
     assert ok is False
     assert "could not tell whether WSL is installed" in msg
     assert "WSL is not installed" not in msg
-    assert hint.index("end every wsl.exe") < hint.index("Install Missing")
+    assert hint.index("wsl --shutdown") < hint.index("Install Missing")
 
 
 def test_a_silent_status_is_not_a_missing_install(monkeypatch):
@@ -254,8 +261,7 @@ def test_a_silent_status_is_not_a_missing_install(monkeypatch):
     _wsl_env(monkeypatch)
     monkeypatch.setattr(prereqs, "_wsl_restart_pending", lambda: False)
     monkeypatch.setattr(prereqs, "_wsl_status_ok", lambda: None)
-    monkeypatch.setattr(wsl_disk, "registered_distro_names",
-                        lambda: ["Ubuntu-24.04", "PAD-Runtime"])
+    _registered(monkeypatch, "Ubuntu-24.04", "PAD-Runtime")
     msg, hint = prereqs._diagnose_wsl_unusable()
     assert "Ubuntu-24.04, PAD-Runtime are registered" in msg
     assert "WSL is not installed" not in msg
@@ -280,11 +286,9 @@ def test_list_and_status_time_out_as_unknown_not_no(monkeypatch):
 def test_a_silent_wsl_is_asked_once_per_row_then_clears(monkeypatch):
     """The next probe in the row (JJP has five) takes its one short try and
     says the same thing, without asking for the list again.  Once WSL
-    answers - say after the stuck wsl.exe are ended and Re-check - the
-    latch is gone."""
+    answers - say after `wsl --shutdown` and Re-check - the latch is gone."""
     _wsl_env(monkeypatch)
-    monkeypatch.setattr(wsl_disk, "registered_distro_names",
-                        lambda: ["Ubuntu"])
+    _registered(monkeypatch, "Ubuntu")
     calls = []
     _silent_wsl(monkeypatch, calls, answers_after=3)
     _ok, first, first_hint = prereqs._probe_wsl("echo ok")
@@ -311,20 +315,21 @@ def test_a_silent_wsl_is_not_asked_which_linux_it_is(monkeypatch):
         "WSL: Ubuntu (Ubuntu 24.04.4 LTS, WSL 2)"]
 
 
-def test_the_stuck_wsl_exe_are_counted_and_ending_them_comes_first(
+def test_the_stuck_wsl_exe_are_counted_but_ending_them_is_not_the_cure(
         monkeypatch):
-    """He had a dozen wsl.exe in Task Manager, and ending every one of them
-    is what brought WSL back.  The message says how many are waiting, and
-    the hint starts with ending them, before any restart."""
+    """He had a dozen wsl.exe in Task Manager.  Ending them all made the
+    error vanish, and it came back minutes later: WSL itself was still stuck.
+    The message counts them; the fix restarts WSL and says ending them only
+    clears them for a while."""
     _wsl_env(monkeypatch)
-    monkeypatch.setattr(wsl_disk, "registered_distro_names",
-                        lambda: ["Ubuntu"])
+    _registered(monkeypatch, "Ubuntu")
     monkeypatch.setattr(prereqs, "_wsl_exe_count", lambda: 12)
     _silent_wsl(monkeypatch, [])
     _ok, msg, hint = prereqs._probe_wsl("echo ok")
     assert "12 wsl.exe processes are stuck waiting on it" in msg
-    assert "Task Manager" in hint
-    assert hint.index("end every wsl.exe") < hint.index("restart Windows")
+    assert hint.index("wsl --shutdown") < hint.index("restart")
+    assert "Restart, not Shut down" in hint
+    assert "only clears them for a while" in hint
 
     monkeypatch.setattr(prereqs, "_wsl_silent", None)
     monkeypatch.setattr(prereqs, "_wsl_exe_count", lambda: 1)
@@ -335,6 +340,120 @@ def test_the_stuck_wsl_exe_are_counted_and_ending_them_comes_first(
     monkeypatch.setattr(prereqs, "_wsl_exe_count", lambda: 0)
     _ok, msg, _hint = prereqs._probe_wsl("echo ok")
     assert "stuck waiting" not in msg
+
+
+def test_a_nearly_full_drive_under_wsl_is_named_as_the_cause(monkeypatch):
+    """WSL's disk grows on a Windows drive while df inside Linux sees the
+    virtual disk's room, so nothing in Linux notices that drive filling - and
+    WSL freezes when it does.  Under WSL_HOST_LOW_FREE the message names the
+    drive as the likely cause and the fix frees space first."""
+    _wsl_env(monkeypatch)
+    _registered(monkeypatch, "Ubuntu")
+    monkeypatch.setattr(prereqs, "_wsl_host_space",
+                        lambda distros: ("C:", int(1.2 * 1024 ** 3)))
+    _silent_wsl(monkeypatch, [])
+    _ok, msg, hint = prereqs._probe_wsl("echo ok")
+    assert "C: has only 1.2 GB free" in msg
+    assert "likely cause" in msg
+    assert "hang or a crash" not in msg
+    assert hint.index("Free some space on C:") < hint.index("wsl --shutdown")
+    assert hint.startswith("WSL is installed, so do not install it again.")
+
+
+def test_a_roomy_drive_is_still_stated_as_a_fact(monkeypatch):
+    """Not the cause, but the next log a user pastes says it, so the first
+    reply does not have to ask."""
+    _wsl_env(monkeypatch)
+    _registered(monkeypatch, "Ubuntu")
+    monkeypatch.setattr(prereqs, "_wsl_host_space",
+                        lambda distros: ("D:", 41 * 1024 ** 3))
+    _silent_wsl(monkeypatch, [])
+    _ok, msg, hint = prereqs._probe_wsl("echo ok")
+    assert "WSL's disk is on D:, which has 41.0 GB free." in msg
+    assert "hang or a crash" in msg
+    assert "Free some space" not in hint
+
+
+def test_host_space_is_the_fullest_drive_holding_a_wsl_disk(monkeypatch):
+    """One disk_usage per drive (never WSL), the drive root when the folder
+    itself can't be read, and the fullest drive wins - that is the one that
+    can freeze WSL."""
+    asked = []
+    free = {"C:\\": 3 * 1024 ** 3, "D:\\": 90 * 1024 ** 3}
+
+    def _usage(where):
+        asked.append(where)
+        if where.upper() not in free:
+            raise FileNotFoundError(where)
+        return types.SimpleNamespace(free=free[where.upper()])
+
+    monkeypatch.setattr(prereqs.shutil, "disk_usage", _usage)
+    got = prereqs._wsl_host_space([
+        ("Ubuntu", r"C:\Users\x\AppData\Local\wsl\{guid}"),
+        ("PAD-Runtime", r"c:\Users\x\AppData\Local\pinball_decryptor"),
+        ("Data", r"D:\wsl\data"),
+        ("Odd", ""),
+    ])
+    assert got == ("C:", 3 * 1024 ** 3)
+    assert asked == [r"C:\Users\x\AppData\Local\wsl\{guid}", "C:\\",
+                     r"D:\wsl\data", "D:\\"]
+    assert prereqs._wsl_host_space([]) is None
+    assert prereqs._wsl_host_space([("Odd", "")]) is None
+
+
+class _FakeWinreg:
+    """Just enough of winreg for wsl_disk.registered_distros."""
+    HKEY_CURRENT_USER = "HKCU"
+
+    def __init__(self, keys):
+        self.keys = keys            # {guid: {value: data}}
+
+    class _Key:
+        def __init__(self, data):
+            self.data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def OpenKey(self, parent, sub):
+        if parent == "HKCU":
+            return self._Key(None)
+        if sub not in self.keys:
+            raise OSError(sub)
+        return self._Key(self.keys[sub])
+
+    def EnumKey(self, key, i):
+        guids = list(self.keys)
+        if i >= len(guids):
+            raise OSError("no more")
+        return guids[i]
+
+    def QueryValueEx(self, key, name):
+        if name not in key.data:
+            raise OSError(name)
+        return key.data[name], 1
+
+
+def test_registered_distros_read_name_and_disk_folder(monkeypatch):
+    """Names as WSL spells them, the disk folder without its \\\\?\\ prefix,
+    "" for a key with no BasePath, and a key with no name skipped."""
+    import sys as _sys
+    fake = _FakeWinreg({
+        "{a}": {"DistributionName": "Ubuntu",
+                "BasePath": "\\\\?\\C:\\Users\\x\\AppData\\Local\\wsl\\{a}"},
+        "{b}": {"DistributionName": "PAD-Runtime"},
+        "{c}": {"BasePath": "C:\\nameless"},
+    })
+    monkeypatch.setitem(_sys.modules, "winreg", fake)
+    assert wsl_disk.registered_distros() == [
+        ("Ubuntu", "C:\\Users\\x\\AppData\\Local\\wsl\\{a}"),
+        ("PAD-Runtime", ""),
+    ]
+    assert wsl_disk.registered_distro_names() == ["Ubuntu", "PAD-Runtime"]
+    assert wsl_disk._lxss_names() == {"ubuntu", "pad-runtime"}
 
 
 def test_wsl_exe_count_reads_tasklist_never_wsl(monkeypatch):
@@ -368,10 +487,10 @@ def test_wsl_exe_count_reads_tasklist_never_wsl(monkeypatch):
 
 def test_the_registry_names_keep_their_case_and_the_set_folds_it(
         monkeypatch):
-    monkeypatch.setattr(wsl_disk, "registered_distro_names",
-                        lambda: ["Ubuntu-24.04", "PAD-Runtime"])
+    monkeypatch.setattr(wsl_disk, "registered_distros",
+                        lambda: [("Ubuntu-24.04", ""), ("PAD-Runtime", "")])
     assert wsl_disk._lxss_names() == {"ubuntu-24.04", "pad-runtime"}
-    monkeypatch.setattr(wsl_disk, "registered_distro_names", lambda: None)
+    monkeypatch.setattr(wsl_disk, "registered_distros", lambda: None)
     assert wsl_disk._lxss_names() is None
 
 

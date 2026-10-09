@@ -804,14 +804,68 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
 |---|---|---|
 | screen, clip | the 32 new builds: a screen and a clip seen on the glass | `TITLE_SCENES` `screen_proven` / `clip_proven`; the item-164 proof (a mode with a screen and a clip, `glshot.sh`) |
 | multiball, ball save, stack | the 32 new builds (plus Elvira, Venom LE, TMNT LE, Godzilla LE ball save) | `MULTIBALL_PROVEN`, `BALL_SAVE_PROVEN`, `STACK_BALLS_PROVEN`: `C:\tmp\pad_generic\mb\mb_batch.sh`, `bs\bs_job.sh` through `rigbatch.sh` |
-| lights | the new builds whose `lamp` lines are not yet tied (Pro siblings of an LE port), and `LAMPS_PROVEN` for all 32 | the lights helper's branch `ticket/PAD-420-lights` ties 15 shipped builds' inserts to their shots (desk; its emulator trials failed to boot, not yet proven) |
+| lights | the new builds whose `lamp` lines are not yet tied (Pro siblings of an LE port), and `LAMPS_PROVEN` for all 32 | the lights helper's branch `ticket/PAD-420-lights` ties 15 shipped builds' inserts to their shots: on main as 740ee80c (its lamp lines and test identical), and all 15 are in `LAMPS_PROVEN` (PAD-483) |
 | shows | none left: every latest build names the game's own light shows (run 24; TMNT LE the last) | done in the emulator; a machine test of a non-Godzilla build's shows and of the lamp-group clean-up is the open proof |
 | scoop | proven (run 7) on Avengers LE 1.10, D&D LE 1.10, Guardians LE 1.15, Iron Maiden LE 1.18, Aerosmith LE 1.16 (the mechanisms helper's runs); 25 more staged (chain19) | Deadpool LE/Pro and James Bond Pro: the handler never saw a settled ball (a call probe of the device's handler next); Aerosmith Pro, Batman, JB 60th: the job closed the wrong switch (fix `mechs_conf.SCOOP`) |
 | held coils | PROVEN (run 8-9, `HELD_COILS_PROVEN`): Led Zeppelin Pro 1.22, Star Wars ELG 1.10, Sword of Rage LE/Pro 1.19, Deadpool LE 1.16 (their gates; generation B, the board-address route with the object taken). Re-running (chain23): Deadpool Pro, Led Zeppelin LE, Iron Maiden LE/Pro (up posts), Avengers LE/Pro (tower magnet, tower post), Jurassic Park LE/Pro (T-Rex magnet, up posts) | A' and B are staged; C (the Device framework, most titles) needs the powers its gate service uses read first (docs/plans/mode_coils_census.md). Every hold power is the game's own |
 | magnet (Mode > Magnet) | Godzilla only | the magnet part also needs `magnet_shot`; a title's magnet can be offered as a held coil first |
-| shaker | none here | PAD-414 (awaiting approval) adds the shaker part; `ticket/PAD-420-shaker` is a duplicate and is not merged |
+| shaker | Godzilla LE only (PAD-414); the other latest builds with a shaker are PAD-474 | `ticket/PAD-420-shaker` duplicated PAD-414's runtime and was deleted (PAD-483); its desk reader `shaker_lines.py` (the game's own shake routine on any build) is noted on PAD-474 |
 | countdown | Aerosmith, John Wick, Elvira: the voice never says a number | `COUNTDOWN_NO_NUMBERS`: decide with David whether a countdown there is a number on screen only, with the section saying so in grey |
 
 Helper branches from the first run (pushed, not merged): `ticket/PAD-420-lights`, `ticket/PAD-420-balls` (a runtime
 guard: a port's mode table that is not the game's is left out instead of crashing it; changes the prebuilt object,
 needs a library sweep before it lands), `ticket/PAD-420-mechs` (WIP), `ticket/PAD-420-shaker` (superseded by PAD-414).
+
+**PAD-483 (2026-10-09) landed or retired all four.** All four heads are kept in `C:/tmp/PAD-483/pad420-helpers.bundle`
+(`git fetch <bundle> refs/remotes/origin/ticket/PAD-420-<name>:refs/heads/<name>` brings one back).
+- `lights` (51a62936): on main as 740ee80c (the same lamp lines and test), and its reader fix as d1b86d37; all 15
+  builds are in `LAMPS_PROVEN`. Deleted.
+- `mechs` (7263ce38, WIP): every piece is on main - `COIL_ROUTE_NEEDS`, `_drive_ok`, the runtime's board-address
+  route (route 1, `coil_drive`, `coil_disabled`, `c->ctl`) - and proven on the builds in `HELD_COILS_PROVEN`. Deleted.
+- `shaker` (268ef0d3): its runtime duplicated PAD-414's (on main, Godzilla LE). Deleted; its desk reader
+  `shaker_lines.py` (the game's own shake routine, found by `AD_SHAKER_MOTOR` and its error text, on any build) is
+  noted on PAD-474 with the restore command.
+- `balls` (40807736): NOT on main, and still needed - `port_derive` still copies `value stock_mode_count` from another
+  title (it counts as a framework value). Landed on ticket/PAD-483 (d95b8be5) with one fix, then the helper branch
+  and its worktree deleted:
+  * **The crash it guards, reproduced** (Venom LE 1.07, main's runtime, `C:/tmp/PAD-483/runs`): a port with the table
+    count 160 (94 real), another title's table address, or a code address: all three games segfault in `stock_class`
+    (pad_mode.so +0x7f10 / +0x7f7c) as the first ball starts. With the guard all three play the check to the end.
+  * **The first cut was wrong on real tables** - the "library sweep" caveat was right: it asked the ACTIVE slot before
+    the class, and a real table holds the title's other rules too (30 of Venom LE 1.07's 94 entries are crule
+    objects - lanes, bonus, skill shot - with shorter vtables). On Venom's own port it left 19 of them out as "not a
+    mode object" and counted them toward turning the route off. Fixed (04902924): the object and its typeinfo word
+    first, then the class, and only a MODE's slot must be code; a rule is class 0 as before the guard.
+  * **The three wrong tables again, with the fix** (`C:/tmp/PAD-483/runs2`): the count past the table (160) - 57 of
+    the 66 words past it left out, the route kept for the 94 real entries (its base-play modes named as usual); a
+    code address - 48 left out and the route turned off ("the port's mode table is not this game's"); another
+    title's table address - its entries are objects here, none of them a mode (class 0): nothing called, nothing
+    said, and the route sees no game mode running (a quiet answer, not "cannot tell"). All three play the check to
+    the end; main's object segfaults on all three.
+  * **Library sweep**: every one of the 43 shipped ports that carries a mode table takes the table route (none names
+    both of the manager's sites), so the walk runs on all of them. `jobs/guard_job.sh` (`C:/tmp/PAD-483/rb_sweep`,
+    the log `rb_sweep.log`): the port and the fixed object staged, the title's NVRAM fresh, Check this game; pass =
+    the check passed and the guard said nothing. The table's readability is checked every tick, in attract too, so all
+    43 say their table is readable here. The entries themselves are checked while a game is on (every entry at the
+    ball's start), so a build counts only when its check played a game:
+    - Round 1 (all 43): 34 passed; TMNT LE 1.59 played 20 of its 29 switches and the guard said nothing (its check
+      then never saw a drain end a ball - the ball saver kept giving it back). 35 proven.
+    - The other 8 never started a game. Not the guard: the table read as readable, and they sat in attract, Tech
+      Alerts, or the game the check's own Save & Exit had left hung (that Save & Exit restarts the game). Round 2
+      (`guard_job2.sh`, the title's EEPROM image set aside: it is shared by every build of a title on a slot)
+      changed nothing - Guided Setup came back after each Save & Exit. Round 3 (`guard_job3.sh`, PAD-420's
+      harness rules: Guided Setup left by `bs/guided.sh`, the stage booted AGAIN, coins one at a time): Avengers LE
+      1.09, Iron Maiden LE 1.16, Mando LE 1.44, Rush LE 1.18, Sword of Rage LE 1.18 and Pro 1.19 all played their
+      check (20 to 40 switches, a ball drained) with nothing left out. 41 proven.
+    - D&D LE 1.10 and 1.00 start no game on today's rig, with the fix OR with main's object (the control,
+      `C:/tmp/PAD-483/rerun6`), on a fresh NVRAM, a seeded one (slot 4's, `jobs/guard_job5.sh`) or with no ball reset
+      (`jobs/guard_job6.sh`): in attract the game ejects a ball and auto-plunges it every ~8 s, the feeder brings it
+      home "untouched", and the game never takes Start (`padball.log`; the feeder's notes on D&D LE's attract search,
+      `ballfeed.py`, say it should settle - here it never does). PAD-420's D&D LE 1.10 check on 2026-10-07
+      (`C:/tmp/PAD-420/check7`) DID play, on the same table (0x00717758, 75 entries, slot 56) with the unguarded walk:
+      no crash, its base-play modes named. The fixed guard refuses only what that walk could not have followed (an
+      unreadable or misaligned object or typeinfo word; a mode whose ACTIVE slot is not code), so D&D LE 1.10 is
+      covered by that run. D&D LE 1.00 (not the latest build) has no game on record anywhere: only its table's
+      readability is proven. The D&D LE rig start is its own problem, for a ticket of its own.
+    So **42 of the 43 proven** (41 in a game with the fix, D&D LE 1.10 by its unguarded game), D&D LE 1.00 readable
+    only. Jobs and logs: `C:/tmp/PAD-483/jobs`, `rb_*` and `rerun*`.

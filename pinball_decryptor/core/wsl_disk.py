@@ -173,15 +173,18 @@ def is_running():
     return any(line.strip().lstrip("﻿") for line in text.splitlines())
 
 
-def _lxss_names():
-    """Every registered distro's name, casefolded, from ``HKCU\\...\\Lxss``;
-    None when the registry cannot be read.  Never runs wsl.exe."""
+def registered_distro_names():
+    """Every registered distro's name as WSL spells it, from
+    ``HKCU\\...\\Lxss``; None when the registry cannot be read.
+
+    Never runs wsl.exe, which is the point of it: it still answers when WSL
+    itself is stuck and every wsl.exe call hangs (PAD-490)."""
     try:
         import winreg
     except ImportError:
         return None
     base = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
-    names = set()
+    names = []
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
             i = 0
@@ -193,14 +196,20 @@ def _lxss_names():
                 i += 1
                 try:
                     with winreg.OpenKey(k, sub) as dk:
-                        names.add(
-                            winreg.QueryValueEx(dk, "DistributionName")[0]
-                            .casefold())
+                        names.append(
+                            winreg.QueryValueEx(dk, "DistributionName")[0])
                 except OSError:
                     continue
     except OSError:
         return None
     return names
+
+
+def _lxss_names():
+    """Every registered distro's name, casefolded, from ``HKCU\\...\\Lxss``;
+    None when the registry cannot be read.  Never runs wsl.exe."""
+    names = registered_distro_names()
+    return None if names is None else {n.casefold() for n in names}
 
 
 def running_distros():

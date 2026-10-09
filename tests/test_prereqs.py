@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-from pinball_decryptor.core import prereqs
+from pinball_decryptor.core import prereqs, wsl_disk
 from pinball_decryptor.core.prereqs import Prerequisite, check_prerequisite
 
 
@@ -81,12 +81,15 @@ def _wsl_env(monkeypatch):
 
     Firmware virtualization defaults to fine — the real probe would spawn
     powershell, which the scripted subprocess fakes (rightly) reject.
-    Virtualization-specific tests override this."""
+    Virtualization-specific tests override this.  The registry lists no
+    distro unless a test says so - never the developer's own."""
     monkeypatch.setattr(prereqs.sys, "platform", "win32")
     monkeypatch.setattr(prereqs.shutil, "which",
                         lambda name, path=None: r"C:\Windows\System32\wsl.exe")
     monkeypatch.setattr(prereqs, "_wsl_boot_wait_failed", False)
+    monkeypatch.setattr(prereqs, "_wsl_silent", None)
     monkeypatch.setattr(prereqs, "_virtualization_disabled", lambda: False)
+    monkeypatch.setattr(wsl_disk, "registered_distro_names", lambda: [])
 
 
 def _scripted_run(monkeypatch, *, registered, probe_outcomes, calls):
@@ -179,6 +182,140 @@ def test_wsl_success_clears_boot_latch(monkeypatch):
     ok, msg, hint = prereqs._probe_wsl("echo ok")
     assert ok is True
     assert prereqs._wsl_boot_wait_failed is False
+
+
+# ---------------------------------------------------------------------------
+# A wsl.exe that answers NOTHING (PAD-490).
+#
+# After a hang, every wsl.exe call on a user's PC timed out: the probe, then
+# `wsl -l -q`, then `wsl --status`.  Each timeout was read as "no", so the
+# check walked down to "WSL is not installed on this machine" while Task
+# Manager showed WSL running.  The timings in his log (60 s, then 52 s on
+# Re-check) are exactly those calls' timeouts added up.
+# ---------------------------------------------------------------------------
+
+def _silent_wsl(monkeypatch, calls, answers_after=None):
+    """Every wsl.exe call times out; after *answers_after* calls, every
+    in-VM probe answers 0 instead (WSL un-stuck by a `wsl --shutdown`)."""
+    def _run(cmd, *a, **kw):
+        assert cmd[0] in ("wsl", "wsl.exe"), cmd
+        kind = ("list" if "-l" in cmd else
+                "status" if "--status" in cmd else "probe")
+        calls.append((kind, kw.get("timeout")))
+        if answers_after is not None and len(calls) > answers_after \
+                and kind == "probe":
+            return subprocess.CompletedProcess(cmd, 0, stdout="ok\n",
+                                               stderr="")
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kw.get("timeout"))
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+
+
+def test_a_stuck_wsl_is_not_called_missing(monkeypatch):
+    """The reporter's PC: the registry lists his distro, wsl.exe answers
+    nothing.  Say WSL is installed and stuck, send him to `wsl --shutdown`,
+    and never to an install - and do not burn the 90 s boot wait on a
+    wsl.exe that could not even list its distros."""
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(wsl_disk, "registered_distro_names",
+                        lambda: ["Ubuntu"])
+    calls = []
+    _silent_wsl(monkeypatch, calls)
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
+    assert ok is False
+    assert "WSL is installed (Ubuntu is registered)" in msg
+    assert "not answering" in msg
+    assert "not installed" not in msg.replace("not a missing install", "")
+    assert "do not install it again" in hint
+    assert "wsl --shutdown" in hint and "Re-check" in hint
+    assert "Install Missing" not in hint
+    assert calls == [("probe", prereqs.PROBE_TIMEOUT),
+                     ("list", prereqs.PROBE_TIMEOUT)]
+
+
+def test_a_silent_wsl_with_nothing_registered_is_unknown_not_absent(
+        monkeypatch):
+    """No distro in the registry and no answer from wsl.exe: the check can
+    not tell, so it says so - and the un-sticking comes before any install."""
+    _wsl_env(monkeypatch)
+    calls = []
+    _silent_wsl(monkeypatch, calls)
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
+    assert ok is False
+    assert "could not tell whether WSL is installed" in msg
+    assert "WSL is not installed" not in msg
+    assert hint.index("wsl --shutdown") < hint.index("Install Missing")
+
+
+def test_a_silent_status_is_not_a_missing_install(monkeypatch):
+    """`wsl -l -q` answered "none", `wsl --status` then said nothing: that
+    is still not "not installed"."""
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs, "_wsl_restart_pending", lambda: False)
+    monkeypatch.setattr(prereqs, "_wsl_status_ok", lambda: None)
+    monkeypatch.setattr(wsl_disk, "registered_distro_names",
+                        lambda: ["Ubuntu-24.04", "PAD-Runtime"])
+    msg, hint = prereqs._diagnose_wsl_unusable()
+    assert "Ubuntu-24.04, PAD-Runtime are registered" in msg
+    assert "WSL is not installed" not in msg
+
+
+def test_list_and_status_time_out_as_unknown_not_no(monkeypatch):
+    def _timeout(cmd, *a, **kw):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kw.get("timeout"))
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _timeout)
+    assert prereqs._wsl_distro_registered() is None
+    assert prereqs._wsl_status_ok() is None
+
+    def _absent(cmd, *a, **kw):
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _absent)
+    assert prereqs._wsl_distro_registered() is False
+    assert prereqs._wsl_status_ok() is False
+
+
+def test_a_silent_wsl_is_asked_once_per_row_then_clears(monkeypatch):
+    """The next probe in the row (JJP has five) takes its one short try and
+    says the same thing, without asking for the list again.  Once WSL
+    answers - say after `wsl --shutdown` and Re-check - the latch is gone."""
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(wsl_disk, "registered_distro_names",
+                        lambda: ["Ubuntu"])
+    calls = []
+    _silent_wsl(monkeypatch, calls, answers_after=3)
+    _ok, first, first_hint = prereqs._probe_wsl("echo ok")
+    ok2, second, second_hint = prereqs._probe_wsl("command -v pigz")
+    assert ok2 is False
+    assert (second, second_hint) == (first, first_hint)
+    assert calls == [("probe", prereqs.PROBE_TIMEOUT),
+                     ("list", prereqs.PROBE_TIMEOUT),
+                     ("probe", prereqs.PROBE_TIMEOUT)]
+    ok3, _msg, _hint = prereqs._probe_wsl("echo ok")
+    assert ok3 is True
+    assert prereqs._wsl_silent is None
+
+
+def test_a_silent_wsl_is_not_asked_which_linux_it_is(monkeypatch):
+    """The "WSL: Ubuntu (24.04, WSL 2)" log line costs two more wsl.exe
+    calls; on a wsl.exe that just answered nothing that is 16 s of waiting
+    for an empty line."""
+    _release(monkeypatch, NOBLE)
+    monkeypatch.setattr(prereqs, "_wsl_silent", ("stuck", "shutdown"))
+    assert prereqs.wsl_release_lines() == []
+    monkeypatch.setattr(prereqs, "_wsl_silent", None)
+    assert prereqs.wsl_release_lines() == [
+        "WSL: Ubuntu (Ubuntu 24.04.4 LTS, WSL 2)"]
+
+
+def test_the_registry_names_keep_their_case_and_the_set_folds_it(
+        monkeypatch):
+    monkeypatch.setattr(wsl_disk, "registered_distro_names",
+                        lambda: ["Ubuntu-24.04", "PAD-Runtime"])
+    assert wsl_disk._lxss_names() == {"ubuntu-24.04", "pad-runtime"}
+    monkeypatch.setattr(wsl_disk, "registered_distro_names", lambda: None)
+    assert wsl_disk._lxss_names() is None
 
 
 # ---------------------------------------------------------------------------

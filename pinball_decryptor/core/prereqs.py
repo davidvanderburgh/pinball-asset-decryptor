@@ -40,6 +40,12 @@ WSL_BOOT_TIMEOUT = 90
 # per probe on a VM that isn't coming up; any successful probe clears it.
 _wsl_boot_wait_failed = False
 
+# Latch: the (message, hint) said when wsl.exe itself did not answer - not
+# even `wsl -l -q`, which needs no VM (PAD-490).  While set, a later probe
+# that times out says the same at once instead of asking a stuck wsl.exe two
+# more questions; any successful probe clears it.
+_wsl_silent: Optional[Tuple[str, str]] = None
+
 
 @dataclass(frozen=True)
 class Prerequisite:
@@ -299,8 +305,14 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
     the prerequisite installer told him it was already there — neither
     half of the app naming the thing that was actually wrong (PAD-73).
     See :func:`_diagnose_wsl_loop_failure`.
+
+    And one state before any of those: a wsl.exe that answers NOTHING.  A
+    timeout is not a "no", but it used to be read as one all the way down -
+    the registration list timed out, ``wsl --status`` timed out, and a user
+    whose WSL had wedged after a hang was told it was not installed while
+    Task Manager showed it running (PAD-490).  See :func:`_diagnose_wsl_silent`.
     """
-    global _wsl_boot_wait_failed
+    global _wsl_boot_wait_failed, _wsl_silent
     if sys.platform != "win32":
         return True, "n/a (non-Windows)", ""
 
@@ -318,9 +330,17 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
         # Re-check right after installing WSL; restarting the app minutes
         # later (VM up by then) said OK.  Distinguish cold from absent via
         # the registration list, then wait the boot out.
+        if _wsl_silent is not None:
+            return False, _wsl_silent[0], _wsl_silent[1]
         if _wsl_boot_wait_failed:
             return False, f"timed out after {PROBE_TIMEOUT}s", ""
-        if not _wsl_distro_registered():
+        registered = _wsl_distro_registered()
+        if registered is None:
+            # Not even the list answered, and it needs no VM: this is not a
+            # booting distro to wait for, it is wsl.exe itself stuck.
+            _wsl_silent = _diagnose_wsl_silent()
+            return False, _wsl_silent[0], _wsl_silent[1]
+        if not registered:
             msg, hint = _diagnose_wsl_unusable()
             return False, msg, hint
         try:
@@ -334,6 +354,7 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
 
     if result.returncode == 0:
         _wsl_boot_wait_failed = False
+        _wsl_silent = None
         out = (result.stdout or "").strip().splitlines()
         return True, out[0] if out else "available", ""
 
@@ -341,7 +362,11 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
     # tool inside it is missing/broken — the static hint (an apt install)
     # is the right advice.  Without one, the "error" is just wsl.exe
     # saying there is nothing to run the command in.
-    if not _wsl_distro_registered():
+    registered = _wsl_distro_registered()
+    if registered is None:
+        _wsl_silent = _diagnose_wsl_silent()
+        return False, _wsl_silent[0], _wsl_silent[1]
+    if not registered:
         msg, hint = _diagnose_wsl_unusable()
         return False, msg, hint
     lines = (result.stderr or result.stdout or "").strip().splitlines()
@@ -386,14 +411,19 @@ def _run_in_wsl(cmd: str, timeout: float) -> subprocess.CompletedProcess:
     )
 
 
-def _wsl_distro_registered() -> bool:
-    """True when WSL has at least one registered distro.
+def _wsl_distro_registered() -> Optional[bool]:
+    """True when WSL has at least one registered distro; None when wsl.exe
+    did not answer at all.
 
     ``wsl -l -q`` is answered by wslservice straight from the registry —
     fast, and no VM boot — and exits non-zero both when the WSL feature is
     absent and when no distro is installed yet.  Output is ignored on
     purpose: wsl.exe prints UTF-16LE (``text=True`` would mangle it) and
-    only the exit code matters here."""
+    only the exit code matters here.
+
+    A timeout is None, never False: a list that needs no VM and still does
+    not come back in PROBE_TIMEOUT is WSL stuck, and reading it as "no
+    distro" is what told PAD-490 his WSL was not installed."""
     try:
         return subprocess.run(
             ["wsl", "-l", "-q"],
@@ -401,7 +431,9 @@ def _wsl_distro_registered() -> bool:
             timeout=PROBE_TIMEOUT,
             creationflags=_CREATE_FLAGS,
         ).returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
+    except subprocess.TimeoutExpired:
+        return None
+    except OSError:
         return False
 
 
@@ -540,7 +572,12 @@ def wsl_release_lines() -> List[str]:
     was always a request for `wsl -l -v`.  It is one line, it costs a command
     on a VM that is already up, and it turns that round trip into a fact the
     log already carries.
+
+    Nothing when the probes just found wsl.exe silent: two more questions it
+    will not answer cost 16 s and say nothing (PAD-490).
     """
+    if _wsl_silent is not None:
+        return []
     ours = runtime.wsl_distro()
     name, wsl_ver = _wsl_default_distro(want=ours)
     distro_id, version, pretty = wsl_release()
@@ -731,9 +768,11 @@ def _wsl_restart_pending() -> bool:
     return bool(boot_id) and marker == boot_id
 
 
-def _wsl_status_ok() -> bool:
+def _wsl_status_ok() -> Optional[bool]:
     """True when the WSL framework itself is installed and answering
-    (``wsl --status`` exits 0 even with zero distros registered)."""
+    (``wsl --status`` exits 0 even with zero distros registered); None when
+    it did not answer in time, which says nothing about whether it is
+    installed (PAD-490)."""
     try:
         return subprocess.run(
             ["wsl", "--status"],
@@ -741,7 +780,9 @@ def _wsl_status_ok() -> bool:
             timeout=PROBE_TIMEOUT,
             creationflags=_CREATE_FLAGS,
         ).returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
+    except subprocess.TimeoutExpired:
+        return None
+    except OSError:
         return False
 
 
@@ -815,7 +856,10 @@ def _diagnose_wsl_unusable() -> Tuple[str, str]:
                 "Restart Windows (use Restart; with Fast Startup, Shut "
                 "down is not a restart), then click 'Install Missing' "
                 "above the tabs to finish.")
-    if _wsl_status_ok():
+    status = _wsl_status_ok()
+    if status is None:
+        return _diagnose_wsl_silent()
+    if status:
         return ("WSL is enabled, but no Linux distro is installed yet — "
                 "normal right after the post-install restart; one step "
                 "remains.",
@@ -825,3 +869,38 @@ def _diagnose_wsl_unusable() -> Tuple[str, str]:
     return ("WSL is not installed on this machine.",
             "Click 'Install Missing' above the tabs — it installs WSL2 + "
             "Ubuntu and asks for one Windows restart.")
+
+
+def _diagnose_wsl_silent() -> Tuple[str, str]:
+    """(message, hint) when wsl.exe itself did not answer in PROBE_TIMEOUT.
+
+    PAD-490: after a hang, every wsl.exe call on a user's PC timed out - the
+    probe, ``wsl -l -q``, ``wsl --status`` - and each timeout was read as
+    "no", so the check walked all the way down to "WSL is not installed on
+    this machine" while Task Manager showed WSL running.  Silence is not an
+    answer.  The registry is: it lists every registered distro and reading
+    it never waits on WSL, so when it names one the message can say WSL IS
+    installed.  When it names none the honest answer is "could not tell",
+    and the hint still puts the restart that un-sticks WSL ahead of an
+    install that would not help."""
+    from . import wsl_disk
+    names = wsl_disk.registered_distro_names() or []
+    if names:
+        listed = ", ".join(names)
+        return (f"WSL is installed ({listed} "
+                f"{'is' if len(names) == 1 else 'are'} registered), but it "
+                f"is not answering: wsl.exe gave no reply within "
+                f"{PROBE_TIMEOUT}s. That is WSL stuck, which usually follows "
+                f"a hang or a crash, not a missing install.",
+                "WSL is installed, so do not install it again. Run "
+                "'wsl --shutdown' in PowerShell, wait ten seconds, then "
+                "click 'Re-check' above the tabs. If it still does not "
+                "answer, restart Windows.")
+    return (f"WSL did not answer: wsl.exe gave no reply within "
+            f"{PROBE_TIMEOUT}s, so this check could not tell whether WSL is "
+            f"installed. A stuck WSL does that (often after a hang or a "
+            f"crash), and so can a PC too busy to start it.",
+            "Run 'wsl --shutdown' in PowerShell, wait ten seconds, then "
+            "click 'Re-check' above the tabs. If it still does not answer, "
+            "restart Windows. 'Install Missing' is only the fix once the "
+            "check says WSL is not installed.")

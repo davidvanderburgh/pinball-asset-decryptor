@@ -565,6 +565,23 @@ pad_guest_up() {
     [ -n "$(pad_pids -f 'arm-binfmt|qemu-arm')" ]
 }
 
+# ---- THE GAME'S SPEED (PAD-484), FOR THE SHELL HALF OF THE HARNESS --------
+#
+# PAD_SPEED=k (padspeed.py) runs the game's clock k times the wall's, and the
+# shim says so in dump/padspeed ("x4.000 game_ms=..."); watch.sh removes the
+# file at every start, so a run nobody sped up reads 1. A script's wait that
+# models the game's time - a hand between two presses, a ball in play - sleeps
+# pad_gsleep, k times shorter; a wait FOR something (a state, a log line) stays
+# a plain sleep in a loop, because how long that takes is the CPU's business.
+pad_speed() {
+    local v
+    v=$(sed -n 's/^x\([0-9.]*\).*/\1/p' "$ROOT/dump/padspeed" 2>/dev/null | head -1)
+    echo "${v:-1}"
+}
+pad_gsleep() {                    # <game seconds>
+    sleep "$(awk -v s="$1" -v k="$(pad_speed)" 'BEGIN { if (k + 0 <= 0) k = 1; printf "%.3f", s / k }')"
+}
+
 # ---- WHAT A CHECKPOINTABLE BOOT NEEDS AND AN ORDINARY ONE DOES NOT --------
 #
 # PAD_PIVOT=1 (item 13, save states) gives the guest its own root with

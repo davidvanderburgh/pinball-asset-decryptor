@@ -53,7 +53,9 @@ def test_the_pause_fields_close_the_block():
     assert padsw.OFF_PAUSE_REQ == 1092
     assert (padsw.OFF_STOP_WANT, padsw.OFF_STOP_GEN,
             padsw.OFF_STOP_N, padsw.OFF_STOP_ACK) == (1096, 1100, 1104, 1108)
-    assert padsw.SIZE == 1112
+    # PAD-484's game speed follows them; the pause fields did not move
+    assert (padsw.OFF_SPEED_REQ, padsw.OFF_SPEED_NOW) == (1112, 1116)
+    assert padsw.SIZE == 1120
 
 
 @pytest.mark.skipif(not shutil.which("gcc"), reason="no C compiler")

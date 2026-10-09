@@ -1,7 +1,7 @@
 #!/bin/bash
 # rigbatch.sh - run one job over a list of builds, spread across several rigs.
 #
-#   rigbatch.sh [-n RIGS] [--who PAD-n] [--out DIR]
+#   rigbatch.sh [-n RIGS] [--who PAD-n] [--out DIR] [--speed K]
 #               [--stage DIR | --no-stage] [--stage-keep GB]
 #               <list> [-- <command> [args...]]
 #
@@ -27,14 +27,26 @@
 # run this as root (`wsl -u root -e env HOME=/home/<you> bash rigbatch.sh ...`),
 # or mount the rigs first with `slot.sh up N`.
 #
-# CARDS ON A SPINNING DISK ARE STAGED (cardstage.sh). Several rigs booting
-# several images off one hard disk make it seek between them until a read
-# stalls past the game's own ten-second watchdog (5 of 12 builds, measured).
-# So with more than one rig and any card on a Windows drive other than C:,
-# one copier moves each card to /mnt/c/tmp/pad_cardstage (the NVMe) ahead of
-# the rigs, and each rig boots its copy. Copies stay for the next sweep up to
-# --stage-keep GB (default 100). --stage DIR stages to DIR instead (any card
-# not already there); --no-stage boots every card where it lies.
+# CARDS ON A WINDOWS DRIVE ARE STAGED ONTO THE WSL DISK (cardstage.sh cache).
+# Several rigs booting several images off one hard disk make it seek between
+# them until a read stalls past the game's own ten-second watchdog (5 of 12
+# builds, measured), so one copier moves each card ahead of the rigs. Since
+# PAD-484 it moves them into cardmount.sh's local cache on the WSL disk, for
+# ONE rig as well as several and for cards on C: as well as D:, and every job
+# runs with PAD_CARD_CACHE=1: a card on any Windows drive boots through 9p
+# under fuse2fs, where the validator's and the scene loader's reads are
+# latency-bound - Godzilla Pro 1.16 reached attract in 79-130 s from C: and in
+# 23 s from the cache. The cache keeps itself (least recently booted first,
+# 30 GB of the WSL disk left free). --stage DIR copies to DIR instead, as
+# before (kept up to --stage-keep GB, default 100); --no-stage boots every card
+# where it lies.
+#
+# --speed K (PAD-484): every job's game runs its clock K times the wall's once
+# it is in attract (PAD_SPEED, padspeed.py) - a sweep's time goes on the game's
+# own waiting, not on the CPU. The rig's helpers (ball feeder, plunger, switch
+# presses, gamecheck.sh) keep the game's time by the same K. A job that has to
+# see real-time behaviour (a clip played frame by frame) leaves it out, or
+# says PAD_SPEED=1 on its own line.
 #
 # Out: DIR (default $PAD_HOME/rigbatch/<list>-<time>/) holds progress.txt,
 # results.tsv (key, rig, verdict, seconds, the VERDICT line) and one log per
@@ -44,7 +56,7 @@
 . "$(dirname "$0")/padpath.sh"
 set -u
 
-N="" WHO="" OUT="" STAGE="" NOSTAGE=0 KEEP=100
+N="" WHO="" OUT="" STAGE="" NOSTAGE=0 KEEP=100 SPEED=""
 while [ $# -gt 0 ]; do
     case "$1" in
         -n) N=$2; shift 2 ;;
@@ -53,7 +65,8 @@ while [ $# -gt 0 ]; do
         --stage) STAGE=$2; shift 2 ;;
         --no-stage) NOSTAGE=1; shift ;;
         --stage-keep) KEEP=$2; shift 2 ;;
-        -h|--help) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --speed) SPEED=$2; shift 2 ;;
+        -h|--help) sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) break ;;
     esac
 done
@@ -103,12 +116,18 @@ done
 say "$TOTAL builds on rig(s) ${SLOTS[*]} for $WHO; job: ${CMD[*]}"
 
 # ---- stage the cards (cardstage.sh) ----------------------------------------
-if [ "$NOSTAGE" = 0 ] && [ -z "$STAGE" ] && [ "${#SLOTS[@]}" -gt 1 ] && [ -d /mnt/c ] \
-   && cut -d'|' -f2 "$OUT/queue" | grep -q '^[[:space:]]*/mnt/[abd-z]/'; then
-    STAGE=/mnt/c/tmp/pad_cardstage
+if [ "$NOSTAGE" = 0 ] && [ -z "$STAGE" ] && [ -d /mnt/c ] \
+   && cut -d'|' -f2 "$OUT/queue" | grep -q '^[[:space:]]*/mnt/[a-z]/'; then
+    STAGE=cache
 fi
 SPID=""
-if [ "$NOSTAGE" = 0 ] && [ -n "$STAGE" ]; then
+if [ "$NOSTAGE" = 0 ] && [ "$STAGE" = cache ]; then
+    mkdir -p "$OUT/stage"
+    say "caching cards on the WSL disk (cardmount.sh's cache), one copy at a time, ${#SLOTS[@]} ahead"
+    setsid bash "$RIG/cardstage.sh" "$OUT" cache "${#SLOTS[@]}" \
+        >> "$OUT/stage.log" 2>&1 < /dev/null &
+    SPID=$!
+elif [ "$NOSTAGE" = 0 ] && [ -n "$STAGE" ]; then
     mkdir -p "$STAGE" "$OUT/stage"
     say "staging cards to $STAGE, one copy at a time, ${#SLOTS[@]} ahead (kept up to ${KEEP} GB)"
     setsid bash "$RIG/cardstage.sh" "$OUT" "$STAGE" "${#SLOTS[@]}" "$KEEP" \
@@ -128,7 +147,7 @@ finish() {
         PAD_SLOT=$s PAD_LABEL="$WHO" bash "$RIG/killgame.sh" > /dev/null 2>&1 < /dev/null
         bash "$RIG/riglock.sh" release "$s" "$WHO" --force > /dev/null 2>&1 < /dev/null
     done
-    if [ -n "$STAGE" ]; then
+    if [ -n "$STAGE" ] && [ "$STAGE" != cache ]; then
         rm -rf "$STAGE/.inflight/$(printf %s "$OUT" | md5sum | cut -c1-12)"   # its own copies in flight only (cardstage.sh)
         bash "$RIG/cardstage.sh" --trim "$STAGE" "$KEEP" >> "$OUT/stage.log" 2>&1 < /dev/null
     fi
@@ -171,7 +190,10 @@ worker() {
         say "rig $slot  start  $key  ($((i + 1))/$TOTAL)"
         t0=$(date +%s)
         # shellcheck disable=SC2086
-        env $envs PAD_SLOT="$slot" PAD_LABEL="$WHO" "${CMD[@]}" "$key" "$card" > "$log" 2>&1 < /dev/null &
+        # the batch's own settings first, so a line's ENV still wins: PAD_CARD_CACHE=1 when the cards were cached
+        # (the job boots the original path and its mount finds the copy), PAD_SPEED for --speed
+        env ${STAGE:+$( [ "$STAGE" = cache ] && echo PAD_CARD_CACHE=1 )} ${SPEED:+PAD_SPEED=$SPEED} $envs \
+            PAD_SLOT="$slot" PAD_LABEL="$WHO" "${CMD[@]}" "$key" "$card" > "$log" 2>&1 < /dev/null &
         jp=$!
         # THE LEASE IS KEPT WHILE THE JOB RUNS (PAD-420): it lapses PAD_LOCK_IDLE after its holder's last touch, and a
         # job that waits minutes (a media proof, a coil hold, a game check) looked free - the next batch took its slot
@@ -198,7 +220,7 @@ worker() {
 
 T0=$(date +%s)
 for s in "${SLOTS[@]}"; do
-    setsid bash -c "$(declare -f say worker); P='$P' OUT='$OUT' TOTAL=$TOTAL RIG='$RIG' WHO='$WHO' STAGE='$STAGE'; \
+    setsid bash -c "$(declare -f say worker); P='$P' OUT='$OUT' TOTAL=$TOTAL RIG='$RIG' WHO='$WHO' STAGE='$STAGE' SPEED='$SPEED'; \
         CMD=($(printf '%q ' "${CMD[@]}")); worker $s" < /dev/null &
     WPIDS+=("$!")
 done
@@ -209,8 +231,13 @@ finish
 WALL=$(( $(date +%s) - T0 ))
 SUM=$(awk -F'\t' '{s += $4} END {print s + 0}' "$OUT/results.tsv")
 PASS=$(awk -F'\t' '$3 == "pass"' "$OUT/results.tsv" | wc -l)
-[ -n "$STAGE" ] && say "staging: $(grep -c ' staged ' "$OUT/stage.log" 2>/dev/null) copied," \
-    "$(grep -c ' reuse ' "$OUT/stage.log" 2>/dev/null) already on $STAGE"
+if [ "$STAGE" = cache ]; then
+    say "staging: $(grep -c ' cached ' "$OUT/stage.log" 2>/dev/null) cached on the WSL disk," \
+        "$(grep -c ' NOT cached ' "$OUT/stage.log" 2>/dev/null) booted where they lie"
+elif [ -n "$STAGE" ]; then
+    say "staging: $(grep -c ' staged ' "$OUT/stage.log" 2>/dev/null) copied," \
+        "$(grep -c ' reuse ' "$OUT/stage.log" 2>/dev/null) already on $STAGE"
+fi
 say "ALL DONE: $PASS/$TOTAL pass in $((WALL / 60))m$((WALL % 60))s on ${#SLOTS[@]} rig(s)" \
     "(one after another: $((SUM / 60))m$((SUM % 60))s)"
 awk -F'\t' '$3 != "pass" {print "  FAIL " $5}' "$OUT/results.tsv" | tee -a "$P"

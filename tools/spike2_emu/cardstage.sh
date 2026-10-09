@@ -3,6 +3,7 @@
 # a few builds ahead of the rigs that will boot them. Run by rigbatch.sh:
 #
 #   cardstage.sh <batch-out-dir> <stage-dir> <ahead> <keep-gb>
+#   cardstage.sh <batch-out-dir> cache <ahead>
 #   cardstage.sh --trim <stage-dir> <keep-gb>
 #
 # WHY. The card images live on D:, which on David's PC is a spinning disk
@@ -31,7 +32,31 @@
 #
 # The copy is Windows' own robocopy when there is one (91 s for an 8 GB card,
 # against 111 s through WSL's cp, and no WSL CPU), else cp.
+#
+# `cache` INSTEAD OF A DIRECTORY (PAD-484, rigbatch's default since): each card
+# goes into cardmount.sh's own local cache on the WSL disk (--cache-now), and
+# the worker boots the ORIGINAL path with PAD_CARD_CACHE=1, which finds the
+# copy. A card staged to C: still boots through 9p under fuse2fs, and that is
+# where a boot's time went: Godzilla Pro 1.16 reached attract in 23 s from the
+# cache against 79-130 s from C:. The cache keeps itself (least recently booted
+# goes first, never a mounted card or one being copied), with
+# PAD_CACHE_KEEP_FREE_GB (30 here) left free on the WSL disk.
 set -u
+RIG=$(cd "$(dirname "$0")" && pwd)
+
+# ONE COPY AT A TIME ACROSS EVERY BATCH (PAD-420): batches staging at once each read the same spinning disk and
+# every copy crawled; the lock makes them take turns, so the disk reads straight through. On the Linux side: flock is
+# sure there, and every batch shares it.
+# OPENED READ-ONLY, made once for everyone (PAD-484): it was `exec 9> lock`, and /tmp is sticky with
+# fs.protected_regular=2 on Ubuntu, so a root batch could not open a lock the desktop user's batch had made (nor the
+# user a root one, 0644) - "Permission denied", then "flock: 9: Bad file descriptor", and the two copied at once
+# anyway. flock needs no write access.
+COPY_LOCK=/tmp/pad-cardstage-copy.lock
+copy_lock() {
+    [ -e "$COPY_LOCK" ] || ( umask 0; : > "$COPY_LOCK" ) 2>/dev/null
+    exec 9< "$COPY_LOCK"
+    flock 9
+}
 GB=$((1024 * 1024 * 1024))
 # Free space always left on the staging disk (PAD_STAGE_SPARE_GB, default 30).
 SPARE=$(( ${PAD_STAGE_SPARE_GB:-30} * GB ))
@@ -77,15 +102,58 @@ make_room() {                     # <stage-dir> <keep-bytes> <need-bytes> [<batc
 }
 
 if [ "${1:-}" = --trim ]; then
+    [ "${2:-}" = cache ] && exit 0      # the cache keeps itself (cardmount.sh cache_make_room)
     make_room "$2" $(( ${3:-100} * GB )) 0
     exit 0
 fi
 
-OUT=${1:?usage: cardstage.sh <batch-out-dir> <stage-dir> <ahead> <keep-gb>}
+OUT=${1:?usage: cardstage.sh <batch-out-dir> <stage-dir>|cache <ahead> <keep-gb>}
 STAGE=${2:?}
 AHEAD=${3:-2}
 KEEP=$(( ${4:-100} * GB ))
 S=$OUT/stage
+if [ "$STAGE" = cache ]; then
+    mkdir -p "$S" || exit 1
+    TOTAL=$(wc -l < "$OUT/queue")
+    pending_c() {
+        local n=0 f
+        for f in "$S"/[0-9]*; do
+            case "$f" in *.done|*.fail) continue ;; esac
+            [ -f "$f" ] && [ ! -e "$f.done" ] && n=$((n + 1))
+        done
+        echo "$n"
+    }
+    for i in $(seq 0 $((TOTAL - 1))); do
+        [ -e "$OUT/stop" ] && exit 0
+        card=$(sed -n "$((i + 1))p" "$OUT/queue" | cut -d'|' -f2 | tr -d '\r' \
+               | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        while [ "$(pending_c)" -ge "$AHEAD" ]; do
+            [ -e "$OUT/stop" ] && exit 0
+            sleep 2
+        done
+        if [ ! -f "$card" ]; then
+            echo "no card at $card" > "$S/$i.fail"; continue
+        fi
+        case "$card" in
+            /mnt/*) ;;
+            *) echo "$card" > "$S/$i"; continue ;;   # on a Linux disk already: no 9p to save
+        esac
+        t0=$(date +%s)
+        # the same one-copier-at-a-time lock as every other batch's copies (they all read one disk)
+        got=$( copy_lock
+               PAD_CACHE_KEEP_FREE_GB=${PAD_CACHE_KEEP_FREE_GB:-30} \
+                   bash "$RIG/cardmount.sh" "$card" --cache-now 2>> "$OUT/stage.cache.log" | tail -1 )
+        case "$got" in
+            "$PAD_HOME"/cardcache/*)
+                echo "$(date +%T) cached $(basename "$card")  in $(( $(date +%s) - t0 ))s" ;;
+            *)
+                echo "$(date +%T) NOT cached $(basename "$card") (disk full?) - it boots from where it lies" ;;
+        esac
+        echo "$card" > "$S/$i"
+    done
+    exit 0
+fi
+
 # THIS batch's own folder for copies in flight (PAD-420): several batches stage into one folder at once, and a
 # batch's end used to empty the shared .partial - a copy another batch had in flight vanished under it (.inflight:
 # a batch still running the old code empties .partial at its end)
@@ -104,10 +172,7 @@ pending() {
 }
 
 copy() {                          # <src> <dest-dir>
-    # ONE COPY AT A TIME ACROSS EVERY BATCH (PAD-420): batches staging at once each read the same spinning disk and
-    # every copy crawled; the lock makes them take turns, so the disk reads straight through
-    exec 9> /tmp/pad-cardstage-copy.lock   # on the Linux side: flock is sure there, and every batch shares it
-    flock 9
+    copy_lock                     # one copy at a time across every batch (above)
     copy_now "$@"
     local rc=$?
     flock -u 9

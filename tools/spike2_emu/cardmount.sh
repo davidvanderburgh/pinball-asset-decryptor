@@ -572,7 +572,7 @@ if [ "${1:-}" = "--cache-drop" ]; then
 fi
 
 IMG=${1:-}
-[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache] | --cache-list | --cache-drop <label>"
+[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache|--cache-now] | --cache-list | --cache-drop <label>"
 [ -f "$IMG" ] || die "no image at $IMG"
 LABEL=$(basename "$IMG"); LABEL=${LABEL%%.Release*}; LABEL=${LABEL%%.raw}
 MNT="$CARDS/$LABEL"
@@ -606,6 +606,18 @@ fi
 # is pressed the copy is done or well along, and the boot's sync wait in
 # cache_pick collects whatever remains. Idempotent: a valid cache just prints
 # "using local cache", a copy already running prints that it is.
+# PAD-484: cache it NOW and wait - no mount. rigbatch's stager (cardstage.sh
+# `cache`) runs this a few builds ahead of the rigs, so every job's own mount
+# finds a valid copy on the WSL disk and boots at native speed: Godzilla Pro
+# 1.16 reached attract in 23 s from the cache against 79-130 s from the same
+# card on C: (9p under fuse2fs: the validator's and the scene loader's reads
+# are latency-bound there). Unlike --precache it does not stand down beside a
+# live run - the runs it stages for read their own copies, not 9p. Prints the
+# path a boot would use: the copy, or the original when it could not be made.
+if [ "$MODE" = "--cache-now" ]; then
+    PAD_CARD_CACHE=1 cache_pick "$IMG" "$LABEL" sync
+    exit 0
+fi
 if [ "$MODE" = "--precache" ]; then
     # Never start a 7 GB dd beside a live run - the copy would fight the
     # run's 9p reads, which is the exact contention item 74 removed. Checked

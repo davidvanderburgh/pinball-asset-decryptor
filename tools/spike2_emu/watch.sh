@@ -1149,6 +1149,18 @@ as_user() {
 setsid_as_user() {
     if [ "$DROP" = 1 ]; then runuser -u "$PAD_USER" -- setsid "$@"; else setsid "$@"; fi
 }
+# ★ A HELPER THAT MUST SEE THE GAME RUNS AS THE GAME (PAD-484). pad_pids finds a
+# slot's processes by the PAD_SLOT in their environment, and /proc/<pid>/environ
+# is readable only by the process's own account and root - so a dropped helper
+# reads a ROOT guest as "another account's = slot 0", which is right in slot 0
+# and wrong in every other. Measured 2026-10-09: on all four slots
+# padauto.log's last line was "[auto] the game is not running; nothing to do",
+# so every rigbatch sweep (root, slots 1-4) waited out Tech Alerts until the
+# game left it by itself - 97 s on Godzilla Pro 1.16, where a working
+# autoattract presses ~15 s after the bus goes quiet. In slot 0 nothing changes.
+setsid_as_seer() {
+    if [ "$DROP" = 1 ] && [ "$PAD_SLOT" != 0 ]; then setsid "$@"; else setsid_as_user "$@"; fi
+}
 # IS THE PLAYFIELD PROCESS THERE? One definition, because there are now five
 # places that ask - four in teardown and the post-start check - and this rig's
 # standing rule is that two copies of one fact eventually disagree. `/init` is
@@ -1348,6 +1360,8 @@ teardown() {
     pad_pkill -9 -f 'autoattract.sh'
     [ -n "$BALLPG" ] && kill -9 -"$BALLPG" 2>/dev/null
     pad_pkill -9 -f 'ballfeed[.]py'
+    [ -n "${SPEEDPG:-}" ] && kill -9 -"$SPEEDPG" 2>/dev/null
+    pad_pkill -9 -f 'padspeed[.]py --when-up'
     # PAD-204's root pause keeper. The guest is already SIGKILLed above, and
     # SIGKILL ends a stopped process too, so nothing is left frozen by this.
     [ -n "$KEEPPG" ] && kill -9 -"$KEEPPG" 2>/dev/null
@@ -1603,6 +1617,9 @@ rm -f "$RING_HOST" "$SW_HOST"
 # game's switch ids for the seconds in between. Absent is the state the panel
 # expects and polls through; wrong is the state nothing would notice.
 rm -f "$ROOT/dump/padbinds"
+# PAD-484: the game's speed as the shim last said it. A run nobody speeds up
+# must read 1 (padpath.sh pad_speed), not the last run's x4.
+rm -f "$ROOT/dump/padspeed"
 # And the ball feeder's status (PAD-134): the playfield's BALLS section shows
 # its count and newest lines, and the LAST run's would read as this one's
 # until the feeder says something.
@@ -2625,7 +2642,7 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
         # exec, so $! is the process teardown kills and alive.sh's
         # `autoattract\.sh` pattern sees it throughout (the wrapper's own
         # command line carries the name).
-        setsid_as_user bash -c 'f=$1; b=$2; shift 2
+        setsid_as_seer bash -c 'f=$1; b=$2; shift 2
             while [ -f "$f" ] && { [ "$b" = 0 ] || [ $(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) )) -lt "$b" ]; }; do
                 sleep 1
             done
@@ -2635,7 +2652,7 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
         echo "[watch] auto-advance on, held back until the boot selector has"
         echo "[watch] chosen; then it presses Service Back past Tech Alerts."
     else
-        setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
+        setsid_as_seer bash "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
         AUTOPG=$!
         echo "[watch] auto-advance on: it will press Service Back until the game"
         echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
@@ -2702,6 +2719,20 @@ if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
     BALLPG=$!
     echo "[watch] ball feed on: the game's own trough eject will be answered"
     echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
+fi
+
+# ★ GAME SPEED (PAD-484). PAD_SPEED=k runs the game's clock k times the wall's
+# once the game is up - a sweep's time goes on the game's own waiting (Tech
+# Alerts, ball savers, a 30 s mode), not on the CPU, which a rig in a game uses
+# half a core of. The boot stays at 1x: it is the CPU-bound part. padspeed.py
+# waits for the first screen, asks the shim through the switch block, and exits;
+# its own log says when. `padspeed.py <k>` changes it on a running game.
+SPEEDPG=
+if [ -n "${PAD_SPEED:-}" ] && [ "$PAD_SPEED" != 1 ]; then
+    setsid_as_seer python3 -u "$S/padspeed.py" --when-up "$PAD_SPEED" > "$PAD_LOGDIR/padspeed.log" 2>&1 &
+    SPEEDPG=$!
+    echo "[watch] game speed: x$PAD_SPEED once the game is up (the boot runs at 1x;"
+    echo "[watch] padspeed.py <k> changes it while it runs, padspeed.py 1 is real time)."
 fi
 
 # PAD_DOOR_OPEN=1 - boot with the coin door held OPEN, for servicing (item 43).

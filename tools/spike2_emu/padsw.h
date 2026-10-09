@@ -246,6 +246,16 @@ struct padsw_shm {
     unsigned stop_gen;                   /* bumped per request;       padglhost */
     unsigned stop_n;                     /* games signalled;          keeper    */
     unsigned stop_ack;                   /* stop_gen served (after n); keeper   */
+    /* ---- GAME SPEED (PAD-484): the game's clock runs k times the wall's. ----
+     *
+     * A sweep is bound by the game's own waiting - Tech Alerts, ball saves, a
+     * 30 s mode - not by the CPU (a rig in a game costs half a core), so the
+     * shim runs every clock the game reads, and every wait it makes, k times
+     * fast (hwshim.c warp_poll). padspeed.py asks; the shim takes it up at its
+     * next clock read and answers. x1000, so 4000 is 4x and 500 slow motion;
+     * 0 is "never asked" and means 1x. One writer per field, as everywhere. */
+    unsigned speed_req;                  /* x1000 asked for; padspeed.py only   */
+    unsigned speed_now;                  /* x1000 in effect;  the shim only     */
 };
 
 #endif

@@ -166,9 +166,9 @@ def exercise(doing, press_ms, gap_ms, verbose=True):
     for sw, num, node, name, rest, _ in doing:
         away = 0 if rest else 1
         padsw.set_held(m, sw, away)
-        time.sleep(press_ms / 1000.0)
+        padsw.game_sleep(m, press_ms / 1000.0)    # game time (PAD-484)
         padsw.set_held(m, sw, rest)
-        time.sleep(gap_ms / 1000.0)
+        padsw.game_sleep(m, gap_ms / 1000.0)
         if verbose:
             print("  %-3d #%-3d node %-2d %-32s %d->%d->%d"
                   % (sw, num, node, name, rest, away, rest))

@@ -2746,12 +2746,15 @@ static int stock_query(const char *site_name)
 static int stock_generic_on;
 static char stock_generic_what[80];     /* "one of the game's modes (cmode_trex_chase)": the last one found */
 
+/* PAD-420: every word the walk follows is in the process's mappings first (maps_has): a typeinfo chain that leads
+ * out of them ends the walk, as a class that is neither */
 static int stock_class(const unsigned *obj)
 {
     /* 2 = a cmode_mball, 1 = another cmode, 0 = neither */
     unsigned ti_mode = data("typeinfo_cmode"), ti_mb = data("typeinfo_cmode_mball"), ti_vmi = data("typeinfo_vmi"), si, vmi, t;
     int guard = 12;
-    if (!obj || !*obj || !ti_mb) return 0;
+    if (!obj || !*obj || !ti_mb || !maps_has(ti_mb, 4, MAP_R)) return 0;
+    if (ti_vmi && !maps_has(ti_vmi, 4, MAP_R)) ti_vmi = 0;
     si = *(const unsigned *)(unsigned long)ti_mb;            /* the vptr of a single-inheritance typeinfo */
     vmi = ti_vmi ? *(const unsigned *)(unsigned long)ti_vmi : 0;   /* and of a multiple-inheritance one */
     t = ((const unsigned *)(unsigned long)obj[0])[-1];
@@ -2759,17 +2762,95 @@ static int stock_class(const unsigned *obj)
         const unsigned *ti = (const unsigned *)(unsigned long)t;
         if (t == ti_mb) return 2;
         if (t == ti_mode) return 1;
+        if ((t & 3) || !maps_has(t, 12, MAP_R)) break;
         if (ti[0] == si) t = ti[2];
         else if (vmi && ti[0] == vmi) {
             /* {vptr, name, flags, base count, {base, offset << 8 | flags} x count}: the base at offset 0
              * (John Wick 1.01's cmode_the_staircase is a cmode_mball and a cwick_mode) */
-            unsigned k, n = ti[3], next = 0;
-            for (k = 0; k < n && k < 8; k++)
+            unsigned k, n, next = 0;
+            if (!maps_has(t, 16, MAP_R)) break;
+            n = ti[3] < 8 ? ti[3] : 8;
+            if (!maps_has(t, 16 + 8 * (unsigned long)n, MAP_R)) break;
+            for (k = 0; k < n; k++)
                 if (!(ti[5 + 2 * k] >> 8)) { next = ti[4 + 2 * k]; break; }
             t = next;
         } else break;
     }
     return 0;
+}
+
+/* PAD-420: a port whose mode table is not this build's must not crash the game. A derived port once carried another
+ * title's mode count: the walk read past the table into whatever followed it and called a "slot" of something that
+ * was not a mode, and the game died in stock_class. So each entry is checked once against the process's mappings
+ * before it is followed - an aligned, readable object whose vtable is readable through the ACTIVE slot, that slot's
+ * function in executable memory and its typeinfo word readable - and an entry that is not is left out (said once). An
+ * entry not found in the mappings read at the gate is checked again with them read afresh (the heap grows after the
+ * gate; at most every 5 s). A table that is not readable, or whose checked entries are mostly not objects, turns
+ * the route off: the runtime then cannot tell (-1), as on a port without the table. The class is kept per entry
+ * (a mode object's class never changes), so the walk does not repeat the checks every time it asks. */
+#define N_STOCK_TABLE 160
+static unsigned stock_seen[N_STOCK_TABLE];       /* the object the entry held when it was checked */
+static unsigned char stock_cls[N_STOCK_TABLE];   /* 0 not checked, 1 not an object, 2 + stock_class() */
+static int stock_table_off, stock_bad_n, stock_maps_fresh;
+static unsigned long stock_maps_at;
+
+static int stock_entry_ok(const unsigned *o, long slot)
+{
+    unsigned vt, f, t;
+    if (((unsigned long)o & 3) || !maps_has((unsigned long)o, 4, MAP_R)) return 0;
+    vt = o[0];
+    if (vt < 4 || (vt & 3) || !maps_has((unsigned long)vt - 4, 4 * ((unsigned long)slot + 2), MAP_R)) return 0;
+    f = ((const unsigned *)(unsigned long)vt)[slot];
+    t = ((const unsigned *)(unsigned long)vt)[-1];
+    return maps_has(f, 4, MAP_R | MAP_X) && (!t || (!(t & 3) && maps_has(t, 12, MAP_R)));
+}
+
+/* the class of entry i (stock_class), or -1 when the entry is empty or is not a mode object */
+static int stock_entry_class(long i, const unsigned *tab, long n, long slot)
+{
+    const unsigned *o = (const unsigned *)(unsigned long)tab[i];
+    int pass, c;
+    if (!o) return -1;                                      /* not built yet: asked again later */
+    if (i < N_STOCK_TABLE && stock_seen[i] == (unsigned)(unsigned long)o && stock_cls[i])
+        return stock_cls[i] == 1 ? -1 : stock_cls[i] - 2;
+    for (pass = 0;; pass++) {
+        if (stock_entry_ok(o, slot)) {
+            c = stock_class(o);
+            if (i < N_STOCK_TABLE) { stock_seen[i] = (unsigned)(unsigned long)o; stock_cls[i] = (unsigned char)(c + 2); }
+            return c;
+        }
+        if (pass || (stock_maps_fresh && pm_ms() - stock_maps_at < 5000)) break;
+        stock_maps_at = pm_ms();
+        stock_maps_fresh = 1;
+        maps_read();
+    }
+    if (i < N_STOCK_TABLE) { stock_seen[i] = (unsigned)(unsigned long)o; stock_cls[i] = 1; }
+    say("stock modes: entry %ld of the port's mode table (0x%08x) is not a mode object of this game - left out",
+        i, (unsigned)(unsigned long)o);
+    if (++stock_bad_n >= 4 && stock_bad_n * 2 > n) {
+        stock_table_off = 1;
+        say("stock modes: the port's mode table is not this game's (%d of its entries are not objects) - the runtime "
+            "cannot tell when the game's modes run", stock_bad_n);
+    }
+    return -1;
+}
+
+/* the table, its count and the ACTIVE slot - or 0 when the port names none, or the table is not readable here
+ * (said once; the route is then off) */
+static const unsigned *stock_table(long *n, long *slot)
+{
+    const unsigned *tab = (const unsigned *)(unsigned long)data("stock_mode_table");
+    *n = pm_port_value("stock_mode_count", 0);
+    *slot = pm_port_value("stock_slot_active", -1);
+    if (!tab || *n <= 0 || *slot < 0 || *slot > 255 || stock_table_off) return 0;
+    if (*n > N_STOCK_TABLE) *n = N_STOCK_TABLE;
+    if (!maps_has((unsigned long)tab, 4 * (unsigned long)*n, MAP_R)) {
+        stock_table_off = 1;
+        say("stock modes: the port's mode table (0x%08x, %ld entries) is not readable in this game - the runtime "
+            "cannot tell when the game's modes run", (unsigned)(unsigned long)tab, *n);
+        return 0;
+    }
+    return tab;
 }
 
 static int stock_generic_route(void)
@@ -2787,7 +2868,6 @@ static int stock_entry_active(const unsigned *o, long slot)
  * notes the entries running from a ball's start until 2 s after its first score; those are the base
  * play, not counted, until they are seen stopped (then they count like any other when they run again).
  * A ball is the player up plus the ball_start events (or ball ends) seen so far. */
-#define N_STOCK_TABLE 160
 static unsigned char stock_base[N_STOCK_TABLE];
 static volatile unsigned stock_ball_ends;       /* on_ball_end, below */
 static unsigned event_count(int id);             /* the events section, below */
@@ -2804,12 +2884,11 @@ static void stock_base_clear(void)
 static void stock_generic_tick(void)
 {
     static unsigned ticks;
-    const unsigned *tab = (const unsigned *)(unsigned long)data("stock_mode_table");
-    long n = pm_port_value("stock_mode_count", 0), slot = pm_port_value("stock_slot_active", -1), i;
+    const unsigned *tab;
+    long n, slot, i;
     unsigned p, key;
     int ev, open;
-    if (!tab || n <= 0 || slot < 0 || !stock_generic_route()) return;
-    if (n > N_STOCK_TABLE) n = N_STOCK_TABLE;
+    if (!stock_generic_route() || !(tab = stock_table(&n, &slot))) return;
     p = pm_in_game() ? pm_player() : 0;
     if (!p) {
         if (stock_ball_key) { stock_ball_key = 0; stock_base_clear(); }
@@ -2827,9 +2906,9 @@ static void stock_generic_tick(void)
     if (stock_base_until && stock_base_until != ~0UL && pm_ms() > stock_base_until) stock_base_until = 0;
     open = stock_base_until != 0;
     if (!open && ++ticks % 15) return;
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < n && !stock_table_off; i++) {
         const unsigned *o = (const unsigned *)(unsigned long)tab[i];
-        if ((!open && !stock_base[i]) || !stock_class(o)) continue;
+        if ((!open && !stock_base[i]) || stock_entry_class(i, tab, n, slot) <= 0) continue;
         if (!stock_entry_active(o, slot)) stock_base[i] = 0;
         else if (open && !stock_base[i]) {
             unsigned ti = ((const unsigned *)(unsigned long)o[0])[-1];
@@ -2869,14 +2948,15 @@ static int stock_named_base(const char *nm)
 
 static int stock_generic(unsigned kinds)
 {
-    const unsigned *tab = (const unsigned *)(unsigned long)data("stock_mode_table");
-    long n = pm_port_value("stock_mode_count", 0), slot = pm_port_value("stock_slot_active", -1), i;
-    if (!tab || n <= 0 || slot < 0) return -1;
+    const unsigned *tab;
+    long n, slot, i;
+    if (!(tab = stock_table(&n, &slot))) return -1;
     if (!pm_player()) return 0;
     for (i = 0; i < n; i++) {
         const unsigned *o = (const unsigned *)(unsigned long)tab[i];
-        int c = stock_class(o);
-        if (!c || (i < N_STOCK_TABLE && stock_base[i])) continue;
+        int c = stock_entry_class(i, tab, n, slot);
+        if (stock_table_off) return -1;
+        if (c <= 0 || stock_base[i]) continue;
         if (!stock_entry_active(o, slot)) continue;
         if ((c == 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY))) || (c == 1 && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)))) {
             unsigned ti = ((const unsigned *)(unsigned long)o[0])[-1];

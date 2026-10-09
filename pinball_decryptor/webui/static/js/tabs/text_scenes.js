@@ -1315,8 +1315,8 @@ function TreeCanvas({ s }) {
       ${filledPolys.map((h, i) => html`<polygon key=${"f" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-filled" />`)}
       ${hov.map((h, i) => html`<polygon key=${"h" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-hover" />`)}
       <g transform=${svgTf(lineOps)}>
-        ${filledSel.map((h, i) => html`<polygon key=${"fs" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-filled" />`)}
         ${selPolys.map((h, i) => html`<polygon key=${"s" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-sel" />`)}
+        ${filledSel.map((h, i) => html`<polygon key=${"fs" + i} points=${h.pts.map((q) => q.join(",")).join(" ")} class="tree-filled" />`)}
         ${selBox ? html`<rect x=${selBox.x} y=${selBox.y} width=${selBox.w} height=${selBox.h} class="tree-box" />` : null}
         ${multi ? (t.sel_boxes || []).map(([bx, by, bw, bh], i) =>
           html`<rect key=${"b" + i} x=${bx} y=${by} width=${bw} height=${bh} class="tree-box" />`) : null}

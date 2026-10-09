@@ -45,6 +45,7 @@ JACKPOT!`` the Megalon and Gigan multiball's (a table of its own).
 from __future__ import annotations
 
 import bisect
+import re
 from dataclasses import dataclass, field
 
 #: bumped when what :func:`read` finds changes
@@ -74,6 +75,8 @@ class Reading:
     keys: dict = field(default_factory=dict)
     #: ``{span file offset: [mode class]}``: the modes that show the span, by its references
     shown: dict = field(default_factory=dict)
+    #: ``{mode class: [scene key]}``: the screens each mode names (:func:`mode_scenes`)
+    scenes: dict = field(default_factory=dict)
 
     def label(self, cls):
         return self.labels.get(cls) or mode_label(cls)
@@ -267,6 +270,33 @@ def _owner(prog, owners, va):
     return m
 
 
+#: a scene as a game program names it: the last one or two folders of its card path
+#: (``<40 hex>/<40 hex>``), as Godzilla's modes name the screens they load
+_SCENE_NAME = re.compile(rb"(?<![0-9a-f])[0-9a-f]{40}(?:/[0-9a-f]{40})?(?=\x00)")
+
+
+def mode_scenes(prog, raw, owners):
+    """``{mode class: [scene key]}``: the screens each of the game's own modes names in its
+    code or its tables, in the order its code names them (PAD-485).  A line a mode shows goes
+    in a text box on one of them: stock Godzilla 1.16's GIGAN AWARD in the title box of the
+    battle vs Gigan's award screen, whose own words are GODZILLA VS GIGAN.  A static
+    initialiser counts as far as :func:`_owner` lets it."""
+    from . import clip_modes as CM
+    names = sorted({m.decode() for m in _SCENE_NAME.findall(raw)})
+    if not names:
+        return {}
+    first = {}
+    for name, refs in CM.clip_refs(prog, raw, names, owners).items():
+        for r in refs:
+            m = _owner(prog, owners, r.at) if r.how == "init" else r.mode
+            if m and r.at < first.get((m, name), r.at + 1):
+                first[(m, name)] = r.at
+    out = {}
+    for (m, name), _at in sorted(first.items(), key=lambda kv: (kv[0][0], kv[1])):
+        out.setdefault(m, []).append(name)
+    return out
+
+
 def line_modes(prog, raw, owners, loads, table_va, count):
     """``{line number: frozenset of mode classes}`` for the lines some mode asks for, by the
     rules in the module docstring ("" in the set: code that is no one mode's asks for it too,
@@ -338,6 +368,7 @@ def _read(raw, spans, census):
     layers = CM._layers(model, modes)
     owners = CM._Owners(S, prog, CM._anchors(S, prog, model, modes, layers), CM._inits(S, prog))
     loads = _Loads(prog, owners)
+    out.scenes = mode_scenes(prog, raw, owners)
     table_va, count = find_table(prog, raw, census)
     entry_line = {}
     if count:

@@ -1072,6 +1072,11 @@ class TextTab(TabService):
             # PAD-485: the game fills its line into a text box on one of its
             # screens; that box's own words are a stand-in reading the same
             hits = R.stand_in_rows(self._text_rows, r)
+            pick = None if hits else self._mode_screen(r)
+            if pick is not None:
+                scene_dir, focus, search = pick
+                return self._open_scene_browser(preselect_dir=scene_dir,
+                                                focus_text=focus, search=search)
             if not hits:
                 compat.messagebox.showinfo(
                     "Scenes",
@@ -1095,6 +1100,52 @@ class TextTab(TabService):
         return self._open_scene_browser(preselect_dir=scene_dir,
                                         focus_text=r["original"],
                                         search=search)
+
+    def _mode_screen(self, r):
+        """PAD-485: for game-program row *r* whose words no screen holds, a screen of a
+        mode that shows it (the Shown in column), as ``(scene dir, line to pick or None,
+        search)``, or None.  The screens each mode names come from the card's game program
+        (``engine.program_mode_scenes``); the box picked is the one sharing most of the
+        line's words in its own words, its name and its group's (the Heisei card's KAIJU
+        AWARD goes in the battle's ``Award_Textbox``, whose own words are GODZILLA VS
+        GIGAN).  With several screens of that mode, *search* is the mode's name, which the
+        Scenes search lists them by."""
+        part = R.row_part(r)
+        modes = [part] if part else list(r.get("modes") or ())
+        assets = self._assets_path()
+        if not modes or not assets:
+            return None
+        try:
+            from ...plugins.stern import engine, scene_render
+            by_mode = engine.program_mode_scenes(assets)
+            layouts = scene_render.load_layouts(assets) or {}
+        except Exception:                            # noqa: BLE001
+            return None
+        card_of = {card.replace("\\", "/").rsplit("/", 1)[0]: card for card in layouts}
+        index = R.scene_dir_index(card_of)
+        lines = {}                                   # scene dir -> its rows' words
+        for s in self._text_rows:
+            if R.row_is_scene(s):
+                d = s["path"].replace("\\", "/").rsplit("/", 1)[0]
+                lines.setdefault(d, {}).setdefault(
+                    R.stand_in_words(s["original"]), s["original"])
+        best = None
+        for cls in modes:
+            dirs = [index[k] for k in by_mode.get(cls) or () if k in index]
+            for d in dirs:
+                lay = layouts.get(card_of[d]) or {}
+                groups = lay.get("groups") or []
+                for t in lay.get("texts") or ():
+                    g = t.get("group")
+                    group = groups[g] if isinstance(g, int) and 0 <= g < len(groups) \
+                        else ""
+                    focus = (lines.get(d) or {}).get(R.stand_in_words(t.get("text")))
+                    score = R.box_score(r["original"], t.get("text"), t.get("name"),
+                                        group) if focus else 0
+                    if best is None or score > best[0]:
+                        best = (score, d, focus if score else None,
+                                R.mode_label(cls) if len(dirs) > 1 else None)
+        return best[1:] if best else None
 
     def _open_scene_browser(self, preselect_rel=None, preselect_video=None,
                             preselect_dir=None, focus_text=None, search=None):

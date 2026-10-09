@@ -8,6 +8,11 @@ multiball's jackpot award title), gives it a longer line and presses Show in Sce
 build before PAD-485 answers with a dialog (no scene file to show); a build with it opens
 Scenes on the jackpot award screen, whose stand-in text reads "GIGAN JACKPOT", with the line
 picked out and drawn with the new words.
+
+Round 3: with PAD485_CARD=<card.raw> the game-program rows come from that card instead, as
+an extract before PAD-470 wrote them, and the card is the project's source, so the Text tab
+re-reads the modes (and, on a build with round 3, each mode's screens) from it when it opens.
+PAD485_LINE=KAIJU AWARD on the Heisei card is DragonRR's case.
 """
 import os
 import shutil
@@ -22,6 +27,35 @@ import shot_pad251_tab as rig  # noqa: E402
 
 LINE = os.environ.get("PAD485_LINE") or "GIGAN JACKPOT!"
 NEW_WORDS = os.environ.get("PAD485_WORDS") or "GIGAN UNLEASHES THE KAIJU JACKPOT!"
+
+
+def _program_rows(repo, card, project):
+    """The project's game-program rows replaced by *card*'s, as an extract before PAD-470
+    wrote them, and *card* recorded as its source."""
+    import json
+    sys.path.insert(0, repo)
+    from pinball_decryptor.core import text_manifest
+    from pinball_decryptor.plugins.stern import progtext
+    from pinball_decryptor.plugins.stern.explorer import CardImage
+    from pinball_decryptor.plugins.stern.mode_tryit import card_title
+    game, _version, part = card_title(card)
+    with CardImage(card) as img:
+        raw = img.preview(part, "/%s/game" % game, cap=256 << 20)
+    rows = [r for r in text_manifest.load(project)
+            if (r.get("path") or "").lower().endswith(".radium")]
+    n = 0
+    for e in progtext.enumerate_program_strings(raw):
+        row = {"path": "/%s/game" % game, "original": e["text"], "replacement": "",
+               "budget": e["budget"]}
+        row["grow" if e.get("growable") else "fixed"] = True
+        rows.append(row)
+        n += 1
+    text_manifest.save(project, rows)
+    st = os.stat(card)
+    with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
+        json.dump({"input_path": os.path.abspath(card), "input_name": os.path.basename(card),
+                   "size": st.st_size, "mtime": int(st.st_mtime)}, f)
+    return n
 
 
 def main():
@@ -39,6 +73,9 @@ def main():
             os.remove(p)
     # an extract leaves its checksums; the tabs that work on one look for them
     open(os.path.join(project, ".checksums.md5"), "w").close()
+    card = os.environ.get("PAD485_CARD")
+    if card:
+        print("program rows from", card, ":", _program_rows(repo, card, project), flush=True)
     proc, url = rig._serve(repo, scratch, project)
     api = lambda m, *a: webui_shot.api(url, m, *a)          # noqa: E731
     text = lambda: webui_shot.state(url)["text"]              # noqa: E731
@@ -66,10 +103,12 @@ def main():
             time.sleep(1.0)
             s = text()
             hit = next(i for i, r in enumerate(s["rows"])
-                       if r and r.get("o") == LINE and r.get("sc") == "game program")
+                       if r and r.get("o") == LINE and r.get("sc") == "game program"
+                       and not r.get("pt"))
             api("text.select", hit)
-            api("text.apply", NEW_WORDS)
-            api("text.select", hit)
+            if NEW_WORDS != "-":
+                api("text.apply", NEW_WORDS)
+                api("text.select", hit)
             time.sleep(1.0)
             print("row:", text()["rows"][hit], flush=True)
             page.locator(".text-page").get_by_role("button", name="Show in Scenes…").first.click()

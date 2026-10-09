@@ -306,6 +306,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._layouts = {}
         self._fonts = None
         self._text_changes = None
+        self._mode_names = None       # scene dir -> its modes' names (PAD-485)
         self._sort_col, self._sort_rev = "#0", False
         self._search = ""
         self._sel = None
@@ -489,6 +490,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._tree_reset()
         self._fonts = None
         self._text_changes = None
+        self._mode_names = None
         self.set(hint=HINT if self._scenes else HINT_EMPTY, card_note="")
         self._refresh_list(preselect, focus_text, jump=True)
         self._auto_trees()
@@ -647,10 +649,30 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             pass
         return reps, added
 
+    def _scene_mode_names(self):
+        """``{scene dir: [name]}``: the game's own modes that name each screen in the card's
+        game program (PAD-485), so the search finds a battle's screens by its name."""
+        if self._mode_names is None:
+            out = {}
+            try:
+                from ..plugins.stern import engine
+                from .text_rules import mode_label, scene_dir_index
+                index = scene_dir_index(self._scenes)
+                for cls, keys in engine.program_mode_scenes(self.assets_dir).items():
+                    for key in keys:
+                        d = index.get(key)
+                        if d and mode_label(cls) not in out.get(d, ()):
+                            out.setdefault(d, []).append(mode_label(cls))
+            except Exception:                        # noqa: BLE001
+                log.exception("mode screens")
+            self._mode_names = out
+        return self._mode_names
+
     def _haystack(self, d, extras=None):
         sc = self._scenes[d]
         reps, added = extras if extras is not None else self._line_extras()
         return (sc["label"] + " " + d + " "
+                + " ".join(self._scene_mode_names().get(d) or ()) + " "
                 + " ".join(n for n, _p in sc["fonts"].values()) + " "
                 + " ".join(sc["texts"]) + " "
                 + " ".join((reps.get(d) or {}).values()) + " "

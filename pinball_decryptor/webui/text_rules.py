@@ -101,6 +101,37 @@ def stand_in_rows(rows, r):
     return same + near
 
 
+#: words a game-program line and a text box are not matched on (PAD-485)
+_BOX_STOP = frozenset(("VS", "THE", "AN", "OF", "AND", "TO", "FOR", "IS", "AT", "IN",
+                       "ON", "INSTANCE", "TEXT", "TEXTBOX"))
+
+
+def _box_words(s):
+    s = re.sub(r"([a-z])([A-Z])", r"\1 \2", s or "").replace("_", " ").upper()
+    return {w for w in re.findall(r"[A-Z][A-Z']+", s) if w not in _BOX_STOP}
+
+
+def box_score(line, text, name="", group=""):
+    """How many of game-program *line*'s words a text box on one of its mode's screens
+    shares: the box's own words, its name and its group's (PAD-485: the Heisei card's
+    KAIJU AWARD and the battle vs Gigan's award screen, ``Award_Textbox.Title_Instance``,
+    share AWARD)."""
+    return len(_box_words(stand_in_words(line))
+               & (_box_words(text) | _box_words(name) | _box_words(group)))
+
+
+def scene_dir_index(dirs):
+    """``{scene key: scene dir}`` for the scene directories *dirs*: a game program names a
+    scene by the last one or two folders of its card path (PAD-485)."""
+    out = {}
+    for d in dirs:
+        parts = [p for p in (d or "").replace("\\", "/").split("/") if p]
+        for n in (2, 1):
+            if len(parts) >= n:
+                out.setdefault("/".join(parts[-n:]), d)
+    return out
+
+
 def row_grows(r):
     """True when a replacement longer than the original's slot is still
     accepted: every scene row, a game-program row flagged ``grows``, and a

@@ -1885,6 +1885,7 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
     # (Godzilla's battle intro was the proving case).  Best-effort: a title
     # whose firmware can't be read/parsed just extracts no program rows.
     prog_rows = []
+    prog_ctx = {}
     fw = fw_cands.get("game_real") or fw_cands.get("game")
     if fw is not None and not cancel():
         from . import progtext
@@ -1894,7 +1895,7 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
                 progress(len(rads), len(rads) + 1,
                          "Scanning the game program for display text")
             entries = progtext.enumerate_program_strings(
-                reader.read_file_bytes(fw_node), modes=True)
+                reader.read_file_bytes(fw_node), modes=True, ctx=prog_ctx)
             prog_rows = []
             from ...core import text_manifest as _tm
             for e in entries:
@@ -1969,7 +1970,7 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
                 % n_kept, "info")
         text_manifest.save(output_dir, all_rows)
         if prog_rows:
-            _program_modes_read(output_dir)
+            _program_modes_read(output_dir, prog_ctx.get("scenes"))
     except Exception as e:
         log("Couldn't write display-text manifest (%s)." % e, "warning")
         return 0
@@ -1992,13 +1993,17 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
 
 
 #: PAD-470: beside ``text/strings.tsv``, the :data:`.text_modes.READ_REV` its
-#: game-program rows' modes were read at (a project read before has none)
+#: game-program rows' modes were read at (a project read before has none), and
+#: (PAD-485, ``scenes_rev`` :data:`SCENES_REV`) the screens each mode names
 _PROGRAM_MODES_FILE = "program_modes.json"
+#: PAD-485: bumped when what :func:`.text_modes.mode_scenes` finds changes
+SCENES_REV = 1
 
 
-def _program_modes_read(assets_dir):
+def _program_modes_read(assets_dir, scenes=None):
     """Note that the manifest's game-program rows carry this build's reading
-    of the game's own modes (:mod:`.text_modes`).  Never raises."""
+    of the game's own modes (:mod:`.text_modes`), with *scenes*, the screens
+    each mode names (``{mode class: [scene key]}``).  Never raises."""
     import json
     from . import text_modes
     from ...core import text_manifest
@@ -2006,16 +2011,35 @@ def _program_modes_read(assets_dir):
         with open(os.path.join(assets_dir, text_manifest.RELDIR,
                                _PROGRAM_MODES_FILE), "w",
                   encoding="utf-8") as f:
-            json.dump({"rev": text_modes.READ_REV}, f)
+            json.dump({"rev": text_modes.READ_REV, "scenes_rev": SCENES_REV,
+                       "scenes": dict(scenes or {})}, f)
     except OSError:
         pass
+
+
+def program_mode_scenes(assets_dir):
+    """``{mode class: [scene key]}``: the screens each of the game's own
+    modes names, as the project's last read of the card found them (PAD-485;
+    empty before one).  A scene key is the last folders of a scene's card
+    path.  Never raises."""
+    import json
+    from ...core import text_manifest
+    try:
+        with open(os.path.join(assets_dir, text_manifest.RELDIR,
+                               _PROGRAM_MODES_FILE), encoding="utf-8") as f:
+            got = json.load(f).get("scenes") or {}
+        return {str(m): [str(k) for k in ks] for m, ks in got.items()
+                if isinstance(ks, list)}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
 
 
 def program_text_needs_refresh(assets_dir, rows):
     """Should :func:`refresh_program_text_flags` re-read the card for the
     manifest *rows* of the project at *assets_dir*: a game-program row with
     no limit flag (extracted before they were measured), or game-program
-    rows whose modes were read by an older build (PAD-470)."""
+    rows whose modes were read by an older build (PAD-470), or before the
+    screens each mode names were noted (PAD-485)."""
     import json
     from . import text_modes
     from ...core import text_manifest
@@ -2028,10 +2052,12 @@ def program_text_needs_refresh(assets_dir, rows):
     try:
         with open(os.path.join(assets_dir, text_manifest.RELDIR,
                                _PROGRAM_MODES_FILE), encoding="utf-8") as f:
-            rev = int(json.load(f).get("rev") or 0)
+            got = json.load(f)
+        rev = int(got.get("rev") or 0)
+        scenes_rev = int(got.get("scenes_rev") or 0)
     except (OSError, ValueError, TypeError, AttributeError):
-        rev = 0
-    return rev < text_modes.READ_REV
+        rev = scenes_rev = 0
+    return rev < text_modes.READ_REV or scenes_rev < SCENES_REV
 
 
 def refresh_program_text_flags(assets_dir, log=None, cancel=None):
@@ -2101,7 +2127,9 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
                 return 0
             raw = reader.read_file_bytes(fw_node)
         from . import progtext
-        entries = progtext.enumerate_program_strings(raw, modes=True)
+        prog_ctx = {}
+        entries = progtext.enumerate_program_strings(raw, modes=True,
+                                                     ctx=prog_ctx)
     except Exception as e:
         log("Couldn't re-read the game program's text limits (%s); longer "
             "text is still offered and the Write step checks each string "
@@ -2158,7 +2186,7 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
                         "budget": f["budget"], "grow": True,
                         "modes": list(f.get("modes") or ())})
             n += 1
-    _program_modes_read(assets_dir)
+    _program_modes_read(assets_dir, prog_ctx.get("scenes"))
     if not n:
         return 0
     try:

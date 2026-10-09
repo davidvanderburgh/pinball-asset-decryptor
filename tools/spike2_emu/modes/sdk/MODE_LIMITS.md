@@ -215,7 +215,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms |
+| TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows, waits for multiballs only |

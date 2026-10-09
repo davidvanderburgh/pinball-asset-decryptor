@@ -751,6 +751,19 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         lane's next card ahead under the same copy lock and .src stamp, so rigbatch reuses it. TMNT LE starts a
         game only on fresh NVRAM (`wipe.titles`, wipe_then.sh): retry lane R (Elvira seeded, TMNT LE wiped) after
         lanes 1 and 3; chainV1 (Godzilla Pro's candidates 300 / 268 replayed) after R.
+      - **Run 24 end: every latest build has the game's own light shows.** 47 ports land a PAD-420 block (plus
+        Godzilla Premium/LE's PAD-411 ten): twelve on most; fewer where the game has fewer worth offering (James Bond
+        60th six, Jurassic Park the Pin five, Star Wars ELG seven, Batman eight - no fade among them on the first
+        three or on Aerosmith 1.16). A show lighting under 6 lights is not offered (fedca138). Godzilla Pro's Insert
+        chase match (candidate 300) killed the game 3 of 3 replays (`runs/godzilla_pro-1.16.verify`), as did 268:
+        neither is offered. Elvira's scan stopped at 310 of 340 after 13 crash restarts; its twelve come from those.
+        TMNT LE starts a game only on fresh NVRAM with its van stocked (`PAD_BALL_VAN_STOCK=2`,
+        `PAD_BALL_VAN_STOCK_AT=lower`), boots to Tech Alerts, and its game begins well after Start: scan_job3.sh now
+        boots past Tech Alerts and takes `INGAME_WAIT` (90 s there; chainT.sh). Card copies were serialised behind
+        one copier: `shows/prestage.sh` copied each lane's next card ahead, and `jobs/copy_watchdog.sh` freed a
+        hung robocopy wrapper (Elvira's card). Not proven on a machine yet: the shows of builds other than Godzilla
+        Premium/LE, and the lamp-group clean-up (072a46d4) - the next machine test of any build with shows should
+        play a dozen mode starts/ends in one game and see the game's own lighting stay right.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.
@@ -788,7 +801,7 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
 | screen, clip | the 32 new builds: a screen and a clip seen on the glass | `TITLE_SCENES` `screen_proven` / `clip_proven`; the item-164 proof (a mode with a screen and a clip, `glshot.sh`) |
 | multiball, ball save, stack | the 32 new builds (plus Elvira, Venom LE, TMNT LE, Godzilla LE ball save) | `MULTIBALL_PROVEN`, `BALL_SAVE_PROVEN`, `STACK_BALLS_PROVEN`: `C:\tmp\pad_generic\mb\mb_batch.sh`, `bs\bs_job.sh` through `rigbatch.sh` |
 | lights | the new builds whose `lamp` lines are not yet tied (Pro siblings of an LE port), and `LAMPS_PROVEN` for all 32 | the lights helper's branch `ticket/PAD-420-lights` ties 15 shipped builds' inserts to their shots (desk; its emulator trials failed to boot, not yet proven) |
-| shows | every title but Godzilla Premium/LE and King Kong LE/Pro (50 builds left at 55a6b003) | run 23: every candidate is played with the recorders (scanlog3.so) by `shows/lane.sh` x3 (chainL1-3); as each build's scan ends `shows/autoland.py` names its shows (showname / lampname / finalname), drops any reaching the game's sound / score / coil / award / clip / event calls (showsafe.py) and lands up to 12 in the port (landshows.py; `landed_new.txt` lists them) - then recipes, MODE_LIMITS's light-shows row, tests, commit. A scan that stopped short of its candidates is not landed: look at it by hand |
+| shows | none left: every latest build names the game's own light shows (run 24; TMNT LE the last) | done in the emulator; a machine test of a non-Godzilla build's shows and of the lamp-group clean-up is the open proof |
 | scoop | proven (run 7) on Avengers LE 1.10, D&D LE 1.10, Guardians LE 1.15, Iron Maiden LE 1.18, Aerosmith LE 1.16 (the mechanisms helper's runs); 25 more staged (chain19) | Deadpool LE/Pro and James Bond Pro: the handler never saw a settled ball (a call probe of the device's handler next); Aerosmith Pro, Batman, JB 60th: the job closed the wrong switch (fix `mechs_conf.SCOOP`) |
 | held coils | PROVEN (run 8-9, `HELD_COILS_PROVEN`): Led Zeppelin Pro 1.22, Star Wars ELG 1.10, Sword of Rage LE/Pro 1.19, Deadpool LE 1.16 (their gates; generation B, the board-address route with the object taken). Re-running (chain23): Deadpool Pro, Led Zeppelin LE, Iron Maiden LE/Pro (up posts), Avengers LE/Pro (tower magnet, tower post), Jurassic Park LE/Pro (T-Rex magnet, up posts) | A' and B are staged; C (the Device framework, most titles) needs the powers its gate service uses read first (docs/plans/mode_coils_census.md). Every hold power is the game's own |
 | magnet (Mode > Magnet) | Godzilla only | the magnet part also needs `magnet_shot`; a title's magnet can be offered as a held coil first |

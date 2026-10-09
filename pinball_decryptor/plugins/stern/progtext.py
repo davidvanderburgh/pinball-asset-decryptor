@@ -843,9 +843,9 @@ def plan_writes(raw, edits, log=None, reloc=None, no_grow_why="", parts=None,
                           moved))
             else:
                 how = " (standalone-name pointer moved)" if moved else ""
-            if part:
-                how += " (%s's line: that mode alone shows it)" % reading.label(part[1])
-            log('Program text: "%s" -> "%s"%s.' % (enc(text), enc(new_full), how),
+            who = (" in %s (a string only that mode shows)"
+                   % reading.label(part[1])) if part else ""
+            log('Program text: "%s" -> "%s"%s%s.' % (enc(text), enc(new_full), who, how),
                 "info")
         for tt, tn in followed:
             log('Program text: "%s" (the game also shows it on its own) -> '

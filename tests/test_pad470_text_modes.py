@@ -111,7 +111,8 @@ def test_a_mode_alone_on_its_string_is_edited_in_place(prog):
     buf = _apply(raw, writes)
     assert _cstr(buf, offs["kaiju_a"]) == "GIGAN AWARD"
     assert _cstr(buf, offs["kaiju_b"]) == "KAIJU AWARD"
-    assert any("Battle vs Gigan's line" in m for _l, m in msgs)
+    assert any('-> "GIGAN AWARD" in Battle vs Gigan (a string only that mode shows)' in m
+               for _l, m in msgs)
 
 
 def test_the_main_row_still_renames_every_line_a_mode_left_blank(prog):

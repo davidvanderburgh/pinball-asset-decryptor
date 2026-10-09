@@ -179,7 +179,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, light shows |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, light shows |
-| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
@@ -217,7 +217,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
-| TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms |
+| TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
@@ -227,7 +227,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **Ball save not yet:** found in the game, not yet seen working.

@@ -2782,40 +2782,50 @@ static int stock_class(const unsigned *obj)
 /* PAD-420: a port whose mode table is not this build's must not crash the game. A derived port once carried another
  * title's mode count: the walk read past the table into whatever followed it and called a "slot" of something that
  * was not a mode, and the game died in stock_class. So each entry is checked once against the process's mappings
- * before it is followed - an aligned, readable object whose vtable is readable through the ACTIVE slot, that slot's
- * function in executable memory and its typeinfo word readable - and an entry that is not is left out (said once). An
- * entry not found in the mappings read at the gate is checked again with them read afresh (the heap grows after the
- * gate; at most every 5 s). A table that is not readable, or whose checked entries are mostly not objects, turns
- * the route off: the runtime then cannot tell (-1), as on a port without the table. The class is kept per entry
- * (a mode object's class never changes), so the walk does not repeat the checks every time it asks. */
+ * before it is followed - an aligned, readable object whose typeinfo word (before its vtable) is readable; then its
+ * class (stock_class follows the typeinfo chain only through readable words); and, for a mode, its vtable readable
+ * through the ACTIVE slot and that slot's function in executable memory (the only slot the walk calls) - and an entry
+ * that is not is left out (said once). A real table holds the title's other rules too (PAD-483: 30 of Venom LE
+ * 1.07's 94 are crule objects - its lanes, bonus, skill shot - whose shorter vtables end before the ACTIVE slot):
+ * those are objects of another class, 0, never called and never counted against the table. An entry not found in
+ * the mappings read at the gate is checked again with them read afresh (the heap grows after the gate; at most every
+ * 5 s). A table that is not readable, or whose checked entries are mostly not objects, turns the route off: the
+ * runtime then cannot tell (-1), as on a port without the table. The class is kept per entry (a mode object's class
+ * never changes), so the walk does not repeat the checks every time it asks. */
 #define N_STOCK_TABLE 160
 static unsigned stock_seen[N_STOCK_TABLE];       /* the object the entry held when it was checked */
 static unsigned char stock_cls[N_STOCK_TABLE];   /* 0 not checked, 1 not an object, 2 + stock_class() */
 static int stock_table_off, stock_bad_n, stock_maps_fresh;
 static unsigned long stock_maps_at;
 
-static int stock_entry_ok(const unsigned *o, long slot)
+/* an object stock_class can read: aligned and readable, its vtable's word before it (the typeinfo) readable */
+static int stock_entry_ok(const unsigned *o)
 {
-    unsigned vt, f, t;
+    unsigned vt;
     if (((unsigned long)o & 3) || !maps_has((unsigned long)o, 4, MAP_R)) return 0;
     vt = o[0];
-    if (vt < 4 || (vt & 3) || !maps_has((unsigned long)vt - 4, 4 * ((unsigned long)slot + 2), MAP_R)) return 0;
-    f = ((const unsigned *)(unsigned long)vt)[slot];
-    t = ((const unsigned *)(unsigned long)vt)[-1];
-    return maps_has(f, 4, MAP_R | MAP_X) && (!t || (!(t & 3) && maps_has(t, 12, MAP_R)));
+    return vt >= 4 && !(vt & 3) && maps_has((unsigned long)vt - 4, 4, MAP_R);
 }
 
-/* the class of entry i (stock_class), or -1 when the entry is empty or is not a mode object */
+/* a mode's ACTIVE slot (stock_entry_active calls it): its vtable readable through it, its function code */
+static int stock_slot_ok(const unsigned *o, long slot)
+{
+    unsigned vt = o[0];
+    return maps_has((unsigned long)vt - 4, 4 * ((unsigned long)slot + 2), MAP_R) &&
+           maps_has(((const unsigned *)(unsigned long)vt)[slot], 4, MAP_R | MAP_X);
+}
+
+/* the class of entry i (stock_class: 0 an object of another class, a rule that is no mode), or -1 when the entry is
+ * empty or is not an object of this game */
 static int stock_entry_class(long i, const unsigned *tab, long n, long slot)
 {
     const unsigned *o = (const unsigned *)(unsigned long)tab[i];
-    int pass, c;
+    int pass, c = 0;
     if (!o) return -1;                                      /* not built yet: asked again later */
     if (i < N_STOCK_TABLE && stock_seen[i] == (unsigned)(unsigned long)o && stock_cls[i])
         return stock_cls[i] == 1 ? -1 : stock_cls[i] - 2;
     for (pass = 0;; pass++) {
-        if (stock_entry_ok(o, slot)) {
-            c = stock_class(o);
+        if (stock_entry_ok(o) && (!(c = stock_class(o)) || stock_slot_ok(o, slot))) {
             if (i < N_STOCK_TABLE) { stock_seen[i] = (unsigned)(unsigned long)o; stock_cls[i] = (unsigned char)(c + 2); }
             return c;
         }

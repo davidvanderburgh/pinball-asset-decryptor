@@ -166,7 +166,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
-| Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
@@ -175,7 +175,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
-| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
+| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, light shows |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, light shows |
@@ -223,7 +223,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |

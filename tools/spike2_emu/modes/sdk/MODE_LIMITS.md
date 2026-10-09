@@ -198,7 +198,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
@@ -213,7 +213,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
 | Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
-| Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |

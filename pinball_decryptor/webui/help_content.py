@@ -1082,8 +1082,14 @@ HELP_CONTENT = {
          "the font when you build, the profile in it, so only that line changes. "
          "The copy adds to the scene, so it needs an image build.\n"
          "- To correct every line in such a font at once, attach the profile to "
-         "its pictures on the Images tab; its lines' palettes then show a link "
-         "mark."),
+         "its pictures on the Images tab; its lines' palettes then show green "
+         "with a link mark, and clicking one says where its color comes from. "
+         "The Colors bar's pick still gives such a line a profile of its own.\n"
+         "- **Apply to all profiled lines of text…** / **Apply to all lines of "
+         "text…** (and **All text…** under Which files) give the shown profile to "
+         "every line in every scene. Lines already corrected through their font "
+         "are left out, and the question says how many. One Undo puts them all "
+         "back."),
         ("Machine screen (Spike 2, preview only)",
          "Not a correction but your machine's screen itself. It is never written to "
          "the card, and Revert all leaves it alone.\n\n"

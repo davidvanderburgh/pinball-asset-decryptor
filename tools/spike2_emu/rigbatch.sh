@@ -1,7 +1,7 @@
 #!/bin/bash
 # rigbatch.sh - run one job over a list of builds, spread across several rigs.
 #
-#   rigbatch.sh [-n RIGS] [--who PAD-n] [--out DIR] [--speed K]
+#   rigbatch.sh [-n RIGS] [--who PAD-n] [--out DIR] [--speed K] [--fps F]
 #               [--stage DIR | --no-stage] [--stage-keep GB]
 #               <list> [-- <command> [args...]]
 #
@@ -20,8 +20,9 @@
 # off a shared queue until it is empty.
 #
 # HOW MANY RIGS. -n, else as many as the CPU feeds at full speed: a rig costs
-# ~2.8 cores (measured, ~/.wslconfig), so nproc*10/28, and never more than the
-# free rigs. Over-committing is not merely slower: an emulated game starved of
+# ~2 cores at the sweep's 15 pictures a second (--fps below; PAD-488 measured
+# 1.7 over four rigs' busiest 30 s), so nproc*10/20, and ~2.8 at the machine's
+# 30 (nproc*10/28) - and never more than the free rigs. Over-committing is not merely slower: an emulated game starved of
 # CPU misses its own timings (ball-save windows, drains, a 150 s start) and a
 # healthy build reads as failed. Taking a rig mounts it, which needs root:
 # run this as root (`wsl -u root -e env HOME=/home/<you> bash rigbatch.sh ...`),
@@ -48,6 +49,18 @@
 # see real-time behaviour (a clip played frame by frame) leaves it out, or
 # says PAD_SPEED=1 on its own line.
 #
+# --fps F (PAD-488): every job's game builds at most F pictures a second (60,
+# 30, 20 or 15; PAD_SWAP_VBLANKS=60/F, eglshim.c). DEFAULT 15, half the
+# machine's 30: a sweep's rig is hidden and every picture is drawn in software,
+# so the renderer's CPU goes with F - and a renderer with CPU to spare draws
+# all 30 while the game builds them, so at 30 the VM stayed saturated. Four
+# rigs at 4x over the 7-build check, two rounds: the busiest 30 s of the VM
+# was 8.8-9.0 of 10 cores on the old renderer, 8.2-9.2 at 30, 6.9 and 6.9 at
+# 15, every job passing (docs/plans/game_speed.md). The game skips a build
+# while the renderer is busy (PAD-301), as on a machine with a slow GPU, and
+# its own clock and logic do not change. A job that judges the pictures' own
+# cadence passes --fps 30, or says PAD_SWAP_VBLANKS=2 on its own line.
+#
 # Out: DIR (default $PAD_HOME/rigbatch/<list>-<time>/) holds progress.txt,
 # results.tsv (key, rig, verdict, seconds, the VERDICT line) and one log per
 # build. The rigs show on the board as held by --who, noting each build as it
@@ -56,7 +69,7 @@
 . "$(dirname "$0")/padpath.sh"
 set -u
 
-N="" WHO="" OUT="" STAGE="" NOSTAGE=0 KEEP=100 SPEED=""
+N="" WHO="" OUT="" STAGE="" NOSTAGE=0 KEEP=100 SPEED="" FPS=15
 while [ $# -gt 0 ]; do
     case "$1" in
         -n) N=$2; shift 2 ;;
@@ -66,7 +79,8 @@ while [ $# -gt 0 ]; do
         --no-stage) NOSTAGE=1; shift ;;
         --stage-keep) KEEP=$2; shift 2 ;;
         --speed) SPEED=$2; shift 2 ;;
-        -h|--help) sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --fps) FPS=$2; shift 2 ;;
+        -h|--help) awk 'NR == 1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
         *) break ;;
     esac
 done
@@ -75,6 +89,10 @@ shift
 [ "${1:-}" = -- ] && shift
 if [ $# -gt 0 ]; then CMD=("$@"); else CMD=(bash "$RIG/bootcheck.sh"); fi
 [ -f "$LIST" ] || { echo "rigbatch: no list at $LIST" >&2; exit 2; }
+case $FPS in
+    60|30|20|15) VBL=$((60 / FPS)) ;;
+    *) echo "rigbatch: --fps is 60, 30, 20 or 15 (a swap is a whole number of 60 Hz refreshes)" >&2; exit 2 ;;
+esac
 WHO=${WHO:-$(pad_label)}
 WHO=${WHO:-rigbatch}
 OUT=${OUT:-$PAD_HOME/rigbatch/$(basename "$LIST" .list)-$(date +%Y%m%d-%H%M%S)}
@@ -90,11 +108,12 @@ echo 0 > "$OUT/next"
 : > "$OUT/results.tsv"
 
 cpu=$(nproc 2>/dev/null || echo 2)
-fit=$(( cpu * 10 / 28 )); [ "$fit" -ge 1 ] || fit=1
+per=$([ "$VBL" -ge 4 ] && echo 20 || echo 28)      # tenths of a core a rig costs (HOW MANY RIGS)
+fit=$(( cpu * 10 / per )); [ "$fit" -ge 1 ] || fit=1
 [ -n "$N" ] || N=$fit
 [ "$N" -gt "$TOTAL" ] && N=$TOTAL
 if [ "$N" -gt "$fit" ]; then
-    say "WARNING: $N rigs on $cpu cores (~2.8 each fits $fit) - builds may fail on timing, not on their own"
+    say "WARNING: $N rigs on $cpu cores (~$((per / 10)).$((per % 10)) each at $FPS fps fits $fit) - builds may fail on timing, not on their own"
 fi
 
 # ---- take the rigs ------------------------------------------------------
@@ -113,7 +132,7 @@ for _ in $(seq 1 "$N"); do
     SLOTS+=("$s")
 done
 [ "${#SLOTS[@]}" -gt 0 ] || { say "no rig could be taken - riglock.sh list"; exit 1; }
-say "$TOTAL builds on rig(s) ${SLOTS[*]} for $WHO; job: ${CMD[*]}"
+say "$TOTAL builds on rig(s) ${SLOTS[*]} for $WHO${SPEED:+ at ${SPEED}x}, $FPS fps; job: ${CMD[*]}"
 
 # ---- stage the cards (cardstage.sh) ----------------------------------------
 if [ "$NOSTAGE" = 0 ] && [ -z "$STAGE" ] && [ -d /mnt/c ] \
@@ -191,8 +210,9 @@ worker() {
         t0=$(date +%s)
         # shellcheck disable=SC2086
         # the batch's own settings first, so a line's ENV still wins: PAD_CARD_CACHE=1 when the cards were cached
-        # (the job boots the original path and its mount finds the copy), PAD_SPEED for --speed
-        env ${STAGE:+$( [ "$STAGE" = cache ] && echo PAD_CARD_CACHE=1 )} ${SPEED:+PAD_SPEED=$SPEED} $envs \
+        # (the job boots the original path and its mount finds the copy), PAD_SPEED for --speed, PAD_SWAP_VBLANKS for --fps
+        env ${STAGE:+$( [ "$STAGE" = cache ] && echo PAD_CARD_CACHE=1 )} ${SPEED:+PAD_SPEED=$SPEED} \
+            PAD_SWAP_VBLANKS=$VBL $envs \
             PAD_SLOT="$slot" PAD_LABEL="$WHO" "${CMD[@]}" "$key" "$card" > "$log" 2>&1 < /dev/null &
         jp=$!
         # THE LEASE IS KEPT WHILE THE JOB RUNS (PAD-420): it lapses PAD_LOCK_IDLE after its holder's last touch, and a
@@ -220,7 +240,7 @@ worker() {
 
 T0=$(date +%s)
 for s in "${SLOTS[@]}"; do
-    setsid bash -c "$(declare -f say worker); P='$P' OUT='$OUT' TOTAL=$TOTAL RIG='$RIG' WHO='$WHO' STAGE='$STAGE' SPEED='$SPEED'; \
+    setsid bash -c "$(declare -f say worker); P='$P' OUT='$OUT' TOTAL=$TOTAL RIG='$RIG' WHO='$WHO' STAGE='$STAGE' SPEED='$SPEED' VBL='$VBL'; \
         CMD=($(printf '%q ' "${CMD[@]}")); worker $s" < /dev/null &
     WPIDS+=("$!")
 done

@@ -487,6 +487,52 @@ def test_a_cached_batch_hands_every_job_the_cache_and_the_speed():
     assert "b T/cards/b.raw cache=1 speed=1" in lines
 
 
+_FPS = r'''
+t=$(mktemp -d) || exit 1
+mkdir -p "$t/rig" "$t/home" "$t/board"
+cp "$R"/padpath.sh "$R"/padslot.sh "$R"/riglock.sh "$R"/rigbatch.sh "$t/rig/"
+printf '#!/bin/bash\necho 0\n' > "$t/rig/alive.sh"
+printf '#!/bin/bash\n:\n' > "$t/rig/killgame.sh"
+cat > "$t/job.sh" <<'JOB'
+#!/bin/bash
+echo "$1 vblanks=${PAD_SWAP_VBLANKS:-unset}" >> "$JOBLOG"
+echo "VERDICT $1 pass"
+JOB
+printf 'a|/cards/a.raw|\nb|/cards/b.raw|PAD_SWAP_VBLANKS=2\n' > "$t/l.list"
+export PAD_HOME="$t/home" PAD_BOARD="$t/board" PAD_SLOTS_MAX=3 JOBLOG="$t/jobs.txt"
+export PAD_RIGBATCH_ASSUME_MOUNTED=1
+bash "$t/rig/rigbatch.sh" -n 1 --who PAD-9 --out "$t/out" --no-stage --fps 15 "$t/l.list" \
+    -- bash "$t/job.sh" > "$t/stdout" 2>&1
+echo "rc=$?"
+grep -o "for PAD-9, 15 fps" "$t/out/progress.txt"
+bash "$t/rig/rigbatch.sh" -n 1 --who PAD-9 --out "$t/out2" --no-stage "$t/l.list" -- bash "$t/job.sh" > /dev/null 2>&1
+bash "$t/rig/rigbatch.sh" -n 1 --who PAD-9 --out "$t/out4" --no-stage --fps 30 "$t/l.list" \
+    -- bash "$t/job.sh" > /dev/null 2>&1
+grep -o "for PAD-9, 30 fps" "$t/out4/progress.txt"
+bash "$t/rig/rigbatch.sh" -n 1 --who PAD-9 --out "$t/out3" --no-stage --fps 25 "$t/l.list" \
+    -- bash "$t/job.sh" > /dev/null 2>"$t/err"
+echo "rc25=$? $(cat "$t/err")"
+sort "$t/jobs.txt"
+rm -rf "$t"
+'''
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/1"), reason="Linux only, like the rig (setsid, flock)")
+def test_a_batch_caps_every_jobs_frame_rate_with_fps():
+    """PAD-488: --fps F hands every job PAD_SWAP_VBLANKS=60/F (a hidden rig draws each picture in software, so the
+    sweep's CPU goes with F), 15 unless it says; a line's own value wins, --fps 30 is the machine's cadence, and a
+    rate a whole number of 60 Hz refreshes cannot make is refused."""
+    out = subprocess.run(["bash", "-c", _FPS], env=dict(os.environ, R=RIG), capture_output=True, text=True,
+                         timeout=120)
+    lines = out.stdout.split("\n")
+    assert "rc=0" in lines, out.stdout + out.stderr
+    assert "for PAD-9, 15 fps" in lines and "for PAD-9, 30 fps" in lines
+    assert lines.count("a vblanks=4") == 2 and lines.count("a vblanks=2") == 1    # --fps 15, no --fps, --fps 30
+    assert lines.count("b vblanks=2") == 3 and "a vblanks=unset" not in lines
+    rc25 = [ln for ln in lines if ln.startswith("rc25=")][0]
+    assert rc25.startswith("rc25=2 ") and "60, 30, 20 or 15" in rc25
+
+
 # --------------------------------------------------------------------------
 # a sweep presses THIS build's switches
 # --------------------------------------------------------------------------

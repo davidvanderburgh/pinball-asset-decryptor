@@ -446,27 +446,81 @@ def _run_tool(argv, timeout, what):
     return result.returncode, out
 
 
-def _debugfs(tools, dev, command, timeout, writable=True):
-    """One ``debugfs -R`` command against *dev*.  debugfs exits 0 even when
-    the command itself failed, so failures are detected from the output."""
-    argv = [tools["debugfs"]] + (["-w"] if writable else []) + \
-        ["-R", command, dev]
-    rc, out = _run_tool(argv, timeout, "debugfs %s" % command.split()[0])
-    lowered = out.lower()
-    if rc != 0 or "ext2_lookup" in lowered or "ext2fs_" in lowered \
-            or "could not allocate" in lowered or "not found" in lowered:
-        raise Ext4GrowError("debugfs '%s' failed:\n%s"
-                            % (command, out.strip()))
-    return out
+#: A batch of debugfs writes ends at this many files or bytes (a bigger file is
+#: a batch of its own): few enough sessions to cost nothing next to the copies,
+#: small enough that the log moves while a big delivery lands.  Every session
+#: opens the partition afresh and a writing one reads and rewrites its bitmaps
+#: and group descriptors, so a session per step of every file was most of what
+#: a big delivery cost.  Both debugfs deliveries (:func:`_grow_files_debugfs`,
+#: :func:`grow_files_pinned`) write this way.
+DEBUGFS_BATCH_FILES = 32
+DEBUGFS_BATCH_BYTES = 64 << 20
+
+#: The longest command line debugfs takes from a command file: it reads them
+#: into a BUFSIZ buffer, 1,024 bytes on macOS, and splits a longer one into two
+#: broken commands ("Unbalanced quotes in command line").
+DEBUGFS_LINE_MAX = 1000
 
 
-def _debugfs_file_size(tools, dev, card_rel, timeout):
-    """Size in bytes of */card_rel* inside *dev*, or ``None`` if absent."""
-    import re
-    argv = [tools["debugfs"], "-R", 'stat "/%s"' % card_rel, dev]
-    rc, out = _run_tool(argv, timeout, "debugfs stat")
-    m = re.search(r"Size:\s*(\d+)", out)
-    return int(m.group(1)) if (rc == 0 and m) else None
+def _debugfs_batches(sizes):
+    """Where each batch of a debugfs delivery ends (one past its last job) for
+    jobs of *sizes* bytes: :data:`DEBUGFS_BATCH_FILES` files and
+    :data:`DEBUGFS_BATCH_BYTES` bytes at most, a bigger file a batch of its
+    own.  The cut depends on the sizes alone, so the same jobs batch the same
+    every time."""
+    cuts, n, total = [], 0, 0
+    for i, size in enumerate(sizes):
+        if n and (n >= DEBUGFS_BATCH_FILES
+                  or total + size > DEBUGFS_BATCH_BYTES):
+            cuts.append(i)
+            n = total = 0
+        n += 1
+        total += size
+    if n:
+        cuts.append(len(sizes))
+    return cuts
+
+
+def _debugfs_session(tools, dev, commands, timeout, writable=False):
+    """Run *commands* through ONE debugfs session on *dev* (``-f -``, a
+    command a line) and return ``(rc, stdout, complaints)``.  debugfs echoes
+    each command to stdout as ``debugfs: <command>`` ahead of what it prints,
+    in order; its complaints go to stderr, out of step with stdout, and do not
+    say which command they are about (``write: Ext2 file already exists``).
+    debugfs exits 0 even when a command failed.  The version banner it prints
+    to stderr (``debugfs 1.47.0 (5-Feb-2023)``) is not a complaint."""
+    argv = [tools["debugfs"]] + (["-w"] if writable else []) + ["-f", "-", dev]
+    try:
+        r = subprocess.run(argv, input="".join(c + "\n" for c in commands),
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        raise Ext4GrowError("debugfs timed out after %ds" % timeout) from e
+    complaints = [ln for ln in (r.stderr or "").splitlines()
+                  if ln.strip() and not re.match(r"debugfs \d", ln)]
+    return r.returncode, r.stdout or "", complaints
+
+
+def _stat_results(out):
+    """``[(path, size), ...]`` for each ``stat "<path>"`` a debugfs session
+    ran, in order, from its stdout; *size* is ``None`` when the path is not
+    there (a directory's is its own size)."""
+    res, path, size = [], None, None
+    for line in out.splitlines():
+        if line.startswith("debugfs: "):
+            if path is not None:
+                res.append((path, size))
+            path = size = None
+            cmd = line[len("debugfs: "):]
+            if cmd.startswith('stat "') and cmd.endswith('"'):
+                path = cmd[len('stat "'):-1]
+        elif path is not None and size is None and line.startswith("User:"):
+            m = re.search(r"Size:\s*(\d+)", line)
+            if m:
+                size = int(m.group(1))
+    if path is not None:
+        res.append((path, size))
+    return res
 
 
 def _wants_exec(src):
@@ -484,11 +538,20 @@ def _wants_exec(src):
 
 
 def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
-    """macOS growth: replace each asset inside the ext4 partition via debugfs
-    (``kill_file`` frees the old blocks, ``rm`` drops the entry, ``write``
-    allocates the full-size copy), then one ``e2fsck -fy`` to reconcile the
-    free block/inode counts debugfs leaves stale.  Verified bit-exact against
-    a loop-mounted reference."""
+    """macOS and native Linux growth: replace each asset inside the ext4
+    partition via debugfs (``kill_file`` frees the old blocks, ``rm`` drops
+    the entry, ``write`` allocates the full-size copy), then one ``e2fsck
+    -fy`` to reconcile the free block/inode counts debugfs leaves stale.
+    Verified bit-exact against a loop-mounted reference.
+
+    In a few sessions, not one per step of every file: one read-only session
+    looks up every path the jobs name, the whole plan is made from that
+    before anything is written, and the files go in batches
+    (:func:`_debugfs_batches`) of one writing session each, which stats what
+    it wrote.  A batch debugfs complains about counts none of its files as
+    grown: the complaint does not say which file it is about, and a file
+    counted that is not on the card would be reported (and recorded) as on
+    it.  *cancel* is asked before each batch."""
     tools = _find_e2fsprogs()
     if tools is None:
         raise Ext4GrowUnavailable(
@@ -501,6 +564,12 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
         raise Ext4GrowError(
             "The image path contains a '?' (%s), which the ext4 tools can't "
             "open. Rename the file and try again." % image_path)
+    for card_rel, src in jobs:
+        # a command a line, its paths in double quotes
+        bad = next((p for p in (src, card_rel) if '"' in p or "\n" in p), None)
+        if bad is not None:
+            raise Ext4GrowError("A path contains a double quote or a line "
+                                "break, which debugfs cannot take: %s" % bad)
     dev = "%s?offset=%d" % (image_path, part_offset)
 
     log("Growing %d file(s) to full size via debugfs..." % len(jobs),
@@ -509,7 +578,6 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
     # Free-space guard: fail clearly up front instead of ENOSPC mid-write
     # (which would leave a partially-written asset).  Read via debugfs, not
     # dumpe2fs — see _find_e2fsprogs for why dumpe2fs chokes on ?offset=.
-    import re
     rc, head = _run_tool([tools["debugfs"], "-R", "stats -h", dev], 60,
                          "debugfs stats")
     mf = re.search(r"^Free blocks:\s*(\d+)", head, re.M)
@@ -519,11 +587,33 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
             "Couldn't read the card's games partition (the card image was not "
             "modified by this step):\n%s" % head.strip())
     avail = int(mf.group(1)) * int(mb.group(1))
+
+    # Every path the jobs name, looked up in ONE read-only session: each
+    # target, its directory, and a scene.assets one may make with that
+    # directory's own parent.
+    sizes = [os.path.getsize(src) for _rel, src in jobs]
+    looked = []
+    for card_rel, _src in jobs:
+        looked.append("/" + card_rel)
+        if "/" in card_rel:
+            looked.append("/" + card_rel.rsplit("/", 1)[0])
+        made = _makes_dir(card_rel)
+        if made:
+            looked.append("/" + made[1])
+    rc, out, complaints = _debugfs_session(
+        tools, dev, ['stat "%s"' % p for p in looked], timeout)
+    found = _stat_results(out)
+    if rc != 0 or [p for p, _s in found] != looked:
+        raise Ext4GrowError(
+            "Couldn't look up the files on the card's games partition (the "
+            "card image was not modified by this step):\n%s"
+            % "\n".join(complaints[-20:]))
+    there = {p: s for p, s in found if s is not None}
+
     need = 0
     items = []
-    for card_rel, src in jobs:
-        cur = _debugfs_file_size(tools, dev, card_rel, 60) or 0
-        d = max(os.path.getsize(src) - cur, 0)
+    for (card_rel, _src), size in zip(jobs, sizes):
+        d = max(size - (there.get("/" + card_rel) or 0), 0)
         need += d
         if d:
             items.append((d, card_rel))
@@ -531,48 +621,49 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
         raise Ext4GrowNoSpace(no_space_message(need, avail, items),
                               need=need, avail=avail, items=items)
 
-    grown, touched = 0, False
+    import shutil
+    import tempfile
+    grown, touched, links = 0, False, None
     try:
-        for card_rel, src in jobs:
-            if cancel():
-                break
+        # The whole plan before anything is written: each job's commands,
+        # with *there* kept as each path will be once the jobs before it have
+        # run.
+        plan = []
+        for (card_rel, src), size in zip(jobs, sizes):
             tgt = '"/%s"' % card_rel
-            touched = True
-            # A file the card NEVER HAD is a legitimate job: a mode's own asset,
-            # indexed by a freshly appended .sidx record (item 129).  kill_file and
-            # rm both fail on a path that does not exist yet and _debugfs raises on
-            # "not found", so creating one used to die on the very first command --
-            # while the Linux path created it happily with a plain `cp`.  Free the
-            # old blocks only when there ARE old blocks; `write` makes the inode
-            # either way.
-            exists = _debugfs_file_size(tools, dev, card_rel, 60) is not None
-            if exists:
-                _debugfs(tools, dev, "kill_file %s" % tgt, 120)
-                _debugfs(tools, dev, "rm %s" % tgt, 120)
+            cmds = []
+            new = "/" + card_rel not in there
+            if not new:
+                cmds += ["kill_file %s" % tgt, "rm %s" % tgt]
             else:
-                # Match the Linux script's PAD_GROW_NODIR guard and name the
-                # directory: debugfs would otherwise fail deep inside `write`
-                # with nothing saying which parent was missing.
+                # A file the card NEVER HAD is a legitimate job: a mode's own
+                # asset, indexed by a freshly appended .sidx record (item
+                # 129).  kill_file and rm both fail on a path that is not
+                # there, so the old blocks are freed only when there ARE old
+                # blocks; `write` makes the inode either way.
                 parent = card_rel.rsplit("/", 1)[0] if "/" in card_rel else ""
                 made = _makes_dir(card_rel)
-                if made and _debugfs_file_size(tools, dev, made[0], 60) is None:
-                    _debugfs(tools, dev, 'mkdir "/%s"' % made[0], 120)
-                if parent:
-                    prc, pout = _run_tool(
-                        [tools["debugfs"], "-R", 'stat "/%s"' % parent, dev],
-                        60, "debugfs stat")
-                    if prc != 0 or "Inode:" not in pout:
-                        raise Ext4GrowError(
-                            "Can't create /%s on the card: its directory /%s "
-                            "does not exist." % (card_rel, parent))
-                log("  creating %s (new file)" % card_rel, "info")
-            _debugfs(tools, dev, 'write "%s" %s' % (src, tgt), timeout)
-            want = os.path.getsize(src)
-            got = _debugfs_file_size(tools, dev, card_rel, 60)
-            if got != want:
-                raise Ext4GrowError(
-                    "debugfs wrote %s B of %s B for %s — the file was left "
-                    "incomplete on the card image." % (got, want, card_rel))
+                if made and "/" + made[0] not in there \
+                        and "/" + made[1] in there:
+                    cmds.append('mkdir "/%s"' % made[0])
+                    there["/" + made[0]] = 0
+                # Match the Linux script's PAD_GROW_NODIR guard and name the
+                # directory: debugfs would otherwise fail deep inside `write`
+                # with nothing saying which parent was missing.  Refused here,
+                # before anything is written.
+                if parent and "/" + parent not in there:
+                    raise Ext4GrowError(
+                        "Can't create /%s on the card: its directory /%s does "
+                        "not exist." % (card_rel, parent))
+            write = 'write "%s" %s' % (src, tgt)
+            if len(write.encode("utf-8")) > DEBUGFS_LINE_MAX:
+                # a source path too long for one command line goes through a
+                # short link to it, which debugfs follows
+                links = links or tempfile.mkdtemp(prefix="pad_debugfs_")
+                link = os.path.join(links, str(len(plan)))
+                os.symlink(src, link)
+                write = 'write "%s" %s' % (link, tgt)
+            cmds.append(write)
             if _wants_exec(src):
                 # debugfs ``write`` creates the inode with the HOST file's
                 # mode, and a staged game ELF opened "wb" is 0644 unless the
@@ -581,14 +672,47 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
                 # carry the game at 0100775 and every asset at 0100664, so
                 # only an executable (an ELF, or a source already marked
                 # executable) is promoted -- a grown video keeps its mode.
-                _debugfs(tools, dev,
-                         "set_inode_field %s mode 0100755" % tgt, 120)
-            grown += 1
-            log("  grew %s" % card_rel, "info")
+                cmds.append("set_inode_field %s mode 0100755" % tgt)
+            cmds.append("stat %s" % tgt)          # the read-back
+            there["/" + card_rel] = size
+            plan.append((cmds, new))
+
+        start = 0
+        for end in _debugfs_batches(sizes):
+            if cancel():
+                break
+            for i in range(start, end):
+                if plan[i][1]:
+                    log("  creating %s (new file)" % jobs[i][0], "info")
+            touched = True
+            rc, out, complaints = _debugfs_session(
+                tools, dev, [c for i in range(start, end) for c in plan[i][0]],
+                timeout, writable=True)
+            if rc != 0 or complaints:
+                raise Ext4GrowError(
+                    "debugfs failed writing %s%s (exit %d), so none of the %d "
+                    "file(s) it was writing together counts as grown:\n%s"
+                    % (jobs[start][0],
+                       " to %s" % jobs[end - 1][0] if end - start > 1 else "",
+                       rc, end - start, "\n".join(complaints[-20:])))
+            back = _stat_results(out)
+            for k, i in enumerate(range(start, end)):
+                card_rel = jobs[i][0]
+                path, got = back[k] if k < len(back) else (None, None)
+                if path != "/" + card_rel or got != sizes[i]:
+                    raise Ext4GrowError(
+                        "debugfs wrote %s B of %s B for %s — the file was left "
+                        "incomplete on the card image."
+                        % (got, sizes[i], card_rel))
+                grown += 1
+                log("  grew %s" % card_rel, "info")
+            start = end
     except Ext4GrowError as e:
         e.grown = grown
         raise
     finally:
+        if links:
+            shutil.rmtree(links, ignore_errors=True)
         # debugfs updates the bitmaps but not the free-count summaries;
         # e2fsck reconciles them (exit 1 = "errors corrected" — expected).
         # Runs even after a mid-loop failure so already-grown files never
@@ -631,17 +755,12 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
 # files: some 2,400 sessions, and minutes with nothing new in the log).  Now one
 # read-only session looks up every path the jobs name, the whole plan is made
 # from that (replaced or new, which mode and owner, which scene.assets to make)
-# before anything is written, and the files go in batches of one session each,
-# which stats what it wrote; the log names each file as its batch lands.
+# before anything is written, and the files go in batches (_debugfs_batches) of
+# one session each, which stats what it wrote; the log names each file as its
+# batch lands.
 
 #: The mode a new file gets: what every stock asset on a Spike 2 card carries.
 PINNED_NEW_MODE = 0o100664
-
-#: A batch of a pinned delivery ends at this many files or bytes (a bigger file
-#: is a batch of its own): few enough sessions to cost nothing next to the
-#: copies, small enough that the log moves while a big delivery lands.
-PINNED_BATCH_FILES = 32
-PINNED_BATCH_BYTES = 64 << 20
 
 _PINNED_HEAD = r'''set -e
 export E2FSPROGS_FAKE_TIME=@EPOCH@ E2FSCK_TIME=@EPOCH@
@@ -724,7 +843,8 @@ i=0
 for k in "${!CUT[@]}"; do
     last=$((CUT[k] - 1))
     rc=0; debugfs -w -f "$LOG.b$k" "$DEV" > "$LOG.out" 2> "$LOG.err" || rc=$?
-    bad=$(grep -v '^debugfs\|^$' "$LOG.err" || true)
+    # all but the version banner ("debugfs 1.47.0 (...)") is a complaint
+    bad=$(grep -v '^debugfs [0-9]\|^$' "$LOG.err" || true)
     if [ "$rc" -ne 0 ] || [ -n "$bad" ]; then
         echo "PAD_GROW_DEBUGFS ${REL[$i]#/} to ${REL[$last]#/} (exit $rc): $bad" >&2; exit 6
     fi
@@ -747,29 +867,12 @@ echo "PAD_GROW_DONE fsck=$rc"
 '''
 
 
-def _pinned_batches(sizes):
-    """Where each batch of a pinned delivery ends (one past its last job) for
-    jobs of *sizes* bytes: :data:`PINNED_BATCH_FILES` files and
-    :data:`PINNED_BATCH_BYTES` bytes at most, a bigger file a batch of its
-    own."""
-    cuts, n, total = [], 0, 0
-    for i, size in enumerate(sizes):
-        if n and (n >= PINNED_BATCH_FILES or total + size > PINNED_BATCH_BYTES):
-            cuts.append(i)
-            n = total = 0
-        n += 1
-        total += size
-    if n:
-        cuts.append(len(sizes))
-    return cuts
-
-
 def _pinned_script(part_offset, jobs_exec, image_exec, epoch, sizes=None):
     """The bash script :func:`grow_files_pinned` runs: one read-only debugfs
     session looks up every path the jobs name; a free-space check; the whole
     plan (kill_file/rm when the file exists, write, the old or stock
     mode/uid/gid, a scene.assets made where one may be) before anything is
-    written; then per batch (:func:`_pinned_batches`) one ``debugfs -w`` that
+    written; then per batch (:func:`_debugfs_batches`) one ``debugfs -w`` that
     stats what it wrote, a size check and a ``PAD_GROW_OK`` marker per file in
     order; then one ``e2fsck -fy`` to reconcile the free counts debugfs leaves
     stale.  Every tool runs with the clock pinned to *epoch*.  *sizes* are the
@@ -806,7 +909,7 @@ def _pinned_script(part_offset, jobs_exec, image_exec, epoch, sizes=None):
         arr("SZ", [int(s) for s in sizes]),
         arr("MKD", ["/" + m[0] if m else "" for m in made]),
         arr("MKU", ["/" + m[1] if m else "" for m in made]),
-        arr("CUT", _pinned_batches(sizes)),
+        arr("CUT", _debugfs_batches(sizes)),
         "NEWMODE=%o\n" % PINNED_NEW_MODE,
         _PINNED_BODY,
         _PINNED_TAIL])

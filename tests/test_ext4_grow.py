@@ -11,6 +11,7 @@ import os
 import pytest
 
 from pinball_decryptor.core import ext4_grow
+from tests._debugfs_fake import FakeDebugfs
 
 
 def test_bash_script_has_the_critical_steps_and_is_quoted():
@@ -152,14 +153,9 @@ def _fake_tools():
     return {"debugfs": "/x/debugfs", "e2fsck": "/x/e2fsck"}
 
 
-def test_debugfs_grow_sequence_and_fsck(monkeypatch, tmp_path):
-    """The macOS path issues kill_file + rm + write per job, verifies the
-    written size, and always finishes with e2fsck -fy."""
-    src = tmp_path / "big.mp4"
-    src.write_bytes(b"x" * 5000)
-
-    calls = []
-
+def _tools_stub(calls, free_blocks=999999, block_size=4096):
+    """``_run_tool`` for the two steps that still run alone: the free-space read
+    and the closing e2fsck (exit 1 = "errors corrected", expected)."""
     def fake_run_tool(argv, timeout, what):
         calls.append(argv)
         tool = os.path.basename(argv[0])
@@ -167,30 +163,42 @@ def test_debugfs_grow_sequence_and_fsck(monkeypatch, tmp_path):
         # device resolution chokes on the ?offset= suffix).
         assert tool != "dumpe2fs"
         if "stats -h" in argv:
-            return 0, "Block size:               4096\n" \
-                      "Free blocks:              8282\n"
+            return 0, "Block size:               %d\n" \
+                      "Free blocks:              %d\n" % (block_size, free_blocks)
         if tool == "e2fsck":
-            return 1, "FILE SYSTEM WAS MODIFIED"       # 1 = fixed, expected
-        # debugfs: stat reports the new size once the write happened
-        if any(a.startswith("stat ") for a in argv):
-            wrote = any("write " in " ".join(c) for c in calls[:-1])
-            return 0, "Size: %d" % (5000 if wrote else 100)
-        return 0, "debugfs 1.47.0"
+            return 1, "FILE SYSTEM WAS MODIFIED"
+        raise AssertionError("debugfs runs in sessions now: %s" % argv)
+    return fake_run_tool
 
+
+def _debugfs_env(monkeypatch, fake, calls, **kw):
     monkeypatch.setattr(ext4_grow, "_find_e2fsprogs", _fake_tools)
-    monkeypatch.setattr(ext4_grow, "_run_tool", fake_run_tool)
+    monkeypatch.setattr(ext4_grow, "_run_tool", _tools_stub(calls, **kw))
+    monkeypatch.setattr(ext4_grow, "_debugfs_session", fake)
+
+
+def test_debugfs_grow_sequence_and_fsck(monkeypatch, tmp_path):
+    """The debugfs path looks every path up in one read-only session, then writes
+    in one session a batch: kill_file + rm + write per replaced file, each read
+    back by a stat, and always finishes with e2fsck -fy."""
+    src = tmp_path / "big.mp4"
+    src.write_bytes(b"x" * 5000)
+    fake, calls = FakeDebugfs({"/video/a.mov": 100}, {"/video"}), []
+    _debugfs_env(monkeypatch, fake, calls)
 
     grown = ext4_grow._grow_files_debugfs(
         str(tmp_path / "card.raw"), 1048576,
         [("video/a.mov", str(src))], lambda *a, **k: None, lambda: False, 600)
-    assert grown == 1
+    assert grown == 1 and fake.files["/video/a.mov"] == 5000
 
-    flat = [" ".join(c) for c in calls]
+    (ro, looked, dev), (rw, wrote, _dev) = fake.sessions
     # Partition opened at its raw offset via unix_io's ?offset= suffix.
-    assert any("?offset=1048576" in s for s in flat)
-    seq = [s for s in flat if "/x/debugfs" in s and "-w" in s]
-    assert "kill_file" in seq[0] and "rm " in seq[1] and "write " in seq[2]
+    assert dev.endswith("card.raw?offset=1048576")
+    assert not ro and looked == ['stat "/video/a.mov"', 'stat "/video"']
+    assert rw and wrote == ['kill_file "/video/a.mov"', 'rm "/video/a.mov"',
+                            'write "%s" "/video/a.mov"' % src, 'stat "/video/a.mov"']
     # e2fsck -fy always runs after a write (debugfs leaves counts stale).
+    flat = [" ".join(c) for c in calls]
     assert any("/x/e2fsck" in s and "-fy" in s for s in flat)
 
 
@@ -203,98 +211,148 @@ def test_debugfs_grow_makes_a_game_elf_executable(monkeypatch, tmp_path):
     elf.write_bytes(b"\x7fELF" + b"\x00" * 4996)
     vid = tmp_path / "big.mp4"
     vid.write_bytes(b"x" * 5000)
-
-    calls = []
-
-    def fake_run_tool(argv, timeout, what):
-        calls.append(argv)
-        tool = os.path.basename(argv[0])
-        if "stats -h" in argv:
-            return 0, "Block size: 4096\nFree blocks: 999999\n"
-        if tool == "e2fsck":
-            return 0, "clean"
-        if any(a.startswith("stat ") for a in argv):
-            return 0, "Size: 5000"
-        return 0, "debugfs 1.47.0"
-
-    monkeypatch.setattr(ext4_grow, "_find_e2fsprogs", _fake_tools)
-    monkeypatch.setattr(ext4_grow, "_run_tool", fake_run_tool)
+    fake, calls = FakeDebugfs({"/gz/game": 100, "/video/a.mov": 100}, {"/gz", "/video"}), []
+    _debugfs_env(monkeypatch, fake, calls)
 
     grown = ext4_grow._grow_files_debugfs(
         str(tmp_path / "card.raw"), 0,
         [("gz/game", str(elf)), ("video/a.mov", str(vid))],
         lambda *a, **k: None, lambda: False, 600)
     assert grown == 2
-    flat = [" ".join(c) for c in calls]
-    modes = [s for s in flat if "set_inode_field" in s]
-    assert len(modes) == 1
-    assert '-w -R set_inode_field "/gz/game" mode 0100755' in modes[0]
-    assert "video" not in modes[0]
+    assert fake.fields == {("/gz/game", "mode"): "0100755"}
+    wrote = fake.sessions[1][1]
+    modes = [c for c in wrote if c.startswith("set_inode_field")]
+    assert modes == ['set_inode_field "/gz/game" mode 0100755']
     # ...and only AFTER that file's write landed.
-    i_write = next(i for i, s in enumerate(flat)
-                   if 'write "' in s and "gz/game" in s)
-    i_mode = next(i for i, s in enumerate(flat) if "set_inode_field" in s)
-    assert i_write < i_mode
+    assert wrote.index('write "%s" "/gz/game"' % elf) < wrote.index(modes[0])
 
 
 def test_debugfs_grow_enospc_fails_before_writing(monkeypatch, tmp_path):
     src = tmp_path / "big.mp4"
     src.write_bytes(b"x" * 5000)
-
-    def fake_run_tool(argv, timeout, what):
-        if "stats -h" in argv:
-            return 0, "Block size:               1024\n" \
-                      "Free blocks:              1\n"    # 1 KiB free
-        if any(a.startswith("stat ") for a in argv):
-            return 0, "Size: 100"
-        raise AssertionError("must not write when out of space: %s" % argv)
-
-    monkeypatch.setattr(ext4_grow, "_find_e2fsprogs", _fake_tools)
-    monkeypatch.setattr(ext4_grow, "_run_tool", fake_run_tool)
+    fake, calls = FakeDebugfs({"/video/a.mov": 100}, {"/video"}), []
+    _debugfs_env(monkeypatch, fake, calls, block_size=1024, free_blocks=1)   # 1 KiB free
 
     with pytest.raises(ext4_grow.Ext4GrowError, match="free space"):
         ext4_grow._grow_files_debugfs(
             str(tmp_path / "card.raw"), 0,
             [("video/a.mov", str(src))],
             lambda *a, **k: None, lambda: False, 600)
+    assert not any(w for w, _c, _d in fake.sessions), "must not write when out of space"
+    assert not any("e2fsck" in c[0] for c in calls)
 
 
 def test_debugfs_grow_partial_failure_reports_grown_count(monkeypatch,
                                                           tmp_path):
     """A mid-run failure still fscks the image and carries how many files
-    landed, so the Write summary stays honest."""
+    landed, so the Write summary stays honest.  Files land a batch at a time:
+    one batch a file here."""
+    monkeypatch.setattr(ext4_grow, "DEBUGFS_BATCH_FILES", 1)
     src = tmp_path / "big.mp4"
     src.write_bytes(b"x" * 5000)
     jobs = [("video/a.mov", str(src)), ("video/b.mov", str(src))]
-
-    state = {"writes": 0, "fsck": 0}
-
-    def fake_run_tool(argv, timeout, what):
-        tool = os.path.basename(argv[0])
-        joined = " ".join(argv)
-        if "stats -h" in argv:
-            return 0, "Block size: 4096\nFree blocks: 999999\n"
-        if tool == "e2fsck":
-            state["fsck"] += 1
-            return 0, "clean"
-        if "write " in joined:
-            state["writes"] += 1
-            if "b.mov" in joined:
-                return 0, "write: Could not allocate block"   # 2nd file fails
-            return 0, "Allocated inode: 13"
-        if any(a.startswith("stat ") for a in argv):
-            return 0, "Size: 5000"
-        return 0, "debugfs 1.47.0"
-
-    monkeypatch.setattr(ext4_grow, "_find_e2fsprogs", _fake_tools)
-    monkeypatch.setattr(ext4_grow, "_run_tool", fake_run_tool)
+    fake = FakeDebugfs({"/video/a.mov": 100, "/video/b.mov": 100}, {"/video"},
+                       fail={"/video/b.mov": "write: Could not allocate block"})
+    calls = []
+    _debugfs_env(monkeypatch, fake, calls)
 
     with pytest.raises(ext4_grow.Ext4GrowError) as ei:
         ext4_grow._grow_files_debugfs(
             str(tmp_path / "card.raw"), 0, jobs,
             lambda *a, **k: None, lambda: False, 600)
     assert ei.value.grown == 1        # a.mov landed before b.mov failed
-    assert state["fsck"] == 1         # the image was still reconciled
+    assert "Could not allocate block" in str(ei.value)
+    assert sum("e2fsck" in c[0] for c in calls) == 1   # the image was still reconciled
+
+
+def test_debugfs_grow_counts_none_of_a_batch_debugfs_complains_about(monkeypatch, tmp_path):
+    """debugfs does not say which file a complaint is about, so a batch with one
+    counts none of its files as grown, even one it did write: a file counted that
+    is not on the card would be reported (and recorded) as on it."""
+    src = tmp_path / "big.mp4"
+    src.write_bytes(b"x" * 5000)
+    jobs = [("video/a.mov", str(src)), ("video/b.mov", str(src))]
+    fake = FakeDebugfs({"/video/a.mov": 100, "/video/b.mov": 100}, {"/video"},
+                       fail={"/video/b.mov": "write: Could not allocate block"})
+    calls = []
+    _debugfs_env(monkeypatch, fake, calls)
+
+    with pytest.raises(ext4_grow.Ext4GrowError, match="none of the 2 file") as ei:
+        ext4_grow._grow_files_debugfs(
+            str(tmp_path / "card.raw"), 0, jobs,
+            lambda *a, **k: None, lambda: False, 600)
+    assert ei.value.grown == 0 and fake.files["/video/a.mov"] == 5000
+    assert "video/a.mov to video/b.mov" in str(ei.value)
+    assert sum("e2fsck" in c[0] for c in calls) == 1
+
+
+def test_debugfs_grow_writes_in_batches_and_logs_each_file(monkeypatch, tmp_path):
+    """A session a batch, not one a step of every file: 70 files are one look-up
+    and three writing sessions, and each file is logged once its batch is read
+    back, in order."""
+    jobs, files = [], {}
+    for n in range(70):
+        p = tmp_path / ("s%d" % n)
+        p.write_bytes(b"x" * (100 + n))
+        jobs.append(("v/%d.asset" % n, str(p)))
+        files["/v/%d.asset" % n] = 50
+    fake, calls, logs = FakeDebugfs(files, {"/v"}), [], []
+    _debugfs_env(monkeypatch, fake, calls)
+
+    grown = ext4_grow._grow_files_debugfs(
+        str(tmp_path / "card.raw"), 0, jobs,
+        lambda m, lvl="info": logs.append(m), lambda: False, 600)
+    assert grown == 70
+    assert [w for w, _c, _d in fake.sessions] == [False, True, True, True]
+    assert [len(c) for w, c, _d in fake.sessions if w] == [32 * 4, 32 * 4, 6 * 4]
+    assert [m for m in logs if m.startswith("  grew ")] == [
+        "  grew v/%d.asset" % n for n in range(70)]
+
+
+def test_debugfs_grow_stops_between_batches_when_cancelled(monkeypatch, tmp_path):
+    monkeypatch.setattr(ext4_grow, "DEBUGFS_BATCH_FILES", 1)
+    src = tmp_path / "big.mp4"
+    src.write_bytes(b"x" * 5000)
+    jobs = [("video/a.mov", str(src)), ("video/b.mov", str(src))]
+    fake = FakeDebugfs({"/video/a.mov": 100, "/video/b.mov": 100}, {"/video"})
+    calls = []
+    _debugfs_env(monkeypatch, fake, calls)
+    asked = []
+
+    def cancel():
+        asked.append(1)
+        return len(asked) > 1               # go on with the first batch only
+
+    assert ext4_grow._grow_files_debugfs(
+        str(tmp_path / "card.raw"), 0, jobs, lambda *a, **k: None, cancel, 600) == 1
+    assert fake.files == {"/video/a.mov": 5000, "/video/b.mov": 100}
+    assert sum("e2fsck" in c[0] for c in calls) == 1
+
+
+def test_debugfs_grow_names_a_file_that_came_out_short(monkeypatch, tmp_path):
+    src = tmp_path / "big.mp4"
+    src.write_bytes(b"x" * 5000)
+    fake = FakeDebugfs({"/video/a.mov": 100}, {"/video"}, short={"/video/a.mov": 4096})
+    _debugfs_env(monkeypatch, fake, [])
+    with pytest.raises(ext4_grow.Ext4GrowError, match="4096 B of 5000 B for video/a.mov") as ei:
+        ext4_grow._grow_files_debugfs(
+            str(tmp_path / "card.raw"), 0, [("video/a.mov", str(src))],
+            lambda *a, **k: None, lambda: False, 600)
+    assert ei.value.grown == 0
+
+
+def test_debugfs_grow_refuses_a_path_debugfs_cannot_take(monkeypatch, tmp_path):
+    """A command a line, its paths in double quotes: a quote or a line break in a
+    path is refused before the card is opened."""
+    src = tmp_path / 'say "hi".mp4'
+    src.write_bytes(b"x" * 10)
+    fake = FakeDebugfs({}, {"/video"})
+    _debugfs_env(monkeypatch, fake, [])
+    with pytest.raises(ext4_grow.Ext4GrowError, match="double quote"):
+        ext4_grow._grow_files_debugfs(
+            str(tmp_path / "card.raw"), 0, [("video/a.mov", str(src))],
+            lambda *a, **k: None, lambda: False, 600)
+    assert fake.sessions == []
 
 
 # ---- PAD-314 (Ales, Linux desktop): native Linux writes with debugfs, as a Mac does ----------
@@ -342,3 +400,22 @@ def test_e2fsprogs_is_looked_for_in_sbin_on_linux(monkeypatch, tmp_path):
                                            "e2fsck": str(sbin / "e2fsck")}
     monkeypatch.setattr(ext4_grow, "E2FSPROGS_DIRS", (str(tmp_path / "nowhere"),))
     assert ext4_grow._find_e2fsprogs() is None
+
+
+def test_debugfs_grow_links_a_source_path_too_long_for_a_command_line(monkeypatch, tmp_path):
+    """debugfs splits a command line longer than its BUFSIZ buffer (1,024 bytes on
+    macOS): such a write goes through a short link to the source, removed afterwards."""
+    monkeypatch.setattr(ext4_grow, "DEBUGFS_LINE_MAX", 60)
+    deep = tmp_path / ("d" * 80)
+    deep.mkdir()
+    src = deep / "big.mp4"
+    src.write_bytes(b"x" * 5000)
+    fake = FakeDebugfs({"/video/a.mov": 100}, {"/video"})
+    _debugfs_env(monkeypatch, fake, [])
+    assert ext4_grow._grow_files_debugfs(
+        str(tmp_path / "card.raw"), 0, [("video/a.mov", str(src))],
+        lambda *a, **k: None, lambda: False, 600) == 1
+    write = next(c for w, cmds, _d in fake.sessions for c in cmds if c.startswith("write "))
+    link = write.split('"')[1]
+    assert link != str(src) and "pad_debugfs_" in link
+    assert fake.files["/video/a.mov"] == 5000 and not os.path.exists(os.path.dirname(link))

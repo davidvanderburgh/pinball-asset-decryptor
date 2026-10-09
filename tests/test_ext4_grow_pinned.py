@@ -194,15 +194,15 @@ def test_a_scene_assets_directory_is_made_and_no_other(tmp_path):
 
 
 def test_a_delivery_is_cut_into_batches_by_files_and_bytes(monkeypatch):
-    """A few debugfs sessions instead of four per file: a batch ends at PINNED_BATCH_FILES
-    files or PINNED_BATCH_BYTES bytes, a bigger file a batch of its own. The cut depends on
+    """A few debugfs sessions instead of four per file: a batch ends at DEBUGFS_BATCH_FILES
+    files or DEBUGFS_BATCH_BYTES bytes, a bigger file a batch of its own. The cut depends on
     the sizes alone, so the same project batches (and so writes) the same every build."""
-    monkeypatch.setattr(ext4_grow, "PINNED_BATCH_FILES", 3)
-    monkeypatch.setattr(ext4_grow, "PINNED_BATCH_BYTES", 100)
-    assert ext4_grow._pinned_batches([]) == []
-    assert ext4_grow._pinned_batches([1] * 7) == [3, 6, 7]
-    assert ext4_grow._pinned_batches([60, 30, 20, 500, 1]) == [2, 3, 4, 5]
-    assert ext4_grow._pinned_batches([500]) == [1]
+    monkeypatch.setattr(ext4_grow, "DEBUGFS_BATCH_FILES", 3)
+    monkeypatch.setattr(ext4_grow, "DEBUGFS_BATCH_BYTES", 100)
+    assert ext4_grow._debugfs_batches([]) == []
+    assert ext4_grow._debugfs_batches([1] * 7) == [3, 6, 7]
+    assert ext4_grow._debugfs_batches([60, 30, 20, 500, 1]) == [2, 3, 4, 5]
+    assert ext4_grow._debugfs_batches([500]) == [1]
 
 
 @needs_e2fs
@@ -210,7 +210,7 @@ def test_a_delivery_in_many_batches_lands_every_file_the_same_both_times(tmp_pat
     """One file a batch: every session sees what the ones before it wrote, a scene.assets
     made in one batch is the next one's directory, and the same target twice is a new file
     and then a replaced one - all decided before anything is written."""
-    monkeypatch.setattr(ext4_grow, "PINNED_BATCH_FILES", 1)
+    monkeypatch.setattr(ext4_grow, "DEBUGFS_BATCH_FILES", 1)
     base = _card(tmp_path)
     jobs = _jobs(tmp_path)
     for n in range(3):
@@ -241,7 +241,7 @@ def test_a_batch_debugfs_complains_about_counts_none_of_its_files(tmp_path, monk
     """debugfs does not say which file a complaint is about, so a batch with one counts
     none of its files as written (a file counted that is not there would go into the build
     record as on the card); the batches before it count, and nothing after it runs."""
-    monkeypatch.setattr(ext4_grow, "PINNED_BATCH_FILES", 2)
+    monkeypatch.setattr(ext4_grow, "DEBUGFS_BATCH_FILES", 2)
     card = _card(tmp_path)
     jobs = _jobs(tmp_path)
     bad = tmp_path / "bad"

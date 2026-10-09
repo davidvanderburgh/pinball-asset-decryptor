@@ -1072,14 +1072,27 @@ class TextTab(TabService):
             # PAD-485: the game fills its line into a text box on one of its
             # screens; that box's own words are a stand-in reading the same
             hits = R.stand_in_rows(self._text_rows, r)
+            pick = None if hits else self._mode_screen(r)
+            if pick is not None:
+                scene_dir, focus, search, node = pick
+                return self._open_scene_browser(preselect_dir=scene_dir,
+                                                focus_text=focus, search=search,
+                                                focus_path=node)
             if not hits:
-                compat.messagebox.showinfo(
-                    "Scenes",
-                    "This is a game-program string. The game puts it into a "
-                    "text box on one of its screens as it runs, and no "
-                    "screen's own text reads the same, so there's no screen "
-                    "to show. (It still writes to the card like any other "
-                    "text edit.)")
+                why = ("This is a game-program string. The game puts it into "
+                       "a text box on one of its screens as it runs, and no "
+                       "screen's own text reads the same, so there's no "
+                       "screen to show. (It still writes to the card like "
+                       "any other text edit.)")
+                if (R.row_part(r) or r.get("modes")) and \
+                        not self._mode_scenes_known():
+                    why = ("This is a game-program string. The game puts it "
+                           "into a text box on a screen of %s, and which "
+                           "screens those are is read from the card this "
+                           "project was extracted from, which isn't where it "
+                           "was. Put the card back, or extract it again, and "
+                           "press Scan." % R.shown_in(r))
+                compat.messagebox.showinfo("Scenes", why)
                 return False
             dirs = {h["path"].replace("\\", "/").rsplit("/", 1)[0]
                     for h in hits}
@@ -1096,11 +1109,83 @@ class TextTab(TabService):
                                         focus_text=r["original"],
                                         search=search)
 
+    def _mode_scenes_known(self):
+        """Has this project's card been read for the screens each mode names
+        (PAD-485)?"""
+        try:
+            from ...plugins.stern import engine
+            return bool(engine.program_mode_scenes(self._assets_path()))
+        except Exception:                            # noqa: BLE001
+            return False
+
+    def _mode_screen(self, r):
+        """PAD-485: for game-program row *r* whose words no screen holds, a screen of a
+        mode that shows it (the Shown in column), as ``(scene dir, line to pick or None,
+        search, node path or None)``, or None.  The screens each mode names come from the
+        card's game program (``engine.program_mode_scenes``), and so do the text boxes it
+        names with each (``program_mode_boxes``: the battle vs Gigan's init names its award
+        screen with ``Award_Textbox.Title_Instance`` first, then ``Award_Textbox2``'s, and
+        the emulator drew GIGAN AWARD in the first, the top one); among those, the one named
+        first, else among the screen's boxes the one sharing most of the line's words in
+        its own words, its name and its group's (the Heisei card's KAIJU AWARD: AWARD).
+        With several screens of that mode, *search* is the mode's name, which the Scenes
+        search lists them by."""
+        part = R.row_part(r)
+        modes = [part] if part else list(r.get("modes") or ())
+        assets = self._assets_path()
+        if not modes or not assets:
+            return None
+        try:
+            from ...plugins.stern import engine, scene_render
+            by_mode = engine.program_mode_scenes(assets)
+            boxes = engine.program_mode_boxes(assets)
+            layouts = scene_render.load_layouts(assets) or {}
+        except Exception:                            # noqa: BLE001
+            return None
+        card_of = {card.replace("\\", "/").rsplit("/", 1)[0]: card for card in layouts}
+        index = R.scene_dir_index(card_of)
+        lines = {}                                   # scene dir -> its rows' words
+        for s in self._text_rows:
+            if R.row_is_scene(s):
+                d = s["path"].replace("\\", "/").rsplit("/", 1)[0]
+                lines.setdefault(d, {}).setdefault(
+                    R.stand_in_words(s["original"]), s["original"])
+        best = None
+        for cls in modes:
+            keys = [k for k in by_mode.get(cls) or () if k in index]
+            dirs = [index[k] for k in keys]
+            for key, d in zip(keys, dirs):
+                lay = layouts.get(card_of[d]) or {}
+                groups = lay.get("groups") or []
+                named = (boxes.get(cls) or {}).get(key) or []
+                for t in lay.get("texts") or ():
+                    g = t.get("group")
+                    group = groups[g] if isinstance(g, int) and 0 <= g < len(groups) \
+                        else ""
+                    path = "%s.%s" % (group, t.get("name")) if group else t.get("name")
+                    # a box the game names with the screen beats every other, the one it
+                    # names first the rest
+                    rank = 0
+                    for i, p in enumerate(named):
+                        if p in (path, t.get("name")):
+                            rank = len(named) - i
+                            break
+                    focus = (lines.get(d) or {}).get(R.stand_in_words(t.get("text")))
+                    score = R.box_score(r["original"], t.get("text"), t.get("name"),
+                                        group) if focus else 0
+                    if best is None or (rank, score) > best[0]:
+                        best = ((rank, score), d, focus if score or rank else None,
+                                R.mode_label(cls) if len(dirs) > 1 else None,
+                                path if rank else None)
+        return best[1:] if best else None
+
     def _open_scene_browser(self, preselect_rel=None, preselect_video=None,
-                            preselect_dir=None, focus_text=None, search=None):
+                            preselect_dir=None, focus_text=None, search=None,
+                            focus_path=None):
         """Tk ``_open_scene_browser``: the Scenes window, optionally on the
-        scene holding an Images row / a Video row / a scene directory, and
-        with *search* in its search box."""
+        scene holding an Images row / a Video row / a scene directory, with
+        *search* in its search box, and the layer at dotted *focus_path*
+        picked."""
         assets = self._assets_path()
         if not assets or not os.path.isdir(assets):
             compat.messagebox.showinfo(
@@ -1111,7 +1196,8 @@ class TextTab(TabService):
         return self.scenes.open(assets, preselect_rel=preselect_rel,
                                 preselect_video=preselect_video,
                                 preselect_dir=preselect_dir,
-                                focus_text=focus_text, search=search)
+                                focus_text=focus_text, search=search,
+                                focus_path=focus_path)
 
     def open_scene_browser(self, assets=None, preselect=None, focus_text=None,
                            preselect_rel=None, preselect_video=None,

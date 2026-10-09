@@ -338,6 +338,15 @@ def test_refresh_adds_the_modes_rows_and_keeps_typed_text(tmp_path, monkeypatch)
     assert [(r["path"], r["replacement"], r.get("modes")) for r in got] == [
         (GAME, "MONSTER AWARD", [A, B]), (GAME + "#" + A, "", [A]), (GAME + "#" + B, "", [B])]
     assert not engine.program_text_needs_refresh(str(assets), got)
+    # PAD-485: the screens each mode names are kept beside the rows; a project read before
+    # they were is read once more
+    assert engine.program_mode_scenes(str(assets)) == {}
+    sidecar = assets / "text" / "program_modes.json"
+    sidecar.write_text(json.dumps({"rev": text_modes.READ_REV}), encoding="utf-8")
+    assert engine.program_text_needs_refresh(str(assets), got)
+    engine._program_modes_read(str(assets), {A: ["a1/b1"], B: ["a2/b2", "a2/b3"]})
+    assert engine.program_mode_scenes(str(assets)) == {A: ["a1/b1"], B: ["a2/b2", "a2/b3"]}
+    assert not engine.program_text_needs_refresh(str(assets), got)
 
 
 def test_write_hands_a_modes_text_to_the_game_program(tmp_path, monkeypatch):
@@ -474,3 +483,24 @@ def test_text_tab_shows_the_modes_and_keeps_a_modes_row_to_itself(tmp_path, monk
         got = {r["path"]: r["replacement"] for r in text_manifest.load(folder)}
         assert got == {"/g/aaaa/scene.radium": "MONSTER AWARD", GAME: "MONSTER AWARD",
                        GAME + "#" + A: "", GAME + "#" + B: "SPACE AWARD"}
+
+
+@pytest.mark.parametrize("card", [LE116, HEISEI15], ids=["le116", "heisei15"])
+def test_each_battle_names_its_award_screen(card):
+    """PAD-485 (DragonRR): the Heisei card's KAIJU AWARD is the battles' award line, and no
+    screen's own words read like it. Each battle's code names its own award screen (an
+    Award_Textbox whose words are the battle's name), which is where the line goes."""
+    raw = _program(card)
+    ctx = {}
+    progtext.enumerate_program_strings(raw, modes=True, ctx=ctx)
+    gigan = "a248977badd032e625ee2480e8cc6d0b2f645d1f/976560ae6c29b77b3a3e96f18f00dc18d1ce7e72"
+    megalon = "acbfac6e7d7f808fcbc9e3e046025e4fa4950b53/3b3de067c19c3687cca71b04ca1c5c7c55cb3bdc"
+    jackpots = "c65ecc5e2f5769bdc59851eb951a1c781b53deb8/619bb5b14df0d97316909daa38e67876793c1470"
+    assert gigan in ctx["scenes"][A] and gigan not in ctx["scenes"][B]
+    assert megalon in ctx["scenes"][B] and megalon not in ctx["scenes"][A]
+    assert jackpots in ctx["scenes"]["cmode_battle_vs_megalon_and_gigan_mb"]
+    # each of them three screens, in one folder of the card
+    assert [k.split("/")[0] for k in ctx["scenes"][A]] == [gigan.split("/")[0]] * 3
+    # and the boxes the battle's init names with its award screen: both award boxes' titles
+    assert {"Award_Textbox.Title_Instance", "Award_Textbox2.Title_Instance"} <= set(ctx["boxes"][A][gigan])
+    assert "Award_Textbox.Title_Instance" in ctx["boxes"]["cmode_battle_vs_megalon_and_gigan_mb"][jackpots]

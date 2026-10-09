@@ -227,7 +227,7 @@ def _tail_map(raw, spans, census=None):
     return tails
 
 
-def enumerate_program_strings(raw, modes=False):
+def enumerate_program_strings(raw, modes=False, ctx=None):
     """The editable program-text rows for the manifest:
     ``[{"text", "budget", "tail_of", "growable", "refs"}]`` in file order,
     deduped by text.
@@ -235,7 +235,10 @@ def enumerate_program_strings(raw, modes=False):
     With *modes* (PAD-470, :mod:`.text_modes`) a row also carries ``modes``,
     the game's own modes that show it, and a text two modes show is followed
     by a row per mode (``part`` = its mode class): that mode's own text,
-    which leaves every other line of the text as it is.
+    which leaves every other line of the text as it is.  *ctx*, a dict when
+    given, gets ``scenes`` and ``boxes``: the screens each mode names and
+    the text boxes it names with them (:func:`.text_modes.mode_scenes`,
+    PAD-485).
 
     ``budget`` is the byte length a replacement must fit: :data:`MAX_EDIT_LEN`
     for a *growable* row (every reference to the string is visible to the
@@ -294,17 +297,20 @@ def enumerate_program_strings(raw, modes=False):
                 # patches both forms; the smaller budget is the safe one).
                 pass
     if modes:
-        rows = _with_mode_rows(raw, spans, census, rows)
+        rows = _with_mode_rows(raw, spans, census, rows, ctx)
     return rows
 
 
-def _with_mode_rows(raw, spans, census, rows):
+def _with_mode_rows(raw, spans, census, rows, ctx=None):
     """*rows* with each one's ``modes`` and, after a text two modes show, a
     row per mode (PAD-470).  A mode's row is always growable: its lines are
     references the census sees, and a copy of new text is placed for them
     alone when the string is not theirs alone."""
     from . import text_modes
     reading = text_modes.read(raw, spans, census)
+    if ctx is not None:
+        ctx["scenes"] = dict(getattr(reading, "scenes", None) or {})
+        ctx["boxes"] = dict(getattr(reading, "boxes", None) or {})
     if not reading.keys:
         return rows
     offs_of = {}

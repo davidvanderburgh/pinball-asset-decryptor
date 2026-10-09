@@ -2464,6 +2464,11 @@ class EmulateTab(TabService):
         def down():
             self._set("state", "Not running")
             self._run_label(False, False)
+            # a Start that ended before anything ran leaves no preparation
+            # words on the ⓘ or the footer ("Cancelling…", PAD-489) for the
+            # next status poll to clear
+            self.set(state_tip="")
+            self._paint_footer()
 
         def run():
             if not no_rig():

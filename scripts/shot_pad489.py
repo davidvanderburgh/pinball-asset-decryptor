@@ -11,9 +11,11 @@ in (PAD_UI_NO_RIG: nothing reaches WSL, no game is started), and:
   <prefix>_start.png     two seconds after Start: the question asked first (after), or the
                          tab already at it with no word of how much there is (before)
   <prefix>_progress.png  ~25 s into the conversion: the State line and the footer's bar
+  <prefix>_cancel.png    a second after Cancel is pressed (round 2): still at it (before), or
+                         stopped, with what was kept said beside the opt-in (after)
 
-The conversion is cancelled after the second shot.  Real ffmpeg encodes run, in the scratch
-folder only.
+The game's own pictures (Desktop\\gzho's images) are switched on under the profile too.
+Real ffmpeg encodes run, in the scratch folder only.
 """
 
 import json
@@ -28,6 +30,7 @@ sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
 CLIPS = r"D:\Pinball\gz116_bottleneck\stock116\video"
+PICS = r"C:\Users\david\OneDrive\Desktop\gzho\images"
 CARD = (r"C:\Users\david\Documents\development\pinball-asset-decryptor\images\Stern\spike2"
         r"\godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw")
 
@@ -66,6 +69,23 @@ def make_project(repo, scratch, n):
             manifest.append(rows[name])
     with open(os.path.join(vid, "manifest.txt"), "w", encoding="utf-8") as f:
         f.writelines(manifest)
+    # the game's own pictures, switched on behind the Images tab's unlock
+    pics, pman = {}, ["# output\tcard path\tbytes\n"]
+    with open(os.path.join(PICS, "manifest.txt"), encoding="utf-8") as f:
+        for ln in f:
+            out = ln.split("\t")[0]
+            src = os.path.join(PICS, *out.split("/"))
+            if ln.startswith("#") or not out.lower().endswith(".png") \
+                    or not os.path.isfile(src):
+                continue
+            dst = os.path.join(proj, "images", *out.split("/"))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+            sums.append("images/%s\t%s\n" % (out, md5_file(dst)))
+            pics["images/" + out] = True
+            pman.append(ln)
+    with open(os.path.join(proj, "images", "manifest.txt"), "w", encoding="utf-8") as f:
+        f.writelines(pman)
     with open(os.path.join(proj, ".checksums.md5"), "w", encoding="utf-8") as f:
         f.writelines(sums)
     with open(os.path.join(proj, ".extract_source.json"), "w", encoding="utf-8") as f:
@@ -73,7 +93,9 @@ def make_project(repo, scratch, n):
                    "card_version": "1.16"}, f)
     staged_changes.save(proj, {
         "video_color_stock": True,
-        "video_color_slots": {"video/" + name: True for name in pick}})
+        "video_color_slots": {"video/" + name: True for name in pick},
+        "image_color_unlocked": True,
+        "image_color_slots": pics})
     cp.store_asset_profile(proj, dict(cp.PRESETS)["bw"])
     return proj, len(pick)
 
@@ -134,7 +156,18 @@ def main():
             page.screenshot(path=out)
             print("shot", out, flush=True)
             webui_shot.api(url, "emulate.toggle")          # Cancel
-            time.sleep(3)
+            time.sleep(1.0)
+            st = webui_shot.state(url).get("emulate") or {}
+            print("after cancel: state", st.get("vals", {}).get("state"),
+                  "button", (st.get("run_btn") or {}).get("label"),
+                  "hint", st.get("ovr_hint"), flush=True)
+            out = os.path.join(out_dir, "%s_cancel.png" % prefix)
+            page.screenshot(path=out)
+            print("shot", out, flush=True)
+            time.sleep(8)
+            st = webui_shot.state(url).get("emulate") or {}
+            print("9 s after cancel: state", st.get("vals", {}).get("state"),
+                  "button", (st.get("run_btn") or {}).get("label"), flush=True)
             browser.close()
     finally:
         proc.terminate()

@@ -186,7 +186,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
-| James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
@@ -225,7 +225,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms |
-| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms |
+| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 

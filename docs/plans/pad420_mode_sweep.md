@@ -742,6 +742,15 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         first scan was all refused): `findcancel.py` found it in each, 45 references agreeing. From 19:00 the scan
         wait is 6 s (showlog4_job.sh), about a fifth faster; David asked about a GPU - no help, the shows play in
         the game's own real time - and whether to take the 4th rig is his call.
+      - **Run 24 (2026-10-08 evening).** `shows/batch.sh <n>` waits for n scans, lands every finished one
+        (autoland), rebuilds recipes, regenerates the "Which games" table (help_content now lists "light shows"
+        in Also for a port that names them: 4ad15964) and runs the targeted tests; the commit stays by hand.
+        Lane 2's long tail is shared with lane 4 (`lane4.keys`, the same builds from the end, after lane 1;
+        `runs/<key>.lock` keeps them apart). Builds waited ~25 min each for their card copies (one copier, every
+        build its own rigbatch): `shows/prestage.sh` (detached, log C:/tmp/PAD-420/prestage.log) copies each
+        lane's next card ahead under the same copy lock and .src stamp, so rigbatch reuses it. TMNT LE starts a
+        game only on fresh NVRAM (`wipe.titles`, wipe_then.sh): retry lane R (Elvira seeded, TMNT LE wiped) after
+        lanes 1 and 3; chainV1 (Godzilla Pro's candidates 300 / 268 replayed) after R.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

@@ -1288,20 +1288,36 @@ def _plan_video(source_dir, target_dir, saved_map, to_target=None):
     return matched, dropped
 
 
+def _text_part(row):
+    """PAD-470: the mode class of a game-program row that is one mode's own
+    text for a line several modes show, else ``""``."""
+    path = row.get("path") or ""
+    if path.lower().endswith(".radium"):
+        return ""
+    return text_manifest.split_part(path)[1]
+
+
+def _text_record_key(original, part):
+    """The key a transfer's record keeps a text edit under: its original, and
+    for a mode's own text the mode too (a tab never survives into a cell)."""
+    return "%s\t%s" % (original, part) if part else original
+
+
 def _plan_text(source_dir, target_dir, src_rows=None):
     """Reconcile text edits: a source edit transfers if its *original* string
     still exists somewhere in the target manifest.  Returns ``(matched,
     dropped)`` where matched entries carry the number of target rows they'll
     fill (edits apply to every scene sharing the original text).  *src_rows*
     overrides the source manifest (rows synthesized by
-    :func:`diff_baked_mods`)."""
+    :func:`diff_baked_mods`).  One mode's own text for a line (PAD-470)
+    transfers to that mode's row of the line only (``part`` in the entry)."""
     if src_rows is None:
         src_rows = text_manifest.load(source_dir)
     tgt_rows = text_manifest.load(target_dir)
     tgt_originals = {}
     for r in tgt_rows:
-        tgt_originals.setdefault(r["original"], 0)
-        tgt_originals[r["original"]] += 1
+        k = (r["original"], _text_part(r))
+        tgt_originals[k] = tgt_originals.get(k, 0) + 1
 
     matched, dropped = [], []
     seen = set()
@@ -1309,17 +1325,22 @@ def _plan_text(source_dir, target_dir, src_rows=None):
         rep = r["replacement"]
         if not rep or rep == r["original"]:
             continue
-        key = (r["original"], rep)
+        part = _text_part(r)
+        key = (r["original"], part, rep)
         if key in seen:
             continue
         seen.add(key)
-        n = tgt_originals.get(r["original"], 0)
+        n = tgt_originals.get((r["original"], part), 0)
+        entry = {"original": r["original"], "new": rep}
+        if part:
+            entry["part"] = part
         if n:
-            matched.append({"original": r["original"], "new": rep, "targets": n})
+            matched.append(dict(entry, targets=n))
         else:
-            dropped.append({"original": r["original"], "new": rep,
-                            "reason": "that original text isn't in the new "
-                                      "version"})
+            dropped.append(dict(entry, reason=(
+                "that original text isn't in the new version" if not part
+                else "the new version has no row of that line for that "
+                     "mode")))
     return matched, dropped
 
 
@@ -1955,20 +1976,22 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     # Text: fill matching originals in the target manifest, and blank the ones
     # the previous transfer filled that this one no longer claims.
     n_text = 0
-    new_by_original = {e["original"]: e["new"] for e in plan["text"]["matched"]}
+    # keyed by the original and, for one mode's own text (PAD-470), the mode
+    new_by_original = {_text_record_key(e["original"], e.get("part") or ""):
+                       e["new"] for e in plan["text"]["matched"]}
     stale_text = {o: v for o, v in (prior.get("text") or {}).items()
                   if o not in new_by_original}
     if new_by_original or stale_text:
         rows = text_manifest.load(target_dir)
         touched = False
         for r in rows:
-            if r["original"] in new_by_original:
-                r["replacement"] = new_by_original[r["original"]]
-                record["text"][r["original"]] = r["replacement"]
+            k = _text_record_key(r["original"], _text_part(r))
+            if k in new_by_original:
+                r["replacement"] = new_by_original[k]
+                record["text"][k] = r["replacement"]
                 n_text += 1
                 touched = True
-            elif r["replacement"] and r["replacement"] == stale_text.get(
-                    r["original"]):
+            elif r["replacement"] and r["replacement"] == stale_text.get(k):
                 r["replacement"] = ""
                 n_superseded += 1
                 touched = True

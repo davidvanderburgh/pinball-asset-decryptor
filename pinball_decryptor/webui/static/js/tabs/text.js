@@ -41,8 +41,21 @@ const REPLACE_NOTE = "Every row whose ORIGINAL text contains the word gets the r
   + "bare-name tail row and its settings caption in one go. Rows whose new text would not fit their Max are "
   + "listed below and skipped.";
 
+// PAD-470: the modes of the game that show a game-program line, and a mode's own text for a line
+// several of them show (a row of its own under the line's)
+const TIP_IN = "The battles, multiballs and other modes of the game that show this line of the game "
+  + "program. A line several modes show has a row per mode under it (↳): give one its own text and only "
+  + "that mode shows it.";
+const inTip = (r) => (r.pt
+  ? { head: r.in, lines: [r.ed ? r.in + " shows its own text for this line; every other mode keeps the line's."
+      : "Shows the same text as the line above until you give this row its own."] }
+  : r.pa ? { head: r.in, lines: ["Each of these modes has a row of its own below: give one its own text there."] }
+  : r.in);
+
 const COLUMNS = [
   { key: "o", label: "On-Screen Text", width: "minmax(0,1.25fr)", sort: "#0", cls: "pre",
+    render: (r) => (r.pt ? html`<span class="text-pairrow"><span class="text-pairmark" aria-hidden="true">↳</span>${r.o}</span>`
+      : r.o),
     titleOf: (r) => r.o },
   { key: "n", label: "New Text", width: "minmax(0,1fr)", sort: "new", cls: "pre",
     render: (r) => (r.ed ? html`<span class="acc-ink">${r.n}</span>` : r.n), titleOf: (r) => r.n || undefined },
@@ -51,6 +64,8 @@ const COLUMNS = [
   { key: "sc", label: "Scene", width: "212px", sort: "scene", cls: "mono small dim", titleOf: (r) => r.sc },
   { key: "nm", label: "Name", width: "minmax(0,.7fr)", sort: "name", titleOf: (r) => r.nm || undefined },
 ];
+const IN_COLUMN = { key: "in", label: "Shown in", width: "minmax(0,.8fr)", sort: "in", title: TIP_IN,
+  render: (r) => (r.in ? html`<span class=${cx("text-in-cell", r.pt && "pair")} ...${tip(inTip(r))}>${r.in}</span>` : "") };
 
 function editorValue(wrap) {
   const el = wrap && wrap.querySelector("input");
@@ -65,6 +80,9 @@ export default function TextTab() {
 
   const rows = s.rows || [];
   const view = s.view || [];
+  // PAD-470: Shown in, once some game-program line names a mode
+  const inCol = useMemo(() => rows.some((r) => r && r.in), [rows]);
+  const columns = inCol ? COLUMNS.concat([IN_COLUMN]) : COLUMNS;
   const shown = useMemo(() => view.map((i) => rows[i]).map((r, n) => (r ? { ...r, i: view[n] } : null))
     .filter(Boolean), [rows, view]);
 
@@ -165,7 +183,7 @@ export default function TextTab() {
           onChange=${(v) => call("text.set_scene", v)} />
         <span class="sp"></span>
       </div>
-      <${Table} cls="text-table" columns=${COLUMNS} rows=${shown} rowKey=${(r) => r.i} selected=${s.sel}
+      <${Table} cls="text-table" columns=${columns} rows=${shown} rowKey=${(r) => r.i} selected=${s.sel}
         onSelect=${(r) => call("text.select", r.i)} onActivate=${(r) => call("text.select", r.i).then(() => setTimeout(focusEditor, 30))}
         onContext=${rowMenu} sort=${{ key: (s.sort || {}).col, desc: (s.sort || {}).desc }}
         onSort=${(k) => call("text.sort_by", k)} empty=${empty}

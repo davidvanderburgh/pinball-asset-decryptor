@@ -1970,7 +1970,8 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
                 % n_kept, "info")
         text_manifest.save(output_dir, all_rows)
         if prog_rows:
-            _program_modes_read(output_dir, prog_ctx.get("scenes"))
+            _program_modes_read(output_dir, prog_ctx.get("scenes"),
+                                prog_ctx.get("boxes"))
     except Exception as e:
         log("Couldn't write display-text manifest (%s)." % e, "warning")
         return 0
@@ -2000,10 +2001,12 @@ _PROGRAM_MODES_FILE = "program_modes.json"
 SCENES_REV = 1
 
 
-def _program_modes_read(assets_dir, scenes=None):
+def _program_modes_read(assets_dir, scenes=None, boxes=None):
     """Note that the manifest's game-program rows carry this build's reading
     of the game's own modes (:mod:`.text_modes`), with *scenes*, the screens
-    each mode names (``{mode class: [scene key]}``).  Never raises."""
+    each mode names (``{mode class: [scene key]}``), and *boxes*, the text
+    boxes it names with them (``{mode class: {scene key: [node path]}}``).
+    Never raises."""
     import json
     from . import text_modes
     from ...core import text_manifest
@@ -2012,9 +2015,27 @@ def _program_modes_read(assets_dir, scenes=None):
                                _PROGRAM_MODES_FILE), "w",
                   encoding="utf-8") as f:
             json.dump({"rev": text_modes.READ_REV, "scenes_rev": SCENES_REV,
-                       "scenes": dict(scenes or {})}, f)
+                       "scenes": dict(scenes or {}),
+                       "boxes": dict(boxes or {})}, f)
     except OSError:
         pass
+
+
+def program_mode_boxes(assets_dir):
+    """``{mode class: {scene key: [node path]}}``: the text boxes each mode
+    names with each of its screens, as the project's last read of the card
+    found them (PAD-485; empty before one).  Never raises."""
+    import json
+    from ...core import text_manifest
+    try:
+        with open(os.path.join(assets_dir, text_manifest.RELDIR,
+                               _PROGRAM_MODES_FILE), encoding="utf-8") as f:
+            got = json.load(f).get("boxes") or {}
+        return {str(m): {str(k): [str(p) for p in ps] for k, ps in v.items()
+                         if isinstance(ps, list)}
+                for m, v in got.items() if isinstance(v, dict)}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
 
 
 def program_mode_scenes(assets_dir):
@@ -2186,7 +2207,7 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
                         "budget": f["budget"], "grow": True,
                         "modes": list(f.get("modes") or ())})
             n += 1
-    _program_modes_read(assets_dir, prog_ctx.get("scenes"))
+    _program_modes_read(assets_dir, prog_ctx.get("scenes"), prog_ctx.get("boxes"))
     if not n:
         return 0
     try:

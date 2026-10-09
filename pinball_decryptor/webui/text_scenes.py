@@ -369,9 +369,11 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
     # opening / closing
     # ------------------------------------------------------------------
     def open(self, assets, preselect_rel=None, preselect_video=None,
-             preselect_dir=None, focus_text=None, search=None):
+             preselect_dir=None, focus_text=None, search=None, focus_path=None):
         """Tk ``_open_scene_browser`` + ``open_scene_browser``; *search* goes in
-        the search box (a game-program line several screens hold, PAD-485)."""
+        the search box (a game-program line several screens hold, PAD-485), and
+        *focus_path* names the layer to pick (``Award_Textbox.Title_Instance``)
+        when the scene draws *focus_text* more than once."""
         preselect = preselect_dir
         if preselect is None and (preselect_rel or preselect_video):
             rel = (preselect_rel or preselect_video).replace("\\", "/")
@@ -411,16 +413,32 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._publish_look()
         self._raise()
         if focus_text:
-            self._focus_layer()
+            self._focus_layer(focus_path)
         return True
 
-    def _focus_layer(self):
+    def _focus_layer(self, path=None):
         """A jump to a line picks its layer in the scene editor too, so its box and Font
         controls are at hand (PAD-485).  After the tab comes forward, which drops the
-        selection (PAD-294)."""
+        selection (PAD-294).  With *path*, the layer at that dotted path when the scene
+        has one: the box the game names for the line, among several with the same words."""
         item = self.store.get(self.ns, "item") if self._focus_want else None
-        if self._sel and item and item.startswith("txt::"):
-            self._find_layer(self._sel, int(item[5:]))
+        if not (self._sel and item and item.startswith("txt::")):
+            return
+        if path and self.store.get(self.ns, "tree") and self._tman is not None:
+            from .text_scenes_tree import _walk_man
+            parent, names = {}, {}
+            for n, p, _d in _walk_man(self._tman):
+                parent[n["id"]] = p["id"] if p else None
+                names[n["id"]] = n.get("name") or ""
+            for nid in names:
+                parts, cur = [], nid
+                while cur is not None:
+                    parts.append(names[cur])
+                    cur = parent.get(cur)
+                if ".".join(reversed(parts)) == path:
+                    self.tree_select(nid)
+                    return
+        self._find_layer(self._sel, int(item[5:]))
 
     def _raise(self):
         """PAD-251: the scenes are a tab now; opening them brings the Scenes tab forward."""

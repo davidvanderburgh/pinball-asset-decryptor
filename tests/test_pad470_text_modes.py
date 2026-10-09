@@ -501,3 +501,6 @@ def test_each_battle_names_its_award_screen(card):
     assert jackpots in ctx["scenes"]["cmode_battle_vs_megalon_and_gigan_mb"]
     # each of them three screens, in one folder of the card
     assert [k.split("/")[0] for k in ctx["scenes"][A]] == [gigan.split("/")[0]] * 3
+    # and the boxes the battle's init names with its award screen: both award boxes' titles
+    assert {"Award_Textbox.Title_Instance", "Award_Textbox2.Title_Instance"} <= set(ctx["boxes"][A][gigan])
+    assert "Award_Textbox.Title_Instance" in ctx["boxes"]["cmode_battle_vs_megalon_and_gigan_mb"][jackpots]

@@ -236,8 +236,9 @@ def enumerate_program_strings(raw, modes=False, ctx=None):
     the game's own modes that show it, and a text two modes show is followed
     by a row per mode (``part`` = its mode class): that mode's own text,
     which leaves every other line of the text as it is.  *ctx*, a dict when
-    given, gets ``scenes``: the screens each mode names
-    (:func:`.text_modes.mode_scenes`, PAD-485).
+    given, gets ``scenes`` and ``boxes``: the screens each mode names and
+    the text boxes it names with them (:func:`.text_modes.mode_scenes`,
+    PAD-485).
 
     ``budget`` is the byte length a replacement must fit: :data:`MAX_EDIT_LEN`
     for a *growable* row (every reference to the string is visible to the
@@ -309,6 +310,7 @@ def _with_mode_rows(raw, spans, census, rows, ctx=None):
     reading = text_modes.read(raw, spans, census)
     if ctx is not None:
         ctx["scenes"] = dict(getattr(reading, "scenes", None) or {})
+        ctx["boxes"] = dict(getattr(reading, "boxes", None) or {})
     if not reading.keys:
         return rows
     offs_of = {}

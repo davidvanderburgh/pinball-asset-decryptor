@@ -77,6 +77,8 @@ class Reading:
     shown: dict = field(default_factory=dict)
     #: ``{mode class: [scene key]}``: the screens each mode names (:func:`mode_scenes`)
     scenes: dict = field(default_factory=dict)
+    #: ``{mode class: {scene key: [node path]}}``: the text boxes it names with each screen
+    boxes: dict = field(default_factory=dict)
 
     def label(self, cls):
         return self.labels.get(cls) or mode_label(cls)
@@ -273,28 +275,60 @@ def _owner(prog, owners, va):
 #: a scene as a game program names it: the last one or two folders of its card path
 #: (``<40 hex>/<40 hex>``), as Godzilla's modes name the screens they load
 _SCENE_NAME = re.compile(rb"(?<![0-9a-f])[0-9a-f]{40}(?:/[0-9a-f]{40})?(?=\x00)")
+#: a node of a scene as a game program names it: a dotted path of names, one of them a text
+#: box's ("Award_Textbox.Title_Instance", "Line1_Instance")
+_NODE_PATH = re.compile(rb"(?<=\x00)[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*(?=\x00)")
+_NODE_WORD = re.compile(rb"Instance|Textbox|_Text\b|Title|Line\d")
+#: how far from the scene's name a node path counts as named with it: a table entry's words,
+#: or the same function's code (Godzilla's inits load a scene's name and its boxes' paths
+#: in one run of movw/movt)
+_BOX_TABLE_REACH = 0x60
+_BOX_CODE_REACH = 0x200
 
 
 def mode_scenes(prog, raw, owners):
-    """``{mode class: [scene key]}``: the screens each of the game's own modes names in its
-    code or its tables, in the order its code names them (PAD-485).  A line a mode shows goes
-    in a text box on one of them: stock Godzilla 1.16's GIGAN AWARD in the title box of the
-    battle vs Gigan's award screen, whose own words are GODZILLA VS GIGAN.  A static
-    initialiser counts as far as :func:`_owner` lets it."""
+    """``({mode class: [scene key]}, {mode class: {scene key: [node path]}})``: the screens
+    each of the game's own modes names in its code or its tables, in the order its code names
+    them, and the text boxes it names with each (PAD-485).  A line a mode shows goes in a text
+    box on one of them: stock Godzilla 1.16's GIGAN AWARD in the title box of the battle vs
+    Gigan's award screen (``Award_Textbox.Title_Instance``, whose own words are GODZILLA VS
+    GIGAN).  A static initialiser counts as far as :func:`_owner` lets it."""
     from . import clip_modes as CM
     names = sorted({m.decode() for m in _SCENE_NAME.findall(raw)})
     if not names:
-        return {}
+        return {}, {}
+    paths = sorted({m.decode() for m in _NODE_PATH.findall(raw)
+                    if len(m) < 80 and _NODE_WORD.search(m)})
+    refs = CM.clip_refs(prog, raw, names + paths, owners)
     first = {}
-    for name, refs in CM.clip_refs(prog, raw, names, owners).items():
-        for r in refs:
+    for name in names:
+        for r in refs.get(name, ()):
             m = _owner(prog, owners, r.at) if r.how == "init" else r.mode
             if m and r.at < first.get((m, name), r.at + 1):
                 first[(m, name)] = r.at
     out = {}
     for (m, name), _at in sorted(first.items(), key=lambda kv: (kv[0][0], kv[1])):
         out.setdefault(m, []).append(name)
-    return out
+    # the boxes named with a scene: in its table entry, or in the same function's code
+    in_table = lambda r: r.kind in ("lone", "group")             # noqa: E731
+    prefs = sorted((r.at, p, in_table(r)) for p in paths for r in refs.get(p, ()))
+    boxes = {}
+    for name in names:
+        for r in refs.get(name, ()):
+            m = _owner(prog, owners, r.at) if r.how == "init" else r.mode
+            if not m:
+                continue
+            if in_table(r):
+                near = [p for a, p, t in prefs if t and abs(a - r.at) <= _BOX_TABLE_REACH]
+            else:
+                fn = prog.func_start(r.at)
+                near = [p for a, p, t in prefs if not t and abs(a - r.at) <= _BOX_CODE_REACH
+                        and prog.func_start(a) == fn]
+            got = boxes.setdefault(m, {}).setdefault(name, [])
+            for p in near:
+                if p not in got:
+                    got.append(p)
+    return out, boxes
 
 
 def line_modes(prog, raw, owners, loads, table_va, count):
@@ -368,7 +402,7 @@ def _read(raw, spans, census):
     layers = CM._layers(model, modes)
     owners = CM._Owners(S, prog, CM._anchors(S, prog, model, modes, layers), CM._inits(S, prog))
     loads = _Loads(prog, owners)
-    out.scenes = mode_scenes(prog, raw, owners)
+    out.scenes, out.boxes = mode_scenes(prog, raw, owners)
     table_va, count = find_table(prog, raw, census)
     entry_line = {}
     if count:

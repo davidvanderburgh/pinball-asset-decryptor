@@ -1009,8 +1009,9 @@ HELP_CONTENT = {
          "When several screens hold it, the Scenes search lists them all.\n"
          "- A line no screen's text reads like, but whose **Shown in** names a battle or "
          "other mode, opens on that mode's screens (the Scenes search finds a screen by "
-         "the name of the mode that shows it), on the box that fits it best: an award "
-         "line in the award box, whose own words may be the battle's name.\n"
+         "the name of the mode that shows it), on the box the game program names for "
+         "that screen, else the one that fits the line best: an award line in the award "
+         "box, whose own words may be the battle's name.\n"
          "- Other game-program lines have no screen to show."),
         ("Narrowing a big card down",
          "- **Show:** All, Changed or Unchanged. Unchanged is what you haven't done "

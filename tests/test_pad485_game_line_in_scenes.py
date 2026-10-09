@@ -26,11 +26,28 @@ def _wait(w, pred, timeout=15.0):
     raise AssertionError("timed out waiting")
 
 
-def _project(tmp_path, program):
+def _two_title_scene():
+    """The synthetic scene's Art and KAIJU title, plus a second KAIJU title inside an
+    Award_Textbox sprite: two lines with the same words, as Godzilla's award screens have."""
+    from tests.test_stern_scene_tree import (FLAG, bitmap, cls, fs, mat, node, sprite, text,
+                                             texture, u32, u64, u8)
+    award = node(61, "Title", [u32(1) + cls(3) + u32(FLAG | 31) + text(12, "KAIJU", (9, 7))],
+                 tracks=((1, mat(1, 100, 500)),))
+    root_kids = [
+        node(50, "Art", [u32(1) + cls(1, "Bitmap") + u32(FLAG | 12) + bitmap(3, 16, 8, texture(21, 16, 8))]),
+        node(53, "Title", [u32(1) + cls(3, "Text") + u32(FLAG | 13) + text(5, "KAIJU", (9, 7))]),
+        node(60, "Award_Textbox", [u32(1) + cls(2, "Sprite") + u32(FLAG | 30) + sprite(11, "", 2, [award])],
+             tracks=((1, mat(1, 0, 0)),)),
+    ]
+    root = sprite(2, "", 20, root_kids, labels=[("Start", 1), ("End", 20)])
+    return (u8(1) + u64(0) + u64(0) + u32(1360) + u32(768) + fs(30.0) + fs(0.2, 0.2, 0.2, 1.0) + root)
+
+
+def _project(tmp_path, program, two=False):
     from pinball_decryptor.core import text_manifest
     folder = tmp_path / "proj"
     folder.mkdir()
-    _seed(folder)
+    _seed(folder, _two_title_scene() if two else None)
     text_manifest.save(str(folder), [
         {"path": CARD, "original": "KAIJU", "replacement": ""},
         {"path": "/g/scene2/scene.radium", "original": "BALL ONE", "replacement": ""},
@@ -114,7 +131,7 @@ def test_a_game_line_no_screen_reads_like_opens_its_battles_award_box(tmp_path):
     mode's screens."""
     from pinball_decryptor.plugins.stern import engine
     gigan, megalon = "cmode_battle_vs_gigan", "cmode_battle_vs_megalon"
-    folder = _project(tmp_path, {"original": "KAIJU AWARD", "modes": [gigan, megalon]})
+    folder = _project(tmp_path, {"original": "KAIJU AWARD", "modes": [gigan, megalon]}, two=True)
     from pinball_decryptor.core import text_manifest
     rows = text_manifest.load(str(folder))
     rows.insert(1, {"path": "/g/scene2/scene.radium", "original": "GODZILLA VS GIGAN",
@@ -137,7 +154,24 @@ def test_a_game_line_no_screen_reads_like_opens_its_battles_award_box(tmp_path):
         assert sc["sel"] == "/g/scene1" and sc["item"] == "txt::0"
         assert sc["search"] == "Battle vs Gigan"
         assert [r["d"] for r in sc["scenes"]] == ["/g/scene1", "/g/scene2"]
-        assert _tv(w)["sel"] == _title(w)
+        # no box named: the first of the scene's two KAIJU lines, the root's own
+        assert _tv(w)["sel"] == next(h["id"] for h in _tv(w)["hits"] if h["path"] == "Title")
+        w.call("text_scenes.close")
+    # the box the game names with the screen wins over the words, and among the named ones
+    # the first (Godzilla names Award_Textbox's title before Award_Textbox2's and the
+    # emulator drew GIGAN AWARD in the first); the jump picks that very layer, the second
+    # of the scene's two "KAIJU" lines, by its dotted path
+    engine._program_modes_read(str(folder), {gigan: ["g/scene2", "g/scene1"],
+                                             megalon: ["scene3"]},
+                               {gigan: {"g/scene1": ["Award_Textbox", "Award_Textbox.Title",
+                                                     "Title"]}})
+    with web_app(tmp_path, mfr="stern") as w:
+        _show(w, folder, "KAIJU AWARD")
+        assert w.state("text_scenes")["sel"] == "/g/scene1"
+        hits = _tv(w)["hits"]
+        named = [h["id"] for h in hits if h["path"] == "Award_Textbox › Title"]
+        root = next(h["id"] for h in hits if h["path"] == "Title")
+        assert named and _tv(w)["sel"] == named[0] != root
         # the Megalon battle's own row: its one screen, nothing to search for
         w.call("ui.select_tab", "text")
         w.call("text.select", _row(w, "KAIJU AWARD", "#" + megalon))

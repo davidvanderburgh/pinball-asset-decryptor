@@ -168,7 +168,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
-| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
@@ -214,11 +214,11 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
-| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, waits for multiballs only |
+| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows, waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |

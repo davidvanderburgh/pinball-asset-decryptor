@@ -1907,6 +1907,21 @@ what it did to the playfield measured at the shim's LED view, sampled every 20 m
 David's Premium: the first played every start and end show; the second showed the 2 s Colour sweep went unnoticed
 and the endings on a drain were cut, which gave the bigger starts and the ball-end rule above.
 
+**Every other build (PAD-420).** The other latest builds' ports name up to twelve shows each (six for a start, four
+fades for an end, two accents, as many as the game has), in a block headed "PAD-420: the game's own light shows";
+the Modes tab's "Which games" table marks them *light shows*. Each build's show-process candidates (bodies from its
+process registry that light lamps) were played one by one in the emulator through `pm_game_show`, with two recorders
+in a scratch runtime: the lamp groups the show process owned (every build; the older framework lights its shows
+through lamp groups alone) and, on Godzilla 1.16, Jaws 1.02 and King Kong 0.97, the light runner's commands. Each is
+named from what it did - its colours (the RGB inserts its groups lit, or the commands' colours), toggling (a strobe),
+in-between levels (a fade), lights coming on in turn (a chase), how many lights next to the build's biggest show
+(wide / small) - and how long it ran; a show still going after the scan's wait runs until stopped and is offered for
+8 s. Never offered: one whose direct calls reach the game's sound, callout, score, award, clip, coil, multiball or
+event calls; one the game crashed during or after; one lighting fewer than 6 lights. A Pro offers its LE's shows by
+the LE's names where they are the same show (the same commands, or 75% or more of the same lights for as long), and
+Godzilla Pro eight of the Premium/LE's by PAD-411's names, so a mode moves between models with its shows. Tested in
+the emulator so far.
+
 **From the Modes tab (PAD-418).** A form mode picks a show for its start and one for its end on its Lights page ("The
 game's light shows": the port's shows by name, grouped flashy / subdued / accent; none by default). They are written
 as the mode file's `show_start <name>` and `show_end <name>`, which `mode_file.c` plays through `pm_game_show_named`

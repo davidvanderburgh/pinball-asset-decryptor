@@ -530,6 +530,43 @@ def asset_signature(spec):
     return json.dumps(got, sort_keys=True)
 
 
+#: the mode file's lines that name the mode's screen in the game's HUD scene (mode_file.c)
+SCREEN_KEYS = ("screen_scene", "screen_node", "screen_text")
+
+
+def _cfg_key(line):
+    s = line.strip()
+    return "" if not s or s.startswith("#") else s.split(None, 1)[0]
+
+
+def keep_built_screen(text, built):
+    """``text`` (a mode file the Modes tab pushes into the running Try it game) naming the
+    screen ``built`` (the file that Try it installed in that slot) names, and no other.
+
+    PAD-493 (DragonRR, Godzilla Premium): Screen was unticked on MOTHRA'S SONG just after Try
+    it, and the pushed file named no screen. The game's HUD scene still held the screen the
+    build put there, which is authored VISIBLE: the runtime never learned its name, so it
+    never hid it, and the panel stayed up from the game's start, under ATOMIC BREATH, and
+    after MOTHRA'S SONG ended. A screen is a built asset and changes at the next Try it
+    (:func:`asset_signature`), so until then the pushed file keeps the built screen lines,
+    and the built ``restore_after`` too when the new file has none. A screen ticked on after
+    the build is left out the same way: the game has no such screen yet."""
+    if built is None:
+        return text
+    lines = text.split("\n")
+    keep = [ln for ln in lines if _cfg_key(ln) not in SCREEN_KEYS]
+    screen = [ln for ln in built.split("\n") if _cfg_key(ln) in SCREEN_KEYS]
+    if screen and not any(_cfg_key(ln) == "restore_after" for ln in keep):
+        screen += [ln for ln in built.split("\n") if _cfg_key(ln) == "restore_after"][:1]
+    at = next((i for i, ln in enumerate(lines) if _cfg_key(ln) in SCREEN_KEYS), None)
+    if at is None:
+        end = len(keep) - 1 if keep and keep[-1] == "" else len(keep)
+        at = next((i + 1 for i, ln in enumerate(keep) if _cfg_key(ln) == "award"), end)
+    else:
+        at = sum(1 for ln in lines[:at] if _cfg_key(ln) not in SCREEN_KEYS)
+    return "\n".join(keep[:at] + screen + keep[at:])
+
+
 # ---- the project's card decides the title (item 148) --------------------------------
 def modes_for_the_card(project, found):
     """``found`` (``[(slug, ModeSpec)]``) as the PROJECT'S CARD runs them, exactly as a

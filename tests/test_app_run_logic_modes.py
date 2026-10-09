@@ -894,6 +894,85 @@ def test_modes_tab_a_save_that_changes_nothing_pushes_nothing(tmp_path, monkeypa
 
 
 @pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_a_pushed_file_keeps_the_screen_the_running_game_has(tmp_path, monkeypatch):
+    """PAD-493 (DragonRR, Godzilla Premium): Screen unticked on MOTHRA'S SONG just after Try it
+    pushed a file naming no screen. The game's HUD still had the built screen, authored visible,
+    and the runtime never learned its name: the panel was up from the game's start, under ATOMIC
+    BREATH, and after MOTHRA'S SONG ended. A screen changes at the next Try it, so until then a
+    pushed file names the built screen; a screen-only change pushes nothing and says so once."""
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    for name in ("ATOMIC BREATH", "MOTHRA'S SONG"):
+        MP.new_mode(str(project), name, MP.ModeSpec(name=name, screen=True, clip="none"))
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, project)
+        _no_wsl(monkeypatch)
+        svc = _svc(w)
+        ran = []
+        _fake_rig(svc, ran)
+        svc._running_fn = lambda: True
+        stage = tmp_path / "stage"
+        stage.mkdir()
+        found = MP.list_modes(str(project))[0]
+        for slot, (slug, spec) in enumerate(found):
+            with open(stage / MA.mode_file_name(slot), "w", encoding="utf-8", newline="\n") as f:
+                f.write(MP.runtime_cfg(spec, slug))
+        built = (stage / MA.mode_file_name(1)).read_text(encoding="utf-8")
+        assert "screen_node    PadMode_mothra_s_song_Screen" in built
+        svc._tryit_live = {"project": str(project),
+                           "slots": {slug: i for i, (slug, _s) in enumerate(found)},
+                           "signatures": {slug: MT.asset_signature(s) for slug, s in found},
+                           "stage": str(stage)}
+
+        _select(w, "mothra_s_song")
+        _f(w, "screen", False)                               # the screen alone: nothing to push
+        _save(w)
+        assert _wait(w, lambda: "MOTHRA'S SONG: a change to its screen or clip reaches the game "
+                                "at the next Try it." in _line(w))
+        assert ran == []
+        _save(w)
+        _f(w, "seconds", "35")                               # a live edit is pushed, screen kept
+        _save(w)
+        assert _wait(w, lambda: any(c[2] == "push" for c in ran))
+        assert [c[-1] for c in ran if c[2] == "push"] == ["1"]
+        pushed = (stage / "push" / MA.mode_file_name(1)).read_text(encoding="utf-8")
+        for key in ("screen_scene", "screen_node", "screen_text", "restore_after"):
+            line = next(ln for ln in built.splitlines() if ln.startswith(key))
+            assert line in pushed.splitlines(), key
+        assert "seconds        35" in pushed
+        assert pushed == built.replace("seconds        30", "seconds        35")
+        assert _wait(w, lambda: "MOTHRA'S SONG updated in the running game. Its screen or clip "
+                                "changes at the next Try it." in _line(w))
+
+
+def test_keep_built_screen_names_only_the_screen_the_build_made():
+    """PAD-493: the pushed file's screen lines are the built file's: kept when the form drops the
+    screen, left out when the form adds one the build never made, the rest of the file as is."""
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    built = ("# GENERATED\nname           M\ntrigger        0x00100000 2\nseconds        25\n"
+             "award          750000\nscreen_scene   32e6\nscreen_node    PadMode_m_Screen\n"
+             "screen_text    PadMode_m_Screen.PadMode_m_Screen_Words\nrestore_after  6\n"
+             "clip_start     PadMode_m_Clip\n")
+    no_screen = ("# GENERATED\nname           M\ntrigger        0x00100000 2\nseconds        20\n"
+                 "award          750000\nclip_start     PadMode_m_Clip\n")
+    assert MT.keep_built_screen(no_screen, built) == built.replace("seconds        25",
+                                                                   "seconds        20")
+    # a screen ticked on after a build without one: the game has none yet
+    assert MT.keep_built_screen(built, no_screen) == built.replace(
+        "screen_scene   32e6\nscreen_node    PadMode_m_Screen\n"
+        "screen_text    PadMode_m_Screen.PadMode_m_Screen_Words\n", "")
+    # the new file's own restore_after wins while both have a screen
+    assert MT.keep_built_screen(built.replace("restore_after  6", "restore_after  9"), built) == \
+        built.replace("restore_after  6", "restore_after  9")
+    assert MT.keep_built_screen(no_screen, None) == no_screen
+
+
+@pytest.mark.usefixtures("preview_modes_on")
 def test_modes_tab_start_mode_now_reaches_only_a_mode_the_running_game_has(tmp_path, monkeypatch):
     """Start mode now names a SLOT, and the game's slot K is whatever Try it installed
     there. A mode added after Try it (BRAVO, between ALPHA and CHARLIE) would take

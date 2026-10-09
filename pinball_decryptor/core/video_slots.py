@@ -645,6 +645,130 @@ def _pristine_slot(slot: VideoSlot, orig: Optional[str]) -> VideoSlot:
     return replace(slot, info=info, probed=True)
 
 
+def _staging_items(slots_by_rel, assignments, assets_dir):
+    """``(colour, chosen, items)`` of a staging pass: the project's colour
+    profile (PAD-305), the files profiles ``{rel: Profile}``, and the
+    ``[(rel, replacement), ...]`` it stages, in that order."""
+    from . import colour_profile
+    # the project's colour profile (PAD-305), read once for the whole pass
+    colour = colour_profile.active(assets_dir) if assets_dir else None
+    items = [(rel, rep) for rel, rep in assignments.items()
+             if rep and rel in slots_by_rel]
+    # The chosen-files profile (PAD-312), baked into the clips switched on;
+    # the display-wide one wins where it corrects the files itself.
+    chosen = ({} if colour is not None
+              else colour_profile.asset_map(assets_dir, "videos",
+                                            [rel for rel, _r in items]))
+    # A game's own clip unlocked on the Video tab (PAD-336) is its own
+    # replacement: re-encoded from its original only to bake the colors in,
+    # so with no profile to bake (or no original to keep) it is left alone.
+    items = [(rel, rep) for rel, rep in items
+             if rep != STOCK_SOURCE or (assets_dir and rel in chosen)]
+    return colour, chosen, items
+
+
+def _conversion(cache, slot, rep, orig, slot_noconv, choice, trim_to_length,
+                pin_byte_size, best_quality, clip_colour):
+    """What staging *rep* into *slot* is asked for: ``(slot_trim, seconds,
+    budget, rate, recipe)``, *choice* being the clip's length choice (see
+    :func:`stage_replacements`).  Worked out once, for the staging and for
+    :func:`conversions_due`'s count of it alike."""
+    seconds = length_seconds(choice)
+    if choice == LENGTH_FULL:
+        slot_trim = False
+    elif choice == LENGTH_STOCK or seconds:
+        slot_trim = True
+    else:
+        slot_trim = bool(trim_to_length)
+    budget = None
+    if pin_byte_size and slot_trim and not seconds:
+        if orig:
+            budget = os.path.getsize(orig)
+        elif slot.size > 0:
+            budget = slot.size
+    # A slot that is NOT held to its byte length gets a conversion at the
+    # bitrate of the clip it shipped with -- the pristine one, for the same
+    # ratchet reason as the budget.  A pinned slot keeps the old encode:
+    # without the length matched its bytes are no guide, and a clip the
+    # build then has to fit would pay a second generation for it.
+    rate = None
+    if not pin_byte_size:
+        rate = _clip_bitrate(orig or slot.abs_path)
+    # A short-GOP slot's recipe names its spacing, so a conversion made
+    # before conversions kept it (PAD-298) is made again; every other
+    # slot's recipe is exactly what it was.
+    gop = {}
+    k = _slot_keyint(orig or slot.abs_path)
+    if k:
+        gop = {"keyint": k}
+    # A clip converted under one colour profile is made again under
+    # another (PAD-305); with none the recipe is exactly what it was.
+    if clip_colour is not None:
+        gop["colour"] = clip_colour.key()
+    recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
+                          length=seconds or 0,
+                          noconv=slot_noconv, budget=budget,
+                          rate=round(rate or 0), best=bool(best_quality),
+                          **gop)
+    return slot_trim, seconds, budget, rate, recipe
+
+
+def conversions_due(slots_by_rel: Dict[str, VideoSlot],
+                    assignments: Dict[str, str],
+                    trim_to_length: bool = False,
+                    no_conversion: bool = False,
+                    assets_dir=None, pin_byte_size: bool = False,
+                    asis_overrides: Optional[Dict[str, bool]] = None,
+                    best_quality: bool = False,
+                    length_overrides: Optional[Dict[str, object]] = None):
+    """The clips :func:`stage_replacements` would convert if it ran now with
+    the same arguments, so a caller can say how long that takes before it
+    starts (PAD-489): ``({rel: pixels}, coloured)``, *pixels* being frames x
+    width x height of the clip (0 when it can't be read) and *coloured* the
+    rels that get a colour profile baked in.
+
+    A clip the staging cache would keep is not due, nor one going on "as
+    is" (a copy, not a conversion).  Stats and ``moov`` reads only, nothing
+    written: a clip with no ``.orig/`` snapshot yet was never staged, so it
+    is due."""
+    from . import staged_originals
+    from .video_quality import quality_of_file
+
+    colour, chosen, items = _staging_items(slots_by_rel, assignments,
+                                           assets_dir)
+    overrides = dict(asis_overrides or {})
+    lengths = dict(length_overrides or {})
+    cache = StagedCache(assets_dir)
+    due, coloured = {}, set()
+    for rel, rep in items:
+        slot = slots_by_rel[rel]
+        stock = rep == STOCK_SOURCE
+        if not stock and bool(overrides.get(rel, no_conversion)):
+            continue
+        orig = (staged_originals.snapshot_path(assets_dir, rel)
+                if assets_dir else None)
+        clip_colour = colour or chosen.get(rel)
+        if stock:
+            rep = orig or slot.abs_path
+        if orig:
+            recipe = _conversion(cache, slot, rep, orig, False,
+                                 lengths.get(rel), trim_to_length,
+                                 pin_byte_size, best_quality, clip_colour)[4]
+            if cache.fresh(slot, recipe):
+                continue
+        pixels = 0
+        for path in (rep, orig or slot.abs_path):
+            q = quality_of_file(path)
+            if not q.error and q.width > 0 and q.duration > 0:
+                pixels = int(q.width * q.height * (q.fps or 30.0)
+                             * q.duration)
+                break
+        due[rel] = pixels
+        if clip_colour is not None:
+            coloured.add(rel)
+    return due, frozenset(coloured)
+
+
 def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        assignments: Dict[str, str],
                        trim_to_length: bool = False,
@@ -705,24 +829,11 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     source and options produced last time is left as it is
     (:class:`StagedCache`).
     """
-    from . import colour_profile
-    # the project's colour profile (PAD-305), read once for the whole pass
-    colour = colour_profile.active(assets_dir) if assets_dir else None
     from .checksums import read_baseline_any
     from . import staged_originals
 
-    items = [(rel, rep) for rel, rep in assignments.items()
-             if rep and rel in slots_by_rel]
-    # The chosen-files profile (PAD-312), baked into the clips switched on;
-    # the display-wide one wins where it corrects the files itself.
-    chosen = ({} if colour is not None
-              else colour_profile.asset_map(assets_dir, "videos",
-                                            [rel for rel, _r in items]))
-    # A game's own clip unlocked on the Video tab (PAD-336) is its own
-    # replacement: re-encoded from its original only to bake the colors in,
-    # so with no profile to bake (or no original to keep) it is left alone.
-    items = [(rel, rep) for rel, rep in items
-             if rep != STOCK_SOURCE or (assets_dir and rel in chosen)]
+    colour, chosen, items = _staging_items(slots_by_rel, assignments,
+                                           assets_dir)
     total = len(items)
     staged = 0
     failures: List = []
@@ -772,45 +883,10 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                            f"it was left as it is", "error")
                 continue
             rep = orig
-        choice = lengths.get(rel)
-        seconds = length_seconds(choice)
-        if choice == LENGTH_FULL:
-            slot_trim = False
-        elif choice == LENGTH_STOCK or seconds:
-            slot_trim = True
-        else:
-            slot_trim = bool(trim_to_length)
-        budget = None
-        if pin_byte_size and slot_trim and not seconds:
-            if orig:
-                budget = os.path.getsize(orig)
-            elif slot.size > 0:
-                budget = slot.size
-        # A slot that is NOT held to its byte length gets a conversion at the
-        # bitrate of the clip it shipped with -- the pristine one, for the same
-        # ratchet reason as the budget.  A pinned slot keeps the old encode:
-        # without the length matched its bytes are no guide, and a clip the
-        # build then has to fit would pay a second generation for it.
-        rate = None
-        if not pin_byte_size:
-            rate = _clip_bitrate(orig or slot.abs_path)
-        # A short-GOP slot's recipe names its spacing, so a conversion made
-        # before conversions kept it (PAD-298) is made again; every other
-        # slot's recipe is exactly what it was.
-        gop = {}
-        k = _slot_keyint(orig or slot.abs_path)
-        if k:
-            gop = {"keyint": k}
-        # A clip converted under one colour profile is made again under
-        # another (PAD-305); with none the recipe is exactly what it was.
         clip_colour = colour or chosen.get(rel)
-        if clip_colour is not None:
-            gop["colour"] = clip_colour.key()
-        recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
-                              length=seconds or 0,
-                              noconv=slot_noconv, budget=budget,
-                              rate=round(rate or 0), best=bool(best_quality),
-                              **gop)
+        slot_trim, seconds, budget, rate, recipe = _conversion(
+            cache, slot, rep, orig, slot_noconv, lengths.get(rel),
+            trim_to_length, pin_byte_size, best_quality, clip_colour)
         if cache.fresh(slot, recipe):
             staged += 1
             kept += 1
@@ -839,7 +915,9 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         else:
             cache.forget(rel)
             failures.append((rel, detail))
-            if log_cb:
+            if log_cb and detail == "cancelled":
+                log_cb(f"  – {rel}: cancelled, left as it was", "warning")
+            elif log_cb:
                 log_cb(f"  ✗ {rel}: {detail}", "error")
         cache.save()
 

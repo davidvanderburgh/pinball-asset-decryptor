@@ -4257,7 +4257,8 @@ class App:
                 f"Audio replacement failed: {e}", "error"))
             return (len(assignments), 0, [("audio replacements", str(e))])
 
-    def _stage_pending_video(self, assets_dir, cancel_cb=None):
+    def _stage_pending_video(self, assets_dir, cancel_cb=None,
+                             progress_cb=None, staging=None):
         """Re-encode + write the user's assigned replacement clips over the
         matching files in *assets_dir* (so the Write pipeline that follows
         repacks them).  Runs on the write worker thread; logs via the queue.
@@ -4265,14 +4266,60 @@ class App:
 
         *cancel_cb* is polled between clips AND inside each re-encode (long
         clips can take many minutes), so the Write flow's Cancel button works
-        during staging."""
+        during staging.  *progress_cb* is stage_replacements' own.
+        *staging* is :meth:`_video_staging`'s answer when the caller already
+        has it."""
+        if staging is None:
+            staging = self._video_staging(assets_dir)
+        if not staging:
+            return (0, 0, [])
+        assignments = staging["assignments"]
+        best = staging["best_quality"]
+        log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+        self.msg_queue.put(LogMsg(
+            f"Applying {len(assignments)} video replacement(s) to the "
+            f"assets folder{' at best quality' if best else ''}...", "info"))
+        from .core.video_slots import stage_replacements
+        options = {k: v for k, v in staging.items()
+                   if k not in ("slots_by_rel", "assignments")}
+        try:
+            with self._colour_assets_scope():
+                staged, failures = stage_replacements(
+                    staging["slots_by_rel"], assignments, log_cb=log_cb,
+                    cancel_cb=cancel_cb, progress_cb=progress_cb, **options)
+            # a clip cut off by Cancel is not one that could not be converted
+            bad = [f for f in failures if f[1] != "cancelled"]
+            cut = len(bad) < len(failures)
+            self.msg_queue.put(LogMsg(
+                f"Applied {staged} video replacement(s)."
+                + (f"  {len(bad)} could not be converted (see above)."
+                   if bad else "")
+                + ("  Cancelled before the rest." if cut else ""),
+                "error" if bad else "warning" if cut else "success"))
+            from .core import history_log
+            history_log.record(assets_dir,
+                               "video  applied %d of %d replacement(s) to "
+                               "the project folder (build)"
+                               % (staged, len(assignments)))
+            return (len(assignments), staged,
+                    [(f"video: {rel}", err) for rel, err in failures])
+        except Exception as e:
+            self.msg_queue.put(LogMsg(
+                f"Video replacement failed: {e}", "error"))
+            return (len(assignments), 0, [("video replacements", str(e))])
+
+    def _video_staging(self, assets_dir):
+        """What staging *assets_dir*'s videos is: the keyword arguments of
+        :func:`core.video_slots.stage_replacements` (all but its callbacks),
+        or ``None`` when there is nothing to stage.  One answer for the
+        staging and for the count of it before it starts (PAD-489)."""
         pend = (self.window.pending_video_assignments(assets_dir)
                 or self._sidecar_pending(assets_dir, "video"))
         if not pend:
-            return (0, 0, [])
+            return None
         slots_by_rel, assignments, trim, no_conversion, asis = pend[:5]
         lengths = pend[5] if len(pend) > 5 else {}
-        from .core.video_slots import STOCK_SOURCE, stage_replacements
+        from .core.video_slots import STOCK_SOURCE
         from .core import colour_profile, staged_changes
         # the game's own clips switched on for color (PAD-336): each one is
         # its own replacement, re-encoded with the profile baked in, and
@@ -4291,15 +4338,11 @@ class App:
             if rel in slots_by_rel and not assignments.get(rel):
                 assignments[rel] = STOCK_SOURCE
         if not assignments:
-            return (0, 0, [])
-        log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+            return None
         # "Best quality" is read from the folder's own record, which the
         # Video tab writes the moment it is ticked: the same answer whether
         # the tab has scanned this folder or not.
         best = bool(staged_changes.load(assets_dir).get("video_best_quality"))
-        self.msg_queue.put(LogMsg(
-            f"Applying {len(assignments)} video replacement(s) to the "
-            f"assets folder{' at best quality' if best else ''}...", "info"))
         pin_size = False
         if self._current_mfr is not None:
             try:
@@ -4307,45 +4350,39 @@ class App:
                     self._current_mfr.video_pins_byte_size(assets_dir))
             except Exception:
                 pin_size = False
-        try:
-            with self._colour_assets_scope():
-                staged, failures = stage_replacements(
-                    slots_by_rel, assignments, trim_to_length=trim,
-                    no_conversion=no_conversion, log_cb=log_cb,
-                    assets_dir=assets_dir, cancel_cb=cancel_cb,
-                    pin_byte_size=pin_size, asis_overrides=asis,
-                    best_quality=best, length_overrides=lengths)
-            self.msg_queue.put(LogMsg(
-                f"Applied {staged} video replacement(s)."
-                + (f"  {len(failures)} could not be converted (see above)."
-                   if failures else ""),
-                "success" if not failures else "error"))
-            from .core import history_log
-            history_log.record(assets_dir,
-                               "video  applied %d of %d replacement(s) to "
-                               "the project folder (build)"
-                               % (staged, len(assignments)))
-            return (len(assignments), staged,
-                    [(f"video: {rel}", err) for rel, err in failures])
-        except Exception as e:
-            self.msg_queue.put(LogMsg(
-                f"Video replacement failed: {e}", "error"))
-            return (len(assignments), 0, [("video replacements", str(e))])
+        return dict(slots_by_rel=slots_by_rel, assignments=assignments,
+                    trim_to_length=trim, no_conversion=no_conversion,
+                    assets_dir=assets_dir, pin_byte_size=pin_size,
+                    asis_overrides=asis, best_quality=best,
+                    length_overrides=lengths)
 
-    def _stage_pending_image(self, assets_dir):
-        """Scale + write the user's assigned replacement images over the
-        matching files in *assets_dir* (so the Write pipeline that follows
-        repacks them).  Runs on the write worker thread; logs via the queue.
-        Returns ``(pending, staged, failures)`` — see _stage_pending_audio."""
+    def _image_staging(self, assets_dir):
+        """:meth:`_video_staging` for the pictures: ``slots_by_rel``,
+        ``assignments`` and ``keep_size``, or ``None``."""
         pend = (self.window.pending_image_assignments(assets_dir)
                 or self._sidecar_pending(assets_dir, "image")
                 or self._stock_colour_pending(assets_dir))
         if not pend:
-            return (0, 0, [])
-        slots_by_rel, assignments = pend[:2]
+            return None
         # Pictures the user kept at their own size (PAD-154); the Write
         # re-serialises their scene around them.
-        keep_size = pend[2] if len(pend) > 2 else frozenset()
+        return dict(slots_by_rel=pend[0], assignments=pend[1],
+                    keep_size=pend[2] if len(pend) > 2 else frozenset())
+
+    def _stage_pending_image(self, assets_dir, cancel_cb=None,
+                             progress_cb=None, staging=None):
+        """Scale + write the user's assigned replacement images over the
+        matching files in *assets_dir* (so the Write pipeline that follows
+        repacks them).  Runs on the write worker thread; logs via the queue.
+        Returns ``(pending, staged, failures)`` — see _stage_pending_audio.
+        *cancel_cb*, *progress_cb* and *staging*: as _stage_pending_video's."""
+        if staging is None:
+            staging = self._image_staging(assets_dir)
+        if not staging:
+            return (0, 0, [])
+        slots_by_rel = staging["slots_by_rel"]
+        assignments = staging["assignments"]
+        keep_size = staging["keep_size"]
         from .core.image_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(
@@ -4355,7 +4392,8 @@ class App:
             with self._colour_assets_scope():
                 staged, failures = stage_replacements(
                     slots_by_rel, assignments, log_cb=log_cb,
-                    assets_dir=assets_dir, keep_size=keep_size)
+                    assets_dir=assets_dir, keep_size=keep_size,
+                    progress_cb=progress_cb, cancel_cb=cancel_cb)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} image replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."
@@ -4415,7 +4453,8 @@ class App:
         return (colour_profile.forced(False) if on_display
                 else contextlib.nullcontext())
 
-    def stage_pending_replacements(self, assets_dir, cancel_cb=None):
+    def stage_pending_replacements(self, assets_dir, cancel_cb=None,
+                                   progress_cb=None, confirm_cb=None):
         """Apply every assigned Replace-tab replacement into *assets_dir* now.
 
         The three ``_stage_pending_*`` calls a Write makes, in the same order,
@@ -4436,13 +4475,57 @@ class App:
 
         Runs on the caller's worker thread and logs through the message queue,
         exactly as the write flow's staging does.
+
+        PAD-489 (DragonRR: "no sign of a progress bar, no warning that there
+        are a huge number of files to process"): *confirm_cb(work)* is
+        handed the :class:`core.staging_work.Work` the videos and pictures
+        come to before anything is staged, and a False answer stages nothing
+        and returns ``None``.  *progress_cb(kind, i, total, rel)* is the
+        video, then the picture staging's own progress (*kind* ``"videos"``
+        / ``"pictures"``).
         """
+        video = self._video_staging(assets_dir) or {}
+        image = self._image_staging(assets_dir) or {}
+        if confirm_cb is not None and not confirm_cb(
+                self._staging_work(assets_dir, video, image)):
+            return None
+
+        def kind(name):
+            if progress_cb is None:
+                return None
+            return lambda i, total, rel="": progress_cb(name, i, total, rel)
+
         pend_a = self._stage_pending_audio(assets_dir)
-        pend_v = self._stage_pending_video(assets_dir, cancel_cb=cancel_cb)
-        pend_i = self._stage_pending_image(assets_dir)
+        pend_v = self._stage_pending_video(assets_dir, cancel_cb=cancel_cb,
+                                           progress_cb=kind("videos"),
+                                           staging=video)
+        # cancelled during the videos: the pictures are not begun at all
+        pend_i = ((0, 0, []) if cancel_cb is not None and cancel_cb() else
+                  self._stage_pending_image(assets_dir, cancel_cb=cancel_cb,
+                                            progress_cb=kind("pictures"),
+                                            staging=image))
         return (pend_a[0] + pend_v[0] + pend_i[0],
                 pend_a[1] + pend_v[1] + pend_i[1],
                 pend_a[2] + pend_v[2] + pend_i[2])
+
+    def _staging_work(self, assets_dir, video, image):
+        """PAD-489: what staging :meth:`_video_staging`'s *video* and
+        :meth:`_image_staging`'s *image* comes to, counted as the staging
+        will see it (under the same colour scope), nothing written."""
+        from .core import image_slots, video_slots
+        from .core.staging_work import Work
+        clips, coloured, pictures = {}, frozenset(), 0
+        try:
+            with self._colour_assets_scope():
+                if video:
+                    clips, coloured = video_slots.conversions_due(**video)
+                if image:
+                    pictures = image_slots.pictures_due(
+                        image["slots_by_rel"], image["assignments"],
+                        assets_dir=assets_dir, keep_size=image["keep_size"])
+        except Exception:                               # noqa: BLE001
+            log.exception("counting the staging")
+        return Work(clips=clips, coloured=coloured, pictures=pictures)
 
     # ------------------------------------------------------------------
     # Revert all changes

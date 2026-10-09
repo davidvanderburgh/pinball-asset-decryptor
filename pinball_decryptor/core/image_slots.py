@@ -154,10 +154,39 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
         return False, str(e)
 
 
+def pictures_due(slots_by_rel: Dict[str, ImageSlot],
+                 assignments: Dict[str, str], assets_dir=None,
+                 keep_size=frozenset()):
+    """How many pictures :func:`stage_replacements` would stage if it ran
+    now with the same arguments (PAD-489): the picks, the game's own
+    pictures switched on behind the unlock, and the built pictures switched
+    on.  Counted without touching a file (the staging itself sets aside a
+    built picture's uncorrected copy)."""
+    from . import colour_profile
+    colour = colour_profile.active(assets_dir) if assets_dir else None
+    picked = {rel for rel, rep in assignments.items()
+              if rep and rel in slots_by_rel}
+    n = len(picked)
+    if colour is None and assets_dir and colour_profile.any_asset_active(
+            assets_dir):
+        stock = {rel for rel in colour_profile.stock_image_rels(
+            assets_dir, picked) if rel in slots_by_rel}
+        n += len(stock)
+        resolve = colour_profile.asset_resolver(assets_dir)
+        for rel in colour_profile.built_image_on(assets_dir):
+            if (rel in slots_by_rel and rel not in picked
+                    and rel not in stock
+                    and resolve("images", rel) is not None
+                    and (colour_profile.uncorrected_path(assets_dir, rel)
+                         or os.path.isfile(slots_by_rel[rel].abs_path))):
+                n += 1
+    return n
+
+
 def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
                        assignments: Dict[str, str],
                        log_cb=None, progress_cb=None, assets_dir=None,
-                       keep_size=frozenset()):
+                       keep_size=frozenset(), cancel_cb=None):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their ImageSlot.  Returns
@@ -167,6 +196,9 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     *assets_dir*, when given, snapshots each slot's pristine bytes under
     ``.orig/`` before the first overwrite so the edit can be reverted without a
     full re-extract (see :mod:`core.staged_originals`).
+
+    *cancel_cb* (returns truthy to stop) is asked before each picture: a
+    whole game's pictures under a colour profile are thousands (PAD-489).
     """
     from .checksums import read_baseline_any
     from . import staged_originals
@@ -220,6 +252,11 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
 
     for i, (rel, rep) in enumerate(items):
+        if cancel_cb is not None and cancel_cb():
+            if log_cb:
+                log_cb("Cancelled — skipping the remaining image "
+                       "replacement(s).", "error")
+            break
         slot = slots_by_rel[rel]
         if progress_cb:
             progress_cb(i, total, rel)

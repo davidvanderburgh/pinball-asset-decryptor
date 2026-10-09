@@ -228,6 +228,30 @@ def test_pending_texts_takes_the_scene_row_and_the_program_placeholder(
         "GODZILLA VS MEGALON": "GODZILLA VS EBIRAH"}
 
 
+def test_pending_texts_takes_a_program_line_whose_stand_in_lacks_its_bang(tmp_path):
+    """PAD-485: Godzilla's jackpot award screen holds "GIGAN JACKPOT" where the game puts
+    "GIGAN JACKPOT!", so an edit of the game's line shows in that box.  It wins over the
+    box's own row (the game writes over it), and a program line reading exactly the same
+    wins over the near one."""
+    assets = _seed(tmp_path, "GIGAN JACKPOT")
+    layouts = scene_render.load_layouts(assets)
+    lay = layouts[CARD]
+    _write_manifest(tmp_path, [
+        {"path": CARD, "original": "GIGAN JACKPOT", "replacement": "OWN WORDS"},
+        {"path": "/g/game", "original": "GIGAN JACKPOT!",
+         "replacement": "GIGAN UNLEASHES THE KAIJU JACKPOT!", "budget": 96},
+        {"path": "/g/game", "original": "GIGAN JACKPOT:",
+         "replacement": "NOT A STAND-IN", "budget": 96}])
+    assert _pending(assets, layouts, CARD, lay) == {
+        "GIGAN JACKPOT": "GIGAN UNLEASHES THE KAIJU JACKPOT!"}
+    _write_manifest(tmp_path, [
+        {"path": "/g/game", "original": "GIGAN JACKPOT",
+         "replacement": "EXACT", "budget": 96},
+        {"path": "/g/game", "original": "GIGAN JACKPOT!",
+         "replacement": "NEAR", "budget": 96}])
+    assert _pending(assets, layouts, CARD, lay) == {"GIGAN JACKPOT": "EXACT"}
+
+
 def test_pending_texts_decodes_program_rows_and_caches_the_manifest(tmp_path):
     """Program rows are manifest-encoded (a two-character ``\\n``); the
     layout's strings carry a real newline.  The manifest is read once per

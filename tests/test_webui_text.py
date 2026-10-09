@@ -514,6 +514,72 @@ def test_show_in_scenes_lands_on_the_line_and_jumps_back(tmp_path):
         assert not w.state("text_scenes")["open"]
 
 
+def test_show_in_scenes_opens_the_screen_a_game_line_goes_in(tmp_path):
+    """PAD-485 (DragonRR): Show in Scenes on a game-program line only said "no scene file to
+    show".  The game puts its line in a text box on one of its screens, and that box's own
+    words are a stand-in (Godzilla's jackpot award screen holds "GIGAN JACKPOT" where the
+    game puts "GIGAN JACKPOT!"), so it now opens the screen whose words read the same, a
+    closing ! aside.  Several such screens: the Scenes search lists them.  A line no screen
+    holds still says why."""
+    folder = _scene_extract(tmp_path / "proj")
+    from pinball_decryptor.core import text_manifest
+    _manifest(folder, text_manifest.load(folder) + [
+        {"path": "/g/scene3/scene.radium", "original": "CLOCK NOT\nSET",
+         "replacement": ""},
+        {"path": "/g/game", "original": "BALL ONE!", "replacement": "",
+         "budget": 96, "grow": True},
+        {"path": "/g/game", "original": "CLOCK NOT SET", "replacement": "",
+         "budget": 96, "grow": True},
+        {"path": "/g/game", "original": "TILT", "replacement": "",
+         "budget": 4, "fixed": True}])
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        w.call("text.select", _row_index(w, "BALL ONE!", "/game"))
+        assert w.call("text.show_in_scene") is True
+        sc = w.state("text_scenes")
+        assert sc["open"] and sc["sel"] == "/g/scene2"
+        assert sc["item"] == "txt::0" and sc["search"] == ""
+        assert w.state("shell")["tab"] == "scenes"
+        # two screens hold it (one with its words over two lines): the search lists both
+        w.call("text.select", _row_index(w, "CLOCK NOT SET", "/game"))
+        assert w.call("text.show_in_scene") is True
+        sc = w.state("text_scenes")
+        assert sc["sel"] == "/g/scene1" and sc["item"] == "txt::0"
+        assert sc["search"] == "CLOCK NOT SET"
+        listed = [r["d"] for r in sc["scenes"]]
+        assert {"/g/scene1", "/g/scene3"} <= set(listed)
+        assert "/g/scene2" not in listed
+        # nothing holds TILT
+        n = len(w.asked)
+        w.call("text.select", _row_index(w, "TILT", "/game"))
+        assert w.call("text.show_in_scene") is False
+        assert len(w.asked) == n + 1 and w.asked[-1]["title"] == "Scenes"
+        assert "no screen's own text reads the same" in str(w.asked[-1])
+
+
+def test_rules_stand_in_rows():
+    """PAD-485: the scene rows a game-program line goes in, the same words first."""
+    from pinball_decryptor.webui import text_rules as R
+    scene = lambda d, o: {"path": "/g/%s/scene.radium" % d,   # noqa: E731
+                          "original": o, "replacement": ""}
+    rows = [scene("a", "GIGAN JACKPOT"), scene("b", "GIGAN JACKPOT!"),
+            scene("c", "GIGAN  JACKPOT !"), scene("d", "MEGALON JACKPOT"),
+            scene("e", "gigan jackpot"), scene("f", "GIGAN JACKPOT:"),
+            {"path": "/g/game", "original": "GIGAN JACKPOT", "replacement": ""}]
+    line = {"path": "/g/game", "original": "GIGAN JACKPOT!", "replacement": ""}
+    assert [s["path"] for s in R.stand_in_rows(rows, line)] == [
+        "/g/b/scene.radium", "/g/a/scene.radium", "/g/c/scene.radium"]
+    # a mode's own row (PAD-470) finds the same screens
+    mode = dict(line, path="/g/game#cmode_battle_vs_gigan")
+    assert R.stand_in_rows(rows, mode) == R.stand_in_rows(rows, line)
+    # line breaks, as the game program writes them, read as spaces
+    two = {"path": "/g/game", "original": "GIGAN\\nJACKPOT", "replacement": ""}
+    assert [s["path"] for s in R.stand_in_rows(rows, two)][:1] == ["/g/a/scene.radium"]
+    assert R.stand_in_rows(rows, rows[0]) == []           # a scene row
+    assert R.stand_in_rows(rows, dict(line, original="!!")) == []
+    assert R.stand_in_words("  A\nB  C!? ", True) == "A B C"
+
+
 def test_scenes_search_keeps_and_steps_through_text(tmp_path):
     """PAD-429 (DragonRR): a search a picked scene does not match narrows the list instead of
     wiping itself, and Previous / Next walk every line of text with the words, round."""

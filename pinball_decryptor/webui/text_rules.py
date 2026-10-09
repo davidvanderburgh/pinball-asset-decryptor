@@ -64,6 +64,74 @@ def row_is_scene(r):
     return (r.get("path") or "").lower().endswith(".radium")
 
 
+_STAND_IN_END = re.compile(r"[!.?]+$")
+
+
+def stand_in_words(s, loose=False):
+    """A line's words for finding the scene text a game-program line is drawn into
+    (PAD-485): ``\\n`` escapes, line breaks and runs of spaces read as one space, the ends
+    trimmed, case kept.  *loose* also drops a closing ``!``, ``.`` or ``?``: Godzilla's
+    Megalon and Gigan jackpot award screen holds "GIGAN JACKPOT" where the game puts
+    "GIGAN JACKPOT!"."""
+    s = " ".join((s or "").replace("\\n", "\n").split())
+    return _STAND_IN_END.sub("", s).rstrip() if loose else s
+
+
+def stand_in_rows(rows, r):
+    """The scene rows of *rows* that hold game-program row *r*'s words: the game fills
+    the line into that text box while it runs, so the scene's own words are a stand-in
+    (PAD-485).  The rows reading the same come first, then the ones that differ only by
+    a closing ``!``, ``.`` or ``?``, each in list order.  Empty for a scene row and for
+    a line no scene holds."""
+    if row_is_scene(r):
+        return []
+    want = stand_in_words(r.get("original"))
+    if not want:
+        return []
+    near_want = stand_in_words(want, True)
+    same, near = [], []
+    for s in rows:
+        if not row_is_scene(s):
+            continue
+        words = stand_in_words(s.get("original"))
+        if words == want:
+            same.append(s)
+        elif near_want and stand_in_words(words, True) == near_want:
+            near.append(s)
+    return same + near
+
+
+#: words a game-program line and a text box are not matched on (PAD-485)
+_BOX_STOP = frozenset(("VS", "THE", "AN", "OF", "AND", "TO", "FOR", "IS", "AT", "IN",
+                       "ON", "INSTANCE", "TEXT", "TEXTBOX"))
+
+
+def _box_words(s):
+    s = re.sub(r"([a-z])([A-Z])", r"\1 \2", s or "").replace("_", " ").upper()
+    return {w for w in re.findall(r"[A-Z][A-Z']+", s) if w not in _BOX_STOP}
+
+
+def box_score(line, text, name="", group=""):
+    """How many of game-program *line*'s words a text box on one of its mode's screens
+    shares: the box's own words, its name and its group's (PAD-485: the Heisei card's
+    KAIJU AWARD and the battle vs Gigan's award screen, ``Award_Textbox.Title_Instance``,
+    share AWARD)."""
+    return len(_box_words(stand_in_words(line))
+               & (_box_words(text) | _box_words(name) | _box_words(group)))
+
+
+def scene_dir_index(dirs):
+    """``{scene key: scene dir}`` for the scene directories *dirs*: a game program names a
+    scene by the last one or two folders of its card path (PAD-485)."""
+    out = {}
+    for d in dirs:
+        parts = [p for p in (d or "").replace("\\", "/").split("/") if p]
+        for n in (2, 1):
+            if len(parts) >= n:
+                out.setdefault("/".join(parts[-n:]), d)
+    return out
+
+
 def row_grows(r):
     """True when a replacement longer than the original's slot is still
     accepted: every scene row, a game-program row flagged ``grows``, and a

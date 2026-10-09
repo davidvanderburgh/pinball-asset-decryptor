@@ -482,7 +482,9 @@ export PAD_GAME="$GAME"
 if [ -z "${PAD_SWAP_VBLANKS:-}" ]; then
     export PAD_SWAP_VBLANKS=2
 fi
-[ -n "${PAD_SWAP_VBLANKS:-}" ] && echo "[watch] a swap takes ${PAD_SWAP_VBLANKS} refresh(es) (the machine's frame cadence)"
+# (rigbatch.sh asks for 4 - 15 pictures a second - for its hidden sweep jobs, PAD-488.)
+[ -n "${PAD_SWAP_VBLANKS:-}" ] && echo "[watch] a swap takes ${PAD_SWAP_VBLANKS} refresh(es) of 60 Hz" \
+    "(2 is the machine's frame cadence)"
 
 # ★ THE BOARD'S RUN RECORD: "a run is up in slot N" for everyone who is not
 # this process - riglock.sh list, the app's Emulate tab, the triage dashboard,

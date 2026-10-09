@@ -2465,7 +2465,8 @@ _GAME_WIZARD_C = r"""/* PAD-436: one of the game's own mini-wizards, by its port
 UNUSED static void game_wizard(const char *name, int start)
 {
     int r = pm_game_wizard_named(name, start ? PM_WIZARD_START : PM_WIZARD_LIGHT);
-    if (r) pm_log("mini-wizard: the game's %s, %s", name, r == PM_WIZARD_STARTED ? "started" : "lit for its start shot");
+    if (r) pm_log("mini-wizard: the game's %s, %s", name, r == PM_WIZARD_STARTED ? "started" : r == PM_WIZARD_WAITING
+                  ? "to start the moment nothing of the game's is in its way" : "lit for its start shot");
 }
 """
 

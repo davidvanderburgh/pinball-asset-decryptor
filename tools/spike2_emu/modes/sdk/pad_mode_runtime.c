@@ -2891,6 +2891,8 @@ static void stock_base_clear(void)
     for (i = 0; i < N_STOCK_TABLE; i++) stock_base[i] = 0;
 }
 
+static int wizm_owns(const unsigned *o);         /* PAD-473: the game's mini-wizards, below */
+
 static void stock_generic_tick(void)
 {
     static unsigned ticks;
@@ -2920,7 +2922,7 @@ static void stock_generic_tick(void)
         const unsigned *o = (const unsigned *)(unsigned long)tab[i];
         if ((!open && !stock_base[i]) || stock_entry_class(i, tab, n, slot) <= 0) continue;
         if (!stock_entry_active(o, slot)) stock_base[i] = 0;
-        else if (open && !stock_base[i]) {
+        else if (open && !stock_base[i] && !wizm_owns(o)) {   /* PAD-473: a mini-wizard handed over is never base play */
             unsigned ti = ((const unsigned *)(unsigned long)o[0])[-1];
             const char *nm = ti ? (const char *)(unsigned long)((const unsigned *)(unsigned long)ti)[1] : 0;
             while (nm && *nm >= '0' && *nm <= '9') nm++;
@@ -5431,6 +5433,11 @@ static void shake_arm(void)
 #define WIZARDS_MAX 8
 #define WIZ_DUE_MAX 4
 static int wizards_n;
+static int wiz_route;                 /* PAD-473: 1 Bond's table (here), 2 the C++ titles' mode objects (below) */
+static int wizm_hand(int n, int how);
+static void wizm_tick(void);
+static int wizm_claim(int n);
+static void wizm_arm(void);
 static struct { int n; unsigned p, sel, lit, played; } wiz_hold;   /* a refused start, put back on the next tick */
 static struct {
     unsigned char n[WIZ_DUE_MAX];     /* handed over and not started yet, in order: n[0] is the one lit */
@@ -5469,7 +5476,7 @@ static void wizard_refused(unsigned start)
 {
     unsigned p = pm_player(), *st;
     int n;
-    if (!(can & PM_CAN_GAME_WIZARDS) || p < 1 || p > 4) return;
+    if (!(can & PM_CAN_GAME_WIZARDS) || wiz_route != 1 || p < 1 || p > 4) return;
     for (n = 1; n <= wizards_n && wizard_entry(n)[3] != start; n++) ;
     if (n > wizards_n) return;
     st = (unsigned *)(unsigned long)data("wizard_state");
@@ -5554,6 +5561,10 @@ static void wizards_tick(void)
     unsigned *st, p = wiz_hold.p, game;
     int ev, n;
     if (!(can & PM_CAN_GAME_WIZARDS)) return;
+    if (wiz_route == 2) {
+        wizm_tick();
+        return;
+    }
     st = (unsigned *)(unsigned long)data("wizard_state");
     if (wiz_hold.n) {
         st[p - 1] = wiz_hold.sel;
@@ -5607,6 +5618,7 @@ int pm_game_wizard(int n, int how)
         say("game wizard %d (%s): not handed over - no game", n, name);
         return 0;
     }
+    if (wiz_route == 2) return wizm_hand(n, how);
     st = (unsigned *)(unsigned long)data("wizard_state");
     bit = wizard_entry(n)[1];
     say("game wizard %d (%s): player %u had selected %u, lit 0x%x, played 0x%x%s", n, name, p, st[p - 1],
@@ -5701,6 +5713,7 @@ int pm_game_wizard_claim(int n)
 {
     unsigned bit;
     if (!(can & PM_CAN_GAME_WIZARDS) || n < 1 || n > wizards_n) return 0;
+    if (wiz_route == 2) return wizm_claim(n);
     if (!wiz_light_hooked) {
         say("game wizard %d (%s): this game's port names no wizard_light - the game's own lighting lights it too", n,
             wizard_name(n));
@@ -5730,7 +5743,10 @@ static void wizards_arm(void)
     unsigned size = (unsigned)pm_port_value("wizard_entry", 0x20), *e;
     char key[24];
     int n;
-    if (!site("wizard_start")) return;                  /* a port without mini-wizard lines: silent */
+    if (!site("wizard_start")) {
+        if (data("wizard_obj_1")) wizm_arm();           /* PAD-473: the C++ titles' route */
+        return;                                         /* a port without mini-wizard lines: silent */
+    }
     for (n = 1; n <= WIZARDS_MAX; n++) {
         pm_snprintf(key, sizeof key, "wizard_name_%d", n);
         if (!pm_port_text(key)) break;
@@ -5754,11 +5770,261 @@ static void wizards_arm(void)
         }
     }
     can |= PM_CAN_GAME_WIZARDS;
+    wiz_route = 1;
     if (site("wizard_light") && !(wiz_light_hooked = hook_veto(fn("wizard_light"), wizard_light_veto)))
         say("game wizards: the game's own lighting (0x%08x) could not be hooked - it lights a mode's mini-wizards too",
             fn("wizard_light"));
     say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08x, start 0x%08x%s)", wizards_n,
         data("wizard_state"), fn("wizard_start"), wiz_light_hooked ? ", its own lighting hooked" : "");
+}
+
+/* ---- the game's own mini-wizards on the C++ titles (PAD-473): the MODE route ----------------------------------
+ * Every C++ title (cmode / crule classes) starts one of its modes the same way: a rule of the game's calls the mode
+ * object's START virtual with only the object (`value stock_slot_start`; TMNT 1.59: getter(0x18)->v[39]()), and the
+ * mode's ACTIVE virtual (`value stock_slot_active`) says it runs. The port names each mini-wizard's object (`data
+ * wizard_obj_<n>`, with `text wizard_name_<n>`) and, where the game lights one for a start shot through a mode of
+ * its own, that mode (`data wizard_ready_<n>`: TMNT's cteam_up_ready). pm_game_wizard(n, START) calls the object's
+ * START as the game's rule does, once nothing of the game's is in its way (none of its own modes running but its
+ * base play - the walk `stack no` uses - and no mode of ours holding the game's modes off); until then it waits,
+ * tried every 250 ms while that ball lasts. LIGHT starts its ready mode the same way; one with none is started
+ * instead. The game's own way to them is left as it is: it still lights and starts them itself. */
+static struct {
+    unsigned char n[WIZ_DUE_MAX];     /* handed over to start and not started yet, in order */
+    int count;
+    unsigned ball;                    /* the ball n[0] became the first on (stock_ball_ends) */
+    unsigned long tried;              /* n[0]'s last try (pm_ms) */
+    char way[96];                     /* what was in n[0]'s way when last said */
+} wizm_due[4];
+static unsigned wizm_game;            /* the game the hand-overs belong to (its game_start events) */
+
+static const unsigned *wizm_obj(int n, int ready)
+{
+    char key[24];
+    pm_snprintf(key, sizeof key, ready ? "wizard_ready_%d" : "wizard_obj_%d", n);
+    return (const unsigned *)(unsigned long)data(key);
+}
+
+static unsigned wizm_vfn(const unsigned *o, const char *slot)
+{
+    return ((const unsigned *)(unsigned long)o[0])[pm_port_value(slot, 0)];
+}
+
+/* one of the port's mini-wizards' objects (never the game's base play: the stack's ball-start window would take one
+ * handed over before the ball's first score for it) */
+static int wizm_owns(const unsigned *o)
+{
+    int k;
+    for (k = 1; o && wiz_route == 2 && k <= wizards_n; k++)
+        if (wizm_obj(k, 0) == o) return 1;
+    return 0;
+}
+
+static int wizm_active(const unsigned *o)
+{
+    return o && (((int (*)(const void *))(unsigned long)wizm_vfn(o, "stock_slot_active"))(o) & 0xff) != 0;
+}
+
+static void wizm_start(const unsigned *o)
+{
+    ((void (*)(const void *))(unsigned long)wizm_vfn(o, "stock_slot_start"))(o);
+}
+
+/* an object where the port says: aligned and readable (the arm's check: the game's static constructors have not run
+ * yet when it arms, so the vtable is not there to check) */
+static int wizm_obj_here(const unsigned *o)
+{
+    return o && !((unsigned long)o & 3) && maps_has((unsigned long)o, 4, MAP_R);
+}
+
+/* an object the runtime may call (checked before every hand-over): where the port says, its vtable readable through
+ * both slots, each slot's function in the game's own code */
+static int wizm_obj_ok(const unsigned *o)
+{
+    long a = pm_port_value("stock_slot_active", -1), s = pm_port_value("stock_slot_start", -1);
+    unsigned vt;
+    if (!wizm_obj_here(o) || a < 0 || s < 0 || a > 255 || s > 255) return 0;
+    vt = o[0];
+    if (!vt || (vt & 3) || !maps_has(vt, 4 * (unsigned long)((a > s ? a : s) + 1), MAP_R)) return 0;
+    return maps_has(((const unsigned *)(unsigned long)vt)[s], 8, MAP_R | MAP_X | MAP_GAME) &&
+           maps_has(((const unsigned *)(unsigned long)vt)[a], 8, MAP_R | MAP_X | MAP_GAME);
+}
+
+/* what of the game's is in the way of starting one now, in words ("" = nothing): a mode of ours holding the game's
+ * modes off, or one of the game's own modes running - not its base play, not a mini-wizard's own ready mode (lit is
+ * not in the way) */
+static const char *wizm_way(void)
+{
+    static char what[96];
+    const unsigned *tab;
+    long n, slot, i;
+    int c, k, r;
+    if (block_owner && running == block_owner) {
+        pm_snprintf(what, sizeof what, "%s (a mode of yours holding the game's modes off)", block_who);
+        return what;
+    }
+    if (stock_generic_route() && (tab = stock_table(&n, &slot)) != 0) {
+        for (i = 0; i < n && !stock_table_off; i++) {
+            const unsigned *o = (const unsigned *)(unsigned long)tab[i];
+            unsigned ti;
+            const char *nm;
+            if ((c = stock_entry_class(i, tab, n, slot)) <= 0 || (stock_base[i] && !wizm_owns(o)) ||
+                !stock_entry_active(o, slot))
+                continue;
+            for (k = 1; k <= wizards_n && wizm_obj(k, 1) != o; k++) ;
+            if (k <= wizards_n) continue;
+            ti = ((const unsigned *)(unsigned long)o[0])[-1];
+            nm = ti ? (const char *)(unsigned long)((const unsigned *)(unsigned long)ti)[1] : 0;
+            while (nm && *nm >= '0' && *nm <= '9') nm++;          /* the mangled name's length */
+            if (c == 1 && stock_named_base(nm)) continue;
+            pm_snprintf(what, sizeof what, "%s (%s)", c == 2 ? "a multiball" : "one of the game's modes", nm ? nm : "?");
+            return what;
+        }
+        if (!stock_table_off) return "";
+    }
+    r = pm_stock_mode_running(PM_STOCK_ANY | PM_STOCK_MULTIBALL | PM_STOCK_BATTLE);
+    if (r <= 0) return "";
+    pm_snprintf(what, sizeof what, "%s", r == (int)PM_STOCK_MULTIBALL ? "a multiball" : "one of the game's modes");
+    return what;
+}
+
+/* player p's first one handed over is done with (started, or given up): the next one comes up */
+static void wizm_next(unsigned p)
+{
+    int k;
+    for (k = 1; k < wizm_due[p - 1].count; k++) wizm_due[p - 1].n[k - 1] = wizm_due[p - 1].n[k];
+    if (wizm_due[p - 1].count) wizm_due[p - 1].count--;
+    wizm_due[p - 1].ball = stock_ball_ends;
+    wizm_due[p - 1].tried = 0;
+    wizm_due[p - 1].way[0] = 0;
+}
+
+/* player p's first one handed over, started now if nothing of the game's is in its way: 1 = started (or running) */
+static int wizm_try(unsigned p)
+{
+    int n = wizm_due[p - 1].n[0];
+    const unsigned *o = wizm_obj(n, 0);
+    const char *way;
+    wizm_due[p - 1].tried = pm_ms();
+    if (wizm_active(o)) {
+        say("game wizard %d (%s): running for player %u (the game started it)", n, wizard_name(n), p);
+        wizm_next(p);
+        return 1;
+    }
+    way = wizm_way();
+    if (*way) {
+        if (!str_eq(way, wizm_due[p - 1].way)) {
+            pm_snprintf(wizm_due[p - 1].way, sizeof wizm_due[p - 1].way, "%s", way);
+            say("game wizard %d (%s): %s is in its way - started the moment nothing is, this ball", n, wizard_name(n),
+                way);
+        }
+        return 0;
+    }
+    wizm_start(o);
+    say("game wizard %d (%s): %s for player %u (the mode's own start, as the game's rules call it)", n, wizard_name(n),
+        wizm_active(o) ? "started" : "its start was called but it does not say it runs", p);
+    wizm_next(p);
+    return 1;
+}
+
+static int wizm_hand(int n, int how)
+{
+    const unsigned *o = wizm_obj(n, 0), *ready = wizm_obj(n, 1);
+    unsigned p = pm_player();
+    int k;
+    if (!wizm_obj_ok(o) || (ready && !wizm_obj_ok(ready))) {
+        say("game wizard %d (%s): not handed over - its mode object (0x%08x) is not one of this build's", n,
+            wizard_name(n), (unsigned)(unsigned long)(wizm_obj_ok(o) ? ready : o));
+        return 0;
+    }
+    if (wizm_active(o)) {
+        say("game wizard %d (%s): already running", n, wizard_name(n));
+        return PM_WIZARD_STARTED;
+    }
+    if (how == PM_WIZARD_LIGHT && ready) {
+        if (!wizm_active(ready)) wizm_start(ready);
+        say("game wizard %d (%s): %s for player %u - the game's start shot starts it", n, wizard_name(n),
+            wizm_active(ready) ? "lit (the game's own mode that lights it)" : "its lighting mode was started but does "
+            "not say it runs", p);
+        return PM_WIZARD_LIT;
+    }
+    if (how == PM_WIZARD_LIGHT)
+        say("game wizard %d (%s): this game lights it for no start shot of its own - started instead", n, wizard_name(n));
+    for (k = 0; k < wizm_due[p - 1].count && wizm_due[p - 1].n[k] != n; k++) ;
+    if (k == wizm_due[p - 1].count) {               /* each one is listed once, so there is room (WIZ_DUE_MAX) */
+        wizm_due[p - 1].n[k] = (unsigned char)n;
+        wizm_due[p - 1].count++;
+    }
+    if (k) {
+        say("game wizard %d (%s): started for player %u after %s, which was handed over first and has not started", n,
+            wizard_name(n), p, wizard_name(wizm_due[p - 1].n[0]));
+        return PM_WIZARD_WAITING;
+    }
+    wizm_due[p - 1].ball = stock_ball_ends;
+    wizm_due[p - 1].way[0] = 0;
+    return wizm_try(p) ? PM_WIZARD_STARTED : PM_WIZARD_WAITING;
+}
+
+/* every tick: each player's hand-overs started the moment nothing is in their way, while the ball lasts */
+static void wizm_tick(void)
+{
+    unsigned p, game;
+    int ev, n;
+    ev = pm_event("game_start");
+    game = ev >= 0 ? event_count(ev) : 0;
+    if (game != wizm_game || !pm_player() || !pm_in_game()) {   /* a new game, or none: nothing handed over carries on */
+        if (game != wizm_game || !pm_player()) for (p = 0; p < 4; p++) wizm_due[p].count = 0;
+        wizm_game = game;
+        return;
+    }
+    p = pm_player();
+    if (p < 1 || p > 4 || !wizm_due[p - 1].count) return;
+    n = wizm_due[p - 1].n[0];
+    if (wizm_due[p - 1].ball != stock_ball_ends) {
+        const unsigned *ready = wizm_obj(n, 1);
+        if (ready && !wizm_active(ready)) wizm_start(ready);
+        say("game wizard %d (%s): the ball ended before nothing of the game's was in its way - %s", n, wizard_name(n),
+            ready ? "lit for the game's start shot" : "not started");
+        wizm_next(p);
+        return;
+    }
+    if (pm_ms() - wizm_due[p - 1].tried >= 250) wizm_try(p);
+}
+
+/* the game's own way to one is left as it is: nothing to claim */
+static int wizm_claim(int n)
+{
+    say("game wizard %d (%s): the game's own rules still light and start it too", n, wizard_name(n));
+    return 0;
+}
+
+static void wizm_arm(void)
+{
+    char key[24];
+    int n, lit = 0;
+    for (n = 1; n <= WIZARDS_MAX; n++) {
+        pm_snprintf(key, sizeof key, "wizard_name_%d", n);
+        if (!pm_port_text(key)) break;
+    }
+    wizards_n = n - 1;
+    if (!wizards_n || pm_port_value("stock_slot_start", -1) < 0 || pm_port_value("stock_slot_active", -1) < 0) {
+        say("game wizards: off - the port's mini-wizard lines are incomplete (names, stock_slot_start, "
+            "stock_slot_active)");
+        wizards_n = 0;
+        return;
+    }
+    for (n = 1; n <= wizards_n; n++) {
+        if (!wizm_obj_here(wizm_obj(n, 0)) || (wizm_obj(n, 1) && !wizm_obj_here(wizm_obj(n, 1)))) {
+            say("game wizards: off - %s's mode object (0x%08x) is not in this build's memory", wizard_name(n),
+                (unsigned)(unsigned long)wizm_obj(n, 0));
+            wizards_n = 0;
+            return;
+        }
+        if (wizm_obj(n, 1)) lit++;
+    }
+    can |= PM_CAN_GAME_WIZARDS;
+    wiz_route = 2;
+    say("game wizards: %d of the game's mini-wizards a mode may start (%d of them lit by a mode of the game's own), by "
+        "each mode's own start (slot %ld)", wizards_n, lit, pm_port_value("stock_slot_start", -1));
 }
 
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN

@@ -638,12 +638,18 @@ void pm_shake_outlast(void);
  * yours has to be running, and one that is keeps running beside it. A wizard the player has played this game
  * plays again. PM_WIZARD_LIT (1): lit for the start shot; PM_WIZARD_STARTED (2); 0: not on this game, no game,
  * no such wizard (mode.log says which). pm_game_wizard_named: the same by the port's name for it (`text
- * wizard_name_<n>`, any case). pm_game_wizards: how many the port names (0 = none on this game). */
+ * wizard_name_<n>`, any case). pm_game_wizards: how many the port names (0 = none on this game).
+ * PAD-473, the C++ titles (MODE_SDK.md "The game's own mini-wizards on the other titles"): the port names each one's
+ * mode object, and PM_WIZARD_START calls its own START as the game's rules do - at once, or the moment none of the
+ * game's own modes is in its way (nor a mode of yours holding them off), that ball (PM_WIZARD_WAITING, 3, until
+ * then). PM_WIZARD_LIGHT starts the game's own mode that lights it for a start shot where it has one, and is a start
+ * where it has none. The game's own rules still light and start them too. */
 #define PM_CAN_GAME_WIZARDS 0x2000000u /* pm_game_wizard / pm_game_wizard_named / pm_game_wizards */
 #define PM_WIZARD_LIGHT     0
 #define PM_WIZARD_START     1
 #define PM_WIZARD_LIT       1
 #define PM_WIZARD_STARTED   2
+#define PM_WIZARD_WAITING   3   /* PAD-473, the C++ titles: to start the moment nothing of the game's is in its way */
 int pm_game_wizard(int n, int how);
 int pm_game_wizard_named(const char *name, int how);
 int pm_game_wizards(void);

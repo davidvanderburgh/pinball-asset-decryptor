@@ -846,3 +846,16 @@ text block_default          21 23
 site lamp_free_owner      0x003a619c 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0x120
 value proc_exit_slots      4
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[8]) as the game's rules start it and asked its ACTIVE (v[14]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x007b5e78   # cmode_monster_zero
+text  wizard_name_1   Monster Zero
+text  wizard_film_1   Godzilla Multiball's Super Jackpot
+data  wizard_obj_2    0x007b5298   # cmode_terror_of_mechagodzilla, a multiball
+text  wizard_name_2   Terror of Mechagodzilla
+text  wizard_film_2   Mechagodzilla Multiball's Super Jackpot
+data  wizard_obj_3    0x007b51a8   # cmode_planet_x_multiball, a multiball
+text  wizard_name_3   Planet X Multiball
+text  wizard_film_3   a battle, Tesla Strike and two attack multiballs

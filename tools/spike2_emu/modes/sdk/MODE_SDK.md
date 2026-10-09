@@ -2281,9 +2281,50 @@ ready check 1), the Right ramp's switches started it (played 0x4, its running qu
 glass), and `game_wizard start Ahoy Mr. Bond` while it ran left Ahoy lit for the ramp (the game's own check: one is
 running). No abort.
 
-**Not done.** The 60th Anniversary edition (its own rules) was not looked at. The game's own lighting by parts was left
-as it is: stopping it ("instead of", PAD-428's first ask) would hold off `0x110cac`'s two calls in the collect, a
-separate choice.
+**Not done.** The game's own lighting by parts was left as it is: stopping it ("instead of", PAD-428's first ask)
+would hold off `0x110cac`'s two calls in the collect, a separate choice.
+
+## The game's own mini-wizards on the other titles (PAD-473)
+
+Every latest build but James Bond's was greyed "The app has not found X's own mini-wizards". PAD-473 read each game's
+own modes and its rulesheet (`docs/plans/pad473_mini_wizards.md`): three games have none of their own - The Munsters
+(Munster Madness is its final wizard), the Star Wars Home Edition (Jedi Multiball) and James Bond 60th (007 Mode) - and
+the Modes tab leaves the section out on them (`mode_project.NO_GAME_WIZARDS`), as it does a machine part a machine
+lacks. Every other game has some.
+
+**The C++ titles: the mode route.** Bond keeps its mini-wizards in a table of its own; the C++ titles (`cmode` /
+`crule` classes: Godzilla, King Kong, Iron Maiden, Jaws, Star Wars, TMNT, ...) do not, but they all start one of their
+modes the same way: a rule of the game's calls the mode object's START virtual with only the object (TMNT 1.59:
+`getter(0x18)->v[39]()`, `value stock_slot_start`), and the mode's ACTIVE virtual (`value stock_slot_active`, the one
+`stack no` asks) says it runs. So the port names each mini-wizard's object, and the runtime starts it the game's way:
+
+```
+data  wizard_obj_1    0x007b5e78   # cmode_monster_zero (Godzilla Premium/LE 1.16)
+text  wizard_name_1   Monster Zero
+text  wizard_film_1   Godzilla Multiball's Super Jackpot      # what earns it, shown beside the name
+data  wizard_ready_1  0x...        # optional: the game's own mode that lights it for a start shot
+text  wizard_shot     Left ramp    # with a ready mode: the shot that starts a lit one
+```
+
+- `pm_game_wizard(n, PM_WIZARD_START)` calls the object's START once nothing of the game's is in its way: none of its
+  own modes running but its base play (the walk `stack no` uses; a mini-wizard's own ready mode is not in its way),
+  and no mode of yours holding the game's modes off. Until then it waits, tried every 250 ms while that ball lasts:
+  `[pad] game wizard 2 (Terror of Mechagodzilla): a multiball (cmode_planet_x_multiball) is in its way - started the
+  moment nothing is, this ball`. Several handed over start in order, never on top of each other. If the ball ends
+  first, it is lit (its ready mode) where the game has one, and dropped where it has none.
+- `PM_WIZARD_LIGHT` starts its ready mode (Star Wars' `clightsaber_duel_ready`, TMNT's `cteam_up_ready`): lit, and the
+  game's own start shot starts it. One the game lights for no start shot of its own is started instead (the Modes tab
+  offers only Start for it, and the file says `start`).
+- The game's own way to them is left as it is: its rules still light and start them too (no claim: Bond's lighting
+  veto has no counterpart here).
+- The objects are the game's static ones: their vtables are written by the game's own constructors, which have not
+  run when the runtime arms, so the arm checks the port's two slot values and that each object is in the game's
+  memory, and every hand-over checks the object's vtable and both slots' functions in the game's code before it calls
+  anything (`[pad] game wizard 1 (...): not handed over - its mode object (0x...) is not one of this build's`).
+
+The lines are written from each build's own mode objects (`stock_scan_cpp`, the scanner the block lines come from)
+and the names and what earns each from the game's rulesheet. Which builds are proven, and how: the plan, and
+`mode_project.WIZARDS_PROVEN`.
 
 ## Ports: why your mode runs on any game
 

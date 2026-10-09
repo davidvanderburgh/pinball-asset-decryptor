@@ -563,3 +563,13 @@ text shake_short            0:200:0
 text shake_medium           0:334:0
 text shake_long             0:1024:0
 text shake_rumble           0:2000:0
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[31]) as the game's rules start it and asked its ACTIVE (v[37]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x0062f3f0   # cmode_original_mball, a multiball
+text  wizard_name_1   KNIGHT Multiball
+text  wizard_film_1   KNIGHT spelled
+data  wizard_obj_2    0x0062f540   # cmode_bk2k_mball, a multiball
+text  wizard_name_2   The King's Ransom
+text  wizard_film_2   KNIGHT spelled again

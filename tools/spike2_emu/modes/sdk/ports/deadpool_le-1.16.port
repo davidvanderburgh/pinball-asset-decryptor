@@ -447,3 +447,13 @@ text shake_setting_ms      0 1024 1024 1024
 text shake_short            0:200:0
 text shake_medium           0:384:0
 text shake_long             0:1024:0
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[13]) as the game's rules start it and asked its ACTIVE (v[23]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x006b54c8   # cmrsinister_rex
+text  wizard_name_1   Megakrakolodonus Rex
+text  wizard_film_1   both quests won and Sauron Multiball
+data  wizard_obj_2    0x006b5658   # cmrsinister_clones, a multiball
+text  wizard_name_2   Clone Multiball
+text  wizard_film_2   the three level 2 battles won

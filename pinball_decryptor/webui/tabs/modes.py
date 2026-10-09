@@ -1600,7 +1600,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                     "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
                     "mb_on_shots": [self.MB_ON_START], "game_modes": [], "magnet_shot": "",
                     "held_coils": [], "shield_rule": "", "game_shows": [], "shakes": [], "shake_max": [],
-                    "game_wizards": [], "wizard_shot": ""}
+                    "game_wizards": [], "wizard_shot": "", "wizard_lights": [], "wizard_claims": False}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
@@ -1628,7 +1628,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "game_shows": self._game_show_rows(p),                           # PAD-418
                 # PAD-436: the game's own mini-wizards a mode can hand over, and the shot that starts a lit one
                 "game_wizards": [{"name": n, "film": film} for n, film in getattr(p, "game_wizards", ()) or ()],
-                "wizard_shot": getattr(p, "wizard_shot", "")}
+                "wizard_shot": getattr(p, "wizard_shot", ""),
+                # PAD-473: the ones a mode can light for the start shot (the rest are started), and whether one a mode
+                # hands out is left unlit by the game's own lighting (Bond's) or the game's rules still start it too
+                "wizard_lights": list(getattr(p, "wizard_lights", ()) or ()),
+                "wizard_claims": bool(getattr(p, "wizard_claims", False))}
 
     @staticmethod
     def _game_show_rows(p):
@@ -2738,6 +2742,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "game_wizards": ([{"name": n, "film": film} for n, film in getattr(p, "game_wizards", ())]
                                  if p is not None and p.can("wizard") else []),
                 "wizard_shot": getattr(p, "wizard_shot", "") if p is not None else "",
+                "wizard_lights": list(getattr(p, "wizard_lights", ()) or ()) if p is not None else [],   # PAD-473
+                "wizard_claims": bool(getattr(p, "wizard_claims", False)) if p is not None else False,
                 "game_wizards_off": ("Not on this game: " + p.why_not("wizard")) if p is not None and not p.can("wizard")
                                     else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else

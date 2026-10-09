@@ -94,6 +94,8 @@ class TitleProfile:
     game_wizards: tuple = ()         # PAD-436: ((name, film), ...) the game's own mini-wizards a mode can hand over
     #                                  (the port's wizard_name_<n> / wizard_film_<n> lines, in number order)
     wizard_shot: str = ""            # PAD-436: the game's shot that starts a lit mini-wizard (`text wizard_shot`)
+    wizard_lights: tuple = ()        # PAD-473: the names of those a mode can light for it (the rest are started)
+    wizard_claims: bool = False      # PAD-457: one a mode hands out is its mode's: the game's own lighting leaves it
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -957,17 +959,36 @@ WIZARD_HOW = ("light", "start")
 WIZARD_NAME_MAX = 40
 
 
+#: PAD-473: the C++ titles' route (pad_mode_runtime.c wizm_arm): each mini-wizard's mode object (`data
+#: wizard_obj_<n>`), started by the title's START virtual and asked its ACTIVE one - these values; a `data
+#: wizard_ready_<n>` is the game's own mode that lights it for a start shot
+WIZARD_MODE_NEEDS = ("stock_slot_start", "stock_slot_active")
+
+
+def _wizard_route(port):
+    """PAD-473: 1 James Bond's wizard table (WIZARD_NEEDS), 2 the C++ titles' mode objects, 0 neither complete."""
+    sites, data = WIZARD_NEEDS
+    if all(n in port["site"] for n in sites) and all(n in port["data"] for n in data):
+        return 1
+    if "wizard_obj_1" in port["data"] and all(n in port["value"] for n in WIZARD_MODE_NEEDS):
+        return 2
+    return 0
+
+
 def _game_wizards(port):
     """PAD-436: ``((name, film), ...)`` in number order: the port's mini-wizards as the runtime arms them -
     `text wizard_name_<n>` numbered from 1 with no gaps, each with its film (`text wizard_film_<n>`, "" when not
-    named). () when the port lacks the lines the runtime needs."""
+    named; PAD-473: on the mode route, what earns it), and its mode object there. () when the port lacks the lines
+    the runtime needs."""
     if not port:
         return ()
-    sites, data = WIZARD_NEEDS
-    if not (all(n in port["site"] for n in sites) and all(n in port["data"] for n in data)):
+    route = _wizard_route(port)
+    if not route:
         return ()
     out, n = [], 1
     while port["text"].get("wizard_name_%d" % n, "").strip():
+        if route == 2 and "wizard_obj_%d" % n not in port["data"]:
+            break
         name = port["text"]["wizard_name_%d" % n].strip()
         if len(name) < WIZARD_NAME_MAX:
             out.append((name, port["text"].get("wizard_film_%d" % n, "").strip()))
@@ -975,17 +996,36 @@ def _game_wizards(port):
     return tuple(out)
 
 
-#: PAD-473: the games with no mini-wizard of their own, by game directory (the same game on every version): read
-#: from each newest build's own modes and its rules (docs/plans/pad473_mini_wizards.md). The Modes tab leaves the
-#: section out on them, as it does a machine part a machine does not have (MACHINE_HARDWARE).
-NO_GAME_WIZARDS = {}
+def _wizard_lights(port):
+    """PAD-473: the names of the mini-wizards a mode can LIGHT for the game's start shot: all of Bond's table; on the
+    mode route, the ones the game lights through a mode of its own (`data wizard_ready_<n>`). The rest are started."""
+    names = _game_wizards(port)
+    if not names or _wizard_route(port) == 1:
+        return tuple(n for n, _f in names)
+    return tuple(n for k, (n, _f) in enumerate(names, 1) if "wizard_ready_%d" % k in port["data"])
+
+
+#: PAD-473: the games with no mini-wizard of their own, by game directory (the same game on every version), and
+#: what they have instead: read from each newest build's own modes and its rules (docs/plans/pad473_mini_wizards.md).
+#: The Modes tab leaves the section out on them, as it does a machine part a machine does not have
+#: (MACHINE_HARDWARE).
+NO_GAME_WIZARDS = {
+    # its one wizard, Munster Madness (cmunster_madness, _ii, _ready), is the final one: every family member a level
+    "munsters_le": "Munster Madness is its final wizard mode",
+    "munsters_pro": "Munster Madness is its final wizard mode",
+    # the Home Edition's own rules (not the 2017 game's): Jedi Multiball, all four characters done, is its only one
+    "star_wars_elg": "Jedi Multiball is its only wizard mode",
+    # a game of its own (not the 2022 Bond's films): 007 Mode, its three multiballs started, is its only one
+    "james_bond_60th_le": "007 Mode is its only wizard mode",
+}
 
 
 def _wizards_cannot(key, label, port=None):
     """The ``cannot`` entry for the game's own mini-wizards on build ``key``, or () when a mode can hand one over."""
-    if key.rsplit("-", 1)[0] in NO_GAME_WIZARDS and not _game_wizards(port):
-        return (("wizard", "%s has no mini-wizards of its own, so there is none for a mode of yours to hand to the "
-                           "player." % label),)
+    game = key.rsplit("-", 1)[0]
+    if game in NO_GAME_WIZARDS and not _game_wizards(port):
+        return (("wizard", "%s has no mini-wizards of its own (%s), so there is none for a mode of yours to hand to "
+                           "the player." % (label, NO_GAME_WIZARDS[game])),)
     if not _game_wizards(port):
         return (("wizard", "The app has not found %s's own mini-wizards, so a mode of yours cannot hand one to the "
                            "player." % label),)
@@ -1873,9 +1913,11 @@ def profile_from_port(path):
         game_shows=_game_shows(port),                        # PAD-418
         # PAD-420: a machine part this build can do is never hidden, whatever MACHINE_HARDWARE read off its coils
         absent=tuple(a for a in machine_absent(game) if a in dict(cannot))
-        + (("wizard",) if game in NO_GAME_WIZARDS and "wizard" in dict(cannot) else ()),    # PAD-473
+        + (("wizard",) if game in NO_GAME_WIZARDS and not _game_wizards(port) else ()),    # PAD-473: a port's win
         game_wizards=_game_wizards(port),                    # PAD-436
         wizard_shot=port["text"].get("wizard_shot", "").strip(),
+        wizard_lights=_wizard_lights(port),                  # PAD-473
+        wizard_claims=_wizard_route(port) == 1 and "wizard_light" in port["site"],
     )
 
 
@@ -4125,7 +4167,9 @@ def wizard_cfg(spec, slug, p):
     ]
     lines += starts_cfg_lines(spec)
     lines += more_to_start_lines(spec, p)
-    lines.append("%-14s %s %s" % ("game_wizard", spec.wizard_how, hands_over(spec, p)))
+    name = hands_over(spec, p)
+    # PAD-473: one the game lights for no start shot of its own is started
+    lines.append("%-14s %s %s" % ("game_wizard", spec.wizard_how if name in p.wizard_lights else "start", name))
     return "\n".join(_starts_ends_lines(spec, lines, p, ends=False)) + "\n"
 
 

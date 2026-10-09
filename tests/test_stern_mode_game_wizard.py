@@ -90,15 +90,22 @@ def test_the_runtime_needs_its_lines():
         assert MP._game_wizards(cut) == (), name
 
 
-def test_the_port_lines_match_the_game_program_when_it_is_here():
+#: (build, its starts in the table, its own lighting): PAD-473 found LE 1.06's code on Pro 1.06, 0xfcc lower
+BOND_BUILDS = [("james_bond_le-1.06", [0x92bd8, 0x20530, 0xbd4dc, 0x7e0b0], 0x110cac),
+               ("james_bond_pro-1.06", [0x92a90, 0x20530, 0xbd2c4, 0x7dfd8], 0x10fce0)]
+
+
+@pytest.mark.parametrize("key,want,light", BOND_BUILDS)
+def test_the_port_lines_match_the_game_program_when_it_is_here(key, want, light):
     """The start's words, and the table the runtime checks at its arm (index, bit, a start in the code)."""
-    elf = next((p for p in (os.environ.get("PAD_BOND_LE_106_ELF", ""), r"C:\tmp\PAD-420\elf\james_bond_le-1.06.elf",
-                            "/mnt/c/tmp/PAD-420/elf/james_bond_le-1.06.elf") if p and os.path.isfile(p)), None)
+    env = "PAD_BOND_%s_106_ELF" % key.split("_")[2].split("-")[0].upper()     # PAD_BOND_LE_106_ELF, ..._PRO_...
+    elf = next((p for p in (os.environ.get(env, ""), r"C:\tmp\PAD-420\elf\%s.elf" % key,
+                            "/mnt/c/tmp/PAD-420/elf/%s.elf" % key) if p and os.path.isfile(p)), None)
     if not elf:
-        pytest.skip("James Bond LE 1.06's game program is not here")
+        pytest.skip("%s's game program is not here" % key)
     import struct
     b = open(elf, "rb").read()
-    text = BOND_PORT.read_text(encoding="utf-8")
+    text = (SDK / "ports" / ("%s.port" % key)).read_text(encoding="utf-8")
 
     def word(addr):                         # the program's first PT_LOAD is at 0x8000, file offset 0
         return struct.unpack_from("<I", b, addr - 0x8000)[0]
@@ -111,11 +118,31 @@ def test_the_port_lines_match_the_game_program_when_it_is_here():
         e = [word(table + 0x20 * n + 4 * k) for k in range(4)]
         assert e[0] == n and e[1] == 1 << n
         starts.append(e[3])
-    assert starts == [0x92bd8, 0x20530, 0xbd4dc, 0x7e0b0]
+    assert starts == want
     assert "site block_start_6      0x00020530" in text            # Ahoy's start: a mode of ours may veto it
     m = re.search(r"^site\s+wizard_light\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)", text, re.M)
     addr, w0, w1 = (int(x, 16) for x in m.groups())
-    assert addr == 0x110cac and (word(addr), word(addr + 4)) == (w0, w1)
+    assert addr == light and (word(addr), word(addr + 4)) == (w0, w1)
+
+
+def test_a_game_with_no_mini_wizards_leaves_the_section_out(monkeypatch):
+    """PAD-473: a game with none of its own says so and is `absent`, as a machine part the machine lacks; a game
+    not listed stays as it was (greyed, the app has not found them) and a port that names some wins."""
+    monkeypatch.setattr(MP, "NO_GAME_WIZARDS", {"godzilla_le": "its wizard modes are the game's own story"})
+    gz = MP.profile_from_port(str(SDK / "ports" / "godzilla_le-1.16.port"))
+    assert "wizard" in gz.absent and "has no mini-wizards of its own" in gz.why_not("wizard")
+    gzp = MP.profile_from_port(str(SDK / "ports" / "godzilla_pro-1.16.port"))
+    assert "wizard" not in gzp.absent and "has not found" in gzp.why_not("wizard")
+    monkeypatch.setattr(MP, "NO_GAME_WIZARDS", {"james_bond_le": "never"})
+    assert MP.profile_from_port(str(BOND_PORT)).can("wizard") and "wizard" not in MP.profile_from_port(
+        str(BOND_PORT)).absent
+
+
+def test_bond_pro_has_the_les_wizards_and_is_proven():
+    """PAD-473: the Pro's port names the same four, films and start shot, and the build was seen handing them over."""
+    pro = MP.profile_from_port(str(SDK / "ports" / "james_bond_pro-1.06.port"))
+    assert pro.game_wizards == BOND.game_wizards and pro.wizard_shot == "Right ramp"
+    assert "james_bond_pro-1.06" in MP.WIZARDS_PROVEN and pro.can("wizard")
 
 
 # ---- the mode ----------------------------------------------------------------------------------
@@ -694,3 +721,23 @@ def test_the_tab_offers_them_on_bond_and_greys_them_elsewhere(tmp_path):
             assert ch["game_wizards_off"].startswith("Not on this game: The app has not found Godzilla Premium/LE")
     finally:
         preview.enabled = old
+
+
+def test_the_tab_leaves_the_section_out_on_a_game_with_none(tmp_path, monkeypatch):
+    """PAD-473: a game with no mini-wizards of its own has no section and no block for one, as a machine part the
+    machine lacks (PAD-420): no yellow reason."""
+    from tests.test_webui_modes import _card_project, _project
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import preview
+    monkeypatch.setattr(preview, "enabled", lambda feature: feature == "modes")
+    monkeypatch.setattr(MP, "NO_GAME_WIZARDS", {"godzilla_le": "its wizards are the story's end"})
+    monkeypatch.setitem(MP.PROFILES, GZ.key, MP.profile_from_port(str(SDK / "ports" / "godzilla_le-1.16.port")))
+    proj = _card_project(tmp_path / "gz", "godzilla_le-1_16_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("modes.new")
+        st = w.state("modes")
+        assert st["dis"]["wizard"] and st["hide"].get("wizard") and "wizard" not in st["reasons"]
+        w.call("modes.new_blocks_mode", "Films")
+        ch = w.state("modes")["code"]["blocks"]["choices"]
+        assert "wizard" in ch["absent"] and "has no mini-wizards of its own" in ch["game_wizards_off"]

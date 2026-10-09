@@ -2272,9 +2272,18 @@ the same call); a machine. Bond LE 1.06's own boot crashed at times on the rig t
 0xaa470, then its dispatch watchdog) with no mode object at all, while other rigs loaded the disk: a boot that got to
 attract ran clean.
 
-**Not done.** Bond Pro 1.06 has no port yet; the 60th Anniversary edition (its own rules) was not looked at. The game's
-own lighting by parts was left as it is: stopping it ("instead of", PAD-428's first ask) would hold off `0x110cac`'s two
-calls in the collect, a separate choice.
+**James Bond Pro 1.06 (PAD-473).** The Pro's program carries the LE's mini-wizard code, 0xfcc lower: the same table
+(`0x621d38`, the same four entries, inserts and Ahoy's start `0x20530`), the start `0x10fdcc` (called from the Right
+ramp's handler `0x1ad998`), the lighting `0x10fce0` (from the collect, twice), the player's words `0x81dc34` and the
+refresh byte `0x869ab8`, each read off the same instructions as the LE's. Proven in the emulator (2026-10-09, rig 1,
+the stock Pro card, hidden, muted): `game_wizard light Goldfinger's Jackpot` lit it (selected 2, lit 0x4, the game's
+ready check 1), the Right ramp's switches started it (played 0x4, its running query 1, GOLDFINGER'S JACKPOT on the
+glass), and `game_wizard start Ahoy Mr. Bond` while it ran left Ahoy lit for the ramp (the game's own check: one is
+running). No abort.
+
+**Not done.** The 60th Anniversary edition (its own rules) was not looked at. The game's own lighting by parts was left
+as it is: stopping it ("instead of", PAD-428's first ask) would hold off `0x110cac`'s two calls in the collect, a
+separate choice.
 
 ## Ports: why your mode runs on any game
 

@@ -329,6 +329,28 @@ text block_name_14      Bath O Sub Hurryup
 site block_start_15     0x0008ca40 0xe92d4008 0xe30001ab
 text block_name_15      Double Scoring
 
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards"), James Bond LE 1.06's code
+# on this build: the same table (4 entries of 0x20 bytes: index, bit, insert lamp, start, running query - the inserts
+# 34, 35, 36, 43 and Ahoy Mr. Bond's start 0x20530 as on the LE) and the same functions 0xfcc lower (LE 0x110d98
+# start, 0x110cac lighting; the Right ramp's handler 0x1ad998 calls the start, the collect 0x1cf2b4 / 0x1cf2f0 the
+# lighting), each player's words at 0x81dc34 (selected, +0x10 lit, +0x20 played) and the lamps' refresh byte at
+# 0x869ab8 read off the same instructions.
+site  wizard_start   0x0010fdcc 0xe92d4070 0xeb033961
+site  wizard_light   0x0010fce0 0xe303013c 0xe3a01004
+data  wizard_state   0x0081dc34
+data  wizard_table   0x00621d38
+data  lamps_dirty    0x00869ab8
+value wizard_entry   0x20
+text  wizard_name_1  Chaos at Crab Key
+text  wizard_name_2  Ahoy Mr. Bond
+text  wizard_name_3  Goldfinger's Jackpot
+text  wizard_name_4  Duel on the Disco Volante
+text  wizard_film_1  Dr. No
+text  wizard_film_2  From Russia With Love
+text  wizard_film_3  Goldfinger
+text  wizard_film_4  Thunderball
+text  wizard_shot    Right ramp
+
 # ---- PAD-420: held coils by their board address (generation C)
 # (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
 # game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)

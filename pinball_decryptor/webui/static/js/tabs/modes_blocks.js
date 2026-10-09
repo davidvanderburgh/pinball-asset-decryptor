@@ -515,7 +515,8 @@ function stmtLabel(b) {
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 
-// PAD-420: a mechanism block for hardware this machine does not have is left out of the palette
+// PAD-420: a mechanism block for hardware this machine does not have is left out of the palette (PAD-473: and
+// the mini-wizard block on a game that has none)
 function machineLacks(t, ch) {
   const no = new Set(ch.absent || []);
   if (t.op === "hold") return no.has("magnet") && no.has("coils");
@@ -523,6 +524,7 @@ function machineLacks(t, ch) {
   if (t.op === "let_go") return no.has("magnet") && no.has("coils") && no.has("scoop");
   if (t.op === "shield") return no.has("shield");
   if (t.op === "shake" || t.op === "shake_game") return no.has("shaker");
+  if (t.op === "game_wizard") return no.has("wizard");   // PAD-473: a game with no mini-wizards of its own
   return false;
 }
 

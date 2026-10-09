@@ -486,7 +486,7 @@ function ModePage({ s, f, off, dis, rs }) {
         <div class="row"><span class="dim">the game's own ${f.game_wizard}</span></div>
       </div>
       ${startsSec}
-      ${wizSec}
+      ${hide.wizard ? null : wizSec}
       ${oftenSec}
     </div>`;
   }
@@ -592,7 +592,7 @@ function ModePage({ s, f, off, dis, rs }) {
           <span class="dim nw">up to</span><${Num} k="add_ball_max" value=${f.add_ball_max} disabled=${mbIn} width=${56} title=${T.addBall} /><span class="dim nw">times</span>
         </div>
       <//>
-      ${wizSec}
+      ${hide.wizard ? null : wizSec}
     </div>
     <${Sec} title="Shots that score while it runs"
       extra=${html`<span class="muted small">${on.size} of ${shots.length}</span>

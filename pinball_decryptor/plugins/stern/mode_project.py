@@ -945,6 +945,11 @@ WIZARDS_PROVEN = frozenset({
     # running query 1, flags 85 86, its intro on the glass); Goldfinger then `light`ed Goldfinger's Jackpot (selected 2,
     # lit 0x4) while Ahoy ran
     "james_bond_le-1.06",
+    # PAD-473 2026-10-09 rig 1, the stock James Bond Pro 1.06 card (hidden, muted): a `game_wizard light Goldfinger's
+    # Jackpot` file lit it (selected 2, lit 0x4, the game's ready check 1), the Right ramp's switches started it
+    # (played 0x4, its running query 1, GOLDFINGER'S JACKPOT on the glass), and a `game_wizard start Ahoy Mr. Bond`
+    # file while it ran left Ahoy lit for the ramp (selected 1, lit 0x2: the game's own check said one was running)
+    "james_bond_pro-1.06",
 })
 #: how a mode hands one over: lit for the game's start shot, or started at once
 WIZARD_HOW = ("light", "start")
@@ -970,8 +975,17 @@ def _game_wizards(port):
     return tuple(out)
 
 
+#: PAD-473: the games with no mini-wizard of their own, by game directory (the same game on every version): read
+#: from each newest build's own modes and its rules (docs/plans/pad473_mini_wizards.md). The Modes tab leaves the
+#: section out on them, as it does a machine part a machine does not have (MACHINE_HARDWARE).
+NO_GAME_WIZARDS = {}
+
+
 def _wizards_cannot(key, label, port=None):
     """The ``cannot`` entry for the game's own mini-wizards on build ``key``, or () when a mode can hand one over."""
+    if key.rsplit("-", 1)[0] in NO_GAME_WIZARDS and not _game_wizards(port):
+        return (("wizard", "%s has no mini-wizards of its own, so there is none for a mode of yours to hand to the "
+                           "player." % label),)
     if not _game_wizards(port):
         return (("wizard", "The app has not found %s's own mini-wizards, so a mode of yours cannot hand one to the "
                            "player." % label),)
@@ -1858,7 +1872,8 @@ def profile_from_port(path):
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
         # PAD-420: a machine part this build can do is never hidden, whatever MACHINE_HARDWARE read off its coils
-        absent=tuple(a for a in machine_absent(game) if a in dict(cannot)),
+        absent=tuple(a for a in machine_absent(game) if a in dict(cannot))
+        + (("wizard",) if game in NO_GAME_WIZARDS and "wizard" in dict(cannot) else ()),    # PAD-473
         game_wizards=_game_wizards(port),                    # PAD-436
         wizard_shot=port["text"].get("wizard_shot", "").strip(),
     )

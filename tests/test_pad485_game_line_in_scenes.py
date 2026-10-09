@@ -157,3 +157,21 @@ def test_rules_score_a_box_by_the_lines_words():
     assert R.box_score("GODZILLA VS GIGAN", "GODZILLA VS MEGALON") == 1   # "VS" is no word
     idx = R.scene_dir_index(["/g/a/b", "/h/c"])
     assert idx["a/b"] == idx["b"] == "/g/a/b" and idx["c"] == "/h/c"
+
+
+def test_a_mode_line_without_its_cards_screens_says_why(tmp_path):
+    """The screens each mode names are read from the project's card; with no card to read
+    them from, the dialog says so instead of that no screen holds the line."""
+    folder = _project(tmp_path, {"original": "KAIJU AWARD",
+                                 "modes": ["cmode_battle_vs_gigan"]})
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(lambda: w.window.write_assets_var.set(str(folder)))
+        w.call("ui.select_tab", "text")
+        _wait(w, lambda: not w.state("text")["scanning"]
+              and w.state("text").get("total", 0) > 0)
+        w.call("text.select", _row(w, "KAIJU AWARD", "/game"))
+        n = len(w.asked)
+        assert w.call("text.show_in_scene") is False
+        assert len(w.asked) == n + 1
+        said = str(w.asked[-1])
+        assert "Battle vs Gigan" in said and "isn't where it was" in said

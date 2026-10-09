@@ -1078,13 +1078,20 @@ class TextTab(TabService):
                 return self._open_scene_browser(preselect_dir=scene_dir,
                                                 focus_text=focus, search=search)
             if not hits:
-                compat.messagebox.showinfo(
-                    "Scenes",
-                    "This is a game-program string. The game puts it into a "
-                    "text box on one of its screens as it runs, and no "
-                    "screen's own text reads the same, so there's no screen "
-                    "to show. (It still writes to the card like any other "
-                    "text edit.)")
+                why = ("This is a game-program string. The game puts it into "
+                       "a text box on one of its screens as it runs, and no "
+                       "screen's own text reads the same, so there's no "
+                       "screen to show. (It still writes to the card like "
+                       "any other text edit.)")
+                if (R.row_part(r) or r.get("modes")) and \
+                        not self._mode_scenes_known():
+                    why = ("This is a game-program string. The game puts it "
+                           "into a text box on a screen of %s, and which "
+                           "screens those are is read from the card this "
+                           "project was extracted from, which isn't where it "
+                           "was. Put the card back, or extract it again, and "
+                           "press Scan." % R.shown_in(r))
+                compat.messagebox.showinfo("Scenes", why)
                 return False
             dirs = {h["path"].replace("\\", "/").rsplit("/", 1)[0]
                     for h in hits}
@@ -1100,6 +1107,15 @@ class TextTab(TabService):
         return self._open_scene_browser(preselect_dir=scene_dir,
                                         focus_text=r["original"],
                                         search=search)
+
+    def _mode_scenes_known(self):
+        """Has this project's card been read for the screens each mode names
+        (PAD-485)?"""
+        try:
+            from ...plugins.stern import engine
+            return bool(engine.program_mode_scenes(self._assets_path()))
+        except Exception:                            # noqa: BLE001
+            return False
 
     def _mode_screen(self, r):
         """PAD-485: for game-program row *r* whose words no screen holds, a screen of a

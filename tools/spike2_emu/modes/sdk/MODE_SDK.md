@@ -1841,10 +1841,11 @@ arrival), a second move 1.5 s later refused (busy), floor 2 (+2500), floor 9 ref
 the mode's end it was put back on floor 0 (+5000). When the ball drained mid-test, the game sent it to floor
 0 itself and the put-back stood aside. Not machine-tested.
 
-## The shaker (Godzilla Premium/LE, PAD-414)
+## The shaker (Godzilla Premium/LE, PAD-414; every latest title with one, PAD-474)
 
-A Godzilla Premium may have the optional shaker motor in its cabinet (an LE has it fitted). A mode shakes it
-through the game's own shake, for a time at a strength, or with one of the game's own shakes by name:
+A Godzilla Premium may have the optional shaker motor in its cabinet (an LE has it fitted), and so may the other
+Spike 2 titles (PAD-474, below). A mode shakes it through the game's own shake, for a time at a strength, or with
+one of the game's own shakes by name:
 
 ```c
 pm_shake(500, PM_SHAKE_HARD);             /* half a second, as hard as the game's battle hits */
@@ -1854,7 +1855,8 @@ pm_shake_game("multiball_start");         /* the Godzilla Multiball start: five 
 if (pm_shake_game("jackpot")) pm_shake_outlast();   /* as the mode ends: left to run out after the end */
 ```
 
-The game's own shakes, read from the program (the port's `text shake_<name>` lines, steps of `at:ms:strength`):
+The game's own shakes, read from the program (the port's `text shake_<name>` lines, steps of `at:ms:strength`) - on
+Godzilla (the other titles': below):
 
 | Name | What the game does with it |
 |---|---|
@@ -1868,9 +1870,10 @@ The limits are the runtime's and cannot be raised:
 
 - **Through the game's own call only**, so the operator's SHAKER MOTOR (OPTIONAL) setting always applies: off
   (0, or no shaker fitted) nothing shakes and the call is refused; settings 1-4 cut every shake to 100, 334,
-  500 or 5000 ms, as they cut the game's own. The board ends each shake by itself when its time is up.
+  500 or 5000 ms (Godzilla's; each title's own table, `text shake_setting_ms`), as they cut the game's own. The board ends each shake by itself when its time is up.
 - **A strength the game uses** (0 hard .. 3 soft) and **never longer than the game's own longest shake at that
-  strength**: 1000 ms at 0 and 1, 5000 ms at 2 and 3. At least 100 ms.
+  strength**: on Godzilla 1000 ms at 0 and 1, 5000 ms at 2 and 3; most other titles shake at one strength only,
+  0 (`text shake_max_ms`). At least 100 ms.
 - Only while your mode runs, in a game (not attract, not tilted); never while one of the game's own shakes
   runs, or one of yours; at most 20 shakes and 15 s of shaking in any minute (a game shake of several steps
   is one shake, all its steps counted).
@@ -1917,6 +1920,63 @@ file's `shake start 1500 2`, `shake shot game jackpot <left ramp>` and `shake en
 on each left ramp, and as it ended - that one ran its 1000 ms after the END with no OFF. The setting read 4 on
 the stock card; the game itself shook as a game started (334 ms at 0, then 2000-4000 ms at 3). Not yet
 machine-tested (David's Premium has a shaker fitted).
+### Every other latest title with a shaker (PAD-474)
+
+The other titles' programs have the same ONE shake routine (`shaker_lines.py <game ELF> [--port <port>]` finds it
+by the two things only it names, AD_SHAKER_MOTOR and the error text, and prints the port lines - on Godzilla LE 1.16
+it finds PAD-414's own). It comes in three shapes, each ending in the same ONE timed command on drive 7 (coil 0 of
+the cabinet board), so `text shake_call` tells the runtime how to call it:
+
+- **`ms strength force`** (no line; Godzilla, Led Zeppelin, Rush): Godzilla's, above - the strength picks the power
+  from the game's table, `site shake_stop` is beside it.
+- **`ms force`** (TMNT, The Mandalorian, The Munsters, Venom): the same at ONE power (51/255). Strength 0 only.
+- **`drive`** (Aerosmith, Guardians of the Galaxy, Elvira, Sword of Rage): `shake(kind, min level)` - it shakes only
+  with the operator's setting (0..3) at least the call's level, for the kind's own time, at one power. It takes no
+  time, so the runtime sends a mode's shake the way that call sends its own: the setting not 0, the drive not running
+  a longer one, then `coil_fire(drive, value shake_power, ms)`. A mode's shake runs at any setting but 0 (the
+  game's most important shakes' level).
+
+Without a `site shake_stop` the stop is the game's OFF, the all-zero `coil_fire` its own stop sends. `text
+shake_max_ms` is the longest constant the game's own calls pass at each strength (0: one it never uses), and its own
+shakes are named by length - `tap`, `short`, `medium`, `long`, `rumble`: in each band the one it calls most. Godzilla
+Pro 1.16's routine is the LE's instruction for instruction, so it has the LE's lines and named shakes.
+
+| Build | `site shake` | `shake_call` | Power /255 | Setting (ms) | Longest per strength | The game's own shakes (ms) |
+|---|---|---|---|---|---|---|
+| Aerosmith 1.16 | `0x000e9be8` | kind level (drive) | 32 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Aerosmith LE 1.16 | `0x000e9ae0` | kind level (drive) | 32 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Elvira 1.13 | `0x00145c68` | kind level (drive) | 42 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Godzilla Pro 1.16 | `0x00185e9c` | ms strength force | 51/36/31/23 | 0/100/334/500/5000 | 1000/1000/5000/5000 | hit 200, big_hit 334, jackpot 500, rumble 3000, multiball_start 334+100+500+1000+5000 |
+| Guardians of the Galaxy 1.15 | `0x000f7414` | kind level (drive) | 32 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Guardians of the Galaxy LE 1.15 | `0x000f7644` | kind level (drive) | 32 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Led Zeppelin LE 1.22 | `0x000d35c0` | ms strength force | 42/31 | 0/100/334/500/4000 | 1000/1500 | tap 100, short 200, medium 334, long 1500 |
+| Led Zeppelin Pro 1.22 | `0x000d07a4` | ms strength force | 42/31 | 0/100/334/500/4000 | 1000/1500 | tap 100, short 200, medium 334, long 1500 |
+| The Mandalorian LE 1.45 | `0x001a1c38` | ms force | 51 | 0/334/484/1536/2048 | 1024 | tap 80, short 200, medium 334, long 1024 |
+| The Mandalorian Pro 1.45 | `0x001a1618` | ms force | 51 | 0/334/484/1536/2048 | 1024 | tap 80, short 200, medium 334, long 1024 |
+| The Munsters LE 1.28 | `0x000d0550` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 334, long 1536 |
+| The Munsters Pro 1.28 | `0x000ce360` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 334, long 1536 |
+| Rush LE 1.19 | `0x0013023c` | ms strength force | 42/31/23 | 0/100/334/500/4000 | 500/334/500 | tap 100, short 200, medium 500 |
+| Rush Pro 1.19 | `0x0012f520` | ms strength force | 42/31/23 | 0/100/334/500/4000 | 500/334/500 | tap 100, short 200, medium 500 |
+| Sword of Rage LE 1.19 | `0x000b9968` | kind level (drive) | 42 | 0/2000/2000/2000 | 2000 | tap 80, short 200, medium 334, long 1024, rumble 2000 |
+| Sword of Rage Pro 1.19 | `0x000b7448` | kind level (drive) | 42 | 0/2000/2000/2000 | 2000 | tap 80, short 200, medium 334, long 1024, rumble 2000 |
+| TMNT LE 1.59 | `0x00141a24` | ms force | 51 | 0/200/334/1024/2048 | 1536 | tap 80, short 200, medium 484, long 1536 |
+| TMNT Pro 1.59 | `0x00140144` | ms force | 51 | 0/200/334/1024/2048 | 1536 | tap 80, short 200, medium 484, long 1536 |
+| Venom LE 1.07 | `0x00196c48` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 484, long 1024 |
+| Venom Pro 1.07 | `0x00192dec` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 484, long 1024 |
+
+**Measured (emulator, PAD-474: every build above on its stock card, hidden, muted, `PAD_COIL_PROBE=1`, the pinned
+runtime, through `rigbatch.sh`).** A mode file with `shake start <its longest at 0> 0`, `shake shot game <its short
+shake> <every shot>` and `shake end <600 ms or its longest> <its softest used strength>`: every runtime `shaker:` line
+was followed on the board within ~20 ms by `[coildrive] node 1 coil 0` at the game's power for the time asked, cut
+to the stock setting's longest (setting 2 on Elvira, 3 on Aerosmith, Guardians and Sword of Rage, 4 elsewhere; the
+board counts in 10 ms ticks, so 1024 ms runs 1020 and 1536 runs 1530). Ending the mode mid-shake sent the OFF (the
+game's own stop on Godzilla Pro, Led Zeppelin and Rush, the all-zero `coil_fire` elsewhere) with the rest of the
+shake left; a hit played the game's own short shake (Godzilla Pro: its hit); the end shake ran out after the END
+with no OFF. A hit the game itself shakes on refused the mode's ("one of the game's own shakes is running", Venom
+Pro), as designed. Rush's longest shake is 500 ms, as long as the half second a trigger file takes, so its stop was
+proven on a mode started by a hit. The shaker is coil 0 of node 1 (the cabinet board) on every one. Not yet
+machine-tested on any of them.
+
 ## The game's own light shows (Godzilla Premium/LE, PAD-411)
 
 David, after the first machine test of the shield: "i am not seeing any fancy playfield light shows when custom modes

@@ -666,3 +666,16 @@ site show_12              0x00122560 0xe92d4010 0xe24dd018   # rush_le-1.19's Wi
 text show_name_12         Wide red and cyan strobe
 text show_kind_12         accent
 value show_secs_12        1
+
+# ---- PAD-474: the shaker motor, read by shaker_lines.py from the game's own shake routine ----------
+# shake(ms, strength 0..3 (powers 42/31/23/3 /255), force): adjustment 393 (AD_SHAKER_MOTOR), drive 7; 94 constant calls
+site shake              0x0012f520 0xe92d40f0 0xe1a04000
+site shake_stop         0x0012f5d4 0xe52de004 0xe24dd00c
+site drive_left         0x003548f0 0xe3500000 0xe92d4038
+value shake_adj            393
+value shake_drive          7
+text shake_max_ms          500 334 500 0
+text shake_setting_ms      0 100 334 500 4000
+text shake_tap              0:100:2
+text shake_short            0:200:1
+text shake_medium           0:500:0

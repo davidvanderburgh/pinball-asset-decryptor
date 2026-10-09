@@ -736,3 +736,20 @@ site show_12              0x001cd40c 0xe92d4038 0xeb087209   # Godzilla LE's Cya
 text show_name_12         Cyan flick
 text show_kind_12         accent
 value show_secs_12        1
+
+# ---- PAD-474: the shaker motor (an optional kit on a Pro) - the LE 1.16's own shake (PAD-414) at this build's addresses
+# shaker_lines.py reads the same routine here: the LE's 0x189a54 instruction for instruction, its stop beside it, the
+# same setting table (0, 100, 334, 500, 5000 ms), powers (51, 36, 31, 23, 3 /255) and the same 179 constant calls -
+# so the LE's longest shake per strength and its named shakes (PAD-414's census) are this build's too.
+site shake              0x00185e9c 0xe92d40f0 0xe1a04000
+site shake_stop         0x00185f50 0xe52de004 0xe24dd00c
+site drive_left         0x00402f48 0xe3500000 0xe92d4038
+value shake_adj            335
+value shake_drive          7
+text shake_max_ms          1000 1000 5000 5000
+text shake_setting_ms      0 100 334 500 5000
+text shake_hit             0:200:0
+text shake_big_hit         0:334:0
+text shake_jackpot         0:500:0
+text shake_rumble          0:3000:3
+text shake_multiball_start 266:334:2 633:100:2 1600:500:2 2560:1000:2 4000:5000:2

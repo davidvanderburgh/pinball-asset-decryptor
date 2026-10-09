@@ -350,10 +350,10 @@ static void magnet_shot(struct slot *M, uint64_t mask)
            pm_magnet_grab(cfg.magnet_ms) ? "holding the ball" : "no grab (the runtime's line says why)");
 }
 
-/* PAD-414: the shaker (MODE_SDK.md "The shaker")
+/* PAD-414: the shaker (MODE_SDK.md "The shaker"; PAD-474: every latest title with one)
  *   shake start <ms> <strength>        as the mode starts: the cabinet shakes <ms> at <strength> (0 hardest .. 3
- *   shake start game <name>            softest), or plays the game's own shake <name> (hit, big_hit, jackpot,
- *   shake shot <ms> <strength> <mask>  rumble, multiball_start: the port's `text shake_<name>`); `shot` on every
+ *   shake start game <name>            softest), or plays the game's own shake <name> (Godzilla's hit, jackpot...,
+ *   shake shot <ms> <strength> <mask>  another's tap, short...: the port's `text shake_<name>`); `shot` on every
  *   shake shot game <name> <mask>      hit of <mask> while it runs (the starting hit included); `end` as it ends,
  *   shake end <ms> <strength>          left to run out after the end (pm_shake_outlast). Every limit is
  *   shake end game <name>              pm_shake's: the operator's setting, its length per strength, 20 shakes and

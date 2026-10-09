@@ -61,6 +61,14 @@ every image (or video) that is not locked gets the individual files profile,
 attached, after an "Are you sure?" (``apply_to_all`` with a *kind*), one
 Undo step.  The stored boxes still count where a project has them ticked.
 
+LINES OF TEXT TOO (PAD-471, DragonRR: "set ALL images and text to BW", and a
+plain green line stayed green).  A line's colour is its own, so All images
+never reached it.  The Scenes bar's file line on a line of text has Apply to
+all profiled lines of text / Apply to all lines of text, and Which files has
+All text: every line in every scene that is not locked (``_TextLines``).  A
+line in a font with colours of its own whose pictures carry the profile on
+the Images tab is corrected with its font already, and is left as it is.
+
 RECOMMENDED FOLLOWS THE SCREEN (PAD-346).  On Spike 2 the overlay's and the
 individual files' Recommended is the Machine screen on show, undone
 (core/colour_profile.py ``recommended``), worked out again whenever the
@@ -162,6 +170,58 @@ def _clamp(key, v):
     return min(max(float(v), lo), hi)
 
 
+class _TextLines:
+    """PAD-471: the lines of text in Scenes as Apply to all reaches them, the
+    way the Images and Video tabs answer for their files (``color_targets``,
+    ``put_color_switches``): every scene of the project, open in Scenes or
+    not."""
+
+    def __init__(self, tab):
+        self.tab = tab
+        #: lines "all" left out the last time it was asked: in a font whose
+        #: pictures have the profile attached, so corrected already
+        self.left_out = 0
+
+    def color_targets(self, scope="profiled"):
+        """``{rel: attached}``: "profiled", the lines with a color profile
+        attached; "all", every line that is not locked, but for one its
+        font's pictures correct already (counted in :attr:`left_out`)."""
+        from ...plugins.stern import text_colour
+        self.left_out = 0
+        assets = self.tab._project
+        if not (assets and os.path.isdir(assets)):
+            return {}
+        out = {}
+        for rel, sw in text_colour.every_line(assets).items():
+            if sw.get("on"):
+                out[rel] = True
+            elif scope == "all":
+                if sw.get("font_on"):
+                    self.left_out += 1
+                else:
+                    out[rel] = False
+        return out
+
+    def put_color_switches(self, switches):
+        """Lines' own switches set at once; returns what each was.  Scenes
+        and the Write tab follow (the caller tells Scenes to draw again)."""
+        from ...plugins.stern import text_colour
+        before = text_colour.put_line_switches(self.tab._project, switches)
+        if before:
+            for ns, name in (("text", "scenes_lines_changed"),
+                             ("write", "_maybe_rescan_write_preview")):
+                try:
+                    fn = getattr(self.tab.window.service(ns), name, None)
+                except Exception:                       # noqa: BLE001
+                    fn = None
+                if fn is not None:
+                    try:
+                        fn()
+                    except Exception:                   # noqa: BLE001
+                        log.exception("color profile lines %s.%s", ns, name)
+        return before
+
+
 class ColorTab(TabService):
     ns = "color"
     key = "Color Profile"
@@ -186,6 +246,7 @@ class ColorTab(TabService):
         self._file = None            # PAD-368: {kind, rel, label, attach} the bar is on
         #                              (PAD-462: "more", the other files selected with it)
         self._switched = {}          # PAD-462: switches the last change to them attached
+        self._lines = _TextLines(self)   # PAD-471: Apply to all lines of text
         self.set(sample="card", sample_url="", sample_path="", samples=[],
                  problems=[], rev=0, active=False, project="",
                  has_project=False, try_note="", mode="display",
@@ -873,11 +934,15 @@ class ColorTab(TabService):
         return True
 
     # -- Apply to all (PAD-439) ---------------------------------------------
-    #: the tab each kind of file is listed on, and its words
-    _ALL_NS = {"images": "images", "videos": "video"}
-    _ALL_WORDS = {"images": ("image", "images"), "videos": ("video", "videos")}
+    #: the tab each kind of file is listed on, and its words (PAD-471: lines
+    #: of text, in Scenes)
+    _ALL_NS = {"images": "images", "videos": "video", "text": "text"}
+    _ALL_WORDS = {"images": ("image", "images"), "videos": ("video", "videos"),
+                  "text": ("line of text", "lines of text")}
 
     def _all_service(self, kind):
+        if kind == "text":
+            return self._lines
         try:
             return self.window.service(self._ALL_NS[kind])
         except Exception:                               # noqa: BLE001
@@ -902,7 +967,31 @@ class ColorTab(TabService):
         "all": "that is not locked",
     }
     _ALL_UNLOCK = {"images": "the game's own pictures while they are unlocked",
-                   "videos": "the game's own clips while Advanced is ticked"}
+                   "videos": "the game's own clips while Advanced is ticked",
+                   "text": "the game's own lines while they are unlocked"}
+    #: the files of a kind that are never locked
+    _ALL_EACH = {"images": "each replaced one", "videos": "each replaced one",
+                 "text": "each one added in Scenes"}
+
+    def _none_left(self, kind, prefix):
+        """The toast for no file of *kind* to give a profile to."""
+        if kind == "text":
+            return ("%s: add lines in Scenes, or tick Unlock extracted images "
+                    "and text (Advanced, beside Preview colors)." % prefix)
+        return ("%s: choose replacements on the %s tab, or unlock %s."
+                % (prefix, "Video" if kind == "videos" else "Images",
+                   self._ALL_UNLOCK[kind]))
+
+    def _left_out_words(self, kind):
+        """PAD-471: what "all" left out, for its question."""
+        n = self._lines.left_out if kind == "text" else 0
+        if not n:
+            return ""
+        return (" %s in a font with colors of its own %s left as %s: its "
+                "font's pictures have a color profile attached on the Images "
+                "tab, so %s corrected with every line in that font already."
+                % (("%d lines" % n, "are", "they are", "they are") if n > 1
+                   else ("One line", "is", "it is", "it is")))
 
     @rpc
     def apply_to_all(self, scope="profiled", kind=None):
@@ -932,7 +1021,6 @@ class ColorTab(TabService):
             scope = "profiled"
         kind, rel = fm
         one, many = self._ALL_WORDS[kind]
-        tab = "Video" if kind == "videos" else "Images"
         fn = getattr(self._all_service(kind), "color_targets", None)
         try:
             targets = dict(fn(scope) or {}) if fn is not None else {}
@@ -942,12 +1030,14 @@ class ColorTab(TabService):
         if not set(targets) - {rel}:
             if scope == "profiled":
                 self.toast("No other %s has a color profile attached: attach "
-                           "one with its palette in the Color column, or use "
-                           "Apply to all %s." % (one, many), "info")
+                           "one with its palette in the %s, or use "
+                           "Apply to all %s." % (
+                               one, "Scenes layers" if kind == "text"
+                               else "Color column", many), "info")
             else:
-                self.toast("There are no other %s to apply it to: choose "
-                           "replacements on the %s tab, or unlock %s."
-                           % (many, tab, self._ALL_UNLOCK[kind]), "info")
+                self.toast(self._none_left(
+                    kind, "There are no other %s to apply it to" % many),
+                    "info")
             return False
         assets = self._project
         mkey = "files\n" + kind
@@ -969,15 +1059,17 @@ class ColorTab(TabService):
                    "left as they are." % (len(targets), many, name, one,
                                           many.capitalize()))
         else:
-            msg = ("Are you sure?\n\nEvery %s that is not locked (each "
-                   "replaced one, and %s), all %d of them, gets “%s”, this "
-                   "%s's color profile, in place of the one each has now."
-                   % (one, self._ALL_UNLOCK[kind], len(targets), name, one))
+            msg = ("Are you sure?\n\nEvery %s that is not locked (%s, and "
+                   "%s), all %d of them, gets “%s”, this %s's color profile, "
+                   "in place of the one each has now."
+                   % (one, self._ALL_EACH[kind], self._ALL_UNLOCK[kind],
+                      len(targets), name, one))
             if attach:
                 msg += (" It is attached to the %d that have none attached."
                         % len(attach) if len(attach) > 1
                         else " It is attached to the one that has none "
                         "attached.")
+            msg += self._left_out_words(kind)
         msg += "\n\nUndo in the Colors bar puts them all back."
         key = self._mode_key()
         title = ("Apply to all profiled %s" if scope == "profiled"
@@ -1017,7 +1109,6 @@ class ColorTab(TabService):
         profile on show, and is attached; after an "Are you sure?", one Undo
         step on that profile (switches too)."""
         one, many = self._ALL_WORDS[kind]
-        tab = "Video" if kind == "videos" else "Images"
         fn = getattr(self._all_service(kind), "color_targets", None)
         try:
             targets = dict(fn("all") or {}) if fn is not None else {}
@@ -1025,9 +1116,8 @@ class ColorTab(TabService):
             log.exception("color profile targets %s", kind)
             targets = {}
         if not targets:
-            self.toast("There are no %s to give it to: choose replacements "
-                       "on the %s tab, or unlock %s." % (
-                           many, tab, self._ALL_UNLOCK[kind]), "info")
+            self.toast(self._none_left(
+                kind, "There are no %s to give it to" % many), "info")
             return False
         assets = self._project
         mkey = "files\n" + kind
@@ -1040,10 +1130,11 @@ class ColorTab(TabService):
             self.toast("All %d %s that are not locked already have “%s”."
                        % (len(targets), many, name), "info")
             return False
-        msg = ("Are you sure?\n\nEvery %s that is not locked (each replaced "
-               "one, and %s), all %d of them, gets “%s”, the individual files "
-               "color profile, in place of the one each has now."
-               % (one, self._ALL_UNLOCK[kind], len(targets), name))
+        msg = ("Are you sure?\n\nEvery %s that is not locked (%s, and %s), "
+               "all %d of them, gets “%s”, the individual files color profile, "
+               "in place of the one each has now."
+               % (one, self._ALL_EACH[kind], self._ALL_UNLOCK[kind],
+                  len(targets), name))
         if change:
             msg += (" %d of them lose a color profile of their own."
                     % len(change) if len(change) > 1
@@ -1052,6 +1143,7 @@ class ColorTab(TabService):
             msg += (" It is attached to the %d that have none attached."
                     % len(attach) if len(attach) > 1
                     else " It is attached to the one that has none attached.")
+        msg += self._left_out_words(kind)
         msg += "\n\nUndo puts them all back."
         if not compat.messagebox.askyesno("All %s" % many, msg):
             return False

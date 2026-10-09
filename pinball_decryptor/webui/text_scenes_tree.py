@@ -2228,11 +2228,13 @@ class TreeEditMixin:
         return done
 
     @rpc
-    def tree_color(self, node, on):
+    def tree_color(self, node, on, palette=False):
         """A layer's colour switch (PAD-312): the chosen-files profile is baked into its
         picture (an added one, or an Images-tab replacement), or the picture goes on the card
         in its own colours.  The game's own pictures have no switch (Stern made them for the
-        machine's screen) until the Layers list's advanced box unlocks them (PAD-344)."""
+        machine's screen) until the Layers list's advanced box unlocks them (PAD-344).
+        *palette*: the click is the Layers list's palette (PAD-471: one on a line its font's
+        pictures already correct says so instead)."""
         from ..plugins.stern import scene_edit
         card, man = self._tree_card()
         if card is None:
@@ -2251,7 +2253,7 @@ class TreeEditMixin:
         tman = getattr(self, "_tman", None) or man
         tindex = scene_edit._man_index(tman)
         if node in tindex and _kind_of(tman, tindex[node][0]) == "Text":
-            return self._text_color(card, tman, tindex[node][0], ops, bool(on))
+            return self._text_color(card, tman, tindex[node][0], ops, bool(on), palette)
         index = scene_edit._man_index(man)
         if node not in index:
             return False
@@ -2260,16 +2262,29 @@ class TreeEditMixin:
             return False
         return self._picture_color("images/" + pics[0], on)
 
-    def _text_color(self, card, man, n, ops, on):
+    def _text_color(self, card, man, n, ops, on, palette=False):
         """A line of text's colour switch (PAD-438): its own (an added line's edit, or a game
         line's behind the unlock), a line in a font with colours of its own too (PAD-451:
-        the Write gives it its own copy of the font)."""
-        from ..core import colour_profile as _cp
+        the Write gives it its own copy of the font).
+
+        PAD-471 (DragonRR): a line in such a font whose pictures have the profile on the
+        Images tab is corrected with every line in the font, so its palette is green; a click
+        on it there (*palette*) says where that comes from rather than give the line a copy
+        of the font with the same profile in it."""
+        from ..core import colour_profile as _cp, staged_changes
         from ..plugins.stern import scene_edit, text_colour
         if not self._colour_unlock()["offered"]:
             return False
         sw = text_colour.line_switch(self.assets_dir, card, man, n, ops)
         if sw is None or sw.get("locked"):
+            return False
+        if (palette and on and sw.get("art") and not sw.get("on")
+                and text_colour.font_on(sw, staged_changes.peek(self.assets_dir))):
+            font = sw.get("font") or "its font"
+            self.window.toast("This line is corrected with every line in %s: its font's "
+                              "pictures have the color profile attached on the Images tab. To "
+                              "give this line a profile of its own, select it and pick one in "
+                              "the Colors bar." % font, "info")
             return False
         if sw.get("added"):
             new = [dict(op) for op in ops]
@@ -2341,6 +2356,13 @@ class TreeEditMixin:
         # the picture only changed after a tab switch)
         self.pictures_changed()
         return True
+
+    def lines_changed(self):
+        """PAD-471: lines' colour switches moved from the Colors tab (Apply to all lines of
+        text, or its Undo).  The tab tells this scene to draw again itself; a running game is
+        handed it, as a palette click does."""
+        if getattr(self, "_alive", False) and self._sel:
+            self._live_kick()
 
     def pictures_changed(self):
         """The Images tab moved a picture's colour switch: this scene is drawn again
@@ -3047,8 +3069,7 @@ def _text_switch(assets_dir, card, man, n, ops, data, fonts, picks, settings, un
         rels = sw.get("font_pictures") or []
         sw = dict(sw, font_pictures=["images/" + r for r in rels],
                   scenes=text_colour.font_scenes(assets_dir, rels),
-                  font_on=bool(rels) and all((settings.get("images") or {}).get("images/" + r)
-                                             for r in rels))
+                  font_on=text_colour.font_on(sw, data))
     return dict(sw, kind="text")
 
 def _kept_size(pick, assets_dir, rel, stock=None):

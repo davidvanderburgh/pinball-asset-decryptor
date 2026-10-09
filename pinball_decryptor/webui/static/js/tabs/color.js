@@ -695,9 +695,12 @@ function countWords(n) {
 // Every replaced picture / video, are All images / All videos: every one not locked gets this
 // profile, attached, after an "Are you sure?", and one Undo puts them back (color.py
 // apply_to_all with a kind).  A project with an old box still ticked says so, with a way off.
+// PAD-471 (DragonRR: a green line stayed green after All images): All text, every line of
+// text in Scenes that is not locked
 const EVERY = [
-  ["images", "All images…", "image", "picture", "the game's own pictures while they are unlocked (Images tab, Advanced)"],
-  ["videos", "All videos…", "video", "clip", "the game's own clips while Advanced is ticked (Video tab)"],
+  ["images", "All images…", "image", "picture", "the game's own pictures while they are unlocked (Images tab, Advanced)", "each replaced one"],
+  ["videos", "All videos…", "video", "clip", "the game's own clips while Advanced is ticked (Video tab)", "each replaced one"],
+  ["text", "All text…", "line of text", "line", "the game's own lines while they are unlocked (Scenes, Advanced)", "each one added in Scenes"],
 ];
 export function WhichFiles({ s }) {
   const n = s.asset_counts || {};
@@ -706,10 +709,11 @@ export function WhichFiles({ s }) {
   const old = EVERY.filter(([k]) => s["all_" + k]);
   return html`<${Card} title="Which files" cls="cp-which">
     <div class="row cp-which-all">
-      ${EVERY.map(([k, label, one, , unlocked]) => html`<${Button} key=${k} size="sm" icon="copy"
+      ${EVERY.map(([k, label, one, , unlocked, each]) => html`<${Button} key=${k} size="sm" icon="copy"
         onClick=${() => call("color.apply_to_all", "all", k)}
         title=${{ head: `Give every ${one} this color profile`, lines: [profile,
-          `Every ${one} that is not locked gets the profile on show below, attached: each replaced one, and ${unlocked}.`,
+          `Every ${one} that is not locked gets the profile on show below, attached: ${each}, and ${unlocked}.`,
+          k === "text" ? "A line in a font with colors of its own whose pictures have a color profile attached on the Images tab is corrected with them already, and is left as it is." : null,
           `A ${one} with a color profile of its own loses it.`,
           "You are asked first. Undo puts them all back."] }}>${label}<//>`)}
     </div>

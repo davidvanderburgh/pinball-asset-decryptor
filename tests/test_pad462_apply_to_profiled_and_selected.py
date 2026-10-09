@@ -281,4 +281,5 @@ def test_apply_to_all_videos_tooltip_is_dragonrrs_own_words():
              "will be affected. You can undo this function")
     tip_js = pane.split("const ALL_TIP = (one, many) => `", 1)[1].split("`;", 1)[0]
     assert tip_js.replace("${many}", "videos").replace("${one}", "video") == words
-    assert 'title=${ALL_TIP(all[2], all[1])}>Apply to all ${all[1]}…<//>' in pane
+    assert ('title=${f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(all[2], all[1])}>Apply to '
+            'all ${all[1]}…<//>') in pane                # (PAD-471: lines of text's own)

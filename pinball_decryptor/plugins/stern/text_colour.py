@@ -291,8 +291,120 @@ def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
         data = staged_changes.peek(assets_dir)
     if not data.get(cp.STOCK_IMAGES_KEY):
         return dict({"locked": True, "line": True}, **art)
-    return dict({"line": True, "on": rel in cp.text_lines_on(assets_dir, data), "own": True,
-                 "rel": rel, "stock": True}, **art)
+    # (cp.text_lines_on's test, looked up: Apply to all asks it of every line, PAD-471)
+    slots = data.get(cp.TEXT_SLOTS_KEY)
+    return dict({"line": True, "on": bool(isinstance(slots, dict) and slots.get(rel)),
+                 "own": True, "rel": rel, "stock": True}, **art)
+
+
+# ---------------------------------------------------------------------------------------------
+# every line at once (PAD-471)
+# ---------------------------------------------------------------------------------------------
+#: the edits that change which lines a scene has, or a line's font (so whether its letters
+#: carry colours of their own)
+_LINE_OPS = ("add_text", "remove", "text_font")
+
+
+def font_on(sw, data):
+    """Do all of a line's font's pictures (*sw* :func:`line_switch`'s, a line in a font with
+    colours of its own) have the profile attached on the Images tab?  Then every line in the
+    font is corrected, this one too (PAD-451)."""
+    from ...core import colour_profile as cp
+    rels = (sw or {}).get("font_pictures") or []
+    slots = data.get(cp.IMAGE_SLOTS_KEY)
+    slots = slots if isinstance(slots, dict) else {}
+    return bool(rels) and all(slots.get(r if r.startswith("images/") else "images/" + r)
+                              for r in rels)
+
+
+def every_line(assets_dir, trees=None, data=None, fonts=None):
+    """``{rel: switch}`` of every line of text in every scene of the project that is not
+    locked, the ones added in Scenes too, as the user's edits leave them (PAD-471, DragonRR:
+    Apply to all lines of text).  Each switch is :func:`line_switch`'s, a line in a font with
+    colours of its own with ``"font_on"`` (:func:`font_on`).  *trees*: ``{card: stock
+    manifest}``, read from the project when not given."""
+    from ...core import staged_changes
+    from . import scene_edit
+    if not assets_dir:
+        return {}
+    if trees is None:
+        try:
+            with open(os.path.join(assets_dir, "images", "scene_textures", "scene_tree.json"),
+                      encoding="utf-8") as f:
+                trees = json.load(f)
+        except (OSError, ValueError):
+            trees = {}
+    if data is None:
+        data = staged_changes.peek(assets_dir)
+    fonts = fonts if fonts is not None else fonts_by_key(assets_dir)
+    edits = scene_edit.load(assets_dir)
+    out = {}
+    for card, man in (trees or {}).items():
+        if not isinstance(man, dict) or "root" not in man:
+            continue
+        ops = edits.get(card) or []
+        if any(op.get("op") in _LINE_OPS for op in ops):
+            try:
+                man, _n = scene_edit.apply_manifest(
+                    man, scene_edit.to_apply(assets_dir, card, man, ops))
+            except Exception:                        # noqa: BLE001
+                pass                                 # its stock lines, as the game has them
+        for n in _walk(man):
+            sw = line_switch(assets_dir, card, man, n, ops, data, fonts)
+            if sw is None or sw.get("locked"):
+                continue
+            if sw.get("art"):
+                sw = dict(sw, font_on=font_on(sw, data))
+            out[sw["rel"]] = sw
+    return out
+
+
+def put_line_switches(assets_dir, switches):
+    """Lines' own switches set at once, ``{rel: True / False / None}`` (a game line: off and
+    ``None`` are no switch at all; a line added in Scenes: its edit's ``color``), one save of
+    each file.  Returns what each was, the same way (PAD-471: Apply to all lines of text, and
+    its Undo).  A game line is switched only while the unlock box is ticked."""
+    from ...core import colour_profile as cp, staged_changes
+    from . import scene_edit
+    if not assets_dir or not switches:
+        return {}
+    edits = scene_edit.load(assets_dir)
+    added = {}
+    for card, ops in edits.items():
+        for op in ops:
+            if op.get("op") == "add_text" and op.get("id") is not None:
+                added[cp.text_rel(card, op["id"])] = op
+    before, stock = {}, {}
+    for rel, value in switches.items():
+        rel = str(rel)
+        op = added.get(rel)
+        if op is not None:
+            before[rel] = op.get("color")
+            if value is None:
+                op.pop("color", None)
+            else:
+                op["color"] = bool(value)
+        elif "#" in rel:
+            stock[rel] = value
+    if any(rel in added for rel in before):
+        scene_edit.save(assets_dir, edits)
+    if stock:
+        data = staged_changes.load(assets_dir)
+        if data.get(cp.STOCK_IMAGES_KEY):
+            m = data.get(cp.TEXT_SLOTS_KEY)
+            m = dict(m) if isinstance(m, dict) else {}
+            for rel, value in stock.items():
+                before[rel] = True if m.get(rel) else None
+                if value:
+                    m[rel] = True
+                else:
+                    m.pop(rel, None)
+            if m:
+                data[cp.TEXT_SLOTS_KEY] = m
+            else:
+                data.pop(cp.TEXT_SLOTS_KEY, None)
+            staged_changes.save(assets_dir, data)
+    return before
 
 
 def art_map(font):

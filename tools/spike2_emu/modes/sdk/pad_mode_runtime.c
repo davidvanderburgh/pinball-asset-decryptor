@@ -5094,6 +5094,8 @@ static void building_arm(void)
  *               it takes no time, so the runtime sends a shake as the call sends its own: the setting not 0, the
  *               drive not running a longer one, then coil_fire(drive, `value shake_power`, ms) - the same ONE
  *               timed command (and its setting table holds 0, then the longest kind for every level above).
+ *               Metallica's call drives at the operator's own SHAKER MOTOR POWER (3..51): `value shake_power_adj`
+ *               names that adjustment, read at each shake as the call reads it.
  * The two later shapes have no stop of their own beside the call: the stop is then the game's OFF, an all-zero
  * coil_fire on the drive (what `site shake_stop` sends on the first). */
 #define SHAKE_MIN_MS        100u
@@ -5110,6 +5112,7 @@ struct shake_step { unsigned at, ms, strength; };
 static struct {
     int call;                               /* PAD-474: SHAKE_CALL_* */
     unsigned power;                         /* SHAKE_CALL_DRIVE: the power the game's own shakes use */
+    unsigned power_adj;                     /* ... or the adjustment that holds it (Metallica), 0 none */
     unsigned max_ms[SHAKE_STRENGTHS];       /* the game's own longest shake at each strength */
     unsigned long until;                    /* pm_ms() our shake (or a game shake's last step) runs to; 0 none */
     unsigned long sent_until;               /* pm_ms() the step we sent last runs to: the motor is ours till then */
@@ -5192,6 +5195,14 @@ static unsigned shake_setting_ms(unsigned setting)
     return setting ? 5000u : 0u;
 }
 
+static unsigned shake_power(void)          /* PAD-474: the drive's power: the port's, or the operator's own */
+{
+    unsigned v;
+    if (!shk.power_adj) return shk.power;
+    v = ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(shk.power_adj) & 0xffu;   /* uxtb, as the game */
+    return v ? v : 1u;
+}
+
 static unsigned shake_coil(unsigned power, unsigned ms)    /* PAD-474: the framework's coil call on the drive */
 {
     return ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("coil_fire"))
@@ -5207,7 +5218,7 @@ static unsigned shake_send(unsigned ms, unsigned strength)
 {
     unsigned cap = shake_setting_ms(shake_setting()), r;
     if (shk.call == SHAKE_CALL_DRIVE)
-        r = cap && shake_left() < (ms > cap ? cap : ms) && shake_coil(shk.power, ms > cap ? cap : ms) != 0;
+        r = cap && shake_left() < (ms > cap ? cap : ms) && shake_coil(shake_power(), ms > cap ? cap : ms) != 0;
     else if (shk.call == SHAKE_CALL_MS)
         r = ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("shake"))(ms, 0) & 0xffu;
     else
@@ -5376,11 +5387,12 @@ static void shake_arm(void)
     }
     shk.call = shake_call(pm_port_text("shake_call"));
     shk.power = (unsigned)pm_port_value("shake_power", 0);
+    shk.power_adj = (unsigned)pm_port_value("shake_power_adj", 0);
     if (shk.call != SHAKE_CALL_STRENGTH)                 /* one power: strength 0 only */
         for (i = 1; i < SHAKE_STRENGTHS; i++) shk.max_ms[i] = 0;
     if (!have_sites(s) || !have_values(v) || !t || !shk.max_ms[0] || shk.call < 0
         || (!fn("shake_stop") && !fn("coil_fire"))                         /* no stop: neither the game's nor its OFF */
-        || (shk.call == SHAKE_CALL_DRIVE && (!fn("coil_fire") || !shk.power || shk.power > 255u))) {
+        || (shk.call == SHAKE_CALL_DRIVE && (!fn("coil_fire") || (!shk.power && !shk.power_adj) || shk.power > 255u))) {
         say("shaker: off - the port's shaker lines are incomplete or do not match this build");
         return;
     }

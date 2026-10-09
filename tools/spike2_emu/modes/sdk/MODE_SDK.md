@@ -1922,19 +1922,25 @@ the stock card; the game itself shook as a game started (334 ms at 0, then 2000-
 machine-tested (David's Premium has a shaker fitted).
 ### Every other latest title with a shaker (PAD-474)
 
-The other titles' programs have the same ONE shake routine (`shaker_lines.py <game ELF> [--port <port>]` finds it
+Every Spike 2 title but the two Home Editions has a SHAKER MOTOR device (coil 0 of the cabinet board; on most
+models an optional kit, "included in LE editions" on many). The other titles' programs have the same ONE shake routine (`shaker_lines.py <game ELF> [--port <port>]` finds it
 by the two things only it names, AD_SHAKER_MOTOR and the error text, and prints the port lines - on Godzilla LE 1.16
 it finds PAD-414's own). It comes in three shapes, each ending in the same ONE timed command on drive 7 (coil 0 of
 the cabinet board), so `text shake_call` tells the runtime how to call it:
 
-- **`ms strength force`** (no line; Godzilla, Led Zeppelin, Rush): Godzilla's, above - the strength picks the power
-  from the game's table, `site shake_stop` is beside it.
-- **`ms force`** (TMNT, The Mandalorian, The Munsters, Venom): the same at ONE power (51/255). Strength 0 only.
-- **`drive`** (Aerosmith, Guardians of the Galaxy, Elvira, Sword of Rage): `shake(kind, min level)` - it shakes only
+- **`ms strength force`** (no line; Godzilla, Led Zeppelin, Rush, Avengers, Foo Fighters, Jaws, Jurassic Park, King
+  Kong, Uncanny X-Men): Godzilla's, above - the strength picks the power from the game's table, `site shake_stop`
+  is beside it. Iron Maiden's picks between two powers by a branch instead (strength 0: 51/255, any other 32).
+- **`ms force`** (TMNT, The Mandalorian, The Munsters, Venom, Star Wars): the same at ONE power (51/255). Strength 0
+  only. Dungeons & Dragons' routine takes the setting first; its own wrapper `shake(ms, force)`, which reads the
+  setting and calls it, is the port's `site shake`.
+- **`drive`** (Aerosmith, Guardians of the Galaxy, Elvira, Sword of Rage, Batman 66, The Beatles, Deadpool, James
+  Bond, John Wick, Metallica, Stranger Things): `shake(kind, min level)` - it shakes only
   with the operator's setting (0..3) at least the call's level, for the kind's own time, at one power. It takes no
   time, so the runtime sends a mode's shake the way that call sends its own: the setting not 0, the drive not running
   a longer one, then `coil_fire(drive, value shake_power, ms)`. A mode's shake runs at any setting but 0 (the
-  game's most important shakes' level).
+  game's most important shakes' level). Metallica's drives at the operator's own SHAKER MOTOR POWER (adjustment 315,
+  3..51): `value shake_power_adj` names it and the runtime reads it at each shake, as the call does.
 
 Without a `site shake_stop` the stop is the game's OFF, the all-zero `coil_fire` its own stop sends. `text
 shake_max_ms` is the longest constant the game's own calls pass at each strength (0: one it never uses), and its own
@@ -1945,30 +1951,60 @@ Pro 1.16's routine is the LE's instruction for instruction, so it has the LE's l
 |---|---|---|---|---|---|---|
 | Aerosmith 1.16 | `0x000e9be8` | kind level (drive) | 32 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
 | Aerosmith LE 1.16 | `0x000e9ae0` | kind level (drive) | 32 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Avengers: Infinity Quest LE 1.10 | `0x001339d0` | ms strength force | 51/23 | 0/100/334/500/4000 | 500/3000 | short 200, medium 500, rumble 3000 |
+| Avengers: Infinity Quest Pro 1.10 | `0x0013277c` | ms strength force | 51/23 | 0/100/334/500/4000 | 500/3000 | short 200, medium 500, rumble 3000 |
+| Batman 66 1.14 | `0x001b196c` | kind level (drive) | 42 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Deadpool LE 1.16 | `0x0012e280` | kind level (drive) | 42 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Deadpool Pro 1.16 | `0x0012daf8` | kind level (drive) | 42 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Dungeons & Dragons LE 1.10 | `0x001c74e0` | ms force | 51 | 0/334/484/1536/2048 | 484 | tap 80, short 200, medium 484 |
+| Dungeons & Dragons Pro 1.10 | `0x001c3180` | ms force | 51 | 0/334/484/1536/2048 | 484 | tap 80, short 200, medium 484 |
 | Elvira 1.13 | `0x00145c68` | kind level (drive) | 42 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Foo Fighters LE 1.04 | `0x00129910` | ms strength force | 51/31/23 | 0/100/334/500/5000 | 334/1200/3000 | tap 100, short 200, medium 334, long 1334, rumble 1666 |
+| Foo Fighters Pro 1.04 | `0x001280c0` | ms strength force | 51/31/23 | 0/100/334/500/5000 | 334/1200/3000 | tap 100, short 200, medium 334, long 1334, rumble 1666 |
 | Godzilla Pro 1.16 | `0x00185e9c` | ms strength force | 51/36/31/23 | 0/100/334/500/5000 | 1000/1000/5000/5000 | hit 200, big_hit 334, jackpot 500, rumble 3000, multiball_start 334+100+500+1000+5000 |
 | Guardians of the Galaxy 1.15 | `0x000f7414` | kind level (drive) | 32 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
 | Guardians of the Galaxy LE 1.15 | `0x000f7644` | kind level (drive) | 32 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| Iron Maiden LE 1.18 | `0x000f06a4` | ms strength force | 51/32 | 0/334/500/2000/4000 | 500/4000 | tap 100, short 200, medium 334, rumble 2000 |
+| Iron Maiden Pro 1.18 | `0x000eddd4` | ms strength force | 51/32 | 0/334/500/2000/4000 | 500/4000 | tap 100, short 200, medium 334, rumble 2000 |
+| James Bond 007 LE 1.06 | `0x00187fc8` | kind level (drive) | 32 | 0/2816/2816/2816 | 1024 | short 200, medium 384, long 1024 |
+| James Bond 007 Pro 1.06 | `0x001867d8` | kind level (drive) | 32 | 0/2816/2816/2816 | 1024 | short 200, medium 384, long 1024 |
+| Jaws LE 1.02 | `0x0023b390` | ms strength force | 51/36/31/23 | 0/100/334/500/5000 | 500/100/334/100 | tap 100, short 200, medium 500 |
+| Jaws Pro 1.02 | `0x0023acdc` | ms strength force | 51/36/31/23 | 0/100/334/500/5000 | 500/100/334/100 | tap 100, short 200, medium 500 |
+| John Wick LE 1.02 | `0x0010fb60` | kind level (drive) | 42 | 0/1024/1024/1024 | 1024 | tap 100, short 200, medium 384, long 1024 |
+| John Wick Pro 1.02 | `0x0010f288` | kind level (drive) | 42 | 0/1024/1024/1024 | 1024 | tap 100, short 200, medium 384, long 1024 |
+| Jurassic Park LE 1.16 | `0x001c49c4` | ms strength force | 51/31/23 | 0/100/334/500/4000 | 500/4000/2000 | tap 100, short 200, medium 334, rumble 2000 |
+| Jurassic Park Pro 1.16 | `0x001c2420` | ms strength force | 51/31/23 | 0/100/334/500/4000 | 500/4000/2000 | tap 100, short 200, medium 334, rumble 2000 |
+| King Kong LE 0.97 | `0x00264f04` | ms strength force | 51/31/23 | 0/100/334/500/5000 | 500/1500/200 | tap 100, short 200, medium 334, long 1500 |
+| King Kong Pro 0.97 | `0x00263ab4` | ms strength force | 51/31/23 | 0/100/334/500/5000 | 500/1500/200 | tap 100, short 200, medium 334, long 1500 |
 | Led Zeppelin LE 1.22 | `0x000d35c0` | ms strength force | 42/31 | 0/100/334/500/4000 | 1000/1500 | tap 100, short 200, medium 334, long 1500 |
 | Led Zeppelin Pro 1.22 | `0x000d07a4` | ms strength force | 42/31 | 0/100/334/500/4000 | 1000/1500 | tap 100, short 200, medium 334, long 1500 |
-| The Mandalorian LE 1.45 | `0x001a1c38` | ms force | 51 | 0/334/484/1536/2048 | 1024 | tap 80, short 200, medium 334, long 1024 |
-| The Mandalorian Pro 1.45 | `0x001a1618` | ms force | 51 | 0/334/484/1536/2048 | 1024 | tap 80, short 200, medium 334, long 1024 |
-| The Munsters LE 1.28 | `0x000d0550` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 334, long 1536 |
-| The Munsters Pro 1.28 | `0x000ce360` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 334, long 1536 |
+| Metallica Remastered 1.04 | `0x0012bcac` | kind level (drive) | the operator's (adj. 315) | 0/1024/1024/1024 | 1024 | tap 128, short 256, medium 384, long 1024 |
 | Rush LE 1.19 | `0x0013023c` | ms strength force | 42/31/23 | 0/100/334/500/4000 | 500/334/500 | tap 100, short 200, medium 500 |
 | Rush Pro 1.19 | `0x0012f520` | ms strength force | 42/31/23 | 0/100/334/500/4000 | 500/334/500 | tap 100, short 200, medium 500 |
+| Star Wars LE 1.31 | `0x000d6ebc` | ms force | 51 | 0/334/484/1024/2048 | 2048 | tap 80, short 200, medium 334, long 1024, rumble 2048 |
+| Star Wars Pro 1.31 | `0x000d4f64` | ms force | 51 | 0/334/484/1024/2048 | 2048 | tap 80, short 200, medium 334, long 1024, rumble 2048 |
+| Stranger Things 1.13 | `0x00126b04` | kind level (drive) | 32 | 0/2816/2816/2816 | 2816 | short 200, medium 384, long 1024, rumble 2816 |
+| Stranger Things LE 1.13 | `0x00143b2c` | kind level (drive) | 32 | 0/2816/2816/2816 | 2816 | short 200, medium 384, long 1024, rumble 2816 |
 | Sword of Rage LE 1.19 | `0x000b9968` | kind level (drive) | 42 | 0/2000/2000/2000 | 2000 | tap 80, short 200, medium 334, long 1024, rumble 2000 |
 | Sword of Rage Pro 1.19 | `0x000b7448` | kind level (drive) | 42 | 0/2000/2000/2000 | 2000 | tap 80, short 200, medium 334, long 1024, rumble 2000 |
 | TMNT LE 1.59 | `0x00141a24` | ms force | 51 | 0/200/334/1024/2048 | 1536 | tap 80, short 200, medium 484, long 1536 |
 | TMNT Pro 1.59 | `0x00140144` | ms force | 51 | 0/200/334/1024/2048 | 1536 | tap 80, short 200, medium 484, long 1536 |
+| The Beatles 1.29 | `0x0006b978` | kind level (drive) | 42 | 0/1024/1024/1024 | 1024 | short 200, medium 384, long 1024 |
+| The Mandalorian LE 1.45 | `0x001a1c38` | ms force | 51 | 0/334/484/1536/2048 | 1024 | tap 80, short 200, medium 334, long 1024 |
+| The Mandalorian Pro 1.45 | `0x001a1618` | ms force | 51 | 0/334/484/1536/2048 | 1024 | tap 80, short 200, medium 334, long 1024 |
+| The Munsters LE 1.28 | `0x000d0550` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 334, long 1536 |
+| The Munsters Pro 1.28 | `0x000ce360` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 334, long 1536 |
+| Uncanny X-Men LE 0.98 | `0x00115708` | ms strength force | 51/36/31/23 | 0/100/334/500/5000 | 2500/334/1000/5000 | short 200, medium 334, long 1000, rumble 5000 |
+| Uncanny X-Men Pro 0.98 | `0x00110788` | ms strength force | 51/36/31/23 | 0/100/334/500/5000 | 1000/334/1000/5000 | short 200, medium 334, long 1000, rumble 5000 |
 | Venom LE 1.07 | `0x00196c48` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 484, long 1024 |
 | Venom Pro 1.07 | `0x00192dec` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 484, long 1024 |
 
-**Measured (emulator, PAD-474: every build above on its stock card, hidden, muted, `PAD_COIL_PROBE=1`, the pinned
-runtime, through `rigbatch.sh`).** A mode file with `shake start <its longest at 0> 0`, `shake shot game <its short
+**Measured (emulator, PAD-474: every build above but D&D LE on its stock card, hidden, muted, `PAD_COIL_PROBE=1`,
+the pinned runtime, through `rigbatch.sh`; D&D LE starts no game on the rig, so its lines are unproven).** A mode file with `shake start <its longest at 0> 0`, `shake shot game <its short
 shake> <every shot>` and `shake end <600 ms or its longest> <its softest used strength>`: every runtime `shaker:` line
 was followed on the board within ~20 ms by `[coildrive] node 1 coil 0` at the game's power for the time asked, cut
-to the stock setting's longest (setting 2 on Elvira, 3 on Aerosmith, Guardians and Sword of Rage, 4 elsewhere; the
+to the stock setting's longest (setting 2 on Elvira, 3 on most `drive` titles, 4 elsewhere; Metallica at its operator's
+power, 40/255 by default; the
 board counts in 10 ms ticks, so 1024 ms runs 1020 and 1536 runs 1530). Ending the mode mid-shake sent the OFF (the
 game's own stop on Godzilla Pro, Led Zeppelin and Rush, the all-zero `coil_fire` elsewhere) with the rest of the
 shake left; a hit played the game's own short shake (Godzilla Pro: its hit); the end shake ran out after the END

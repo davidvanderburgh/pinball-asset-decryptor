@@ -541,3 +541,17 @@ site show_12              0x00179134 0xe92d4010 0xeb02c0cc   # jurassic_park_le-
 text show_name_12         Wide white fade
 text show_kind_12         accent
 value show_secs_12        1
+
+# ---- PAD-474: the shaker motor, read by shaker_lines.py from the game's own shake routine ----------
+# shake(ms, strength 0..3 (powers 51/31/23/3 /255), force): adjustment 510 (AD_SHAKER_MOTOR), drive 7; 27 constant calls
+site shake              0x001c2420 0xe92d40f0 0xe1a04000
+site shake_stop         0x001c24d4 0xe52de004 0xe24dd00c
+site drive_left         0x001d572c 0xe3500000 0xe92d4038
+value shake_adj            510
+value shake_drive          7
+text shake_max_ms          500 4000 2000 0
+text shake_setting_ms      0 100 334 500 4000
+text shake_tap              0:100:0
+text shake_short            0:200:0
+text shake_medium           0:334:0
+text shake_rumble           0:2000:2

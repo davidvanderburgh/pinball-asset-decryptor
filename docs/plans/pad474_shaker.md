@@ -108,6 +108,33 @@ and four variants of them:
 James Bond 60th LE 1.11 (a newer framework: no duration error, its SHAKER MOTOR "controls the intensity", and a
 separate reel shaker) has no such routine; the reader stops there.
 
-None of these 30 has "shaker" in MACHINE_HARDWARE yet, so the Modes tab hides the section on them (no yellow). The
-next step on this ticket: their lines, the runtime's `value shake_power_adj`, "shaker" in MACHINE_HARDWARE for the
-ones the same sweep proves, and that sweep over all of them with the 20 again on the final object.
+### Phase 2: the 29, and the 20 again on the final object
+
+Their 29 ports carry the reader's lines; the runtime reads `value shake_power_adj` (Metallica) at each shake; mode.so
+rebuilt. Then every one of the 49 latest builds through `rigbatch.sh` on that object (`final.list`, job
+`shake_job_v3.sh`, 4 rigs, ~70 min, staging the cards the bottleneck): **44 passed** - the 19 of the first 20 that
+reached a game, and 25 of the 29 - each its shake on node 1 coil 0 at the game's power (Metallica 40/255: the
+operator's SHAKER MOTOR POWER at its default), the stop's OFF, the game's own short shake on a hit and the end shake
+run out. The five that did not were the harness, each passed on a re-run (`shake_job_v5.sh` / `_v6.sh`):
+- Avengers LE: the rig never came up (state off for 18 min). Re-run: passed.
+- Jurassic Park LE / Pro: no game - Guided Setup came back after every Save & Exit. With the slot's NVRAM for the
+  title wiped and the stage booted AGAIN after Save & Exit (PAD-420's and PAD-483's rule): both passed.
+- Rush LE: its 500 ms start shake ran out before the trigger file's stop, and the hit the job starts it on is one
+  the game shakes on itself ~55 ms later, so the runtime rightly left THAT shake running at the stop (" the shake
+  running now is the game's own, left to run"). The job now also starts by the file and stops the moment it starts;
+  the re-run passed on its first hit (300 ms left, the OFF).
+- Dungeons & Dragons LE 1.10: no game, the known rig problem (memory: attract ejects and auto-plunges a ball every
+  ~8 s and never takes Start). Also no game on the port as it was when PAD-420 last played it (2026-10-07, before the
+  scoop, held coils and shows; `dnd_le_check7.port` + the shake lines): those lines are not the cause. Its shaker
+  is armed ("a mode may shake the cabinet through the game's own shake (one power) 0x001c74e0") but no mode was
+  seen to shake it, so it is NOT in MACHINE_HARDWARE's shaker titles: the Modes tab shows no Shaker section on it,
+  as before. D&D Pro 1.10 (the same wrapper) passed. The rig start wants a ticket of its own.
+Godzilla LE 1.16 (PAD-414's) passed again on the final object too.
+
+So `SHAKER_PROVEN` holds 49 builds - Godzilla LE and 48 from this sweep (the 20's entries rewritten with the final
+object's numbers) - and MACHINE_HARDWARE lists the shaker on the 28 more titles. Logs: C:/tmp/PAD-474/runs/<build>/
+(and `.wipe` / `.a3` for the re-runs), the batch logs `rb_final`, `rb_rerun3`.
+
+The Modes tab's shake rows held Godzilla's defaults (a hard start, its jackpot shake on a hit, a soft end); on a game
+without a jackpot shake or a soft strength an unticked row showed the raw value ("game:jackpot"). A row the mode does
+not use now holds the nearest the build has: its first shake on a hit, its softest strength at the end.

@@ -1291,13 +1291,29 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     #: shakes is "game:<name>"
     _SHAKE_OWN = {v: k for k, v in MP.SHAKE_STRENGTHS.items()}
 
+    @staticmethod
+    def _shake_default(p, when):
+        """PAD-474: what an unticked shake row offers on title ``p``: the form's default (Godzilla's hard start,
+        jackpot hit, soft end) when the game has it, else the nearest it does have - its hardest or softest
+        strength, its first shake on a hit."""
+        own = [w for k, w in MP.SHAKE_STRENGTHS.items() if MP.shake_max_ms(p, k)]
+        games = ["game:" + n for n, _l in getattr(p, "shakes", ()) or ()]
+        what = _DEFAULTS["shake_what_" + when]
+        if not own or what in own + games:
+            return what
+        if when == "shot" and games:
+            return games[0]
+        return own[-1] if when == "end" else own[0]
+
     def _load_shakes(self, f, spec):
         """PAD-414: the first shake of each kind (start, shot, end) onto the form's three rows."""
         rows = [r for r in (getattr(spec, "shakes", None) or []) if isinstance(r, (list, tuple)) and len(r) == 4]
+        p = self._shown or self._profile
         for when in MP.SHAKE_WHEN:
             row = next((r for r in rows if r[0] == when), None)
             f["shake_on_" + when] = row is not None
             if row is None:
+                f["shake_what_" + when] = self._shake_default(p, when)
                 continue
             what, strength = row[1], row[2]
             if isinstance(what, str):

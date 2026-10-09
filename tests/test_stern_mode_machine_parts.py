@@ -20,7 +20,8 @@ def test_the_inventory_only_names_hardware_parts():
 def test_absent_is_what_the_machine_lacks():
     assert MP.machine_absent("godzilla_pro") == ("coils", "shield")
     assert MP.machine_absent("godzilla_le") == ()       # its shaker is no coil name, but PAD-414 shakes it
-    assert MP.machine_absent("jaws_le") == ("magnet", "scoop", "shield", "shaker")
+    assert MP.machine_absent("jaws_le") == ("magnet", "scoop", "shield")    # PAD-474: its shaker is the test menu's
+    assert MP.machine_absent("jurassic_park_the_pin") == ("magnet", "scoop", "shield", "shaker")   # a Home Edition
     assert MP.machine_absent("no_such_game") == ()
 
 

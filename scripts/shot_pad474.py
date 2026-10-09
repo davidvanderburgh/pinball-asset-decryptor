@@ -9,6 +9,8 @@ Writes into <out_dir>:
   section: a shake as it starts, on a shot and as it ends (before: greyed, "has not found how ... shakes")
 - <prefix>_blocks_shaker.png a blocks mode on an Aerosmith 1.16 project that shakes the cabinet as it starts and
   with one of the game's own shakes on a shot (before: the blocks refused, the game's shakes "not on this game")
+- <prefix>_jp_shaker.png     a form mode on a Jurassic Park LE 1.16 project (a title whose shaker is the optional kit's,
+  found in its test menu's device record): before, no Shaker section at all; after, the section, live
 """
 
 import json
@@ -23,6 +25,7 @@ import shot_pad232 as S  # noqa: E402
 import webui_shot  # noqa: E402
 
 TMNT = "turtles_le-1_59_0.Release.8G.sdcard.raw"
+JP = "jurassic_park_le-1_16_0.Release.8G.sdcard.raw"
 AERO = "aerosmith-1_16_0.Release.8G.sdcard.raw"
 
 
@@ -55,10 +58,15 @@ def main():
     repo = os.path.abspath(sys.argv[1])
     out_dir = os.path.abspath(sys.argv[2])
     prefix = sys.argv[3]
+    only = sys.argv[4:]                     # screens to shoot (form, blocks, jp); none = all
     sys.path.insert(0, repo)
     from pinball_decryptor.plugins.stern import block_modes as BM
     from pinball_decryptor.plugins.stern import mode_project as MP
     print("repo", repo, "mode_project", MP.__file__, flush=True)
+    if "jp" in only or not only:
+        jp_shot(repo, out_dir, prefix, MP, S, webui_shot)
+    if only and "form" not in only and "blocks" not in only:
+        return
 
     # the form: TMNT LE 1.59
     scratch = tempfile.mkdtemp(prefix="pad474-")
@@ -112,6 +120,36 @@ def main():
             page.screenshot(path=out)
             print("shot", out, flush=True)
         S._shoot(url, blocks, height=1350)
+    finally:
+        proc.terminate()
+
+
+def jp_shot(repo, out_dir, prefix, MP, S, webui_shot):
+    scratch = tempfile.mkdtemp(prefix="pad474j-")
+    project = _card_project(scratch, "JP 1.16 LE Extract", JP)
+    p = MP.profile("jurassic_park_le_1_16")
+    print("jurassic_park_le_1_16 can shaker:", p.can("shaker"), "|", p.why_not("shaker"), "| absent", p.absent,
+          flush=True)
+    shots = [n for n, _m in p.shots]
+    spec = MP.ModeSpec(name="QUAKE", title="jurassic_park_le_1_16")
+    spec.start_shot, spec.scoring_shots = shots[0], shots[1:3]
+    if p.can("shaker"):
+        spec.shakes = [["start", 500, 0, ""], ["end", 1000, 1, ""]]
+    slug, _path = MP.new_mode(project, spec=spec)
+    proc, url = S._serve(repo, scratch, project)
+    try:
+        def form(page):
+            webui_shot.api(url, "modes.select", slug, "form")
+            time.sleep(3)
+            page.evaluate("""() => { const leaf = (t) => [...document.querySelectorAll('*')].find((e) =>
+                e.children.length === 0 && e.textContent.trim() === t);
+                const h = leaf('Shaker') || leaf('Other mechanisms') || leaf('Ball save');
+                if (h) h.scrollIntoView({ block: 'center' }); }""")
+            time.sleep(1)
+            out = os.path.join(out_dir, "%s_jp_shaker.png" % prefix)
+            page.screenshot(path=out)
+            print("shot", out, flush=True)
+        S._shoot(url, form, height=1500)
     finally:
         proc.terminate()
 

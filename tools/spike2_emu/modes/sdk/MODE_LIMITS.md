@@ -167,19 +167,19 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
 | Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
-| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
+| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
-| Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
-| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
-| Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
+| Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows |
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows |
-| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
-| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
+| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
+| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, shaker, light shows |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows |
@@ -187,49 +187,49 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
-| Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
-| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows, mini-wizards |
-| James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
+| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards |
+| James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
-| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
+| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
+| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
-| John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, light shows |
-| John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop, light shows |
-| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
+| John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop, shaker, light shows |
+| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
-| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
-| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
+| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
-| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows |
 | Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
-| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
-| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
+| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows |
-| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows, waits for multiballs only |
+| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows |
 | The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
-| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
-| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
+| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows |
+| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 

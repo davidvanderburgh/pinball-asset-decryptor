@@ -609,3 +609,16 @@ site show_12              0x00050dc4 0xe92d4ff0 0xe24dd01c   # uncanny_xmen_pro-
 text show_name_12         Flash
 text show_kind_12         accent
 value show_secs_12        1
+
+# ---- PAD-474: the shaker motor, read by shaker_lines.py from the game's own shake routine ----------
+# shake(ms, strength 0..4 (powers 51/36/31/23/3 /255), force): adjustment 209 (AD_SHAKER_MOTOR), drive 7; 120 constant calls
+site shake              0x00115708 0xe92d40f0 0xe1a04000
+site drive_left         0x0042c51c 0xe3500000 0xe92d4038
+value shake_adj            209
+value shake_drive          7
+text shake_max_ms          2500 334 1000 5000
+text shake_setting_ms      0 100 334 500 5000
+text shake_short            0:200:3
+text shake_medium           0:334:2
+text shake_long             0:1000:3
+text shake_rumble           0:5000:3

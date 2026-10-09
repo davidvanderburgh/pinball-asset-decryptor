@@ -653,6 +653,7 @@ const eyeTip = (l, solo) => ({
       : "hide it here, to see or reach what is under it"],
     ["Alt+click", solo === l.id ? "bring the other layers back" : "show only this layer"],
     ["H", "hide or show the selected layers"],
+    ["Ctrl+Z", "take an eye click back, as any edit"],
     "The game is not changed.",
   ] });
 const gameTip = (l) => ({
@@ -1466,9 +1467,9 @@ function TreeActions({ t }) {
     <${Button} size="sm" kind="ghost" icon="plus" title="Add a line of text to this scene"
       onClick=${() => { setWords(""); setAdding(true); }}>Text…<//>
     <span class="tree-actions-sep"></span>
-    <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.can_undo} title="Undo the last edit in this scene (Ctrl+Z)"
+    <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.can_undo} title="Undo the last edit in this scene, an eye click in Layers too (Ctrl+Z)"
       onClick=${() => call("text_scenes.tree_undo")}>Undo<//>
-    <${Button} size="sm" kind="ghost" icon="redo" disabled=${!t.can_redo} title="Redo the edit just undone (Ctrl+Y or Ctrl+Shift+Z)"
+    <${Button} size="sm" kind="ghost" icon="redo" disabled=${!t.can_redo} title="Redo the edit or eye click just undone (Ctrl+Y or Ctrl+Shift+Z)"
       onClick=${() => call("text_scenes.tree_redo")}>Redo<//>
     <${Button} size="sm" kind="ghost" iconRight="down" disabled=${!t.edits && !t.all_edits && !t.view_apart}
       title="Put this scene (or every scene) back: as the last Write left it, or as the game shipped it"

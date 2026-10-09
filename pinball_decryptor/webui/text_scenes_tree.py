@@ -75,7 +75,7 @@ class TreeEditMixin:
         self._tlive = {}             # card -> (push result, "HH:MM:SS") handed to a running game
         self._tlive_job = None
         self._tlive_lock = threading.Lock()
-        self._thist = {}             # (project, card) -> undo / redo lists of whole op lists
+        self._thist = {}             # (project, card) -> undo / redo lists of (ops, eyes) steps
 
     def _tree_reset(self):
         self._trees = None
@@ -113,21 +113,47 @@ class TreeEditMixin:
     # -- undo / redo (PAD-283) ---------------------------------------------
     # Every change to a scene's op list is one step, whatever made it (a drag, Draw 1:1, Show,
     # As shipped, a new tint), so Undo puts back the list as it was and Redo the one it undid.
+    # A step is ``(ops, eyes)``: an eye click in Layers is a step too, though it never changes
+    # the card (DragonRR, PAD-472: Undo stayed grey after hiding layers with their eyes).
     def _tree_hist(self, card):
         return self._thist.get((self.assets_dir, card))
 
+    def _tree_eyes(self, card):
+        """The preview's eyes on *card* as an undo step keeps them: ``(shut, turned on, solo)``."""
+        solo = self._tsolo.get((self.assets_dir, card))
+        return (frozenset(self._tree_view_hidden(card)), frozenset(self._tforce.get(card) or ()),
+                None if solo is None else (solo[0], frozenset(solo[1]), frozenset(solo[2])))
+
+    def _tree_eyes_put(self, card, eyes):
+        shut, ons, solo = eyes
+        key = (self.assets_dir, card)
+        self._tview[key] = set(shut)
+        self._tforce[card] = set(ons)
+        if solo is None:
+            self._tsolo.pop(key, None)
+        else:
+            self._tsolo[key] = (solo[0], set(solo[1]), set(solo[2]))
+
     def _tree_track(self, card):
-        """Note *card*'s op list; a change since it was last noted becomes an undo step."""
+        """Note *card*'s op list and eyes; a change since they were last noted becomes an undo
+        step."""
         ops = self._tree_ops(card)
+        eyes = self._tree_eyes(card)
         h = self._tree_hist(card)
         if h is None:
-            self._thist[(self.assets_dir, card)] = {"now": ops, "undo": [], "redo": []}
-        elif ops != h["now"]:
-            h["undo"].append(h["now"])
+            self._thist[(self.assets_dir, card)] = {"now": ops, "eyes": eyes,
+                                                    "undo": [], "redo": []}
+        elif ops != h["now"] or eyes != h["eyes"]:
+            h["undo"].append((h["now"], h["eyes"]))
             del h["undo"][:-self._UNDO_STEPS]
             h["redo"] = []
-            h["now"] = ops
+            h["now"], h["eyes"] = ops, eyes
         return self._tree_hist(card)
+
+    def _tree_eyes_moved(self, card):
+        """An eye was clicked: one undo step, and the preview drawn again."""
+        self._tree_track(card)
+        self._render_tree_preview(self._sel)
 
     #: undo steps kept per scene
     _UNDO_STEPS = 200
@@ -371,7 +397,7 @@ class TreeEditMixin:
             got.add(node)
         else:
             got.discard(node)
-        self._render_tree_preview(self._sel)
+        self._tree_eyes_moved(card)
         return True
 
     @rpc
@@ -407,7 +433,7 @@ class TreeEditMixin:
             keep = chain | self._tree_inside(node, everything)
             self._tview[key] = everything - keep
             self._tforce[card] = set(got[2]) | (chain & self._tstate_off)
-        self._render_tree_preview(self._sel)
+        self._tree_eyes_moved(card)
         return True
 
     @rpc
@@ -422,7 +448,7 @@ class TreeEditMixin:
                 view.discard(node)
             else:
                 view.add(node)
-        self._render_tree_preview(self._sel)
+        self._tree_eyes_moved(card)
         return True
 
     @rpc
@@ -432,7 +458,7 @@ class TreeEditMixin:
         if card is None:
             return False
         self._tree_view_reset(card)
-        self._render_tree_preview(self._sel)
+        self._tree_eyes_moved(card)
         return True
 
     def _missing_note(self, draws):
@@ -1358,7 +1384,7 @@ class TreeEditMixin:
             return True
         hidden = {op.get("node") for op in self._tree_ops(card) if op["op"] == "visible"}
         if all(n in hidden for n in nodes):
-            self._render_tree_preview(self._sel)          # its eye shut; nothing new to add
+            self._tree_eyes_moved(card)                   # its eye shut; nothing new to add
             return True
         if self._tree_add_group([{"op": "visible", "node": n, "on": False}
                                  for n in nodes if n not in hidden]):
@@ -2455,7 +2481,7 @@ class TreeEditMixin:
             return False
         self._tree_view_hidden(card).update(nodes)
         if not self.tree_visible_many(nodes, False):     # hidden in the game already
-            self._render_tree_preview(self._sel)
+            self._tree_eyes_moved(card)
         return True
 
     @rpc
@@ -2467,10 +2493,11 @@ class TreeEditMixin:
         if card is None:
             return False
         h = self._tree_hist(card)
-        was = h["undo"].pop() if h["undo"] else scene_edit.undone(h["now"])
-        if was == h["now"]:
+        # a step from before the app was started has no eyes noted (they follow its hides)
+        was = h["undo"].pop() if h["undo"] else (scene_edit.undone(h["now"]), None)
+        if was[0] == h["now"] and was[1] in (None, h["eyes"]):
             return False
-        h["redo"].append(h["now"])
+        h["redo"].append((h["now"], h["eyes"]))
         return self._tree_put(card, h, was)
 
     @rpc
@@ -2482,22 +2509,30 @@ class TreeEditMixin:
         h = self._tree_hist(card)
         if not h["redo"]:
             return False
-        h["undo"].append(h["now"])
+        h["undo"].append((h["now"], h["eyes"]))
         return self._tree_put(card, h, h["redo"].pop())
 
-    def _tree_put(self, card, h, ops):
+    def _tree_put(self, card, h, step):
+        """Put *card* back to *step*, ``(ops, eyes)``: its op list, and its eyes as they were
+        then (``None``: they follow the game hides the step changes)."""
         from ..plugins.stern import scene_edit
+        ops, eyes = step
         was = self._tree_hidden(card)
         try:
-            scene_edit.set_ops(self.assets_dir, card, ops)
+            if ops != self._tree_ops(card):              # an eye's step leaves the card be
+                scene_edit.set_ops(self.assets_dir, card, ops)
         except OSError as e:
             compat.messagebox.showerror("Scene edit", str(e))
             return False
         h["now"] = self._tree_ops(card)
-        now = self._tree_hidden(card)
-        # an undone (or redone) game hide takes its eye with it, as the hide did (PAD-407)
-        self._tree_view_follow(card, was - now, True)
-        self._tree_view_follow(card, now - was, False)
+        if eyes is not None:
+            self._tree_eyes_put(card, eyes)
+        else:
+            now = self._tree_hidden(card)
+            # an undone (or redone) game hide takes its eye with it, as the hide did (PAD-407)
+            self._tree_view_follow(card, was - now, True)
+            self._tree_view_follow(card, now - was, False)
+        h["eyes"] = self._tree_eyes(card)
         self._tree_refresh()
         return True
 

@@ -1146,6 +1146,72 @@ def test_alt_click_on_an_eye_shows_that_layer_alone(tmp_path):
         w.call("text_scenes.close")
 
 
+def test_an_eye_click_is_an_undo_step(tmp_path):
+    """DragonRR (PAD-472): Undo stayed grey after hiding layers with their eyes, with Redo
+    still lit from an edit undone before.  An eye click in Layers (Alt+click, a look turned on,
+    "Preview eyes as in the game" too) is an undo step like any edit; the card is not changed
+    by it, and a new one ends the Redo."""
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder, _body_scene())
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        ly = {l["name"]: l for l in _tv(w)["layers"]}
+        assert w.call("text_scenes.tree_state", ly["Select"]["id"], 2)     # the picker on B
+        art, box, body_a = ly["Body_Art"]["id"], ly["Body_Textbox"]["id"], ly["BodyA"]["id"]
+        hits = lambda: [h["id"] for h in _tv(w)["hits"]]                  # noqa: E731
+        lay = lambda: {l["id"]: l for l in _tv(w)["layers"]}               # noqa: E731
+        shut = lambda: {i for i, l in lay().items() if l["view_off"]}      # noqa: E731
+        # an edit taken back, as in DragonRR's picture: Redo is lit, Undo is not
+        assert w.call("text_scenes.tree_move", art, 10, 0)
+        assert w.call("text_scenes.tree_undo")
+        assert not _tv(w)["can_undo"] and _tv(w)["can_redo"]
+        # two eyes shut: Undo is lit, the Redo is over, the card is not changed
+        assert w.call("text_scenes.tree_view", art, False)
+        assert w.call("text_scenes.tree_view", box, False)
+        assert _tv(w)["can_undo"] and not _tv(w)["can_redo"]
+        assert shut() == {art, box} and box not in hits() and _ops(folder) == []
+        # Undo opens them again, one at a time; Redo shuts one again
+        assert w.call("text_scenes.tree_undo")
+        assert shut() == {art} and box in hits() and _ops(folder) == []
+        assert w.call("text_scenes.tree_undo")
+        assert shut() == set() and art in hits()
+        assert not _tv(w)["can_undo"] and not w.call("text_scenes.tree_undo")
+        assert w.call("text_scenes.tree_redo")
+        assert shut() == {art} and _tv(w)["can_redo"]
+        # edits and eye clicks in turn are taken back in turn
+        assert w.call("text_scenes.tree_move", box, 5, 0)
+        moved = _ops(folder)
+        assert moved and not _tv(w)["can_redo"]
+        assert w.call("text_scenes.tree_view_many", [box], False)          # H
+        assert w.call("text_scenes.tree_undo")
+        assert shut() == {art} and _ops(folder) == moved
+        assert w.call("text_scenes.tree_undo")
+        assert shut() == {art} and _ops(folder) == []
+        # Alt+click shows one alone: Undo brings the rest back, Redo shows it alone again
+        assert w.call("text_scenes.tree_view_solo", box)
+        assert _tv(w)["solo"] == box and hits() == [box]
+        assert w.call("text_scenes.tree_undo")
+        assert _tv(w)["solo"] is None and shut() == {art}
+        assert w.call("text_scenes.tree_redo")
+        assert _tv(w)["solo"] == box and hits() == [box]
+        assert w.call("text_scenes.tree_view_solo", box)                   # Alt+click again
+        assert _tv(w)["solo"] is None and shut() == {art}
+        # a look the picker does not show, turned on with its eye
+        assert lay()[body_a]["state_off"]
+        assert w.call("text_scenes.tree_force", body_a, True)
+        assert lay()[body_a]["shown"]
+        assert w.call("text_scenes.tree_undo")
+        assert not lay()[body_a]["shown"] and lay()[body_a]["state_off"]
+        # every eye back to the game's, from the Reset menu
+        assert w.call("text_scenes.tree_view_reset")
+        assert shut() == set()
+        assert w.call("text_scenes.tree_undo")
+        assert shut() == {art}
+        assert _ops(folder) == []
+        w.call("text_scenes.close")
+
+
 def test_a_hidden_layer_the_game_draws_elsewhere_is_found_when_picked(tmp_path):
     """DragonRR (PAD-289): a layer hidden with its eye in a sprite the game is not drawing at
     this moment goes, picked, to where the game shows that sprite, and is drawn there."""

@@ -409,7 +409,17 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             self.reload(preselect, focus_text)
         self._publish_look()
         self._raise()
+        if focus_text:
+            self._focus_layer()
         return True
+
+    def _focus_layer(self):
+        """A jump to a line picks its layer in the scene editor too, so its box and Font
+        controls are at hand (PAD-485).  After the tab comes forward, which drops the
+        selection (PAD-294)."""
+        item = self.store.get(self.ns, "item") if self._focus_want else None
+        if self._sel and item and item.startswith("txt::"):
+            self._find_layer(self._sel, int(item[5:]))
 
     def _raise(self):
         """PAD-251: the scenes are a tab now; opening them brings the Scenes tab forward."""

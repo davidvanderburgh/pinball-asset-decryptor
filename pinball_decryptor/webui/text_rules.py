@@ -64,6 +64,43 @@ def row_is_scene(r):
     return (r.get("path") or "").lower().endswith(".radium")
 
 
+_STAND_IN_END = re.compile(r"[!.?]+$")
+
+
+def stand_in_words(s, loose=False):
+    """A line's words for finding the scene text a game-program line is drawn into
+    (PAD-485): ``\\n`` escapes, line breaks and runs of spaces read as one space, the ends
+    trimmed, case kept.  *loose* also drops a closing ``!``, ``.`` or ``?``: Godzilla's
+    Megalon and Gigan jackpot award screen holds "GIGAN JACKPOT" where the game puts
+    "GIGAN JACKPOT!"."""
+    s = " ".join((s or "").replace("\\n", "\n").split())
+    return _STAND_IN_END.sub("", s).rstrip() if loose else s
+
+
+def stand_in_rows(rows, r):
+    """The scene rows of *rows* that hold game-program row *r*'s words: the game fills
+    the line into that text box while it runs, so the scene's own words are a stand-in
+    (PAD-485).  The rows reading the same come first, then the ones that differ only by
+    a closing ``!``, ``.`` or ``?``, each in list order.  Empty for a scene row and for
+    a line no scene holds."""
+    if row_is_scene(r):
+        return []
+    want = stand_in_words(r.get("original"))
+    if not want:
+        return []
+    near_want = stand_in_words(want, True)
+    same, near = [], []
+    for s in rows:
+        if not row_is_scene(s):
+            continue
+        words = stand_in_words(s.get("original"))
+        if words == want:
+            same.append(s)
+        elif near_want and stand_in_words(words, True) == near_want:
+            near.append(s)
+    return same + near
+
+
 def row_grows(r):
     """True when a replacement longer than the original's slot is still
     accepted: every scene row, a game-program row flagged ``grows``, and a

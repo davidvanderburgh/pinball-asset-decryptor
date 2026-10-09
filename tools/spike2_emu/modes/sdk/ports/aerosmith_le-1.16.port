@@ -336,3 +336,64 @@ value proc_exit_slots      4
 # PAD-420: the game's kill by id (id, 0xffff), which stops a show of the runtime's - the same code as the
 # event_cancel of the 45 other ports that name it (shows/findcancel.py)
 site event_cancel     0x0034b9d8 0xe92d40f8 0xe30f6b50
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x00078640 0xe92d4008 0xeb059d4c   # 123 lights in its lamp groups, 0 light-runner commands, white, 7.7 s
+text show_name_1          Wide white glow
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x00080c0c 0xe92d4ff0 0xe3a0000b   # 105 lights in its lamp groups, 0 light-runner commands, red, blue, 2.8 s
+text show_name_2          Wide fast red and blue strobe
+text show_kind_2          flashy
+value show_secs_2         3
+site show_3               0x00039948 0xe92d4070 0xeb06988a   # 96 lights in its lamp groups, 0 light-runner commands, cyan, white, 3.0 s
+text show_name_3          Cyan and white strobe
+text show_kind_3          flashy
+value show_secs_3         3
+site show_4               0x00128570 0xe92d4ff0 0xe3a00008   # 94 lights in its lamp groups, 0 light-runner commands, yellow, white, 6.9 s
+text show_name_4          Yellow and white strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x00085e58 0xe92d4ff0 0xe3a0000b   # 87 lights in its lamp groups, 0 light-runner commands, red, 2.8 s
+text show_name_5          Fast red strobe
+text show_kind_5          flashy
+value show_secs_5         3
+site show_6               0x00082954 0xe92d4070 0xeb057487   # 83 lights in its lamp groups, 0 light-runner commands, red, 8.2 s
+text show_name_6          Red strobe
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x001284b8 0xe92d4070 0xeb02ddae   # 83 lights in its lamp groups, 0 light-runner commands, orange, yellow, 7.8 s
+text show_name_7          Orange and yellow strobe
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x0012326c 0xe92d41f0 0xe3a04f4e   # 39 lights in its lamp groups, 0 light-runner commands, white, 5.6 s
+text show_name_8          White glow
+text show_kind_8          flashy
+value show_secs_8         8
+site show_9               0x00106894 0xe92d4008 0xeb0364b7   # 35 lights in its lamp groups, 0 light-runner commands, red, green, 7.7 s
+text show_name_9          Red and green strobe
+text show_kind_9          flashy
+value show_secs_9         8
+site show_10              0x000c4568 0xe92d4ff0 0xe3a0000a   # 3 lights in its lamp groups, 0 light-runner commands, red, 8.2 s
+text show_name_10         Small slow red fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x00099c10 0xe92d4070 0xe24dd020   # 118 lights in its lamp groups, 0 light-runner commands, green, white, 1.9 s
+text show_name_11         Wide green and white strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x00061c94 0xe92d4ff0 0xe3a0000d   # 104 lights in its lamp groups, 0 light-runner commands, blue, 1.0 s
+text show_name_12         Wide blue chase
+text show_kind_12         accent
+value show_secs_12        1

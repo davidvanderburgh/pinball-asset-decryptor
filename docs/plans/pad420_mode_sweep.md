@@ -764,6 +764,10 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
         hung robocopy wrapper (Elvira's card). Not proven on a machine yet: the shows of builds other than Godzilla
         Premium/LE, and the lamp-group clean-up (072a46d4) - the next machine test of any build with shows should
         play a dozen mode starts/ends in one game and see the game's own lighting stay right.
+        The clean-up proven again with the SHIPPED runtime source (scanship.so: the SDK's pad_mode_runtime.c and
+        mode_file.c, no recorders; chainS.sh): King Kong LE's candidate 22 played 63 times in one game (the
+        runtime's SHOWS_MAX caps a port at 63; the other 57 were refused for that), every play running until the
+        scan stopped it - where before 072a46d4 every play from the 27th died at once.
   - `t2/voices_all.py` (detached Windows process): transcripts for every new build; land them with
     `t2/apply_new.sh` (applies callouts, rebuilds recipes), tests, commit. Rush LE, Aerosmith Pro/LE, Avengers
     LE/Pro, Deadpool LE landed.

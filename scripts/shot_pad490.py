@@ -9,8 +9,9 @@ The server runs from THIS tree against a scratch settings folder:
 
 - every wsl.exe call raises TimeoutExpired at once (the user's 8 s and 20 s
   waits, without the waiting);
-- the registry lists one distro, Ubuntu, whatever this PC has.  A tree from
-  before PAD-490 never reads it.
+- the registry lists one distro, Ubuntu, whatever this PC has, and twelve
+  wsl.exe are running (his Task Manager).  A tree from before PAD-490 never
+  reads either.
 
 It opens Stern's Extract tab, waits for the check to finish and photographs
 the page with the log showing the WSL2 row's problem and fix.
@@ -36,8 +37,9 @@ def _stuck(argv, *a, **kw):
         raise subprocess.TimeoutExpired(cmd=argv, timeout=kw.get("timeout") or 0)
     return _run(argv, *a, **kw)
 subprocess.run = _stuck
-from pinball_decryptor.core import wsl_disk
+from pinball_decryptor.core import prereqs, wsl_disk
 wsl_disk.registered_distro_names = lambda: ["Ubuntu"]
+prereqs._wsl_exe_count = lambda: 12
 from pinball_decryptor.webui import host
 sys.exit(host.main(sys.argv[1:]))
 '''

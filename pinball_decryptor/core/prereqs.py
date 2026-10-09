@@ -881,26 +881,53 @@ def _diagnose_wsl_silent() -> Tuple[str, str]:
     answer.  The registry is: it lists every registered distro and reading
     it never waits on WSL, so when it names one the message can say WSL IS
     installed.  When it names none the honest answer is "could not tell",
-    and the hint still puts the restart that un-sticks WSL ahead of an
-    install that would not help."""
+    and the hint still puts un-sticking WSL ahead of an install that would
+    not help.
+
+    THE CURE IS THE ONE THAT WORKED FOR HIM.  His Task Manager held a dozen
+    wsl.exe processes, each a call waiting on WSL, and ending every one of
+    them is what brought WSL back - no restart, and no `wsl --shutdown`,
+    which is one more wsl.exe call into the same stuck WSL.  So the message
+    counts them (tasklist never touches WSL) and the hint starts there."""
     from . import wsl_disk
     names = wsl_disk.registered_distro_names() or []
+    waiting = _wsl_exe_count()
+    stuck = (f", and {waiting} wsl.exe "
+             f"{'process is' if waiting == 1 else 'processes are'} stuck "
+             f"waiting on it" if waiting else "")
+    cure = ("In Task Manager's Details tab, end every wsl.exe, then click "
+            "'Re-check' above the tabs. If it still does not answer, "
+            "restart Windows.")
     if names:
         listed = ", ".join(names)
         return (f"WSL is installed ({listed} "
                 f"{'is' if len(names) == 1 else 'are'} registered), but it "
                 f"is not answering: wsl.exe gave no reply within "
-                f"{PROBE_TIMEOUT}s. That is WSL stuck, which usually follows "
-                f"a hang or a crash, not a missing install.",
-                "WSL is installed, so do not install it again. Run "
-                "'wsl --shutdown' in PowerShell, wait ten seconds, then "
-                "click 'Re-check' above the tabs. If it still does not "
-                "answer, restart Windows.")
+                f"{PROBE_TIMEOUT}s{stuck}. That is WSL stuck, which usually "
+                f"follows a hang or a crash, not a missing install.",
+                "WSL is installed, so do not install it again. " + cure)
     return (f"WSL did not answer: wsl.exe gave no reply within "
-            f"{PROBE_TIMEOUT}s, so this check could not tell whether WSL is "
-            f"installed. A stuck WSL does that (often after a hang or a "
-            f"crash), and so can a PC too busy to start it.",
-            "Run 'wsl --shutdown' in PowerShell, wait ten seconds, then "
-            "click 'Re-check' above the tabs. If it still does not answer, "
-            "restart Windows. 'Install Missing' is only the fix once the "
-            "check says WSL is not installed.")
+            f"{PROBE_TIMEOUT}s{stuck}, so this check could not tell whether "
+            f"WSL is installed. A stuck WSL does that (often after a hang or "
+            f"a crash), and so can a PC too busy to start it.",
+            cure + " 'Install Missing' is only the fix once the check says "
+            "WSL is not installed.")
+
+
+def _wsl_exe_count() -> int:
+    """How many wsl.exe processes are running, read from ``tasklist`` - which
+    never asks WSL anything, so it answers while WSL is stuck.  0 when it
+    can't be read.  The rows are CSV with the image name first, which no
+    Windows language translates."""
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq wsl.exe", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT,
+            creationflags=_CREATE_FLAGS,
+        ).stdout or ""
+    except (subprocess.TimeoutExpired, OSError):
+        return 0
+    return sum(1 for line in out.splitlines()
+               if line.strip().lower().startswith('"wsl.exe"'))

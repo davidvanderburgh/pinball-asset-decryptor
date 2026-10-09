@@ -29,7 +29,17 @@ AUTO=$PAD_HOME/padauto.log
 say() { echo "[check] $*"; }
 die() { say "$*"; exit 1; }
 game_up() { [ -n "$(pad_pids -x game)" ]; }
+#: PAD-484: the game may run k times the wall's clock (PAD_SPEED, padspeed.py). A wait that IS the game's
+#: time - a hand between two presses, a ball saver waited out, the tilt's 4 s gaps - is pad_gsleep (k times
+#: shorter); a wait FOR something (a log line, a state) stays a plain loop, since how long that takes is the
+#: CPU's business. gsecs <game seconds> [<at least, real>]: whole real seconds for a window of game time
+gsecs() { awk -v s="$1" -v k="$(pad_speed)" -v f="${2:-0}" 'BEGIN { if (k + 0 <= 0) k = 1; v = s / k; if (v < f) v = f; printf "%d", v + 0.999 }'; }
 count() { grep -ac -- "$1" "$LOG" 2>/dev/null || true; }
+#: PAD-484: the switch list is THIS build's (its `# binary:` line names the game binary running), not merely
+#: there. The tables are kept per title, so a rig that last ran another build holds that build's list until
+#: mktables re-derives it from this run's dump - and the ids move between builds: on Iron Maiden LE 1.18 the
+#: older list pressed Tournament Start for Start and latched the coin door on the wrong switch
+list_current() { python3 "$RIG/mktables.py" --current --game "$GAME" > /dev/null 2>&1; }
 # wait_for <seconds> <extended regex> <file>: 0 when a line matches, 1 at the time limit or
 # when the game is gone
 wait_for() {
@@ -43,9 +53,9 @@ wait_for() {
 }
 press() {   # press <id>: a mark the object logs, then a 150 ms press
     echo "$1" > "$DUMP/census.mark"
-    sleep 0.45
+    pad_gsleep 0.45
     python3 "$RIG/swpoke.py" "$1" 150 > /dev/null 2>&1 || say "swpoke $1 failed"
-    sleep 1.1
+    pad_gsleep 1.1
 }
 #: a switch the check leaves alone, by its name in the switch list. A mechanism's position sensor is one
 #: (POSITION, HOME, and Batman 66's "Turntable Pos. #2" / "Crane Pos. #5": PAD-420, pressed they left its
@@ -70,7 +80,7 @@ launch_ball() {
 start_game() {
     python3 "$RIG/plunge.py" coin 8 > /dev/null 2>&1 || say "plunge.py coin said no"
     python3 "$RIG/plunge.py" game > /dev/null 2>&1
-    nofeed && { say "no ball feeder on this title: serving the ball by hand"; sleep 2; launch_ball; }
+    nofeed && { say "no ball feeder on this title: serving the ball by hand"; pad_gsleep 2; launch_ball; }
 }
 #: Guided Setup (a first boot's menu): walk its red row down with SERVICE PLUS until the last row,
 #: Save & Exit, is the red one (menurow.py reads a glshot.sh frame), then SERVICE SELECT. Measured
@@ -91,17 +101,17 @@ guided_setup() {
         case "$state" in
             "menu last=yes")
                 python3 "$RIG/swpoke.py" "$sel" 300 > /dev/null 2>&1
-                sleep 4
+                pad_gsleep 4
                 rm -f "$shot"
                 return 0 ;;
             "menu last=no")
                 python3 "$RIG/swpoke.py" "$plus" 300 > /dev/null 2>&1
-                sleep 1.2 ;;
+                pad_gsleep 1.2 ;;
             *)
                 if [ "$backs" -gt 0 ] && [ -n "$back" ]; then
                     backs=$((backs - 1))
                     python3 "$RIG/swpoke.py" "$back" 300 > /dev/null 2>&1
-                    sleep 1.5
+                    pad_gsleep 1.5
                     continue
                 fi
                 cp "$shot" "$DUMP/gamecheck.png" 2>/dev/null   # the frame it judged, for a person
@@ -118,14 +128,14 @@ guided_setup() {
 drain_until_end() {
     local before n end id
     echo drain > "$DUMP/census.mark"
-    sleep 0.6
+    pad_gsleep 0.6
     before=$(count "check ball end")
     for n in 1 2 3 4 5; do
         game_up || return 1
         # PAD-420: the drain's own answer goes on the line - "the ball saver gave it back" was said after a drain the
         # rig refused (the trough already full: no ball in play to drain), which is a game that kept no ball out
         say "drain $n: $(python3 "$RIG/plunge.py" drain 2>&1 | head -n 1)"
-        end=$(( $(date +%s) + 7 ))
+        end=$(( $(date +%s) + $(gsecs 7 2) ))
         while [ "$(date +%s)" -lt "$end" ]; do
             [ "$(count "check ball end")" -gt "$before" ] && return 0
             sleep 0.5
@@ -134,11 +144,11 @@ drain_until_end() {
         say "the ball saver gave it back: playing past it"
         # PAD-420: launch the ball it served back first (a title with no auto launch leaves it in the shooter lane,
         # and a drain then is not that ball's; plunge moves nothing with the lane empty)
-        python3 "$RIG/plunge.py" plunge > /dev/null 2>&1; sleep 2
+        python3 "$RIG/plunge.py" plunge > /dev/null 2>&1; pad_gsleep 2
         for id in "${ids[@]:0:3}"; do press "$id"; done
         # PAD-420: longer each time - Batman 1.14's saver outlasts 15 s after the first switch (every drain was given
         # back); 30 s ended its ball
-        sleep $(( 10 * n + 10 ))
+        pad_gsleep $(( 10 * n + 10 ))
         echo drain > "$DUMP/census.mark"
     done
     return 1
@@ -178,11 +188,26 @@ case "$cmd" in
             || say "(the rig never said the Tech Alerts were cleared; starting anyway)"
         game_up || die "the game stopped before a game could start"
         # a title's FIRST boot on this rig: mktables writes its switch list a minute or so in
-        # (from the shim's dump, or read out of the program by swelf.py)
-        wait_for 150 "" "$LIST" || [ -f "$LIST" ] || die "the rig has no switch list for $GAME ($LIST)"
-        sleep 3
+        # (from the shim's dump, or read out of the program by swelf.py), and another build's list is
+        # re-derived the same way (PAD-484)
+        end=$(( $(date +%s) + 150 ))
+        until list_current; do
+            [ "$(date +%s)" -lt "$end" ] && game_up || break
+            sleep 2
+        done
+        [ -f "$LIST" ] || die "the rig has no switch list for $GAME ($LIST)"
+        list_current || say "(the switch list is $(python3 "$RIG/mktables.py" --current --game "$GAME" 2>&1 \
+            | sed -n 's/^switch list: //p'); its switches may not be this build's)"
+        pad_gsleep 3
         # a first boot opens Guided Setup: leave it BEFORE Start, which there opens a row's editor
-        guided_setup 0 && { say "first boot: left Guided Setup by Save & Exit"; sleep 3; }
+        guided_setup 0 && { say "first boot: left Guided Setup by Save & Exit"; pad_gsleep 3; }
+        # PAD-484: and wait for ATTRACT - the game's own light show (gamestate.sh) - before the first
+        # Start. Past Tech Alerts is not there yet: the game is still loading its scenes, it ignores a
+        # Start, and the check spent ~30 s on "no game yet (try 1)" on every Godzilla Pro run measured
+        # (a sped-up game - PAD_SPEED - only speeds up from attract, too). Not a gate: a title whose show
+        # never says so still gets its three tries after a minute
+        wait_for 60 "\[led\] light show running" "$PAD_LOGDIR/gzwatch.log" \
+            || say "(the game never said its attract show was running; starting anyway)"
         # a Start the game ignores (a service screen the rig's autoattract opened for a moment, a
         # menu a first boot left up) is tried again, up to three times, leaving any menu first
         started=""
@@ -192,14 +217,14 @@ case "$cmd" in
             wait_for 12 "in_game 0 -> 1" "$LOG" && { started=1; break; }
             if guided_setup 2; then
                 say "left Guided Setup by Save & Exit"
-                sleep 3
+                pad_gsleep 3
             else
                 say "no game yet (try $attempt)"
-                sleep 8
+                pad_gsleep 8
             fi
         done
         [ -n "$started" ] || die "no game started after three tries, and the screen is not a menu the check can leave"
-        sleep 2
+        pad_gsleep 2
         ids=()
         while read -r id _num _node _bit name; do
             case "$id" in ""|\#*|*[!0-9]*) continue ;; esac
@@ -223,26 +248,26 @@ case "$cmd" in
         say "a ball ended"
         # the bonus (its end is an event on most builds), and the next ball's start
         wait_for 20 "check event bonus_end" "$LOG" || true
-        sleep 2
+        pad_gsleep 2
         if [ "$FULL" = full ]; then
             # ball 2: a tilt (three pendulum hits, 4.5 s apart), then its drain; ball 3: played
             # past the ball saver and drained, which ends the game
             TILT=$(awk '!/^#/ && toupper($0) ~ /TILT/ && toupper($0) !~ /SLAM/ {print $1; exit}' "$LIST")
             wait_for 25 "check event ball_start" "$LOG" || true
             launch_ball
-            sleep 2
+            pad_gsleep 2
             for id in "${ids[@]:0:10}"; do press "$id"; done
             if [ -n "$TILT" ]; then
                 say "tilting ball 2 (switch $TILT)"
-                for k in 1 2 3; do echo "tilt$k" > "$DUMP/census.mark"; sleep 0.45
-                    python3 "$RIG/swpoke.py" "$TILT" 150 > /dev/null 2>&1; sleep 4; done
-                sleep 4
+                for k in 1 2 3; do echo "tilt$k" > "$DUMP/census.mark"; pad_gsleep 0.45
+                    python3 "$RIG/swpoke.py" "$TILT" 150 > /dev/null 2>&1; pad_gsleep 4; done
+                pad_gsleep 4
             fi
             drain_until_end || say "no drain ended ball 2"
             say "ball 2 ended"
-            sleep 20
+            pad_gsleep 20
             launch_ball
-            sleep 2
+            pad_gsleep 2
             say "ball 3: playing past the ball saver"
             for id in "${ids[@]}"; do game_up || break; press "$id"; done
             drain_until_end || say "no drain ended ball 3"

@@ -76,7 +76,9 @@ give_back() { pad_give_back "$@"; }
 # laggy. The detached copier is unchanged underneath; --precache starts it
 # early (card pick time) and a stalled or failed copy falls back to booting
 # the original exactly as before. dd conv=sparse punches holes for the zero
-# blocks, so a 15 GB image lands as only its real data.
+# blocks, so a 15 GB image lands as only its real data - and since PAD-484
+# cardcopy.py reads only that data too (each ext partition's used blocks,
+# by its own bitmaps): ~25 s an 8 GB card off D: instead of 1-2 minutes.
 #
 # PAD_CARD_CACHE=0 turns it off. The stamp file records path+size+mtime of the
 # source, but only SIZE+MTIME are the identity (item 34): David keeps
@@ -157,7 +159,7 @@ label_mounted() {   # <label>
 # the label being copied, a mounted label, or one whose copier is live.
 # `need` is what the copy can really take: the image's ALLOCATED bytes when
 # its filesystem reports them (drvfs does, for NTFS), else its apparent size.
-# The copy is `dd conv=sparse`, so it never lands bigger than what the
+# The copy is sparse (cardcopy.py, or `dd conv=sparse`), so it never lands bigger than what the
 # original allocates. Apparent size alone was wrong by 22 GB for a card built
 # for a 32 GB SD card (card_size.py: 30.4 GB apparent, 8.5 GB allocated) -
 # more than the whole work disk, so merely PICKING it evicted every other
@@ -301,14 +303,25 @@ cache_pick() {
         # the exact opposite of the point. Progress goes to a log beside the
         # cache.
         setsid bash -c '
-            img="$1"; copy="$2"; stamp="$3"; pidf="$4"
+            img="$1"; copy="$2"; stamp="$3"; pidf="$4"; self="$5"
             rm -f "$copy.partial"
+            # PAD-484: only what the card USES is read (cardcopy.py: the ext
+            # partitions by their own bitmaps, the rest whole) - about half
+            # of a Spike 2 image, and every byte of it comes off D: through
+            # 9p. Anything it cannot do, it says so and the plain copy runs.
+            if [ "${PAD_CARD_COPY_USED:-1}" != 0 ] && \
+               python3 "$self/cardcopy.py" "$img" "$copy.partial"; then
+                :
+            else
+                rm -f "$copy.partial"
+                dd if="$img" of="$copy.partial" bs=4M conv=sparse status=none
+            fi
             # The size gate on the way out is load-bearing: two copiers can
             # only exist through a broken lock, but if they ever do they
             # share the .partial NAME, and an mv would publish the OTHER
             # copier in-flight file under a stamp cache_valid accepts.
             # Never publish a file that is not the whole image.
-            if dd if="$img" of="$copy.partial" bs=4M conv=sparse status=none \
+            if [ -f "$copy.partial" ] \
                && [ "$(stat -c %s "$copy.partial" 2>/dev/null)" = \
                     "$(stat -c %s "$img" 2>/dev/null)" ]; then
                 mv "$copy.partial" "$copy"
@@ -332,7 +345,7 @@ cache_pick() {
                 echo "[card] local cache copy FAILED (disk full?); runs still work off D:"
             fi
             rm -f "$pidf"
-        ' _ "$img" "$copy" "$stamp" "$pidf" \
+        ' _ "$img" "$copy" "$stamp" "$pidf" "$SELF" \
             </dev/null >> "$CACHE/$label.log" 2>&1 &
         echo $! > "$pidf"
         give_back "$pidf" "$CACHE/$label.log"
@@ -572,7 +585,7 @@ if [ "${1:-}" = "--cache-drop" ]; then
 fi
 
 IMG=${1:-}
-[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache] | --cache-list | --cache-drop <label>"
+[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache|--cache-now] | --cache-list | --cache-drop <label>"
 [ -f "$IMG" ] || die "no image at $IMG"
 LABEL=$(basename "$IMG"); LABEL=${LABEL%%.Release*}; LABEL=${LABEL%%.raw}
 MNT="$CARDS/$LABEL"
@@ -606,6 +619,18 @@ fi
 # is pressed the copy is done or well along, and the boot's sync wait in
 # cache_pick collects whatever remains. Idempotent: a valid cache just prints
 # "using local cache", a copy already running prints that it is.
+# PAD-484: cache it NOW and wait - no mount. rigbatch's stager (cardstage.sh
+# `cache`) runs this a few builds ahead of the rigs, so every job's own mount
+# finds a valid copy on the WSL disk and boots at native speed: Godzilla Pro
+# 1.16 reached attract in 23 s from the cache against 79-130 s from the same
+# card on C: (9p under fuse2fs: the validator's and the scene loader's reads
+# are latency-bound there). Unlike --precache it does not stand down beside a
+# live run - the runs it stages for read their own copies, not 9p. Prints the
+# path a boot would use: the copy, or the original when it could not be made.
+if [ "$MODE" = "--cache-now" ]; then
+    PAD_CARD_CACHE=1 cache_pick "$IMG" "$LABEL" sync
+    exit 0
+fi
 if [ "$MODE" = "--precache" ]; then
     # Never start a 7 GB dd beside a live run - the copy would fight the
     # run's 9p reads, which is the exact contention item 74 removed. Checked

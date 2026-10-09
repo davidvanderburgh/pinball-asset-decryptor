@@ -470,6 +470,225 @@ static int pause_clock(int clk)
     return clk == 0 || clk == 1 || (clk >= 4 && clk <= 9) || clk == 11;
 }
 
+/* ---- PAD-484: GAME SPEED - the game's clock runs k times the wall's -------
+ *
+ * David, 2026-10-09: "Need a way of sweeping a spike 2 image much much
+ * faster ... Consider how long PAD-420 took to finish (over 2 days)" - 581
+ * rig jobs, 52 rig-hours. Measured before anything was built: a hidden rig in
+ * a game costs about HALF A CORE (the guest ~26% of one, its busiest thread,
+ * the node bus, ~5%), so the game is not starved, it is WAITING - on its own
+ * timers: a Tech Alerts screen, ball-save windows, a 30 s mode, a drain. The
+ * GPU cannot run ARM code; what makes a sweep faster is the game's clock
+ * running faster than the wall's, and the CPU it was idling on doing the work.
+ *
+ * So the game reads a GAME clock: every clock the pause above stops, plus an
+ * offset that grows (k - 1) times as fast as real time passes,
+ *
+ *     game = real - paused + off(P),     off(P) = d0 + (k - 1) * (P - pa)
+ *
+ * P is the paused monotonic clock, k the speed, and (pa, d0) the moment k
+ * last changed - so the clock is continuous across a change and never runs
+ * back. Every way the game WAITS shrinks by the same k: usleep, nanosleep,
+ * sleep, clock_nanosleep, select/pselect, poll/ppoll, the futex timeouts glib
+ * and libstdc++ pass through syscall(), pthread_cond_timedwait and the POSIX
+ * timers - the closed list of time imports of the game and every library it
+ * loads (PAD-484's census: libc, librt, glib, gstreamer, libusb, dbus, curl,
+ * libstdc++).
+ *
+ * THE SPEED IS ASKED FOR THROUGH THE KEYBOARD BLOCK (padsw.h speed_req), by
+ * padspeed.py, at any moment; watch.sh's PAD_SPEED=k asks once the game is up,
+ * so the boot - the part that IS CPU-bound - runs at 1x. The shim answers in
+ * speed_now and in /dump/padspeed, which the host's harness reads to shorten
+ * its own physical delays (a ball rolling, a button held) by the same k.
+ *
+ * NOTHING CHANGES UNTIL A SPEED OTHER THAN 1 IS ASKED FOR: w_on stays 0 and
+ * every interposer takes exactly the path it took before this ticket.
+ *
+ * WHAT STAYS ON THE WALL CLOCK is anything that waits for the HOST rather than
+ * for the game: eglshim's swap pacing and the GL bridge's ring (pad_real_us /
+ * pad_real_sleep_us below). The picture is built 30 times a REAL second at
+ * any speed - the game skips a frame build while the renderer is busy, as on a
+ * machine with a slow GPU (PAD-301) - so a sweep does not pay k times the
+ * renderer for frames nobody looks at.
+ *
+ * THE WATCHDOG GUARD. A timed wait of 5 s or more (PAD_SPEED_GUARD_MS) keeps
+ * its REAL length: the dispatch loop's 10 s condvar wait is a watchdog (exit 5,
+ * PAD-200), and at 8x a 1.25 s stall in a CPU-bound load would end the game.
+ * It times out on the game's clock as before, k times later in game time.
+ * Nothing the game TIMES waits that long on a condvar: its timers run on the
+ * 60 Hz tick. */
+extern int *__errno_location(void);
+extern int prctl(int, unsigned long, unsigned long, unsigned long, unsigned long);
+static int (*real_cg)(int, struct shim_ts *);
+static int (*real_nsl)(const struct shim_ts *, struct shim_ts *);
+
+static void real_time_init(void)
+{
+    if (!real_cg) real_cg = dlsym(RTLD_NEXT, "clock_gettime");
+    if (!real_nsl) real_nsl = dlsym(RTLD_NEXT, "nanosleep");
+}
+
+static long long ts_us(const struct shim_ts *t)
+{
+    return (long long)t->s * 1000000LL + t->ns / 1000;
+}
+
+static void us_ts(long long us, struct shim_ts *t)
+{
+    if (us < 0) us = 0;
+    t->s = (long)(us / 1000000LL);
+    t->ns = (long)(us % 1000000LL) * 1000L;
+}
+
+/* A REAL clock, in microseconds: no pause, no speed. */
+static long long real_clk_us(int clk)
+{
+    struct shim_ts t = { 0, 0 };
+    real_time_init();
+    real_cg(clk, &t);
+    return ts_us(&t);
+}
+
+static volatile unsigned w_seq;            /* odd while a change is written */
+static long long w_pa, w_d0;               /* where k last changed, and off() there */
+static volatile unsigned w_k = 1000;       /* the speed in effect, x1000 */
+static volatile int w_on;                  /* a speed other than 1 was ever asked */
+static volatile int w_lock;
+static volatile unsigned w_seen = 1000;    /* the request last acted on */
+
+static unsigned speed_req_x1000(void);     /* with the keyboard block, below */
+static void speed_publish(unsigned k, unsigned was, long long game_ms);
+static void wt_rearm(unsigned was, unsigned now);
+
+/* off(P), read consistently against a change being written */
+static long long warp_off(long long P)
+{
+    unsigned s, k;
+    long long pa, d0;
+    do {
+        s = w_seq;
+        __sync_synchronize();
+        pa = w_pa; d0 = w_d0; k = w_k;
+        __sync_synchronize();
+    } while ((s & 1u) || s != w_seq);
+    return d0 + ((long long)k - 1000LL) * (P - pa) / 1000LL;
+}
+
+/* P: the paused monotonic clock */
+static long long warp_P(void)
+{
+    return real_clk_us(1) - (long long)pause_total_ms() * 1000LL;
+}
+
+/* The GAME's reading of a pausable clock, in microseconds. */
+static long long game_clk_us(int clk)
+{
+    long long P = warp_P();
+    if (clk == 1) return P + warp_off(P);
+    return real_clk_us(clk) - (long long)pause_total_ms() * 1000LL + warp_off(P);
+}
+
+static unsigned speed_clamp(unsigned k)
+{
+    if (!k) return 1000;
+    if (k < 100) return 100;               /* x0.1: slow motion */
+    if (k > 64000) return 64000;
+    return k;
+}
+
+/* A new speed, taken up by whichever thread notices it first. Cheap when
+ * nothing changed: one read of the shared block. */
+static void warp_poll(void)
+{
+    unsigned req = speed_clamp(speed_req_x1000());
+    if (req == w_seen) return;
+    if (__sync_lock_test_and_set(&w_lock, 1)) return;
+    if (req != w_seen) {
+        long long P = warp_P(), d = warp_off(P);
+        unsigned was = w_k;
+        w_seq++;
+        __sync_synchronize();
+        w_pa = P; w_d0 = d; w_k = req;
+        __sync_synchronize();
+        w_seq++;
+        w_seen = req;
+        if (req != 1000) w_on = 1;
+        wt_rearm(was, req);
+        speed_publish(req, was, (P + d) / 1000);
+    }
+    __sync_lock_release(&w_lock);
+}
+
+/* PAD_SPEED_GUARD_MS: a wait at least this long keeps its real length. */
+static long long guard_us(void)
+{
+    static long long g = -1;
+    if (g < 0) {
+        const char *e = getenv("PAD_SPEED_GUARD_MS");
+        long long v = 5000;
+        if (e && *e >= '0' && *e <= '9') {
+            v = 0;
+            while (*e >= '0' && *e <= '9') v = v * 10 + (*e++ - '0');
+        }
+        g = v * 1000LL;
+    }
+    return g;
+}
+
+/* How long, REAL, a wait of `left` game microseconds gets. */
+static long long warp_budget(long long left)
+{
+    long long r;
+    if (left <= 0) return 0;
+    r = left * 1000LL / (long long)w_k;
+    if (left >= guard_us() && r < left) r = left;
+    return r;
+}
+
+/* Sleep `d` game microseconds: in slices of at most 50 ms real, each one
+ * re-reading the game clock, so a change of speed - or a pause - mid-sleep
+ * is honoured within a slice. A signal ends it early with EINTR, as the
+ * kernel's own sleep would, with what is left on the game's clock in `rem`. */
+static int warp_sleep(long long d, struct shim_ts *rem)
+{
+    long long end = game_clk_us(1) + d;
+    real_time_init();
+    /* 1 us of timer slack, not Linux's 50: at 8x the node bus's 1 ms sleep is
+     * 125 us real, and 50 us of slack on it would be the speed lost. A
+     * thread's own setting, so each sleeping thread makes it. */
+    prctl(29 /* PR_SET_TIMERSLACK */, 1, 0, 0, 0);
+    for (;;) {
+        long long left = end - game_clk_us(1), r;
+        struct shim_ts ts;
+        if (left <= 0) return 0;
+        r = left * 1000LL / (long long)w_k;
+        if (r > 50000) r = 50000;
+        if (r < 1) r = 1;
+        us_ts(r, &ts);
+        if (real_nsl(&ts, 0) != 0 && *__errno_location() == 4 /* EINTR */) {
+            if (rem) us_ts(end - game_clk_us(1), rem);
+            return -1;
+        }
+        warp_poll();
+    }
+}
+
+/* The wall clock and a wall-clock sleep, for what waits on the HOST (the GL
+ * bridge, eglshim's swap pacing). Exported: eglshim.c and glbridge.c are a
+ * separate library and find these through the dynamic linker. */
+long long pad_real_us(void)
+{
+    return real_clk_us(1);
+}
+
+void pad_real_sleep_us(long long us)
+{
+    struct shim_ts ts;
+    real_time_init();
+    us_ts(us, &ts);
+    real_nsl(&ts, 0);
+}
+
 int shim_clock_gettime(int clk, struct shim_ts *t) __asm__("clock_gettime");
 int shim_clock_gettime(int clk, struct shim_ts *t)
 {
@@ -477,6 +696,11 @@ int shim_clock_gettime(int clk, struct shim_ts *t)
     unsigned p;
     int r;
     if (!real) real = dlsym(RTLD_NEXT, "clock_gettime");
+    warp_poll();
+    if (w_on && t && pause_clock(clk)) {
+        us_ts(game_clk_us(clk), t);
+        return 0;
+    }
     r = real(clk, t);
     if (r == 0 && t && pause_clock(clk) && (p = pause_total_ms()) != 0)
         ts_sub_ms(t, p);
@@ -492,6 +716,15 @@ int shim_gettimeofday(struct shim_tv *tv, void *tz)
     unsigned p;
     int r;
     if (!real) real = dlsym(RTLD_NEXT, "gettimeofday");
+    warp_poll();
+    if (w_on && tv) {
+        long long us;
+        if (tz) real(tv, tz);              /* the (obsolete) zone, as before */
+        us = game_clk_us(0);
+        tv->s = (long)(us / 1000000LL);
+        tv->us = (long)(us % 1000000LL);
+        return 0;
+    }
     r = real(tv, tz);
     if (r == 0 && tv && (p = pause_total_ms()) != 0) {
         tv->s -= p / 1000;
@@ -510,6 +743,39 @@ long shim_time(long *out)
     return tv.s;
 }
 
+/* PAD-484: which clock an absolute deadline is on shows in the number -
+ * REALTIME is ~1.8e9 s, MONOTONIC the uptime. A condvar's is REALTIME unless
+ * pthread_condattr_setclock (which the game imports) said MONOTONIC. */
+static int warp_dl_clock(long long dl)
+{
+    return dl > 1000000000LL * 1000000LL ? 0 : 1;
+}
+
+/* A condvar wait with the game running at speed: ONE real deadline, the game's
+ * time left divided by k, and a timeout handed back only once the game's clock
+ * has reached the game's deadline - the speed went down or a pause came during
+ * the wait, and it waits on for what is left, as the pause path above does.
+ *
+ * NEVER A SPURIOUS WAKE. The first build sliced these waits at 50 ms real and
+ * returned 0 when a slice ended early: POSIX allows a spurious wake, but only a
+ * caller that loops on its predicate survives one, and nothing says every
+ * caller in a game program does - so the shim never makes one up. (The crash
+ * that first raised the doubt, Godzilla Pro 1.16 at game+0x526f0, was the boot
+ * run fast instead - padspeed.py UP_STATES - and came back the same with this.) */
+static int warp_cond_wait(int (*real)(void *, void *, void *), void *c, void *m,
+                          const struct shim_ts *t)
+{
+    long long dl = ts_us(t), left;
+    int clk = warp_dl_clock(dl), r;
+    struct shim_ts k;
+    for (;;) {
+        left = dl - game_clk_us(clk);
+        us_ts(real_clk_us(clk) + warp_budget(left), &k);
+        r = real(c, m, &k);
+        if (r != 110 /* ETIMEDOUT */ || game_clk_us(clk) >= dl) return r;
+    }
+}
+
 int shim_cond_timedwait(void *c, void *m, void *t) __asm__("pthread_cond_timedwait");
 int shim_cond_timedwait(void *c, void *m, void *t)
 {
@@ -521,6 +787,8 @@ int shim_cond_timedwait(void *c, void *m, void *t)
     if (!real) real = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
     if (ra > 0x16a00 && ra < 0x5d3168) synclog("pthread_cond_timedwait", c, ra);
     if (!t) return real(c, m, t);
+    warp_poll();
+    if (w_on) return warp_cond_wait(real, c, m, (const struct shim_ts *)t);
     /* the game's (paused) clock -> the kernel's */
     dl = *(const struct shim_ts *)t;
     ts_add_ms(&dl, p0);
@@ -532,6 +800,281 @@ int shim_cond_timedwait(void *c, void *m, void *t)
         r = real(c, m, &dl);
     }
     return r;
+}
+
+/* ---- PAD-484: the rest of the ways the game waits, at speed ---------------
+ * Each is the real call until a speed is asked for (w_on), so a run at 1x
+ * takes exactly the path it took before. */
+int shim_nanosleep(const struct shim_ts *req, struct shim_ts *rem) __asm__("nanosleep");
+int shim_nanosleep(const struct shim_ts *req, struct shim_ts *rem)
+{
+    real_time_init();
+    warp_poll();
+    if (!w_on || !req) return real_nsl(req, rem);
+    return warp_sleep(ts_us(req), rem);
+}
+
+unsigned shim_sleep(unsigned s) __asm__("sleep");
+unsigned shim_sleep(unsigned s)
+{
+    static unsigned (*real)(unsigned);
+    struct shim_ts rem = { 0, 0 };
+    if (!real) real = dlsym(RTLD_NEXT, "sleep");
+    warp_poll();
+    if (!w_on) return real(s);
+    if (warp_sleep((long long)s * 1000000LL, &rem) == 0) return 0;
+    return (unsigned)rem.s + (rem.ns ? 1u : 0u);
+}
+
+/* Returns the error itself, not -1 - clock_nanosleep's own convention. */
+int shim_clock_nanosleep(int clk, int flags, const struct shim_ts *req,
+                         struct shim_ts *rem) __asm__("clock_nanosleep");
+int shim_clock_nanosleep(int clk, int flags, const struct shim_ts *req,
+                         struct shim_ts *rem)
+{
+    static int (*real)(int, int, const struct shim_ts *, struct shim_ts *);
+    long long d;
+    if (!real) real = dlsym(RTLD_NEXT, "clock_nanosleep");
+    warp_poll();
+    if (!w_on || !req || !pause_clock(clk)) return real(clk, flags, req, rem);
+    d = (flags & 1 /* TIMER_ABSTIME */) ? ts_us(req) - game_clk_us(clk) : ts_us(req);
+    if (warp_sleep(d, (flags & 1) ? 0 : rem) == 0) return 0;
+    return 4 /* EINTR */;
+}
+
+int shim_select(int n, void *r, void *w, void *e, struct shim_tv *tv) __asm__("select");
+int shim_select(int n, void *r, void *w, void *e, struct shim_tv *tv)
+{
+    static int (*real)(int, void *, void *, void *, struct shim_tv *);
+    long long g, b, left;
+    struct shim_tv k;
+    int ret;
+    if (!real) real = dlsym(RTLD_NEXT, "select");
+    warp_poll();
+    if (!w_on || !tv) return real(n, r, w, e, tv);
+    g = (long long)tv->s * 1000000LL + tv->us;
+    b = warp_budget(g);
+    k.s = (long)(b / 1000000LL);
+    k.us = (long)(b % 1000000LL);
+    ret = real(n, r, w, e, &k);
+    /* Linux writes back what was left of the wait - on the game's clock */
+    left = (long long)k.s * 1000000LL + k.us;
+    left = b ? left * g / b : 0;
+    tv->s = (long)(left / 1000000LL);
+    tv->us = (long)(left % 1000000LL);
+    return ret;
+}
+
+int shim_pselect(int n, void *r, void *w, void *e, const struct shim_ts *ts,
+                 const void *mask) __asm__("pselect");
+int shim_pselect(int n, void *r, void *w, void *e, const struct shim_ts *ts,
+                 const void *mask)
+{
+    static int (*real)(int, void *, void *, void *, const struct shim_ts *, const void *);
+    struct shim_ts k;
+    if (!real) real = dlsym(RTLD_NEXT, "pselect");
+    warp_poll();
+    if (!w_on || !ts) return real(n, r, w, e, ts, mask);
+    us_ts(warp_budget(ts_us(ts)), &k);
+    return real(n, r, w, e, &k, mask);
+}
+
+static int (*real_ppoll)(void *, unsigned long, const struct shim_ts *, const void *);
+
+/* poll's timeout is whole milliseconds, too coarse for 1 ms at 8x: a wait at
+ * speed goes to ppoll with the shrunk time in microseconds. */
+int shim_poll(void *fds, unsigned long nfds, int ms) __asm__("poll");
+int shim_poll(void *fds, unsigned long nfds, int ms)
+{
+    static int (*real)(void *, unsigned long, int);
+    struct shim_ts k;
+    if (!real) real = dlsym(RTLD_NEXT, "poll");
+    warp_poll();
+    if (!w_on || ms <= 0) return real(fds, nfds, ms);
+    if (!real_ppoll) real_ppoll = dlsym(RTLD_NEXT, "ppoll");
+    if (!real_ppoll) return real(fds, nfds, ms);
+    us_ts(warp_budget((long long)ms * 1000LL), &k);
+    return real_ppoll(fds, nfds, &k, 0);
+}
+
+int shim_ppoll(void *fds, unsigned long nfds, const struct shim_ts *ts,
+               const void *mask) __asm__("ppoll");
+int shim_ppoll(void *fds, unsigned long nfds, const struct shim_ts *ts,
+               const void *mask)
+{
+    struct shim_ts k;
+    if (!real_ppoll) real_ppoll = dlsym(RTLD_NEXT, "ppoll");
+    warp_poll();
+    if (!w_on || !ts) return real_ppoll(fds, nfds, ts, mask);
+    us_ts(warp_budget(ts_us(ts)), &k);
+    return real_ppoll(fds, nfds, &k, mask);
+}
+
+/* syscall(): glib's g_cond_wait_until and libstdc++'s futex waits pass their
+ * timeouts straight to the kernel, and a clock read could come this way too.
+ * Declared with seven fixed arguments: on ARM EABI a variadic call passes its
+ * words exactly as a fixed one does, and forwarding all seven words keeps any
+ * 64-bit argument's register pair where the caller put it. Nothing in here may
+ * be unsafe in a signal handler for the calls it only forwards - the shim's own
+ * raw gettid comes from one. */
+long shim_syscall(long n, long a, long b, long c, long d, long e, long f, long g)
+    __asm__("syscall");
+long shim_syscall(long n, long a, long b, long c, long d, long e, long f, long g)
+{
+    static long (*real)(long, ...);
+    if (!real) real = dlsym(RTLD_NEXT, "syscall");
+    if (w_on) {
+        if (n == 240 /* futex */ && d) {
+            int cmd = (int)b & ~(128 | 256);   /* PRIVATE, CLOCK_REALTIME */
+            struct shim_ts k;
+            if (cmd == 0 /* FUTEX_WAIT: relative */) {
+                us_ts(warp_budget(ts_us((const struct shim_ts *)d)), &k);
+                return real(n, a, b, c, (long)&k, e, f, g);
+            }
+            if (cmd == 9 /* FUTEX_WAIT_BITSET: absolute */) {
+                int clk = (b & 256) ? 0 : 1;
+                long long left = ts_us((const struct shim_ts *)d) - game_clk_us(clk);
+                us_ts(real_clk_us(clk) + warp_budget(left), &k);
+                return real(n, a, b, c, (long)&k, e, f, g);
+            }
+        }
+        if (n == 263 /* clock_gettime */)
+            return shim_clock_gettime((int)a, (struct shim_ts *)b);
+        if (n == 78 /* gettimeofday */)
+            return shim_gettimeofday((struct shim_tv *)a, (void *)b);
+        if (n == 162 /* nanosleep */)
+            return shim_nanosleep((const struct shim_ts *)a, (struct shim_ts *)b);
+    }
+    return real(n, a, b, c, d, e, f, g);
+}
+
+/* The POSIX timers (librt): each one's GAME interval is kept, so a change of
+ * speed can re-arm it - a periodic timer the kernel runs on its own would
+ * otherwise go on at the speed it was set at. */
+struct shim_its { struct shim_ts iv, val; };
+#define WT_N 32
+static struct { void *id; int clk, armed; long long g_iv; } wt[WT_N];
+static int (*real_tset)(void *, int, const struct shim_its *, struct shim_its *);
+static int (*real_tget)(void *, struct shim_its *);
+
+static void wt_init(void)
+{
+    if (!real_tset) real_tset = dlsym(RTLD_NEXT, "timer_settime");
+    if (!real_tget) real_tget = dlsym(RTLD_NEXT, "timer_gettime");
+}
+
+static int wt_find(void *id, int make)
+{
+    int i, free_i = -1;
+    for (i = 0; i < WT_N; i++) {
+        if (wt[i].id == id) return i;
+        if (!wt[i].id && free_i < 0) free_i = i;
+    }
+    if (make && free_i >= 0) {
+        wt[free_i].id = id;
+        wt[free_i].clk = 1;
+        wt[free_i].armed = 0;
+        wt[free_i].g_iv = 0;
+    }
+    return make ? free_i : -1;
+}
+
+/* a nonzero game time never shrinks to zero, which would DISARM the timer */
+static void wt_scale(const struct shim_ts *in, struct shim_ts *out, long long num, long long den)
+{
+    long long us = ts_us(in);
+    int set = in->s || in->ns;
+    us = us * num / den;
+    if (set && us < 1) us = 1;
+    us_ts(us, out);
+}
+
+int shim_timer_create(int clk, void *sev, void **id) __asm__("timer_create");
+int shim_timer_create(int clk, void *sev, void **id)
+{
+    static int (*real)(int, void *, void **);
+    int r, i;
+    if (!real) real = dlsym(RTLD_NEXT, "timer_create");
+    r = real(clk, sev, id);
+    if (r == 0 && id && (i = wt_find(*id, 1)) >= 0) wt[i].clk = clk;
+    return r;
+}
+
+int shim_timer_delete(void *id) __asm__("timer_delete");
+int shim_timer_delete(void *id)
+{
+    static int (*real)(void *);
+    int i;
+    if (!real) real = dlsym(RTLD_NEXT, "timer_delete");
+    if ((i = wt_find(id, 0)) >= 0) wt[i].id = 0;
+    return real(id);
+}
+
+int shim_timer_settime(void *id, int flags, const struct shim_its *nv,
+                       struct shim_its *ov) __asm__("timer_settime");
+int shim_timer_settime(void *id, int flags, const struct shim_its *nv,
+                       struct shim_its *ov)
+{
+    struct shim_its k;
+    int i, r, clk;
+    wt_init();
+    warp_poll();
+    i = wt_find(id, 1);
+    clk = i >= 0 ? wt[i].clk : 1;
+    if (i >= 0 && nv) {
+        wt[i].g_iv = ts_us(&nv->iv);
+        wt[i].armed = nv->val.s || nv->val.ns;
+    }
+    if (!w_on || !nv || !pause_clock(clk)) return real_tset(id, flags, nv, ov);
+    wt_scale(&nv->iv, &k.iv, 1000, w_k);
+    if (!(nv->val.s || nv->val.ns)) {
+        k.val = nv->val;                    /* zero: disarm, as asked */
+    } else if (flags & 1 /* TIMER_ABSTIME */) {
+        long long left = ts_us(&nv->val) - game_clk_us(clk);
+        us_ts(left > 0 ? left * 1000LL / w_k : 0, &k.val);
+        if (!k.val.s && !k.val.ns) k.val.ns = 1000;
+        flags &= ~1;
+    } else {
+        wt_scale(&nv->val, &k.val, 1000, w_k);
+    }
+    r = real_tset(id, flags, &k, ov);
+    if (r == 0 && ov) {
+        wt_scale(&ov->iv, &ov->iv, w_k, 1000);
+        wt_scale(&ov->val, &ov->val, w_k, 1000);
+    }
+    return r;
+}
+
+int shim_timer_gettime(void *id, struct shim_its *cur) __asm__("timer_gettime");
+int shim_timer_gettime(void *id, struct shim_its *cur)
+{
+    int r;
+    wt_init();
+    r = real_tget(id, cur);
+    if (r == 0 && cur && w_on) {
+        wt_scale(&cur->iv, &cur->iv, w_k, 1000);
+        wt_scale(&cur->val, &cur->val, w_k, 1000);
+    }
+    return r;
+}
+
+/* Called by warp_poll, with the speed changed from `was` to `now`: every armed
+ * timer gets what is left of its game time, and its game interval, at `now`. */
+static void wt_rearm(unsigned was, unsigned now)
+{
+    int i;
+    wt_init();
+    if (!real_tset || !real_tget) return;
+    for (i = 0; i < WT_N; i++) {
+        struct shim_its cur, k;
+        if (!wt[i].id || !wt[i].armed || !pause_clock(wt[i].clk)) continue;
+        if (real_tget(wt[i].id, &cur) != 0) continue;
+        if (!cur.val.s && !cur.val.ns) { wt[i].armed = 0; continue; }   /* spent */
+        wt_scale(&cur.val, &k.val, was, now);
+        us_ts(wt[i].g_iv * 1000LL / now, &k.iv);
+        if (wt[i].g_iv && !k.iv.s && !k.iv.ns) k.iv.ns = 1000;
+        real_tset(wt[i].id, 0, &k, 0);
+    }
 }
 
 /* ---- libstdc++ read path ---------------------------------------------- *
@@ -1237,6 +1780,8 @@ int shim_usleep(unsigned int us)
         }
     }
     if (!us) return 0;
+    warp_poll();
+    if (w_on) return warp_sleep((long long)us, 0);   /* PAD-484: at speed */
     return real_usleep(us);
 }
 
@@ -4127,6 +4672,10 @@ struct padsw_shm {
     unsigned char cab[8]; unsigned char scr_cab[8];
     /* PAD-204: padglhost's pause - see shim_cond_timedwait */
     unsigned paused; unsigned paused_ms; unsigned pause_req;
+    /* PAD-204 round 3: the root hand that stops the game (pausekeep.py) */
+    unsigned stop_want; unsigned stop_gen; unsigned stop_n; unsigned stop_ack;
+    /* PAD-484: the game's speed, x1000 - see warp_poll */
+    unsigned speed_req; unsigned speed_now;
 };
 #define PADSW_MAGIC 0x53444150u
 
@@ -4141,6 +4690,35 @@ static volatile struct padsw_shm *sw_shm;
 static unsigned pause_total_ms(void)
 {
     return sw_shm ? sw_shm->paused_ms : 0;
+}
+
+/* PAD-484: the speed padspeed.py asked for, x1000; 0 = none (1x). Read only
+ * once the block carries the field: a block an older padglhost made is the
+ * pause fields' 1112 bytes in a 4096-byte file, and the rest reads zero. */
+static unsigned speed_req_x1000(void)
+{
+    return sw_shm ? sw_shm->speed_req : 0;
+}
+
+/* The answer: speed_now in the block, and /dump/padspeed for the shell
+ * scripts of the harness, which read it to shorten their own waits by the
+ * same k ("x4.000 game_ms=123456"). One line, rewritten on each change. */
+static void speed_publish(unsigned k, unsigned was, long long game_ms)
+{
+    char b[96];
+    int fd, n;
+    if (sw_shm) sw_shm->speed_now = k;
+    n = snprintf(b, sizeof b, "x%u.%03u game_ms=%lld\n", k / 1000, k % 1000, game_ms);
+    init();
+    fd = real_open("/dump/padspeed", 01 | 0100 | 01000 /* WRONLY|CREAT|TRUNC */, 0644);
+    if (fd >= 0) {
+        int (*rc)(int) = dlsym(RTLD_NEXT, "close");
+        write(fd, b, (unsigned long)n);
+        if (rc) rc(fd);
+    }
+    snprintf(b, sizeof b, "[speed] the game's clock runs x%u.%03u (was x%u.%03u) at game %lld ms\n",
+             k / 1000, k % 1000, was / 1000, was % 1000, game_ms);
+    logmsg(b);
 }
 
 /* A tap in flight. `pad_tap_id` is consulted by sw_scan_bytes() exactly as if

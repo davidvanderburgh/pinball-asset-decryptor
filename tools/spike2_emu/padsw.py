@@ -86,7 +86,9 @@ OFF_STOP_WANT = OFF_PAUSE_REQ + 4    # 1096 1 = freeze wanted  (padglhost writes
 OFF_STOP_GEN = OFF_STOP_WANT + 4     # 1100 request counter    (padglhost writes)
 OFF_STOP_N = OFF_STOP_GEN + 4        # 1104 games signalled    (pausekeep.py writes)
 OFF_STOP_ACK = OFF_STOP_N + 4        # 1108 request served     (pausekeep.py writes)
-SIZE = OFF_STOP_ACK + 4              # 1112, in a 4096-byte block
+OFF_SPEED_REQ = OFF_STOP_ACK + 4     # 1112 game speed x1000   (padspeed.py writes)
+OFF_SPEED_NOW = OFF_SPEED_REQ + 4    # 1116 speed in effect    (the shim writes)
+SIZE = OFF_SPEED_NOW + 4             # 1120, in a 4096-byte block
 
 
 def open_block(path=PATH):
@@ -278,6 +280,48 @@ def set_cab(m, name, val):
     merges it, so there is no edge to lose and no stuck level to inherit
     except our own, which the callers release on EOF."""
     m[OFF_SCR_CAB + CAB_NAMES.index(name)] = 1 if val else 0
+    m.flush()
+
+
+def speed(m):
+    """The game's speed in effect (PAD-484): how many game seconds pass per real
+    one. 1.0 until padspeed.py asks for another and the shim takes it up - and
+    on a block an older renderer made, where the field reads zero."""
+    v = struct.unpack_from("<I", m, OFF_SPEED_NOW)[0]
+    return v / 1000.0 if v else 1.0
+
+
+def game_sleep(m, secs):
+    """Sleep `secs` of the GAME's time. Every helper that models a physical
+    time - a button held, a ball rolling down a lane, a coil's pulse settling -
+    waits through this, so at 4x the game sees the same 150 ms press it sees at
+    1x rather than a 600 ms one (which on a service button is an auto-repeat)."""
+    time.sleep(secs / speed(m))
+
+
+class GameClock:
+    """Seconds of the GAME's time, for a helper that keeps time across many
+    looks at the wire (ballfeed.py). It advances by the speed in effect at each
+    look, so at 1x it IS time.monotonic() - it starts there, and a helper's
+    zeros and comparisons mean what they always did."""
+
+    def __init__(self, m):
+        self.m = m
+        self.real = time.monotonic()
+        self.game = self.real
+
+    def now(self):
+        r = time.monotonic()
+        self.game += (r - self.real) * speed(self.m)
+        self.real = r
+        return self.game
+
+
+def request_speed(m, k):
+    """Ask the shim for game speed `k` (4 = four game seconds a real one; 0.5 is
+    slow motion; 1 is real time). It is taken up at the game's next clock read;
+    speed() says when it has been."""
+    struct.pack_into("<I", m, OFF_SPEED_REQ, max(0, int(round(k * 1000))))
     m.flush()
 
 

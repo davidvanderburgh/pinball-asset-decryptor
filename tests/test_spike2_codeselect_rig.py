@@ -1060,9 +1060,11 @@ def test_the_bound_comes_from_the_countdown_and_zero_means_for_ever():
 def test_autoattract_is_held_back_until_the_menu_has_chosen():
     """autoattract reads a quiet bus as a ready game and presses Service
     Back; the menu ignores it and the presses would be spent before Tech
-    Alerts. The plain launch line stays verbatim in the other branch."""
+    Alerts. The plain launch line stays verbatim in the other branch - as the
+    game's own account since PAD-484 (setsid_as_seer), so it can see the game
+    on a root run in a rig slot."""
     code = _code(_read("watch.sh"))
-    plain = ('setsid_as_user bash "$S/autoattract.sh" "$LOG" > '
+    plain = ('setsid_as_seer bash "$S/autoattract.sh" "$LOG" > '
              '"$PAD_LOGDIR/padauto.log" 2>&1 &')
     assert plain in code
     block = code[code.index('if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then'):]

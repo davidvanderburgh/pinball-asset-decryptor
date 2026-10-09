@@ -410,7 +410,7 @@ class Feeder:
         for step in plan.steps:
             if step[0] == "wait":
                 if not self.dry:
-                    time.sleep(step[1])
+                    padsw.game_sleep(m, step[1])   # a ball rolling: game time (PAD-484)
                 continue
             # THE GAME'S OWN ANSWER, not ours (PAD-186). take() and the write
             # after it are `1 -> 0 -> 1` in scr_held and the shim only looks
@@ -463,7 +463,7 @@ class Feeder:
                     self.extra -= 1
                 if self.run_plan(m, plan, "eject:"):
                     self.eject_at, self.eject_from_full = now, full_before
-                    self.last_feed = time.monotonic()
+                    self.last_feed = now
                     self.fed += 1
                     publish(self.fed)
                     fed = True
@@ -721,6 +721,13 @@ def main():
         % (HZ, FLIGHT_S * 1000, MIN_GAP_S * 1000, ", DRY RUN" if dry else ""))
 
     period, gone_since, ever = 1.0 / max(1.0, HZ), None, False
+    # PAD-484: THE GAME'S CLOCK, not the wall's. Every time this models - the
+    # lane flight, the retry gap, the way home, the room's minute - is a time
+    # on the machine, so with the game running k times the wall's they all
+    # run k times as fast. The look at the wire comes up to 4 times as often
+    # too: the coil is a COUNTER, so no pulse is missed either way - it only
+    # answers the eject sooner in the game's time.
+    gclock = padsw.GameClock(m)
     while True:
         d = read_led()
         if d is None:
@@ -745,9 +752,9 @@ def main():
             ever = True
             say("padled block is up - watching")
         gone_since = None
-        if f.poll(m, d, time.monotonic()) and once:
+        if f.poll(m, d, gclock.now()) and once:
             break
-        time.sleep(period)
+        time.sleep(period / min(4.0, max(1.0, padsw.speed(m))))
     m.close()
     return 0
 

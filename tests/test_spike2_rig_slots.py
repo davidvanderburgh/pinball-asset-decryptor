@@ -671,7 +671,14 @@ def test_a_running_job_keeps_its_slot_and_copies_take_turns():
     assert 'riglock.sh" use "$slot" "$WHO"' in loop and "sleep 2" in loop
     cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
     c = cs[cs.index("copy() {"):cs.index("copy_now() {")]
-    assert "exec 9> /tmp/pad-cardstage-copy.lock" in c and "flock 9" in c and 'copy_now "$@"' in c
+    assert "copy_lock" in c and 'copy_now "$@"' in c and c.index("copy_lock") < c.index('copy_now "$@"')
+    # PAD-484: opened READ-ONLY - /tmp is sticky with fs.protected_regular=2, so `exec 9> lock` could not open a lock
+    # another account's batch had made, and the two batches copied at once
+    lk = cs[cs.index("copy_lock() {"):]
+    lk = lk[:lk.index("\n}\n")]
+    assert 'exec 9< "$COPY_LOCK"' in lk and "flock 9" in lk
+    assert not [ln for ln in cs.splitlines() if "exec 9> " in ln and not ln.lstrip().startswith("#")]
+    assert "COPY_LOCK=/tmp/pad-cardstage-copy.lock" in cs
 
 
 def test_a_copy_is_staged_only_whole():

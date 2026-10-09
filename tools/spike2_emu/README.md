@@ -972,6 +972,15 @@ exception and cannot be made otherwise: the game builds its switch table on the
 heap, so the id belonging to a name is not in the binary anywhere. It is cached
 per title, so only the first run of a title waits for it.
 
+**Per title, not per build — so each list names its build** (`# binary: game
+<size> bytes`), and the ids do move between builds (Iron Maiden LE 1.18's are
+one off its older builds'). `watch.sh` removes a list that names another build
+before anything reads it (`mktables.py --current --elf <binary>`), and the run
+derives this build's like a first run; `gamecheck.sh` waits for this build's
+list. Hidden runs build the tables too: `PAD_PLAYFIELD=0` only skips the window
+(PAD-484 — a sweep on a slot that last ran another build pressed the wrong
+switches).
+
 **These were checked into git until 2026-08-06, and only Godzilla's existed** —
 so every other title got a schematic and it read like a property of the title
 rather than of the repository. The artwork was worse: it sat here ignored by
@@ -1104,6 +1113,24 @@ window. Above `PAD_AUDIO_MAX_LATE_MS` (default 750; the queue normally rests
 near 200) it drops the oldest audio back to the 350 ms cushion and logs
 `[padplay] queue stayed above N ms for 2 s - skipped M ms to catch up`. The
 5 s `[padplay] queue` line counts the total `skipped`.
+
+**The game's clock can run faster than the wall's (PAD-484).** `PAD_SPEED=4
+watch.sh ...` (or `rigbatch.sh --speed 4`, or `padspeed.py 4` on a running
+game) runs every clock the guest reads, and every way it waits, four times as
+fast: the same interposers as the pause, plus every sleep, `select`/`poll`, the
+futex timeouts glib and libstdc++ pass through `syscall()` and the POSIX timers
+(`hwshim.c`, "GAME SPEED"). A rig in a game costs about half a core - the game
+is waiting on its own timers, not on the CPU - so a sweep's ball savers, drains
+and 30 s modes take a quarter of the time. It starts once the game is in
+attract (the boot interleaves the game's timers with card reads that do not
+speed up, and sped up from the start Godzilla Pro 1.16 took a Start before its
+scenes were loaded and crashed); the picture stays at ~30 frames a real second,
+a timed wait of 5 s or more keeps its real length (the dispatch watchdog), and
+the harness's own physical times (`swpoke.py`, `plunge.py`, `ballfeed.py`,
+`gamecheck.sh`) follow the speed through `padsw.game_sleep` and `pad_gsleep`.
+`padspeed.py` alone says the speed in effect; `padspeed.py 1` is real time.
+`docs/plans/game_speed.md` has the measurements. Leave it off for anything that
+must see real-time behaviour (a clip played frame by frame, audio).
 
 `buildgl.sh` and `buildbridge.sh` **both write `libGLESv2.so.2`**, so whichever
 ran last decides which backend is live. Re-run the one you want before measuring.

@@ -691,6 +691,33 @@ def drawable(game=None):
         return False
 
 
+def list_current(game=None, elf=None):
+    """(ok, why): whether the title's switch_list.txt is the RUNNING build's.
+
+    PAD-484. The tables directory is keyed by TITLE, so a rig that last ran
+    another build of it holds that build's list until build() re-derives it
+    from this run's own dump - and the ids move between builds (Iron Maiden LE
+    1.18's are one off its older builds': the check pressed Tournament Start
+    for Start). A reader that is about to press switches by name asks this
+    first rather than trusting that the file exists. The same test build()
+    applies (_built_from: the `# binary:` line names the binary there now).
+    `elf` names the binary outright - watch.sh asks before the run has
+    published where its title is (dump/title).
+    """
+    game = gameinfo.active(game)
+    sw_list = gameinfo.table("switch_list.txt", game) if game else None
+    if not sw_list or not os.path.exists(sw_list):
+        return False, "missing"
+    elf = elf or gameinfo.elf(game)
+    if not elf or not os.path.exists(elf):
+        return True, "there (no game binary to compare it with)"
+    if _built_from(sw_list, elf):
+        return True, "this build's (%s)" % devicexy.binary_id(elf)
+    return False, ("another build's (%s; this run is %s)"
+                   % (_recorded_binary(sw_list) or "an unrecorded build",
+                      devicexy.binary_id(elf)))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--game", default=None, help="title (default: the active one)")
@@ -698,7 +725,17 @@ def main():
     ap.add_argument("--wait", type=float, default=0,
                     help="seconds to wait for the switch dump to appear")
     ap.add_argument("--force", action="store_true", help="rebuild everything")
+    ap.add_argument("--current", action="store_true",
+                    help="build nothing: exit 0 when the switch list is the "
+                         "running build's, 1 when it is missing or another's")
+    ap.add_argument("--elf", default=None,
+                    help="with --current: the running game binary (default: "
+                         "the one the run published)")
     a = ap.parse_args()
+    if a.current:
+        ok, why = list_current(a.game, a.elf)
+        print("switch list: %s" % why)
+        return 0 if ok else 1
     made = build(a.game, a.log, a.wait, a.force)
     if not made:
         print("nothing written")

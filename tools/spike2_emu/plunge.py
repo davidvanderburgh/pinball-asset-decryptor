@@ -206,16 +206,16 @@ def do_coin(m, n=1):
     padsw.take(m, (COIN,))
     for _ in range(n):
         _set(m, COIN, 1)
-        time.sleep(0.12)
+        padsw.game_sleep(m, 0.12)
         _set(m, COIN, 0)
-        time.sleep(0.7)
+        padsw.game_sleep(m, 0.7)
     print("%d coin(s) in the left chute" % n)
 
 
 def do_start(m):
     padsw.take(m, (START,))
     _set(m, START, 1)
-    time.sleep(0.15)
+    padsw.game_sleep(m, 0.15)
     _set(m, START, 0)
     print("Start pressed")
     if not _held(m, COIN):
@@ -324,11 +324,11 @@ def do_serve(m):
         return 1
     for step in plan.steps:
         if step[0] == "wait":
-            time.sleep(step[1])
+            padsw.game_sleep(m, step[1])
             continue
         _set(m, step[1], step[2])
         print(step[3])
-    time.sleep(LANE_S)
+    padsw.game_sleep(m, LANE_S)
     _set(m, SHOOTER, 0)
     print("shooter lane opened (ball launched)")
     return 0
@@ -384,7 +384,7 @@ def do_drain(m):
         return 1
     for step in plan.steps:
         if step[0] == "wait":              # the roll down the ramp (PAD-186)
-            time.sleep(step[1])
+            padsw.game_sleep(m, step[1])
             continue
         if not _move(m, step[1], step[2], step[3]):
             return 1
@@ -430,9 +430,9 @@ def main():
         # than inventing a ball. So a Start that did not take no longer costs
         # the machine a ball, which was this verb's recorded fault.
         do_coin(m)
-        time.sleep(1.5)
+        padsw.game_sleep(m, 1.5)
         do_start(m)
-        time.sleep(5)
+        padsw.game_sleep(m, 5)
         rc = do_plunge(m)
     elif what == "reset":
         do_reset(m)

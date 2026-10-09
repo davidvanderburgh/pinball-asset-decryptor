@@ -11,6 +11,11 @@ extern long write(int, const void *, unsigned long);
 extern unsigned long strlen(const char *);
 extern int gettimeofday(void *, void *);
 extern int nanosleep(const void *, void *);
+/* PAD-484: the wall clock, from hwshim.so (LD_PRELOAD), past the game's clock
+ * - see the swap pacing below. Weak: a guest without the shim has neither,
+ * and the game's clock IS the wall's there. */
+extern long long pad_real_us(void) __attribute__((weak));
+extern void pad_real_sleep_us(long long) __attribute__((weak));
 extern int snprintf(char *, unsigned long, const char *, ...);
 extern char *getenv(const char *);
 
@@ -156,9 +161,16 @@ int eglMakeCurrent(void *dpy, void *draw, void *read, void *ctx)
 struct tv_ { long sec, usec; };
 struct ts_ { long sec, nsec; };
 
+/* PAD-484: ON THE WALL CLOCK. With the game's clock running k times the wall's
+ * (hwshim's game speed), pacing swaps on the game's clock would build k times
+ * as many pictures a real second, and the renderer would pay for every one.
+ * On the wall clock the game builds 30 a real second at any speed and skips
+ * the rest, as it does on a machine whose GPU is slow (PAD-301); at 1x the
+ * two clocks are the same clock and nothing changes. */
 static unsigned long long now_us(void)
 {
     struct tv_ t;
+    if (pad_real_us) return (unsigned long long)pad_real_us();
     gettimeofday(&t, 0);
     return (unsigned long long)t.sec * 1000000ULL + (unsigned long long)t.usec;
 }
@@ -284,7 +296,8 @@ int eglSwapBuffers(void *dpy, void *surf)
         unsigned long long d = next_us - now;
         req.sec = (long)(d / 1000000ULL);
         req.nsec = (long)((d % 1000000ULL) * 1000ULL);
-        nanosleep(&req, 0);
+        if (pad_real_sleep_us) pad_real_sleep_us((long long)d);
+        else nanosleep(&req, 0);
     }
     next_us += frame_us;
     if (next_us < now) next_us = now + frame_us;

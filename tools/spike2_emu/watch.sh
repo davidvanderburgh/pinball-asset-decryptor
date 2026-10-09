@@ -560,6 +560,29 @@ else GAME_ELF="$ROOT/games/$GAME/game"; fi
 PROV=$(python3 "$RIG/gameinfo.py" --provenance "$GAME_ELF" 2>/dev/null)
 [ -n "$PROV" ] && echo "[watch] firmware: $PROV"
 
+# PAD-484: ANOTHER BUILD'S SWITCH LIST GOES BEFORE ANYTHING READS IT. The tables
+# are kept per TITLE, and mktables refuses a list another build made (the
+# jurassic_park_le lesson) - but only in its pass two, once this run's own dump
+# is in, ~20 s into the boot, and its pass one cannot tell either (the run has
+# not published dump/title yet). By then padglhost had latched the coin door
+# and the trough on that build's ids, and autoattract and ballfeed had read
+# them: Iron Maiden LE 1.18 after an older build is every id one off - Service
+# Back pressed Headphone Detect, the check's Start was Tournament Start, "48V
+# DISABLED", the feeder watching the wrong trough for the whole run. Without
+# it the run is the title's first run on this rig (item 49): the platform ids,
+# the playfield withheld until pass two writes this build's list. Asked with
+# the explicit binary, as nbdir.py is below. Only an answer of "another
+# build's" removes anything - a python that fails says nothing of the kind.
+if [ -f "$GAME_ELF" ] && [ -f "$PAD_TABLES/$GAME/switch_list.txt" ]; then
+    SWCUR=$(python3 "$RIG/mktables.py" --current --game "$GAME" --elf "$GAME_ELF" 2>/dev/null)
+    case "$SWCUR" in
+        "switch list: another build's"*)
+            rm -f "$PAD_TABLES/$GAME/switch_list.txt" "$PAD_TABLES/$GAME/switch_xy.txt"
+            echo "[watch] $GAME's cached switch list is ${SWCUR#switch list: } -" \
+                 "removed; this run derives its own" ;;
+    esac
+fi
+
 NBID="$PAD_TABLES/$GAME/node_ident.txt"
 mkdir -p "$PAD_TABLES/$GAME" 2>/dev/null
 NBID_FRESH=0
@@ -1149,6 +1172,18 @@ as_user() {
 setsid_as_user() {
     if [ "$DROP" = 1 ]; then runuser -u "$PAD_USER" -- setsid "$@"; else setsid "$@"; fi
 }
+# ★ A HELPER THAT MUST SEE THE GAME RUNS AS THE GAME (PAD-484). pad_pids finds a
+# slot's processes by the PAD_SLOT in their environment, and /proc/<pid>/environ
+# is readable only by the process's own account and root - so a dropped helper
+# reads a ROOT guest as "another account's = slot 0", which is right in slot 0
+# and wrong in every other. Measured 2026-10-09: on all four slots
+# padauto.log's last line was "[auto] the game is not running; nothing to do",
+# so every rigbatch sweep (root, slots 1-4) waited out Tech Alerts until the
+# game left it by itself - 97 s on Godzilla Pro 1.16, where a working
+# autoattract presses ~15 s after the bus goes quiet. In slot 0 nothing changes.
+setsid_as_seer() {
+    if [ "$DROP" = 1 ] && [ "$PAD_SLOT" != 0 ]; then setsid "$@"; else setsid_as_user "$@"; fi
+}
 # IS THE PLAYFIELD PROCESS THERE? One definition, because there are now five
 # places that ask - four in teardown and the post-start check - and this rig's
 # standing rule is that two copies of one fact eventually disagree. `/init` is
@@ -1348,6 +1383,8 @@ teardown() {
     pad_pkill -9 -f 'autoattract.sh'
     [ -n "$BALLPG" ] && kill -9 -"$BALLPG" 2>/dev/null
     pad_pkill -9 -f 'ballfeed[.]py'
+    [ -n "${SPEEDPG:-}" ] && kill -9 -"$SPEEDPG" 2>/dev/null
+    pad_pkill -9 -f 'padspeed[.]py --when-up'
     # PAD-204's root pause keeper. The guest is already SIGKILLed above, and
     # SIGKILL ends a stopped process too, so nothing is left frozen by this.
     [ -n "$KEEPPG" ] && kill -9 -"$KEEPPG" 2>/dev/null
@@ -1603,6 +1640,9 @@ rm -f "$RING_HOST" "$SW_HOST"
 # game's switch ids for the seconds in between. Absent is the state the panel
 # expects and polls through; wrong is the state nothing would notice.
 rm -f "$ROOT/dump/padbinds"
+# PAD-484: the game's speed as the shim last said it. A run nobody speeds up
+# must read 1 (padpath.sh pad_speed), not the last run's x4.
+rm -f "$ROOT/dump/padspeed"
 # And the ball feeder's status (PAD-134): the playfield's BALLS section shows
 # its count and newest lines, and the LAST run's would read as this one's
 # until the feeder says something.
@@ -2233,7 +2273,22 @@ fi
 #     group kills leave it alone. It talks to the rig only through dump/padled
 #     (read) and swpoke.py (clicks), so it survives the game restarting under it.
 #   * </dev/null and &, so nothing can block here again.
-if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
+#
+# PAD-484: THE TABLES ARE BUILT ON EVERY RUN; ONLY THE WINDOW IS PAD_PLAYFIELD'S.
+# This whole block used to sit under PAD_PLAYFIELD, and a hidden run (every
+# rigbatch sweep job) sets PAD_PLAYFIELD=0 - so a sweep never ran mktables, and
+# the switch list a rig slot had cached for a TITLE stayed whichever build last
+# ran there with a window. The jurassic_park_le refusal below (another build's
+# list is re-derived from this run's own dump) never ran either. Iron Maiden LE
+# 1.18 on a slot that had last shown an older build: every id one off, so
+# autoattract's Service Back was Headphone Detect, the check's Start was
+# Tournament Start, padglhost's coin-door latch held the wrong switch ("48V
+# DISABLED / CLOSE COIN DOOR"), and "no game started after three tries". The
+# device table was another build's too (no eject coil, so no ball feeder).
+# Everything here but the window reads these files (plunge.py, swpoke.py,
+# ballfeed.py, gamecheck.sh, padglhost's binds), so they are built whatever
+# is shown.
+if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then
     # THE TABLES ARE BUILT FROM THE TITLE, HERE, RATHER THAN COMMITTED. See
     # mktables.py. Three of the four need nothing but the game binary, so the
     # window can open with artwork, inserts and coils on a title's very first
@@ -2301,8 +2356,13 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             exec python3 "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
             "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$PAD_LOGDIR/padtables.log" 2>&1 &
         TBLPG=$!
-    elif grep -q '^drawable=yes' "$TBL_OUT"; then
-        echo "[watch]   opening now; the switch table follows in the background"
+    elif [ "${PAD_PLAYFIELD:-1}" = 0 ] || grep -q '^drawable=yes' "$TBL_OUT"; then
+        # no window (a hidden run) has nothing to wait for, whatever it can draw
+        if [ "${PAD_PLAYFIELD:-1}" = 0 ]; then
+            echo "[watch]   no playfield window; the switch table follows in the background"
+        else
+            echo "[watch]   opening now; the switch table follows in the background"
+        fi
         setsid_as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
             > "$PAD_LOGDIR/padtables.log" 2>&1 &
         TBLPG=$!
@@ -2318,7 +2378,8 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             | grep -v '^drawable=' | sed 's/^/[watch]   /'
     fi
     rm -f "$TBL_OUT"
-
+fi
+if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # TWO WAYS TO OPEN ONE WINDOW, AND WHICH ONE IS RIGHT IS A PROPERTY OF THE
     # MACHINE, NOT A PREFERENCE.
     #
@@ -2625,7 +2686,7 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
         # exec, so $! is the process teardown kills and alive.sh's
         # `autoattract\.sh` pattern sees it throughout (the wrapper's own
         # command line carries the name).
-        setsid_as_user bash -c 'f=$1; b=$2; shift 2
+        setsid_as_seer bash -c 'f=$1; b=$2; shift 2
             while [ -f "$f" ] && { [ "$b" = 0 ] || [ $(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) )) -lt "$b" ]; }; do
                 sleep 1
             done
@@ -2635,7 +2696,7 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
         echo "[watch] auto-advance on, held back until the boot selector has"
         echo "[watch] chosen; then it presses Service Back past Tech Alerts."
     else
-        setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
+        setsid_as_seer bash "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
         AUTOPG=$!
         echo "[watch] auto-advance on: it will press Service Back until the game"
         echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
@@ -2702,6 +2763,20 @@ if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
     BALLPG=$!
     echo "[watch] ball feed on: the game's own trough eject will be answered"
     echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
+fi
+
+# ★ GAME SPEED (PAD-484). PAD_SPEED=k runs the game's clock k times the wall's
+# once the game is up - a sweep's time goes on the game's own waiting (Tech
+# Alerts, ball savers, a 30 s mode), not on the CPU, which a rig in a game uses
+# half a core of. The boot stays at 1x: it is the CPU-bound part. padspeed.py
+# waits for the first screen, asks the shim through the switch block, and exits;
+# its own log says when. `padspeed.py <k>` changes it on a running game.
+SPEEDPG=
+if [ -n "${PAD_SPEED:-}" ] && [ "$PAD_SPEED" != 1 ]; then
+    setsid_as_seer python3 -u "$S/padspeed.py" --when-up "$PAD_SPEED" > "$PAD_LOGDIR/padspeed.log" 2>&1 &
+    SPEEDPG=$!
+    echo "[watch] game speed: x$PAD_SPEED once the game is up (the boot runs at 1x;"
+    echo "[watch] padspeed.py <k> changes it while it runs, padspeed.py 1 is real time)."
 fi
 
 # PAD_DOOR_OPEN=1 - boot with the coin door held OPEN, for servicing (item 43).

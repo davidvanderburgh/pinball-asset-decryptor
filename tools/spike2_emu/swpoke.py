@@ -84,7 +84,9 @@ def main():
               % ('PRESS  ' if state else 'RELEASE', sw,
                  struct.unpack_from('<I', m, OFF_GEN)[0]))
         if state:
-            time.sleep(ms / 1000.0)
+            # the GAME's milliseconds (PAD-484): at 4x a 150 ms press is
+            # 37 ms of the wall, and the game sees the 150 it was asked for
+            padsw.game_sleep(m, ms / 1000.0)
     m.close()
     return 0
 

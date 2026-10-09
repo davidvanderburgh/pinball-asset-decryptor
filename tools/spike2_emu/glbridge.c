@@ -32,6 +32,16 @@ extern int close(int);
 extern char *getenv(const char *);
 extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned int);
+/* PAD-484: hwshim.so's wall-clock sleep. Every wait in this file is for the
+ * HOST (ring space, a frame acknowledged), so it stays on the wall clock when
+ * the game's runs faster - else the 10 s "host stalled" limit below would be
+ * 1.25 s at 8x. Weak: without the shim, usleep is the wall clock anyway. */
+extern void pad_real_sleep_us(long long) __attribute__((weak));
+static void host_wait(void)
+{
+    if (pad_real_sleep_us) pad_real_sleep_us(50);
+    else usleep(50);
+}
 
 static void say(const char *s) { write(2, s, strlen(s)); }
 
@@ -113,7 +123,7 @@ static unsigned char *reserve(unsigned int n, unsigned int *at)
         tail = hdr->tail;
         if (head - tail + n <= ring_bytes) break;
         if (++spins > 200000) { bridge_dead = 1; say("[bridge] host stalled; giving up\n"); return 0; }
-        usleep(50);
+        host_wait();
     }
     resv_base = head;
     *at = (unsigned int)(resv_base % ring_bytes);
@@ -215,7 +225,7 @@ void pad_present(void)
         if (inflight < 0) inflight = envint("PAD_GL_INFLIGHT", 1);
         while (hdr->frame_seq - hdr->frame_ack > (unsigned long long)inflight) {
             if (++spins > 200000) { bridge_dead = 1; break; }
-            usleep(50);
+            host_wait();
         }
     }
 }

@@ -70,7 +70,9 @@ def test_the_python_offsets_follow_the_end_of_the_block(padsw):
     assert padsw.OFF_PAUSE_REQ == padsw.OFF_PAUSED_MS + 4
     assert padsw.OFF_STOP_WANT == padsw.OFF_PAUSE_REQ + 4      # PAD-204 round 3
     assert padsw.OFF_STOP_ACK == padsw.OFF_STOP_WANT + 12
-    assert padsw.SIZE == padsw.OFF_STOP_ACK + 4
+    assert padsw.OFF_SPEED_REQ == padsw.OFF_STOP_ACK + 4       # PAD-484
+    assert padsw.OFF_SPEED_NOW == padsw.OFF_SPEED_REQ + 4
+    assert padsw.SIZE == padsw.OFF_SPEED_NOW + 4
     assert padsw.SIZE <= 4096
 
 
@@ -107,8 +109,12 @@ def test_the_shim_mirror_carries_the_fields(padsw):
     c = _text("hwshim.c")
     body = re.search(r"struct padsw_shm \{(.*?)\n\};", c, re.S).group(1)
     assert "unsigned char cab[8]; unsigned char scr_cab[8];" in body
-    tail = body.rstrip().splitlines()[-1]           # PAD-204's pause is last now
-    assert "unsigned paused; unsigned paused_ms; unsigned pause_req;" in tail
+    lines = body.rstrip().splitlines()
+    tail = lines[-1]                                # PAD-484's game speed is last now
+    assert "unsigned speed_req; unsigned speed_now;" in tail
+    assert any("unsigned paused; unsigned paused_ms; unsigned pause_req;" in ln for ln in lines)
+    assert any("unsigned stop_want; unsigned stop_gen; unsigned stop_n; unsigned stop_ack;" in ln
+               for ln in lines)
     assert "spin[256]" in body                      # ...and after the last old field
     assert body.index("spin[256]") < body.index("cab[8]")
 

@@ -48,6 +48,9 @@ extern int open(const char *, int, ...);
 extern int close(int);
 extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
+/* PAD-484: hwshim.c's wall-clock sleep, for the waits on the HOST's decoder -
+ * the frame schedule itself follows the game's clock, at whatever speed. */
+extern void pad_real_sleep_us(long long);
 extern void pad_say(const char *);
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
 extern int clock_gettime(int, unsigned long *);
@@ -865,7 +868,7 @@ static void *vid_thread(void *arg)
                 }
                 if (waited_us[ch] > delay * 8) waited_us[ch] = 0;
             }
-            usleep(1000);
+            pad_real_sleep_us(1000);   /* the decoder is the host's */
             continue;
         }
         {
@@ -1307,7 +1310,7 @@ int pad_vid_prepare(void *pipeline)
         static unsigned said;
         unsigned long w0 = vid_us();
         unsigned long wall;
-        while (c->ack_gen != gen && spins++ < 3000) usleep(1000);
+        while (c->ack_gen != gen && spins++ < 3000) pad_real_sleep_us(1000);
         wall = (vid_us() - w0) / 1000ul;
         if (adopted)
             VLOG("[vid] ch%d ADOPT %s hw ch%d, waited %d spins = %lu ms wall%s\n",

@@ -36,6 +36,41 @@ partition through a loop device bounded to it, followed by a read-only
 class.  Nothing before p3's end moves: p1, p2 and p3's start are where they
 were, so every offset the build computed from the original is still right.
 
+A SMALLER 16 GB CARD (PAD-465).  Stern's 16 GB image is 15,494,807,552
+bytes, and some SD cards sold as 16 GB hold a little less, so a build of
+a 16 GB original (James Bond 1.06, Jaws, Rush...) doesn't fit them.
+:data:`SMALL` is Stern's 16 GB layout with the games partition five block
+groups (640 MiB) shorter: a 14.82 GB image.  Five, because that is more than
+the 605 MiB the moved /data and /dump take, so their new place never overlaps
+their old one and the copy is read back against an untouched original before
+the table points at it; and it leaves the image well under any 16 GB card.
+An 8 GB original GROWS to it like to any other class.  A 16 GB original is
+made smaller by :func:`shrink_image`, which is the expansion run backwards,
+and costs what the expansion is careful never to do: Stern fills its 16 GB
+games partitions to the last group, so ``resize2fs`` moves the files at the
+end further in.  That is why a build shrinks the card LAST, after every
+in-place patch and whole-file copy is on it (no offset the build computed is
+used after it), why the files it moves are read back and compared, and why
+such a build is always made whole, never updated in place.
+
+AS SMALL AS IT CAN BE (PAD-467).  A finished image at any of these sizes
+still carries every free block of its games partition: 2.18 GB on a Godzilla
+retheme built at Stern's 8 GB size, gigabytes more on a card grown to fill a
+bigger one, so the file is bigger than the card needs to be to share, keep
+or flash.  :func:`fit_image` is the same shrink with the length worked out
+from what the finished games partition holds (:func:`fit_layout`): the
+shortest one that keeps :data:`FIT_SPARE` free past the kernel's reserve,
+ending where the extended partition can start on a whole MiB, as every
+Stern card has it.  The machine mounts /games read-only (its /etc/fstab) and
+writes it only while installing a code update on the machine, which unpacks
+into /games/.tmp: a card made this small may not have the room for one.
+The table that comes out is no Stern class, so :func:`read_layout` only
+reads it back with ``any_size``; nothing else here takes such a card as an
+original to grow.  When the cut is shorter than the extended partition, its
+new place overlaps the old one: it is moved front to back
+(:func:`_move_down`), safe for a move to an earlier place, and checked
+against a digest of the original taken before the first byte moved.
+
 THE RULES THAT KEEP IT SAFE.
   * Only a card laid out exactly like Stern's (the table above, a stock class
     size, two logicals) is expanded; anything else is refused with the reason
@@ -57,6 +92,7 @@ THE RULES THAT KEEP IT SAFE.
 """
 
 import collections
+import hashlib
 import os
 import shlex
 import struct
@@ -73,6 +109,18 @@ CARD_SIZES = collections.OrderedDict([
     ("16G", 15494807552),
     ("32G", 30359420928),
 ])
+#: PAD-465: the smaller 16 GB card (see the module's notes): Stern's 16 GB
+#: layout with the games partition :data:`SMALL_CUT` sectors shorter.  Not a
+#: class Stern ships, so it is never suggested (:func:`offered`,
+#: :func:`smallest_fit`): only a user who picks it gets it.
+SMALL = "16S"
+SMALL_CUT = 5 * 32768 * 8           # five 128 MiB block groups, in sectors
+#: Every layout a card this app builds can have, smallest first: Stern's
+#: three classes and :data:`SMALL`.
+LAYOUT_SIZES = collections.OrderedDict(sorted(
+    list(CARD_SIZES.items())
+    + [(SMALL, CARD_SIZES["16G"] - SMALL_CUT * SECTOR)],
+    key=lambda kv: kv[1]))
 #: The build option, set by the Write tab (webui/tabs/write.py) like the other
 #: Stern build options: unset means "the original's size", which is what every
 #: headless caller has always built.
@@ -82,6 +130,21 @@ ENV = "PAD_STERN_CARD_SIZE"
 #: the whole chain), so a ported card that runs out of room is never told to
 #: set SD card size on the Write tab: that is for building the card on its own.
 FIXED_ENV = "PAD_STERN_CARD_SIZE_FIXED"
+#: PAD-467: "1" when the Write tab's "Make the image as small as it can be"
+#: is ticked (:func:`fit_requested`); unset otherwise, so a headless caller
+#: builds what it always built.  A port's chain never reads it
+#: (:data:`FIXED_ENV`, :func:`fit_requested`).
+FIT_ENV = "PAD_STERN_CARD_FIT"
+#: The free room a card made as small as it can be keeps on its games
+#: partition, past the kernel's reserve: two block groups.  The machine never
+#: writes the partition but to install a code update (see the module's
+#: notes); resize2fs needs some to move files into.
+FIT_SPARE = 256 << 20
+#: A cut shorter than this isn't made: it would cost the minutes the shrink
+#: takes to save less than a block group.
+FIT_MIN_CUT = 128 << 20
+#: Every Stern card starts its extended partition on a whole MiB.
+ALIGN = 2048
 
 P1 = (0x0C, 8192, 16384)
 P2 = (0x83, 24576, 688128)
@@ -105,7 +168,10 @@ class Cancelled(CardSizeError):
 
 def words(cls):
     """``"16 GB"`` for ``"16G"``: the words the Write tab and the packaging
-    use, for every sentence a user reads."""
+    use, for every sentence a user reads; ``"smaller 16 GB"`` for
+    :data:`SMALL` ("a smaller 16 GB SD card")."""
+    if cls == SMALL:
+        return "smaller 16 GB"
     return str(cls or "").replace("G", " GB") if cls else ""
 
 
@@ -142,16 +208,24 @@ Layout = collections.namedtuple(
 
 
 def requested():
-    """The card size the build was asked for (``"16G"`` / ``"32G"``), or
-    ``None`` for the original's own size."""
+    """The card size the build was asked for (``"16S"`` / ``"16G"`` /
+    ``"32G"``), or ``None`` for the original's own size."""
     v = (os.environ.get(ENV) or "").strip().upper()
-    return v if v in CARD_SIZES and v != "8G" else None
+    return v if v in LAYOUT_SIZES and v != "8G" else None
 
 
 def size_fixed():
     """Whether this build can't take an SD card size at all: Port + build
     (:data:`FIXED_ENV`) makes every card at its own original's size."""
     return os.environ.get(FIXED_ENV) == "1"
+
+
+def fit_requested():
+    """PAD-467: whether the build is asked to come out as small as it can be
+    (:data:`FIT_ENV`).  Never on macOS (no loop devices: :func:`supported`)
+    or in a port's chain (:func:`size_fixed`)."""
+    return (os.environ.get(FIT_ENV) == "1" and supported()
+            and not size_fixed())
 
 
 def bigger_card(cls, free=None, fixed=False):
@@ -178,6 +252,39 @@ def class_of(nbytes):
     return None
 
 
+def layout_class(nbytes):
+    """:func:`class_of`, and :data:`SMALL` for a card built for a smaller
+    16 GB SD card: every size a card laid out the way Stern lays one out can
+    have."""
+    for name, size in LAYOUT_SIZES.items():
+        if int(nbytes) == size:
+            return name
+    return None
+
+
+def layout_size(cls):
+    """The image size of the layout *cls* (:data:`LAYOUT_SIZES`), or 0."""
+    return LAYOUT_SIZES.get(cls, 0)
+
+
+def shrinks(layout, target):
+    """Whether a build of a card laid out as *layout* for the *target* size
+    makes it SMALLER: only a Stern 16 GB card for :data:`SMALL`."""
+    return target == SMALL and layout.laid_out == CARD_SIZES["16G"]
+
+
+def shrinks_card(path, target):
+    """:func:`shrinks` for the card image at *path* (False for one that
+    isn't laid out the way Stern lays a card out)."""
+    if target != SMALL:
+        return False
+    try:
+        with open(_lp(path), "rb") as f:
+            return shrinks(read_layout(f), target)
+    except (CardSizeError, OSError):
+        return False
+
+
 def _entry(buf, i):
     raw = buf[446 + 16 * i: 462 + 16 * i]
     ptype = raw[4]
@@ -185,10 +292,12 @@ def _entry(buf, i):
     return ptype, start, count
 
 
-def read_layout(f, size=None):
+def read_layout(f, size=None, any_size=False):
     """The card's :class:`Layout` from the open binary file *f*, or
     :class:`CardSizeError` saying why this is not a card laid out the way
-    Stern lays one out."""
+    Stern lays one out.  With *any_size* its partitions may describe a card
+    of any length (one made as small as it can be, :func:`fit_image`), not
+    only one of :data:`LAYOUT_SIZES`."""
     if size is None:
         f.seek(0, os.SEEK_END)
         size = f.tell()
@@ -236,7 +345,7 @@ def read_layout(f, size=None):
             raise CardSizeError("a partition runs past the end of the "
                                 "extended partition")
     laid_out = (s4 + c4 + TAIL) * SECTOR
-    if class_of(laid_out) is None:
+    if layout_class(laid_out) is None and not any_size:
         raise CardSizeError("its partitions describe a %.2f GB card, which is "
                             "not one of Stern's card sizes" % (laid_out / 1e9))
     if size < laid_out:
@@ -247,9 +356,19 @@ def read_layout(f, size=None):
 
 def plan(layout, target):
     """``(delta_sectors, new_layout)`` for growing *layout* to the *target*
-    class; ``(0, layout)`` when the card is that size or bigger already."""
-    new_laid = CARD_SIZES[target]
+    class; ``(0, layout)`` when the card is that size or bigger already.
+    The one card that is made smaller (:func:`shrinks`: a 16 GB card for a
+    smaller 16 GB SD card) gets a NEGATIVE delta and the smaller layout,
+    whose file is cut to it: an original FILE longer than its table (a dump
+    of a whole bigger SD card) comes out at the layout's own size, or the
+    build would not fit the card it was asked for."""
+    new_laid = LAYOUT_SIZES[target]
     delta = (new_laid - layout.laid_out) // SECTOR
+    if delta < 0 and shrinks(layout, target):
+        return delta, Layout(
+            new_laid, new_laid, layout.p3_count + delta,
+            layout.p4_start + delta, layout.p4_count,
+            [(e + delta, s + delta, c) for e, s, c in layout.logicals])
     if delta <= 0:
         return 0, layout
     new = Layout(max(layout.size, new_laid), new_laid,
@@ -273,8 +392,10 @@ def linux_parts(layout):
 def target_for(original_path, target=None):
     """The class a build of *original_path* comes out at when *target* (or
     the build option, when None) is asked for: the class name when the card
-    will actually grow, else ``None``.  Raises :class:`CardSizeError` when
-    the original can't be grown."""
+    will actually grow (or, for :data:`SMALL`, be made smaller: see
+    :func:`shrinks`), else ``None``.  Raises :class:`CardSizeError` when the
+    original can't be grown, or holds more than the smaller card has room
+    for."""
     target = target or requested()
     if not target:
         return None
@@ -285,8 +406,8 @@ def target_for(original_path, target=None):
             raise CardSizeError(
                 "This card can't be built for a %s SD card: %s."
                 % (words(target), e))
-        delta, _new = plan(layout, target)
-        if delta <= 0:
+        delta, new = plan(layout, target)
+        if delta == 0:
             return None
         # The check that runs before the games partition grows replays an
         # unfinished journal, and the replay rewrites files the build has
@@ -297,9 +418,30 @@ def target_for(original_path, target=None):
             raise CardSizeError(
                 "This card can't be built for a %s SD card: its games "
                 "partition was not cleanly unmounted, so it still has changes "
-                "waiting to be written, and growing it would move files the "
+                "waiting to be written, and %s it would move files the "
                 "build has already placed. Build it at its own size, or "
-                "start from a clean copy of the card." % words(target))
+                "start from a clean copy of the card."
+                % (words(target), "growing" if delta > 0 else "shrinking"))
+        if delta < 0:
+            # what the original already holds has to fit the smaller
+            # partition (the build's own files are the pre-flight's to count)
+            from .ext4 import Ext4Reader
+            f.seek(0, os.SEEK_END)
+            try:
+                space = p3_space(Ext4Reader(f, P3_START * SECTOR,
+                                            f.tell() - P3_START * SECTOR))
+            except Exception:  # noqa: BLE001 - Ext4Error, a short read
+                raise CardSizeError(
+                    "This card can't be built for a %s SD card: its games "
+                    "partition can't be read, so whether what it holds fits "
+                    "a smaller one isn't known." % words(target))
+            nb = new.p3_count * SECTOR // space.block_size
+            if usable_blocks(space, nb) <= 0:
+                raise CardSizeError(
+                    "This card can't be built for a %s SD card: its games "
+                    "partition already holds %s, more than fits on one."
+                    % (words(target), size_words(
+                        (space.blocks - space.free) * space.block_size)))
     # A multi-boot STORE card is laid out exactly like a stock one (its extras
     # live inside a grown p3), so the table alone can't tell: ask the reader
     # that knows.  The Multi-boot tab sizes those cards itself.
@@ -314,6 +456,36 @@ def target_for(original_path, target=None):
             "card, and the Multi-boot tab sets the size of those."
             % words(target))
     return target
+
+
+def fit_refusal(original_path):
+    """PAD-467: why a build of *original_path* can't be made as small as it
+    can be (:func:`fit_image`), in words that follow "Make the image as small
+    as it can be: ", or "" when it can.  The cards :func:`target_for`
+    refuses for any size, for the same reasons; a card already made as small
+    as it could be is one it can make smaller still."""
+    try:
+        with open(_lp(original_path), "rb") as f:
+            try:
+                read_layout(f, any_size=True)
+            except CardSizeError as e:
+                return "this card can't be made smaller: %s" % e
+            if journal_pending(f):
+                return ("this card's games partition was not cleanly "
+                        "unmounted, so it still has changes waiting to be "
+                        "written, and making it smaller would move files the "
+                        "build has already placed")
+    except OSError as e:
+        return "the original can't be read (%s)" % e
+    try:
+        from .multiimage import images_for_path
+        multi = len(images_for_path(original_path)) > 1
+    except Exception:  # noqa: BLE001 - not readable as multi-boot = not one
+        multi = False
+    if multi:
+        return ("this is a multi-boot card, and the Multi-boot tab sets the "
+                "size of those")
+    return ""
 
 
 def output_parts(original_path, parts, target):
@@ -441,10 +613,75 @@ def _has_super(g, sparse):
     return False
 
 
+def _overhead_fn(s, gdt, resv):
+    """``overhead(g)``: the blocks block group *g* of the filesystem *s*
+    spends on its own bookkeeping, its two bitmaps and its inode table, and
+    on a group that carries a backup superblock (:func:`_has_super`) that
+    block, the descriptor table (*gdt* blocks) and the *resv* reserved for
+    it to grow."""
+    itable = -(-s.inodes_per_group * s.inode_size // s.block_size)
+
+    def overhead(g):
+        return 2 + itable + (1 + gdt + resv
+                             if _has_super(g, s.sparse_super) else 0)
+    return overhead
+
+
+#: Blocks :func:`shrunk` keeps back for the extent blocks the files resize2fs
+#: moves may need (1 MB at 4 KiB blocks; the real shrink took 2).
+_SHRINK_SLACK = 256
+#: Free blocks :func:`shrink_image` wants left on the smaller partition, past
+#: the slack, before it resizes: the kernel's reserve, which the pre-flight
+#: (usable_blocks, mount route) already keeps back from every build, so a
+#: build it let through always has it.
+_SHRINK_HEADROOM = 4096
+
+
+def shrunk(space, new_blocks):
+    """``(blocks, free, r_blocks)`` of the filesystem *space* once resize2fs
+    has made it *new_blocks* long, shorter than it is (PAD-465, the smaller
+    16 GB card).  Every block in use stays in use, moved further in where it
+    sat past the new end, except the bookkeeping of the groups that go
+    (:func:`_overhead_fn`, wherever flex_bg put it), which is freed.  A last
+    group too short for its own bookkeeping and 50 blocks more is left off,
+    as resize2fs does.  ``free`` comes out negative when what the partition
+    holds can't fit.  The root reserve keeps its percentage.
+
+    A moved file can come out in more pieces than it was in, and a file in
+    more pieces than its inode holds needs an extent block: James Bond Pro
+    1.06 shrank with 210 files moved and 2 blocks less free than the
+    arithmetic, so :data:`_SHRINK_SLACK` comes off on top."""
+    s = space
+    new_blocks = int(new_blocks)
+    if new_blocks >= s.blocks:
+        return grown(space, new_blocks)
+    if s.meta_bg:
+        raise CardSizeError("its games partition uses a layout (meta_bg) the "
+                            "free-space estimate doesn't know")
+    bpg, fdb = s.blocks_per_group, s.first_data_block
+    per_block = s.block_size // s.desc_size
+    groups_old = -(-(s.blocks - fdb) // bpg)
+    overhead = _overhead_fn(s, -(-groups_old // per_block), s.reserved_gdt)
+    blocks = new_blocks
+    groups = -(-(blocks - fdb) // bpg)
+    rem = (blocks - fdb) % bpg
+    if groups > 1 and rem and rem < overhead(groups - 1) + 50:
+        blocks -= rem
+        groups -= 1
+    free = (s.free - (s.blocks - blocks)
+            + sum(overhead(g) for g in range(groups, groups_old))
+            - _SHRINK_SLACK)
+    r_blocks = (int(s.r_blocks * 100.0 / s.blocks * blocks / 100.0)
+                if s.r_blocks else 0)
+    return blocks, free, r_blocks
+
+
 def grown(space, new_blocks):
     """``(blocks, free, r_blocks)`` of the filesystem *space* once resize2fs
     has grown it to *new_blocks* (the grown partition's length in blocks);
     the filesystem as it is when that is no longer than it already is.
+    (A partition made SHORTER is :func:`shrunk`'s; :func:`usable_blocks`
+    asks the right one.)
 
     What resize2fs 1.47 does (resize/resize2fs.c, adjust_fs_info): every new
     block group costs its two bitmaps and its inode table, and a group that
@@ -502,22 +739,124 @@ def usable_blocks(space, new_blocks=None, route=ROUTE_MOUNT):
     or :data:`ROUTE_PINNED`) is how the copies reach the card; only the
     kernel's driver holds its reserve back.  The root reserve is taken off
     on both, though a copy by debugfs could use it: never promise room that
-    one route has and the other hasn't."""
-    blocks, free, r_blocks = grown(space, new_blocks)
+    one route has and the other hasn't.  A *new_blocks* shorter than the
+    partition is the smaller 16 GB card's (:func:`shrunk`)."""
+    if new_blocks and int(new_blocks) < space.blocks:
+        blocks, free, r_blocks = shrunk(space, new_blocks)
+    else:
+        blocks, free, r_blocks = grown(space, new_blocks)
     k = kernel_reserve(blocks) if route == ROUTE_MOUNT else 0
     return max(0, free - k - r_blocks)
 
 
 def p3_blocks_at(layout, target, block_size):
     """The games partition's length in filesystem blocks once *layout* is
-    grown to the *target* class; ``None`` when that isn't bigger than the
-    card already is."""
-    if not target or target not in CARD_SIZES:
+    grown to the *target* class (or made smaller, :func:`shrinks`); ``None``
+    when the card keeps its size for it."""
+    if not target or target not in LAYOUT_SIZES:
         return None
     delta, new = plan(layout, target)
-    if delta <= 0:
+    if delta == 0:
         return None
     return new.p3_count * SECTOR // int(block_size)
+
+
+def inodes_used(reader):
+    """Inodes in use on the filesystem an :class:`.ext4.Ext4Reader` is open
+    on: the group descriptors' free counts taken off the total, which is what
+    the kernel counts (the superblock's own count stands in when they can't
+    be read, as in :func:`p3_space`)."""
+    sb = reader._sb
+    total = struct.unpack_from("<I", sb, 0x00)[0]
+    free = struct.unpack_from("<I", sb, 0x10)[0]
+    ipg, ds = int(reader.inodes_per_group), int(reader.desc_size)
+    groups = -(-total // ipg) if ipg else 0
+    if groups:
+        raw = reader._read(reader.gdt_block * int(reader.block_size),
+                           groups * ds)
+        if len(raw) == groups * ds:
+            n = 0
+            for g in range(groups):
+                c = struct.unpack_from("<H", raw, g * ds + 0x0E)[0]
+                if ds >= 0x30:
+                    c |= struct.unpack_from("<H", raw, g * ds + 0x2E)[0] << 16
+                n += c
+            if n <= total:
+                free = n
+    return max(0, total - free)
+
+
+#: Inodes past those in use that the groups :func:`fit_layout` keeps must
+#: have free, for resize2fs to renumber the ones in the groups that go.
+_FIT_INODE_SLACK = 256
+
+
+def fit_layout(layout, space, inodes=0, spare=FIT_SPARE,
+               min_cut=FIT_MIN_CUT):
+    """PAD-467: the shortest layout of the card *layout* whose games
+    partition (*space*, *inodes* of it in use) still holds everything on it
+    with *spare* bytes free past the kernel's reserve (:func:`usable_blocks`
+    with :func:`shrunk`'s arithmetic, the room a build is measured against),
+    its extended partition starting on a whole MiB (:data:`ALIGN`), as on
+    every Stern card.  ``None`` when that is less than *min_cut* bytes
+    shorter than *layout*: the card is about as small as it can be already.
+
+    The usable room never shrinks as the partition gets longer (a last group
+    too short to pay for its own bookkeeping is left off, so keeping one
+    always adds room), so the shortest length that fits is found by halving
+    the whole MiBs between the system partition's end and the extended
+    partition's place now."""
+    bs = space.block_size
+    want = -(-int(spare) // bs)
+
+    def p3_at(m):
+        return layout.p3_count + (m * ALIGN - layout.p4_start)
+
+    def fits(m):
+        nb = p3_at(m) * SECTOR // bs
+        if nb >= space.blocks:
+            return True
+        if nb <= space.first_data_block:
+            return False
+        blocks = shrunk(space, nb)[0]
+        groups = -(-(blocks - space.first_data_block)
+                   // space.blocks_per_group)
+        if groups * space.inodes_per_group < int(inodes) + _FIT_INODE_SLACK:
+            return False
+        return usable_blocks(space, nb) >= want
+    hi = layout.p4_start // ALIGN
+    lo = hi - (layout.p3_count // ALIGN)
+    while lo < 0 or p3_at(lo) <= 0:
+        lo += 1
+    if lo >= hi or not fits(hi):
+        return None
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if fits(mid):
+            hi = mid
+        else:
+            lo = mid + 1
+    delta = hi * ALIGN - layout.p4_start
+    if delta >= 0 or -delta * SECTOR < min_cut:
+        return None
+    laid = layout.laid_out + delta * SECTOR
+    return Layout(laid, laid, layout.p3_count + delta,
+                  layout.p4_start + delta, layout.p4_count,
+                  [(e + delta, s + delta, c) for e, s, c in layout.logicals])
+
+
+def fit_estimate(path):
+    """PAD-467: about how big the card image at *path* comes out made as
+    small as it can be, as it is now (:func:`fit_layout` with no least
+    cut): the end of its last partition when nothing comes off.  What the
+    Write tab says before a build adds to it; reads a few KB."""
+    from .ext4 import Ext4Reader
+    with open(_lp(path), "rb") as f:
+        old = read_layout(f, any_size=True)
+        f.seek(0, os.SEEK_END)
+        r = Ext4Reader(f, P3_START * SECTOR, f.tell() - P3_START * SECTOR)
+        new = fit_layout(old, p3_space(r), inodes_used(r), min_cut=0)
+    return new.size if new is not None else old.laid_out
 
 
 def room_by_class(layout, space, classes, route=ROUTE_MOUNT):
@@ -525,8 +864,8 @@ def room_by_class(layout, space, classes, route=ROUTE_MOUNT):
     laid out as *layout*, at each of *classes* (as it is for its own class or
     a smaller one), smallest class first."""
     out = collections.OrderedDict()
-    for c in sorted({c for c in classes if c in CARD_SIZES},
-                    key=CARD_SIZES.get):
+    for c in sorted({c for c in classes if c in LAYOUT_SIZES},
+                    key=LAYOUT_SIZES.get):
         nb = p3_blocks_at(layout, c, space.block_size)
         out[c] = usable_blocks(space, nb, route) * space.block_size
     return out
@@ -535,10 +874,11 @@ def room_by_class(layout, space, classes, route=ROUTE_MOUNT):
 def smallest_fit(need, room, above=None):
     """The smallest class of *room* (:func:`room_by_class`) whose usable
     bytes hold *need* bytes, or ``None``.  With *above*, only classes bigger
-    than that one are considered."""
-    floor = CARD_SIZES.get(above, 0) if above else 0
+    than that one are considered.  Only Stern's own classes are ever named:
+    the smaller 16 GB card (:data:`SMALL`) is for a user who picks it."""
+    floor = LAYOUT_SIZES.get(above, 0) if above else 0
     for c, have in room.items():
-        if CARD_SIZES[c] > floor and need <= have:
+        if c in CARD_SIZES and CARD_SIZES[c] > floor and need <= have:
             return c
     return None
 
@@ -548,8 +888,9 @@ def candidates(original_path):
     first: its own, then the bigger ones this computer can grow it to
     (:func:`offered`)."""
     with open(_lp(original_path), "rb") as f:
-        own = class_of(read_layout(f).laid_out)
-    return [c for c in CARD_SIZES if c == own or c in offered(original_path)]
+        own = layout_class(read_layout(f).laid_out)
+    return [c for c in LAYOUT_SIZES
+            if c == own or c in offered(original_path)]
 
 
 def room_gained(path, target, route=ROUTE_MOUNT):
@@ -659,11 +1000,16 @@ class WontFit(CardSizeError):
                     % (words(self.fits),
                        bigger_card(self.fits, self.fits_room, fixed=True), out))
         elif self.fits:
-            # only a machine whose SD card is that big can take the image
+            # only a machine whose SD card is that big can take the image;
+            # from the smaller 16 GB card, Stern's own 16 GB image is the next
+            # size, which some 16 GB cards can't hold (PAD-465): said in bytes
             msg += (" Build it for a %s SD card if the SD card in the machine "
-                    "is %s or bigger (SD card size on the Write tab%s). "
+                    "%s (SD card size on the Write tab%s). "
                     "Otherwise take something out (%s)."
-                    % (words(self.fits), words(self.fits),
+                    % (words(self.fits),
+                       "holds a %s image" % size_words(CARD_SIZES[self.fits])
+                       if self.current == SMALL and self.fits in CARD_SIZES
+                       else "is %s or bigger" % words(self.fits),
                        ": %s free there" % size_words(self.fits_room)
                        if self.fits_room is not None else "", out))
         elif self.largest and self.largest_room is not None:
@@ -699,22 +1045,24 @@ def bigger_card_offer(refusal):
     if not isinstance(refusal, WontFit) or refusal.fixed or not supported():
         return None
     cur, fits = refusal.current, refusal.fits
-    if cur not in CARD_SIZES or fits not in CARD_SIZES:
+    if cur not in LAYOUT_SIZES or fits not in CARD_SIZES:
         return None
-    if CARD_SIZES[fits] <= CARD_SIZES[cur]:
+    if CARD_SIZES[fits] <= LAYOUT_SIZES[cur]:
         return None
     return cur, fits
 
 
 def offer_question(current, fits):
-    """The one-click question for :func:`bigger_card_offer`'s answer."""
+    """The one-click question for :func:`bigger_card_offer`'s answer.  From
+    the smaller 16 GB card the machine's card has to hold Stern's own image
+    of that size, which some 16 GB cards don't: said in bytes."""
     now = words(current)
+    need = ("hold a %s image" % size_words(CARD_SIZES[fits])
+            if current == SMALL else "be %s or bigger" % words(fits))
     return ("Your assets no longer fit on %s %s SD card. Would you like to "
             "change the size requirement to %s so that you don't have to "
-            "compress any assets?\n\nThe SD card in the machine has to be %s "
-            "or bigger."
-            % ("an" if now.startswith("8") else "a", now, words(fits),
-               words(fits)))
+            "compress any assets?\n\nThe SD card in the machine has to %s."
+            % ("an" if now.startswith("8") else "a", now, words(fits), need))
 
 
 # ---------------------------------------------------------------------------
@@ -778,6 +1126,32 @@ class _E2fs:
         16G/32G cards: left lazy, the kernel zeroes them at a pace that
         depends on how long each later mount lasts, so no two builds agree,
         and the machine finishes the job on its first read-write mount."""
+        return self._resize(image_path, offset, size, size, epoch, timeout)
+
+    def shrink(self, image_path, offset, size, new_size, epoch=None,
+               timeout=5400):
+        """:meth:`grow`'s steps with the filesystem made *new_size* bytes
+        long, shorter than the *size*-byte partition the loop device is
+        bounded to (PAD-465, the smaller 16 GB card).  resize2fs moves the
+        files past the new end further in, which is why it runs only on a
+        build's finished output (see :func:`shrink_image`).
+
+        With ``-f``.  resize2fs will not shrink below its own minimum
+        (calculate_minimum_resize_size), which adds a flex group's worth of
+        slack "so the resize operation can be guaranteed to finish" when it
+        has to move inode tables: about 2 GB over what is in use on Stern's
+        16 GB cards (James Bond Pro 1.06: 2,303,145 blocks used, minimum
+        2,771,153), so any build adding more than about 2.4 GB to Bond, and
+        180 MB to Rush, was refused at the very end.  This shrink moves no
+        inode table: it drops groups 103-107, whose metadata flex_bg put in
+        group 96, which stays.  The room it needs is :func:`shrunk`'s, exact
+        to the block, which :func:`shrink_image` checks on the finished build
+        before calling this, and every moved file is read back after."""
+        return self._resize(image_path, offset, size, new_size, epoch,
+                            timeout, force=True)
+
+    def _resize(self, image_path, offset, size, new_size, epoch, timeout,
+                force=False):
         img = self.ex.to_exec_path(image_path)
         env = ["export RESIZE2FS_FORCE_ITABLE_INIT=1"]
         if epoch:
@@ -799,8 +1173,8 @@ class _E2fs:
             'e2fsck -fp "$L" > /tmp/pad_e2.$$ 2>&1; r=$?',
             'sed "s/^/PAD_OUT fsck /" /tmp/pad_e2.$$; echo "PAD_E2 fsck $r"',
             '[ $r -le 1 ] || exit 0',
-            'resize2fs "$L" %ds > /tmp/pad_e2.$$ 2>&1; r=$?'
-            % (int(size) // SECTOR),
+            'resize2fs %s"$L" %ds > /tmp/pad_e2.$$ 2>&1; r=$?'
+            % ("-f " if force else "", int(new_size) // SECTOR),
             'sed "s/^/PAD_OUT resize /" /tmp/pad_e2.$$; echo "PAD_E2 resize $r"',
             '[ $r -eq 0 ] || exit 0',
             'e2fsck -fn "$L" > /tmp/pad_e2.$$ 2>&1; r=$?',
@@ -1072,6 +1446,304 @@ def expand_image(path, target, log=None, cancel=None, epoch=None):
     log("The card is a %s card now (%s)."
         % (words(target), _fmt(time.monotonic() - t0)), "success")
     return True
+
+
+def _files_and_tail(path, blocks, cancel, hash_tail=True):
+    """``(sizes, tail)`` of the games partition of the card at *path*:
+    ``{path: size}`` for every regular file, and ``{path: (size, sha256)}``
+    for the ones a resize to *blocks* long moves, read whole: a block at or
+    past *blocks*, or an inode in a block group that goes (resize2fs gives
+    it a new number).  Without *hash_tail*, *tail* holds the paths only
+    (``None`` for the digest)."""
+    from .ext4 import Ext4Reader
+    sizes, tail = {}, {}
+    with open(_lp(path), "rb") as f:
+        f.seek(0, os.SEEK_END)
+        r = Ext4Reader(f, P3_START * SECTOR, f.tell() - P3_START * SECTOR)
+        kept = -(-(int(blocks) - int(r.first_data_block))
+                 // int(r.blocks_per_group))
+        last_ino = kept * int(r.inodes_per_group)
+        for p, ino, node in r.iter_regular_files(min_size=0, max_depth=20):
+            sizes[p] = int(node.get("size") or 0)
+            if ino <= last_ino and not any(
+                    phys + cnt > blocks for _log, phys, cnt in r._runs(node)):
+                continue
+            if not hash_tail:
+                tail[p] = (sizes[p], None)
+                continue
+            h = hashlib.sha256()
+            for _off, buf in r.read_file_chunks(node, chunk=8 << 20):
+                if cancel():
+                    raise Cancelled("cancelled")
+                h.update(buf)
+            tail[p] = (sizes[p], h.hexdigest())
+    return sizes, tail
+
+
+def _digest(path, rels, cancel):
+    """``{path: (size, sha256)}`` of the regular files *rels* on the games
+    partition of the card at *path* (``None`` for one that isn't there)."""
+    from .ext4 import Ext4Reader
+    want, out = set(rels), {}
+    with open(_lp(path), "rb") as f:
+        f.seek(0, os.SEEK_END)
+        r = Ext4Reader(f, P3_START * SECTOR, f.tell() - P3_START * SECTOR)
+        for p, _ino, node in r.iter_regular_files(min_size=0, max_depth=20):
+            if p not in want:
+                continue
+            h = hashlib.sha256()
+            for _off, buf in r.read_file_chunks(node, chunk=8 << 20):
+                if cancel():
+                    raise Cancelled("cancelled")
+                h.update(buf)
+            out[p] = (int(node.get("size") or 0), h.hexdigest())
+    return {p: out.get(p) for p in want}
+
+
+def shrink_image(path, target, log=None, cancel=None, epoch=None):
+    """Make the card image at *path* the smaller *target* layout IN PLACE
+    (PAD-465: a 16 GB card for a smaller 16 GB SD card, :func:`shrinks`).
+    Returns True when it shrank, False when the card isn't one that is made
+    smaller for *target*.  Raises :class:`CardSizeError` (and
+    :class:`Cancelled`); a failure before the partition table is rewritten
+    leaves a card whose table still describes it, its filesystem merely
+    shorter than its partition.  *epoch*: see :meth:`_E2fs.grow`.
+
+    Run on a build's FINISHED output only: resize2fs moves the files that
+    sit past the new end, so nothing may be patched by an offset afterwards.
+    The steps are :func:`_shrink_to`'s."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    t0 = time.monotonic()
+    e2 = _E2fs()
+    with open(_lp(path), "rb") as f:
+        old = read_layout(f)
+    delta, new = plan(old, target)
+    if delta >= 0:
+        return False
+    space = read_space(path)
+    new_blocks = new.p3_count * SECTOR // space.block_size
+    # The room, on the build as it is: the pre-flight counted it before the
+    # encode, partly by estimate, and resize2fs runs forced (_E2fs.shrink),
+    # so this is the check that a build too full for the smaller card is
+    # refused in words, before anything here is touched.
+    _b, free, _r = shrunk(space, new_blocks)
+    if free < _SHRINK_HEADROOM:
+        raise CardSizeError(
+            "what this build put on the games partition is %s more than a "
+            "%s SD card has room for (with %s to spare); build it at "
+            "Stern's own size, or take something out"
+            % (size_words((_SHRINK_HEADROOM - free) * space.block_size),
+               words(target),
+               size_words(_SHRINK_HEADROOM * space.block_size)))
+    log("Making the card fit a %s SD card: the games partition shrinks from "
+        "%.2f GB to %.2f GB (the files at its end move further in), and the "
+        "two small partitions that hold the machine's settings and logs move "
+        "up behind it. The image comes out %s."
+        % (words(target), old.p3_count * SECTOR / 1e9,
+           new.p3_count * SECTOR / 1e9, size_words(new.size)), "info")
+    moved, files = _shrink_to(e2, path, old, new, space, cancel, epoch)
+    log("The card fits a %s SD card now (%s): %d file(s) moved further in "
+        "and read back the same, and all %d files are there."
+        % (words(target), _fmt(time.monotonic() - t0), moved, files),
+        "success")
+    return True
+
+
+def fit_image(path, target=None, log=None, cancel=None, epoch=None):
+    """PAD-467: make the card image at *path* as small as it can be, IN
+    PLACE: its games partition cut to :func:`fit_layout`'s length, the
+    extended partition moved up behind it, the file cut at its end.  Returns
+    True when it shrank, False when there was too little to take off (said
+    in the log; a file longer than its own table is still cut to it).  With
+    *target*, the size the build was made for: a card that size is made
+    smaller for (:func:`shrinks`, the smaller 16 GB card) is never handed
+    back longer than that layout, so when the fit would be, that is the
+    shrink made (:func:`shrink_image`).  Raises :class:`CardSizeError` (and
+    :class:`Cancelled`) as :func:`shrink_image` does.
+
+    Run on a build's FINISHED output only, as :func:`shrink_image` is."""
+    from .ext4 import Ext4Reader
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    t0 = time.monotonic()
+    e2 = _E2fs()
+    with open(_lp(path), "rb") as f:
+        old = read_layout(f, any_size=True)
+        f.seek(0, os.SEEK_END)
+        reader = Ext4Reader(f, P3_START * SECTOR, f.tell() - P3_START * SECTOR)
+        space = p3_space(reader)
+        inodes = inodes_used(reader)
+    new = fit_layout(old, space, inodes)
+    if target and shrinks(old, target):
+        small = plan(old, target)[1]
+        if new is None or new.p4_start > small.p4_start:
+            return shrink_image(path, target, log=log, cancel=cancel,
+                                epoch=epoch)
+    if new is None:
+        log("The image is about as small as it can be already: its games "
+            "partition has %s free and keeps %s of it, so there is less than "
+            "%s to take off."
+            % (size_words(usable_blocks(space) * space.block_size),
+               size_words(FIT_SPARE), size_words(FIT_MIN_CUT)), "info")
+        if old.size > old.laid_out:
+            # a dump of a whole bigger SD card: nothing past the end of the
+            # last partition is the card's
+            with open(_lp(path), "r+b") as f:
+                f.truncate(old.laid_out)
+                f.flush()
+                os.fsync(f.fileno())
+            log("The image is cut to the end of its last partition: %s."
+                % size_words(old.laid_out), "info")
+        return False
+    nb = new.p3_count * SECTOR // space.block_size
+    log("Making the image as small as it can be: the games partition shrinks "
+        "from %.2f GB to %.2f GB with %s of it left free (the files at its "
+        "end move further in), and the two small partitions that hold the "
+        "machine's settings and logs move up behind it. The image comes out "
+        "%s instead of %s."
+        % (old.p3_count * SECTOR / 1e9, new.p3_count * SECTOR / 1e9,
+           size_words(usable_blocks(space, nb) * space.block_size),
+           size_words(new.size), size_words(old.size)), "info")
+    moved, files = _shrink_to(e2, path, old, new, space, cancel, epoch)
+    log("The image is as small as it can be now (%s): %s, %d file(s) moved "
+        "further in and read back the same, and all %d files are there."
+        % (_fmt(time.monotonic() - t0), size_words(new.size), moved, files),
+        "success")
+    return True
+
+
+def _shrink_to(e2, path, old, new, space, cancel, epoch):
+    """Make the card image at *path*, laid out as *old* with the games
+    partition *space*, the shorter layout *new* IN PLACE through the
+    :class:`_E2fs` *e2*; returns ``(files moved, files on the partition)``.
+    A failure before the partition table is rewritten leaves a card whose
+    table still describes it, its filesystem merely shorter than its
+    partition.
+
+    1. Every file holding a block past the new end is read and digested.
+    2. ``e2fsck -fp``, ``resize2fs`` to the new length, ``e2fsck -fn``, on a
+       loop device bounded to the partition as it is (:meth:`_E2fs.shrink`).
+    3. The extended partition (the two EBRs, /data and /dump) is copied to
+       its new place.  Clear of the old one (:data:`SMALL_CUT` keeps it so),
+       both copies are read back and compared; overlapping it (a card made
+       as small as it can be by less than the partition's length), it is
+       moved front to back and checked against a digest taken first
+       (:func:`_move_down`).
+    4. THE COMMIT: the two MBR fields are rewritten, then the file is cut to
+       the new size and the table re-read.
+    5. The moved files are read again and must match their digests, and
+       every file must still be there at its size."""
+    src = old.p4_start * SECTOR
+    dst = new.p4_start * SECTOR
+    n = old.laid_out - src              # EBR1 .. p6 .. the 2-sector tail
+    if dst >= src:
+        raise CardSizeError("the settings and log partitions would not move "
+                            "up")
+    new_blocks = new.p3_count * SECTOR // space.block_size
+    sizes, tail = _files_and_tail(path, new_blocks, cancel)
+    if cancel():
+        raise Cancelled("cancelled")
+    res = e2.shrink(path, P3_START * SECTOR, old.p3_count * SECTOR,
+                    new.p3_count * SECTOR, epoch=epoch)
+    for step, what, ok in (
+            ("loop", "the card image could not be attached as a disk",
+             lambda rc: rc == 0),
+            ("fsck", "the games partition failed its check before shrinking",
+             lambda rc: rc in (0, 1)),
+            ("resize", "the games partition could not be made smaller",
+             lambda rc: rc == 0),
+            ("check", "the smaller games partition did not check clean",
+             lambda rc: rc == 0)):
+        rc, out = res.get(step, (None, ""))
+        if rc is None or not ok(rc):
+            raise CardSizeError("%s (%s):\n%s" % (
+                what, "did not run" if rc is None else "exit %d" % rc,
+                (out or "")[-2000:]))
+    if os.path.getsize(_lp(path)) != old.size:
+        raise CardSizeError("the card image changed size while its games "
+                            "partition was made smaller")
+    if cancel():
+        raise Cancelled("cancelled")
+    with open(_lp(path), "r+b") as f:
+        if dst + n <= src:
+            _copy_range(f, src, dst, n, cancel)
+            f.flush()
+            os.fsync(f.fileno())
+            if not _same_range(f, src, dst, n):
+                raise CardSizeError("the moved settings and log partitions "
+                                    "did not read back the same")
+        else:
+            _move_down(f, src, dst, n)
+        # THE COMMIT POINT: from here the card's table points at the copy.
+        _set_mbr(f, new.p3_count, new.p4_start)
+        f.flush()
+        os.fsync(f.fileno())
+        f.truncate(new.size)
+        f.flush()
+        os.fsync(f.fileno())
+        if read_layout(f, any_size=True) != new:
+            raise CardSizeError("the rewritten partition table does not read "
+                                "back as planned")
+    after = _digest(path, tail, lambda: False)
+    for p, want in sorted(tail.items()):
+        if after.get(p) != want:
+            raise CardSizeError("%s did not read back the same after the "
+                                "games partition was made smaller" % p)
+    now, _t = _files_and_tail(path, new_blocks, lambda: False,
+                              hash_tail=False)
+    if now != sizes:
+        lost = sorted(set(sizes) ^ set(now)) or sorted(
+            p for p in sizes if now.get(p) != sizes[p])
+        raise CardSizeError("the games partition's files are not all there "
+                            "at their sizes after it was made smaller (%s)"
+                            % lost[0])
+    if _t:
+        raise CardSizeError("%s still has a block past the end of the "
+                            "smaller games partition" % sorted(_t)[0])
+    return len(tail), len(sizes)
+
+
+def _range_digest(f, off, n):
+    h = hashlib.sha256()
+    pos = 0
+    while pos < n:
+        step = min(CHUNK, n - pos)
+        f.seek(off + pos)
+        buf = f.read(step)
+        if len(buf) != step:
+            raise CardSizeError("the card image ended early while moving its "
+                                "settings and log partitions")
+        h.update(buf)
+        pos += step
+    return h.digest()
+
+
+def _move_down(f, src, dst, n):
+    """Move *n* bytes of *f* from *src* to the EARLIER *dst* where the two
+    ranges overlap: front to back, so no byte is written over before it is
+    read, then checked against a digest of the source taken before the
+    first byte moved.  Not cancellable once begun: half moved, the old place
+    is no longer whole.  A zero chunk is written only where the destination
+    doesn't read as zeros already (see :func:`_copy_range`)."""
+    want = _range_digest(f, src, n)
+    pos = 0
+    while pos < n:
+        step = min(CHUNK, n - pos)
+        f.seek(src + pos)
+        buf = f.read(step)
+        if len(buf) != step:
+            raise CardSizeError("the card image ended early while moving its "
+                                "settings and log partitions")
+        if buf.count(0) != step or not _is_zero(f, dst + pos, step):
+            f.seek(dst + pos)
+            f.write(buf)
+        pos += step
+    f.flush()
+    os.fsync(f.fileno())
+    if _range_digest(f, dst, n) != want:
+        raise CardSizeError("the moved settings and log partitions did not "
+                            "read back the same")
 
 
 def check_blocks_unmoved(original_path, path, parts, log=None):

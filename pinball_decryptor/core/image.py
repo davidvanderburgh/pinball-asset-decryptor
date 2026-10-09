@@ -116,13 +116,15 @@ def _checkerboard(size):
     return bg
 
 
-def _fit_png(im, max_w, max_h):
+def _fit_png(im, max_w, max_h, rgb_fn=None):
     """PNG bytes of the open image *im* fitted to ``max_w`` x ``max_h``.
 
     An image smaller than the pane (font glyph slices are usually a few dozen
     pixels) is upscaled by a whole-number factor with nearest-neighbour so it
     stays crisp and inspectable; anything with transparency is composited over
-    the standard checkerboard.
+    the standard checkerboard.  *rgb_fn* (PAD-463): a function of the fitted
+    picture's colours (an ``uint8`` height x width x 3 array) giving the
+    colours to show, run before the checkerboard goes behind it.
     """
     im = im.convert("RGBA")
     max_w = max(1, int(max_w))
@@ -133,23 +135,32 @@ def _fit_png(im, max_w, max_h):
         k = min(max_w // im.width, max_h // im.height)
         if k >= 2:
             im = im.resize((im.width * k, im.height * k), Image.NEAREST)
+    if rgb_fn is not None:
+        import numpy as np
+        a = np.asarray(im)
+        rgb = np.ascontiguousarray(rgb_fn(np.ascontiguousarray(a[..., :3])),
+                                   np.uint8)
+        im = Image.fromarray(np.dstack([rgb, a[..., 3]]), "RGBA")
     if im.getchannel("A").getextrema()[0] < 255:
         bg = _checkerboard(im.size)
         bg.alpha_composite(im)
         im = bg
     buf = io.BytesIO()
-    im.save(buf, "PNG")
+    # PAD-464: a preview is shown and dropped: the fastest packing (a third
+    # of the time; the Scenes frames are written the same way)
+    im.save(buf, "PNG", compress_level=1)
     return buf.getvalue()
 
 
-def thumbnail_png(path, max_w, max_h):
+def thumbnail_png(path, max_w, max_h, rgb_fn=None):
     """Return PNG bytes of *path* scaled to fit ``max_w`` x ``max_h`` (aspect
-    preserved), for the tab's preview pane, or ``None`` on failure."""
+    preserved), for the tab's preview pane, or ``None`` on failure.
+    *rgb_fn*: see :func:`_fit_png`."""
     if not _PIL_OK or not path or not os.path.isfile(path):
         return None
     try:
         with Image.open(path) as im:
-            return _fit_png(im, max_w, max_h)
+            return _fit_png(im, max_w, max_h, rgb_fn)
     except Exception:
         return None
 

@@ -53,7 +53,7 @@ def test_a_files_own_profile_wins_over_the_projects(tmp_path):
     assert cp.own_profile(d, "images", "portrait.png") is None
     assert cp.own_profile_names(d) == {"images": {"tv.png": "Custom red",
                                                   "grey.png": "Brighter"},
-                                       "videos": {}}
+                                       "videos": {}, "text": {}}
     # the switch still decides: off is off, whatever profile it has
     cp.set_asset_slot(d, "images", "tv.png", False)
     assert "tv.png" not in cp.asset_map(d, "images", rels)
@@ -190,7 +190,7 @@ def test_the_bar_on_a_clicked_file_changes_that_files_profile_only(tmp_path):
         s = w.state("color")
         assert s["mode"] == "assets"
         assert s["file"] == {"kind": "images", "rel": BANNER, "label": "SpaceGodzilla.png",
-                             "on": False, "own": False}
+                             "on": False, "own": False, "count": 1, "own_n": 0}
         assert s["name"] == "Recommended"
         # a change is the file's own, and attaches it (its switch was off)
         w.call("color.set_params", {"name": "Custom red", "gain": [1.3, 0.9, 0.9]})

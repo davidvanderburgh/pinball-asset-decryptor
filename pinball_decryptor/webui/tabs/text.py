@@ -1129,6 +1129,36 @@ class TextTab(TabService):
         self.set(focus_row=hits[0])
         return True
 
+    def set_scene_words(self, assets, card, original, new):
+        """The Scenes editor's Words box (DragonRR, PAD-468): *new* words for the line of
+        scene *card* whose manifest original is *original* (every row of that scene with
+        these words: the preview draws one replacement per line of words).  ``None`` or the
+        original puts the game's words back.  The edit lands here, as an Apply on this tab
+        would, so the two never hold different copies of the manifest.  Returns True, False
+        after saying why (too long), or None when the scene has no such line."""
+        if not _same_folder(assets, self._text_scan_dir):
+            # this tab has not read the project's text yet (or read another folder's): read
+            # it now, as a scan would
+            from ...core import text_manifest
+            try:
+                loaded = text_manifest.load(assets)
+            except Exception:                        # noqa: BLE001
+                return None
+            self._text_scan_id += 1
+            self._populate_after_scan(loaded, None, self._text_scan_id, assets)
+        rows = [r for r in self._text_rows
+                if r["path"] == card and r["original"] == original]
+        if not rows:
+            return None
+        new = original if new is None else new
+        if R.row_len(rows[0], new) > R.row_budget(rows[0]):
+            compat.messagebox.showwarning("Replacement too long",
+                                          R.too_long_message(rows[0], new))
+            return False
+        eff = "" if new == original else new
+        self._set_replacements([(r, eff) for r in rows])
+        return True
+
     @rpc
     def open_folder(self):
         """Click on the project folder: open it in the file manager, or say

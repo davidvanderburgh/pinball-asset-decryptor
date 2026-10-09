@@ -584,4 +584,69 @@ void pm_game_show_stop(void);
 int pm_game_show_playing(void);
 int pm_game_shows(void);
 
+/* ---- the shaker (PAD-414; MODE_SDK.md "The shaker") ----------------------------------------------
+ * Godzilla Premium/LE can have a shaker motor in the cabinet (optional on a Premium, fitted on an LE).
+ * pm_shake shakes it for `ms` at a `strength` through the game's own shake call - the one every shake of the
+ * game's goes through - so the operator's SHAKER MOTOR setting always applies (off = nothing; a lower
+ * setting cuts every shake shorter) and the board stops each shake by itself when its time is up.
+ * `strength` is one the game uses: PM_SHAKE_HARD (0, its battle hits and jackpots) .. PM_SHAKE_SOFT (3,
+ * its long rumbles). The limits are the runtime's and cannot be raised:
+ *   - `ms` is at least 100 and never longer than the game's own longest shake at that strength: 1000 ms at
+ *     0 and 1, 5000 ms at 2 and 3.
+ *   - only while your mode runs, in a game (not attract, not tilted); never with the shaker set to off (or
+ *     none fitted), while one of the game's own shakes runs, or while one of yours does; at most 20 shakes
+ *     and 15 s of shaking in any minute.
+ *   - the runtime stops your shake when your mode ends, the ball ends, or the game ends or tilts (and on
+ *     pm_shake_stop) - unless the game has since asked for a shake of its own, which it leaves to run.
+ * pm_shake_game plays one of the GAME's own shakes by name, as the program has it (the port's `text
+ * shake_<name>` lines): "hit" (200 ms, hard: a battle's shot), "big_hit" (334 ms), "jackpot" (500 ms, hard:
+ * every super jackpot), "rumble" (3000 ms, soft: O2 Destroyer), "multiball_start" (five shakes over 4 s:
+ * the Godzilla Multiball start). Same limits; its steps count as one shake.
+ * pm_shake / pm_shake_game: 1 = shaking; 0 = refused (the reason is in mode.log) or no shaker on this
+ * game's port (PM_CAN_SHAKER). pm_shaking: 1 while a shake of yours runs. */
+#define PM_CAN_SHAKER       0x1000000u /* pm_shake / pm_shake_game / pm_shake_stop / pm_shaking / pm_shake_outlast */
+#define PM_SHAKE_HARD       0
+#define PM_SHAKE_STRONG     1
+#define PM_SHAKE_MEDIUM     2
+#define PM_SHAKE_SOFT       3
+int pm_shake(unsigned ms, unsigned strength);
+int pm_shake_game(const char *name);
+void pm_shake_stop(void);
+int pm_shaking(void);
+/* A shake as your mode ENDS: call pm_shake or pm_shake_game, then pm_shake_outlast, then end the mode - the
+ * end then leaves that one shake to run out (its own length); a ball end, game end or tilt still stops it. */
+void pm_shake_outlast(void);
+
+/* ---- the game's own mini-wizards (PAD-436; MODE_SDK.md "The game's own mini-wizards") ---------------------
+ * James Bond LE 1.06 has four, each with its insert on the Right ramp: 1 Chaos at Crab Key (Dr. No), 2 Ahoy
+ * Mr. Bond (From Russia With Love), 3 Goldfinger's Jackpot, 4 Duel on the Disco Volante (Thunderball). The game
+ * lights them when a part (henchman, villain, Q Branch, gadget) is collected in all six films, and the Right
+ * ramp starts the one selected. pm_game_wizard hands the player up one of them, the game's own way:
+ *   PM_WIZARD_LIGHT  select it and light it: the game's start shot (the Right ramp) starts it
+ *   PM_WIZARD_START  the same, then the game's own start of it at once - if the game would start one now (none
+ *                    running, nothing of its own in the way: its own check); otherwise it stays lit and the
+ *                    runtime starts it the moment the game would, that ball (then the start shot does)
+ * Until the game starts it, it is the only one lit and the one selected (PAD-457): the game's own lighting and
+ * its selection shots cannot hand the start shot another; what the game lit itself is lit again once it started.
+ * Several handed over start in the order given. It runs the game's mode: its shots, lights, screens, sounds and
+ * award, as when the game starts it. No mode of
+ * yours has to be running, and one that is keeps running beside it. A wizard the player has played this game
+ * plays again. PM_WIZARD_LIT (1): lit for the start shot; PM_WIZARD_STARTED (2); 0: not on this game, no game,
+ * no such wizard (mode.log says which). pm_game_wizard_named: the same by the port's name for it (`text
+ * wizard_name_<n>`, any case). pm_game_wizards: how many the port names (0 = none on this game). */
+#define PM_CAN_GAME_WIZARDS 0x2000000u /* pm_game_wizard / pm_game_wizard_named / pm_game_wizards */
+#define PM_WIZARD_LIGHT     0
+#define PM_WIZARD_START     1
+#define PM_WIZARD_LIT       1
+#define PM_WIZARD_STARTED   2
+int pm_game_wizard(int n, int how);
+int pm_game_wizard_named(const char *name, int how);
+int pm_game_wizards(void);
+/* PAD-457: claim one - this card's modes hand it out, so the game's own lighting (a part in all six films) leaves it
+ * unlit from now on and it lights only when a mode hands it over; the game still lights the unclaimed ones. A mode
+ * that hands one over claims it as it loads (a mode file's `game_wizard`, a blocks mode's init). 1 = claimed, 0 = not
+ * on this game, no such wizard, or the port names no `site wizard_light` (then the game lights it too). */
+int pm_game_wizard_claim(int n);
+int pm_game_wizard_claim_named(const char *name);
+
 #endif

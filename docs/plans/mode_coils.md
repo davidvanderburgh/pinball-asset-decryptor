@@ -245,6 +245,41 @@ test). This is a last line of defence, not a guardrail of ours.
   not during the game's modes or multiballs, and ends the hold the moment the mode, ball or game ends. Emulator:
   after 30 spins, kept toward 30 s (before: turned back every ~3 s); only the ball search's 12 s jiggles moved it.
 
+- **Step 9 (PAD-414, 2026-10-06): the shaker.** David: "We also should be able to have control over Shaker motor
+  effects"; his Premium has one fitted. Read from LE 1.16 (no class: a plain drive). Every shake of the game's goes
+  through one call, `shake(ms, strength, force)` (`0x189a54`): it reads adjustment 335 (AD_SHAKER_MOTOR, 0 off .. 4),
+  cuts the time to that setting's table (`0x6487f4`: 0/100/334/500/5000 ms; past 4 is error 317, the "shake duration
+  out of range" assert), does nothing unforced while the mode mask has 0x310, nothing when what is left of the running
+  shake is longer, then `coil_fire(7, power, ms)` at the strength's power (`0x648808`: 51/36/31/23/3). Drive 7 is the
+  SHAKER MOTOR device record (board index 5 coil 0: the cabinet board, beside the coin and ticket meters on coils 2
+  and 3). `0x189b08` stops it (an OFF). A census of the ~340 calls (with their classes and strings) named the game's
+  shakes: 200 ms at 0 on a battle's or multiball's shot, 334 ms at 0 on a bigger one, 500 ms at 0 on every super
+  jackpot and Destruction Jackpot, 3000 ms at 3 in O2 Destroyer, the Godzilla Multiball start's five (its video at
+  0.27-4.0 s: 334/100/500/1000/5000 ms at 2), and video-timed sequences (the 0x42xxx and 0x47axx process scripts).
+  Strength 0 and 1 never run past 1000 ms; 2 and 3 to 5000. Pro 1.16 has the same call (not ported).
+  - The runtime ("the shaker"): `pm_shake(ms, strength)`, `pm_shake_game(name)` (the port's `text shake_<name>`
+    steps, later ones sent by the tick), `pm_shake_stop`, `pm_shaking`, `pm_shake_outlast`. Limits: the game's own
+    call only, never forced (so the operator's setting always applies); the running mode, in a game; refused with the
+    setting 0, over the game's own shake (`drive_left`, `0x3e8bcc`) or one of the mode's; 100 ms .. the game's own
+    longest at that strength; 20 shakes and 15 s of shaking a minute; the game's own stop at the mode, ball or game
+    end - unless the game has asked for a longer one since, and except the mode's ending shake (outlast).
+  - The drive's time left reads 0 straight after the call (the game's coil service sends the request a moment later),
+    so the first run thought no shake was running and the stop never fired; the runtime now counts its shake from
+    the request, cut to the setting (`text shake_setting_ms`).
+  - Mode file `shake start|shot|end <ms> <strength> [mask]` / `... game <name> [mask]`; Mode > Shaker on the form
+    (`shakes`); blocks *Shake the cabinet for N ms* and *Shake it the game's way* (in When the mode ends, it runs
+    out); MECHAGODZILLA's example starts with the multiball start and shakes the jackpot on the Godzilla target;
+    `final_wars.c` and `destoroyah.c` shake their jackpots. `SHAKER_PROVEN` = LE 1.16.
+  - Emulator-proven (rig 1, stock LE card, muted, hidden, `PAD_COIL_PROBE=1`): every shake reached the board as
+    `[coildrive] node 1 coil 0` at the strength's power for the time asked (3000 at 0 cut to 1000); the multiball
+    start's steps on time; `pm_end` mid-shake sent the game's OFF with 4001 ms left; refusals as designed; a mode
+    file's and a blocks mode's start/shot/end shakes, the end one running out after the END with no OFF.
+  - Owed: a machine test on David's Premium (how hard each strength feels; that SHAKER MOTOR is on there).
+  - Seen on the rig (PAD-424): the virtual playfield's side panel has a SHAKER MOTOR box - SHAKING/IDLE, a 60 fps
+    scrolling trace of the drive power (padled v5's drive table, `coilmap.drive`), time left, shakes this run - and
+    the playfield picture jiggles while it runs. The coil is the table's SHAKER MOTOR row, else group 5 index 0 when
+    the table has no group 5 at all (godzilla), none on the Home Editions (`coilmap.shaker_address`).
+
 ## Machine test (2026-10-05, David's Godzilla Premium 1.16)
 
 His card's p2 was backed up, the branch's pinned `mode.so`, its `godzilla_le-1.16.port` and one mode file from

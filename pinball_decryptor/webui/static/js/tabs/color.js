@@ -686,21 +686,39 @@ function countWords(n) {
   if (n.images) parts.push(`${n.images} replaced picture${n.images === 1 ? "" : "s"}`);
   if (n.videos) parts.push(`${n.videos} replaced video${n.videos === 1 ? "" : "s"}`);
   if (n.added) parts.push(`${n.added} picture${n.added === 1 ? "" : "s"} added in Scenes`);
+  // PAD-438: lines of text in Scenes
+  if (n.text) parts.push(`${n.text} line${n.text === 1 ? "" : "s"} of text in Scenes`);
   return parts.join(", ");
 }
 
-// PAD-312: which files the chosen-files profile reaches
+// PAD-312: which files the chosen-files profile reaches.  PAD-463 (DragonRR): its two boxes,
+// Every replaced picture / video, are All images / All videos: every one not locked gets this
+// profile, attached, after an "Are you sure?", and one Undo puts them back (color.py
+// apply_to_all with a kind).  A project with an old box still ticked says so, with a way off.
+const EVERY = [
+  ["images", "All images…", "image", "picture", "the game's own pictures while they are unlocked (Images tab, Advanced)"],
+  ["videos", "All videos…", "video", "clip", "the game's own clips while Advanced is ticked (Video tab)"],
+];
 export function WhichFiles({ s }) {
   const n = s.asset_counts || {};
   const words = countWords(n);
+  const profile = { profile: s.asset_name || "Recommended" };
+  const old = EVERY.filter(([k]) => s["all_" + k]);
   return html`<${Card} title="Which files" cls="cp-which">
-    <${Check} checked=${!!s.all_images} label="Every replaced picture"
-      title="Every picture picked on the Images tab gets this profile baked in when you build, unless its own box there says otherwise."
-      onChange=${(v) => call("color.set_all", "images", v)} />
-    <${Check} checked=${!!s.all_videos} label="Every replaced video"
-      title="Every clip picked on the Video tab gets this profile baked in when you build (each is re-encoded for it), unless its own box there says otherwise."
-      onChange=${(v) => call("color.set_all", "videos", v)} />
-    <p class="small muted cp-which-now">${words ? `Now: ${words}.` : "It is not attached to any file yet."} One file at a time: its box in the Color column of the Images or Video tab, or its palette in the Scenes layers. The game's own pictures and clips have no box: Stern made them for this screen.</p>
+    <div class="row cp-which-all">
+      ${EVERY.map(([k, label, one, , unlocked]) => html`<${Button} key=${k} size="sm" icon="copy"
+        onClick=${() => call("color.apply_to_all", "all", k)}
+        title=${{ head: `Give every ${one} this color profile`, lines: [profile,
+          `Every ${one} that is not locked gets the profile on show below, attached: each replaced one, and ${unlocked}.`,
+          `A ${one} with a color profile of its own loses it.`,
+          "You are asked first. Undo puts them all back."] }}>${label}<//>`)}
+    </div>
+    ${old.map(([k, , , word]) => html`<div key=${k} class="row cp-which-old">
+      <span class="small muted grow">${`Every replaced ${word} you pick is attached as you pick it: this project still has the old Every replaced ${word} box ticked.`}</span>
+      <${Button} size="xs" onClick=${() => call("color.set_all", k, false)}
+        title=${`Untick the old Every replaced ${word} box: a ${word} you pick from now on is not attached until you attach it. The ones attached now stay as they are.`}>Turn off<//>
+    </div>`)}
+    <p class="small muted cp-which-now">${words ? `Now: ${words}.` : "It is not attached to any file yet."} One file at a time: its palette in the Color column of the Images or Video tab, or in the Scenes layers. Several at once: select them there and pick a profile in the Colors bar. The game's own pictures and clips are locked until Advanced unlocks them.</p>
   <//>`;
 }
 
@@ -811,6 +829,11 @@ export function undoKey(e, flush) {
   return true;
 }
 
+// PAD-438: the Files mode can be on a line of text in Scenes as well as a file
+const fileWord = (f) => (f && f.kind === "text" ? "line of text" : "file");
+// PAD-462: several clips selected together are one target
+const thisFile = (f) => (f && f.count > 1 ? `these ${f.count} files` : "this " + fileWord(f));
+
 // The line under the modes: what the profile on show does to this project now.
 export function statusNote(s) {
   const assets = s.per_file && s.mode === "assets";
@@ -824,9 +847,9 @@ export function statusNote(s) {
           : html`<${Note} kind="info">${"Scenes uses the Recommended screen, tuned on a real Spike 2. Move a slider or pick a starting point to set this machine's own screen."}<//>`)
     : assets && s.file
       ? (s.file.on === false
-          ? html`<${Note} kind="info">${"No color profile is attached to this file. Pick a starting point or a saved profile, or move a slider, and it is attached."}<//>`
-          : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into this file when you build; the other files keep their own."}<//>`
-          : html`<${Note} kind="info">${"“" + (s.name || "No change") + "” changes nothing: this file goes onto the card as you made it."}<//>`)
+          ? html`<${Note} kind="info">${"No color profile is attached to " + thisFile(s.file) + ". Pick a starting point or a saved profile, or move a slider, and " + (s.file.count > 1 ? "each is attached." : "it is attached.")}<//>`
+          : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + thisFile(s.file) + " when you build; the other files keep their own."}<//>`
+          : html`<${Note} kind="info">${"“" + (s.name || "No change") + "” changes nothing: " + thisFile(s.file) + (s.file.count > 1 ? " go" : " goes") + " onto the card as you made " + (s.file.count > 1 ? "them." : "it.")}<//>`)
     : assets
       ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
             + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`

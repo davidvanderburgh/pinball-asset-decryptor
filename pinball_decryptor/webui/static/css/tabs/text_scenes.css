@@ -43,6 +43,8 @@
 .scenes-left { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
 .scenes-search { gap: 6px; flex-wrap: nowrap; }
 .scenes-search > .field { flex: 1 1 auto; min-width: 0; }
+.scenes-search > .btn { flex: none; }
+.scenes-search .sc-find-n, .text-find-n { flex: none; padding-right: 8px; }
 .scenes-list-wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .scenes-list { flex: 1 1 auto; min-height: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .scenes-list .tr { padding: 0 10px; gap: 6px; }
@@ -134,6 +136,10 @@
 .tree-handle { fill: var(--accent); stroke: #000; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
 .tree-side { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .tree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* PAD-468: a line's Words, with Previous / Next through every line of text */
+.tree-words { display: flex; flex-direction: column; gap: 4px; }
+.tree-words > .tree-row:first-child { flex-wrap: nowrap; }
+.tree-words .field.grow { flex: 1 1 auto; min-width: 0; }
 .tree-num { display: flex; align-items: center; gap: 4px; }
 .tree-num .field { width: 76px; }
 .tree-num .lbl { width: auto; }
@@ -159,6 +165,10 @@
 .ly-color.locked { color: #539bf5; cursor: default; opacity: .75; }
 .ly-color:hover:not(.locked) { opacity: 1; filter: brightness(1.2); }
 .ly-color:focus-visible { outline: 2px solid var(--accent); }
+/* PAD-451: a line whose font's pictures have the profile on the Images tab (every line in the
+   font corrected through them): a link mark on its palette */
+.ly-color.via-font { position: relative; }
+.ly-color .ly-share { position: absolute; right: -6px; bottom: -5px; width: 11px; height: 11px; stroke: var(--ink); stroke-width: 3; background: var(--panel); border-radius: 50%; padding: 1px; }
 .ly-img { all: unset; cursor: pointer; display: inline-flex; color: var(--ink-3); border-radius: 4px; }
 .ly-img:hover { color: var(--accent); }
 .ly-img:focus-visible, .ly-eye:focus-visible { outline: 2px solid var(--accent); }

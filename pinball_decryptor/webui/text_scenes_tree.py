@@ -92,6 +92,10 @@ class TreeEditMixin:
                     self._trees = json.load(f)
             except (OSError, ValueError):
                 self._trees = {}
+            # PAD-433: the lines the game lays out itself (middle, shrunk to fit), as it does
+            from ..plugins.stern import game_text_layout
+            for card, man in self._trees.items():
+                game_text_layout.mark(man, card)
         return self._trees
 
     def _tree_card(self, scene_dir=None):
@@ -133,11 +137,21 @@ class TreeEditMixin:
         return scene_edit.ops_for(self.assets_dir, card)
 
     def _tree_edited(self, card, man):
-        from ..plugins.stern import scene_edit
+        from ..plugins.stern import scene_edit, text_colour
         # PAD-403: less the edits the project's scene already shows (its card was built with
         # them), which would otherwise move and size their nodes twice
+        ops = self._tree_ops(card)
         edited, notes = scene_edit.apply_manifest(
-            man, scene_edit.to_apply(self.assets_dir, card, man, self._tree_ops(card)))
+            man, scene_edit.to_apply(self.assets_dir, card, man, ops))
+        # PAD-438: its lines of text with the colour profile on, as the Write sets them
+        try:
+            lines, _w = text_colour.line_ops(self.assets_dir, card, edited, ops,
+                                             bake=self._look_sw()["files"])
+        except Exception:                            # noqa: BLE001
+            log.exception("scene text colours")
+            lines = []
+        if lines:
+            edited, _n = scene_edit.apply_manifest(edited, lines)
         return edited, notes
 
     def _tree_default(self, card):
@@ -820,6 +834,11 @@ class TreeEditMixin:
         picks = self._tree_pictures()
         added_ops = {int(op["id"]): op for op in ops
                      if op.get("op") == "add_picture" and op.get("id") is not None}
+        # PAD-438: a line of text's switch (its own, or its coloured font's picture's)
+        from ..core import staged_changes as _sc
+        from ..plugins.stern import text_colour as _tc
+        sidecar = _sc.load(self.assets_dir) if unlock["offered"] else {}
+        fonts = _tc.fonts_by_key(self.assets_dir) if unlock["offered"] else {}
         for n, parent, depth in _walk_man(man):
             kind = _kind_of(man, n)
             pics = []
@@ -829,14 +848,19 @@ class TreeEditMixin:
                         os.path.join(self.assets_dir, "images", *rel.split("/")))
                 if have[rel]:
                     pics.append(rel)
+            if kind == "Text":
+                color = (_text_switch(self.assets_dir, card, man, n, ops, sidecar, fonts,
+                                      picks, settings, unlock["on"], built)
+                         if unlock["offered"] else None)
+            else:
+                color = _colour_switch(n, kind, pics, picks, settings, added_ops.get(n["id"]),
+                                       unlock["on"], built)
             layers.append({"id": n["id"], "name": n["name"], "depth": depth, "kind": kind,
                            "parent": parent["id"] if parent is not None else None,
                            "group": kind in _GROUP_KINDS,
                            "pics": ["images/" + rel for rel in pics],
                            "text": _text_of(man, n, kind),
-                           "color": _colour_switch(n, kind, pics, picks, settings,
-                                                   added_ops.get(n["id"]), unlock["on"],
-                                                   built),
+                           "color": color,
                            "drawn": n["id"] in drawn or n["id"] in self._tworlds,
                            "state_off": n["id"] in self._teye_off,
                            "part_off": n["id"] in self._tpart_off,
@@ -907,7 +931,84 @@ class TreeEditMixin:
                 "view_off": nid in self._tree_view_hidden(card),
                 "hid_in": self._tree_hidden_in(man, nid, self._tree_hidden(card)),
                 "view_in": self._tree_hidden_in(man, nid, self._tree_view_hidden(card)),
-                "pic": self._tree_pic_props(nid)}
+                "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n),
+                "font": self._tree_font_of(man, n, ops),
+                "words": self._tree_words_of(card, man, n, ops)}
+
+    def _tree_words_of(self, card, man, n, ops):
+        """A line of text's words for the Words box (DragonRR, PAD-468): ``{"text": the words
+        it shows, "game": the card's own, "edited", "limit": the bytes it may take}`` for a line
+        of the game's, ``{"text", "added": True}`` for one added here; None for anything else,
+        and for a line the project's text list does not hold (nothing to change it in)."""
+        if _kind_of(man, n) != "Text":
+            return None
+        if n.get("added"):
+            op = _added_text_op(ops, n["id"])
+            return {"text": op.get("text") or "", "added": True} if op else None
+        from ..core import text_manifest
+        from . import text_rules
+        text = _text_of(man, n, "Text")
+        orig = text_manifest.escape_cell(text or "")
+        d = card.replace("\\", "/").rsplit("/", 1)[0]
+        if not orig.strip() or orig not in ((self._scenes.get(d) or {}).get("texts") or ()):
+            return None
+        rep = dict((self._load_text_changes() or {}).get(card) or ()).get(orig)
+        return {"text": rep or orig, "game": orig, "edited": bool(rep),
+                "limit": text_rules.row_budget({"path": card, "original": orig})}
+
+    @rpc
+    def tree_words(self, node, words=None):
+        """The Words box (DragonRR, PAD-468): new words for a line of text, ``None`` for the
+        game's own.  A line of the game's is changed as the Text tab changes it (the same edit,
+        listed there too, and kept to the length a line may be); a line added here keeps its
+        words in its own edit, so Undo takes a change back."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None or self._tman is None:
+            return False
+        got = scene_edit._man_index(self._tman).get(int(node))
+        if got is None or _kind_of(self._tman, got[0]) != "Text":
+            return False
+        n = got[0]
+        if n.get("added"):
+            words = (words or "").strip()
+            ops = self._tree_ops(card)
+            op = _added_text_op(ops, n["id"])
+            if op is None or not words or op.get("text") == words:
+                return False
+            op["text"] = words
+            try:
+                scene_edit.set_ops(self.assets_dir, card, ops)
+            except OSError as e:
+                compat.messagebox.showerror("Scene edit", str(e))
+                return False
+            self._tree_refresh()
+            return True
+        from ..core import text_manifest
+        orig = text_manifest.escape_cell(_text_of(self._tman, n, "Text") or "")
+        done = self.tab.set_scene_words(self.assets_dir, card, orig, words)
+        if done is None:
+            compat.messagebox.showinfo(
+                "Words",
+                "This line is not in the project's text list (text/strings.tsv), so its words "
+                "can't be changed here. Extract the card again with Text ticked to list it.")
+            return False
+        return bool(done)
+
+    @staticmethod
+    def _tree_text_align_of(man, n):
+        """A Text node's alignment as ``{"align": name, "valign": name, "game_layout": bool}``
+        (PAD-433; ``game_layout``: the game puts this line in the middle of its box itself,
+        :mod:`game_text_layout`), else {}."""
+        from ..plugins.stern import scene_edit
+        for _s, oid in n["comps"]:
+            o = man["objects"].get(str(oid)) or {}
+            if o.get("kind") == "Text":
+                a, v = int(o.get("align", 1) or 0), int(o.get("valign") or 0)
+                return {"align": scene_edit.ALIGN_NAMES[a] if 0 <= a <= 2 else "centre",
+                        "valign": scene_edit.VALIGN_NAMES[v] if 0 <= v <= 2 else "top",
+                        "game_layout": bool(o.get("game_layout"))}
+        return {}
 
     def _tree_picture(self, nid):
         """``(draw, (w, h))``: the one picture node *nid* itself draws now and the picture's
@@ -1014,6 +1115,7 @@ class TreeEditMixin:
         if self._sel:
             self._render_tree_preview(self._sel)
             self._live_kick()
+        self._find_sync()                            # a line added or taken away (PAD-468)
 
     # ------------------------------------------------------------------
     # the running emulator ("on the fly", PAD-251)
@@ -1152,6 +1254,7 @@ class TreeEditMixin:
         self._tsel = node
         self._tsels = [node] if node is not None else []
         self._tanchor = node
+        self._find_follow(node)                      # PAD-468: Previous / Next go on from it
         if node is not None and node == peeked:
             self._tpeek = node
             self._render_tree_preview(self._sel, quiet=True)
@@ -1483,6 +1586,335 @@ class TreeEditMixin:
             return False
         return self._tree_add({"op": "text_rect", "node": node, "rect": rect, "wrap": True})
 
+    @rpc
+    def tree_text_align(self, node, align=None, valign=None):
+        """Where a line of text's words sit in its box (DragonRR, PAD-433: "left and right,
+        top and bottom and centre"): *align* ``left``/``centre``/``right`` across, *valign*
+        ``top``/``middle``/``bottom`` up and down, ``None`` keeping that one as it is.  The
+        Text's own alignment word and VerticalAlignment, so the machine puts them there too."""
+        from ..plugins.stern import scene_edit
+        card, man = self._tree_card()
+        if card is None or self._tman is None:
+            return False
+        node = int(node)
+        got = scene_edit._man_index(self._tman).get(node)
+        cur = self._tree_text_align_of(self._tman, got[0]) if got else {}
+        if not cur:
+            return False
+        want = {"align": cur["align"] if align is None else str(align).lower(),
+                "valign": cur["valign"] if valign is None else str(valign).lower()}
+        want["align"] = {"center": "centre"}.get(want["align"], want["align"])
+        if cur.get("game_layout") and want["valign"] != cur["valign"]:
+            return False                # the game puts this line in the middle whatever it says
+        want["game_layout"] = cur.get("game_layout")
+        if want["align"] not in scene_edit.ALIGN_NAMES \
+                or want["valign"] not in scene_edit.VALIGN_NAMES or want == cur:
+            return False
+        return self._tree_add({"op": "text_align", "node": node,
+                               "align": scene_edit.ALIGN_NAMES.index(want["align"]),
+                               "valign": scene_edit.VALIGN_NAMES.index(want["valign"])})
+
+    # -- the Font bar (PAD-452) ---------------------------------------------
+    # A Spike 2 line of text names one of the font SIZES its scene carries (each a style -
+    # GameFont_Primary, a typeface's plain letters - baked at one size) and has no size of its
+    # own: the game scales a line as it scales its node.  So the bar's font is a style the scene
+    # carries, its size is the baked size nearest to it, scaled the rest of the way with its
+    # box kept (scene_edit's text_font), and its spacings are the Text's own two numbers.
+    #: the edits the Font bar makes, which "Font as shipped" takes off a line
+    _FONT_OPS = ("text_font", "text_spacing", "text_flow", "text_align", "text_slant",
+                 "text_stretch")
+    #: Italic: the slant it gives, in degrees (Photoshop's faux italic leans about as far)
+    _ITALIC_DEG = 12.0
+
+    @staticmethod
+    def _font_styles(man):
+        """``[(style name, [(size id, declared size), ...] smallest first)]``: the fonts the
+        scene carries, by style (its own name, else its typeface's, else its picture's)."""
+        from ..plugins.stern import scene_edit
+        styles = {}
+        for sid, f in scene_edit.font_table(man).items():
+            name = f.get("variant") or f.get("face") or _font_label(f.get("font") or "") \
+                or "Font %d" % sid
+            size = float(f.get("line") or 0) or float(f.get("font_px") or 0)
+            if size > 0:
+                styles.setdefault(name, []).append((sid, size))
+        return sorted((name, sorted(sizes, key=lambda x: x[1]))
+                      for name, sizes in styles.items())
+
+    def _tree_text_scale(self, nid):
+        """How many glass pixels one of the line's own pixels is, up and down, now: the
+        height of its letters' parallelogram (area over width), so a slant or a letter width
+        leaves it alone."""
+        d = self._tree_text_draw(nid)
+        m = d["m"] if d is not None else (self._tworlds.get(nid) or (None, None))[1]
+        if not m:
+            return 1.0
+        w = math.hypot(m[0], m[1])
+        k = abs(m[0] * m[3] - m[1] * m[2]) / w if w > 1e-9 else 0.0
+        return k if k > 1e-6 else 1.0
+
+    def _tree_text_hscale(self, nid):
+        """How many glass pixels one of the line's own pixels is, along its lines, now."""
+        d = self._tree_text_draw(nid)
+        m = d["m"] if d is not None else (self._tworlds.get(nid) or (None, None))[1]
+        w = math.hypot(m[0], m[1]) if m else 0.0
+        return w if w > 1e-6 else 1.0
+
+    def _tree_text_obj(self, man, n):
+        for _s, oid in n["comps"]:
+            o = man["objects"].get(str(oid)) or {}
+            if o.get("kind") == "Text":
+                return o
+        return None
+
+    def _tree_font_of(self, man, n, ops):
+        """A Text node's font, size, spacing and wrapping as the Font bar shows them (sizes and
+        spacings in glass pixels, as the line is drawn now), else None."""
+        o = self._tree_text_obj(man, n)
+        if o is None:
+            return None
+        k = self._tree_text_scale(n["id"])
+        # the scale the line had before its own size edits: the sizes its scene's fonts were
+        # made at, as they show here (at 1, drawn as made)
+        made = k
+        for op in ops:
+            if op.get("node") == n["id"] and op["op"] == "text_font":
+                made /= float(op.get("s") or 1.0)
+        styles = self._font_styles(man)
+        style, own = "", 0.0
+        for name, sizes in styles:
+            for sid, size in sizes:
+                if sid == o.get("font_id"):
+                    style, own = name, size
+        own = own or float(o.get("line") or 0) or float(o.get("font_px") or 0)
+        sp = list(o.get("spacing") or (0, 0)) + [0, 0]
+        flags = list(o.get("flags") or (0, 0)) + [0, 0]
+        slant, width = self._tree_text_slant_width(n["id"], ops)
+        return {"style": style,
+                "styles": [{"value": name, "label": name,
+                            "sizes": [round(size * made, 1) for _sid, size in sizes]}
+                           for name, sizes in styles],
+                "size": round(own * k, 1),
+                "letter": round(float(sp[1] or 0) * self._tree_text_hscale(n["id"]), 1),
+                "line": round(float(sp[0] or 0) * k, 1),
+                "multiline": bool(flags[0]), "wrap": bool(flags[1]),
+                "fit": bool(o.get("fit")), "game_layout": bool(o.get("game_layout")),
+                # PAD-452 round 2: italic (a slant) and the letters' width, from as shipped
+                "slant": round(slant, 1), "italic": abs(slant) >= 0.05,
+                "width": round(width * 100, 1),
+                # its drop shadow: it has one, or it is one
+                "shadow": {"has": any(op["op"] == "shadow" and op.get("node") == n["id"]
+                                      for op in ops),
+                           "is": any(op["op"] == "shadow" and op.get("id") == n["id"]
+                                     for op in ops)},
+                "edited": any(op.get("node") == n["id"] and op["op"] in self._FONT_OPS
+                              for op in ops)}
+
+    @staticmethod
+    def _tree_text_slant_width(nid, ops):
+        """``(slant in degrees, width factor)`` the Font bar gave line *nid*."""
+        t, w = 0.0, 1.0
+        for op in ops:
+            if op.get("node") != nid:
+                continue
+            if op["op"] == "text_slant":
+                t += float(op.get("t") or 0.0)
+            elif op["op"] == "text_stretch":
+                w *= float(op.get("sx") or 1.0)
+        return math.degrees(math.atan(t)), w
+
+    def _tree_font_target(self, node):
+        """``(text object, glass scale, [(style, sizes)], style, own size)`` of a Text node."""
+        if self._tman is None:
+            return None
+        from ..plugins.stern import scene_edit
+        got = scene_edit._man_index(self._tman).get(int(node))
+        o = self._tree_text_obj(self._tman, got[0]) if got else None
+        if o is None:
+            return None
+        styles = self._font_styles(self._tman)
+        for name, sizes in styles:
+            for sid, size in sizes:
+                if sid == o.get("font_id"):
+                    return o, self._tree_text_scale(int(node)), styles, name, size
+        return None
+
+    def _tree_font_add(self, node, sizes, sid_now, want, **say):
+        """Draw a line *want* of its own pixels tall in one of *sizes* (a style's): the baked
+        size nearest to that, the words scaled the rest of the way (a ``text_font``; *say*,
+        ``style`` / ``px``, names it in Layers)."""
+        sid, size = min(sizes, key=lambda x: abs(math.log(want / x[1])))
+        s = want / size
+        if sid == sid_now and abs(s - 1.0) < 1e-4:
+            return False
+        return self._tree_add(dict({"op": "text_font", "node": int(node),
+                                    "font": sid if sid != sid_now else None, "s": round(s, 6)},
+                                   **say))
+
+    @rpc
+    def tree_text_font(self, node, style):
+        """Draw a line of text in another of the fonts its scene carries (DragonRR, PAD-452),
+        at the size it is now.  Its box stays where it is; the words re-flow in it."""
+        got = self._tree_font_target(node)
+        if got is None:
+            return False
+        o, _k, styles, now, own = got
+        sizes = dict(styles).get(str(style))
+        if not sizes or str(style) == now:
+            return False
+        return self._tree_font_add(node, sizes, o.get("font_id"), own, style=str(style))
+
+    @rpc
+    def tree_text_size(self, node, px):
+        """A line of text's size in glass pixels (its font's declared height, as drawn now).
+        Its box stays where it is, so bigger words wrap sooner, or shrink to fit, as the box
+        says."""
+        got = self._tree_font_target(node)
+        if got is None:
+            return False
+        o, k, styles, style, _own = got
+        try:
+            want = float(px) / k
+        except (TypeError, ValueError):
+            return False
+        if not 2 <= want <= 4000:
+            return False
+        return self._tree_font_add(node, dict(styles)[style], o.get("font_id"), want,
+                                   px=round(float(px), 1))
+
+    @rpc
+    def tree_text_spacing(self, node, letter=None, line=None):
+        """LetterSpacing / LineSpacing in glass pixels: the Text's own two numbers, set so the
+        line shows that much more after each letter / between its lines as drawn now."""
+        got = self._tree_font_target(node)
+        if got is None:
+            return False
+        o, k = got[0], got[1]
+        sp = list(o.get("spacing") or (0, 0)) + [0, 0]
+        op = {"op": "text_spacing", "node": int(node)}
+        try:
+            if letter not in (None, ""):
+                op["letter"] = round(float(letter) / self._tree_text_hscale(int(node)), 3)
+                op["letter_px"] = round(float(letter), 1)
+            if line not in (None, ""):
+                op["line"] = round(float(line) / k, 3)
+                op["line_px"] = round(float(line), 1)
+        except (TypeError, ValueError):
+            return False
+        if all(abs(op[f] - float(sp[i] or 0)) < 1e-3 for f, i in (("line", 0), ("letter", 1))
+               if f in op):
+            return False
+        return self._tree_add(op)
+
+    @rpc
+    def tree_text_flow(self, node, multiline=None, wrap=None, fit=None):
+        """The Text's Multiline and WordWrap bytes and ScaleToBounds (PAD-412): line breaks
+        kept, words wrapped at the box's width, words shrunk to fit the box."""
+        got = self._tree_font_target(node)
+        if got is None:
+            return False
+        o = got[0]
+        flags = list(o.get("flags") or (0, 0)) + [0, 0]
+        cur = {"multiline": bool(flags[0]), "wrap": bool(flags[1]), "fit": bool(o.get("fit"))}
+        op = {"op": "text_flow", "node": int(node)}
+        for f, v in (("multiline", multiline), ("wrap", wrap), ("fit", fit)):
+            if v is not None and bool(v) != cur[f]:
+                op[f] = bool(v)
+        if "fit" in op and o.get("game_layout"):
+            del op["fit"]                       # the game shrinks this line to fit (PAD-433)
+        if len(op) == 2:
+            return False
+        return self._tree_add(op)
+
+    @rpc
+    def tree_text_slant(self, node, deg):
+        """Italic (DragonRR, PAD-452 round 2: "Italics/Underline etc."): Spike 2 fonts have no
+        italic of their own, so the line is slanted *deg* degrees from as shipped (tops of the
+        letters to the right) by its node's matrix, which the game draws it with, about the
+        middle of its box."""
+        got = self._tree_font_target(node)
+        card, _man = self._tree_card()
+        if got is None or card is None:
+            return False
+        try:
+            want = float(deg)
+        except (TypeError, ValueError):
+            return False
+        if abs(want) > 45:
+            return False
+        cur, _w = self._tree_text_slant_width(int(node), self._tree_ops(card))
+        t = math.tan(math.radians(want)) - math.tan(math.radians(cur))
+        if abs(t) < 1e-5:
+            return False
+        L, T, R, B = (list(got[0].get("rect") or (0, 0, 0, 0)) + [0, 0, 0, 0])[:4]
+        return self._tree_add({"op": "text_slant", "node": int(node), "t": round(t, 6),
+                               "py": round((T + B) / 2.0, 3)})
+
+    @rpc
+    def tree_text_italic(self, node, on):
+        """The Italic box: a slant of :data:`_ITALIC_DEG`, or none."""
+        return self.tree_text_slant(node, self._ITALIC_DEG if on else 0.0)
+
+    @rpc
+    def tree_text_width(self, node, pct):
+        """The letters' width, % of as shipped (condensed below 100, wide above), the box left
+        where it is so the words re-flow in it."""
+        got = self._tree_font_target(node)
+        card, _man = self._tree_card()
+        if got is None or card is None:
+            return False
+        try:
+            want = float(pct) / 100.0
+        except (TypeError, ValueError):
+            return False
+        if not 0.1 <= want <= 10:
+            return False
+        _s, cur = self._tree_text_slant_width(int(node), self._tree_ops(card))
+        sx = want / cur
+        if abs(sx - 1.0) < 1e-4:
+            return False
+        return self._tree_add({"op": "text_stretch", "node": int(node), "sx": round(sx, 6)})
+
+    @rpc
+    def tree_shadow_remove(self, node):
+        """Remove drop shadow (DragonRR, PAD-452 round 2): a line's drop shadows, or the
+        shadow *node* is, with every edit made to them (one undo step).  The line is
+        selected after."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        ops = self._tree_ops(card)
+        shadows = [op for op in ops if op["op"] == "shadow"
+                   and node in (op.get("node"), op.get("id"))]
+        if not shadows:
+            return False
+        gone = {int(op["id"]) for op in shadows}
+        keep = [op for op in ops if op.get("id") not in gone and op.get("node") not in gone]
+        scene_edit.set_ops(self.assets_dir, card, keep)
+        if self._tsel in gone:
+            self._tsel = int(shadows[0]["node"])
+        self._tree_refresh()
+        return True
+
+    @rpc
+    def tree_text_font_reset(self, node):
+        """Font as shipped: the line's font, size, spacing, wrapping and alignment edits
+        taken off (one undo step)."""
+        from ..plugins.stern import scene_edit
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        ops = self._tree_ops(card)
+        keep = [op for op in ops if not (op.get("node") == node and op["op"] in self._FONT_OPS)]
+        if len(keep) == len(ops):
+            return False
+        scene_edit.set_ops(self.assets_dir, card, keep)
+        self._tree_refresh()
+        return True
+
     def _tree_set_text_pixels(self, node, w, h):
         """W px / H px on a line of text: its box, not its words.  The box keeps the edges
         (or, centred, the middle) its words are aligned to, across and up and down (PAD-412:
@@ -1722,6 +2154,9 @@ class TreeEditMixin:
         if not self.assets_dir or not self._colour_unlock()["offered"]:
             return False
         on = bool(on)
+        if not on:
+            # the game's own lines of text are locked again with its pictures (PAD-438)
+            _cp.drop_text_slots(self.assets_dir)
         images = self._images_here()
         if images is not None:
             try:
@@ -1812,13 +2247,68 @@ class TreeEditMixin:
             scene_edit.set_ops(self.assets_dir, card, new)
             self._tree_refresh()
             return True
+        # PAD-438: a line of text (an added one too: the edited scene drawn now has it)
+        tman = getattr(self, "_tman", None) or man
+        tindex = scene_edit._man_index(tman)
+        if node in tindex and _kind_of(tman, tindex[node][0]) == "Text":
+            return self._text_color(card, tman, tindex[node][0], ops, bool(on))
         index = scene_edit._man_index(man)
         if node not in index:
             return False
         pics = _pics_of(man, index[node][0], {})
         if len(pics) != 1:
             return False
-        rel = "images/" + pics[0]
+        return self._picture_color("images/" + pics[0], on)
+
+    def _text_color(self, card, man, n, ops, on):
+        """A line of text's colour switch (PAD-438): its own (an added line's edit, or a game
+        line's behind the unlock), a line in a font with colours of its own too (PAD-451:
+        the Write gives it its own copy of the font)."""
+        from ..core import colour_profile as _cp
+        from ..plugins.stern import scene_edit, text_colour
+        if not self._colour_unlock()["offered"]:
+            return False
+        sw = text_colour.line_switch(self.assets_dir, card, man, n, ops)
+        if sw is None or sw.get("locked"):
+            return False
+        if sw.get("added"):
+            new = [dict(op) for op in ops]
+            for op in new:
+                if op.get("op") == "add_text" and op.get("id") == n["id"]:
+                    op["color"] = bool(on)
+            scene_edit.set_ops(self.assets_dir, card, new)
+            log.info("Scenes: %s %s", n["name"], "has the color profile attached" if on
+                     else "has no color profile attached")
+            self._tell_colour_tabs()
+            self._tree_refresh()
+            self._publish_look()
+            return True
+        _cp.set_text_slot(self.assets_dir, sw["rel"], bool(on))
+        log.info("Scenes: the game's line %s %s", n["name"], "has the color profile attached"
+                 if on else "keeps the game's own colors")
+        self._tell_colour_tabs()
+        self.pictures_changed()
+        self._live_kick()                        # a running game gets the line's new colour
+        return True
+
+    def _tell_colour_tabs(self):
+        """A line's switch moved here (PAD-438): the Color profile tab's counts and the Write
+        tab's pending list follow, as for a picture's."""
+        for ns, name in (("color", "asset_switches_changed"),
+                         ("write", "_maybe_rescan_write_preview")):
+            try:
+                fn = getattr(self.window.service(ns), name, None)
+            except Exception:                            # noqa: BLE001
+                fn = None
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:                        # noqa: BLE001
+                    log.exception("scene text colour %s.%s", ns, name)
+
+    def _picture_color(self, rel, on):
+        """One picture's colour switch (*rel* under images/), recorded where the Images tab
+        keeps it."""
         images = self.window.service("images")
         here = self._images_here()
         done = False
@@ -2254,7 +2744,8 @@ class TreeEditMixin:
                              if "text:%d" % i not in take}
                 tfits = [(r, new) for r, new in tfits if id(r) not in gone_text]
                 more = scene_share.has_extras(extras) and (
-                    bool(extras["pictures"] or extras["added"]) or overlay)
+                    bool(extras["pictures"] or extras["added"] or extras.get("lines"))
+                    or overlay)
             renamed = {}
             if got:
                 got, missing = scene_edit.import_edits(self.assets_dir, path,
@@ -2271,7 +2762,8 @@ class TreeEditMixin:
                     if k)
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
-                                                       renamed=renamed, overlay=overlay)
+                                                       renamed=renamed, overlay=overlay,
+                                                       cards_here=self._load_trees().keys())
             if tfits:
                 if text_tab is not None:
                     text_tab._set_replacements(
@@ -2533,6 +3025,32 @@ def _colour_switch(n, kind, pics, picks, settings, added_op, unlocked=False, bui
     return None
 
 
+def _text_switch(assets_dir, card, man, n, ops, data, fonts, picks, settings, unlocked,
+                 built):
+    """A line of text's colour switch for the Layers list (PAD-438, DragonRR: "exactly like
+    images"): a line added here has its own (``"added"``), a game line is a blue lock until
+    the advanced box unlocks it (``"stock"``), each ``"kind": "text"`` with its
+    :func:`colour_profile.text_rel`.  ``None`` for a drop shadow (it takes its line's colour).
+
+    A line in a font whose letters carry their own colours (Godzilla's orange
+    GameFont_Secondary) has one of its own too (PAD-451, DragonRR: "make it so that we can
+    change each text layer individually"): the Write gives it its own copy of the font.
+    ``"art"`` marks it, with the font's name, its pictures (``"font_pictures"``, rels under
+    images/, which every other line in it shares), ``"scenes"`` drawing from them and
+    ``"font_on"`` when the Images tab has the profile on all of them (every line in the font
+    corrected, this one too)."""
+    from ..plugins.stern import text_colour
+    sw = text_colour.line_switch(assets_dir, card, man, n, ops, data, fonts)
+    if sw is None:
+        return None
+    if sw.get("art"):
+        rels = sw.get("font_pictures") or []
+        sw = dict(sw, font_pictures=["images/" + r for r in rels],
+                  scenes=text_colour.font_scenes(assets_dir, rels),
+                  font_on=bool(rels) and all((settings.get("images") or {}).get("images/" + r)
+                                             for r in rels))
+    return dict(sw, kind="text")
+
 def _kept_size(pick, assets_dir, rel, stock=None):
     """The size a picture is written at when it keeps its own size, else None.  A pick that
     keeps its own size is written at its file's size.  With no pick file the project's own
@@ -2608,9 +3126,23 @@ def _text_of(man, n, kind):
     return None
 
 
+def _added_text_op(ops, node):
+    """The ``add_text`` edit that made added line *node*, or None."""
+    return next((op for op in ops or () if op.get("op") == "add_text"
+                 and op.get("id") is not None and int(op["id"]) == int(node)), None)
+
+
 def _kind_of(man, n):
     kinds = [(man["objects"].get(str(oid)) or {}).get("kind") for _s, oid in n["comps"]]
     kinds = [k for k in kinds if k]
     return kinds[0] if kinds else "Group"
+
+
+def _font_label(key):
+    """A font's name from its picture's (``radimg_STERN_HelveticaNeueBlack_MONO_512x512_c2..``
+    -> ``STERN_HelveticaNeueBlack_MONO``), "" when the picture has none of its own."""
+    name = re.sub(r"^radimg_", "", str(key or ""))
+    name = re.sub(r"_?\d+x\d+(_[0-9a-f]{6,})?$", "", name)
+    return name
 
 

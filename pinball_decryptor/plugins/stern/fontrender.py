@@ -356,7 +356,10 @@ def render_text(font, text, slice_loader=None, tracking=0, metric_scale=1.0):
     way the machine will draw it.  The atlas art is the master and is fitted
     to the scaled box, as :func:`_fit_to_metrics` already does at 1.0.  At 1.0
     the output is byte-identical to what it has always been.  *tracking* is
-    in output pixels and is not scaled."""
+    in output pixels and is not scaled: it is added after every letter but a
+    line's last, as the game adds a Text's LetterSpacing (PAD-452, emulator: a
+    centred line spaced 20 px wider per letter grew by 20 px per GAP, so the
+    line is as wide as its letters reach, not its last spacing)."""
     Image = _pil()
     loader = slice_loader or (lambda g: load_slice(g))
     ms = _metric_scale(metric_scale)
@@ -415,7 +418,7 @@ def render_text(font, text, slice_loader=None, tracking=0, metric_scale=1.0):
             min_x = min(min_x, x)
             max_x = max(max_x, x + img.size[0], pen + adv)
             pen += adv + kern + tracking
-        max_x = max(max_x, pen)
+        max_x = max(max_x, pen - (tracking if line else 0))
     n_lines = text.count("\n") + 1
     W = max(1, int(round(max_x - min_x)))
     H = max(1, int(round(n_lines * line_h - LINE_GAP)))

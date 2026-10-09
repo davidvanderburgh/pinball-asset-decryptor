@@ -29,6 +29,8 @@ const P = {
   emulate: "M6 4l14 8-14 8z",
   play: "M6 4l14 8-14 8z",
   pause: "M7 5h3v14H7zM14 5h3v14h-3z",
+  // PAD-446: a slot's random clips
+  shuffle: "M3 7h3c3.5 0 4.5 2.5 6 5s2.5 5 6 5h3M3 17h3c1.6 0 2.6-.6 3.4-1.6M14.6 8.6C15.4 7.6 16.4 7 18 7h3M18 4l3 3-3 3M18 14l3 3-3 3",
   stop: "M7 6h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5",
   folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
@@ -65,6 +67,10 @@ const P = {
   undo: "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3",
   redo: "M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3",
   lock: "M6 11h12v9H6zM8 11V7a4 4 0 0 1 8 0v4",
+  // PAD-451: a line of text corrected through its font's pictures
+  link: "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7.1 7.1l1.7-1.7",
+  // PAD-448: a game's own clip unlocked by Advanced
+  unlock: "M6 11h12v9H6zM8 11V7a4 4 0 0 1 7.7-1.5",
   star: "M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z",
   sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
   moon: "M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z",

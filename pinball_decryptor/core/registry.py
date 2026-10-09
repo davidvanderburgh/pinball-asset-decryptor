@@ -345,7 +345,9 @@ class Capabilities:
     # added / modified / deleted files per asset type by the cards' own
     # validation digests, sound counts, adjustment defaults and high-score
     # boards.  The plugin implements ``compare_images``.  Stern Spike 2 only
-    # (plugins.stern.compare).
+    # (plugins.stern.compare).  Without it the tab still compares two
+    # extract FOLDERS for any manufacturer that extracts (PAD-442,
+    # ``compare_folders``) — this flag only adds the card images.
     compare: bool = False
     # Video-quality report: surfaces a "Check card…" button on the Replace
     # Video tab that measures every clip ALREADY on a card image and lists the
@@ -697,6 +699,19 @@ class Manufacturer(ABC):
         """
         return []
 
+    def compare_folders(self, dir_a, dir_b, progress=None, cancel=None):
+        """What changed from project / extract folder *dir_a* to *dir_b*, in
+        the same section shape as :meth:`compare_images` (PAD-442).
+
+        Every manufacturer has one: the files are compared as they are on
+        disk now, by kind (:func:`core.folder_compare.compare_folders`).  A
+        plugin that pairs some files up better than by path overrides this
+        and hands that function a ``special`` section (Stern's decoded
+        sounds).  *progress(done, total)* / *cancel()* cover the reads; runs
+        on a worker thread."""
+        from .folder_compare import compare_folders
+        return compare_folders(dir_a, dir_b, progress=progress, cancel=cancel)
+
     def video_quality(self, path, log=None, progress=None, cancel=None):
         """Measure every video clip already on the card image *path* ->
         ``[core.video_quality.ClipQuality]``.
@@ -942,6 +957,16 @@ class Manufacturer(ABC):
         be both a shipped file and a dead-end derivative; an extension
         filter can't tell those apart (see :meth:`video_slot_dirs`).
         """
+        return None
+
+    def video_variants_offer(self, assets_dir, rels):
+        """Which Replace-Video slots can play one of several clips at random
+        in the game (PAD-446): ``{"why": why_none, "slots": {rel: why_not},
+        "max": n}`` - why no slot of this project can (``""`` when they can),
+        per slot why that one cannot (``""`` when it can), and how many clips a
+        slot may have beyond its own.  ``None`` (the default) when the plugin
+        has no such thing, and the tab offers nothing.  Called off the UI
+        thread: it may open the project's card image."""
         return None
 
     def video_pins_byte_size(self, assets_dir=None) -> bool:

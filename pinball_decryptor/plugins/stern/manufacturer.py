@@ -50,6 +50,28 @@ from .pipeline import (Spike1ExtractPipeline, Spike1RevertPipeline,
 _WHITESTAR_DB = {k: v for k, v in _PMC_GAME_DB.items()
                  if v["manufacturer"] == "Stern"}
 
+
+def _spike2_print(path):
+    """A Spike 2 card's fingerprint for project lineage (PAD-427); ``None``
+    for anything else."""
+    if path.lower().endswith(".zip") or detect_spike1_game(path) is not None:
+        return None
+    from .stock_prints import card_print
+    return card_print(path)
+
+
+def _spike2_off_stock(assets_dir):
+    """What a Spike 2 project's extract holds that the official card
+    doesn't (PAD-427), as ``(words, files)``; ``None`` without a record."""
+    from .stock_prints import off_stock_words, project_off_stock
+    got = project_off_stock(assets_dir)
+    return None if got is None else (off_stock_words(got), got["files"])
+
+
+from ...core import lineage as _lineage  # noqa: E402
+_lineage.register_printer(_spike2_print)
+_lineage.register_off_stock(_spike2_off_stock)
+
 _SPIKE2_GAMES = tuple(
     Game(key=k, display=info["display"], manufacturer_key="stern",
          era="spike2")
@@ -733,6 +755,34 @@ class SternManufacturer(Manufacturer):
         from .info import card_version_probe
         return card_version_probe(path)
 
+    def stock_check(self, path, deep=False):
+        """Is the card image at *path* the card Stern released, or one built
+        from it?  :func:`stock_prints.check_card`'s verdict dict, or
+        ``None`` for a card that has no official record to check against
+        (Spike 1, Whitestar).  *deep* hashes every file's bytes (minutes on
+        a spinning disk).  Opens the image: call off the UI thread."""
+        if path.lower().endswith(".zip") or detect_spike1_game(path)                 is not None:
+            return None
+        from .stock_prints import check_card
+        got = check_card(path, deep=deep)
+        if got.get("print"):
+            # the walk took the card's fingerprint too: projects find their
+            # cards by it (PAD-427)
+            _lineage.remember_print(path, {
+                "print": got["print"], "sidx": got["sidx"],
+                "label": got["label"],
+                "official": got["status"] == "official"})
+        return got
+
+    def project_stock(self, assets_dir):
+        """``{"status", "label", "text"}``: was the project at *assets_dir*
+        extracted from an official Stern card (see
+        :func:`stock_prints.check_project`)?  ``None`` when there is
+        nothing to go on."""
+        from .stock_prints import check_project
+        got = check_project(assets_dir)
+        return got if got["status"] != "unknown" else None
+
     def compare_images(self, path_a, path_b, assets_a=None, assets_b=None):
         # Spike 2 cards only — a Whitestar MAME zip has no manifest/firmware
         # to diff, and the Spike 1 comparer isn't built yet, so refuse with a
@@ -746,6 +796,22 @@ class SternManufacturer(Manufacturer):
                                 "yet — pick two Spike 2 card images.")])]
         from .compare import compare_cards
         return compare_cards(path_a, path_b, assets_a, assets_b)
+
+    def compare_folders(self, dir_a, dir_b, progress=None, cancel=None):
+        # The decoded sounds pair by slot and past the codec's lead-in, the
+        # same diff the card report runs on two extracts (PAD-442).
+        from ...core.folder_compare import compare_folders
+        from .compare import folder_sound_rows, owns_sound
+        return compare_folders(
+            dir_a, dir_b, special=("Sounds", owns_sound, folder_sound_rows),
+            progress=progress, cancel=cancel)
+
+    def video_variants_offer(self, assets_dir, rels):
+        # PAD-446: the in-game video bank's clips, on a title the swap was
+        # proven on (clip_variants.PROVEN)
+        from .clip_variants import MAX_EXTRA, offer
+        why, slots = offer(assets_dir, rels, probe=True)
+        return {"why": why, "slots": slots, "max": MAX_EXTRA}
 
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games

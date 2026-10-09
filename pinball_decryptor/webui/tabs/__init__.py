@@ -8,6 +8,8 @@ app down) and the failure goes to the session log.
 
 import importlib
 import logging
+import sys
+import time
 
 from .base import TabService
 
@@ -65,11 +67,52 @@ def _placeholder(ns, key, label, group, icon, reason):
     })
 
 
+#: PAD-430: seconds to wait before each retry of a tab whose import hit a
+#: file another process holds open.  A virus scanner reading a DLL the update
+#: just wrote (numpy's _multiarray_umath) fails the import outright; the lock
+#: is gone a moment later, so the tab loads on a retry.
+_LOCKED_RETRY_WAITS = (0.5, 1.0, 2.0, 4.0)
+
+
+def _file_locked(exc):
+    """True when *exc* (or anything it wraps) is a Windows sharing violation."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if getattr(exc, "winerror", None) == 32:
+            return True
+        text = str(exc)
+        if "being used by another process" in text or "WinError 32" in text:
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def _import_tab(name):
+    """Import the tab module *name*, retrying while a file it needs is locked."""
+    for wait in _LOCKED_RETRY_WAITS + (None,):
+        before = set(sys.modules)
+        try:
+            return importlib.import_module(name)
+        except Exception as e:                        # noqa: BLE001
+            if wait is None or not _file_locked(e):
+                raise
+            log.warning("tab %s import hit a locked file, retrying in %.1fs:"
+                        " %s", name, wait, e)
+            # Drop what the failed attempt left half-imported (numpy keeps
+            # the submodules it loaded before the DLL), so the retry starts
+            # from a clean slate.
+            for mod in set(sys.modules) - before:
+                sys.modules.pop(mod, None)
+            importlib.invalidate_caches()
+            time.sleep(wait)
+
+
 def load_tab_classes():
     classes = []
     for module, ns, key, label, group, icon in TABS:
         try:
-            mod = importlib.import_module("%s.%s" % (__name__, module))
+            mod = _import_tab("%s.%s" % (__name__, module))
             cls = getattr(mod, "TAB")
             for attr, value in (("ns", ns), ("key", key), ("label", label),
                                 ("group", group), ("icon", icon)):

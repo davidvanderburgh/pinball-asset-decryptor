@@ -36,6 +36,12 @@ const STATE_TIP = {
   edited: "Changed since the last Write: the next Write puts it on the card.",
   written: "Written: the last Write put exactly these edits on the card.",
 };
+// PAD-429 (DragonRR): the search finds the game's on-screen text, not only scene names;
+// PAD-468: with nothing typed, the arrows go through every line of text of every scene
+const FIND_TIP = "Finds scenes by name, font or the words they show. Enter (or the down arrow) "
+  + "goes to the next line of text with these words and picks it out; Shift+Enter goes back. "
+  + "With nothing typed, the arrows go through every line of text in every scene, one after "
+  + "another: see each where it sits and fix its words under Selected.";
 // The count columns the scene list has room for: a narrow list keeps the scene NAMES
 // readable and drops the counts, least useful first (Video, Fonts, then Text and Images).
 const COLS_BY_WIDTH = [[470, ["imgs", "fonts", "texts", "vids"]], [330, ["imgs", "texts"]],
@@ -230,8 +236,9 @@ export function ScenesActions() {
 }
 
 // colorsOpen / openColors(mode): the Color profiles bar on the page's edge (PAD-350,
-// scenes.js); while it is open the scene list steps aside unless shown again
-export function ScenesPage({ colorsOpen = false, openColors } = {}) {
+// scenes.js); while it (or the Font bar) is open the scene list steps aside unless shown
+// again.  openFont(): the Font bar (PAD-452), from a line of text's Selected panel
+export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
   const [wideOwn, setWideOwn] = useState(false); // the scene editor without the scene list
@@ -324,6 +331,9 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
     openMenu({ x: e.clientX, y: e.clientY }, items);
   };
   const editor = !!(s.tree && s.tree_view);
+  // PAD-468: the arrows stay with nothing typed (every line of text, in turn)
+  const searching = !!(s.search || "").trim();
+  const find = s.find && (searching || s.find.n) ? s.find : null;
   const stage = editor ? s.tree_view.stage : [1360, 768];
   // PAD-349 (DragonRR): the advanced unlock sits beside Preview colors, not in the Layers head
   const unlock = editor ? s.tree_view.color_unlock : null;
@@ -335,9 +345,20 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
           aria-label="Show the scene list" ...${tip("Show the scene list")}>
         <${Icon} name="right" /><span class="sc-list-tab-txt">Scenes</span><${Icon} name="right" /></button>` : null}
       <div class="scenes-left">
-        <div class="row scenes-search">
-          <${Field} sm value=${s.search} placeholder="Search" onChange=${(v) => call("text_scenes.set_search", v)}
-            delay=${200} prefix=${html`<${Icon} name="search" />`} />
+        <div class="row scenes-search" onKeyDown=${(e) => {
+            // PAD-429: Enter goes to the next match, Shift+Enter to the previous one
+            if (e.key === "Enter" && find) { e.preventDefault(); call("text_scenes.find_step", e.shiftKey ? -1 : 1); } }}>
+          <${Field} sm value=${s.search} placeholder="Search text" onChange=${(v) => call("text_scenes.set_search", v)}
+            delay=${200} prefix=${html`<${Icon} name="search" />`} title=${FIND_TIP}
+            suffix=${find && searching ? html`<span class="small muted nw sc-find-n">${find.n ? (find.pos ? `${find.pos} of ${find.n}` : `${find.n} found`) : "none"}</span>` : null} />
+          ${find ? html`<${Button} size="xs" kind="ghost" icon="up" label="Previous match" disabled=${!find.n}
+              title=${searching ? "Previous match (Shift+Enter)"
+                : `Previous line of text (Shift+Enter): every line of every scene in turn (${find.n} lines)`}
+              onClick=${() => call("text_scenes.find_step", -1)} />
+            <${Button} size="xs" kind="ghost" icon="down" label="Next match" disabled=${!find.n}
+              title=${searching ? "Next match (Enter): the next line of text with these words, in this scene or the next one"
+                : `Next line of text (Enter): every line of every scene in turn (${find.n} lines). Type words to go through only the lines with them.`}
+              onClick=${() => call("text_scenes.find_step", 1)} />` : null}
           <${InfoBadge} text=${s.hint} />
           <${Button} size="sm" icon="left" cls="sc-list-hide" label="Hide the scene list"
             title="Hide the scene list: more room for the preview (the Scenes tab on the left brings it back)"
@@ -411,7 +432,7 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
           ${unlock && unlock.offered ? html`<div class=${cx("scenes-unlock", unlock.on && "on")} ...${tip(UNLOCK_TIP)}>
             <span class="look-head">Advanced</span>
             <${Check} checked=${!!unlock.on} onChange=${(v) => call("text_scenes.tree_color_unlocked", v)}
-              label="Unlock extracted images" cls="small" /></div>` : null}
+              label="Unlock extracted images and text" cls="small" /></div>` : null}
         </div>
         ${layout ? html`<${LayoutEditor} key=${layout.kind + "\u0000" + layout.text} d=${layout} />` : null}
         ${editor || s.preparing ? null : html`<div class="row scenes-bottom">
@@ -423,7 +444,8 @@ export function ScenesPage({ colorsOpen = false, openColors } = {}) {
       <div class="scenes-inspector" ref=${inspRef}>
         ${editor ? html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
             style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
-            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} /></div>
+            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} openFont=${openFont}
+              find=${s.find} searching=${searching} /></div>
           <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
           <${TreeTop} s=${s} onMenu=${itemMenu} />`
           : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
@@ -571,6 +593,21 @@ function inPoly(pts, x, y) {
   return inside;
 }
 
+// PAD-447 (DragonRR): a click whose mouse jiggles a pixel or two picks a picture or a line of
+// text without moving it.  A press moves, resizes or scales nothing until the pointer has gone
+// DRAG_SLOP px on the screen from where it went down; from then on it follows the pointer from
+// that spot, so what was grabbed stays under it.  *d* is the drag from the press (sx, sy: where
+// it went down on the screen; x0, y0: in stage units), (sx, sy) the pointer on the screen and
+// (x, y) in stage units; the same *d* back means it has not started.
+export const DRAG_SLOP = 5;
+export function dragTo(d, sx, sy, x, y) {
+  if (!d.go && Math.hypot(sx - d.sx, sy - d.sy) < DRAG_SLOP) return d;
+  if (d.mode === "move") return { ...d, go: true, dx: x - d.x0, dy: y - d.y0 };
+  // a text's box: the corner picked moves as the pointer does (it was only near the pointer)
+  if (d.mode === "box") return { ...d, go: true, x: d.mx + x - d.x0, y: d.my + y - d.y0 };
+  return { ...d, go: true, f: Math.max(0.05, Math.hypot(x - d.cx, y - d.cy) / d.d0) };
+}
+
 function TreeTop({ s, onMenu }) {
   const [view, setView] = useState("layers");
   return html`<div class="scenes-top">
@@ -629,33 +666,60 @@ const gameTip = (l) => ({
     ["Delete", "hide it in the game and the preview, after asking"],
     `The eye on its own hides it here only.${l.part_off ? " It shows only when the look it sits in is on." : ""}`,
   ] });
+// PAD-451 (DragonRR): a line in a font whose letters carry their own colors (c.art) has a
+// palette of its own: the Write gives it its own copy of the font.  What that means, and how
+// to reach every line in the font at once (its pictures, on the Images tab)
+const artLines = (c) => {
+  if (!c.art) return [];
+  const name = c.font || "its font";
+  const n = (c.font_pictures || []).length;
+  const pics = n > 1 ? `its ${n} pictures` : "its picture";
+  return [
+    c.on ? `Its letters carry their own colors (${name}): when you build, this line gets its own copy of that font with the color profile in it, so the other lines in ${name} keep their look.`
+      : `Its letters carry their own colors (${name}): attached, this line gets its own copy of that font, so only this line changes.`,
+    c.font_on ? `Its font's pictures have the color profile attached on the Images tab, so every line in ${name} is corrected, this one too.`
+      : `To correct every line in ${name} at once${c.scenes > 1 ? ` (${c.scenes} scenes)` : ""}, attach the profile to ${pics} on the Images tab.`,
+  ];
+};
 // PAD-312: a picture's colour switch - the individual files profile baked into it (green), its
 // own colours (red), or the game's own picture, which has no switch (blue lock) until the
 // advanced box beside Preview colors unlocks it (PAD-344; moved there in PAD-349)
 const colorTip = (l, cs) => {
   const c = l.color || {};
+  if (c.locked && c.line) return { head: "Color: the game's own line of text", lines: [
+    "Stern made its colors for the machine's screen, so the individual files profile is not offered on it.",
+    ...artLines(c),
+    "Tick Unlock extracted images and text (Advanced, beside Preview colors) to give it a palette too. A line you add has one already." ] };
   if (c.locked) return { head: "Color: the game's own picture", lines: [
     "Stern made it for the machine's screen, so the individual files profile is not offered on it.",
-    "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images (Advanced, beside Preview colors)." ] };
+    "Replace it on the Images tab to correct a picture of your own, or tick Unlock extracted images and text (Advanced, beside Preview colors)." ] };
+  if (c.line) return { head: c.on ? "Color profile attached to this line" : "No color profile attached to this line", lines: [
+    ...artLines(c),
+    layerProfile(l, cs),
+    ["Click", c.on ? "detach the color profile" : "attach the color profile"],
+    c.on ? `Its color profile is baked into ${c.art ? "its copy of the font" : "the color it is drawn in"} when you build; the preview shows it. Open Colors with the layer selected to give it one of its own.`
+      : "It goes on the card in its own colors.",
+    c.stock ? "The game's own line, unlocked: corrected from its own color when you build, so never twice."
+      : "Set for this line." ] };
   return { head: c.on ? "Color profile attached to this file" : "No color profile attached to this file", lines: [
     layerProfile(l, cs),
     ["Click", c.on ? "detach the color profile" : "attach the color profile"],
     c.on ? "Its color profile is baked into this picture when you build; the preview shows it. Open Colors with the layer selected to give it one of its own."
       : "It goes on the card as it is.",
     c.stock ? "The game's own picture, unlocked: corrected from its original when you build, so never twice."
-      : c.own ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture." ] };
+      : c.own ? "Set for this picture." : c.on ? "Attached by the old Every replaced picture box, still ticked in this project." : null ] };
 };
-const UNLOCK_TIP = { head: "Advanced: unlock extracted images", lines: [
-  "Off: the original extracted images are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added are not locked.",
-  "On: each extracted image gets a red / green palette too, whatever is drawn in it now. A green one has the color profile attached: it is corrected from its original extracted copy when you build.",
-  "The same box as on the Images tab. Turning it off locks them again as they were." ] };
+const UNLOCK_TIP = { head: "Advanced: unlock extracted images and text", lines: [
+  "Off: the original extracted images and the game's own lines of text are locked (blue lock), so the individual files profile is never applied to them twice by accident. Pictures you replaced or added, and lines you added, are not locked.",
+  "On: each extracted image and line of text gets a red / green palette too, whatever is drawn in it now. A green one has the color profile attached: a picture is corrected from its original extracted copy, a line of text from its own color, when you build.",
+  "The same box as Unlock extracted images on the Images tab. Turning it off locks them again as they were." ] };
 // PAD-368: the profile a layer's picture has (null for a layer with no colour switch);
 // PAD-369: a {profile} line, drawn in the one color every tooltip gives it (core/ui.js)
 export const layerProfile = (l, cs) => {
   const c = l.color;
   if (!c) return null;
   if (c.locked || !c.on) return { profile: "None" };
-  return { profile: ((cs.own_names || {}).images || {})[c.rel] || cs.asset_name || "Recommended" };
+  return { profile: ((cs.own_names || {})[c.kind || "images"] || {})[c.rel] || cs.asset_name || "Recommended" };
 };
 const rowTip = (l, cs) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
@@ -831,10 +895,10 @@ function TreeLayers({ t }) {
         aria-pressed=${l.hidden ? "true" : "false"} ...${tip(gameTip(l))}
         onClick=${(e) => { e.stopPropagation(); call("text_scenes.tree_visible", l.id, l.hidden); }}>
         <${Icon} name="sd" /></button>
-      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off")}
-        aria-label="Color profile on this picture" aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
+      ${l.color ? html`<button type="button" class=${cx("ly-color", l.color.locked ? "locked" : l.color.on ? "on" : "off", l.color.font_on && "via-font")}
+        aria-label=${l.color.line ? "Color profile on this line" : "Color profile on this picture"} aria-pressed=${l.color.on ? "true" : "false"} ...${tip(colorTip(l, cs))}
         onClick=${(e) => { e.stopPropagation(); if (!l.color.locked) call("text_scenes.tree_color", l.id, !l.color.on); }}>
-        <${Icon} name=${l.color.locked ? "lock" : "palette"} /></button>` : html`<span></span>`}
+        <${Icon} name=${l.color.locked ? "lock" : "palette"} />${l.color.font_on ? html`<${Icon} name="link" cls="ly-share" />` : null}</button>` : html`<span></span>`}
       ${(l.pics || []).length ? html`<button type="button" class="ly-img"
         aria-label="Show on the Images tab" ...${tip(l.pics.length === 1 ? "Show this picture on the Images tab"
           : `Show one of the ${l.pics.length} pictures it draws on the Images tab`)}
@@ -1105,16 +1169,19 @@ function TreeCanvas({ s }) {
     flushNudge();
     const [x, y] = toStage(e);
     box.current.setPointerCapture(e.pointerId);
+    const at = { sx: e.clientX, sy: e.clientY, x0: x, y0: y };      // where it went down (PAD-447)
     if (corner(x, y) && p.kind === "Text") {
       // the corner across from the one picked stays put
-      const fx = Math.abs(x - selBox.x) < Math.abs(x - (selBox.x + selBox.w)) ? selBox.x + selBox.w : selBox.x;
-      const fy = Math.abs(y - selBox.y) < Math.abs(y - (selBox.y + selBox.h)) ? selBox.y + selBox.h : selBox.y;
-      setDrag({ mode: "box", node: p.id, fx, fy, x, y, x0: x, y0: y });
+      const left = Math.abs(x - selBox.x) < Math.abs(x - (selBox.x + selBox.w));
+      const top = Math.abs(y - selBox.y) < Math.abs(y - (selBox.y + selBox.h));
+      const fx = left ? selBox.x + selBox.w : selBox.x, fy = top ? selBox.y + selBox.h : selBox.y;
+      const mx = left ? selBox.x : selBox.x + selBox.w, my = top ? selBox.y : selBox.y + selBox.h;
+      setDrag({ mode: "box", node: p.id, fx, fy, mx, my, x: mx, y: my, ...at });
       return;
     }
     if (corner(x, y)) {
       const cx0 = selBox.x + selBox.w / 2, cy0 = selBox.y + selBox.h / 2;
-      setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1 });
+      setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1, ...at });
       return;
     }
     const h = pick(x, y);
@@ -1124,24 +1191,22 @@ function TreeCanvas({ s }) {
     // a picture already in a selection of several drags them all
     const ids = multi && sels.includes(h.id) ? sels : [h.id];
     if (!p || (ids.length === 1 && h.id !== p.id)) call("text_scenes.tree_select", h.id);
-    setDrag({ mode: "move", id: keyOf(ids), ids, x0: x, y0: y, dx: 0, dy: 0 });
+    setDrag({ mode: "move", id: keyOf(ids), ids, dx: 0, dy: 0, ...at });
   };
   const move = (e) => {
     const [x, y] = toStage(e);
     if (!drag) { const h = pick(x, y); setHover(h ? h.id : null); return; }
-    if (drag.mode === "move") setDrag({ ...drag, dx: x - drag.x0, dy: y - drag.y0 });
-    else if (drag.mode === "box") setDrag({ ...drag, x, y });
-    else setDrag({ ...drag, f: Math.max(0.05, Math.hypot(x - drag.cx, y - drag.cy) / drag.d0) });
+    setDrag((q) => q && dragTo(q, e.clientX, e.clientY, x, y));
   };
   const up = () => {
     const d = drag;
     setDrag(null);
-    if (!d) return;
+    if (!d || !d.go) return;                  // a click (PAD-447): it picked, it moves nothing
     if (d.mode === "move" && Math.abs(d.dx) + Math.abs(d.dy) >= 1) {
       const dx = Math.round(d.dx), dy = Math.round(d.dy);
       send(d.ids, { m: "move", dx, dy }, () => moveCall(d.ids, dx, dy));
     }
-    if (d.mode === "box" && Math.abs(d.x - d.x0) + Math.abs(d.y - d.y0) >= 1) {
+    if (d.mode === "box" && Math.abs(d.x - d.mx) + Math.abs(d.y - d.my) >= 1) {
       const b = boxOf(d);
       const r = { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) };
       setBoxPend({ node: d.node, box: r, rev: t.rev || 0 });
@@ -1223,7 +1288,49 @@ function TreeCanvas({ s }) {
   </div>`;
 }
 
-function TreeSide({ t, play, playFrame }) {
+// PAD-468 (DragonRR): a line's words, fixed where it sits, and Previous / Next through every
+// line of text of every scene (the lines the search finds, while it has words in it), so
+// spelling and placement are checked here instead of in the game
+const WORDS_TIP = { head: "Words", lines: [
+  "The words this line shows. Change them and press Enter (or click away): the preview draws them at once, and Write puts them on the card.",
+  "A line of the game's is the same edit as on the Text tab, which lists it too. A line you added keeps its words in this scene (Undo takes a change back).",
+  "Type \\n for a line break." ] };
+function Words({ p, find, searching }) {
+  const w = p.words;
+  const [draft, setDraft] = useState(w.text);
+  useEffect(() => { setDraft(w.text); }, [p.id, w.text]);
+  const len = [...draft].length;
+  const over = w.limit != null && len > w.limit;
+  const apply = (v) => { if (v !== w.text && v.trim()) call("text_scenes.tree_words", p.id, v); };
+  const where = find && find.pos ? `${find.pos} of ${find.n}` : "";
+  const what = searching ? "line with the words searched for" : "line of text, in this scene or the next";
+  return html`<div class="tree-words">
+    <div class="tree-row">
+      <span class="lbl" ...${tip(WORDS_TIP)}>Words</span>
+      <${Field} key=${p.id} sm cls="grow" value=${w.text} onChange=${setDraft} onCommit=${apply} bad=${over}
+        title=${WORDS_TIP} />
+      <${Button} size="xs" kind="ghost" icon="up" label="Previous line" disabled=${!(find && find.n)}
+        title=${`Previous ${what.replace("next", "one before")} (Shift+Enter in the search box)`}
+        onClick=${() => call("text_scenes.find_step", -1)} />
+      <${Button} size="xs" kind="ghost" icon="down" label="Next line" disabled=${!(find && find.n)}
+        title=${`Next ${what} (Enter in the search box)`}
+        onClick=${() => call("text_scenes.find_step", 1)} />
+    </div>
+    <div class="tree-row">
+      ${w.limit != null ? html`<span class=${cx("small nw", over ? "err-ink" : "muted")}
+        ...${tip(over ? "Too long: a line of a scene can take this many bytes at most." : "Its length, and the most a line of a scene can take.")}>
+        ${len} / ${w.limit} bytes</span>` : null}
+      ${w.limit != null && where ? html`<span class="small muted">·</span>` : null}
+      ${where ? html`<span class="small muted nw" ...${tip(searching ? "Where this line is among the lines the search finds"
+        : "Where this line is among every line of text in every scene listed")}>${searching ? `match ${where}` : `line ${where}`}</span>` : null}
+      <span class="grow"></span>
+      ${w.edited ? html`<${Button} size="xs" icon="undo" title=${`Back to the game's words: "${w.game}"`}
+        onClick=${() => call("text_scenes.tree_words", p.id, null)}>Game's words<//>` : null}
+    </div>
+  </div>`;
+}
+
+function TreeSide({ t, play, playFrame, openFont, find, searching }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
   const [keepShape, setKeepShape] = useState(true);
@@ -1282,6 +1389,7 @@ function TreeSide({ t, play, playFrame }) {
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
       ${p.hidden ? html`<div class="small in-game">Hidden in the game: Write leaves it out of the card.${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
       : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
+      ${p.words ? html`<${Words} p=${p} find=${find} searching=${searching} />` : null}
       ${p.pic ? html`<div class="tree-row">
         <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>
           Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%</span>
@@ -1336,12 +1444,11 @@ function TreeSide({ t, play, playFrame }) {
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "back")}>To back<//>
         <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
-      ${p.kind === "Text" ? html`<div class="tree-row">
-        <${Button} size="xs" disabled=${p.x == null}
-          title="Shrink or grow this text's box to go round its words, with a small border. The words stay where they are. Words the game puts in while it plays can be longer than these."
-          onClick=${() => call("text_scenes.tree_fit_text", p.id)}>Fit box to text<//>
-        <${Button} size="xs" title="A dark copy of this text just beneath it, a few pixels down and right. It is selected after, to move, tint or remove."
-          onClick=${() => call("text_scenes.tree_shadow", p.id)}>Add a drop shadow<//>
+      ${p.kind === "Text" && p.font && openFont ? html`<div class="tree-row">
+        <${Button} size="xs" icon="text" title=${{ head: "Font controls", lines: [
+          "Opens the Font bar on the right edge: this line's font, size, italic, letter width, spacing, wrapping, where its words sit in its box, Fit box to text and its drop shadow."] }}
+          onClick=${openFont}>Font controls<//>
+        <span class="small muted ellip">${p.font.style ? `${p.font.style}, ${p.font.size} px` : `${p.font.size} px`}</span>
       </div>` : null}
     </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers. Ctrl-click (or Shift-click) to pick several and move them together.</div>`}
     ${(t.notes || []).length ? html`<div class="small warn-ink">${t.notes.join("; ")}</div>` : null}

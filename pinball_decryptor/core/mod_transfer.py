@@ -37,6 +37,9 @@ asset layout.  Two hazards, handled differently:
   target is dropped (a safe no-op), never re-pointed.  The user's renamed
   image groups (``image_group_tags``) ride along too — their group keys are
   container identities that transfer when the container still exists.
+  A video slot's RANDOM CLIPS (``video_variants``, PAD-446: the slot's extra
+  clips, one played at random each time) follow the slot exactly as its
+  replacement does (:func:`_plan_video`), list and all.
 
 Every one of those on-card identities begins with the card's **game folder**,
 which Stern names after the MODEL of the title (``godzilla_pro`` on a Pro card,
@@ -82,6 +85,13 @@ from . import (checksums, session_log, staged_changes, staged_originals,
 
 # Slot categories that carry ``rel_path -> replacement`` assignment maps.
 _ASSIGN_KEYS = ("audio", "video", "image")
+# PAD-446: a video slot's random clips, ``rel_path -> [clip, ...]``; they pair
+# with the slot exactly as a video replacement does.
+_VARIANT_KEY = "video_variants"
+# What a random clip is called in the game's video bank, and so what an extract
+# of a card built with one names its file: ``<the slot's name>__PadVar<k>``
+# (plugins/stern/clip_variants.NAME_FORMAT; k = 2 for the first extra clip).
+_VARIANT_NAME_RE = re.compile(r"^(?P<base>.+)__PadVar(?P<k>\d+)$")
 # Per-audio-slot flag maps that must follow a remapped audio key (the loudness
 # offset is a number rather than a flag, but it is per-slot state that belongs
 # to the replacement, so it travels with it).
@@ -648,6 +658,36 @@ def _pair_text_lists(stock, modded):
     return pairs, unpaired
 
 
+def _baked_variants(modded_dir):
+    """``{base rel: [variant file, ...]}``: the random clips a card was built with
+    (PAD-446), read out of an extract of that card.  The build added each one to
+    the game's video bank as ``<the slot's name>__PadVar<k>``, so the extract
+    names its file that way beside the slot's own clip; they come back in k
+    order, as the slot's list was.  A variant whose slot's file is not in the
+    extract is left out."""
+    by_stem = {}
+    found = {}
+    for rel in _walk_rels(modded_dir, "video"):
+        stem = os.path.splitext(_slot_name(rel))[0]
+        by_stem.setdefault(stem, rel)
+        m = _VARIANT_NAME_RE.match(stem)
+        if m:
+            found.setdefault(m.group("base"), []).append((int(m.group("k")), rel))
+    out = {}
+    for base, takes in found.items():
+        base_rel = by_stem.get(base)
+        if base_rel is None:
+            continue
+        out[base_rel] = [os.path.abspath(_abs(modded_dir, r)) for _k, r in sorted(takes)]
+    return out
+
+
+def _variant_rels(variants, modded_dir):
+    """The extract rels of every random clip in :func:`_baked_variants`' answer."""
+    return {os.path.relpath(f, modded_dir).replace(os.sep, "/")
+            for files in variants.values() for f in files}
+
+
 def diff_baked_mods(modded_dir, stock_dir, log_cb=None, report_dir=None):
     """Detect mods that are BAKED INTO an extract (the game code itself was
     modded, e.g. with another tool, before extraction) by diffing it against a
@@ -755,6 +795,27 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None, report_dir=None):
         log("%s: %d differ.%s"
             % (cat.capitalize(), len(saved[cat]), extra))
 
+    # PAD-446: the random clips the card was built with come back as videos of
+    # their own beside the slot's clip; each list goes to the STOCK rel of its
+    # slot, as a replacement would.
+    baked = _baked_variants(modded_dir)
+    if baked:
+        mod_rel_to_card = {r: c for c, r in mod_cards.items()}
+        stk_cards = {c: r for r, c in stk_rel_to_card.items()}
+        variants = {}
+        for base_rel, files in baked.items():
+            card = mod_rel_to_card.get(base_rel)
+            stk_rel = stk_cards.get(card) if card else None
+            if stk_rel is None and _stock_exists(stock_dir, base_rel):
+                stk_rel = base_rel
+            if stk_rel is not None:
+                variants[stk_rel] = files
+        if variants:
+            saved[_VARIANT_KEY] = variants
+        log("Random clips: %d slot(s) were built to play one of several clips "
+            "(%d clip(s) of their own)."
+            % (len(variants), sum(len(f) for f in variants.values())))
+
     # Text: pair the two manifests per asset (see _pair_text_lists).
     stk_by_path, mod_by_path = {}, {}
     for r in text_manifest.load(stock_dir):
@@ -838,6 +899,7 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
     plan = {"audio": {"matched": [], "remapped": [], "flagged": [],
                       "dropped": []},
             "video": {"matched": [], "dropped": []},
+            _VARIANT_KEY: {"matched": [], "dropped": []},
             "image": {"matched": [], "dropped": []},
             "text": {"matched": [], "dropped": []},
             "toggles": {}}
@@ -850,27 +912,48 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
     # ---- Videos: card-path pairing, filename fallback -------------------
     mod_cards = _video_card_paths(modded_dir)
     tgt_cards = _video_card_paths(target_dir)
+    # PAD-446: a card built with random clips carries them as videos of their
+    # own, which the new version never has: they go with their slot instead
+    baked = _baked_variants(modded_dir)
+    variant_rels = _variant_rels(baked, modded_dir)
     pairs = []          # (mod_rel, tgt_rel)
+    pair_of = {}        # mod_rel -> tgt_rel
     manifest_paired = set()
     if mod_cards and tgt_cards:
         for card, mod_rel in mod_cards.items():
             manifest_paired.add(mod_rel)
+            if mod_rel in variant_rels:
+                continue
             tgt_rel = tgt_cards.get(to_target(card))
             if tgt_rel is None:
                 notes["video_old_only"] += 1
             else:
                 pairs.append((mod_rel, tgt_rel))
+                pair_of[mod_rel] = tgt_rel
         log("Videos: %d paired by on-card path, %d only in the old version."
             % (len(pairs), notes["video_old_only"]))
     # Videos the manifests don't cover (older extract / hand-added files).
     for rel in _walk_rels(modded_dir, "video"):
-        if rel in manifest_paired:
+        if rel in manifest_paired or rel in variant_rels:
             continue
         cand = to_target(rel)
         if _stock_exists(target_dir, cand):
             pairs.append((rel, cand))
+            pair_of[rel] = cand
         else:
             notes["video_old_only"] += 1
+    for base_rel, files in sorted(baked.items()):
+        tgt_rel = pair_of.get(base_rel)
+        if tgt_rel is None:
+            plan[_VARIANT_KEY]["dropped"].append(
+                {"rel": base_rel, "repl": files,
+                 "reason": "no %s in the new version" % base_rel})
+        else:
+            plan[_VARIANT_KEY]["matched"].append(
+                {"rel": tgt_rel, "repl": files, "src_rel": base_rel})
+    if baked:
+        log("Random clips: %d slot(s) were built to play one of several clips; "
+            "%d carried." % (len(baked), len(plan[_VARIANT_KEY]["matched"])))
     log("Comparing %d video pair(s)..." % len(pairs))
     for i, (mod_rel, tgt_rel) in enumerate(pairs, 1):
         if i % 100 == 0:
@@ -953,8 +1036,10 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
             if r["original"] not in tgt_originals:
                 notes["text_unmatched"] += 1
 
-    transfer = len(plan["video"]["matched"]) + len(plan["image"]["matched"])
-    plan["totals"] = {"transfer": transfer, "flagged": 0, "dropped": 0}
+    transfer = (len(plan["video"]["matched"]) + len(plan["image"]["matched"])
+                + len(plan[_VARIANT_KEY]["matched"]))
+    plan["totals"] = {"transfer": transfer, "flagged": 0,
+                      "dropped": len(plan[_VARIANT_KEY]["dropped"])}
     plan["notes"] = notes
     return plan
 
@@ -1313,6 +1398,20 @@ def _plan_group_tags(source_dir, target_dir, saved, to_target=None):
     return matched, dropped
 
 
+def _variant_map(raw):
+    """A sidecar's ``video_variants`` as ``{rel: [clip, ...]}``, empty lists and
+    anything not a list of paths left out."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for rel, files in raw.items():
+        if isinstance(rel, str) and isinstance(files, (list, tuple)):
+            keep = [f for f in files if isinstance(f, str) and f.strip()]
+            if keep:
+                out[rel] = keep
+    return out
+
+
 def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
                   log_cb=None):
     """Compute a reconciliation plan moving *source_dir*'s mods onto
@@ -1320,6 +1419,7 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
 
         {"audio": {matched, remapped, flagged, dropped},
          "video": {matched, dropped},
+         "video_variants": {matched, dropped},   # a slot's random clips
          "image": {matched, dropped},
          "text":  {matched, dropped},
          "group_tags": {matched, dropped},
@@ -1345,6 +1445,9 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
         source_dir, target_dir, saved.get("audio"), log_cb=log_cb)
     v_matched, v_dropped = _plan_video(
         source_dir, target_dir, saved.get("video"), to_target)
+    # PAD-446: a slot's random clips follow the slot as its replacement does
+    vv_matched, vv_dropped = _plan_video(
+        source_dir, target_dir, _variant_map(saved.get(_VARIANT_KEY)), to_target)
     i_matched, i_dropped = _plan_image(
         source_dir, target_dir, saved.get("image"), to_target)
     t_matched, t_dropped = _plan_text(source_dir, target_dir,
@@ -1356,6 +1459,7 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
         "audio": {"matched": a_matched, "remapped": a_remapped,
                   "flagged": a_flagged, "dropped": a_dropped},
         "video": {"matched": v_matched, "dropped": v_dropped},
+        _VARIANT_KEY: {"matched": vv_matched, "dropped": vv_dropped},
         "image": {"matched": i_matched, "dropped": i_dropped},
         "text": {"matched": t_matched, "dropped": t_dropped},
         "group_tags": {"matched": g_matched, "dropped": g_dropped},
@@ -1365,11 +1469,11 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
     }
     n_defaults = sum(len(v) for v in plan["defaults"].values())
     transfer = (len(a_matched) + len(a_remapped) + len(v_matched)
-                + len(i_matched) + len(t_matched) + len(g_matched)
-                + n_defaults)
+                + len(vv_matched) + len(i_matched) + len(t_matched)
+                + len(g_matched) + n_defaults)
     flagged = len(a_flagged)
-    dropped = (len(a_dropped) + len(v_dropped) + len(i_dropped)
-               + len(t_dropped) + len(g_dropped))
+    dropped = (len(a_dropped) + len(v_dropped) + len(vv_dropped)
+               + len(i_dropped) + len(t_dropped) + len(g_dropped))
     plan["totals"] = {"transfer": transfer, "flagged": flagged,
                       "dropped": dropped}
     return plan
@@ -1661,6 +1765,11 @@ def plan_detail_lines(plan, cap=_DETAIL_CAP):
         (plan.get("video") or {}).get("dropped"), lambda e: e["rel"], cap)
     _detail_block(
         out, "error",
+        "Transfer: %d slot(s) with random clips can NOT be carried — the new "
+        "version has no matching clip:",
+        (plan.get(_VARIANT_KEY) or {}).get("dropped"), lambda e: e["rel"], cap)
+    _detail_block(
+        out, "error",
         "Transfer: %d image replacement(s) can NOT be carried — the new "
         "version has no matching image:",
         (plan.get("image") or {}).get("dropped"), lambda e: e["rel"], cap)
@@ -1700,8 +1809,9 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     targets the same slot/string.  ``include_flagged`` also applies the audio
     entries whose index was reused (off by default — those are the risky ones).
     ``src_saved`` overrides the source sidecar (pairs with ``plan_transfer``'s
-    ``saved``).  Returns ``{"audio", "video", "image", "text", "group_tags",
-    "defaults", "superseded"}`` counts actually written.
+    ``saved``).  Returns ``{"audio", "video", "video_variants", "image",
+    "text", "group_tags", "defaults", "superseded"}`` counts actually written
+    (``video_variants``: slots given their random clips, PAD-446).
 
     *origin* is the folder the mods CAME FROM as the user named it — field 1
     of the Mod Pack tab, which for a baked-in-mods transfer is the modded
@@ -1731,7 +1841,8 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     prior = transfers.get(key) or {}
     # What THIS run writes, per category — the record that supersedes the
     # previous one.
-    record = {"audio": {}, "video": {}, "image": {}, "text": {}}
+    record = {"audio": {}, "video": {}, "image": {}, "text": {},
+              _VARIANT_KEY: {}}
 
     src_loop = src_saved.get("audio_loop") or {}
     src_keep = src_saved.get("audio_keep") or {}
@@ -1772,6 +1883,12 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
         tgt_image[e["rel"]] = e["repl"]
         record["image"][e["rel"]] = e["repl"]
 
+    # PAD-446: a slot's random clips, the list as the old folder had it
+    tgt_variants = _variant_map(tgt.get(_VARIANT_KEY))
+    for e in (plan.get(_VARIANT_KEY) or {}).get("matched", ()):
+        tgt_variants[e["rel"]] = list(e["repl"])
+        record[_VARIANT_KEY][e["rel"]] = list(e["repl"])
+
     # Drop what the previous transfer of the same mods staged and this one
     # didn't — but only where the entry still holds that transfer's own
     # replacement, so an assignment the user re-pointed by hand survives.  A
@@ -1791,11 +1908,18 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
                 tgt_keep.pop(rel, None)
                 tgt_levels.pop(rel, None)
             staged_originals.revert(target_dir, rel)
+    # random clips change no file in the folder, so nothing is put back for them
+    for rel, files in (prior.get(_VARIANT_KEY) or {}).items():
+        if rel in record[_VARIANT_KEY] or tgt_variants.get(rel) != list(files):
+            continue
+        del tgt_variants[rel]
+        n_superseded += 1
 
     for kind, current in (("audio", tgt_audio), ("video", tgt_video),
                           ("image", tgt_image), ("audio_loop", tgt_loop),
                           ("audio_keep", tgt_keep),
-                          ("audio_levels", tgt_levels)):
+                          ("audio_levels", tgt_levels),
+                          (_VARIANT_KEY, tgt_variants)):
         if current:
             tgt[kind] = current
         else:
@@ -1863,6 +1987,7 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     staged_changes.save(target_dir, tgt)
 
     return {"audio": n_audio, "video": len(plan["video"]["matched"]),
+            _VARIANT_KEY: len(record[_VARIANT_KEY]),
             "image": len(plan["image"]["matched"]), "text": n_text,
             "group_tags": n_tags, "defaults": n_defaults,
             "superseded": n_superseded}

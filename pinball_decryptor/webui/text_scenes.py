@@ -148,7 +148,8 @@ def _rows(assets_dir, *parts):
 def _collect_scenes(assets_dir):
     """``scene_browser.collect_scenes`` verbatim (see there for the why of
     every step): ``{scene_dir: {"label", "images": [(order, rel)],
-    "fonts": {table: (name, px)}, "texts": [str], "videos": [rel]}}``."""
+    "fonts": {table: (name, px)}, "texts": [str], "videos": [rel]}}``, and
+    ``"program": True`` on the game program's strings (PAD-468)."""
     scenes = {}
 
     def scene_for(d):
@@ -223,8 +224,12 @@ def _collect_scenes(assets_dir):
         for row in text_manifest.load(assets_dir):
             p = (row.get("path") or "").replace("\\", "/")
             if p:
-                scene_for(p.rsplit("/", 1)[0])["texts"].append(
-                    row.get("original") or "")
+                sc = scene_for(p.rsplit("/", 1)[0])
+                sc["texts"].append(row.get("original") or "")
+                if not p.lower().endswith(".radium"):
+                    # the game program's own strings (/godzilla_le/game): listed as one
+                    # "scene", but no scene draws them as they are (PAD-468)
+                    sc["program"] = True
     except Exception:                                # noqa: BLE001
         pass
     scene_font_px = {}
@@ -306,6 +311,8 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._sel = None
         self._listed = []
         self._focus_want = None
+        self._find_at = None          # the search match Previous / Next is on (PAD-429)
+        self._find_stepping = False   # Previous / Next is picking its line (PAD-468)
         self._token = 0
         self._frames_full = []
         self._preview_full = None
@@ -338,7 +345,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             return ["Black"]
 
     def _reset_state(self):
-        self.set(open=False, alive=False, hint=HINT, search="", scenes=[],
+        self.set(open=False, alive=False, hint=HINT, search="", scenes=[], find=None,
                  sel=None,
                  sort={"col": "#0", "rev": False}, contents=None, item=None,
                  thumb="", detail="", caption="", caption_full="",
@@ -470,7 +477,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._fonts = None
         self._text_changes = None
         self.set(hint=HINT if self._scenes else HINT_EMPTY, card_note="")
-        self._refresh_list(preselect, focus_text)
+        self._refresh_list(preselect, focus_text, jump=True)
         self._auto_trees()
         self._check_card()
 
@@ -498,12 +505,29 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             except Exception:                        # noqa: BLE001
                 names = ()
             titles = {n.lower().rsplit(".", 1)[0].split("-")[0] for n in names}
-            self.ctx.loop.post(self._card_checked, assets, card, games, titles)
+            try:
+                from ..core.extract_source import card_relation
+                rel = card_relation(card, assets, measure=True) or {}
+            except Exception:                        # noqa: BLE001
+                rel = {}
+            self.ctx.loop.post(self._card_checked, assets, card, games, titles, rel)
 
         threading.Thread(target=work, daemon=True, name="scene-card").start()
 
-    def _card_checked(self, assets, card, games, titles):
-        if assets != self.assets_dir or not titles or games & titles:
+    def _card_checked(self, assets, card, games, titles, rel=None):
+        if assets != self.assets_dir:
+            return
+        rel = rel or {}
+        if (not titles or games & titles) and rel.get("source_name")                 and rel.get("kind") in ("other", "other_build"):
+            # PAD-421: the same game, but another card (a custom one over the stock extract)
+            self.set(card_note=(
+                "This project folder holds the extract of %s, not of %s (the card on the "
+                "Extract tab). What you see and edit here is %s's; %s's own pictures "
+                "are not in this project. To work on %s, extract it into a new project "
+                "folder." % (rel["source_name"], os.path.basename(card), rel["source_name"],
+                             os.path.basename(card), os.path.basename(card))))
+            return
+        if not titles or games & titles:
             return
         self.set(card_note=(
             "This project folder holds the scenes of %s, but the card on the Extract tab is "
@@ -588,24 +612,51 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             out.reverse()
         return out
 
-    def _haystack(self, d):
+    def _line_extras(self):
+        """The words the scenes' lines show besides the card's own (PAD-468), as
+        ``({scene dir: {original: new words}}, {scene dir: [(node, words)]})``: the edits made
+        to their lines (on the Text tab or in the Words box) and the lines added in the scene
+        editor, so a search finds a line by the words it shows now too."""
+        reps = {}
+        for path, pairs in (self._load_text_changes() or {}).items():
+            p = (path or "").replace("\\", "/")
+            if p.lower().endswith(".radium"):
+                reps.setdefault(p.rsplit("/", 1)[0], {}).update(pairs)
+        added = {}
+        try:
+            from ..plugins.stern import scene_edit
+            for card, ops in scene_edit.load(self.assets_dir).items():
+                d = card.replace("\\", "/").rsplit("/", 1)[0]
+                for op in ops:
+                    if op.get("op") == "add_text" and op.get("id") is not None:
+                        added.setdefault(d, []).append((int(op["id"]), op.get("text") or ""))
+        except Exception:                            # noqa: BLE001
+            pass
+        return reps, added
+
+    def _haystack(self, d, extras=None):
         sc = self._scenes[d]
+        reps, added = extras if extras is not None else self._line_extras()
         return (sc["label"] + " " + d + " "
                 + " ".join(n for n, _p in sc["fonts"].values()) + " "
-                + " ".join(sc["texts"])).lower()
+                + " ".join(sc["texts"]) + " "
+                + " ".join((reps.get(d) or {}).values()) + " "
+                + " ".join(t for _n, t in added.get(d) or ())).lower()
 
-    def _refresh_list(self, preselect=None, focus_text=None):
+    def _refresh_list(self, preselect=None, focus_text=None, jump=False):
         q = (self._search or "").strip().lower()
-        # A jump in beats a search left in this window.
-        if q and preselect in self._scenes and q not in self._haystack(
-                preselect):
+        extras = self._line_extras() if q else None
+        # A jump in beats a search left in this window.  Only a jump: typing a search while a
+        # scene it does not match was picked used to wipe the search (DragonRR, PAD-429).
+        if jump and q and preselect in self._scenes and q not in self._haystack(
+                preselect, extras):
             self._search = ""
             q = ""
         rows = []
         states = self._scene_states()
         for d in self._sorted_dirs():
             sc = self._scenes[d]
-            if q and q not in self._haystack(d):
+            if q and q not in self._haystack(d, extras):
                 continue
             rows.append({"d": d, "label": sc["label"],
                          "imgs": len(sc["images"]), "fonts": len(sc["fonts"]),
@@ -617,18 +668,139 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             self._listed[0] if self._listed else None)
         self._focus_want = (want, focus_text) if (want and focus_text) \
             else None
+        self._find_at = None
         self.set(scenes=rows, search=self._search,
                  sort={"col": self._sort_col, "rev": self._sort_rev})
         if want != self._sel:
             self._drop_live_edit()
         self._sel = want
         self._on_select()
+        self._find_sync()
 
     @rpc
     def set_search(self, q):
         self._search = q or ""
         self._refresh_list(preselect=self._sel)
         return True
+
+    def _find_hits(self):
+        """Every match of the search, in the list's order (DragonRR, PAD-429): each line of
+        on-screen text the words are in, as ``(scene, line)``, *line* the index of one of the
+        scene's own lines or ``("add", node)`` for a line added in the scene editor; a line
+        is found by the card's words or the words it shows now.  A scene listed for its name
+        or a font only is one match of its own, ``(scene, None)``.
+
+        With nothing typed, every line of text of every scene, in turn (DragonRR, PAD-468:
+        proof-read them all without the game); the game program's own strings are not a
+        scene's, so they are left to the Text tab."""
+        q = (self._search or "").strip().lower()
+        reps, added = self._line_extras()
+        hits = []
+        for d in self._listed:
+            sc = self._scenes[d]
+            if not q and sc.get("program"):
+                continue
+            rep = reps.get(d) or {}
+            lines = [(d, i) for i, t in enumerate(sc["texts"])
+                     if (t or "").strip() and (not q or q in t.lower()
+                                               or q in (rep.get(t) or "").lower())]
+            lines += [(d, ("add", n)) for n, t in added.get(d) or ()
+                      if not q or q in t.lower()]
+            hits.extend(lines or ([(d, None)] if q else []))
+        return hits
+
+    def _line_of_node(self, node):
+        """The line of text (a :meth:`_find_hits` entry) that layer *node* of the scene
+        showing draws, or None for a layer that is not a line of text: :meth:`_find_layer`
+        the other way round."""
+        d = self._sel
+        if node is None or d not in self._scenes or self._tman is None \
+                or not self.store.get(self.ns, "tree"):
+            return None
+        from .text_scenes_tree import _walk_man, _kind_of, _text_of
+        walk = [n for n, _p, _d in _walk_man(self._tman)]
+        n = next((x for x in walk if x["id"] == node), None)
+        if n is None or _kind_of(self._tman, n) != "Text":
+            return None
+        if n.get("added"):
+            return (d, ("add", node))
+        flat = lambda t: " ".join((t or "").split())             # noqa: E731
+        words = flat(_text_of(self._tman, n, "Text"))
+        same = [x["id"] for x in walk if flat(_text_of(self._tman, x, _kind_of(self._tman, x)))
+                == words]
+        lines = [i for i, t in enumerate(self._scenes[d]["texts"]) if flat(t) == words]
+        if not words or not lines or node not in same:
+            return None
+        return (d, lines[min(same.index(node), len(lines) - 1)])
+
+    def _find_sync(self):
+        """Say where Previous / Next stand ("3 of 40").  A line of text picked in the scene
+        editor is where they go on from (PAD-468): picked by hand, or by a step."""
+        hits = self._find_hits()
+        here = self._line_of_node(self._tsel)
+        if here is not None:
+            self._find_at = here if here in hits else None
+        pos = hits.index(self._find_at) + 1 if self._find_at in hits else 0
+        self.set(find={"pos": pos, "n": len(hits)})
+
+    def _find_follow(self, node):
+        """A layer was picked in the scene editor (the mixin's ``tree_select``): a line of text
+        picked by hand moves Previous / Next to it; a picture leaves them where they were."""
+        if not self._find_stepping and self._line_of_node(node) is not None:
+            self._find_sync()
+
+    @rpc
+    def find_step(self, delta=1):
+        """Previous / Next beside the search (and beside a line's Words): go to the next
+        match, the scene and the line of text in it, round from the last to the first.  The
+        first press lands on the first match in the scene that is showing."""
+        hits = self._find_hits()
+        if not hits:
+            self.set(find={"pos": 0, "n": 0})
+            return False
+        step = -1 if int(delta or 1) < 0 else 1
+        if self._find_at in hits:
+            pos = (hits.index(self._find_at) + step) % len(hits)
+        else:
+            here = [n for n, h in enumerate(hits) if h[0] == self._sel]
+            pos = (here[0] if step > 0 else here[-1]) if here else (0 if step > 0 else -1)
+            pos %= len(hits)
+        d, line = hits[pos]
+        self._find_stepping = True
+        try:
+            if d != self._sel:
+                self.select(d)
+            self._find_at = hits[pos]
+            self.set(find={"pos": pos + 1, "n": len(hits)})
+            if line is None:
+                return True
+            if isinstance(line, tuple):
+                # a line added here is a layer of the scene editor only
+                self.set(item=None, thumb="")
+                if self.store.get(self.ns, "tree"):
+                    self.tree_select(line[1])
+                return True
+            self.set(item="txt::%d" % line, thumb="")
+            self._find_layer(d, line)
+        finally:
+            self._find_stepping = False
+        return True
+
+    def _find_layer(self, d, line):
+        """In the scene editor the line is its Text layer: pick it (the n-th layer with these
+        words, for a scene that shows the same words more than once)."""
+        if not self.store.get(self.ns, "tree") or self._tman is None:
+            return
+        # the text list has a layer's lines run together ("START TERROR OF +3 SECONDS")
+        flat = lambda t: " ".join((t or "").split())             # noqa: E731
+        texts = [flat(t) for t in self._scenes[d]["texts"]]
+        words = texts[line]
+        nth = texts[:line].count(words)
+        from .text_scenes_tree import _walk_man, _kind_of, _text_of
+        same = [n["id"] for n, _p, _d in _walk_man(self._tman)
+                if flat(_text_of(self._tman, n, _kind_of(self._tman, n))) == words]
+        if same:
+            self.tree_select(same[min(nth, len(same) - 1)])
 
     @rpc
     def sort_by(self, col):
@@ -653,6 +825,10 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._tree_unselect()
         self._sel = d
         self._on_select()
+        if not self._find_stepping and self._find_at and self._find_at[0] != d:
+            # another scene picked by hand: Next goes to its first line (PAD-468)
+            self._find_at = None
+            self._find_sync()
         return True
 
     def _drop_live_edit(self):
@@ -765,6 +941,13 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             if os.path.isfile(path):
                 thumb = path
         self.set(item=iid, thumb=thumb)
+        if iid and iid.startswith("txt::") and self._item_text(iid) is not None:
+            # a line picked by hand: Previous / Next go on from it (PAD-468)
+            hits = self._find_hits()
+            hit = (self._sel, int(iid[5:]))
+            if hit in hits:
+                self._find_at = hit
+                self.set(find={"pos": hits.index(hit) + 1, "n": len(hits)})
         return True
 
     # ------------------------------------------------------------------
@@ -1956,6 +2139,9 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                 "folder was extracted from — the scene layouts are read back "
                 "off the card.")
             return False
+        card = self._project_card(card, quiet)
+        if not card:
+            return False
         state = self._rebuild = {"cancel": False, "quiet": quiet or False}
         self.set(rebuilding=True, rebuild_msg=(
             "Re-reading the scenes for the latest editor…" if quiet == "upgrade"
@@ -1987,6 +2173,47 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         threading.Thread(target=work, daemon=True,
                          name="scene-rebuild").start()
         return True
+
+    def _project_card(self, card, quiet):
+        """PAD-421: the card to re-read, or ``""`` to stop.  A scene re-read has to come off
+        the card this project was extracted from: the project's picture list names where
+        each picture sits in THAT card's scenes, and a card built since (or another card
+        altogether) lays them out differently, so every such scene came back empty
+        (DragonRR's 1.96 card over the stock card's extract).  A card built from this
+        project reads its source card without asking; another card asks first; with the
+        source card gone, a built card is read as it is (the engine refuses scenes that do
+        not line up) and another card is refused with the reason."""
+        from ..core.extract_source import card_relation
+        try:
+            rel = card_relation(card, self.assets_dir)
+        except Exception:                            # noqa: BLE001
+            rel = None
+        kind = (rel or {}).get("kind")
+        if kind not in ("build", "other", "other_build") or not rel.get("source_name"):
+            return card
+        name, src = os.path.basename(card), rel.get("source") or ""
+        if kind == "build":
+            return src or card
+        if src:
+            if quiet or compat.messagebox.askyesno(
+                    "Re-read from card",
+                    "This project folder was extracted from %s, not from %s (the card picked "
+                    "on the Select card tab). The project's pictures are laid out for %s's "
+                    "scenes, so reading %s's would leave them empty.\n\nRe-read the scenes "
+                    "from %s, the card this project came from?" % (
+                        rel["source_name"], name, rel["source_name"], name,
+                        rel["source_name"])):
+                return src
+            return ""
+        msg = ("This project folder was extracted from %s, not from %s (the card picked on "
+               "the Select card tab), and %s is no longer where it was. Pick %s on the Select "
+               "card tab to re-read the scenes." % (
+                   rel["source_name"], name, rel["source_name"], rel["source_name"]))
+        if quiet:
+            self.set(rebuild_msg=msg)
+        else:
+            compat.messagebox.showwarning("Re-read from card", msg)
+        return ""
 
     def _rebuild_tick(self, state, cur, total):
         if state is not self._rebuild:

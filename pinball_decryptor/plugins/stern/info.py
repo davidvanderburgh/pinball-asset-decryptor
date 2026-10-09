@@ -140,6 +140,11 @@ def card_version_probe(path):
     return version, source == "the card's update index"
 
 
+# The most sound records a bank can carry: ``spike2.masterdir.MAX_RECORDS``,
+# repeated here so Image Info doesn't import the emulator to read two words.
+_MAX_SOUND_RECORDS = 1 << 16
+
+
 def container_counts(head):
     """``(sound_fragments, sounds)`` from the ``image.bin`` header, else
     ``(None, None)``.
@@ -171,6 +176,14 @@ def container_counts(head):
     Verified across all 33 vendor images on hand (word @ 0x58 is always 0,
     fragments >= sounds always holds); anything off-pattern returns
     ``(None, None)`` so the caller degrades to the honest "run Extract" row.
+
+    A grown bank may read MORE sounds than fragments (PAD-445): a grow only
+    appends master-directory records and rewrites the sounds word, never the
+    fragment word, so 11 code modes' 69 own sounds take Godzilla 1.16's 2534
+    to 2603 past its 2599 fragments.  The fragment word is still the card's
+    own then, and refusing the pair hid it from the request-table locator
+    every mode sound is looked up through.  So the sounds word only has to be
+    a record count the bank could hold (:data:`_MAX_SOUND_RECORDS`).
     """
     if len(head) < 0x68:
         return None, None
@@ -178,7 +191,7 @@ def container_counts(head):
     zero, fragments, sounds = struct.unpack_from("<III", head, 0x58)
     if not (0x68 <= hdr_size <= 0x10000) or hdr_size % 8 or zero != 0:
         return None, None
-    if not (0 < sounds <= fragments < 500_000):
+    if not (0 < fragments < 500_000 and 0 < sounds <= _MAX_SOUND_RECORDS):
         return None, None
     return fragments, sounds
 
@@ -354,6 +367,16 @@ def _data_partition_probe(card):
     image_bin = found["image_bin"]
 
     rows = []
+    # Is this the card Stern released, or one built from it (PAD-426)?  The
+    # version above comes from the update index, which a built card keeps,
+    # so a custom card read as the stock build until this row.
+    try:
+        from .stock_prints import check_walked
+        stock = check_walked(reader, found)
+    except Exception:                                   # noqa: BLE001
+        stock = None
+    if stock and stock["status"] != "unreadable":
+        rows.append(("Official release", stock["text"]))
     recs, fmt = {}, None
     if sidx_node is not None:
         try:

@@ -25,7 +25,8 @@ import sys
 import threading
 import time
 
-from .. import compat
+from .. import compat, look_switches
+from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
 
 #: Tk's iid prefix for a "Group by scene" header row; the page's id for one.
@@ -41,6 +42,13 @@ SORT_CFG = (("#0", "Original Image", False), ("n", "Images", True),
             ("src", "Source", False), ("keep", "Keep size", True),
             ("color", "Color", True), ("rep", "Replacement", False))
 CHUNK = 256
+#: pictures side by side in Compare (PAD-463, as the Video tab's PAD-440)
+COMPARE_MAX = 4
+#: a game's own picture with its color profile attached: Compare's
+#: title for its other side (the Video tab's words)
+STOCK_COLOURED = "With its color profile"
+#: the colour steps the page may ask a picture drawn through (PAD-463)
+LOOKS_KEPT = 128
 log = logging.getLogger(__name__)
 LABEL = "Replace Images"
 SCAN_LABEL = "Images"
@@ -221,7 +229,7 @@ def _plural(n, word):
 
 
 # ---------------------------------------------------------------------------
-class ImagesTab(TabService):
+class ImagesTab(FindOriginalsMixin, TabService):
     ns = "images"
     key = "Replace Images"
     label = "Images"
@@ -233,6 +241,8 @@ class ImagesTab(TabService):
         "image_change_filter_var", "image_group_by_scene_var",
         "image_keep_size_var", "image_status_var",
     )
+    _orig_kind = "picture"
+    _orig_label = LABEL
 
     def __init__(self, window):
         super().__init__(window)
@@ -285,6 +295,17 @@ class ImagesTab(TabService):
         self._quiet = 0
         #: a file picker of this tab is open (see _pick)
         self._picking = False
+        # PAD-463 (DragonRR): the Video tab's color work on pictures: the
+        # preview's three switches (remembered as the Video tab's are), each
+        # pane's Original / With its color profile, and Compare
+        self._lsw = look_switches.initial(window, "images")
+        self._pview = {"orig": None, "rep": None}
+        self._pview_key = None
+        self._looks = {}             # token -> colour steps the page may ask for
+        self._looks_lock = threading.Lock()
+        self._cmp = []               # Compare's tiles
+        self._cmp_ids = 0
+        self._cmp_open = False
         for v in (self.image_search_var, self.image_source_filter_var,
                   self.image_change_filter_var,
                   self.image_group_by_scene_var):
@@ -299,7 +320,9 @@ class ImagesTab(TabService):
                  focus=None, total=0, shown=0,
                  reveal_label=reveal_menu_label(), sources=list(SOURCES),
                  shows=list(CHANGE_FILTER_VALUES),
-                 widths=self._saved_widths())
+                 widths=self._saved_widths(),
+                 look=self._no_look(),
+                 compare={"open": False, "max": COMPARE_MAX, "tiles": []})
 
     # ------------------------------------------------------------------
     # small accessors
@@ -348,6 +371,7 @@ class ImagesTab(TabService):
         self._open_groups = set()
         self._scan_t0 = None
         self._change_running = False
+        self._cmp_reset()
         self._clear_preview()
         try:
             note = mfr.image_note() or ""
@@ -363,6 +387,8 @@ class ImagesTab(TabService):
         self._refresh_pillow()
         self._maybe_rescan_image()
         self.set(pex=self._pex_available())
+        # the Color profile tab's profiles change elsewhere (PAD-463)
+        self.publish_look()
 
     def on_running(self, running, mode):
         self._running = bool(running)
@@ -539,6 +565,7 @@ class ImagesTab(TabService):
         self._foreign_rels = set()
         self._foreign_twins = {}
         if folder_changed:
+            self._cmp_reset()
             self._clear_preview()
             self._open_groups = set()
         self.set(dir=scan_dir)
@@ -1025,6 +1052,13 @@ class ImagesTab(TabService):
                      and not self._is_built(r)]
             for r in stock:
                 del self._color[r]
+            # the game's own lines of text in Scenes are locked again too (PAD-438)
+            try:
+                from ...core import colour_profile as cp
+                if self._assets_dir():
+                    cp.drop_text_slots(self._assets_dir())
+            except Exception:                           # noqa: BLE001
+                log.exception("images unlock: text switches")
             if not self._is_running():
                 restored = self._put_back_originals(
                     self._applied_replacement_rels(stock))
@@ -1037,6 +1071,8 @@ class ImagesTab(TabService):
         self._refresh_image_list()
         if self._current_rel:
             self._render_preview(self._current_rel)
+        else:
+            self.publish_look()
         self._color_changed()
         return True
 
@@ -1063,11 +1099,18 @@ class ImagesTab(TabService):
         """The Color profile tab moved its "every replaced picture" box."""
         from ...core import staged_changes
         folder = self._assets_dir()
-        self._color_all = bool(folder and staged_changes.load(folder).get(
+        was = self._color_all
+        self._color_all = bool(folder and staged_changes.peek(folder).get(
             "color_all_images"))
-        self._publish_chunks()
+        if self._color_all != was:
+            # PAD-464: the Colors bar tells every change, a slider's too; the
+            # rows show the switches alone, so only the box moving redraws
+            # them (thousands of rows, a tenth of a second a move)
+            self._publish_chunks()
         if self._current_rel:
             self._render_preview(self._current_rel)
+        else:
+            self.publish_look()
 
     def _color_changed(self):
         """A switch moved here: the Color profile tab's counts, the Write
@@ -1131,7 +1174,433 @@ class ImagesTab(TabService):
             self._publish_chunks({i // CHUNK})
         if rel == self._current_rel:
             self._render_preview(rel)
+        else:
+            self.publish_look()
         self._color_changed()
+        return True
+
+    def color_targets(self, scope="profiled"):
+        """The pictures the Colors bar's Apply to all gives its profile,
+        ``{rel: attached}`` (PAD-439).  *scope* (PAD-462): "profiled", the
+        pictures with a color profile attached (replaced, built earlier, or a
+        game picture unlocked); "all", every picture that is not locked: each
+        replaced or built one, and with the game's own pictures unlocked
+        every one."""
+        if not self._per_file_colour():
+            return {}
+        rels = (self._by_rel if scope == "all" else set(self._assignments)
+                | {r for r, v in self._color.items() if v})
+        out = {}
+        for rel in rels:
+            on = self._color_state(rel) if rel in self._by_rel else None
+            if on is not None and (on or scope == "all"):
+                out[rel] = on
+        return out
+
+    def put_color_switches(self, switches):
+        """PAD-439: pictures' own switches set at once (``True`` /
+        ``False``, ``None`` = follow the box again), one save and one redraw.
+        Returns what each was, the same way (Apply to all's Undo).  PAD-462:
+        a built or (unlocked) game picture too, which has no box to follow:
+        off is no switch, and one a build already corrected gets its own
+        colors back, as its palette does it (``set_color``)."""
+        from ...core import colour_profile as cp
+        before, stock, built = {}, [], []
+        for rel, value in (switches or {}).items():
+            if rel not in self._by_rel:
+                continue
+            if not self._assignments.get(rel):
+                is_built = self._is_built(rel)
+                if not (is_built or self._color_unlocked):
+                    continue
+                before[rel] = self._color.get(rel)
+                if value:
+                    self._color[rel] = True
+                elif self._color.pop(rel, None):
+                    (built if is_built else stock).append(rel)
+                continue
+            before[rel] = self._color.get(rel)
+            if value is None:
+                self._color.pop(rel, None)
+            else:
+                self._color[rel] = bool(value)
+        if not self._is_running():
+            for rel in built:
+                cp.put_back_uncorrected(self._scan_dir, rel)
+            if stock:
+                self._put_back_originals(
+                    self._applied_replacement_rels(stock))
+        if before:
+            self._save_staged_changes()
+            self._publish_chunks()
+            if self._current_rel:
+                self._render_preview(self._current_rel)
+            else:
+                self.publish_look()
+            self._color_changed()
+        return before
+
+    # -- the preview through the color profiles (PAD-463, DragonRR) -------
+    # The Video tab's players draw through the profiles (PAD-329, PAD-454,
+    # PAD-462); the two panes here and Compare's pictures do the same: the
+    # preview's three switches (Preview colors), and on each pane Original /
+    # With its color profile.  The page asks for each picture by a token
+    # naming its colour steps (``look.keys``, a tile's ``key``), and
+    # ``thumb`` draws it through them with the picture maths, exactly as
+    # Scenes does.  Only the preview changes: nothing is attached or staged.
+    def _no_look(self):
+        return {"offered": False, "on": False, "sw": dict(self._lsw),
+                "parts": None, "keys": {"orig": None, "rep": None},
+                "views": {"orig": None, "rep": None}}
+
+    def _own_colours(self):
+        """The Scenes gear menu's setting: a picture with no color profile
+        attached passes the machine screen by (as on the Video tab)."""
+        var = getattr(self.window, "scenes_own_colours_var", None)
+        try:
+            return False if var is None else bool(var.get())
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _look_key(self, steps):
+        """The token the page asks ``thumb`` for a picture drawn through
+        *steps* with (``None`` for no steps); the steps are kept under it."""
+        if not steps:
+            return None
+        import hashlib
+        token = hashlib.sha1("|".join(
+            "%s:%s" % (kind, prof.key()) for kind, prof in steps
+        ).encode()).hexdigest()[:16]
+        with self._looks_lock:
+            self._looks.pop(token, None)
+            self._looks[token] = list(steps)
+            while len(self._looks) > LOOKS_KEPT:
+                self._looks.pop(next(iter(self._looks)))
+        return token
+
+    def _look_steps(self, token):
+        with self._looks_lock:
+            return self._looks.get(token) if token else None
+
+    def _profile_side(self, rel):
+        """The pane of the file *rel*'s color profile is on: its
+        Replacement (a pick, or the user's own picture an earlier build put
+        in), else (a game's own picture, unlocked) its Original."""
+        return "rep" if rel and (self._assignments.get(rel)
+                                 or self._is_built(rel)) else "orig"
+
+    def _pane_views(self, folder, rel, switch):
+        """Each pane's Original / With its color profile switch, as the Video
+        tab's players have it: ``{side: {"plain", "view", "name", "on"} or
+        None}``, on a pane with a picture when the picture has a palette.
+        The pane of the file the profile is on opens on With its color
+        profile while it is attached, and turns to it when the Colors bar
+        changes the profile (``profile_shown``).  A game's own picture's
+        Replacement pane (the copy a build corrected) has none."""
+        key = (rel, switch, self._assignments.get(rel) if rel else None)
+        if key != self._pview_key:
+            old = self._pview_key
+            if old is None or old[0] != rel or not (key[2] and old[2]):
+                self._pview["orig"] = None
+            self._pview["rep"] = None
+            self._pview_key = key
+        out = {"orig": None, "rep": None}
+        pv = self.get("preview") or {}
+        if not rel or switch is None or pv.get("rel") != rel:
+            return out
+        try:
+            from ...core import colour_profile as cp
+            prof = cp.asset_resolver(folder)("images", rel)
+        except Exception:                               # noqa: BLE001
+            log.exception("images pane views")
+            prof = None
+        if prof is None:
+            return out
+        mine = self._profile_side(rel)
+        for side in ("orig", "rep"):
+            if not pv.get(side) or (side == "rep" and mine == "orig"):
+                continue
+            out[side] = {
+                "plain": (pv.get("hdr_main") or "Original") if side == "orig"
+                else "Replacement",
+                "name": prof.name or "", "on": bool(switch),
+                "view": self._pview[side] or (
+                    "profile" if side == mine and switch else "plain")}
+        return out
+
+    @staticmethod
+    def _pane_sources(switch, views):
+        """Which of ``video_look_exact``'s lists each pane draws through, and
+        for which Color switch: ``{side: (list, switch)}`` (the Video tab's
+        rule)."""
+        out = {"orig": ("orig", switch), "rep": ("rep", switch)}
+        for side, v in (views or {}).items():
+            if not v:
+                continue
+            if v["view"] == "profile":
+                out[side] = ("rep", True)
+            elif side == "rep":
+                out[side] = ("rep", False)
+        return out
+
+    def _look_lists(self, folder, rel, switch):
+        from ...core import colour_profile as cp
+        sw = self._lsw
+        return cp.video_look_exact(
+            folder, switch, self._own_colours(), overlay_on=sw["overlay"],
+            files_on=sw["files"], screen_on=sw["screen"], rel=rel,
+            kind="images")
+
+    def publish_look(self):
+        """What the two panes (and Compare's pictures) are drawn through:
+        worked out again whenever a picture loads, a switch moves or a
+        profile changes."""
+        offered = self._per_file_colour()
+        sw = dict(self._lsw)
+        look = self._no_look()
+        look.update(offered=offered, on=any(sw.values()), sw=sw)
+        folder = self._scan_dir
+        rel = self._current_rel
+        switch = self._color_state(rel) if rel else None
+        if offered and folder and os.path.isdir(folder):
+            try:
+                from ...core import colour_profile as cp
+                look["parts"] = cp.preview_parts(folder)
+            except Exception:                           # noqa: BLE001
+                log.exception("images preview parts")
+            look["views"] = self._pane_views(folder, rel, switch)
+            if look["on"] and rel:
+                try:
+                    done = {}
+                    for side, (part, on) in self._pane_sources(
+                            switch, look["views"]).items():
+                        if on not in done:
+                            done[on] = self._look_lists(folder, rel, on)
+                        look["keys"][side] = self._look_key(done[on][part])
+                except Exception:                       # noqa: BLE001
+                    log.exception("images preview look")
+        if look != self.get("look"):
+            self.set(look=look)
+        if self._cmp_open:
+            self._cmp_sync()
+
+    @rpc
+    def set_look_part(self, part, on):
+        """One of the preview's three switches: "overlay", "files" or
+        "screen".  Only the preview changes."""
+        if part not in self._lsw:
+            return False
+        self._lsw[part] = bool(on)
+        look_switches.save(self.window, "images", self._lsw)
+        self.publish_look()
+        return True
+
+    @rpc
+    def set_pane_view(self, side, view):
+        """One pane's Original / With its color profile switch.  Only that
+        pane changes: nothing is attached or detached."""
+        if side not in self._pview or view not in ("plain", "profile"):
+            return False
+        self._pview[side] = view
+        self.publish_look()
+        return True
+
+    def profile_shown(self, rels):
+        """The Colors bar changed the color profile of *rels*: the picture on
+        show, if it is one, is shown with it on the pane of the file it is
+        on (the Video tab's PAD-462 rule).  The bar redraws after."""
+        rel = self._current_rel
+        if not rel or rel not in set(rels or ()):
+            return False
+        self._pview[self._profile_side(rel)] = "profile"
+        return True
+
+    # -- Compare (PAD-463, DragonRR: the Video tab's PAD-440 for pictures) --
+    def _orig_pane_path(self, rel):
+        """The Original pane's picture, its title, whether a build changed
+        the folder's copy and the snapshot of the game's own picture then."""
+        from ...core import staged_originals
+        slot = self._by_rel.get(rel) if rel is not None else None
+        opath = slot.abs_path if slot else None
+        changed = self._slot_changed_on_disk(rel) if rel is not None \
+            else False
+        snap = None
+        if changed:
+            snap = staged_originals.snapshot_path(self._scan_dir or None, rel)
+            if snap:
+                opath = snap
+        title = ("Current file (already modified)" if changed and not snap
+                 else "Original")
+        return opath, title, changed, snap
+
+    def _rep_pane_path(self, rel):
+        """The Replacement pane's picture: the pick, else the folder's copy a
+        build changed (for the user's own picture an earlier build put in,
+        its uncorrected copy where a build corrected it, PAD-345)."""
+        rep = self._assignments.get(rel) if rel is not None else None
+        if rep:
+            return rep
+        _o, _t, changed, snap = self._orig_pane_path(rel)
+        slot = self._by_rel.get(rel) if rel is not None else None
+        if not (changed and snap and slot):
+            return None
+        if self._is_built(rel):
+            from ...core import colour_profile as cp
+            return cp.uncorrected_path(self._scan_dir, rel) or slot.abs_path
+        return slot.abs_path
+
+    def _stock_coloured(self, rel):
+        """A game's own picture (unlocked) with its color profile attached."""
+        return bool(rel and self._profile_side(rel) == "orig"
+                    and self._color_state(rel))
+
+    def _cmp_sides(self, rel):
+        """What a Compare picture can show of *rel*: ``[[side, label]]``."""
+        if self._stock_coloured(rel):
+            return [["orig", "Original"], ["rep", STOCK_COLOURED]]
+        if self._rep_pane_path(rel):
+            return [["orig", "Original"], ["rep", "Replacement"]]
+        return [["orig", "Original"]]
+
+    def _cmp_pane(self, rel, side):
+        if side == "rep" and not self._stock_coloured(rel):
+            path = self._rep_pane_path(rel)
+            label = (os.path.basename(self._assignments[rel])
+                     if self._assignments.get(rel)
+                     else self._remembered_rep_name(rel)
+                     or os.path.basename(path or ""))
+            return {"path": path or "", "title": "Replacement",
+                    "label": label}
+        path, title, _c, _s = self._orig_pane_path(rel)
+        if side == "rep":
+            # a game's own picture with its color profile attached: its
+            # other side is its original through the profile
+            title = STOCK_COLOURED
+        return {"path": path or "", "title": title,
+                "label": os.path.basename(path or "")}
+
+    def _cmp_tile(self, tid):
+        return next((t for t in self._cmp if t["id"] == tid), None)
+
+    def _cmp_steps(self):
+        """Each picture's colour steps: the panes' (publish_look), worked out
+        for the tile's own picture and side."""
+        look = self.get("look") or {}
+        folder = self._scan_dir
+        if not (look.get("offered") and look.get("on") and folder
+                and os.path.isdir(folder)):
+            for t in self._cmp:
+                t["key"] = None
+            return
+        done = {}
+        for t in self._cmp:
+            rel = t["rel"]
+            if rel not in done:
+                try:
+                    done[rel] = self._look_lists(folder, rel,
+                                                 self._color_state(rel))
+                except Exception:                       # noqa: BLE001
+                    log.exception("images compare look")
+                    done[rel] = {}
+            t["key"] = self._look_key(done[rel].get(t["side"]))
+
+    def _cmp_publish(self):
+        st = {"open": self._cmp_open, "max": COMPARE_MAX, "tiles": [
+            {k: t[k] for k in ("id", "rel", "side", "sides", "pane", "key")}
+            for t in self._cmp] if self._cmp_open else []}
+        if st != self.get("compare"):
+            self.set(compare=st)
+
+    def _cmp_sync(self):
+        """The list changed (a pick, a clear, a switch, a scan): each picture
+        follows its slot, and a slot no longer listed leaves."""
+        if not self._cmp_open:
+            return
+        keep = []
+        for t in self._cmp:
+            rel = t["rel"]
+            if rel not in self._by_rel:
+                continue
+            sides = self._cmp_sides(rel)
+            side = t["side"] if any(k == t["side"] for k, _l in sides) \
+                else "orig"
+            if len(t["sides"]) == 1 and len(sides) > 1:
+                # a profile just attached to a game's own picture (or a
+                # replacement just picked) is what it was put up to show
+                side = sides[-1][0]
+            t.update(sides=sides, side=side, pane=self._cmp_pane(rel, side))
+            keep.append(t)
+        self._cmp = keep
+        if not keep:
+            self._cmp_open = False
+        self._cmp_steps()
+        self._cmp_publish()
+
+    def _cmp_reset(self):
+        self._cmp_open = False
+        self._cmp = []
+        self._cmp_publish()
+
+    @rpc
+    def compare_open(self, rels):
+        """Compare: the pictures selected, side by side, big, beside the
+        Colors bar.  One picture: its Original beside its Replacement.
+        Several: each one's Replacement where it has one, else its Original,
+        the first COMPARE_MAX of them.  Returns how many it opened with."""
+        seen = set()
+        rels = [r for r in (rels or []) if r in self._by_rel
+                and not (r in seen or seen.add(r))]
+        if not rels:
+            return 0
+        if len(rels) > COMPARE_MAX:
+            self.toast("Compare shows %d pictures at a time: the first %d "
+                       "selected are in it." % (COMPARE_MAX, COMPARE_MAX))
+            rels = rels[:COMPARE_MAX]
+        sides = self._cmp_sides(rels[0])
+        if len(rels) == 1 and len(sides) > 1:
+            want = [(rels[0], "orig"), (rels[0], sides[-1][0])]
+        else:
+            want = [(r, self._cmp_sides(r)[-1][0]) for r in rels]
+        self._cmp = []
+        for rel, side in want:
+            self._cmp_ids += 1
+            self._cmp.append({"id": self._cmp_ids, "rel": rel, "side": side,
+                              "sides": self._cmp_sides(rel),
+                              "pane": self._cmp_pane(rel, side),
+                              "key": None})
+        self._cmp_open = True
+        self.publish_look()
+        return len(self._cmp)
+
+    @rpc
+    def compare_close(self):
+        if not self._cmp_open:
+            return False
+        self._cmp_reset()
+        return True
+
+    @rpc
+    def compare_side(self, tid, side):
+        """One picture shows the other side of its slot (Original /
+        Replacement)."""
+        tile = self._cmp_tile(tid)
+        if tile is None or side == tile["side"] or not any(
+                k == side for k, _l in tile["sides"]):
+            return False
+        tile["side"] = side
+        tile["pane"] = self._cmp_pane(tile["rel"], side)
+        self._cmp_steps()
+        self._cmp_publish()
+        return True
+
+    @rpc
+    def compare_remove(self, tid):
+        """A picture's x: it leaves Compare (the last one stays)."""
+        tile = self._cmp_tile(tid)
+        if tile is None or len(self._cmp) < 2:
+            return False
+        self._cmp.remove(tile)
+        self._cmp_publish()
         return True
 
     def _offers_keep_size(self):
@@ -1160,11 +1629,14 @@ class ImagesTab(TabService):
             disp, tag = "Choose…", ""
         res = "…" if (s.info is None and not s.probed) \
             else s.resolution_str()
-        return {"r": rel, "s": res, "f": s.format_summary(),
-                "o": source_label(rel), "k": self._keep_state(rel),
-                "p": disp, "t": tag, "c": self._color_state(rel),
-                "co": rel in self._color, "cl": self._color_locked(rel),
-                "cg": not rep}
+        row = {"r": rel, "s": res, "f": s.format_summary(),
+               "o": source_label(rel), "k": self._keep_state(rel),
+               "p": disp, "t": tag, "c": self._color_state(rel),
+               "co": rel in self._color, "cl": self._color_locked(rel),
+               "cg": not rep}
+        if not rep and self._is_built(rel):
+            row["cb"] = True        # PAD-463: the user's own, from a build
+        return row
 
     def _publish_chunks(self, which=None):
         """Send the rows (all chunks, or the chunk numbers in *which*)."""
@@ -1309,6 +1781,7 @@ class ImagesTab(TabService):
                                "on": self._color_unlocked},
                  empty=empty)
         self._update_clear_all()
+        self._cmp_sync()
 
     def _select_first_row(self):
         view = self.get("view") or []
@@ -1393,6 +1866,7 @@ class ImagesTab(TabService):
         p["ver"] = self._preview_ver
         self.image_keep_size_var.set(False)
         self.set(preview=p)
+        self.publish_look()
 
     @rpc
     def select(self, iid):
@@ -1410,6 +1884,7 @@ class ImagesTab(TabService):
             p.update(group=key, orig=slot.abs_path if slot else "",
                      ver=self._preview_ver)
             self.set(preview=p)
+            self.publish_look()
             return True
         if iid not in self._by_rel:
             return False
@@ -1421,29 +1896,19 @@ class ImagesTab(TabService):
         return True
 
     def _render_preview(self, rel):
-        """Tk _image_render_preview."""
-        from ...core import staged_originals
+        """Tk _image_render_preview.  PAD-463: the user's own picture an
+        earlier build corrected shows its uncorrected copy (what its color
+        profile is drawn through), and the panes' colours follow."""
         slot = self._by_rel.get(rel) if rel is not None else None
         rep = self._assignments.get(rel) if rel is not None else None
-        opath = slot.abs_path if slot else None
-        changed = self._slot_changed_on_disk(rel) if rel is not None \
-            else False
-        snap = None
-        if changed:
-            snap = staged_originals.snapshot_path(self._scan_dir or None, rel)
-            if snap:
-                opath = snap
-        hdr_main = ("Current file (already modified)" if changed and not snap
-                    else "Original")
+        opath, hdr_main, _changed, _snap = self._orig_pane_path(rel)
         note = ""
         n_occ = self._group_occ.get(rel, 0) if rel is not None else 0
         if n_occ > 1:
             note = ("shared by %d scenes (replacing it changes all of them)"
                     % n_occ)
         hdr = hdr_main + (("  ·  " + note) if note else "")
-        shown_rep = rep
-        if shown_rep is None and changed and snap and slot:
-            shown_rep = slot.abs_path
+        shown_rep = self._rep_pane_path(rel)
         empty = (self._rep_pane_empty_text(
             rel, "(no replacement assigned — double-click the row to pick "
                  "one)") if slot else "")
@@ -1459,6 +1924,7 @@ class ImagesTab(TabService):
             "clearable": bool(self._replacement_targets([rel]))
             if slot else False,
             "ver": self._preview_ver})
+        self.publish_look()
 
     def _keep_row(self, rel):
         """Tk _image_refresh_keep_row: ``{on, text}`` or None (hidden)."""
@@ -1491,16 +1957,25 @@ class ImagesTab(TabService):
         return {"on": keep, "text": text}
 
     @rpc(loop=False)
-    def thumb(self, path, w=320, h=214):
+    def thumb(self, path, w=320, h=214, look=None):
         """A preview picture as a data: URL (the Tk panes' own helper,
-        core.image.thumbnail_png), or "" when it cannot be read."""
+        core.image.thumbnail_png), or "" when it cannot be read.  *look*
+        (PAD-463): a token of ``look.keys`` / a Compare picture's ``key``:
+        the picture is drawn through those colour steps."""
         from ...core.image import thumbnail_png
         try:
             w = max(16, min(2400, int(w)))
             h = max(16, min(2400, int(h)))
         except (TypeError, ValueError):
             w, h = 320, 214
-        png = thumbnail_png(path, w, h) if path else None
+        steps = self._look_steps(look)
+        fn = None
+        if steps:
+            from ...core import colour_profile as cp
+
+            def fn(rgb):
+                return cp.run_steps(steps, rgb)
+        png = thumbnail_png(path, w, h, fn) if path else None
         if not png:
             return ""
         return "data:image/png;base64," + base64.b64encode(png).decode()
@@ -1891,6 +2366,43 @@ class ImagesTab(TabService):
             self._render_preview(self._current_rel)
         self._update_clear_all()
         return n
+
+    # ------------------------------------------------------------------
+    # Find originals… (webui/find_originals.py, PAD-443)
+    # ------------------------------------------------------------------
+    def _orig_picks(self):
+        return {rel: rep for rel, rep in self._assignments.items()
+                if rep and rel in self._by_rel}
+
+    def _orig_changed(self):
+        return {rel for rel in self._changed_on_disk
+                if rel in self._by_rel and rel not in self._foreign_rels}
+
+    def _orig_slot_path(self, rel):
+        slot = self._by_rel.get(rel)
+        return slot.abs_path if slot is not None else ""
+
+    def _orig_project(self):
+        assets = self._assets_dir()
+        return assets if assets and self._live(assets) else ""
+
+    def _orig_busy(self):
+        return self._is_running()
+
+    def _orig_keep_size(self, rel):
+        return rel in self._keep_size
+
+    def _orig_use(self, pairs):
+        changed = sum(1 for rel, path in pairs.items()
+                      if self._assignments.get(rel) != path)
+        self._assignments.update(pairs)
+        self._keep_grown(list(pairs))
+        self._save_staged_changes()
+        self._refresh_image_list()
+        if self._current_rel in pairs:
+            self._render_preview(self._current_rel)
+        self._update_clear_all()
+        return changed
 
     # ------------------------------------------------------------------
     # Save settings to a file / Load settings from a file (PAD-300)

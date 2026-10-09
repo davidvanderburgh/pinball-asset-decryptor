@@ -185,6 +185,16 @@ def _isolate_card_edits(tmp_path_factory):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolate_card_prints(tmp_path_factory):
+    """Same for the card fingerprint cache (PAD-427, core.lineage): an
+    extract or build driven by a test would fingerprint pytest's throwaway
+    cards into the developer's own ``card_prints.json``."""
+    from pinball_decryptor.core import lineage
+    lineage.PRINT_CACHE = str(
+        tmp_path_factory.mktemp("card_prints") / "card_prints.json")
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _isolate_audio_ctl(tmp_path_factory):
     """Point the Emulate tabs' volume/mute file (item 56) at a temp path for
     the whole run — same reason and same shape as ``_isolate_card_edits``

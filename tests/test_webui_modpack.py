@@ -405,3 +405,27 @@ def test_transfer_and_port_do_nothing_without_the_capability(tmp_path):
         w.call("modpack.port")
         assert len(w.asked) == n
 
+
+
+def test_stock_extract_found_for_an_old_extract_off_a_modified_card(tmp_path):
+    """PAD-427: the old extract's own record says it came off a modified
+    card, and an extract of the official card of that release sits beside
+    it: field 3 fills itself (once; clearing it sticks)."""
+    def extract(name, status):
+        d = tmp_path / "work" / name
+        d.mkdir(parents=True)
+        (d / ".checksums.md5").write_text("audio/x.wav\t0\n")
+        (d / ".extract_source.json").write_text(json.dumps({
+            "input_path": "X:/gone/%s.raw" % name, "input_name": name + ".raw",
+            "size": 1, "mtime": 1,
+            "stock": {"status": status, "sidx": "godzilla_le-1_16_0.sidx"}}))
+        return str(d)
+    old = extract("heisei", "modified")
+    stock = extract("godzilla stock", "official")
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.set", "modpack", "src", old)
+        w.drain()
+        assert w.window.transfer_oldstock_var.get() == os.path.normpath(stock)
+        w.call("ui.set", "modpack", "oldstock", "")
+        w.drain()
+        assert w.window.transfer_oldstock_var.get() == ""

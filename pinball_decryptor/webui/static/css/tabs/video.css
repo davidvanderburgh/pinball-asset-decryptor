@@ -42,6 +42,11 @@
 .vid-rep.picked { color: var(--ok); }
 .vid-rep.ondisk { color: var(--info); }
 .vid-rep.stray { color: var(--warn); }
+/* PAD-446: a slot's random clips, after its replacement */
+.vid-repcell { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vid-repcell .vid-rep { flex: 0 1 auto; min-width: 0; }
+.vid-var { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 9px; background: var(--info-soft); color: var(--info); font-size: 12px; line-height: 18px; cursor: default; }
+.vid-var .i { width: 13px; height: 13px; }
 
 /* the two players */
 .vid-preview { flex: 0 0 auto; border-top: 1px solid var(--line); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -56,6 +61,9 @@
 .vid-screen .hint.err-ink { color: #f0705f; }
 .vid-seek { flex: 1 1 auto; min-width: 60px; margin: 0; accent-color: var(--accent); }
 .vid-transport { gap: 8px; flex-wrap: nowrap; }
+/* PAD-454: each player's Original / With its color profile switch, under its transport */
+.vid-view { gap: 10px; min-height: 28px; flex-wrap: nowrap; min-width: 0; }
+.vid-view .seg button { padding: 4px 10px; font-size: 12.5px; }
 .vid-cmd { width: 100%; min-height: 70px; resize: vertical; }
 
 /* "Check card…": a window over the tab, not a modal (no scrim) */
@@ -96,5 +104,58 @@ html.bph-760 .vid-tbl { min-height: 150px; }
 /* PAD-329: As on the machine above the players; the filter defs take no room */
 .vid-look { margin: 0 0 6px; }
 .vid-lookdefs { position: absolute; width: 0; height: 0; overflow: hidden; }
+/* PAD-448: the player drawn through its exact colour table (video_gl.js), over the <video> */
+.vid-screen canvas.vid-gl { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  background: #000; pointer-events: none; }
 /* PAD-369: the Original Video name carries its own tooltip (the clip and its color profile) */
 .vid-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* PAD-440: Compare - up to four clips side by side, big, beside the Color profiles bar */
+.vcm-page:focus { outline: none; }
+.vcm { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.vcm-hd { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.vcm-hdrow { gap: 8px 10px; flex-wrap: wrap; }
+.vcm-hdrow .h2 { white-space: nowrap; }
+.vcm-look { padding: 10px 16px 0; }
+.vcm-look .look-row { margin: 0; }
+/* the players share the height; where there is not enough they keep theirs and the
+   grid scrolls */
+.vcm-grid { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 14px; padding: 12px 16px 14px;
+  grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(270px, 1fr); }
+.vcm-grid.n2, .vcm-grid.n3, .vcm-grid.n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vcm-tile { min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 8px; }
+/* the clip clicked: the one the Color profiles bar changes */
+.vcm-tile.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* a narrow player puts Original / Replacement under the name */
+.vcm-tilehd { gap: 4px 8px; min-height: 28px; flex-wrap: wrap; }
+.vcm-name { min-width: 0; font-weight: 600; }
+.vcm-screen { flex: 1 1 auto; height: auto; min-height: 110px; cursor: pointer; }
+.vcm-screen:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.vcm-color { gap: 8px; min-height: 22px; flex-wrap: nowrap; min-width: 0; }
+.vcm-color .vid-color svg.i { width: 16px; height: 16px; }
+/* PAD-369's one color for a profile's name */
+.vcm-cp { color: var(--cp-ink); font-weight: 600; }
+/* PAD-448: a game's own clip, marked on its player: blue lock = locked, open = Advanced */
+.vcm-badge { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px 3px 7px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.3;
+  background: rgba(10, 12, 16, .8); border: 1px solid currentColor; cursor: default; }
+.vcm-badge svg.i { width: 14px; height: 14px; }
+.vcm-badge.locked { color: #539bf5; }
+.vcm-badge.unlocked { color: #c9d1d9; border-color: rgba(201, 209, 217, .45); }
+.vcm-adv { display: inline-flex; }
+html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 { grid-template-columns: minmax(0, 1fr); }
+
+/* PAD-444: Played in - which of the game's modes plays a clip, the mode filter, a row for
+   each mode of a clip two modes share, and the clips the game never plays */
+.vid-card .toolbar .vid-modefilter { flex: 0 1 230px; width: 230px; min-width: 150px; }
+.vid-modes-busy { display: inline-flex; align-items: center; gap: 6px; }
+.vid-modes-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.vid-modes-cell.pair { color: var(--accent); }
+.vid-modes-cell.unplayed, .vid-modes-cell.other { color: var(--ink-3); font-style: italic; }
+.vid-modes .note { align-items: center; }
+.vid-sound-list { margin: 4px 0 2px; padding-left: 18px; }
+.vid-sound-list li { overflow-wrap: anywhere; }
+/* a mode's own row of a clip another mode plays too, under that mode's row */
+.vid-pairmark { color: var(--accent); margin-right: 6px; }
+.vid-rep.follow { color: var(--ink-3); font-style: italic; }

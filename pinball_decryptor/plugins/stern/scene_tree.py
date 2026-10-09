@@ -381,12 +381,12 @@ class _Reader:
                 name = r.string()
                 r.o = save
             if name == "Font":
-                end, sizes = _font_end(r.d, at)
+                end, sizes, face = _font_end(r.d, at)
                 for sid, off, variant in sizes:
                     # the size record: u32 key | f32 line height | f32 ascent | f32 descent
                     line, asc, desc = struct.unpack_from("<3f", r.d, off + 4)
                     s.font_sizes[sid] = dict(offset=off, variant=variant, entry=len(s.fonts),
-                                             line=line, ascent=asc, descent=desc)
+                                             line=line, ascent=asc, descent=desc, face=face)
                 if v & FLAG:
                     s.classes[cid] = "Font"
                 s.library.append((key, cid, ("font", r.d[at + 4:end])))
@@ -408,9 +408,10 @@ class _Reader:
 
 
 def _font_end(d, at):
-    """``(end, [(size id, offset, variant)])``: where the Font library entry at *at* ends,
-    and each of its SIZES - the object a Text names as its font - with the offset its record
-    starts at (its glyph table follows) and its style variant ("" = the base sizes).
+    """``(end, [(size id, offset, variant)], face)``: where the Font library entry at *at*
+    ends, and each of its SIZES - the object a Text names as its font - with the offset its
+    record starts at (its glyph table follows) and its style variant ("" = the base sizes),
+    and the typeface it was made from (``STERN_HelveticaNeueBlack``).
     :func:`scene_write._walk_font`'s walk
     (which Modes relies on, with its caps) without the caps: a scene's game font can carry
     30 style variants (Iron Maiden) and long kerning lists."""
@@ -422,7 +423,7 @@ def _font_end(d, at):
     if w.take("<I") != key:
         raise SceneTreeError("a Font's key does not repeat at 0x%x" % at)
     w.string()
-    w.string()
+    face = w.string().decode("latin1")
     w.o += 2
     n = w.take("<Q")           # (not ``w.o += 2 * w.take()``: that reads w.o before take moves it)
     w.o += 2 * n
@@ -455,7 +456,7 @@ def _font_end(d, at):
             sizes(w.string().decode("latin1"))
     except (_sw.SceneWriteError, struct.error) as e:
         raise SceneTreeError("the Font at 0x%x does not walk: %s" % (at, e))
-    return w.o, found
+    return w.o, found, face
 
 
 def parse(data):

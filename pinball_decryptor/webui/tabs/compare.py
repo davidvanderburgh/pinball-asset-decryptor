@@ -1,8 +1,10 @@
 """Compare tab (Tk: ``MainWindow._build_compare_tab`` and its ``_compare_*``
 methods).
 
-Pick two card images of the same game, press Compare, read the plugin's
-sectioned what-changed report (``mfr.compare_images``), fold / unfold long
+Pick two card images of the same game -- or two project folders (PAD-442,
+``mfr.compare_folders``: every manufacturer that extracts) -- press Compare,
+read the plugin's sectioned what-changed report (``mfr.compare_images``), fold
+/ unfold long
 change lists ("Rows per list"), double-click a listed file to pull it off the
 right card and open it with the desktop (``mfr.extract_report_file``), copy
 the WHOLE report as text (``core.image_info.as_text``), or Extract Both (the
@@ -15,6 +17,7 @@ folded group or a collapsed section costs a repaint, never a card read.
 
 import os
 import threading
+import time
 
 from .. import compat
 from .base import TabService, rpc
@@ -31,7 +34,25 @@ INTRO = ("Compare two card images of the same game — two releases, or a "
          "Extract. The packed sounds are the exception: run Extract Both and "
          "compare again, and every changed sound is listed by name. "
          "Double-click a listed file to open it — it is pulled off the card "
-         "and handed to whatever you normally view or play it with.")
+         "and handed to whatever you normally view or play it with.\n\n"
+         "Or pick two project folders (Folder…) — two versions of a mod, or "
+         "a mod against the stock extract. The files are compared as they "
+         "are in the folders now, sounds, videos, images and the rest, plus "
+         "the Replace tabs' per-file settings (a sound's Level, a clip's "
+         "length, the color profile ticks), which a build uses but no file "
+         "holds.")
+
+#: The manufacturers without a card-image compare get the folder half only.
+INTRO_FOLDERS = (
+    "Pick two project folders — two versions of a mod, or a mod against the "
+    "stock extract — and see what changed from A to B: sounds, videos, "
+    "images and the other files, compared as they are in the folders now, "
+    "plus the Replace tabs' per-file settings (a sound's Level, a clip's "
+    "length, the color profile ticks), which a build uses but no file holds. "
+    "Double-click a listed file to open it.")
+
+#: Seconds between two "N of M files read" status updates.
+PROGRESS_EVERY = 0.25
 
 EXTRACT_BOTH_TIP = (
     "Extract image A and then image B into one folder you pick — a "
@@ -98,7 +119,8 @@ class CompareTab(TabService):
         self.set(intro=INTRO, extract_both_tip=EXTRACT_BOTH_TIP,
                  limit_tip=LIMIT_TIP, limit_choices=list(ROW_LIMIT_CHOICES),
                  rows=[], running=False, has_report=False, status="",
-                 hist_a=[], hist_b=[], report=0, widths=None)
+                 hist_a=[], hist_b=[], report=0, widths=None,
+                 images_ok=True, kind="")
 
     # ------------------------------------------------------------------
     # hooks
@@ -106,6 +128,15 @@ class CompareTab(TabService):
     def on_manufacturer(self, mfr):
         self._compare_reset()
         self._push_history()
+        ok = self._images_ok(mfr)
+        self.set(images_ok=ok, intro=INTRO if ok else INTRO_FOLDERS)
+
+    @staticmethod
+    def _images_ok(mfr):
+        """Can this manufacturer compare two CARD IMAGES?  (Two folders
+        always can.)"""
+        return bool(getattr(getattr(mfr, "capabilities", None), "compare",
+                            False))
 
     def on_show(self):
         self._push_history()
@@ -125,7 +156,7 @@ class CompareTab(TabService):
         self._collapsed = set()
         self._report += 1
         self.set(rows=[], running=False, has_report=False, status="",
-                 report=self._report)
+                 report=self._report, kind="")
 
     # ------------------------------------------------------------------
     # pickers
@@ -158,13 +189,23 @@ class CompareTab(TabService):
         return [(spec.label, joined), ("All files", "*.*")]
 
     @rpc
-    def browse(self, side):
+    def browse(self, side, folder=False):
+        """Image… / Folder… beside a box: a card image, or a project folder
+        (starting where the box, or the project, already points)."""
         var = self.compare_a_var if side == "a" else self.compare_b_var
-        ext_var = getattr(self.window, "extract_input_var", None)
-        path = self.window.ask_open(
-            "compare_" + side, "Select card image", self._input_filetypes(),
-            initialdir=self.window._initialdir_for(
-                var.get(), ext_var.get() if ext_var is not None else ""))
+        if folder:
+            out_var = getattr(self.window, "extract_output_var", None)
+            path = self.window.ask_folder(
+                "compare_dir_" + side, "Select project folder %s"
+                % side.upper(), initialdir=self.window._initialdir_for(
+                    var.get(), out_var.get() if out_var is not None else ""))
+        else:
+            ext_var = getattr(self.window, "extract_input_var", None)
+            path = self.window.ask_open(
+                "compare_" + side, "Select card image",
+                self._input_filetypes(),
+                initialdir=self.window._initialdir_for(
+                    var.get(), ext_var.get() if ext_var is not None else ""))
         if path:
             var.set(os.path.normpath(path))
         return path
@@ -195,19 +236,55 @@ class CompareTab(TabService):
                     roots.append(d)
         return roots
 
-    @rpc
-    def run(self):
-        """Diff the two picked images on a worker and paint the report."""
-        a, b = self._paths()
+    def _pair_kind(self, a, b):
+        """``"images"`` / ``"folders"`` for the picked pair, or ``None``
+        after telling the user why it can't be compared."""
+        mfr = self.mfr
+        images_ok = self._images_ok(mfr)
         if not a or not b:
             compat.messagebox.showinfo(
-                "Pick two images", "Pick both card images to compare first.")
-            return False
+                "Pick two to compare",
+                "Pick A and B first: two card images, or two project "
+                "folders." if images_ok else
+                "Pick two project folders to compare first.")
+            return None
+        kinds = []
         for side, p in (("A", a), ("B", b)):
-            if not os.path.isfile(p):
-                compat.messagebox.showerror("File not found",
-                                            "Image %s:\n\n%s" % (side, p))
-                return False
+            if os.path.isdir(p):
+                kinds.append("folders")
+            elif os.path.isfile(p):
+                kinds.append("images")
+            else:
+                compat.messagebox.showerror(
+                    "Not found", "%s %s:\n\n%s" % (
+                        "Image" if images_ok else "Folder", side, p))
+                return None
+        if kinds[0] != kinds[1]:
+            compat.messagebox.showinfo(
+                "One image, one folder",
+                "A is a %s and B is a %s. Pick two card images, or two "
+                "project folders.\n\nTo compare a card with a project, "
+                "extract the card first and compare the two folders."
+                % tuple("folder" if k == "folders" else "card image"
+                        for k in kinds))
+            return None
+        if kinds[0] == "images" and not images_ok:
+            compat.messagebox.showinfo(
+                "Pick two folders",
+                "%s card images can't be compared directly. Extract both "
+                "cards, then compare the two project folders."
+                % getattr(mfr, "display", "These"))
+            return None
+        return kinds[0]
+
+    @rpc
+    def run(self):
+        """Diff the two picked images (or folders) on a worker and paint the
+        report."""
+        a, b = self._paths()
+        kind = self._pair_kind(a, b)
+        if kind is None:
+            return False
         mfr = self.mfr
         if mfr is None:
             return False
@@ -218,19 +295,36 @@ class CompareTab(TabService):
 
         self._seq += 1
         seq = self._seq
-        roots = self._extract_roots(a, b)
+        roots = self._extract_roots(a, b) if kind == "images" else []
+        last = [0.0]
+
+        def _progress(done, total):
+            now = time.monotonic()
+            if done < total and now - last[0] < PROGRESS_EVERY:
+                return
+            last[0] = now
+            try:
+                self.ctx.loop.post(self._progress, seq, done, total)
+            except Exception:                    # noqa: BLE001
+                pass
 
         def _worker():
             from ...core import extract_source
             try:
-                sections = mfr.compare_images(
-                    a, b,
-                    assets_a=extract_source.find_extract_for(a, roots),
-                    assets_b=extract_source.find_extract_for(b, roots)) or []
+                if kind == "folders":
+                    sections = mfr.compare_folders(
+                        a, b, progress=_progress,
+                        cancel=lambda: seq != self._seq) or []
+                else:
+                    sections = mfr.compare_images(
+                        a, b,
+                        assets_a=extract_source.find_extract_for(a, roots),
+                        assets_b=extract_source.find_extract_for(
+                            b, roots)) or []
             except Exception as e:               # noqa: BLE001
                 sections = [("Error", [("Could not compare", str(e))])]
             try:
-                self.ctx.loop.post(self._landed, seq, sections)
+                self.ctx.loop.post(self._landed, seq, sections, kind)
             except Exception:                    # noqa: BLE001
                 pass
 
@@ -241,15 +335,25 @@ class CompareTab(TabService):
         self._collapsed = set()
         self._report += 1
         self.set(rows=[], running=True, has_report=False,
-                 status="Comparing images…", report=self._report)
+                 status="Comparing %s…" % kind, report=self._report,
+                 kind=kind)
         threading.Thread(target=_worker, daemon=True,
                          name="pad-compare").start()
         return True
 
-    def _landed(self, seq, sections):
+    def _progress(self, seq, done, total):
+        """The folder compare's reads, as they land: the first compare of two
+        big projects reads gigabytes (after that the hashcache answers)."""
+        if seq != self._seq:
+            return
+        self.set(status="Comparing folders… %s of %s files read" % (
+            format(done, ","), format(total, ",")))
+
+    def _landed(self, seq, sections, kind="images"):
         if seq != self._seq:
             return                              # superseded / mfr switched
         self.render(sections)
+        self.set(kind=kind)
 
     def render(self, sections):
         """Take a finished report (Tk ``_compare_render``): kept WHOLE, drawn
@@ -389,6 +493,10 @@ class CompareTab(TabService):
                             "of the file rows.")
             return None
         side = (ref.get("side") or "B").upper()
+        if ref.get("disk") and self.get("kind") == "folders":
+            # a file in one of the two folders: nothing to pull off a card,
+            # so no card to look for
+            return side, None, ref
         image = ((self.compare_a_var.get() if side == "A"
                   else self.compare_b_var.get()) or "").strip()
         if not image or not os.path.isfile(image):
@@ -410,19 +518,27 @@ class CompareTab(TabService):
             return False
         side, image, ref = target
         name = ref.get("name") or "file"
+        where = "folder" if self.get("kind") == "folders" else "image"
         self._open_busy = True
-        self.set(status="Opening %s from image %s…" % (name, side))
+        self.set(status="Opening %s from %s %s…" % (name, where, side))
 
         def _worker():
             import tempfile
             path = err = None
             try:
-                out = tempfile.mkdtemp(prefix="spike2_compare_")
-                path = mfr.extract_report_file(image, ref, out)
+                if ref.get("disk"):
+                    path = ref["disk"]
+                    if not os.path.isfile(path):
+                        raise FileNotFoundError(
+                            "%s is no longer there" % path)
+                else:
+                    out = tempfile.mkdtemp(prefix="spike2_compare_")
+                    path = mfr.extract_report_file(image, ref, out)
             except Exception as e:               # noqa: BLE001
                 err = e
             try:
-                self.ctx.loop.post(self._open_finished, name, side, path, err)
+                self.ctx.loop.post(self._open_finished, name, side, path, err,
+                                   where)
             except Exception:                    # noqa: BLE001
                 pass
 
@@ -430,18 +546,19 @@ class CompareTab(TabService):
                          name="pad-compare-open").start()
         return True
 
-    def _open_finished(self, name, side, path, err):
+    def _open_finished(self, name, side, path, err, where="image"):
         from ...core import desktop
         self._open_busy = False
         if err is not None:
             self.set(status="")
             compat.messagebox.showerror(
                 "Open %s" % name,
-                "That file couldn't be read off image %s:\n\n%s" % (side, err))
+                "That file couldn't be read off %s %s:\n\n%s"
+                % (where, side, err))
             return
         ok, why = desktop.open_path(path)
         if ok:
-            self.set(status="Opened %s from image %s." % (name, side))
+            self.set(status="Opened %s from %s %s." % (name, where, side))
         else:
             self.set(status="")
             compat.messagebox.showinfo(
@@ -462,6 +579,14 @@ class CompareTab(TabService):
                 "Pick two images",
                 "Pick both card images first — Extract Both extracts the "
                 "pair.")
+            return False
+        if os.path.isdir(a) or os.path.isdir(b):
+            compat.messagebox.showinfo(
+                "Extract Both",
+                "Extract Both extracts two card images, and %s already a "
+                "folder. Press Compare to compare folders."
+                % ("A and B are each" if os.path.isdir(a) and os.path.isdir(b)
+                   else "A is" if os.path.isdir(a) else "B is"))
             return False
         for side, p in (("A", a), ("B", b)):
             if not os.path.isfile(p):

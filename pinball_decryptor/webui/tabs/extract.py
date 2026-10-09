@@ -56,6 +56,66 @@ _EXPORTS = (
 )
 
 
+def _card_kind(card, folder, details):
+    """How the Extract tab's card relates to the extract already in *folder* (PAD-421):
+    ``"other"`` when the folder holds the extract of a different card, so the page can say
+    the project is not this card's; ``""`` when it is (or a build of it), or nothing to
+    compare.  DragonRR picked a custom Godzilla card over a folder holding the stock card's
+    extract, and the page read as if this card were extracted."""
+    if not card or not details.get("baseline") or not details.get("source_name"):
+        return ""
+    from ...core.extract_source import card_relation
+    try:
+        rel = card_relation(card, folder, measure=True)
+    except Exception:                                   # noqa: BLE001
+        return ""
+    return "other" if rel and rel.get("kind") in ("other", "other_build") else ""
+
+
+def _card_project(card, folder, candidates):
+    """The project folder *card* belongs to when it is not *folder*: the one a build
+    record beside it names (a card PAD built), else a recent project extracted from it or
+    built into it; ``""`` when there is none on disk.  PAD-421: DragonRR picked a card that
+    already had a project of its own, and the page kept showing the folder that was open,
+    never offering his."""
+    from ...core.extract_source import _build_project, card_relation, _same_dir
+    if not card or not os.path.isfile(card):
+        return ""
+    built = _build_project(card)
+    if built and os.path.isdir(built) and not _same_dir(built, folder):
+        return os.path.normpath(built)
+    for cand in candidates:
+        if not cand or _same_dir(cand, folder) or not os.path.isdir(cand):
+            continue
+        try:
+            rel = card_relation(card, cand, measure=True)
+        except Exception:                               # noqa: BLE001
+            continue
+        if rel and rel.get("kind") in ("source", "build"):
+            return os.path.normpath(cand)
+    return ""
+
+
+def _same(path):
+    """*path* the way two spellings of one file compare equal."""
+    return os.path.normcase(os.path.normpath(path)) if path else ""
+
+
+def _project_name_for(caption, card, parent):
+    """The folder name New project suggests for *card* (PAD-435): the game the title bar
+    names for it ("James Bond 007 v1.06.0 LE"), else the card file's own name, never one
+    already in *parent*."""
+    from ..shellx_projects import _BAD_NAME_CHARS
+    name = "".join("-" if ch in _BAD_NAME_CHARS else ch for ch in (caption or ""))
+    name = name.strip().rstrip(". ")
+    if not name:
+        name = os.path.splitext(os.path.basename(card or ""))[0].rstrip(". ") or "New project"
+    base, n = name, 2
+    while parent and os.path.exists(os.path.join(parent, name)) and n < 100:
+        name, n = "%s (%d)" % (base, n), n + 1
+    return name
+
+
 def _is_admin():
     from ...core.admin import is_admin
     try:
@@ -116,6 +176,9 @@ class ExtractTab(TabService):
         self._drives_thread = None
         self._drives_cache = []
         self._stats_seq = 0
+        self._followed_card = ""      # PAD-421: the last card whose project was opened
+        self._stats_pair = None       # PAD-435: (folder, card) the last stats described
+        self._offered = set()         # PAD-435: the (folder, card) pairs already offered
         self._stats_after = None
         self._stats_thread = None
         self._info_seq = 0
@@ -177,6 +240,7 @@ class ExtractTab(TabService):
                  deltas_show=False, deltas_help=H.DEFAULT_DELTAS_HELP,
                  deltas=[], opt_transcribe=False, opt_music=False,
                  opt_duration=False, autoname_enabled=True,
+                 autoname_reason="",
                  block_reason="", dmd=None, matrix=None,
                  project=None, recents=[], info=None, pinfo=False,
                  rc=None, platform=sys.platform)
@@ -410,6 +474,8 @@ class ExtractTab(TabService):
         self._mirror("write_upd_var", self.extract_input_var.get())
         self._refresh_gate()
         self._start_probe()
+        # "This project" says when the folder holds another card's extract (PAD-421)
+        self._schedule_stats()
 
     def _on_output_changed(self):
         # the shared assets folder every other tab reads follows this box
@@ -819,10 +885,27 @@ class ExtractTab(TabService):
             self._done_key = None
             self._refresh_gate()
 
+    def _autoname_reason(self):
+        """Why Auto-name now can't run on the project folder's sounds ("" when
+        it can; PAD-460).  It names what an earlier extract left there, so it
+        needs that extract and one of the naming options ticked."""
+        if not (self.transcribe_var.get() or self.music_id_var.get()):
+            return "Tick Auto-name call-outs or Auto-name music first."
+        state = H.extract_state(self.extract_output_var.get())
+        if state is None:
+            return "Choose a project folder first."
+        if state["archived"]:
+            return ("This project is archived. Extract it again before "
+                    "naming its sounds.")
+        if not state["extracted"]:
+            return "This project folder holds no extract yet."
+        return ""
+
     def _refresh_gate(self):
         if self.mfr is None:
             return
-        self.set(block_reason=self._block_reason())
+        self.set(block_reason=self._block_reason(),
+                 autoname_reason=self._autoname_reason())
 
     def on_running(self, running, mode):
         if not running:
@@ -948,6 +1031,17 @@ class ExtractTab(TabService):
         if self.window._is_running():
             return False
         cb = self.window.cb.get("on_extract")
+        if cb is not None:
+            cb()
+        return True
+
+    @rpc
+    def autoname_now(self):
+        """Auto-name now (PAD-460): the ticked naming options run over the
+        sounds already in the project folder, with no new extract."""
+        if self.window._is_running() or self._autoname_reason():
+            return False
+        cb = self.window.cb.get("on_autoname")
         if cb is not None:
             cb()
         return True
@@ -1218,6 +1312,8 @@ class ExtractTab(TabService):
         # (its anchor) from its own image, never read off the input box
         mfrs = list(self.window.manufacturers)
         mfr = self.mfr
+        card = (self.extract_input_var.get() or "").strip()
+        candidates = self._recent_folders()
 
         def _work():
             try:
@@ -1228,8 +1324,21 @@ class ExtractTab(TabService):
                 details = H.project_details(folder, mfrs, mfr)
             except Exception:                           # noqa: BLE001
                 details = None
+            if details is not None:
+                details["card_kind"] = _card_kind(card, folder, details)
+                try:
+                    details["card_project"] = _card_project(card, folder, candidates)
+                except Exception:                       # noqa: BLE001
+                    details["card_project"] = ""
+                # the picked card's own game, to name it beside the project's (PAD-435)
+                details["card_game"] = ""
+                if details["card_kind"] == "other":
+                    try:
+                        details["card_game"] = H.project_game(mfr, [card])
+                    except Exception:                   # noqa: BLE001
+                        pass
             self.ctx.loop.post(self._apply_stats, seq, folder, name, rows,
-                               details)
+                               details, card)
 
         t = threading.Thread(target=_work, daemon=True,
                              name="extract-stats")
@@ -1245,13 +1354,88 @@ class ExtractTab(TabService):
             state = None
         self.store.set("shell", project_state=state)
 
-    def _apply_stats(self, seq, folder, name, rows, details):
+    def _apply_stats(self, seq, folder, name, rows, details, card=""):
         if seq != self._stats_seq:
             return
         self.set(project={"folder": folder, "name": name, "exists": True,
                           "loading": False,
                           "rows": [[str(a), str(b)] for a, b in rows],
                           "details": details})
+        prev, self._stats_pair = self._stats_pair, (_same(folder), _same(card))
+        self._follow_card_project(details)
+        self._offer_card_project(prev, details)
+
+    def _offer_card_project(self, prev, details):
+        """PAD-435 (David): "If I'm in Godzilla and have a Godzilla project, then select a
+        James Bond card, there's no way we should stay in the Godzilla project."  A card
+        picked while the open project holds another card's extract, when the card has no
+        project of its own to open (PAD-421 opens that one), brings up New project filled
+        in for it.  Only for a pick (the card changed and the folder did not, so never at
+        startup or on opening a project) and once per card and folder: staying is allowed,
+        and the tabs keep offering it."""
+        d = details or {}
+        here = self._stats_pair
+        card = (self.extract_input_var.get() or "").strip()
+        if (d.get("card_kind") != "other" or d.get("card_project")
+                or prev is None or prev[0] != here[0] or prev[1] == here[1]
+                or here in self._offered or not os.path.isfile(card)
+                or (_same(self._project_folder()), _same(card)) != here
+                or self.window._is_running()):
+            return False
+        self._offered.add(here)
+        return self._open_card_project_form(d)
+
+    @rpc
+    def new_card_project(self):
+        """The tabs' "New project for this card…" button (PAD-435)."""
+        if self.window._is_running():
+            return False
+        return self._open_card_project_form(
+            (self.get("project") or {}).get("details") or {})
+
+    def _open_card_project_form(self, d):
+        """The New project window, filled in for the picked card: the card as its stock
+        image, the card's game as its name, where New project last made one (else beside
+        the open project), and a line saying why it came up."""
+        card = (self.extract_input_var.get() or "").strip()
+        if not card:
+            return False
+        folder = os.path.normpath(self._project_folder()) if self._project_folder() else ""
+        settings = getattr(self.app, "_settings", None) or {}
+        parent = settings.get("project_dir") or (os.path.dirname(folder) if folder else "")
+        game = d.get("card_game") or ""
+        self.ctx.bus.publish("open_dialog", name="project_new", props={
+            "stock": card,
+            "name": _project_name_for(game, card, parent),
+            "parent": parent,
+            "mfr": getattr(self.mfr, "key", ""),
+            "why": {"card": game or os.path.basename(card),
+                    "project": os.path.basename(folder) if folder else "",
+                    "project_card": d.get("game") or d.get("source_name") or ""}})
+        return True
+
+    def _follow_card_project(self, details):
+        """PAD-421 (DragonRR): a card picked that has a project folder of its own
+        loads that project, once per pick, the way a folder holding a project loads
+        it.  He went back to his 1.96a card after extracting the stock card elsewhere,
+        and the tab kept the stock card's folder open with no obvious way out.  Only
+        when the open folder holds another card's extract; switching back by hand
+        afterwards sticks (the same pick is not followed twice)."""
+        d = details or {}
+        card = (self.extract_input_var.get() or "").strip()
+        target = d.get("card_project") or ""
+        if (not card or not target or d.get("card_kind") != "other"
+                or self._followed_card == card or self.window._is_running()):
+            return
+        self._followed_card = card
+        if self._open_folder(target):
+            # opening a project picks the card its anchor names (for a card PAD built,
+            # the stock card it started from); the card the user picked stays picked
+            if (self.extract_input_var.get() or "").strip() != card:
+                self.extract_input_var.set(card)
+            self.window.append_log(
+                "Opened %s, the project folder of %s." % (target, os.path.basename(card)),
+                "info")
 
     @rpc
     def open_project_info(self):
@@ -1279,6 +1463,41 @@ class ExtractTab(TabService):
             return False
         from ...core import desktop
         desktop.open_path(folder)
+        return True
+
+    def _recent_folders(self, n=20):
+        from ...core import project_registry
+        settings = getattr(self.app, "_settings", None) or {}
+        try:
+            return [e.get("folder") or "" for e in project_registry.recent(settings, n)]
+        except Exception:                               # noqa: BLE001
+            return []
+
+    @rpc
+    def use_card_project(self):
+        """The Extract tab's "Open its project": the picked card's own project folder
+        (PAD-421), opened the way a recent project is."""
+        d = (self.get("project") or {}).get("details") or {}
+        folder = d.get("card_project") or ""
+        if not folder or not os.path.isdir(folder):
+            return False
+        return self._open_folder(folder)
+
+    def _open_folder(self, folder):
+        """Switch to the project in *folder*: opened as a recent project when it has its
+        project file, else picked as the project folder (a folder without one could not
+        be opened at all - "Couldn't read the project in this folder")."""
+        from ...core import project_file
+        if self.window._is_running():
+            return False
+        if project_file.has_anchor(folder):
+            return self.open_recent(folder)
+        # as Browse… picks one
+        self._forget_done()
+        self.extract_output_var.set(folder)
+        cb = self.window.cb.get("on_project_folder_picked")
+        if cb is not None:
+            cb(folder)
         return True
 
     def _refresh_recents(self):

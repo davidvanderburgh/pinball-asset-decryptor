@@ -85,10 +85,15 @@ class TitleProfile:
     #                                  longest command on it is shorter than COIL_MAX_MS (its `_drive` line's last word)
     shield_rule: str = ""            # PAD-392: the game's own shield feature (the port's `text shield_rule`, one of
     #                                  game_rules): it turns the platform back while it counts shots
+    shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
+    shake_max_ms: tuple = ()         # PAD-414: the game's own longest shake at strength 0..3 (`text shake_max_ms`)
     game_shows: tuple = ()           # PAD-418: ((name, kind, secs), ...) the game's own light shows a mode can play
     #                                  (the port's show_<n> lines, in number order; kind flashy / subdued / accent)
     absent: tuple = ()               # PAD-420: HARDWARE_PARTS this machine does not have (machine_absent): the tab
     #                                  leaves their sections out rather than saying why they cannot be used
+    game_wizards: tuple = ()         # PAD-436: ((name, film), ...) the game's own mini-wizards a mode can hand over
+    #                                  (the port's wizard_name_<n> / wizard_film_<n> lines, in number order)
+    wizard_shot: str = ""            # PAD-436: the game's shot that starts a lit mini-wizard (`text wizard_shot`)
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -172,6 +177,13 @@ EVENT_LABELS = {
     "skill_shot": "the skill shot is made",
     "multiball_start": "a multiball starts",
     "multiball_end": "a multiball ends",
+    # PAD-428: James Bond 007 (LE/Pro 1.06): a film's four parts (henchman, villain, Q Branch, gadget) all done
+    "film_dr_no": "Dr. No done",
+    "film_frwl": "From Russia With Love done",
+    "film_goldfinger": "Goldfinger done",
+    "film_thunderball": "Thunderball done",
+    "film_yolt": "You Only Live Twice done",
+    "film_daf": "Diamonds Are Forever done",
 }
 
 #: Godzilla Pro 1.15's events, each one proven by a marked game in the emulator
@@ -263,7 +275,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop", "coils", "shield", "shows")
+         "magnet", "scoop", "coils", "shield", "shaker", "shows", "wizard")
 
 #: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
 HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "shaker")
@@ -291,8 +303,8 @@ MACHINE_HARDWARE = {
     "elvira3": ("scoop", "coils", "shaker"),
     "foo_fighters_le": ("magnet", "coils"),
     "foo_fighters_pro": ("coils",),       # run 21: its device table (the names resolve now) has no OVERLORD MAGNET - the LE's only
-    "godzilla_le": ("magnet", "scoop", "coils", "shield"),
-    "godzilla_pro": ("magnet", "scoop"),
+    "godzilla_le": ("magnet", "scoop", "coils", "shield", "shaker"),   # its shaker drive is no coil name: PAD-414 shakes it
+    "godzilla_pro": ("magnet", "scoop", "shaker"),   # the shaker kit is optional; the game's own shake call is the LE's
     "guardians": ("magnet", "scoop", "coils", "shaker"),
     "guardians_le": ("magnet", "scoop", "coils", "shaker"),
     "iron_maiden_le": ("scoop", "coils"),
@@ -743,6 +755,57 @@ def _shield_cannot(key, label, port=None):
                        "turn it in the emulator, so it cannot here yet." % label),)
 
 
+#: PAD-414: the cabinet's shaker motor (Godzilla Premium/LE: optional on a Premium, fitted on an LE). What
+#: pad_mode_runtime.c's shake_arm needs - (sites, values, texts): the game's own shake and stop, the drive's time
+#: left, the adjustment reader; the SHAKER MOTOR setting and the drive; the game's longest shake per strength and
+#: the longest each setting allows.
+SHAKER_NEEDS = (("shake", "shake_stop", "drive_left", "adjustment"), ("shake_adj", "shake_drive"),
+                ("shake_max_ms", "shake_setting_ms"))
+#: The builds where a mode file's ``shake`` lines were seen reach the board in the emulator.
+SHAKER_PROVEN = frozenset({
+    "godzilla_le-1.16",                # PAD-414 2026-10-06 rig 1, the stock Premium/LE card, PAD_COIL_PROBE=1: shake start 1500 2 -> node 1 coil 0 31/255 for 1500 ms; the game's jackpot shake on each left ramp (51/255, 500 ms), a hit while it ran refused; shake end 1000 3 ran out after the mode (no OFF); pm_end mid-shake sent the game's OFF with 4001 ms left
+})
+#: a shake's strength: the game's own power steps, 0 the hardest (its battle hits and jackpots)
+SHAKE_STRENGTHS = {0: "hard", 1: "strong", 2: "medium", 3: "soft"}
+SHAKE_MIN_MS = 100
+SHAKE_WHEN = {"start": "as it starts", "shot": "on a shot", "end": "as it ends"}
+SHAKES_MAX = 4                                 # mode_file.c holds 4 shake lines
+#: what the app calls the game's own shakes (the port's `text shake_<name>`); one the port names but this does not
+#: is shown by its name
+SHAKE_LABELS = {"hit": "the game's hit (0.2 s)", "big_hit": "the game's big hit (0.33 s)",
+                "jackpot": "the game's jackpot (0.5 s)", "rumble": "the game's rumble (3 s)",
+                "multiball_start": "the game's multiball start (4 s)"}
+
+
+def _shaker_cannot(key, label, port=None):
+    """The ``cannot`` entry for the shaker on build ``key``, or () when it can."""
+    sites, values, texts = SHAKER_NEEDS
+    if not port or not (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
+                        and all(port["text"].get(n) for n in texts)):
+        return (("shaker", "The app has not found how %s shakes its cabinet, so a mode of yours cannot shake it."
+                           % label),)
+    if key in SHAKER_PROVEN:
+        return ()
+    return (("shaker", "The app has found how %s shakes its cabinet but has not yet seen a mode of yours shake it "
+                       "in the emulator, so it cannot here yet." % label),)
+
+
+def _shakes(port):
+    """((name, label), ...) the game's own shakes the port names, in the port's order."""
+    out = []
+    for k in port["text"]:
+        if k.startswith("shake_") and k not in ("shake_max_ms", "shake_setting_ms"):
+            name = k[len("shake_"):]
+            out.append((name, SHAKE_LABELS.get(name, "the game's %s shake" % name.replace("_", " "))))
+    return tuple(out)
+
+
+def _shake_max_ms(port):
+    try:
+        v = tuple(int(x) for x in port["text"].get("shake_max_ms", "").split())
+    except ValueError:
+        return ()
+    return v if len(v) == len(SHAKE_STRENGTHS) else ()
 #: PAD-418: the game's own light shows (PAD-411, MODE_SDK.md "The game's own light shows"). What pad_mode_runtime.c's
 #: shows_arm needs besides the `site show_<n>` lines before it plays one - (sites, values) - and the kinds a show is.
 #: PAD-420: and the game's clean-up of a show's lamp groups as it ends (pad_mode_runtime.c show_exit_hook): without
@@ -780,6 +843,52 @@ def _shows_cannot(label, port=None):
         return ()
     return (("shows", "The app has not found %s's own light shows, so a mode of yours cannot play one at its "
                       "start or end." % label),)
+
+
+#: PAD-436: the game's own mini-wizards (James Bond LE 1.06: MODE_SDK.md "The game's own mini-wizards"). What
+#: pad_mode_runtime.c's wizards_arm needs besides the `text wizard_name_<n>` lines - (sites, data).
+WIZARD_NEEDS = (("wizard_start",), ("wizard_state", "wizard_table", "lamps_dirty"))
+#: The builds where a mode file's ``game_wizard`` line was seen hand the player the game's own mode in the emulator.
+WIZARDS_PROVEN = frozenset({
+    # PAD-436 2026-10-07 rig 2, the stock card: From Russia With Love completed through the game's own collect fired
+    # film_frwl and a `game_wizard start Ahoy Mr. Bond` file started the game's Ahoy Mr. Bond (its start, played 0x2, its
+    # running query 1, flags 85 86, its intro on the glass); Goldfinger then `light`ed Goldfinger's Jackpot (selected 2,
+    # lit 0x4) while Ahoy ran
+    "james_bond_le-1.06",
+})
+#: how a mode hands one over: lit for the game's start shot, or started at once
+WIZARD_HOW = ("light", "start")
+#: mode_file.c's wizard name holds this many bytes, the end included
+WIZARD_NAME_MAX = 40
+
+
+def _game_wizards(port):
+    """PAD-436: ``((name, film), ...)`` in number order: the port's mini-wizards as the runtime arms them -
+    `text wizard_name_<n>` numbered from 1 with no gaps, each with its film (`text wizard_film_<n>`, "" when not
+    named). () when the port lacks the lines the runtime needs."""
+    if not port:
+        return ()
+    sites, data = WIZARD_NEEDS
+    if not (all(n in port["site"] for n in sites) and all(n in port["data"] for n in data)):
+        return ()
+    out, n = [], 1
+    while port["text"].get("wizard_name_%d" % n, "").strip():
+        name = port["text"]["wizard_name_%d" % n].strip()
+        if len(name) < WIZARD_NAME_MAX:
+            out.append((name, port["text"].get("wizard_film_%d" % n, "").strip()))
+        n += 1
+    return tuple(out)
+
+
+def _wizards_cannot(key, label, port=None):
+    """The ``cannot`` entry for the game's own mini-wizards on build ``key``, or () when a mode can hand one over."""
+    if not _game_wizards(port):
+        return (("wizard", "The app has not found %s's own mini-wizards, so a mode of yours cannot hand one to the "
+                           "player." % label),)
+    if key in WIZARDS_PROVEN:
+        return ()
+    return (("wizard", "The app has found %s's own mini-wizards but has not yet seen a mode of yours hand one over in "
+                       "the emulator, so it cannot here yet." % label),)
 
 
 #: PAD-381: the port's other HELD COILS (`text held_coils`, besides "magnet", which has its own part): each held
@@ -945,7 +1054,9 @@ GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzill
                             + _scoop_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _coils_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _shield_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
-                            + _shows_cannot("Godzilla Pro 1.15"))
+                            + _shaker_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _shows_cannot("Godzilla Pro 1.15")
+                            + _wizards_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
 #: item 164: the builds where a ``stack no`` mode was seen held back by a multiball that count showed, and
@@ -1598,7 +1709,9 @@ def profile_from_port(path):
     cannot += list(_scoop_cannot(key, label, port))          # PAD-381
     cannot += list(_coils_cannot(key, label, port))          # PAD-381
     cannot += list(_shield_cannot(key, label, port))         # PAD-392
+    cannot += list(_shaker_cannot(key, label, port))         # PAD-414
     cannot += list(_shows_cannot(label, port))               # PAD-418
+    cannot += list(_wizards_cannot(key, label, port))        # PAD-436
     events = tuple(name for name, _kind, needs in port["event"] if needs in sites)
     if not events:
         no("events", "The app does not know any of %(label)s's events yet (a ball starting, a "
@@ -1651,8 +1764,13 @@ def profile_from_port(path):
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
         coil_caps=_coil_caps(port, [n for n, _l in _held_coils(port) if (key, n) in HELD_COILS_PROVEN]),   # PAD-420
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
+        shakes=_shakes(port),                                                # PAD-414
+        shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
-        absent=machine_absent(game),                         # PAD-420
+        # PAD-420: a machine part this build can do is never hidden, whatever MACHINE_HARDWARE read off its coils
+        absent=tuple(a for a in machine_absent(game) if a in dict(cannot)),
+        game_wizards=_game_wizards(port),                    # PAD-436
+        wizard_shot=port["text"].get("wizard_shot", "").strip(),
     )
 
 
@@ -1863,10 +1981,12 @@ try:
         game_shows=_game_shows(_port_115),
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
-                     if c[0] not in ("magnet", "scoop", "coils", "shield", "shows"))
+                     if c[0] not in ("magnet", "scoop", "coils", "shield", "shaker", "shows"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
         + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
-        + _shows_cannot(_label_115, _port_115))
+        + _shows_cannot(_label_115, _port_115)
+        + _shaker_cannot(_key_115, _label_115, _port_115),
+        shakes=_shakes(_port_115), shake_max_ms=_shake_max_ms(_port_115))
 except OSError:
     pass
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
@@ -2336,10 +2456,20 @@ class ModeSpec:
     # PAD-392: while it runs the shield targets face the player (Godzilla Premium/LE's platform turns 1.5 s after it
     # starts, is kept there, and turns back when it ends) - only while the game's own shield feature sees no shots
     shield: bool = False
+    # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
+    # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
+    # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
+    shakes: list = field(default_factory=list)
     # PAD-418: the game's own light show at its start and at its end, by the port's name for it (the profile's
     # game_shows); "" = none. The end's is skipped when the ball is ending (the game stops every show of its own then)
     show_start: str = ""
     show_end: str = ""
+    # PAD-436: the game's own mini-wizard instead of a mode of its own, by the port's name for it (the profile's
+    # game_wizards); "" = none. When it would start, the player is handed the game's mode - lit for the game's start
+    # shot ("light") or started at once ("start") - and nothing of this mode's own runs (its clock, shots, screen,
+    # lights, sounds and points are not used)
+    game_wizard: str = ""
+    wizard_how: str = "light"
     # PAD-396: the mode on the title's OTHER models (the Pro beside the Premium/LE): {model word: {field: value}}
     # of MODEL_FIELDS, as the mode last was on that model, put back when it goes back (:func:`port_model`)
     models: dict = field(default_factory=dict)
@@ -2479,6 +2609,11 @@ def example_specs():
     ]
 
 
+#: PAD-414: the examples' shakes, where the game can shake its cabinet (:func:`examples_for`): MECHAGODZILLA starts big
+#: (the game's own multiball start) and every Godzilla target is a jackpot (the game's jackpot shake)
+EXAMPLE_SHAKES = {"MECHAGODZILLA": [["start", "multiball_start", 0, ""], ["shot", "jackpot", 0, "Godzilla target"]]}
+
+
 def example(name):
     """The example called ``name``, or None."""
     for n, spec in example_specs():
@@ -2510,8 +2645,12 @@ def _switch_off_what_it_cannot(spec, p):
         spec.coil_holds = []
     if not p.can("shield"):
         spec.shield = False
+    if not p.can("shaker"):
+        spec.shakes = []
     if not p.can("shows"):
         spec.show_start = spec.show_end = ""
+    if not p.can("wizard"):
+        spec.game_wizard = ""
     return spec
 
 
@@ -2539,6 +2678,10 @@ def examples_for(p):
     for name, spec in example_specs():
         if spec.start_shot in names and all(s in names for s in spec.scoring_shots):
             spec.title = p.key
+            games = {n for n, _l in getattr(p, "shakes", ())}
+            shakes = EXAMPLE_SHAKES.get(name, [])                # PAD-414: where the game can shake its cabinet
+            if p.can("shaker") and all(r[1] in games and (not r[3] or r[3] in names) for r in shakes):
+                spec.shakes = [list(r) for r in shakes]
             out.append((name, _switch_off_what_it_cannot(spec, p)))
     if out:
         return out
@@ -2623,7 +2766,7 @@ def retarget(spec, p):
 #: lights - is the same mode on every model.
 MODEL_FIELDS = ("start_shot", "start_also", "start_sequence", "scoring_shots", "shot_award", "end_shot",
                 "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds",
-                "shield", "show_start", "show_end")
+                "shield", "shakes", "show_start", "show_end", "game_wizard")
 #: what each model word is called in the words
 MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "Premium"}
 
@@ -2699,6 +2842,9 @@ def _map_shots(spec, fn):
     if isinstance(spec.coil_holds, list):
         spec.coil_holds = [[r[0], r[1], one(r[2])] if isinstance(r, (list, tuple)) and len(r) == 3 else r
                            for r in spec.coil_holds]
+    if isinstance(spec.shakes, list):                  # PAD-414
+        spec.shakes = [[r[0], r[1], r[2], one(r[3])] if isinstance(r, (list, tuple)) and len(r) == 4 else r
+                       for r in spec.shakes]
 
 
 def _port_model(out, old_key, p):
@@ -2737,6 +2883,8 @@ def _port_model(out, old_key, p):
             out.scoop_hold_ms = 0
         if not p.can("shield"):
             out.shield = False
+        if not p.can("shaker"):
+            out.shakes = []
     return port
 
 
@@ -2776,6 +2924,8 @@ def port_words(old, new, p):
         gone.append("the scoop")
     if old.shield is True and not new.shield:
         gone.append("the shield platform")
+    if old.shakes and not new.shakes:
+        gone.append("the shaker")
     shows = [s for s in (old.show_start, old.show_end)
              if isinstance(s, str) and s and s not in (new.show_start, new.show_end)]
     if gone:
@@ -2784,7 +2934,10 @@ def port_words(old, new, p):
     if shows:                                        # PAD-418
         words.append("%s does not have the light show%s %s, so %s left out there" % (
             now, "" if len(shows) == 1 else "s", " or ".join(shows), "it is" if len(shows) == 1 else "they are"))
-    if gone or shows:
+    wizard = old.game_wizard if isinstance(old.game_wizard, str) and old.game_wizard != new.game_wizard else ""
+    if wizard:                                       # PAD-436
+        words.append("%s does not have the mini-wizard %s, so there it is a mode of its own again" % (now, wizard))
+    if gone or shows or wizard:
         words.append(kept)
     return words
 
@@ -2856,6 +3009,9 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         for f in ("show_start", "show_end"):
             if isinstance(getattr(out, f), str) and getattr(out, f) not in have:
                 setattr(out, f, "")
+        # PAD-436: so is a mini-wizard
+        if isinstance(out.game_wizard, str) and out.game_wizard not in {n for n, _f in getattr(p, "game_wizards", ())}:
+            out.game_wizard = ""
     if old_key == p.key or not isinstance(out.callout_at, list):
         return
     try:
@@ -3109,7 +3265,14 @@ def copy_modes(src, dest, slugs=None, replace=False):
                 report.modes.append(CopiedMode(slug, spec.name, COPY_TO_FIX, new_slug, words))
             else:
                 save(dest, new_slug, new)
-                report.modes.append(CopiedMode(slug, spec.name, COPY_CARRIED, new_slug, words))
+                # PAD-432: every shot carried, but the card may still not build it (an event its game
+                # does not report, a ball save it has not, a picture or clip the copy lacks)
+                problems = validate(new, mode_folder(dest, new_slug))
+                if problems:
+                    words = "; ".join(w for w in (words, "a build there refuses it until then: "
+                                                  + " ".join(problems)) if w)
+                report.modes.append(CopiedMode(slug, spec.name, COPY_TO_FIX if problems else COPY_CARRIED,
+                                               new_slug, words))
         elif slug in codes:
             try:
                 name = CM.load(src, slug).name
@@ -3209,30 +3372,79 @@ def port_targets(project, folders):
 # ---- a file of modes to share or keep (PAD-281) --------------------------------------
 SHARE_MANIFEST = "pad_modes.json"
 SHARE_KIND = "pad-modes"
+#: PAD-432: that file's name on a card a Write put modes on, beside ``mode.so``
+CARD_BUNDLE = "pad_modes.zip"
 
 
-def export_modes(project, zip_path, slugs=None):
+def card_about(project):
+    """PAD-432: ``{"title", "label", "card"}`` for the manifest of a file of ``project``'s modes:
+    the title key and words of the card it was made from, and that card's file name. ``{}`` when
+    the project names no card the app can read."""
+    try:
+        card, p = project_profile(project)
+    except Exception:                                   # noqa: BLE001
+        return {}
+    out = {}
+    if p is not None:
+        out.update(title=p.key, label=p.label)
+    if card is not None and card.image:
+        out["card"] = os.path.basename(card.image)
+    return out
+
+
+#: PAD-432: the files of a mode folder that are its pictures, clips and sounds - what a file of
+#: modes with a ``media_budget`` leaves out first (everything else is its settings and sources)
+MEDIA_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wav", ".mp3", ".ogg", ".flac",
+              ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp")
+
+
+def export_modes(project, zip_path, slugs=None, about=None, media_budget=None):
     """Write modes of ``project`` (``slugs``; None: every form and code mode) to a zip: each
     mode's whole folder (picture, clip and sounds too) under ``modes/<slug>/``. Anyone loads
-    it with :func:`import_modes`. Returns the slugs written."""
+    it with :func:`import_modes`. ``about`` (PAD-432, :func:`card_about`) goes in its manifest
+    as ``"from"``. ``media_budget`` (PAD-432, bytes): every settings and source file goes in,
+    and the pictures, clips and sounds (:data:`MEDIA_EXTS`) smallest first while they fit in it;
+    the ones that do not are named in the manifest's ``"left_out"`` (``modes/<slug>/<file>``).
+    Returns the slugs written."""
     import zipfile
     from . import code_modes as CM
     have = [s for s, _ in list_modes(project)[0]] + CM.code_slugs(project)
     want = [s for s in (have if slugs is None else slugs) if s in have]
     if not want:
         raise ModeProjectError("there are no modes to save")
+    files = []                                  # (arc name, path, size, is media)
+    for slug in want:
+        top = mode_folder(project, slug)
+        for root, _dirs, names in os.walk(top):
+            for name in sorted(names):
+                if name.endswith(".tmp"):
+                    continue
+                path = os.path.join(root, name)
+                rel = os.path.relpath(path, top).replace(os.sep, "/")
+                files.append(("%s/%s/%s" % (MODES_DIRNAME, slug, rel), path, os.path.getsize(path),
+                              name.lower().endswith(MEDIA_EXTS)))
+    left = []
+    if media_budget is not None:
+        room = media_budget
+        for arc, _p, size, media in sorted(files, key=lambda f: f[2]):
+            if not media:
+                continue
+            if size <= room:
+                room -= size
+            else:
+                left.append(arc)
+        left.sort()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(SHARE_MANIFEST, json.dumps(
-            {"format": FORMAT, "kind": SHARE_KIND, "modes": want}, indent=1))
-        for slug in want:
-            top = mode_folder(project, slug)
-            for root, _dirs, files in os.walk(top):
-                for name in files:
-                    if name.endswith(".tmp"):
-                        continue
-                    path = os.path.join(root, name)
-                    rel = os.path.relpath(path, top).replace(os.sep, "/")
-                    z.write(path, "%s/%s/%s" % (MODES_DIRNAME, slug, rel))
+        head = {"format": FORMAT, "kind": SHARE_KIND, "modes": want}
+        if about:
+            head["from"] = dict(about)
+        if left:
+            head["left_out"] = left
+        z.writestr(SHARE_MANIFEST, json.dumps(head, indent=1))
+        skip = set(left)
+        for arc, path, _size, _media in files:
+            if arc not in skip:
+                z.write(path, arc)
     return want
 
 
@@ -3411,6 +3623,9 @@ def validate(spec, folder=None):
         out.append("Pick the shot that starts the mode.")
     if int(spec.start_count) < 1:
         out.append("It has to take at least one shot to start.")
+    if spec.game_wizard:                               # PAD-436: the game's mode, nothing of its own to check
+        return out + validate_starts(spec) + _validate_starts_ends(spec, p, ends=False) + \
+            validate_more_to_start(spec, p) + validate_wizard(spec, p)
     if int(spec.seconds) < 1 and not (spec.multiball and int(spec.seconds) == 0):
         out.append("It has to run for at least a second.")
     if not spec.scoring_shots:
@@ -3451,6 +3666,7 @@ def validate(spec, folder=None):
     out += validate_scoop(spec, p)                     # PAD-381
     out += validate_coils(spec, p)                     # PAD-381
     out += validate_shield(spec, p)                    # PAD-392
+    out += validate_shakes(spec, p)                    # PAD-414
     out += validate_shows(spec, p)                     # PAD-418
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
@@ -3692,6 +3908,58 @@ def shield_lines(spec, p):
     return ["shield         toward"] if spec.shield is True and p.can("shield") else []
 
 
+# ---- PAD-414: the cabinet's shaker -----------------------------------------------------------
+def shake_max_ms(p, strength):
+    """The longest shake title ``p``'s game itself runs at ``strength`` (0 when it never uses it)."""
+    m = tuple(getattr(p, "shake_max_ms", ()) or ())
+    return m[strength] if isinstance(strength, int) and 0 <= strength < len(m) else 0
+
+
+def validate_shakes(spec, p):
+    """Every reason the shaker part cannot be built; nothing when the mode shakes nothing."""
+    rows = spec.shakes
+    if rows in (None, []):
+        return []
+    if not isinstance(rows, list):
+        return ["The shakes are a list."]
+    if not p.can("shaker"):
+        return ["Shaking the cabinet is not on %s yet (Mode says why)." % p.label]
+    out = []
+    if len(rows) > SHAKES_MAX:
+        out.append("A mode shakes the cabinet at most %d ways." % SHAKES_MAX)
+    games, shots = dict(p.shakes), dict(p.shots)
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 4:
+            out.append("A shake is [when, what, strength, shot].")
+            continue
+        when, what, strength, shot = row
+        if when not in SHAKE_WHEN:
+            out.append("A shake comes as the mode starts, on a shot, or as it ends.")
+        if isinstance(what, str):
+            if what not in games:
+                out.append("%s has no shake of its own called %r." % (p.label, what))
+        else:
+            top = shake_max_ms(p, strength if isinstance(strength, int) and not isinstance(strength, bool) else -1)
+            n = _int_or_none(what)
+            if not top:
+                out.append("A shake's strength is %s." % ", ".join("%d %s" % kv for kv in SHAKE_STRENGTHS.items()))
+            elif n is None or not SHAKE_MIN_MS <= n <= top:
+                out.append("A %s shake lasts %g to %g seconds: the game's own longest at that strength." % (
+                    SHAKE_STRENGTHS[strength], SHAKE_MIN_MS / 1000, top / 1000))
+        if when == "shot" and shot not in shots:
+            out.append("%s has no shot called %r to shake the cabinet on." % (p.label, shot))
+    return out
+
+
+def shake_lines(spec, p):
+    """The runtime lines of the shaker: ``shake start|shot|end <ms> <strength> | game <name> [mask]``."""
+    if not p.can("shaker") or not isinstance(spec.shakes, list):
+        return []
+    out = []
+    for when, what, strength, shot in (r for r in spec.shakes if isinstance(r, (list, tuple)) and len(r) == 4):
+        body = "game %s" % what if isinstance(what, str) else "%d %d" % (int(what), int(strength))
+        out.append("shake          %s %s%s" % (when, body, " 0x%08x" % p.mask([shot]) if when == "shot" else ""))
+    return out
 # ---- PAD-418: the game's own light shows at the start and the end ---------------------------
 def validate_shows(spec, p):
     """Every reason the light-show part cannot be built; nothing when the mode plays none."""
@@ -3716,6 +3984,43 @@ def show_lines(spec, p):
         return []
     have = {name for name, _k, _s in p.game_shows}
     return ["%-14s %s" % (f, getattr(spec, f)) for f in ("show_start", "show_end") if getattr(spec, f) in have]
+
+
+# ---- PAD-436: the game's own mini-wizard instead of a mode of its own -----------------------
+def validate_wizard(spec, p):
+    """Every reason the mini-wizard part cannot be built; nothing when the mode is a mode of its own."""
+    v = spec.game_wizard
+    if v in ("", None):
+        return []
+    if not isinstance(v, str):
+        return ["The game's mini-wizard is one of its mini-wizards' names."]
+    if not p.can("wizard"):
+        return ["A mini-wizard of the game's is not on %s (Mode says why)." % p.label]
+    if v not in {n for n, _f in p.game_wizards}:
+        return ["%s has no mini-wizard called %r." % (p.label, v)]
+    if spec.wizard_how not in WIZARD_HOW:
+        return ["The game's mini-wizard is lit for its start shot, or started at once."]
+    return []
+
+
+def hands_over(spec, p):
+    """The game's mini-wizard ``spec`` hands the player instead of running a mode of its own, or "" (PAD-436)."""
+    v = spec.game_wizard
+    return v if isinstance(v, str) and v and p.can("wizard") and v in {n for n, _f in p.game_wizards} else ""
+
+
+def wizard_cfg(spec, slug, p):
+    """The file of a mode that hands over: its name, what starts it and how often - and the game's mini-wizard. None
+    of a mode's own run (clock, shots, screen, clip, lights, sounds, points) is written: mode_file.c runs none of it."""
+    lines = [
+        "# GENERATED by the Modes tab from modes/%s/mode.json - edit the mode there." % slug,
+        "name           %s" % spec.name.strip(),
+        "trigger        0x%08x %d" % (p.mask([spec.start_shot]), int(spec.start_count)),
+    ]
+    lines += starts_cfg_lines(spec)
+    lines += more_to_start_lines(spec, p)
+    lines.append("%-14s %s %s" % ("game_wizard", spec.wizard_how, hands_over(spec, p)))
+    return "\n".join(_starts_ends_lines(spec, lines, p, ends=False)) + "\n"
 
 
 # ---- item 142: cuts from a film ------------------------------------------------------
@@ -3806,7 +4111,7 @@ def ends_on_parts(spec):
     return (words[0] if words else "drain"), None
 
 
-def _validate_starts_ends(spec, p):
+def _validate_starts_ends(spec, p, ends=True):
     out = []
     words = (spec.starts_on or "shot").split()
     events = tuple(getattr(p, "events", ()) or ())
@@ -3831,6 +4136,8 @@ def _validate_starts_ends(spec, p):
             out.append("Pick the event that starts the mode.")
         elif name not in events:
             out.append("%s has no event %r to start on." % (p.label, name))
+    if not ends:                                    # PAD-436: a mode that hands over never runs, so never ends
+        return out
     kind, name = ends_on_parts(spec)
     if kind not in ("drain", "clock", "event"):
         out.append("A mode ends on the drain, on its clock only, or on one of the game's events.")
@@ -3878,6 +4185,8 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     if problems:
         raise ModeProjectError(" ".join(problems))
     p = profile(spec.title)
+    if hands_over(spec, p):                  # PAD-436: the game's mini-wizard, nothing of its own
+        return wizard_cfg(spec, slug, p)
     names = asset_names(slug)
     lines = [
         "# GENERATED by the Modes tab from modes/%s/mode.json - edit the mode there." % slug,
@@ -3893,6 +4202,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += scoop_lines(spec, p)           # PAD-381: nothing unless it holds a ball in the scoop
     lines += coil_lines(spec, p)            # PAD-381: the other mechanisms it holds
     lines += shield_lines(spec, p)          # PAD-392: the shield targets toward the player while it runs
+    lines += shake_lines(spec, p)           # PAD-414: the cabinet's shaker
     lines += show_lines(spec, p)            # PAD-418: the game's own light shows at its start and end
     if spec.screen and p.can("screen"):
         lines += [
@@ -4339,7 +4649,7 @@ def parameter_lines(spec, slug, p):
     return lines
 
 
-def _starts_ends_lines(spec, lines, p):
+def _starts_ends_lines(spec, lines, p, ends=True):
     """Item 147: an event start REPLACES the trigger line (so a mode.so older than events
     logs the file NOT VALID rather than starting it on a shot); a start on a shot and an
     end on the drain write exactly what they wrote before. PAD-314: a start on shots in
@@ -4359,6 +4669,8 @@ def _starts_ends_lines(spec, lines, p):
             if others:
                 seq.append("%-14s 0x%08x" % ("trigger_seq_reset", p.mask(others)))
         out[2:2] = ["starts_on      sequence"] + seq
+    if not ends:                                     # PAD-436: a mode that hands over never runs
+        return out
     kind, name = ends_on_parts(spec)
     if kind == "clock":
         out.append("ends_on        clock")

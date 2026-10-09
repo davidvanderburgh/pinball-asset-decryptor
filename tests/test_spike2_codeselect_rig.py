@@ -823,11 +823,16 @@ def test_the_fuse2fs_fetch_survives_the_release_that_renamed_libfuse2():
     assert 'for name in "$@"' in body and "return 0" in body, (
         "each spelling is tried until one resolves")
     assert "2>&1" in body and "sed" in body, "apt's own error is what is shown"
+    # The downloads live in _fetch_fuse2fs since PAD-437 (which fetches the
+    # library only when the binary needs it); ensure_fuse2fs calls it.
+    fetch = code[code.index("_fetch_fuse2fs() {"):]
+    fetch = fetch[:fetch.index("\n}")]
+    assert fetch.count("_apt_download_first") == 2, (
+        "the binary and the library are separate downloads now")
     ensure = code[code.index("ensure_fuse2fs() {"):]
     ensure = ensure[:ensure.index("\n}")]
-    assert ensure.count("_apt_download_first") == 2, (
-        "the binary and the library are separate downloads now")
-    assert "no network?" not in ensure
+    assert '_fetch_fuse2fs "$pkgs"' in ensure
+    assert "no network?" not in ensure and "no network?" not in fetch
 
 
 def test_everything_new_in_run_game_is_gated_on_pad_select():

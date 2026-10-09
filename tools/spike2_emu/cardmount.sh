@@ -38,7 +38,9 @@ PREFIX=$PAD_HOME/local
 CARDS=$PAD_CARDS          # per rig slot (padpath.sh): a slot unmounts only its own
 CACHE=$PAD_HOME/cardcache
 FUSE2FS="$PREFIX/usr/bin/fuse2fs"
-export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+# Both library directories, because the packages unpacked into $PREFIX put
+# their libraries in /lib up to 24.04 and in /usr/lib from 26.04 (PAD-437).
+export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:$PREFIX/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
 die() { echo "[card] $*" >&2; exit 1; }
 
@@ -347,8 +349,10 @@ cache_pick() {
 }
 
 # fuse2fs and libfuse2, unpacked into a private prefix. Downloaded once; after
-# that this is offline. Ubuntu splits them into two packages and fuse2fs links
-# libfuse.so.2 (not the libfuse3 the distro ships), hence both.
+# that this is offline. Ubuntu splits them into two packages, and up to 24.04
+# fuse2fs links libfuse.so.2 (not the libfuse3 the distro ships), hence both.
+# 26.04's fuse2fs links libfuse3, so there the library download is skipped
+# (PAD-437, ensure_fuse2fs).
 #
 # ONE OF THE TWO IS SPELLED DIFFERENTLY ON EVERY RELEASE BUT THIS ONE, and
 # this used to name 24.04's spelling alone. The t64 transition renamed
@@ -393,6 +397,38 @@ _apt_download_first() {
     return 1
 }
 
+#: Unpack every .deb in <dir> into $PREFIX, deleting each once it is in, so
+#: the next download into the same directory is all the next call unpacks.
+_unpack_debs() {   # <dir>
+    local d
+    for d in "$1"/*.deb; do
+        [ -e "$d" ] || continue
+        dpkg-deb -x "$d" "$PREFIX" || return 1
+        rm -f "$d"
+    done
+}
+
+#: The download, into the empty directory <dir>: fuse2fs first, then the
+#: library ONLY IF the binary it brought cannot find one. Up to 24.04 fuse2fs
+#: links libfuse.so.2, which a stock install does not have. 26.04's links the
+#: system's libfuse3, which the fuse3 prerequisite already installs, so
+#: fetching libfuse2 there was a second slow download of a file nothing opens.
+_fetch_fuse2fs() {   # <dir>
+    ( cd "$1" && _apt_download_first $PAD_FUSE2FS_PKGS ) || {
+        echo "[card] could not download fuse2fs (tried: $PAD_FUSE2FS_PKGS)" >&2
+        return 1; }
+    _unpack_debs "$1" || return 1
+    [ -x "$FUSE2FS" ] || {
+        echo "[card] that package unpacked, and it does not hold $FUSE2FS" >&2
+        return 1; }
+    _resolves "$FUSE2FS" && return 0
+    ( cd "$1" && _apt_download_first $PAD_LIBFUSE2_PKGS ) || {
+        echo "[card] could not download libfuse.so.2 (tried:" \
+             "$PAD_LIBFUSE2_PKGS)" >&2
+        return 1; }
+    _unpack_debs "$1"
+}
+
 ensure_fuse2fs() {
     # A PROPERLY INSTALLED fuse2fs WINS, and asking first is the whole fix.
     # The private-prefix download below exists for one situation - a machine
@@ -410,9 +446,24 @@ ensure_fuse2fs() {
     # filled on the release this machine used to be on: the file is there, the
     # library it wants is not, and the mount died in the dynamic linker rather
     # than here where it can be re-fetched.
-    [ -e "$PREFIX/lib/x86_64-linux-gnu/libfuse.so.2" ] && _resolves "$FUSE2FS" \
-        && return 0
-    echo "[card] fetching fuse2fs into $PREFIX (once)"
+    #
+    # AND ldd IS THE WHOLE TEST, because the "(once)" below was never true on
+    # Ubuntu 26.04 (PAD-437). This also demanded
+    # $PREFIX/lib/x86_64-linux-gnu/libfuse.so.2 by name, which is where 22.04's
+    # and 24.04's packages put it. 26.04's packages put their libraries under
+    # /usr/lib, and its fuse2fs does not link libfuse.so.2 at all, so that file
+    # never existed: every Start went back to apt for both packages, and on a
+    # slow mirror the run sat on the boot selector's line for 44 s, and past
+    # 100 s once, before the card mounted. "Does the binary find every library
+    # it links" is the question that path stood in for, and ldd answers it for
+    # every layout.
+    _resolves "$FUSE2FS" && return 0
+    # On stderr, so the line is in the log WHILE the download runs: watch.sh
+    # reads stdout through $(...) and republishes it only once the mount is
+    # done, which put this line after the wait it explains. And it says how
+    # long that wait can be: one package took 51 s from archive.ubuntu.com
+    # on 2026-10-07, both together 135 s.
+    echo "[card] fetching fuse2fs into $PREFIX (once; a download from Ubuntu, which can take a minute or two)" >&2
     # ...AND THIS ACCOUNT MAY WRITE THERE. Asked BEFORE the download, because
     # what a root-owned prefix produces otherwise is twenty lines of tar
     # ("Cannot open: File exists", "Cannot utime: Operation not permitted"),
@@ -421,24 +472,28 @@ ensure_fuse2fs() {
     # (PAD-182). An elevated run that made this prefix now hands it back
     # below, so this is only ever reached on a machine one already poisoned.
     pad_can_write "$PREFIX" card || return 1
-    mkdir -p "$PREFIX" /tmp/cardpkg || return 1
-    ( cd /tmp/cardpkg && _apt_download_first $PAD_FUSE2FS_PKGS ) || {
-        echo "[card] could not download fuse2fs (tried: $PAD_FUSE2FS_PKGS)" >&2
-        return 1; }
-    ( cd /tmp/cardpkg && _apt_download_first $PAD_LIBFUSE2_PKGS ) || {
-        echo "[card] could not download libfuse.so.2 (tried:" \
-             "$PAD_LIBFUSE2_PKGS)" >&2
-        return 1; }
-    for d in /tmp/cardpkg/*.deb; do dpkg-deb -x "$d" "$PREFIX" || return 1; done
-    [ -x "$FUSE2FS" ] || {
-        echo "[card] those packages unpacked, and none of them holds" \
-             "$FUSE2FS" >&2
-        return 1; }
+    mkdir -p "$PREFIX" || return 1
+    # A FRESH DIRECTORY FOR EVERY FETCH. This was one shared /tmp/cardpkg and
+    # every .deb in it was unpacked: a root (PAD_PIVOT) fetch left it
+    # root-owned for the next ordinary run's download to fail in, and a .deb an
+    # earlier fetch left there (another version, another release) was unpacked
+    # again, in name order, over the one just downloaded.
+    local pkgs ok=0
+    pkgs=$(mktemp -d "${TMPDIR:-/tmp}/cardpkg.XXXXXX") || return 1
+    _fetch_fuse2fs "$pkgs" && ok=1
+    rm -rf "$pkgs"
     # RECURSIVE, because this is a whole unpacked tree and not a stamp: a root
     # fetch used to leave every file in it owned by root, and the next ordinary
-    # run could then neither re-fetch nor repair it (PAD-182).
+    # run could then neither re-fetch nor repair it (PAD-182). Handed back on a
+    # failed fetch too, since a half-unpacked tree is the same trap.
     pad_give_back -R "$PREFIX"
-    return 0
+    [ "$ok" = 1 ] || return 1
+    # Still a library short? Then name it. Passing this on to the mount is how
+    # it used to go: "fuse2fs refused <card>", and no word about what for.
+    _resolves "$FUSE2FS" && return 0
+    echo "[card] fuse2fs is here but cannot start; it needs:" >&2
+    ldd "$FUSE2FS" 2>&1 | grep "not found" | sed 's/^[[:space:]]*/[card]   /' >&2
+    return 1
 }
 
 # The games partition. It is p3 on every Spike 2 card seen - 8 GB and 16 GB,

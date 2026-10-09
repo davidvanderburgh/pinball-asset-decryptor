@@ -125,8 +125,14 @@ class FlashDialog:
                  initial_choices=None, on_choices=None, handed_in="",
                  fresh_image=False, flashed_fn=None, image_titles=None,
                  publish=None, ask_open=None, ask_save=None,
-                 build_size=None, build_size_hint="", build_refusal=None):
+                 build_size=None, build_size_hint="", build_refusal=None,
+                 image_size_hint=None):
         self._host = host                  # the UI loop (post)
+        #: (image path, its size, the card's size) -> what else the user can
+        #: do when an image already built won't fit the card ("" for
+        #: nothing), or None (Stern Spike 2: build it for the smaller 16 GB
+        #: card, PAD-465)
+        self._image_size_hint = image_size_hint
         # () -> (title, message) refusing the build, or None: asked FIRST
         # when Start builds, before any question here (Stern Spike 2: an SD
         # card size the original or this computer can't build), so a refused
@@ -137,7 +143,8 @@ class FlashDialog:
         # Build ticked, the fit is checked against THIS rather than whatever
         # an earlier build left at the build path; None keeps that file.
         self._build_size = int(build_size) if build_size else None
-        #: what else the user can do when the build won't fit the card
+        #: what else the user can do when the build won't fit the card: the
+        #: words, or (card's size) -> the words, when they depend on it
         self._build_size_hint = build_size_hint or ""
         self._mfr = manufacturer
         self._on_flash = on_flash
@@ -313,6 +320,27 @@ class FlashDialog:
                    else self.MENU_NOTE_UNFLASHED)
         self.menu_note = why
 
+    def _image_hint(self, path, size, card_size):
+        """What else to do with an image already built that won't fit the
+        card (the *image_size_hint* callback's words), or ""."""
+        if self._image_size_hint is None:
+            return ""
+        try:
+            return self._image_size_hint(path, size, card_size) or ""
+        except Exception:                               # noqa: BLE001
+            return ""
+
+    def _build_hint(self, card_size):
+        """What else to do when the build won't fit a card of *card_size*
+        bytes (*build_size_hint*), or ""."""
+        hint = self._build_size_hint
+        if callable(hint):
+            try:
+                hint = hint(card_size)
+            except Exception:                           # noqa: BLE001
+                hint = ""
+        return hint or ""
+
     # ------------------------------------------------------------------
     def readout(self):
         """(text, kind) - kind is "gray" | "err" | "ok"."""
@@ -362,11 +390,14 @@ class FlashDialog:
                 return ("⚠ The build will be %s, larger than the %s %s — it "
                         "won't fit. Use a larger %s%s."
                         % (_fmt_size(img_size), noun, _fmt_size(card_size),
-                           noun, (", " + self._build_size_hint)
-                           if self._build_size_hint else ""), "err")
+                           noun, (", " + self._build_hint(card_size))
+                           if self._build_hint(card_size) else ""), "err")
+            hint = self._image_hint(img, img_size, card_size)
             return ("⚠ Image %s is larger than the %s %s — it won't fit. "
-                    "Use a larger %s." % (_fmt_size(img_size), noun,
-                                          _fmt_size(card_size), noun), "err")
+                    "Use a larger %s%s." % (_fmt_size(img_size), noun,
+                                            _fmt_size(card_size), noun,
+                                            (", " + hint) if hint else ""),
+                    "err")
         if card_size:
             return ("Image %s  →  %s %s   ✓ fits"
                     % (_fmt_size(img_size), noun, _fmt_size(card_size)),
@@ -689,11 +720,14 @@ class FlashDialog:
                     return False
             if (not building and card.size_bytes and not self.to_disk()
                     and os.path.getsize(img) > card.size_bytes):
+                hint = self._image_hint(img, os.path.getsize(img),
+                                        card.size_bytes)
                 mb.showerror(
                     "Image too big",
                     "The image (%s) is larger than the %s (%s). Use a "
-                    "larger %s." % (_fmt_size(os.path.getsize(img)), noun,
-                                    _fmt_size(card.size_bytes), noun))
+                    "larger %s%s." % (_fmt_size(os.path.getsize(img)), noun,
+                                      _fmt_size(card.size_bytes), noun,
+                                      (", " + hint) if hint else ""))
                 return False
             # the same check for a build, when its size is known up front:
             # refused now, not after the build when the chained write is
@@ -705,8 +739,10 @@ class FlashDialog:
                     "The build will be %s, larger than the %s (%s). Use a "
                     "larger %s%s." % (_fmt_size(self._build_size), noun,
                                       _fmt_size(card.size_bytes), noun,
-                                      (", " + self._build_size_hint)
-                                      if self._build_size_hint else ""))
+                                      (", " + self._build_hint(
+                                          card.size_bytes))
+                                      if self._build_hint(card.size_bytes)
+                                      else ""))
                 return False
             flash_what = (os.path.basename(build_path)
                           if building else os.path.basename(img))

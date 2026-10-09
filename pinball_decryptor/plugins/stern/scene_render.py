@@ -329,13 +329,31 @@ def viewed(canvas, view):
     if view is None:
         return canvas
     import numpy as np
-    a = canvas[..., 3:4].astype(np.float32)
-    cov = np.maximum(a, 1.0)
-    straight = np.clip(canvas[..., :3].astype(np.float32) * 255.0 / cov + 0.5,
-                       0, 255).astype(np.uint8)
-    shown = np.asarray(view(straight), np.float32)
+    # PAD-464: the same numbers, worked out only where they can differ: an
+    # empty pixel comes back black whatever the view does (its colour times
+    # its cover, 0), a solid one is its straight colour already and comes
+    # back as the view shows it (x * 255 / 255 is x), and only a pixel with
+    # some cover works through the sums.  A selected layer is mostly empty.
+    canvas = np.ascontiguousarray(canvas, np.uint8)
+    src = canvas.reshape(-1, 4)
     out = canvas.copy()
-    out[..., :3] = np.clip(shown * a / 255.0 + 0.5, 0, 255).astype(np.uint8)
+    dst = out.reshape(-1, 4)
+    dst[:, :3] = 0
+    seen = np.flatnonzero(src[:, 3])
+    if not seen.size:
+        return out
+    px = src[seen]
+    straight = np.ascontiguousarray(px[:, :3])
+    part = np.flatnonzero(px[:, 3] != 255)
+    if part.size:
+        a = px[part, 3:4].astype(np.float32)
+        straight[part] = np.clip(px[part, :3].astype(np.float32) * 255.0
+                                 / np.maximum(a, 1.0) + 0.5, 0, 255).astype(np.uint8)
+    shown = np.array(view(straight), np.uint8)
+    if part.size:
+        shown[part] = np.clip(shown[part].astype(np.float32) * a / 255.0 + 0.5,
+                              0, 255).astype(np.uint8)
+    dst[seen, :3] = shown
     return out
 
 
@@ -780,7 +798,7 @@ def pending_pictures(assets_dir, bake=True):
     Individual files switch turned off (PAD-330): no picture gets its correction drawn in."""
     try:
         from ...core import staged_changes, colour_profile
-        data = staged_changes.load(assets_dir) or {}
+        data = staged_changes.peek(assets_dir) or {}
     except Exception:
         return {}
     keep = set(data.get("image_keep_size") or ())
@@ -968,12 +986,13 @@ def _ink_width(ink_of, s):
         return 0
 
 
-def _metrics(font, line):
+def _metrics(font, line, letter=0.0):
     """``(width, above, below)`` of *line* by *font*'s glyph metrics, the way the game
     measures a line to wrap it or scale it to fit (PAD-412, emulator: by the glyphs' metric
     boxes, not the outline margins their atlas cells carry): how wide the metric boxes reach
-    from the pen's start, and how far above and below the baseline.  None when the font has
-    no metrics for it."""
+    from the pen's start, and how far above and below the baseline.  *letter*, the Text's
+    LetterSpacing, moves the pen on that much more after every letter.  None when the font
+    has no metrics for it."""
     from . import fontrender as fr
     glyphs = font.get("glyphs") or {}
     if not glyphs:
@@ -985,7 +1004,7 @@ def _metrics(font, line):
         if g is None:
             if ch != " ":
                 return None
-            pen += fr._space_advance(font)          # as fontrender.render_text spaces words
+            pen += fr._space_advance(font) + letter  # as fontrender.render_text spaces words
             continue
         nxt = ord(line[i + 1]) if i + 1 < len(line) else None
         if g["lh"] > 1:
@@ -993,16 +1012,45 @@ def _metrics(font, line):
             right = max(right, pen + g["bx"] + g["lw"])
             above = max(above, float(g["by"]))
             below = max(below, float(g["lh"] - g["by"]))
-        pen += g["adv"] + (g["kern"].get(nxt, 0.0) if nxt is not None else 0.0)
+        pen += g["adv"] + (g["kern"].get(nxt, 0.0) if nxt is not None else 0.0) + letter
     return right - min(0.0, left or 0.0), above, below
 
 
-def _measure(font, ink_of):
+def _measure(font, ink_of, letter=0.0):
     """The width of a line as the game measures it (:func:`_metrics`), else its ink's."""
     def width(s):
-        m = _metrics(font, s)
+        m = _metrics(font, s, letter)
         return m[0] if m is not None else _ink_width(ink_of, s)
     return width
+
+
+def letter_spacing(d):
+    """Text draw *d*'s LetterSpacing (the second spacing float), in its own pixels: the
+    game moves the pen on that much more after each letter (PAD-452: Stern's own initials
+    entry sets it so a W and an underscore of another size step alike, advance + spacing
+    the same within a pixel)."""
+    sp = list(d.get("spacing") or (0, 0)) + [0, 0]
+    try:
+        return float(sp[1] or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def ink_maker(font, d, inks=None):
+    """``ink_of(line)``: the line's letters in *font* laid out as text draw *d* lays them
+    (its LetterSpacing), kept in *inks* (a dict) when given."""
+    from . import fontrender as fr
+    letter = letter_spacing(d)
+    key = (d.get("font") or "", d.get("font_px") or 0, letter)
+
+    def ink_of(s):
+        if inks is None:
+            return fr.render_text(font, s, tracking=letter)[0]
+        if (key, s) not in inks:
+            inks[(key, s)] = fr.render_text(font, s, tracking=letter)[0]
+        return inks[(key, s)]
+    ink_of.key = key
+    return ink_of
 
 
 def text_lines(text, width, wrap, measure, keep_space=False):
@@ -1054,7 +1102,8 @@ def _layout(d, font, shown, ink_of):
     if not multiline:
         text = text.replace("\n", "")
     width = R - L               # what the words must fit (emulator: the whole rect, gutters too)
-    measure = _measure(font, ink_of)
+    letter = letter_spacing(d)
+    measure = _measure(font, ink_of, letter)
     lines = text_lines(text, width, wrap, measure, keep_space=True)
     inks = []
     for line in lines:
@@ -1070,8 +1119,8 @@ def _layout(d, font, shown, ink_of):
         # ScaleToBounds: the widest line into the rect's width, the lines' metric height into
         # its height (emulator: shrink only, never grow)
         widest = max(measure(line) for line in lines)
-        first = _metrics(font, lines[0]) or (0, asc, 0)
-        last = _metrics(font, lines[-1]) or (0, 0, line_h - asc)
+        first = _metrics(font, lines[0], letter) or (0, asc, 0)
+        last = _metrics(font, lines[-1], letter) or (0, 0, line_h - asc)
         tall = (len(lines) - 1) * step + first[1] + last[2]
         if widest > 0 and width > 0:
             s = min(s, width / float(widest))
@@ -1124,11 +1173,10 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
     up and down (PAD-412: the top, the bottom, or the middle); a line that wraps keeps room
     for its widest line, so it breaks where it did, and words scaled to fit their box keep
     its width, so they keep their size."""
-    from . import fontrender as fr
     if font is None or not d.get("text"):
         return None
     if ink_of is None:
-        ink_of = lambda s: fr.render_text(font, s)[0]           # noqa: E731
+        ink_of = ink_maker(font, d)
     # matched the way render_tree matches it (PAD-382: a line with breaks is keyed flat)
     shown = _unpadded(text_manifest.edit_for(text_edits, d["text"]) or d["text"])
     L, T, R, B = (list(d.get("rect") or (0, 0, 0, 0)) + [0, 0, 0, 0])[:4]
@@ -1138,7 +1186,7 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
     placed, top, block = _layout(d, font, shown, ink_of)
     x0 = y0 = y1 = x1 = None
     widest = 0
-    measure = _measure(font, ink_of)
+    measure = _measure(font, ink_of, letter_spacing(d))
     for line, ink, x, y, s in placed:
         widest = max(widest, measure(line))
         bb = ink.getchannel("A").getbbox() if ink.mode == "RGBA" else ink.getbbox()
@@ -1174,6 +1222,75 @@ def text_fit_rect(d, font, text_edits=None, ink_of=None, margin=FIT_MARGIN):
         # an old manifest decides wrapping by the rect's height: keep that the same
         nb = max(nb, nt + 1.6 * line_h) if wrap else min(nb, nt + 1.6 * line_h - 0.01)
     return [round(nl, 3), round(nt, 3), round(nr, 3), round(nb, 3)]
+
+
+def font_colours(font, pictures):
+    """``{atlas rel: profile}``: each of *font*'s pictures whose colour switch is on (PAD-451:
+    a big font's letters fill several pictures, each with its own switch on the Images tab),
+    whose profile the Write bakes into it (PAD-438): a line drawn in the font shows them."""
+    out = {}
+    for rel in (font or {}).get("atlas_rels") or ():
+        rel = str(rel).replace("\\", "/")
+        pic = (pictures or {}).get(rel) or {}
+        if pic.get("colour") is not None:
+            out[rel] = pic["colour"]
+    return out
+
+
+def _paged_ink(font, cols, inks, key, tracking=0):
+    """A line in *font* with each letter through ITS picture's profile (*cols*,
+    :func:`font_colours`), as the Write bakes each picture: for a font whose pictures are not
+    all switched on with the one profile (PAD-451); *tracking*, its LetterSpacing (PAD-452)."""
+    from . import fontrender as fr
+    tag = tuple(sorted((rel, prof.key()) for rel, prof in cols.items()))
+
+    def loader(g):
+        img = fr.load_slice(g)
+        prof = cols.get(str(g.get("atlas_rel") or "").replace("\\", "/"))
+        return prof.apply_image(img) if prof is not None else img
+
+    def ink(s):
+        k = (key, s, "cp", tag)
+        if inks is not None and k in inks:
+            return inks[k]
+        img = fr.render_text(font, s, slice_loader=loader, tracking=tracking)[0]
+        if inks is not None:
+            inks[k] = img
+        return img
+    return ink
+
+
+def _own_art(art):
+    """``(profile, mul)`` of a line drawn with its own copy of its font (``line_font``,
+    PAD-451), else None."""
+    if not art or not art.get("profile"):
+        return None
+    from ...core import colour_profile as cp
+    prof = cp._from_dict(art["profile"])
+    return (prof, art.get("mul")) if prof is not None else None
+
+
+def _corrected_ink(ink_of, prof, inks, key, mul=None):
+    """*ink_of* with *prof* applied to the letters (kept in *inks* when given); *mul* (a
+    line's own colour baked into its copy of the font, PAD-451) multiplies them first."""
+    def ink(s):
+        k = (key, s, "cp", prof.key()) if mul is None else (key, s, "cp", prof.key(),
+                                                              tuple(mul))
+        if inks is not None and k in inks:
+            return inks[k]
+        img = ink_of(s)
+        if mul is not None:
+            import numpy as np
+            from PIL import Image
+            arr = np.asarray(img.convert("RGBA")).astype(np.float32)
+            arr[..., :3] = np.clip(arr[..., :3] * np.asarray(mul[:3], np.float32) + 0.5,
+                                   0, 255)
+            img = Image.fromarray(arr.astype(np.uint8))
+        img = prof.apply_image(img)
+        if inks is not None:
+            inks[k] = img
+        return img
+    return ink
 
 
 def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
@@ -1272,15 +1389,26 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             if d.get("styled"):
                 rgba = [1.0, 1.0, 1.0, rgba[3]]          # the game ignores it (see scene_eval)
             pick = (colors or {}).get(d["text"])
-            if pick:
+            if pick and not d.get("profiled"):
+                # (a line with its colour profile applied has the recolour in it: PAD-438)
                 rgba = [c / 255.0 for c in pick[:3]] + [rgba[3]]
-            if inks is None:
-                ink_of = lambda s, _f=font: fr.render_text(_f, s)[0]     # noqa: E731
-            else:
-                def ink_of(s, _f=font, _k=(d.get("font") or "", d.get("font_px") or 0)):
-                    if (_k, s) not in inks:
-                        inks[(_k, s)] = fr.render_text(_f, s)[0]
-                    return inks[(_k, s)]
+            # PAD-438: a font whose letters carry their own colours gets its picture's
+            # profile, as the Write bakes it into that picture; PAD-451: each letter its
+            # own picture's, where the font's pictures differ
+            cols = font_colours(font, pictures)
+            paged = cols and (len(cols) < len(font.get("atlas_rels") or ())
+                              or len({p.key() for p in cols.values()}) > 1)
+            # its letters, LetterSpacing apart (PAD-452)
+            ink_of = ink_maker(font, d, inks)
+            own = _own_art(d.get("art"))
+            if own is not None:
+                # PAD-451: its own copy of the font, the profile baked in (from the font's
+                # pictures as they were, whatever the Images tab does to them)
+                ink_of = _corrected_ink(ink_of, own[0], inks, ink_of.key, own[1])
+            elif paged:
+                ink_of = _paged_ink(font, cols, inks, ink_of.key, letter_spacing(d))
+            elif cols:
+                ink_of = _corrected_ink(ink_of, next(iter(cols.values())), inks, ink_of.key)
             mul = tuple(d["mul"][i] * (1.0 if i < 3 else rgba[3]) for i in range(4))
             boxed = d if d.get("rect") else dict(d, rect=[0, 0, w, h])
             # in its rect as the machine lays it out (text_layout: gutter, declared ascent,

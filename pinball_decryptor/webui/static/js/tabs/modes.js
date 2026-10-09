@@ -46,11 +46,13 @@ const T = {
   ballSave: "For this many seconds after the balls are served, a drained ball is served back.",
   startSave: "When the mode starts, the game's own ball saver is on for this many seconds: a ball that drains in that time is served back, and the ball does not end. A multiball uses its own ball save instead.",
   coils: "Holds this mechanism the same way as the magnet: one command at the power the game itself uses for it, for this long (0.1 to 5 seconds), then it is let go. As the mode starts, or on every hit of a shot while it runs. The same limits as the magnet: one hold at a time, 3 seconds between holds, at most 6 a minute, never while the game is using it, and let go when the mode or the ball ends or the game tilts.",
+  shaker: "Shakes the cabinet's shaker motor: as the mode starts, on every hit of a shot while it runs, or as it ends (that one runs out after the mode). A shake is one of the game's own (its jackpot shake, its multiball start...) or one of the mode's own at a strength the game uses, never longer than the game's own longest at that strength (1 second hard or strong, 5 seconds medium or soft). It goes through the game's own shake, so the operator's Shaker Motor setting always applies: switched off (or no shaker fitted), nothing shakes. The limits are the app's and cannot be changed: one shake at a time, never over one of the game's own, at most 20 shakes and 15 seconds of shaking a minute, stopped when the mode, the ball or the game ends.",
   shield: "While the mode runs, the shield targets face the player: the platform turns 1.5 seconds after the mode starts (once the ball that started it is clear of it) and turns back when the mode ends, the ball drains, or the game ends or tilts. The game's ball search swings the platform when no switch closes for a while; it is turned back after that. The limits are the app's and cannot be changed: never while one of the game's own modes or multiballs runs, 1.5 seconds between moves, at most 12 a minute. It stays turned only while the game's modes cannot start and its own shield feature does not keep counting: that feature turns the platform back about 2 seconds after every move. An operator who switched the shield motor off in the game's settings keeps it where it is.",
   scoop: "While the mode runs, a ball that lands in the scoop stays there this long once the game is done with it (its own awards and screens always come first), then the game kicks it out the way it always does, at the kick power the operator set. Your mode never fires the scoop itself. 0.1 to 10 seconds; the ball goes at once when the mode ends or the game tilts.",
   magnet: "While the mode runs, every hit of the shot the magnet sits at (the one that starts the mode too) holds the ball on the magnet for this long, then lets it go. The magnet runs at the power the operator set for it in the game's settings. To keep the coil safe, the app always holds the same limits: 0.1 to 5 seconds a grab, one grab at a time, 3 seconds between grabs, at most 6 a minute, never while the game is using the magnet itself, and it lets go when the mode or the ball ends or the game tilts. A grab it refuses is skipped and the mode carries on.",
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
+  wizard: "Make this mode the game's own mini-wizard: when it starts (on its shot, an event such as a film done, or shots in order), the player gets the game's mode itself, with its own shots, lights, screens, sounds and award. Lit, it waits for the game's own start shot, as when the game lights one; started, it begins at once, or the moment the game would start one (when the film's last part came from one of its own modes, once that mode is done), and if the ball ends first it stays lit for the start shot. Until it starts it is the only one lit, so the game's own choosing cannot swap it for another. The game no longer lights this one by itself (its own way: a henchman, villain, Q Branch or gadget in all six films), so only this mode hands it out; it still lights the ones no mode hands out. A mini-wizard the player has already played this game plays again.",
   gameShows: "One of the game's own playfield light shows as the mode starts, and another as it ends: flashy ones suit a start, subdued ones an end. Each plays for its own few seconds, one at a time (a new one takes the place of one still playing). The one at the end is skipped when the mode ends because the ball drained: the game stops its own shows then.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
   priority: "Kept for modes made before it changed: it no longer holds the game's displays back. A mode never makes the game's screens wait (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off), so the game's awards, starts and jackpots always come through, and the mode's screen is back when they end. 0 = none.",
@@ -80,6 +82,9 @@ const T = {
 const LAYOUT_TIP = "Opens the Scenes editor on the game's HUD with this screen in it: drag it, size it, move its words on their own, or send it to the back to put it under the HUD's own pictures. Saved into the mode as you go; without it the app places the screen itself.";
 const PAGES = [["mode", "Mode"], ["show", "Show"], ["lights", "Lights"], ["sounds", "Sounds"], ["scoring", "Scoring"]];
 const PATTERNS = ["Solid", "Blink", "Pulse", "Chase"];
+// PAD-436: a mode that is the game's own mini-wizard runs nothing of its own, so only its Mode page is used
+const WIZ_NONE = "(none)";
+const handsOver = (f, dis) => !dis.wizard && !!f.game_wizard && f.game_wizard !== WIZ_NONE;
 const STATE_WORDS = { preflight: "Preparing", building: "Building", installing: "Installing", starting: "Starting",
                       live: "Live", ended: "Ended", failed: "Failed" };
 
@@ -326,6 +331,12 @@ function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
             { label: "Load modes from a file…", icon: "upload",
               title: "Add the modes in a file saved here or by someone else. Each is matched to this card's shots by name, and the app says which need a look.",
               onClick: () => call("modes.load_file") },
+            { label: "Load modes from a card image…", icon: "upload",
+              title: "Add the modes on a card the app wrote modes onto: another version, model or custom image of this game too. Each is matched to this card's shots by name, and the app says what could not carry over.",
+              onClick: () => call("modes.load_card") },
+            { label: "Save a card image's modes to a file…", icon: "download",
+              title: "The modes on a card the app wrote modes onto, in one .zip file to keep or load into another project",
+              onClick: () => call("modes.save_card") },
           ])}>Save / load<//>
         <${Button} size="sm" kind="ghost" icon="trash" disabled=${!s.del_ok} onClick=${() => call("modes.delete")}>Delete<//>
       </div>
@@ -362,6 +373,24 @@ function ModePage({ s, f, off, dis, rs }) {
   const shieldFeature = prof.shield_rule || "shield";
   const shieldLive = (f.game_modes || "block") !== "block" || (!!prof.shield_rule && (s.keep_on || []).includes(prof.shield_rule));
   const shieldOff = off || dis.shield || (shieldLive && !f.shield);
+  // PAD-414: the shaker - a shake of the mode's own at a strength, or one of the game's
+  const shakeOff = off || dis.shaker;
+  const shakeWhat = (v) => withValue(prof.shakes || [], v);
+  const shakeOwn = (v) => !String(v || "").startsWith("game:");
+  const shakeTop = (v) => { const i = ["hard", "strong", "medium", "soft"].indexOf(v); const m = (prof.shake_max || [])[i]; return m ? m / 1000 : 0; };
+  const shakeShots = withValue([{ value: "", label: "(choose a shot)", disabled: true }, ...shots.map((x) => ({ value: x, label: x }))], f.shake_shot);
+  const shakeRow = (when, label, extra) => html`<div>
+    <div class="row wrap">
+      <${Check} label=${label} checked=${f["shake_on_" + when]} disabled=${shakeOff} title=${T.shaker} ns="modes" k=${"f:shake_on_" + when} />
+      ${extra || null}
+    </div>
+    <div class="row wrap" style="padding-left:26px">
+      <${Select} value=${f["shake_what_" + when]} options=${shakeWhat(f["shake_what_" + when])} ns="modes" k=${"f:shake_what_" + when} disabled=${shakeOff || !f["shake_on_" + when]} width=${230} title=${T.shaker} />
+      ${shakeOwn(f["shake_what_" + when]) ? html`<span class="dim nw">for</span>
+        <${Num} k=${"shake_s_" + when} value=${f["shake_s_" + when]} disabled=${shakeOff || !f["shake_on_" + when]} width=${56} title=${T.shaker} />
+        <span class="dim nw">s${shakeTop(f["shake_what_" + when]) ? ` (up to ${shakeTop(f["shake_what_" + when])})` : ""}</span>` : null}
+    </div>
+  </div>`;
   const balls = (prof.ball_shots || ["(none)"]).map((x) => ({ value: x, label: x }));
   const ballOpts = f.add_ball_shot && !balls.some((o) => o.value === f.add_ball_shot) ? [{ value: f.add_ball_shot, label: f.add_ball_shot }, ...balls] : balls;
   const mbOnOpts = withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x })), f.mb_on_shot);
@@ -383,16 +412,27 @@ function ModePage({ s, f, off, dis, rs }) {
   const gmOpts = [{ value: "stack", label: "may start (this one moves aside)" },
     { value: "give_way", label: "may start, and end this one", disabled: !!dis.give_way },
     { value: "block", label: "cannot start (the ones ticked)", disabled: !!dis.block && f.game_modes !== "block" }];
-  return html`<div class="modes-grid2">
-      <div class="stack">
+  // PAD-436: the game's own mini-wizard instead of a mode of its own
+  const wizOff = off || dis.wizard;
+  const handOff = handsOver(f, dis);
+  const wizOpts = withValue([{ value: WIZ_NONE, label: "(nothing: this mode runs)" },
+    ...(prof.game_wizards || []).map((w) => ({ value: w.name, label: w.film ? `${w.name} (${w.film})` : w.name }))], f.game_wizard);
+  const nameRow = html`<div class="stack">
         <label class="lbl" for="m-name">Name</label>
         <${Field} id="m-name" ns="modes" k="f:name" value=${f.name} disabled=${off} title=${T.name} />
-      </div>
-      <div class="stack">
-        <span class="lbl">Runs for</span>
-        <div class="row"><${Num} k="seconds" value=${f.seconds} disabled=${off} width=${84} /><span class="dim">seconds${f.multiball ? " (0 = until one ball is left)" : ""}</span></div>
-      </div>
-      <${Sec} title="Starts on" reason=${rs.events}>
+      </div>`;
+  const wizSec = html`<${Sec} title="The game's mini-wizard" tipText=${T.wizard} reason=${rs.wizard}>
+        <div class="row wrap">
+          <span class="dim nw">Hand the player</span>
+          <${Select} value=${f.game_wizard || WIZ_NONE} options=${wizOpts} ns="modes" k="f:game_wizard" disabled=${wizOff} width=${320} title=${T.wizard} />
+        </div>
+        <div class="row wrap" style="padding-left:26px">
+          <${Radio} name="m-wiz" value="light" label=${`Light it: the ${prof.wizard_shot || "game's start shot"} starts it`} checked=${f.wizard_how !== "start"} disabled=${wizOff || !handOff} title=${T.wizard} onChange=${(v) => setF("wizard_how", v, true)} />
+          <${Radio} name="m-wiz" value="start" label="Start it at once" checked=${f.wizard_how === "start"} disabled=${wizOff || !handOff} title=${T.wizard} onChange=${(v) => setF("wizard_how", v, true)} />
+        </div>
+        ${handOff ? html`<div class="small muted wrap">When it starts, the player gets the game's own ${f.game_wizard}, with its shots, lights, screens and sounds. Nothing of this mode's own runs, so the other pages are not used. The game no longer lights it by itself: only this mode hands it out.</div>` : null}
+      <//>`;
+  const startsSec = html`<${Sec} title="Starts on" reason=${rs.events}>
         <div class="row wrap">
           <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event" && !seqOn} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_shot} options=${shotOpts} ns="modes" k="f:start_shot" disabled=${off || !shots.length} width=${180} title=${T.startShot} />
@@ -422,7 +462,41 @@ function ModePage({ s, f, off, dis, rs }) {
           <span class="dim nw">has run this</span>
           <${Select} value=${f.after_when} options=${[{ value: "ball", label: "ball" }, { value: "game", label: "game" }]} ns="modes" k="f:after_when" disabled=${afterOff} width=${80} title=${T.afterMode} />
         </div>
-      <//>
+      <//>`;
+  const oftenSec = html`<${Sec} title="How often it can start" tipText=${T.starts}>
+        <div class="row wrap" style="gap:4px 16px">
+          ${[["once_per_game", "once a game"], ["once_per_ball", "once a ball"], ["unlimited", "any number of times"]].map(([v, l]) =>
+            html`<${Radio} name="m-often" value=${v} label=${l} checked=${f.starts_policy === v} disabled=${off} onChange=${(x) => setF("starts_policy", x, true)} />`)}
+        </div>
+        <div class="row wrap">
+          <${Radio} name="m-often" value="count" label="up to" checked=${f.starts_policy === "count"} disabled=${off} onChange=${(x) => setF("starts_policy", x, true)} />
+          <${Num} k="starts_count" value=${f.starts_count} disabled=${off} width=${64} /><span class="dim nw">times a game</span>
+        </div>
+        <div class="row">
+          <span class="dim nw">Wait</span><${Num} k="cooldown" value=${f.cooldown} disabled=${off} width=${76} title=${T.cooldown} />
+          <span class="dim">seconds after it ends before it can start again</span>
+        </div>
+        <div class="small muted">${s.starts_words}</div>
+      <//>`;
+  if (handOff) {
+    return html`<div class="modes-grid2">
+      ${nameRow}
+      <div class="stack">
+        <span class="lbl">Runs</span>
+        <div class="row"><span class="dim">the game's own ${f.game_wizard}</span></div>
+      </div>
+      ${startsSec}
+      ${wizSec}
+      ${oftenSec}
+    </div>`;
+  }
+  return html`<div class="modes-grid2">
+      ${nameRow}
+      <div class="stack">
+        <span class="lbl">Runs for</span>
+        <div class="row"><${Num} k="seconds" value=${f.seconds} disabled=${off} width=${84} /><span class="dim">seconds${f.multiball ? " (0 = until one ball is left)" : ""}</span></div>
+      </div>
+      ${startsSec}
       <${Sec} title="Ends on">
         <div class="row wrap">
           <${Radio} name="m-ends" value="drain" label="its clock, or the ball draining" checked=${f.ends_kind === "drain"} disabled=${off} title=${T.drain} onChange=${(v) => setF("ends_kind", v, true)} />
@@ -441,21 +515,7 @@ function ModePage({ s, f, off, dis, rs }) {
               onChange=${(v) => setField("modes", "endshot:" + n, v, { flush: true })} />`)}
         </div>` : null}
       <//>
-      <${Sec} title="How often it can start" tipText=${T.starts}>
-        <div class="row wrap" style="gap:4px 16px">
-          ${[["once_per_game", "once a game"], ["once_per_ball", "once a ball"], ["unlimited", "any number of times"]].map(([v, l]) =>
-            html`<${Radio} name="m-often" value=${v} label=${l} checked=${f.starts_policy === v} disabled=${off} onChange=${(x) => setF("starts_policy", x, true)} />`)}
-        </div>
-        <div class="row wrap">
-          <${Radio} name="m-often" value="count" label="up to" checked=${f.starts_policy === "count"} disabled=${off} onChange=${(x) => setF("starts_policy", x, true)} />
-          <${Num} k="starts_count" value=${f.starts_count} disabled=${off} width=${64} /><span class="dim nw">times a game</span>
-        </div>
-        <div class="row">
-          <span class="dim nw">Wait</span><${Num} k="cooldown" value=${f.cooldown} disabled=${off} width=${76} title=${T.cooldown} />
-          <span class="dim">seconds after it ends before it can start again</span>
-        </div>
-        <div class="small muted">${s.starts_words}</div>
-      <//>
+      ${oftenSec}
       <${Sec} title="The game's own modes" reason=${rs.stack}>
         <div class="row wrap">
           <span class="dim nw">While it runs, the game's modes</span>
@@ -510,6 +570,12 @@ function ModePage({ s, f, off, dis, rs }) {
         <${Check} label="Turn the shield targets toward the player while it runs" checked=${f.shield} disabled=${shieldOff} title=${T.shield} ns="modes" k="f:shield" />
         ${!dis.shield && shieldLive ? html`<div class="small muted" style="padding-left:26px">Only while the game's modes cannot start and ${shieldFeature} does not keep counting: otherwise the game turns them back.</div>` : null}
       <//>`}
+      ${hide.shaker ? null : html`<${Sec} title="Shaker" reason=${rs.shaker}>
+        ${shakeRow("start", "Shake the cabinet as it starts")}
+        ${shakeRow("shot", "Shake it on every hit of", html`<${Select} value=${f.shake_shot || ""} options=${shakeShots} ns="modes" k="f:shake_shot" disabled=${shakeOff || !f.shake_on_shot} width=${170} title=${T.shaker} />`)}
+        ${shakeRow("end", "Shake it as it ends")}
+        ${!dis.shaker ? html`<div class="small muted">The operator's Shaker Motor setting still applies: switched off, or no shaker fitted, nothing shakes.</div>` : null}
+      <//>`}
       <${Sec} title="Multiball" reason=${rs.multiball}>
         <${Check} label="A multiball: the game serves more balls" checked=${f.multiball} disabled=${mbOff} title=${T.multiball} ns="modes" k="f:multiball" />
         <div class="row wrap">
@@ -526,6 +592,7 @@ function ModePage({ s, f, off, dis, rs }) {
           <span class="dim nw">up to</span><${Num} k="add_ball_max" value=${f.add_ball_max} disabled=${mbIn} width=${56} title=${T.addBall} /><span class="dim nw">times</span>
         </div>
       <//>
+      ${wizSec}
     </div>
     <${Sec} title="Shots that score while it runs"
       extra=${html`<span class="muted small">${on.size} of ${shots.length}</span>
@@ -783,9 +850,12 @@ function Editor({ s, showClip }) {
   const fixPages = new Set(s.fix_pages || []);
   const saveWords = s.no_port ? "" : s.save_state === "editing" ? "Saving…"
     : s.save_state === "saved" ? (s.write_waits ? "Saved · Write carries it after a Try it" : "Saved · put on the card by Write") : "";
-  const offPages = new Set(dis.show_order ? ["show"] : []);
+  const handOff = handsOver(f, dis);                                           // PAD-436
+  const offPages = new Set(handOff ? ["show", "lights", "sounds", "scoring"] : dis.show_order ? ["show"] : []);
   const props = { s, f, off, dis, rs, labels, files, showClip };
   const P = { mode: ModePage, show: ShowPage, lights: LightsPage, sounds: SoundsPage, scoring: ScoringPage }[page] || ModePage;
+  const offTip = handOff ? "This mode is the game's own mini-wizard: nothing on this page is used."
+    : "Nothing on this page works on this game yet: the page says why.";
   return html`<section class="card modes-editor">
     <div class="hd">
       <span class="h2 ellip">${f.name || "—"}</span>
@@ -796,9 +866,11 @@ function Editor({ s, showClip }) {
     ${s.status && s.status !== "Ready to build." ? html`<div class=${cx("modes-status", s.no_port || ready ? "info" : "warn")} role="status">${s.status}</div>` : null}
     <div class="pages" role="tablist">
       ${PAGES.map(([k, l]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${cx(page === k && "on", offPages.has(k) && "off")} onClick=${() => setPage(k)}
-        ...${tip(fixPages.has(k) ? "What the line above says to fix is on this page." : offPages.has(k) ? "Nothing on this page works on this game yet: the page says why." : "")}>${l}${fixPages.has(k) ? html`<span class="m" aria-label="to fix">•</span>` : null}</button>`)}
+        ...${tip(fixPages.has(k) ? "What the line above says to fix is on this page." : offPages.has(k) ? offTip : "")}>${l}${fixPages.has(k) ? html`<span class="m" aria-label="to fix">•</span>` : null}</button>`)}
     </div>
-    <div class="bd modes-editor-bd"><${P} ...${props} /></div>
+    <div class="bd modes-editor-bd">${handOff && page !== "mode"
+      ? html`<div class="modes-show-off"><${Reason} text=${`This mode is the game's own ${f.game_wizard}: when it starts, the player gets the game's mode, with its own screens, lights, sounds and award, so nothing on this page is used. The Mode page sets it.`} /></div>`
+      : html`<${P} ...${props} />`}</div>
   </section>`;
 }
 

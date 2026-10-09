@@ -2,9 +2,11 @@
 
 What the Tk ``MainWindow`` kept around the notebook, on the page:
 
-* the gear Settings menu (update check + interval, disk space, logs, voice
-  recognition quality, prerequisites, preview features, the disclaimer) as
-  ``shell.settings_items`` + ``window.settings_actions``;
+* the gear Settings menu (update check + interval, disk space, logs,
+  clearing the downloaded voice models, prerequisites, preview features, the
+  disclaimer) as ``shell.settings_items`` + ``window.settings_actions``;
+* the voice recognition quality (``voice_quality`` + ``voice_choices``), which
+  the Extract tab shows beside Auto-name call-outs (PAD-460);
 * the green ? "Tips for this tab" window (``webui/help_content.py``);
 * the Project menu's windows (``shellx_projects.py``) and Manage disk space
   (``shellx_disk.py``);
@@ -36,8 +38,10 @@ from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
 
-# Voice recognition quality in the ⚙ settings menu: the faster-whisper model
-# Auto-name call-outs transcribes with.  The first entry is the default.
+# Voice recognition quality, picked beside Auto-name call-outs on the Extract
+# tab (PAD-460: it used to hide in the ⚙ menu, where a regular user never found
+# it): the faster-whisper model call-outs are transcribed with.  The first entry
+# is the default.
 VOICE_QUALITY_CHOICES = (
     ("tiny.en", "Standard — fastest (~75 MB model)"),
     ("small.en", "High — better accuracy, ~4× slower (~500 MB model)"),
@@ -118,7 +122,9 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         self._disk_init()
         self.set(update_state="", download=None, log_seed=None,
                  disk_badge="", picker=self._picker_cards(),
-                 prereq_hints={}, platform=sys.platform)
+                 prereq_hints={}, platform=sys.platform,
+                 voice_choices=[{"value": v, "label": label}
+                                for v, label in VOICE_QUALITY_CHOICES])
         self._install_actions()
         self._publish_disclaimer()
         # App sets the window's theme after the services are built, so
@@ -319,15 +325,11 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
                                 "(the default) draws every file through the screen, "
                                 "an added test card too.")})
         items.append({"sep": True})
-        vq = self.voice_quality_var.get()
-        items.append({"label": "Voice recognition quality", "submenu": [
-            {"id": "voice_quality", "args": [value], "label": label,
-             "checked": vq == value, "radio": True}
-            for value, label in VOICE_QUALITY_CHOICES] + [
-            {"sep": True},
-            {"id": "clear_voice_models",
-             "label": "Clear downloaded voice models…",
-             "needs_idle": True}]})
+        # the quality itself is picked beside Auto-name call-outs on the
+        # Extract tab (PAD-460); clearing the downloads stays a setting
+        items.append({"id": "clear_voice_models",
+                      "label": "Clear downloaded voice models…",
+                      "needs_idle": True})
         items.append({"sep": True})
         # the cascade's LABEL is the live prerequisite summary, so the state
         # shows without opening it (the page counts shell.prereqs, which

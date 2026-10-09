@@ -1,6 +1,7 @@
-// Compare: two card images, the plugin's what-changed report, Rows per list,
-// Copy Report, Extract Both, double-click a listed file to open it.  The
-// report is painted in tabs/compare.py; this page renders its flat `rows`.
+// Compare: two card images or two project folders (PAD-442), the plugin's
+// what-changed report, Rows per list, Copy Report, Extract Both, double-click
+// a listed file to open it.  The report is painted in tabs/compare.py; this
+// page renders its flat `rows`.
 
 import { html, useState, useEffect, PageHead, Card, Button, Field, Select, Table, Empty, openMenu, InfoBadge, tip, Icon,
   call, cx } from "../core/ui.js";
@@ -8,7 +9,9 @@ import { useNs } from "../core/store.js";
 
 export const css = true;
 
-const SUB = "Compare two card images of the same game — two releases, or a modded card against its stock base.";
+const SUB = "Compare two card images of the same game, or two project folders — two releases, or a mod against its stock base.";
+// the manufacturers whose card images can't be compared (tabs/compare.py images_ok)
+const SUB_FOLDERS = "Compare two project folders — two versions of a mod, or a mod against the stock extract.";
 
 const HEAD_KIND = {
   Added: "ok", "Added defaults": "ok",
@@ -19,9 +22,9 @@ const HEAD_KIND = {
 
 function recentMenu(anchor, paths, onPick) {
   openMenu(anchor, [
-    { header: "Recent card images" },
+    { header: "Recent" },
     ...(paths.length ? paths.map((p) => ({ label: p, onClick: () => onPick(p) }))
-      : [{ label: "No recent card images yet", disabled: true }]),
+      : [{ label: "Nothing compared yet", disabled: true }]),
   ], { align: "right" });
 }
 
@@ -43,16 +46,19 @@ function withPaths(method) {
     .then(() => call(method));
 }
 
-function ImageRow({ side, label, value, history, running }) {
+function PathRow({ side, label, value, history, running, imagesOk }) {
   const id = "cmp-" + side;
   const run = () => withPaths("compare.run");
   return html`
     <label class="lbl" for=${id}>${label}</label>
     <form class="row" style="gap:8px" onSubmit=${(e) => { e.preventDefault(); if (!running) run(); }}>
-      <${Field} id=${id} ns="compare" k=${side} value=${value} mono cls="grow" placeholder="A card image" />
-      <${Button} icon="down" title="Recent card images"
+      <${Field} id=${id} ns="compare" k=${side} value=${value} mono cls="grow"
+        placeholder=${imagesOk ? "A card image, or a project folder" : "A project folder"} />
+      <${Button} icon="down" title="Recently compared"
         onClick=${(e) => recentMenu(e.currentTarget, history || [], (p) => call("ui.set", "compare", side, p))} />
-      <${Button} onClick=${() => call("compare.browse", side)}>Browse…<//>
+      ${imagesOk ? html`<${Button} title="Pick a card image" onClick=${() => call("compare.browse", side)}>Image…<//>` : null}
+      <${Button} icon="folder" title="Pick a project folder: what Extract made, with your changes in it"
+        onClick=${() => call("compare.browse", side, true)}>Folder…<//>
     </form>`;
 }
 
@@ -64,6 +70,7 @@ export default function CompareTab() {
   useEffect(() => { setSel(null); }, [s.report]);
   useEffect(() => hideTips, []);
   const running = !!s.running;
+  const imagesOk = s.images_ok !== false;
   const nSections = rows.filter((r) => r.kind === "section").length;
   const anyShut = rows.some((r) => r.kind === "section" && r.shut);
 
@@ -93,8 +100,8 @@ export default function CompareTab() {
 
   const actions = html`
     <${Button} kind="primary" icon="compare" disabled=${running} onClick=${() => withPaths("compare.run")}>Compare<//>
-    <span ...${tip(s.extract_both_tip)}><${Button} icon="extract"
-      onClick=${() => { hideTips(); withPaths("compare.extract_both"); }}>Extract Both<//></span>
+    ${imagesOk ? html`<span ...${tip(s.extract_both_tip)}><${Button} icon="extract"
+      onClick=${() => { hideTips(); withPaths("compare.extract_both"); }}>Extract Both<//></span>` : null}
     <${Button} icon="copy" disabled=${running || !s.has_report} onClick=${() => call("compare.copy_report")}>Copy Report<//>
     <span class="row" style="gap:8px" ...${tip(s.limit_tip)}>
       <span class="lbl nw">Rows per list</span>
@@ -104,15 +111,17 @@ export default function CompareTab() {
     <span class="cmp-status small" title=${s.status || undefined}>${s.status || ""}</span>`;
 
   const empty = running ? null : html`<${Empty} icon="compare" title="No report yet">
-    Pick Image A and Image B, then press Compare.<//>`;
+    ${imagesOk ? "Pick two card images or two project folders, then press Compare."
+      : "Pick two project folders, then press Compare."}<//>`;
 
   return html`<div class="page fill cmp">
-    <${PageHead} title=${html`<span class="row" style="gap:8px">Compare <${InfoBadge} text=${s.intro} /></span>`} sub=${SUB} />
+    <${PageHead} title=${html`<span class="row" style="gap:8px">Compare <${InfoBadge} text=${s.intro} /></span>`}
+      sub=${imagesOk ? SUB : SUB_FOLDERS} />
 
     <${Card} cls="cmp-src" footer=${actions}>
       <div class="cmp-grid">
-        <${ImageRow} side="a" label="Image A" value=${s.a} history=${s.hist_a} running=${running} />
-        <${ImageRow} side="b" label="Image B" value=${s.b} history=${s.hist_b} running=${running} />
+        <${PathRow} side="a" label="A" value=${s.a} history=${s.hist_a} running=${running} imagesOk=${imagesOk} />
+        <${PathRow} side="b" label="B" value=${s.b} history=${s.hist_b} running=${running} imagesOk=${imagesOk} />
       </div>
     <//>
 
@@ -129,7 +138,7 @@ export default function CompareTab() {
           onActivate=${(r) => call("compare.activate", r.id)}
           rowClass=${(r) => cx("cmp-r-" + r.kind, r.open && "cmp-openable")}
           empty=${empty} />
-        ${running ? html`<div class="cmp-busy" role="status"><span class="spin"></span><span>Comparing images…</span></div>` : null}
+        ${running ? html`<div class="cmp-busy" role="status"><span class="spin"></span><span>${s.status || "Comparing…"}</span></div>` : null}
       </div>
     <//>
   </div>`;

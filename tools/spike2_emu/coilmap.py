@@ -660,3 +660,70 @@ def eject_address(coils):
 def for_game(tables_dir):
     """Every coil for a title, given its built tables directory."""
     return load(os.path.join(tables_dir or "", "device_xy.txt"))
+
+
+#: The cabinet's shaker (PAD-424). Every table that names it - deadpool_le,
+#: led_zeppelin_le, star_wars_le, turtles_pro, venom_le - puts it at group 5
+#: index 0, beside the coin and ticket meters on 2..4; godzilla's table names
+#: none of the cabinet board, and its game drives the shaker as drive 7, which
+#: reached the rig's board as node 1 coil 0 (PAD-414, docs/plans/mode_coils.md).
+SHAKER = "SHAKER MOTOR"
+SHAKER_GROUP, SHAKER_INDEX = 5, 0
+
+
+def shaker_address(table_path):
+    """(node, index) of the cabinet's shaker motor for a device_xy.txt, or None.
+
+    The named row when the table has one. Otherwise group 5 index 0 - but only
+    when no row of the table uses group 5 at all, which is what keeps the HOME
+    EDITIONS out: their whole machine is group 5 (fixed_group_node()), so index
+    0 there is a playfield coil or nothing, and they have no shaker.
+    """
+    coils = load(table_path)
+    got = address(coils, SHAKER)
+    if got is not None:
+        return got
+    rows = parse_rows(_maybe_lines(table_path) or [])
+    if not rows or any(r.get("group") == SHAKER_GROUP for r in rows):
+        return None
+    node = group_node_for(table_path, dev_rows=rows).get(SHAKER_GROUP)
+    return (node, SHAKER_INDEX) if node is not None and node < NODES else None
+
+
+#: padled VERSION 5's drive half (PAD-381): what each coil is driven to and
+#: for how long. padled.h lists these offsets beside the struct; the test in
+#: tests/test_spike2_coil_drive.py pins them to the C layout.
+DRIVE_T0_OFF = 4776
+DRIVE_TPS_OFF = 4780
+DRIVE_UNTIL_OFF = 4784
+DRIVE_PULSE_T_OFF = 5808
+DRIVE_HOLD_T_OFF = 6320
+DRIVE_PULSE_PWR_OFF = 6832
+DRIVE_HOLD_PWR_OFF = 7088
+DRIVE_FIRES_OFF = 7344
+DRIVE_READ = 7356
+
+
+def drive(data, node, index):
+    """The last command one coil was sent, from a version-5 padled block, or None.
+
+    {until, pulse_ms, hold_ms, pulse_pwr, hold_pwr}: `until` is the GUEST's
+    pad_ms() the command runs out at (0 once an OFF landed), a clock a Windows
+    reader cannot see - so a reader times the drive from when `until` CHANGES,
+    and takes its length from the ticks at the boards' claimed tick rate.
+    """
+    if data is None or len(data) < DRIVE_READ or not has_magic(data):
+        return None
+    if struct.unpack_from("<I", data, 4)[0] < 5:
+        return None
+    if not (0 <= node < NODES and 0 <= index < COIL_N):
+        return None
+    o = node * COIL_N + index
+    tps = struct.unpack_from("<I", data, DRIVE_TPS_OFF)[0]
+    pt = struct.unpack_from("<H", data, DRIVE_PULSE_T_OFF + 2 * o)[0]
+    ht = struct.unpack_from("<H", data, DRIVE_HOLD_T_OFF + 2 * o)[0]
+    return {"until": struct.unpack_from("<I", data, DRIVE_UNTIL_OFF + 4 * o)[0],
+            "pulse_ms": pt * 1000 // tps if tps else 0,
+            "hold_ms": ht * 1000 // tps if tps else 0,
+            "pulse_pwr": data[DRIVE_PULSE_PWR_OFF + o],
+            "hold_pwr": data[DRIVE_HOLD_PWR_OFF + o]}

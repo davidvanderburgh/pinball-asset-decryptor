@@ -16,6 +16,12 @@ const TRANSCRIBE_TIP = "Transcribe each spoken WAV (faster-whisper) and rename i
   + "e.g. “Super jackpot!”. Also writes callouts.csv.";
 const MUSIC_TIP = "Identify each full song online (AcoustID) and rename it by artist + title — "
   + "e.g. “Led Zeppelin - Kashmir”. Needs internet.";
+// PAD-460: the quality used to hide in the ⚙ menu; it sits with the option it
+// tunes now, and Auto-name now names a project that is already extracted.
+const VOICE_TIP = "The voice-recognition model Auto-name call-outs listens with. Higher hears more words "
+  + "right but runs slower, and downloads a bigger model the first time.";
+const AUTONAME_TIP = "Run the ticked Auto-name options on the sounds already in this project folder, "
+  + "without extracting again. Sounds that already have a name keep it.";
 const DURATION_TIP = "Lead each extracted sound's filename with its play length — e.g. "
   + "“01m22s235 - idx0001.wav” — so sorting by name lines the same sounds up across firmware "
   + "versions (slot numbers shift between releases; play lengths rarely do).";
@@ -152,15 +158,23 @@ function projectHint(p) {
   if (!p) return "";
   if (!p.exists) return "A new folder: Extract creates it.";
   const d = p.details || {};
+  // PAD-421: the folder was extracted from another card, and nothing on the page said so;
+  // when the picked card has a project folder of its own, offer it
+  const own = d.card_project ? d.card_project.split(/[\\/]/).filter(Boolean).slice(-2).join("\\") : "";
+  if (d.card_kind === "other") return { warn: true, project: own,
+    text: own ? `This folder was extracted from ${d.source_name}, not from the card above. The card above has its own project folder, ${own}.`
+      : `This folder was extracted from ${d.source_name}, not from the card above. To work on the card above, extract it into a new project folder.` };
   if (d.archived) return "This project is archived: extracting into it is the hydrate — your edited files are set aside first and restored over the fresh extraction automatically.";
   if (d.baseline) return "Already holds an extract: extracting again overwrites your edits (after a confirmation). Use a fresh project folder per firmware version.";
   return "";
 }
 
-function Options({ s }) {
+function Options({ s, shell }) {
+  const sx = useNs("shellx");
   const cats = s.categories || [];
   const showNaming = s.opt_transcribe || s.opt_music || s.opt_duration;
   const off = !s.autoname_enabled;
+  const running = !!(shell && shell.running);
   const capturePrimary = s.capture_primary;
   return html`
     ${s.deltas_show ? html`<div class="stack x-sec">
@@ -209,6 +223,16 @@ function Options({ s }) {
           ${s.opt_music ? html`<${Check} ns="extract" k="music_id" checked=${s.music_id} disabled=${off} label="Auto-name music" title=${MUSIC_TIP} />` : null}
           ${s.opt_duration ? html`<${Check} ns="extract" k="duration_names" checked=${s.duration_names} disabled=${off} label="Length-prefix names" title=${DURATION_TIP} />` : null}
         </div>
+        ${s.opt_transcribe ? html`<div class="row wrap x-voice">
+            <label class="small dim" for="x-voice">Voice recognition quality</label>
+            <${Select} id="x-voice" sm value=${sx.voice_quality} options=${sx.voice_choices || []} title=${VOICE_TIP}
+              disabled=${off || !s.transcribe || running} onChange=${(v) => call("ui.settings_action", "voice_quality", v)} />
+          </div>` : null}
+        ${s.opt_transcribe || s.opt_music ? html`<div class="row wrap x-autoname">
+            <${Button} size="sm" icon="edit" disabled=${running || !!s.autoname_reason} title=${AUTONAME_TIP}
+              onClick=${() => call("extract.autoname_now")}>Auto-name now<//>
+            <span class="small dim grow">${s.autoname_reason || "Names the sounds already in this project folder, no new extract."}</span>
+          </div>` : null}
       </div>` : null}`;
 }
 
@@ -270,9 +294,14 @@ function SourceCard({ s, shell }) {
         <${InfoBadge} text=${PROJECT_INFO_TIP} onClick=${() => call("extract.open_project_info")} /></div>
       <${PathCombo} id="x-proj" k="output" value=${s.output} history=${hist.extract_output}
         onBrowse=${() => call("extract.browse_output")} browseTitle=${PROJECT_TIP} />
-      ${hint ? html`<span class="small muted">${hint}</span>` : null}
+      ${hint && hint.warn ? html`<div class="x-badge warn"><${Icon} name="warn" /><span>${hint.text}</span>
+          ${hint.project ? html`<${Button} size="sm" icon="folder" title=${p.details.card_project}
+            onClick=${() => call("extract.use_card_project")}>Open its project<//>`
+            : html`<${Button} size="sm" icon="plus" title="Make a project folder for the card above and switch to it"
+            onClick=${() => call("extract.new_card_project")}>New project…<//>`}</div>`
+        : hint ? html`<span class="small muted">${hint}</span>` : null}
     </div>
-    <${Options} s=${s} />
+    <${Options} s=${s} shell=${shell} />
   <//>`;
 }
 
@@ -304,6 +333,69 @@ export function projectGame(s) {
   return d.game || "";
 }
 
+// ------------------------------------------------- revision history graph
+// PAD-427: every card built from the project, newest at the top, each joined to the card it
+// was built over (git-log style: a build over an older revision branches into its own lane).
+// Dots are coloured by the computer the revision was built on; the root is the official card
+// (green ring) or the modified card the project was extracted from (amber).
+const RG_ROW = 40, RG_LANE = 18, RG_R = 5;
+const RG_HOST = ["var(--accent)", "var(--info)", "var(--cp-ink)", "var(--ok)", "var(--err)"];
+const RG_MAX = 7;
+
+function RevisionGraph({ g }) {
+  const [all, setAll] = useState(false);
+  const rows = all || g.rows.length <= RG_MAX ? g.rows
+    // the newest revisions and the root; the lines of the rest are drawn to the "more" gap
+    : g.rows.slice(0, RG_MAX - 2).concat([{ key: "__more", kind: "more", lane: 0 }], g.rows.slice(-1));
+  const at = {}; rows.forEach((r, i) => { at[r.key] = i; });
+  const lanes = Math.max(1, ...rows.map((r) => (r.lane || 0) + 1));
+  const w = lanes * RG_LANE + 6, h = rows.length * RG_ROW;
+  const x = (lane) => 9 + lane * RG_LANE, y = (i) => i * RG_ROW + RG_ROW / 2;
+  const hostInk = (host) => RG_HOST[Math.max(0, g.hosts.indexOf(host)) % RG_HOST.length];
+  const ink = (r) => r.kind === "rev" ? hostInk(r.host) : r.kind === "stock" ? "var(--ok)"
+    : r.kind === "modified" ? "var(--warn)" : "var(--ink-3)";
+  const edges = [];
+  rows.forEach((r, i) => {
+    if (r.kind === "more") return;
+    let j = at[r.parent];
+    if (j === undefined && r.parent) j = at.__more;       // its parent is folded away
+    if (j === undefined) return;
+    const cx = x(r.lane), cy = y(i), px = x(rows[j].lane), py = y(j);
+    const end = cy + RG_R + 2;                              // the arrow tip stops at the dot
+    const d = cx === px ? `M${px},${py - RG_R} L${cx},${end}`
+      : `M${px},${py - RG_R} C${px},${py - RG_ROW * 0.55} ${cx},${py - RG_ROW * 0.45} ${cx},${py - RG_ROW * 0.85} L${cx},${end}`;
+    edges.push(html`<path d=${d} stroke=${ink(r)} marker-end="url(#rg-arrow)" />`);
+  });
+  return html`<div class="x-rg">
+    <div class="x-rg-head"><span class="h3">Revision history</span>
+      ${g.hosts.length > 1 ? html`<span class="x-rg-hosts">${g.hosts.map((hn) =>
+        html`<span class="x-rg-host"><i style=${`background:${hostInk(hn)}`}></i>${hn}</span>`)}</span>` : null}</div>
+    <div class="x-rg-body" style=${`min-height:${h}px`}>
+      <svg class="x-rg-svg" width=${w} height=${h} viewBox=${`0 0 ${w} ${h}`} aria-hidden="true">
+        <defs><marker id="rg-arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" fill="context-stroke" /></marker></defs>
+        <g fill="none" stroke-width="1.6">${edges}</g>
+        ${rows.map((r, i) => r.kind === "more" ? html`<text x=${x(0) - 3} y=${y(i) + 4} class="x-rg-dots">⋮</text>`
+          : r.kind === "rev" ? html`<circle cx=${x(r.lane)} cy=${y(i)} r=${RG_R} fill=${ink(r)} />`
+          : html`<circle cx=${x(r.lane)} cy=${y(i)} r=${RG_R} fill="var(--panel)" stroke=${ink(r)} stroke-width="2"
+              stroke-dasharray=${r.kind === "other" ? "2 2" : null} />`)}
+      </svg>
+      <div class="x-rg-rows" style=${`margin-left:${w + 6}px`}>
+        ${rows.map((r) => r.kind === "more"
+          ? html`<div class="x-rg-row"><button type="button" class="x-rg-more" onClick=${() => setAll(true)}>
+              Show all ${g.rows.length - 1} revisions</button></div>`
+          : html`<div class="x-rg-row" ...${tip(r.sub ? { head: r.title, lines: [r.sub] } : r.title)}>
+              <div class="x-rg-title"><b>${r.title}</b>${r.tags.map((t) =>
+                html` <${Chip} sm kind=${t === "latest" ? "acc" : "info"}>${t}<//>`)}</div>
+              <div class="x-rg-sub">${r.sub}</div></div>`)}
+      </div>
+    </div>
+    ${all && g.rows.length > RG_MAX ? html`<button type="button" class="x-rg-more" onClick=${() => setAll(false)}>Show fewer</button>` : null}
+    ${(g.imported || []).length ? html`<div class="x-rg-imp">${g.imported.map((m) => html`<div class="small muted">
+      Mod pack <span class="mono">${m.pack}</span>${m.rev ? ` (rev ${m.rev} of another project, ${m.from || "unknown card"})` : ""} brought in${m.at ? ` ${m.at}` : ""}</div>`)}</div>` : null}
+  </div>`;
+}
+
 function ProjectCard({ s, shell }) {
   const p = s.project;
   const d = (p && p.details) || {};
@@ -328,9 +420,13 @@ function ProjectCard({ s, shell }) {
     body = html`<div class="kv x-kv">
         ${caption ? html`<span class="k">Game</span><span>${caption}</span>` : null}
         ${d.extracted ? html`<span class="k">Extracted</span><span>${d.extracted}${d.source_name ? html` · from <span class="mono">${d.source_name}</span>` : null}</span>` : null}
-        ${rows.map(([k, v]) => html`<span class="k">${k}</span><span class=${k === "Changed" && v !== "nothing changed yet" ? "acc-ink" : ""}>${v}</span>`)}
+        ${d.stock ? html`<span class="k">Stock</span><span class=${d.stock.status === "official" ? "ok-ink" : "warn-ink"}>${d.stock.text}</span>` : null}
+        ${d.revisions ? html`<span class="k">Revisions</span><span>${d.revisions.text}</span>` : null}
+        ${rows.map(([k, v]) => html`<span class="k">${k}</span><span class=${k === "Changed" && v !== "nothing changed yet" ? "acc-ink" : ""}>${v}</span>
+          ${k === "Changed" && d.off_stock ? html`<span class="k">Off stock</span><span class="warn-ink">${d.off_stock}</span>` : null}`)}
       </div>
       ${p.loading && !rows.length ? html`<div class="row small muted"><${Spinner} />Collecting…</div>` : null}
+      ${d.revisions && d.revisions.graph ? html`<${RevisionGraph} g=${d.revisions.graph} />` : null}
       <div class="note"><${Icon} name="info" /><div class="body-text">${PROJECT_TIP}</div></div>`;
   }
   return html`<${Card} cls="x-project" head=${head}

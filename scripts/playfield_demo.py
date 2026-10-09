@@ -126,6 +126,8 @@ def main(argv=None):
                               "RIGHT FLIPPER")):
         x, y = rnd.randint(40, W - 40), rnd.randint(120, H - 130)
         dev.append("coil %s %d %d 10 10 6 %d - %s" % (name, x, y, k, img))
+    # the cabinet's shaker, off the artwork, where the real tables put it
+    dev.append("coil SHAKER MOTOR 0 0 0 0 5 0 - -")
     with open(os.path.join(tdir, "device_xy.txt"), "w") as f:
         f.write("# demo\n" + ("\n".join(dev) + "\n"
                               if a.mode == "field" else ""))
@@ -174,16 +176,34 @@ def main(argv=None):
     fade_head = coilmap.GEN_OFF + 8
     fade_ent = fade_head + 4
     seen = fade_ent + 96 * 12
-    size = seen + 16 * 96 + 8
+    size = 8192                     # padled version 5: the drive table too
     stop = threading.Event()
+    #: the shaker's commands over a 7 s cycle: (at s, ms, power) - a long soft
+    #: shake, then the jackpot-sized hard ones (PAD-424)
+    shakes = ((0.4, 1500, 31), (2.6, 500, 51), (3.5, 200, 51), (4.3, 334, 36))
+    shaker = 1 * 16 + 0             # node 1 coil 0
 
     def led_loop():
         t0, fires, head, dec = time.time(), [0] * 256, 0, 0
+        cmd, cyc = None, -1
         while not stop.is_set():
             t = time.time() - t0
             b = bytearray(size)
             struct.pack_into("<I", b, 0, coilmap.PADLED_MAGIC)
-            struct.pack_into("<I", b, 4, 4)
+            struct.pack_into("<I", b, 4, 5)
+            c, ph = int(t // 7), t % 7
+            for k, (at, ms, pwr) in enumerate(shakes):
+                if ph >= at and (c, k) > (cyc, cmd if cmd is not None else -1):
+                    cyc, cmd = c, k
+                    until = int(t * 1000) + ms
+                    drive = (until, ms // 10, pwr)
+                    fires[shaker] = (fires[shaker] + 1) & 0xFF
+            if cmd is not None:
+                until, ticks, pwr = drive
+                struct.pack_into("<I", b, coilmap.DRIVE_TPS_OFF, 100)
+                struct.pack_into("<I", b, coilmap.DRIVE_UNTIL_OFF + 4 * shaker, until)
+                struct.pack_into("<H", b, coilmap.DRIVE_PULSE_T_OFF + 2 * shaker, ticks)
+                b[coilmap.DRIVE_PULSE_PWR_OFF + shaker] = pwr
             for node in (8, 9):
                 for idx in range(96):
                     ph = (idx * 0.37 + t * (1.7 if node == 8 else 1.1)) % (2 * math.pi)

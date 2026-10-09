@@ -322,6 +322,9 @@ class App:
         # (plugins/stern/card_size.py).  Mirrored to PAD_STERN_CARD_SIZE the
         # same way; the original's own size leaves the var unset.
         self._apply_card_size_env(self._card_size_setting())
+        # Write tab: "Make the image as small as it can be" (PAD-467), the
+        # same way: PAD_STERN_CARD_FIT, unset when it isn't ticked.
+        self._apply_card_fit_env(self._card_fit_setting())
         # PREVIEW FEATURES (the mode maker ships dark): the codes in settings.json
         # are checked ONCE, here, and the answer is cached for the whole run
         # (core/preview.py).  Before the window, whose Modes tab asks it.
@@ -362,6 +365,9 @@ class App:
         # project starts (its edits are parked in .hydrate/), consumed by
         # the done-handler to move them back.  See _start_extract.
         self._pending_post_hydrate = None
+        # An Auto-name now run (PAD-460) is in flight: it borrows the extract
+        # run-state, but none of the extract-completion behaviour applies.
+        self._autoname_active = False
         # The window's last un-maximized "WxH+X+Y", kept by the desktop host
         # as the user resizes (webui.host); saved in settings on the way out.
         self._last_normal_geometry = None
@@ -403,6 +409,7 @@ class App:
             on_manufacturer_change=self._on_manufacturer_change,
             on_extract=self._start_extract,
             on_extract_cancel=self._cancel,
+            on_autoname=self._start_autoname,
             on_write=self._start_write,
             on_write_cancel=self._cancel,
             on_apply_delta=self._start_apply_delta,
@@ -462,6 +469,8 @@ class App:
             on_text_grow_change=self._on_text_grow_change,
             initial_card_size=self._card_size_setting(),
             on_card_size_change=self._on_card_size_change,
+            initial_card_fit=self._card_fit_setting(),
+            on_card_fit_change=self._on_card_fit_change,
             on_detected_game_change=self._on_detected_game_change,
             on_audio_profile=self._on_audio_profile_request,
             on_partition_image_opened=self._on_partition_image_opened,
@@ -1460,6 +1469,14 @@ class App:
                 pass
             return prev_saved  # cross-mfr path — keep what we had
 
+        def _compare_path(current_var, prev_saved):
+            # The Compare pair may be two extract folders (PAD-442): a
+            # folder is nobody's card image, so detect() can't vouch for it.
+            current = current_var.strip()
+            if current and os.path.isdir(current):
+                return current
+            return _safe_input_path(current, prev_saved)
+
         section[key] = {
             "extract_input": _safe_input_path(
                 self.window.extract_input_var.get(),
@@ -1470,10 +1487,10 @@ class App:
                 existing.get("write_original", "")),
             "write_assets": self.window.write_assets_var.get().strip(),
             "write_output": self.window.write_output_var.get().strip(),
-            "compare_a": _safe_input_path(
+            "compare_a": _compare_path(
                 self.window.compare_a_var.get(),
                 existing.get("compare_a", "")),
-            "compare_b": _safe_input_path(
+            "compare_b": _compare_path(
                 self.window.compare_b_var.get(),
                 existing.get("compare_b", "")),
             "extract_options": self.window.get_extract_options(),
@@ -2356,8 +2373,10 @@ class App:
         # before the pipeline reads it (belt and braces: it is also set at
         # startup and on every toggle).
         self._apply_text_grow_env(self.window.text_grow_enabled())
-        # The Write tab's SD card size, the same way.
+        # The Write tab's SD card size, the same way, and its "as small as
+        # it can be".
         self._apply_card_size_env(self.window.card_size_choice())
+        self._apply_card_fit_env(self.window.card_fit_enabled())
         if self._current_mfr.supports_build_update():
             write_kwargs["update"] = update
         self._chain_flash_after_build = (
@@ -2658,7 +2677,8 @@ class App:
     # ------------------------------------------------------------------
 
     def _start_transcribe(self, assets_dir_override=None,
-                          outer_done_summary=None, outer_done_cb=None):
+                          outer_done_summary=None, outer_done_cb=None,
+                          step_done_cb=None):
         """Run the transcribe pipeline.
 
         Called from ``_start_extract`` (chained) when the user ticked
@@ -2667,6 +2687,8 @@ class App:
         the window's var); ``outer_done_summary`` + ``outer_done_cb`` let us
         defer the Extract's "Complete" modal until transcribe finishes
         so the user sees one terminal dialog instead of two.
+        ``step_done_cb`` (Auto-name now, PAD-460) gets this run's own
+        ``(success, summary)``; its caller owns the run state.
         """
         if not self._current_mfr.capabilities.transcribe:
             return
@@ -2674,7 +2696,7 @@ class App:
             if self._cancel_requested:        # cancelled upstream → don't chain
                 outer_done_cb(False, outer_done_summary or "")
                 return
-        else:
+        elif step_done_cb is None:
             self._cancel_requested = False     # standalone = a fresh run
         assets_dir = (assets_dir_override
                       or self.window.extract_output_var.get().strip()
@@ -2685,6 +2707,8 @@ class App:
                 f"Cannot run transcribe — folder not found:\n{assets_dir}")
             if outer_done_cb:
                 outer_done_cb(True, outer_done_summary or "")
+            elif step_done_cb:
+                step_done_cb(False, f"Folder not found: {assets_dir}")
             return
 
         # Stay in extract mode so the status row keeps its labels.
@@ -2695,7 +2719,7 @@ class App:
         # calling it again would reset the elapsed timer to zero
         # mid-pipeline -- the user just saw Extract take 60s and now
         # the clock would say 00:00 again during transcribe.
-        if outer_done_cb is None:
+        if outer_done_cb is None and step_done_cb is None:
             self.window.set_running(True, mode="extract")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
@@ -2710,7 +2734,9 @@ class App:
         # If we're chained, replace the normal done_cb with one that
         # merges transcribe's summary into the Extract summary and
         # delegates the final "Complete" modal to outer_done_cb.
-        if outer_done_cb is not None:
+        if step_done_cb is not None:
+            done_cb = step_done_cb
+        elif outer_done_cb is not None:
             head = (outer_done_summary or "").rstrip()
             def merged_done(transcribe_success, transcribe_summary):
                 label = ("Auto-transcribe:" if transcribe_success
@@ -2762,7 +2788,8 @@ class App:
         return wrapped
 
     def _start_music_id(self, assets_dir_override=None,
-                        outer_done_summary=None, outer_done_cb=None):
+                        outer_done_summary=None, outer_done_cb=None,
+                        step_done_cb=None):
         """Run the online music-ID pipeline (chained after a successful
         Extract/transcribe).  Mirrors ``_start_transcribe``."""
         if not self._current_mfr.capabilities.music_id:
@@ -2771,7 +2798,7 @@ class App:
             if self._cancel_requested:        # cancelled upstream → don't chain
                 outer_done_cb(False, outer_done_summary or "")
                 return
-        else:
+        elif step_done_cb is None:
             self._cancel_requested = False     # standalone = a fresh run
         assets_dir = (assets_dir_override
                       or self.window.extract_output_var.get().strip()
@@ -2782,10 +2809,12 @@ class App:
                 f"Cannot identify music — folder not found:\n{assets_dir}")
             if outer_done_cb:
                 outer_done_cb(True, outer_done_summary or "")
+            elif step_done_cb:
+                step_done_cb(False, f"Folder not found: {assets_dir}")
             return
 
         self._active_mode = "extract"
-        if outer_done_cb is None:
+        if outer_done_cb is None and step_done_cb is None:
             self.window.set_running(True, mode="extract")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
@@ -2795,7 +2824,9 @@ class App:
         self.window.show_chained_phases(
             getattr(self._current_mfr, "music_id_phases", ()))
 
-        if outer_done_cb is not None:
+        if step_done_cb is not None:
+            done_cb = step_done_cb
+        elif outer_done_cb is not None:
             head = (outer_done_summary or "").rstrip()
 
             def merged_done(ok, summary):
@@ -2807,6 +2838,60 @@ class App:
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
             rename_after=True)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Auto-name now (PAD-460)
+    # ------------------------------------------------------------------
+
+    def _start_autoname(self):
+        """The Extract tab's Auto-name now: the ticked Auto-name options
+        (call-outs, then music) over the sounds an earlier extract left in the
+        project folder, with no new extract.  A tester had extracted without
+        them and the only way to name the sounds afterwards was extracting
+        again.  Call-outs use the quality picked beside the option; files
+        already named keep their names, so a second run names only what the
+        first one missed (the transcribe summary's "run it again" advice)."""
+        mfr = self._current_mfr
+        caps = mfr.capabilities if mfr is not None else None
+        steps = []
+        if (getattr(caps, "transcribe", False)
+                and self.window.transcribe_var.get()):
+            steps.append(("Auto-name call-outs", self._start_transcribe))
+        if (getattr(caps, "music_id", False)
+                and self.window.music_id_var.get()):
+            steps.append(("Auto-name music", self._start_music_id))
+        if not steps or self.window._is_running():
+            return
+        folder = self.window.extract_output_var.get().strip()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror("Invalid Folder",
+                                 f"Project folder not found:\n{folder}")
+            return
+        folder = os.path.normpath(folder)
+        self._active_mode = "extract"
+        self._autoname_active = True
+        self._cancel_requested = False
+        self.window.set_running(True, mode="extract")
+        self.window.append_log(
+            "Auto-naming the sounds already in %s..." % folder, "info")
+        done_cb = self._make_callbacks()[3]
+        results = []
+
+        def run(i):
+            if i == len(steps) or self._cancel_requested:
+                ok = bool(results) and all(r[0] for r in results)
+                done_cb(ok, "\n\n".join(r[1] for r in results))
+                return
+            label, start = steps[i]
+
+            def step_done(ok, summary):
+                # from the step's worker thread: hop to the UI loop
+                results.append((ok, "%s%s:\n%s" % (
+                    label, "" if ok else " failed", summary)))
+                self.root.after(0, lambda: run(i + 1))
+            start(assets_dir_override=folder, step_done_cb=step_done)
+
+        run(0)
 
     # ------------------------------------------------------------------
     # Apply delta
@@ -3560,6 +3645,9 @@ class App:
 
         tags_note = ("" if not res.get("group_tags")
                      else ", %d group name(s)" % res["group_tags"])
+        if res.get("video_variants"):
+            tags_note += (", %d slot(s) with random clips"
+                          % res["video_variants"])
         if res.get("defaults"):
             tags_note += ", %d staged default(s)" % res["defaults"]
         # An earlier transfer of the same mods onto this folder is replaced,
@@ -3643,6 +3731,12 @@ class App:
                         len(a["flagged"]), len(a["dropped"])))
         lines.append("Video:  %d matched, %d dropped"
                      % (len(v["matched"]), len(v["dropped"])))
+        vv = plan.get("video_variants") or {}
+        if vv.get("matched") or vv.get("dropped"):
+            # PAD-446: a slot's random clips go where its replacement would
+            lines.append("Random clips:  %d slot(s) matched, %d dropped"
+                         % (len(vv.get("matched", ())),
+                            len(vv.get("dropped", ()))))
         lines.append("Image:  %d matched, %d dropped"
                      % (len(i["matched"]), len(i["dropped"])))
         lines.append("Text:   %d matched, %d dropped"
@@ -3849,9 +3943,12 @@ class App:
                        % totals["flagged"], "warning")
             res = mod_transfer.apply_transfer(project, ws, plan,
                                               include_flagged=False)
-            return ("%d audio, %d video, %d image, %d text transferred"
+            return ("%d audio, %d video, %d image, %d text transferred%s"
                     % (res["audio"], res["video"], res["image"],
-                       res["text"]))
+                       res["text"],
+                       ("; %d slot(s) with random clips"
+                        % res["video_variants"])
+                       if res.get("video_variants") else ""))
 
         def stage(ws):
             pend_a = self._stage_pending_audio(ws)
@@ -3892,7 +3989,9 @@ class App:
         if asked:
             log_cb("Each ported card is built at its own original's size: "
                    "the SD card size on the Write tab (%s) is for this "
-                   "project's own card." % asked.replace("G", " GB"), "info")
+                   "project's own card." % (
+                       "smaller 16 GB" if asked == "16S"    # card_size.SMALL
+                       else asked.replace("G", " GB")), "info")
         try:
             results = mod_port.run_ports(
                 jobs, extract, transfer, stage, write, log_cb,
@@ -4407,6 +4506,13 @@ class App:
             assets_dir,
             "revert  all staged replacements/edits cleared and every "
             "modified file restored to the extract's original")
+        # PAD-444: a mode's own copy of a clip is a file the project made; it
+        # goes with the record of it (a copy the card already has stays)
+        try:
+            from .plugins.stern import clip_modes
+            clip_modes.remove_copies(assets_dir)
+        except Exception:
+            pass
         self.window.clear_replace_assignments(assets_dir)
         try:
             text_manifest.revert_all(assets_dir)
@@ -4598,6 +4704,32 @@ class App:
             self.window._refresh_extract_phases()
             return
 
+        # Auto-name now (PAD-460) borrows the extract run-state as well, and
+        # extracted nothing either: no source to stamp, no "Extract completed"
+        # line, and a failure is not an "Extract Failed".
+        if self._autoname_active:
+            self._autoname_active = False
+            self.window.set_running(False, mode="extract")
+            # the sounds were renamed under the Replace tabs: scan them again
+            self.window.invalidate_asset_scans()
+            if self._cancel_requested:
+                self._cancel_requested = False
+                self.window.set_status("Cancelled")
+                self.window.append_log("Auto-name cancelled.", "info")
+            elif success:
+                self.window.set_phase(
+                    len(getattr(self.window, "_phases", {}).get(
+                        "extract", ())), mode="extract")
+                self.window.set_status(
+                    time.strftime("Completed at %I:%M %p").replace(" 0", " "))
+                self.window.set_progress(1, 1, mode="extract")
+                self.window.append_log(summary, "success")
+            else:
+                self.window.set_status("Failed")
+                self.window.append_log(summary, "error")
+                messagebox.showerror("Auto-name Failed", summary)
+            return
+
         is_extract = self._active_mode == "extract"
         # Snapshot the run's wall-clock now — set_running(False) below clears
         # the window's timer state.  Covers the whole chain (extract +
@@ -4672,6 +4804,38 @@ class App:
                             from .core.extract_source import (
                                 amend_extract_source)
                             amend_extract_source(out_path, card_version=ver)
+                    except Exception:
+                        pass
+                    # Was this the card Stern released?  The project keeps
+                    # the answer, so its baseline is known to be stock or
+                    # known to be someone's build (PAD-426).  Every file's
+                    # bytes are hashed: a card built elsewhere can keep
+                    # Stern's records for files it replaced.
+                    try:
+                        check = getattr(mfr, "stock_check", None)
+                        stock = check(in_path, deep=True) if check else None
+                        if stock and stock["status"] in ("official",
+                                                         "modified"):
+                            from .core.extract_source import (
+                                amend_extract_source)
+                            amend_extract_source(out_path, stock={
+                                k: stock[k] for k in ("status", "label",
+                                                      "sidx", "text")})
+                            self.window.append_log(
+                                "Source card: " + stock["text"],
+                                "success" if stock["status"] == "official"
+                                else "warning")
+                    except Exception:
+                        stock = None
+                    # The project's revision history starts (or carries on)
+                    # from this card's fingerprint (PAD-427).
+                    try:
+                        from .core import lineage
+                        info = lineage.card_print(in_path, measure=True)
+                        if info:
+                            lineage.note_extract(
+                                out_path, os.path.basename(in_path), info,
+                                (stock or {}).get("status") or "")
                     except Exception:
                         pass
                 threading.Thread(target=_stamp, daemon=True).start()
@@ -4816,10 +4980,19 @@ class App:
                 "Not built: the SD card size stays %s. To fit it, use fewer "
                 "or smaller replacements." % cs.words(current), "info")
             return True
-        self.window.write_card_size_var.set(fits)       # saved and applied
+        # From the smaller 16 GB card of a 16 GB original (PAD-465), the size
+        # that fits is the original's own: that is "Same as the original",
+        # not a 16 GB choice that would stay saved and grow the next 8 GB one
+        choice, said = fits, "%s" % cs.words(fits)
+        try:
+            if cs.target_for(self.window.write_upd_var.get().strip(),
+                             fits) is None:
+                choice, said = "", "the original's own (%s)" % cs.words(fits)
+        except (cs.CardSizeError, OSError):
+            pass
+        self.window.write_card_size_var.set(choice)     # saved and applied
         self.window.append_log(
-            "SD card size is now %s; building again." % cs.words(fits),
-            "info")
+            "SD card size is now %s; building again." % said, "info")
         device = chain_flash[0] if chain_flash else None
         verify = chain_flash[2] if chain_flash else True
         self.root.after(0, lambda: self._start_write(
@@ -6283,16 +6456,17 @@ class App:
 
     #: Settings key for the Write tab's "SD card size" (Stern Spike 2,
     #: plugins/stern/card_size.py): "" builds at the original's size, "16G" /
-    #: "32G" grows the card's games partition to that class.
+    #: "32G" grows the card's games partition to that class, "16S" builds for
+    #: a 16 GB SD card a little short of Stern's 16 GB image (PAD-465).
     _CARD_SIZE_KEY = "card_size"
     #: card_size.ENV, spelled out so the setting is applied before (and
     #: without) the Stern plugin being imported.
     _CARD_SIZE_ENV = "PAD_STERN_CARD_SIZE"
-    _CARD_SIZES = ("16G", "32G")
+    _CARD_SIZES = ("16S", "16G", "32G")
 
     @classmethod
     def _norm_card_size(cls, val):
-        """A saved or chosen card size: "16G" / "32G", anything else "".
+        """A saved or chosen card size: "16S" / "16G" / "32G", anything else "".
         Always "" where a card can't be grown (macOS: no loop devices, and
         the Write tab doesn't offer the option there)."""
         from .webui.tabs.write import card_size_supported
@@ -6322,6 +6496,35 @@ class App:
         choice = self._norm_card_size(choice)
         self._settings[self._CARD_SIZE_KEY] = choice
         self._apply_card_size_env(choice)
+        self._save_settings()
+
+    #: Settings key for the Write tab's "Make the image as small as it can
+    #: be" (PAD-467, card_size.fit_image).  Default off.
+    _CARD_FIT_KEY = "card_fit"
+    #: card_size.FIT_ENV, spelled out as _CARD_SIZE_ENV is.
+    _CARD_FIT_ENV = "PAD_STERN_CARD_FIT"
+
+    def _card_fit_setting(self):
+        """The persisted "as small as it can be" (False when never set, and
+        always where a card can't be resized: macOS)."""
+        from .webui.tabs.write import card_size_supported
+        return (bool(self._settings.get(self._CARD_FIT_KEY))
+                and card_size_supported())
+
+    @classmethod
+    def _apply_card_fit_env(cls, on):
+        """Mirror "as small as it can be" into ``PAD_STERN_CARD_FIT``: "1"
+        when ticked, else UNSET, so a headless caller builds what it always
+        built (the SD card size's polarity rule)."""
+        if on:
+            os.environ[cls._CARD_FIT_ENV] = "1"
+        else:
+            os.environ.pop(cls._CARD_FIT_ENV, None)
+
+    def _on_card_fit_change(self, on):
+        """Persist + apply the Write tab's "as small as it can be"."""
+        self._settings[self._CARD_FIT_KEY] = bool(on)
+        self._apply_card_fit_env(bool(on))
         self._save_settings()
 
     def _apply_audio_preview_env(self, output_path):

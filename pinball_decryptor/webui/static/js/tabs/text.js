@@ -68,6 +68,14 @@ export default function TextTab() {
   const shown = useMemo(() => view.map((i) => rows[i]).map((r, n) => (r ? { ...r, i: view[n] } : null))
     .filter(Boolean), [rows, view]);
 
+  // PAD-429 (DragonRR): Previous / Next walk the rows the search left, picking each in turn
+  const finding = !!(s.search || "").trim();
+  const findPos = shown.findIndex((r) => r.i === s.sel);
+  const findStep = (d) => {
+    if (!shown.length) return;
+    const n = findPos < 0 ? (d > 0 ? 0 : shown.length - 1) : (findPos + d + shown.length) % shown.length;
+    call("text.select", shown[n].i);
+  };
   const focusEditor = () => {
     const el = editRef.current && editRef.current.querySelector("input");
     if (el && !el.disabled) { el.focus(); el.select(); }
@@ -136,8 +144,19 @@ export default function TextTab() {
 
     <${Card} cls="text-card" bodyCls="flush text-body" footer=${html`<${Editor} s=${s} editRef=${editRef} apply=${apply} />`}>
       <div class="toolbar">
-        <${Field} cls="search" ns="text" k="search" value=${s.search} placeholder="Search"
-          prefix=${html`<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5" /></svg>`} />
+        <div class="row" style="gap:4px" onKeyDown=${(e) => {
+            // Enter on a search still on its way to Python only sends it; the next one steps
+            if (e.key === "Enter" && finding && e.target.value === s.search) {
+              e.preventDefault(); findStep(e.shiftKey ? -1 : 1); } }}>
+          <${Field} cls="search" ns="text" k="search" value=${s.search} placeholder="Search"
+            prefix=${html`<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5" /></svg>`}
+            suffix=${finding ? html`<span class="small muted nw text-find-n">${shown.length
+              ? (findPos >= 0 ? `${findPos + 1} of ${shown.length}` : `${shown.length} found`) : "none"}</span>` : null} />
+          ${finding ? html`<${Button} size="xs" kind="ghost" icon="up" label="Previous match" disabled=${!shown.length}
+              title="Previous match (Shift+Enter)" onClick=${() => findStep(-1)} />
+            <${Button} size="xs" kind="ghost" icon="down" label="Next match" disabled=${!shown.length}
+              title="Next match (Enter)" onClick=${() => findStep(1)} />` : null}
+        </div>
         <span class="lbl" ...${tip(TIP_SHOW)}>Show</span>
         <${Seg} value=${s.change_filter || "All"} options=${["All", "Changed", "Unchanged"]}
           onChange=${(v) => call("text.set_show", v)} />

@@ -260,7 +260,8 @@ switch 48          0x1000000000    Left outlane
 switch 49          0x2000000000    Left return lane
 switch 50          0x4000000000    Right return lane
 switch 51          0x8000000000    Right outlane
-switch 71          0x10000000000   Top magnet opto      # PAD-420 run 21: flags 0x1400 as 73-76 (broadcast through 0x96f08); the shot Mode > Magnet grabs on
+# PAD-420 run 21: switch 71, flags 0x1400 as 73-76 (broadcast through 0x96f08); the shot Mode > Magnet grabs on
+switch 71          0x10000000000   Top magnet opto
 
 # ---- callouts by role, scenes by role -------------------------------------------------------------
 # countdown: the challenge mode's song clock (0x40f70, AD_CHALLENGE_MODE_SONG_SECONDS) plays

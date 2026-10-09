@@ -21,6 +21,16 @@
 // the bar open, or the bar opened with one clicked, turns the bar to Files on THAT file: it
 // shows the profile baked into it now, and a change gives it a profile of its own.  "Same as
 // the other files" puts it back on the project's individual files profile.
+// PAD-439 (DragonRR): on the Images and Video tabs, "Apply to all images / videos" gives
+// every file there the profile of the one on show, attached, after an "Are you sure?"
+// (color.py apply_to_all); Undo / Redo take the whole of it back as one step.
+// PAD-462 (DragonRR): two of them: "Apply to all profiled videos", the ones with a color
+// profile attached, and "Apply to all videos", every one not locked, attached.  Several
+// clips selected on the Video tab are one target (file.count): a change gives them all
+// the profile, attached.
+// PAD-463 (DragonRR): the Images tab the same: several pictures selected are one target, and
+// its panes draw through the profiles, so the bar there has "Show it in this preview" too.
+// The Which files card's boxes are All images / All videos (color.js WhichFiles).
 
 import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -104,12 +114,11 @@ export function rememberBarOpen(open, host) {
 }
 
 // Where the bar hangs (PAD-364): which preview its "Show it in this preview" switch is, and
-// where the file switches are.  Images has no preview that draws through the profiles, so
-// the bar there has no such switch.
+// where the file switches are (PAD-463: the Images tab's panes draw through the profiles too).
 const HOSTS = {
-  scenes: { lookNs: "text_scenes", files: "switch files on below or in Layers, or move a slider." },
-  video: { lookNs: "video", files: "switch clips on below or in the Color column, or move a slider." },
-  images: { lookNs: null, files: "" },
+  scenes: { lookNs: "text_scenes", files: "switch files on below or in Layers, or move a slider.", what: "the scene" },
+  video: { lookNs: "video", files: "switch clips on below or in the Color column, or move a slider.", what: "the players" },
+  images: { lookNs: "images", files: "switch pictures on in the Color column, or move a slider.", what: "the pictures" },
 };
 
 // the hosts whose bar has opened on its startMode this page load (once each, so a bar
@@ -145,7 +154,7 @@ function ShowHere({ mode, look, host }) {
   const k = PART[mode];
   const part = look.parts[k] || {};
   const on = !!(look.sw || {})[k];
-  const what = host === "video" ? "the players" : "the scene";
+  const what = h.what;
   return html`<${Check} cls="small" checked=${!!(part.set && on)} disabled=${!part.set}
     label="Show it in this preview"
     title=${part.set ? `The same switch as under Preview colors: untick to see ${what} without it. The card is not changed.`
@@ -171,26 +180,62 @@ function CopyPaste({ p, update, mode, name }) {
   </div>`;
 }
 
+// PAD-439: the words of Apply to all, by the kind of file, on the hosts that list them
+const ALL_WORDS = {
+  images: ["image's", "images", "image"],
+  videos: ["video's", "videos", "video"],
+};
+const ALL_HOSTS = { images: "images", video: "videos" };
+// PAD-462 (DragonRR, round 2): Apply to all's tooltip in his words, exactly as he wrote them
+// (Images: the same, of images)
+const ALL_TIP = (one, many) => `This will change all of your unlocked ${many} to the profile you have selected below in this tab. This may mean that every single ${one} existing and replaced will be affected. You can undo this function`;
+
 // The file the bar is on (PAD-368): its name, and whether it has a profile of its own.
-function FileLine({ s }) {
+// PAD-462: or the files selected together, the one on show named first.
+function FileLine({ s, host }) {
   const f = s.file;
   if (!f) return null;
-  return html`<div class="cpd-file">
-    <div class="row cpd-file-hd"><span class="eyebrow nw">This file</span>
-      <span class="mono small ellip" title=${f.rel}>${f.label}</span></div>
-    <div class="row cpd-file-own">${f.own
+  const n = f.count || 1;
+  const all = ALL_HOSTS[host] === f.kind ? ALL_WORDS[f.kind] : null;
+  const many = f.kind === "images" ? "images" : "videos";
+  // PAD-438: a line of text in Scenes has one too (Apply to all is for the tabs' files)
+  const what = f.kind === "text" ? "This line of text" : n > 1 ? `These ${n} ${many}` : "This file";
+  const shared = `“${s.asset_name || "Recommended"}”`;
+  const sameBtn = (head) => html`<${Button} size="xs" onClick=${() => call("color.file_shared")}
+    title=${head}>Same as the other files<//>`;
+  const own = n > 1
+    ? (f.own_n ? html`<span class="small muted grow">${f.own_n === n ? "Each has a color profile of its own."
+        : `${f.own_n} of them have a color profile of their own.`}</span>
+        ${sameBtn(`Drop their own profiles: they get the individual files profile every other file gets (${shared})`)}`
+      : html`<span class="small muted">${`Same as the other files (${shared}). A change here gives all ${n} a profile of their own and attaches it.`}</span>`)
+    : f.own
       ? html`<span class="small muted grow">It has a color profile of its own.</span>
-        <${Button} size="xs" onClick=${() => call("color.file_shared")}
-          title=${`Drop this file's own profile: it gets the individual files profile every other file gets (“${s.asset_name || "Recommended"}”)`}>Same as the other files<//>`
-      : html`<span class="small muted">${`Same as the other files (“${s.asset_name || "Recommended"}”). A change here gives it a profile of its own.`}</span>`}</div>
+        ${sameBtn(`Drop this file's own profile: it gets the individual files profile every other file gets (${shared})`)}`
+      : html`<span class="small muted">${`Same as the other files (${shared}). A change here gives it a profile of its own.`}</span>`;
+  const profile = { profile: s.name || "Recommended" };
+  return html`<div class="cpd-file">
+    <div class="row cpd-file-hd"><span class="eyebrow nw">${what}</span>
+      <span class="mono small ellip" title=${f.rel}>${n > 1 ? `${f.label} and ${n - 1} more` : f.label}</span></div>
+    <div class="row cpd-file-own">${own}</div>
+    ${all ? html`<div class="row cpd-file-all">
+      <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "profiled")}
+        title=${{ head: `Apply this ${all[0]} color profile to all profiled ${all[1]}`, lines: [profile,
+          `Every ${all[2]} on this tab with a color profile attached gets this one, in place of the one it has now.`,
+          `A ${all[2]} with no color profile attached is left as it is.`,
+          "You are asked first. Undo puts them all back."] }}>Apply to all profiled ${all[1]}…<//>
+      <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "all")}
+        title=${ALL_TIP(all[2], all[1])}>Apply to all ${all[1]}…<//>
+    </div>` : null}
   </div>`;
 }
 
 // host: "scenes" (the default), "images" or "video" (PAD-364).  startMode: the profile the
 // bar opens on the first time it is opened here (Images and Video: "assets", the one their
 // Color column attaches); after that it opens where it was left.  file (PAD-368): the file
-// clicked on the host, {kind, rel, label, on, attach}, or null.
-export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null }) {
+// clicked on the host, {kind, rel, label, on, attach, more}, or null (PAD-462: more, the other
+// files selected with it that are not locked).  cls: more classes for the bar
+// (Scenes: "cpd-beside" while its Font bar is open, PAD-452, so this tab hangs from that one).
+export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null, cls = "" }) {
   const s = useNs("color");
   const h = HOSTS[host] || HOSTS.scenes;
   const lookState = useNs(h.lookNs || "color");
@@ -207,17 +252,17 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
     } else call("color.panel_open");
   }, [open]);
   // the file clicked: the bar's Files mode is its profile while the bar is open here
-  const fileKey = file ? `${file.kind}\n${file.rel}\n${file.on}` : "";
+  const fileKey = file ? `${file.kind}\n${file.rel}\n${file.on}\n${(file.more || []).join("\n")}` : "";
   useEffect(() => {
     if (!open || !s.per_file) return;
-    if (file) call("color.set_file", file.kind, file.rel, file.label || "", file.on, file.attach || null);
+    if (file) call("color.set_file", file.kind, file.rel, file.label || "", file.on, file.attach || null, file.more || []);
     else call("color.set_file");
   }, [open, fileKey, s.per_file]);
   useEffect(() => () => { call("color.set_file"); }, []);
   const mode = s.per_file ? (s.mode || "display") : "display";
   // the dots: the host's Preview colors row where it has one, else the profiles' own word
   const parts = (look && look.parts) || s.parts || {};
-  return html`<div class=${cx("cpd", open && "open")} ref=${barRef}
+  return html`<div class=${cx("cpd", open && "open", cls)} ref=${barRef}
       style=${width ? `--cpd-w:${clampWidth(width)}px` : ""}>
     <button type="button" class="cpd-handle" aria-expanded=${open ? "true" : "false"} aria-controls="cpd-panel"
         aria-label="Color profiles" onClick=${() => setOpen(!open)}
@@ -255,7 +300,7 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
         <div class="row cpd-show"><${ShowHere} mode=${mode} look=${look} host=${host} /><span class="sp"></span>
           <${UndoRedo} s=${s} flush=${flush} size="xs" />
           <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div>
-        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} />` : null}
+        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} host=${host} />` : null}
         <div class="cpd-status">${statusNote(s)}</div>
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
         ${s.per_file && mode === "assets" && !s.file ? html`<${WhichFiles} s=${s} />` : null}

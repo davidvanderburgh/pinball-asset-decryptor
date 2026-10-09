@@ -1797,3 +1797,143 @@ def test_the_baked_route_records_the_modded_folder_as_the_origin(tmp_path):
                                 origin=mod)
     assert mod_transfer.prior_transfer_size(tgt, mod) == 1
     assert mod_transfer.prior_transfer_size(tgt, stk) == 0
+
+
+# ---- PAD-446: a slot's random clips ------------------------------------------------------
+_BANK = "/godzilla_%s/assets/lcd/auto_loaded/60ed7e50/scene.assets/2.asset/"
+
+
+def test_random_clips_follow_their_slot_across_models(tmp_path):
+    """A field report: "Can we make the randomized substitutions come through on a transfer to
+    another project folder?" A Pro project's slot with random clips (and a replacement) lands on
+    the Premium/LE slot, list and all, beside the replacement."""
+    src, tgt = str(tmp_path / "pro_mods"), str(tmp_path / "prem_stock")
+    _mk_extract(src, {}, images={"video/EndOfBallBonus.mov": b"BONUS-CLIP",
+                                 "video/Intro.mp4": b"INTRO"})
+    _mk_extract(tgt, {}, images={"video/EndOfBallBonus.mov": b"BONUS-CLIP",
+                                 "video/Intro_2.mp4": b"INTRO"})
+    _write_manifest(src, [("EndOfBallBonus.mov", _BANK % "pro" + "55.asset"),
+                          ("Intro.mp4", _BANK % "pro" + "7.asset")])
+    _write_manifest(tgt, [("EndOfBallBonus.mov", _BANK % "le" + "55.asset"),
+                          ("Intro_2.mp4", _BANK % "le" + "7.asset")])
+    takes = [r"C:\mods\take2.mp4", r"C:\mods\take3.mp4"]
+    staged_changes.save(src, {
+        "video": {"video/Intro.mp4": r"C:\mods\intro.mp4"},
+        "video_variants": {"video/Intro.mp4": takes,
+                           "video/EndOfBallBonus.mov": [r"C:\mods\bonus2.mp4"]}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    got = {e["rel"]: e["repl"] for e in plan["video_variants"]["matched"]}
+    assert got == {"video/Intro_2.mp4": takes,
+                   "video/EndOfBallBonus.mov": [r"C:\mods\bonus2.mp4"]}
+    assert plan["video_variants"]["dropped"] == []
+    assert plan["totals"]["transfer"] == 3            # one replacement, two slots of random clips
+
+    res = mod_transfer.apply_transfer(src, tgt, plan)
+    assert res["video_variants"] == 2
+    saved = staged_changes.load(tgt)
+    assert saved["video"] == {"video/Intro_2.mp4": r"C:\mods\intro.mp4"}
+    assert saved["video_variants"] == got
+    assert mod_transfer.prior_transfer_size(tgt, src) == 3
+
+
+def test_random_clips_a_new_version_lacks_are_named(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"video/gone.mp4": b"GONE"})
+    _mk_extract(tgt, {}, images={"video/other.mp4": b"OTHER"})
+    _write_manifest(src, [("gone.mp4", _BANK % "pro" + "91.asset")])
+    _write_manifest(tgt, [("other.mp4", _BANK % "pro" + "12.asset")])
+    staged_changes.save(src, {"video_variants": {"video/gone.mp4": [r"C:\m\a.mp4"]}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["video_variants"]["matched"] == []
+    assert [e["rel"] for e in plan["video_variants"]["dropped"]] == ["video/gone.mp4"]
+    assert plan["totals"]["dropped"] == 1
+    lines = [t for _lvl, t in mod_transfer.plan_detail_lines(plan)]
+    assert any("1 slot(s) with random clips can NOT be carried" in t for t in lines)
+    assert any(t.strip() == "video/gone.mp4" for t in lines)
+
+
+def test_a_second_transfer_of_the_same_mods_replaces_its_random_clips(tmp_path):
+    """Re-transferring the same project replaces what the last transfer wrote; random clips the
+    person set on the new folder by hand are kept."""
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    for root in (src, tgt):
+        _mk_extract(root, {}, images={"video/a.mp4": b"A", "video/b.mp4": b"B"})
+        _write_manifest(root, [("a.mp4", _BANK % "pro" + "1.asset"),
+                               ("b.mp4", _BANK % "pro" + "2.asset")])
+    staged_changes.save(src, {"video_variants": {"video/a.mp4": [r"C:\m\a2.mp4"],
+                                                 "video/b.mp4": [r"C:\m\b2.mp4"]}})
+    mod_transfer.apply_transfer(src, tgt, mod_transfer.plan_transfer(src, tgt))
+    # by hand on the new folder: b's list changed
+    side = staged_changes.load(tgt)
+    side["video_variants"]["video/b.mp4"] = [r"C:\m\mine.mp4"]
+    staged_changes.save(tgt, side)
+    # the old project drops a's random clips and is transferred again
+    staged_changes.save(src, {"video_variants": {"video/b.mp4": [r"C:\m\b2.mp4"]}})
+    res = mod_transfer.apply_transfer(src, tgt, mod_transfer.plan_transfer(src, tgt))
+    assert res["superseded"] == 1
+    assert staged_changes.load(tgt)["video_variants"] == {"video/b.mp4": [r"C:\m\b2.mp4"]}
+
+
+def test_a_built_cards_random_clips_come_back_from_its_extract(tmp_path):
+    """The baked-mods route: a card built with random clips carries each one in the video bank as
+    <slot name>__PadVar<k>, so its extract has them as videos of their own. They go back to their
+    slot, in order, and on to the target like any other mod."""
+    mod, stk, tgt = (str(tmp_path / n) for n in ("built", "stock", "new"))
+    _mk_extract(mod, {}, images={
+        "video/EndOfBallBonus.mov": b"BONUS-CLIP",
+        "video/EndOfBallBonus__PadVar3.mov": b"MY-TAKE-3",
+        "video/EndOfBallBonus__PadVar2.mov": b"MY-TAKE-2",
+        "video/Lonely__PadVar2.mov": b"NO-SLOT"})
+    _mk_extract(stk, {}, images={"video/EndOfBallBonus.mov": b"BONUS-CLIP"})
+    _mk_extract(tgt, {}, images={"video/EndOfBallBonus_2.mov": b"BONUS-CLIP"})
+    _write_manifest(mod, [("EndOfBallBonus.mov", _BANK % "pro" + "55.asset"),
+                          ("EndOfBallBonus__PadVar2.mov", _BANK % "pro" + "598.asset"),
+                          ("EndOfBallBonus__PadVar3.mov", _BANK % "pro" + "599.asset")])
+    _write_manifest(stk, [("EndOfBallBonus.mov", _BANK % "pro" + "55.asset")])
+    _write_manifest(tgt, [("EndOfBallBonus_2.mov", _BANK % "le" + "55.asset")])
+
+    diff = mod_transfer.diff_baked_mods(mod, stk)
+    takes = [os.path.abspath(os.path.join(mod, "video", n)) for n in
+             ("EndOfBallBonus__PadVar2.mov", "EndOfBallBonus__PadVar3.mov")]
+    assert diff["saved"]["video_variants"] == {"video/EndOfBallBonus.mov": takes}
+    assert diff["saved"]["video"] == {}                  # the slot's own clip is stock
+
+    plan = mod_transfer.plan_transfer(stk, tgt, saved=diff["saved"])
+    mod_transfer.apply_transfer(stk, tgt, plan, src_saved=diff["saved"], origin=mod)
+    assert staged_changes.load(tgt)["video_variants"] == {"video/EndOfBallBonus_2.mov": takes}
+
+
+def test_the_no_baseline_route_carries_a_built_cards_random_clips(tmp_path):
+    mod, tgt = str(tmp_path / "built"), str(tmp_path / "new")
+    _mk_extract(mod, {}, images={"video/Bonus.mov": b"BONUS",
+                                 "video/Bonus__PadVar2.mov": b"MY-TAKE"})
+    _mk_extract(tgt, {}, images={"video/Bonus_2.mov": b"BONUS"})
+    _write_manifest(mod, [("Bonus.mov", _BANK % "pro" + "55.asset"),
+                          ("Bonus__PadVar2.mov", _BANK % "pro" + "598.asset")])
+    _write_manifest(tgt, [("Bonus_2.mov", _BANK % "pro" + "55.asset")])
+
+    plan = mod_transfer.plan_direct_diff(mod, tgt)
+    assert plan["video_variants"]["matched"] == [
+        {"rel": "video/Bonus_2.mov", "src_rel": "video/Bonus.mov",
+         "repl": [os.path.abspath(os.path.join(mod, "video", "Bonus__PadVar2.mov"))]}]
+    # the random clip is not counted as a clip the new version lacks
+    assert plan["notes"]["video_old_only"] == 0
+    assert plan["totals"]["transfer"] == 1
+    mod_transfer.apply_transfer(mod, tgt, plan, src_saved={})
+    assert list(staged_changes.load(tgt)["video_variants"]) == ["video/Bonus_2.mov"]
+
+
+def test_the_confirm_dialog_counts_random_clips():
+    from pinball_decryptor.app import App
+    plan = {"audio": {"matched": [], "remapped": [], "flagged": [], "dropped": []},
+            "video": {"matched": [], "dropped": []},
+            "video_variants": {"matched": [{"rel": "video/a.mp4", "repl": ["x"]}],
+                               "dropped": [{"rel": "video/b.mp4", "repl": ["y"]}]},
+            "image": {"matched": [], "dropped": []},
+            "text": {"matched": [], "dropped": []},
+            "totals": {"transfer": 1, "flagged": 0, "dropped": 1}}
+    assert "Random clips:  1 slot(s) matched, 1 dropped" in App._format_transfer_summary(plan)
+    plan["video_variants"] = {"matched": [], "dropped": []}
+    assert "Random clips" not in App._format_transfer_summary(plan)

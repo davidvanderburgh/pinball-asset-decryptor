@@ -698,6 +698,7 @@ def test_a_copy_has_a_time_limit_and_a_cut_copy_counts_only_whole():
     assert c.index("local rc=$?") < c.index("[ $rc -lt 8 ]")
 
 
+@needs_proc
 def test_rigbatch_boots_staged_copies_and_reuses_them():
     """cardstage.sh: every rig boots a copy staged off the slow disk; a card
     that cannot be staged fails its build (not the batch); a second sweep

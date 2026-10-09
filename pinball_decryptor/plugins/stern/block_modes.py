@@ -52,8 +52,11 @@ one of its own sounds (with a callout of the game's when the card could not carr
 a shot at a pace of its own (any value, in ms) or blinking faster as the clock runs down, and (PAD-395)
 hold one of the game's mechanisms (Godzilla's magnet, and on a Premium/LE the Mechagodzilla magnet
 and the bridge) for a time, hold the next ball (or every ball) in the scoop, and let go, and (PAD-392)
-turn Godzilla Premium/LE's shield targets toward the player or away, kept there while it runs, and (PAD-418)
-play one of the game's own light shows by its port's name (Godzilla Premium/LE's ten). Values: a
+turn Godzilla Premium/LE's shield targets toward the player or away, kept there while it runs, (PAD-418)
+play one of the game's own light shows by its port's name (Godzilla Premium/LE's ten), and (PAD-414)
+shake the cabinet's shaker for N ms at a strength, or with one of the game's own shakes (its jackpot shake...) -
+one in When the mode ends runs out after the mode, and (PAD-436) hand the player one of the game's own
+mini-wizards, lit for its start shot or started (James Bond LE 1.06's four). Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running,
@@ -158,7 +161,7 @@ SHARED_RESETS = ("ball", "game")
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
-              "hold", "scoop_hold", "let_go", "shield", "game_show")
+              "hold", "scoop_hold", "let_go", "shield", "game_show", "shake", "shake_game", "game_wizard")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
@@ -168,6 +171,10 @@ SCOOP_WHICH = {"next": "the next ball", "every": "every ball"}
 #: PAD-392: where a block turns the shield targets (Godzilla Premium/LE's platform), kept there while the mode runs;
 #: "leave" stops keeping them (they stay where they are). The runtime turns them back when the mode ends.
 SHIELD_WHERE = {"toward": "toward the player", "away": "away", "leave": "where they are"}
+#: PAD-414: a shake's strength (the game's own power steps, mode_project.SHAKE_STRENGTHS), and its length: at least
+#: SHAKE_MIN_MS, at most the game's own longest at that strength (the runtime clamps a value worked out while it runs)
+SHAKE_STRENGTH = {v: k for k, v in MP.SHAKE_STRENGTHS.items()}
+SHAKE_MIN_MS, SHAKE_MAX_MS = MP.SHAKE_MIN_MS, 5000
 #: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
 HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus")
 GAUGE_KINDS = ("diamond", "segment", "spike")
@@ -410,6 +417,36 @@ def save(project, slug, program):
     return src
 
 
+def refresh(project):
+    """Every blocks mode's C brought up to what its blocks make NOW, before a build compiles it: the C is written
+    only when the blocks are saved, so a mode saved by an older app kept that app's translation (PAD-457: the claim
+    of the game's mini-wizards a mode hands out). Only a C that differs is written; the blocks are not touched, and
+    one that cannot be read is left for the build to report. Returns the slugs written."""
+    from . import code_modes as CM
+    out = []
+    for slug in CM.code_slugs(project) if project else []:
+        if not is_blocks(project, slug):
+            continue
+        try:
+            program = load(project, slug)
+            text = to_c(program, slug)
+        except Exception:                               # noqa: BLE001 - never a build broken by this
+            continue
+        folder = MP.mode_folder(project, slug)
+        src = os.path.join(folder, slug + ".c")
+        try:
+            with open(src, "r", encoding="utf-8") as f:
+                if f.read() == text:
+                    continue
+        except OSError:
+            pass
+        if program["hud"]["on"]:
+            _copy_kit(folder)
+        _write(src, text)
+        out.append(slug)
+    return out
+
+
 def _write(path, text):
     with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
@@ -571,7 +608,8 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
-def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None):
+def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
+             game_wizards=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -579,7 +617,10 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     and ``scoop`` (whether it may hold a ball in the scoop), when given, are the card's too
     (PAD-395); so is ``shield`` (PAD-392): False where the game has no shield platform a mode may turn,
     else the name of its own shield feature ("" when the port names none); so is ``game_shows`` (PAD-418): the
-    names of the game's own light shows its port names ([] = none on this game). The C is written anyway (a missing shot is 0 to the game, which never matches),
+    names of the game's own light shows its port names ([] = none on this game); so is ``shaker`` (PAD-414): False where the game has no
+    shaker a mode may shake, else ``{"shakes": names of the game's own, "max": its longest per strength}``; so is
+    ``game_wizards`` (PAD-436): the names of the game's own mini-wizards ([] = none a mode may hand over on this game).
+    The C is written anyway (a missing shot is 0 to the game, which never matches),
     so a half-made program always saves."""
     program = normalize(program)
     out = []
@@ -621,7 +662,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds,
            "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield,
-           "game_shows": list(game_shows) if game_shows is not None else None}
+           "game_shows": list(game_shows) if game_shows is not None else None,
+           "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None}
     hud = program["hud"]
     if hud["on"]:
         for k, c in enumerate(hud["counters"]):
@@ -940,6 +982,23 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["shield"] is False:
                 ctx["out"].append("%s turns the shield targets, which a mode cannot do on this card's game."
                                   % where)
+        elif op in ("shake", "shake_game"):                                          # PAD-414
+            shaker = ctx["shaker"]
+            if shaker is False:
+                ctx["out"].append("%s shakes the cabinet, which a mode cannot do on this card's game." % where)
+            elif op == "shake":
+                strength = SHAKE_STRENGTH.get(b.get("strength"))
+                if strength is None:
+                    ctx["out"].append("%s shakes the cabinet: hard, strong, medium or soft." % where)
+                else:
+                    top = ((shaker or {}).get("max") or [0] * 4)[strength] or SHAKE_MAX_MS
+                    _check_ms(b.get("ms"), SHAKE_MIN_MS, top, "%s shakes the cabinet with a %s shake for" % (
+                        where, b.get("strength")), ctx)
+            elif not b.get("shake"):
+                ctx["out"].append("%s plays none of the game's shakes." % where)
+            elif shaker and b.get("shake") not in (shaker.get("shakes") or ()):
+                ctx["out"].append("%s plays the game's %s shake, which this card's game does not have."
+                                  % (where, b.get("shake")))
         elif op == "game_show":                         # PAD-418: by the port's name for it
             name = b.get("name")
             if not name or not isinstance(name, str):
@@ -950,6 +1009,18 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["game_shows"] is not None and name not in ctx["game_shows"]:
                 ctx["out"].append("%s plays the game's light show %s, which this card's game does not have."
                                   % (where, name))
+        elif op == "game_wizard":                       # PAD-436: by the port's name for it
+            name = b.get("name")
+            if not name or not isinstance(name, str):
+                ctx["out"].append("%s hands the player the game's mini-wizard with none chosen." % where)
+            elif ctx["game_wizards"] is not None and not ctx["game_wizards"]:
+                ctx["out"].append("%s hands the player a mini-wizard of the game's, which a mode cannot do on this "
+                                  "card's game." % where)
+            elif ctx["game_wizards"] is not None and name not in ctx["game_wizards"]:
+                ctx["out"].append("%s hands the player the game's mini-wizard %s, which this card's game does not "
+                                  "have." % (where, name))
+            if b.get("how", "light") not in MP.WIZARD_HOW:
+                ctx["out"].append("%s lights the game's mini-wizard or starts it." % where)
 
 
 def _check_ms(ms, lo, hi, where, ctx):
@@ -1112,6 +1183,8 @@ class _Gen:
         self.holds = []                 # PAD-395: the mechanisms its blocks hold or let go, by the port's name
         self.mech = False               # PAD-395: a block holds or lets go of something (the helpers go in)
         self.game_show = False          # PAD-418: a block plays one of the game's own light shows
+        self.game_wizard = False        # PAD-436: a block hands the player one of the game's own mini-wizards
+        self.wizard_names = []          # PAD-457: ... which ones: the mode claims them as it loads
 
     def var(self, i, p="P()"):
         """Variable ``i`` of player ``p``, as C: its own row, or the shared global."""
@@ -1349,11 +1422,28 @@ class _Gen:
                 if where:
                     self.mech = True
                     out.append(pad + "shield(%s);" % where)
+            elif op == "shake":                                                       # PAD-414
+                strength = SHAKE_STRENGTH.get(b.get("strength"))
+                if strength is not None:
+                    self.mech = True
+                    out.append(pad + "shake(%s, %d);" % (self.num(b.get("ms")), strength))
+            elif op == "shake_game":
+                name = str(b.get("shake") or "")
+                if HOLD_RE.match(name):
+                    self.mech = True
+                    out.append(pad + "shake_game(%s);" % _c_str(name))
             elif op == "game_show":
                 name = b.get("name")
                 if name and isinstance(name, str):
                     self.game_show = True
                     out.append(pad + "game_show(%s);" % _c_str(name))
+            elif op == "game_wizard":
+                name = b.get("name")
+                if name and isinstance(name, str):
+                    self.game_wizard = True
+                    if name not in self.wizard_names:
+                        self.wizard_names.append(name)
+                    out.append(pad + "game_wizard(%s, %d);" % (_c_str(name), 1 if b.get("how") == "start" else 0))
         return out
 
     @staticmethod
@@ -1723,6 +1813,8 @@ def to_c(program, slug):
         L.extend((_MEDIA_C % {"slug": slug}).split("\n"))
     if g.game_show:
         L.extend(_GAME_SHOW_C.split("\n"))
+    if g.game_wizard:
+        L.extend(_GAME_WIZARD_C.split("\n"))
     if g.mech:
         L.extend((_MECH_C % {"lo": HOLD_MIN_MS, "hi": HOLD_MAX_MS, "slo": SCOOP_MIN_MS, "shi": SCOOP_MAX_MS,
                              "release": "".join("    pm_coil_release(%s);\n" % _c_str(n) for n in g.holds)}
@@ -1898,6 +1990,8 @@ def to_c(program, slug):
              % len(g.shots))
     if media:
         L.append("    pa_load(&own);")
+    for name in g.wizard_names:                     # PAD-457: the game's own lighting leaves them to this mode
+        L.append("    pm_game_wizard_claim_named(%s);" % _c_str(name))
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
     L.append("")
@@ -2357,6 +2451,19 @@ UNUSED static void game_show(const char *name)
 }
 """
 
+#: PAD-436: the game's own mini-wizard by its port's name (MODE_SDK.md "The game's own mini-wizards")
+_GAME_WIZARD_C = r"""/* PAD-436: one of the game's own mini-wizards, by its port's name: lit for the game's start shot, or started at once
+ * (lit until the game would start one, or while a mode of yours holds the game's modes off). The runtime hands it
+ * over in a game, whether this mode runs or not; a game whose port names no such mini-wizard does nothing. Each
+ * refusal is a line of the runtime's. The mode claims each one it names as it loads (on_init, PAD-457): the game's
+ * own lighting leaves those to it. */
+UNUSED static void game_wizard(const char *name, int start)
+{
+    int r = pm_game_wizard_named(name, start ? PM_WIZARD_START : PM_WIZARD_LIGHT);
+    if (r) pm_log("mini-wizard: the game's %s, %s", name, r == PM_WIZARD_STARTED ? "started" : "lit for its start shot");
+}
+"""
+
 _MECH_C = """/* ---- the mechanisms (PAD-395; MODE_SDK.md "The magnet", "The scoop") ---- */
 static int scoop_next;                  /* 1 = the next ball only, 2 = it is held now: then no more */
 
@@ -2400,6 +2507,25 @@ UNUSED static void shield(int where)
 {
     if (!run.on) return;
     if (!pm_shield_keep(where)) pm_log("shield: no platform on this game");
+}
+
+/* PAD-414: shake the cabinet this many ms at a strength (0 hard .. 3 soft), or with one of the game's own shakes; the
+ * runtime keeps every limit (the operator's setting, the game's own longest, one at a time, 20 and 15 s a minute) and
+ * stops it when the mode ends - unless it was asked for in When the mode ends, which it leaves to run out */
+UNUSED static void shake(long long ms, unsigned strength)
+{
+    if (!run.on) return;
+    if (ms < 0) ms = 0;
+    if (ms > 60000) ms = 60000;
+    if (!pm_shake((unsigned)ms, strength)) pm_log("shake: refused (the runtime's line says why)");
+    else if (ending) pm_shake_outlast();
+}
+
+UNUSED static void shake_game(const char *name)
+{
+    if (!run.on) return;
+    if (!pm_shake_game(name)) pm_log("shake %%s: refused (the runtime's line says why)", name);
+    else if (ending) pm_shake_outlast();
 }
 
 /* every tick while it runs: a hold of the next ball only ends once that ball has been held */

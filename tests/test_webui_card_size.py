@@ -211,6 +211,7 @@ def test_an_8g_original_offers_16_and_32(tmp_path):
         assert "games partition" in s["card_size_tip"]
         assert s["card_size_options"] == [
             {"value": "", "label": "Same as the original"},
+            {"value": "16S", "label": "Smaller 16 GB card"},
             {"value": "16G", "label": "16 GB card"},
             {"value": "32G", "label": "32 GB card"}]
         assert s["card_size_shown"] == ""
@@ -260,8 +261,8 @@ def test_the_original_changing_re_reads_it(tmp_path):
     big = make_card(tmp_path / "jaws.raw", "16G")
     with web_app(tmp_path, mfr="stern") as w:
         point_at(w, small)
-        assert wait_for(w, lambda: values(w.state("write")) == ["", "16G",
-                                                                 "32G"])
+        assert wait_for(w, lambda: values(w.state("write")) == ["", "16S",
+                                                                 "16G", "32G"])
         point_at(w, big)
         assert wait_for(w, lambda: values(w.state("write")) == ["", "32G"])
 
@@ -700,8 +701,8 @@ def test_a_computer_that_cant_grow_a_card_is_refused_first(tmp_path,
                 "computer: the Linux this app uses can't attach the card "
                 "image as a disk.")
         assert s["card_size_note"] == want
-        # the other bigger size stays on offer, the one asked for once
-        assert values(s) == ["", "16G", "32G"]
+        # the other sizes stay on offer, the one asked for once
+        assert values(s) == ["", "16S", "16G", "32G"]
         assert s["card_size_shown"] == "16G"
         assert w.run(w.window.card_size_problem) == want
         # the build's own check (the worker's backstop) says the same
@@ -890,8 +891,9 @@ def _stock_partition(monkeypatch, geometry, harness=None):
 
 
 GZ_ROOM = ("The original is an 8 GB card. Its games partition, where replaced "
-           "videos and longer sounds go, has 352 MB free; built for a 16 GB "
-           "card it has 7.87 GB, for a 32 GB card 22.50 GB.")
+           "videos and longer sounds go, has 352 MB free; built for a smaller "
+           "16 GB card it has 7.21 GB, for a 16 GB card 7.87 GB, for a 32 GB "
+           "card 22.50 GB.")
 
 
 def test_the_note_gives_the_real_room_at_each_size(tmp_path, monkeypatch):
@@ -911,6 +913,7 @@ def test_the_note_gives_the_real_room_at_each_size(tmp_path, monkeypatch):
         assert asked and not any(asked), "read on the UI loop"
         probe = w.window.service("write")._card_probe
         assert probe["room"] == {"8G": (89975 - 4096) * 4096,
+                                 "16S": (1763599 - 4096) * 4096,
                                  "16G": (1924909 - 4096) * 4096,
                                  "32G": (5497389 - 4096) * 4096}
         n = len(asked)

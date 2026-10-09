@@ -25,6 +25,14 @@ Store namespace ``video``:
   best       the "Best quality…" window (webui/video_best.py)
   widths     {column key: px} the columns the user dragged (settings.json
              column_widths["video_web"]); the rest fit their content
+  compare    {open, max, tiles: [{id, rel, side, sides, pane, look}]}: the
+             Compare view's players (PAD-440), each with its colour steps
+
+A row's RANDOM CLIPS (PAD-446): more clips for one slot, the game playing
+one of them at random each time it plays the slot's clip.  Kept in the
+sidecar's ``video_variants`` ({rel: [file, ...]}); which slots can have them
+is the plugin's answer (``Manufacturer.video_variants_offer``), asked once
+per scan off the UI thread.
 """
 
 import csv
@@ -39,6 +47,8 @@ from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
 from .. import look_switches
 from .. import video_helpers as vh
 from ..video_best import BEST_TIP, BestQualityMixin
+from ..video_modes import ModesMixin
+from ..video_undo import UndoMixin, undoable
 from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
@@ -52,6 +62,20 @@ def _length_ok(choice):
         length_seconds(choice))
 
 
+def _variants_from(raw, by_rel):
+    """A sidecar's ``video_variants`` as ``{rel: [file, ...]}``, for the
+    slots this scan found (PAD-446)."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for rel, files in raw.items():
+        if rel in by_rel and isinstance(files, (list, tuple)):
+            keep = [f for f in files if isinstance(f, str) and f.strip()]
+            if keep:
+                out[rel] = keep
+    return out
+
+
 def _length_key(choice):
     """The row menu's name for a clip's length choice."""
     if choice is None:
@@ -60,10 +84,17 @@ def _length_key(choice):
 _SCAN_LABEL = "Video"             # MainWindow._SCAN_LABELS["video"]
 
 NO_PROJECT_TEXT = "Set the project folder on the Extract tab, then click Scan."
+COMPARE_MAX = 4                   # clips side by side in Compare (PAD-440)
 NO_PROJECT_MIRROR = "(no project yet — extract into one on the Extract tab)"
+# a game's own clip with its color profile attached: Compare's title for it
+# (PAD-336, PAD-448)
+STOCK_COLOURED = "With its color profile"
+# PAD-462: and the main Replacement player's words for it, which stays empty
+STOCK_ON_ORIG = ("no replacement assigned: the game's own clip, its color "
+                 "profile is on the Original player")
 
 
-class VideoTab(BestQualityMixin, TabService):
+class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
     ns = "video"
     key = "Replace Video"
     label = "Video"
@@ -89,6 +120,10 @@ class VideoTab(BestQualityMixin, TabService):
         self._asis = {}                  # rel -> per-clip as-is override
         self._length = {}                # rel -> per-clip length choice
         self._color = {}                 # rel -> per-clip colour switch (PAD-312)
+        self._variants = {}              # rel -> [extra clip, ...] (PAD-446)
+        # PAD-446: the plugin's {"why", "slots", "max"} for this scan, or None
+        # when it offers no random clips at all
+        self._var_offer = None
         # the Advanced box (PAD-336): the game's own clips get a switch too,
         # and these are the ones switched on
         self._color_stock = False
@@ -96,6 +131,13 @@ class VideoTab(BestQualityMixin, TabService):
         # the preview's three switches on the players (PAD-329, PAD-330), as
         # they were left last time (PAD-348)
         self._lsw = look_switches.initial(window, "video")
+        # PAD-454 (DragonRR): what each of the two players shows, as a Compare
+        # player does: "plain" (its Original / Replacement as it is) or
+        # "profile" (With its color profile); None = as the clip is set (the
+        # Replacement with its profile when one is attached).  Back to None
+        # for another clip, and the Replacement's when its switch moves
+        self._pview = {"orig": None, "rep": None}
+        self._pview_key = None
         self._color_all = False          # the Color profile tab's "every replaced video"
         self._scan_id = 0
         self._scan_dir = ""
@@ -119,6 +161,14 @@ class VideoTab(BestQualityMixin, TabService):
         self._index = {}                 # rel -> index in _rows
         self._restoring = False
         self._pane_seq = 0
+        self._cmp = []                   # the Compare players (PAD-440)
+        self._cmp_open = False
+        self._cmp_ids = 0
+        # PAD-448: the players' colour tables still to build ({path: steps}),
+        # newest last, and whether a worker is on them
+        self._lut_lock = threading.Lock()
+        self._lut_want = {}
+        self._lut_busy = False
         self._play_seq = 0
         self._stop_seq = 0
         self._sel_seq = 0
@@ -128,6 +178,9 @@ class VideoTab(BestQualityMixin, TabService):
         self._q_cancel = False
         self._q_clips = []
         self._q_card = ""
+        self._m_init()                  # PAD-444: Played in (video_modes.py)
+        self._u_init()                  # PAD-453: Undo / Redo (video_undo.py)
+        self._m_select_after = []
         for v in (self.video_search_var, self.video_change_filter_var):
             v.trace_add("write", lambda *_a: self._refresh_list())
         for v in (self.video_trim_var, self.video_no_conversion_var):
@@ -143,6 +196,7 @@ class VideoTab(BestQualityMixin, TabService):
                  quality=self._quality_state(open_=False),
                  best_tip=BEST_TIP, best_supported=False,
                  color_offered=False, color_stock=False,
+                 compare={"open": False, "max": COMPARE_MAX, "tiles": []},
                  widths=self._saved_widths())
         threading.Thread(target=vh.prune_cache, daemon=True,
                          name="video-cache-prune").start()
@@ -176,6 +230,8 @@ class VideoTab(BestQualityMixin, TabService):
         self._q_clips = []
         self._set_scan_ui(False, log_it=False)
         self._clear_preview()
+        self._m_reset()
+        self._u_reset()
         try:
             note = (mfr.video_length_note() or "").strip()
         except Exception:                                   # noqa: BLE001
@@ -215,31 +271,184 @@ class VideoTab(BestQualityMixin, TabService):
         offered = self._per_file_colour()
         sw = dict(self._lsw)
         look = {"offered": offered, "on": any(sw.values()), "sw": sw, "parts": None,
-                "orig": [], "rep": []}
+                "orig": [], "rep": [], "lut": {"orig": None, "rep": None},
+                "views": {"orig": None, "rep": None}}
+        with self._lut_lock:
+            self._lut_want.clear()
         folder = self._assets_path()
+        rel = self._current
+        switch = self._color_state(rel) if rel else None
         if offered and folder and os.path.isdir(folder):
             try:
                 from ...core import colour_profile
                 look["parts"] = colour_profile.preview_parts(folder)
             except Exception:                           # noqa: BLE001
                 log.exception("preview parts")
+            look["views"] = self._pane_views(folder, rel, switch)
         if offered and look["on"] and folder and os.path.isdir(folder):
-            rel = self._current
-            switch = self._color_state(rel) if rel else None
-            var = getattr(self.window, "scenes_own_colours_var", None)
-            try:
-                own = False if var is None else bool(var.get())
-            except Exception:                           # noqa: BLE001
-                own = False
             try:
                 from ...core import colour_profile
-                look.update(colour_profile.video_look(
-                    folder, switch, own, overlay_on=sw["overlay"],
-                    files_on=sw["files"], screen_on=sw["screen"], rel=rel))
+                kw = dict(overlay_on=sw["overlay"], files_on=sw["files"],
+                          screen_on=sw["screen"], rel=rel)
+                own, done = self._own_colours(), {}
+                prev = (self.get("look") or {}).get("lut") or {}
+                for side, (part, on) in self._pane_sources(
+                        switch, look["views"]).items():
+                    if on not in done:
+                        done[on] = (
+                            colour_profile.video_look(folder, on, own, **kw),
+                            colour_profile.video_look_exact(folder, on, own,
+                                                            **kw))
+                    steps, exact = done[on]
+                    look[side] = steps[part]
+                    look["lut"][side] = self._lut(exact[part], prev.get(side))
             except Exception:                           # noqa: BLE001
                 log.exception("video machine look")
         if look != self.get("look"):
             self.set(look=look)
+        if self._cmp_open:
+            self._cmp_steps()
+            self._cmp_publish()
+
+    def _pane_views(self, folder, rel, switch):
+        """Each player's Original / With its color profile switch (PAD-454):
+        ``{side: {"plain", "view", "name", "on", "stock"} or None}``.  On a
+        player with a clip when the clip has a color profile to show (its
+        own, else the project's individual files one), attached or not:
+        "plain" is the word for the player as it is, "view" which of the
+        two is on show, "name" the profile's, "on" whether it is attached,
+        "stock" a game's own clip on the Replacement player (never since
+        PAD-462; the page still reads it).
+
+        PAD-462 (DragonRR): the player of the file the profile is on (the
+        Replacement, else for a game's own clip the Original) opens on With
+        its color profile while it is attached, and turns to it when the
+        Colors bar changes the profile (``profile_shown``); the other opens
+        as it is.  Either is the user's to turn after that."""
+        key = (rel, switch, self._assign.get(rel) if rel else None)
+        if key != self._pview_key:
+            old = self._pview_key
+            if old is None or old[0] != rel or not (key[2] and old[2]):
+                # the Original is the file the profile is on when the slot
+                # has no replacement: it follows the switch then
+                self._pview["orig"] = None
+            self._pview["rep"] = None
+            self._pview_key = key
+        out = {"orig": None, "rep": None}
+        if not rel:
+            return out
+        try:
+            from ...core import colour_profile
+            prof = colour_profile.asset_resolver(folder)("videos", rel)
+        except Exception:                               # noqa: BLE001
+            log.exception("video player views")
+            prof = None
+        pv = self.get("preview") or {}
+        if prof is None or pv.get("rel") != rel:
+            return out
+        mine = self._profile_side(rel)
+        for side in ("orig", "rep"):
+            pane = pv.get(side) or {}
+            if not pane.get("path"):
+                continue
+            out[side] = {"plain": pane.get("title") or "Original",
+                         "name": prof.name or "", "on": bool(switch),
+                         "stock": False,
+                         "view": self._pview[side] or (
+                             "profile" if side == mine and switch
+                             else "plain")}
+        return out
+
+    def _profile_side(self, rel):
+        """The player of the file *rel*'s color profile is on (PAD-462): its
+        Replacement, else (a game's own clip) its Original."""
+        return "rep" if rel and self._assign.get(rel) else "orig"
+
+    def profile_shown(self, rels):
+        """PAD-462 (DragonRR): the Colors bar changed the color profile of
+        *rels*: the clip on the players, if it is one, is shown with it
+        ("With its color profile" on the player of the file it is on: "the
+        user wants to see what they have just done").  The bar redraws the
+        players after."""
+        rel = self._current
+        if not rel or rel not in set(rels or ()):
+            return False
+        self._pview[self._profile_side(rel)] = "profile"
+        return True
+
+    @staticmethod
+    def _pane_sources(switch, views):
+        """Which of :func:`colour_profile.video_look`'s lists each player
+        draws through, and for which Color switch: ``{side: (list,
+        switch)}``.  With its color profile is the clip's list with the
+        switch on; a Replacement shown as it is, the one with it off; an
+        Original shown as it is, its own (PAD-462: a game's own clip is only
+        ever on the Original player now)."""
+        out = {"orig": ("orig", switch), "rep": ("rep", switch)}
+        for side, v in (views or {}).items():
+            if not v:
+                continue
+            if v["view"] == "profile":
+                out[side] = ("rep", True)
+            elif side == "rep":
+                out[side] = ("rep", False)
+        return out
+
+    @rpc
+    def set_pane_view(self, side, view):
+        """One player's Original / With its color profile switch (PAD-454).
+        Only that player changes: nothing is attached or detached."""
+        if side not in self._pview or view not in ("plain", "profile"):
+            return False
+        self._pview[side] = view
+        self.publish_look()
+        return True
+
+    def _own_colours(self):
+        """The Scenes gear menu's setting: a clip with no color profile
+        attached passes the machine screen by."""
+        var = getattr(self.window, "scenes_own_colours_var", None)
+        try:
+            return False if var is None else bool(var.get())
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _lut(self, steps, prev):
+        """The colour table a player draws *steps* through (PAD-448: the
+        exact maths, colour ranges too): its path once built, ``None`` for
+        no steps.  One not built yet is built on a worker and the player
+        keeps *prev* meanwhile, so a slider dragged in the Colors bar never
+        holds the page up."""
+        from ...core import colour_profile
+        path = colour_profile.look_lut_path(steps)
+        if path is None or os.path.isfile(path):
+            return path
+        with self._lut_lock:
+            self._lut_want.pop(path, None)
+            self._lut_want[path] = steps
+            if self._lut_busy:
+                return prev
+            self._lut_busy = True
+        threading.Thread(target=self._lut_work, daemon=True,
+                         name="video-lut").start()
+        return prev
+
+    def _lut_work(self):
+        """Build the wanted colour tables, newest first; each one built
+        redraws the players, which then find it."""
+        from ...core import colour_profile
+        while True:
+            with self._lut_lock:
+                if not self._lut_want:
+                    self._lut_busy = False
+                    return
+                _path, steps = self._lut_want.popitem()
+            try:
+                colour_profile.build_look_lut(steps)
+            except Exception:                           # noqa: BLE001
+                log.exception("video colour table")
+                continue
+            self.ctx.loop.post(self.publish_look)
 
     @rpc
     def set_look_part(self, part, on):
@@ -353,7 +562,8 @@ class VideoTab(BestQualityMixin, TabService):
             return None
         if not vh.same_dir(assets_dir, self._scan_dir or ""):
             return None
-        by_rel = dict(self._by_rel)
+        by_rel = {rel: s for rel, s in self._by_rel.items()
+                  if rel not in self._m_virtual}
         assignments = {rel: rep for rel, rep in dict(self._assign).items()
                        if rep and rel in by_rel}
         if not assignments:
@@ -422,6 +632,7 @@ class VideoTab(BestQualityMixin, TabService):
         except Exception:                                   # noqa: BLE001
             kept = {}
         staged_changes.save(assets_dir, kept)
+        self._u_reset()
 
     def refresh_after_revert(self):
         """The video part of MainWindow.refresh_after_revert."""
@@ -524,14 +735,23 @@ class VideoTab(BestQualityMixin, TabService):
                 slots = []
             if self._scan_id != scan_id:
                 return
+            # PAD-446: which slots can play one of several clips at random
+            # (it may open the card image, so here and not on the UI thread)
+            try:
+                offer = (mfr.video_variants_offer(
+                    path, [sl.rel_path for sl in slots]) if mfr else None)
+            except Exception:                               # noqa: BLE001
+                offer = None
+            if self._scan_id != scan_id:
+                return
             self.ctx.loop.post(self._populate_after_scan, slots, scan_id,
-                               path)
+                               path, offer)
 
         self._set_scan_ui(True)
         threading.Thread(target=_work, daemon=True,
                          name="video-scan").start()
 
-    def _populate_after_scan(self, slots, scan_id, scan_dir):
+    def _populate_after_scan(self, slots, scan_id, scan_dir, offer=None):
         """MainWindow._populate_video_after_scan."""
         if self._scan_id != scan_id:
             return
@@ -539,6 +759,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._set_scan_ui(False)
         self._slots = slots
         self._by_rel = {s.rel_path: s for s in slots}
+        self._var_offer = offer if isinstance(offer, dict) else None
         if scan_dir != self._scan_dir:
             staged = self._load_staged(scan_dir)
             self._assign = staged_changes.live_assignments(
@@ -572,6 +793,8 @@ class VideoTab(BestQualityMixin, TabService):
                                   and self._color_stock}
                 self._color = {rel: v for rel, v in self._color.items()
                                if self._assign.get(rel)}
+                self._variants = _variants_from(staged.get("video_variants"),
+                                                self._by_rel)
                 val = staged.get("video_change_filter")
                 if val in vh.CHANGE_FILTER_VALUES:
                     self.video_change_filter_var.set(val)
@@ -592,16 +815,34 @@ class VideoTab(BestQualityMixin, TabService):
                            if rel in self._by_rel}
             self._stock_on = {rel for rel in self._stock_on
                               if rel in self._by_rel}
+            self._variants = {rel: v for rel, v in self._variants.items()
+                              if rel in self._by_rel}
         folder_changed = scan_dir != self._scan_dir
         self._scan_dir = scan_dir
         self._changed = set()
         self._foreign = set()
         if folder_changed:
             self._clear_preview()
+            self._m_reset()
+            self._u_reset()
+        # the modes the card's program names (read once per card; a card read
+        # before publishes now, so the rows below carry them)
+        self._m_kick(scan_dir)
         self._refresh_list()
-        # Default to the first clip so a poster frame shows on a fresh scan.
+        # Default to the first clip so a poster frame shows on a fresh scan
+        # (PAD-444: the row a copy was just made or dropped for, when it is listed)
         view = self.get("view") or []
-        if view:
+        after = [r for r in self._m_select_after if r in self._index]
+        self._m_select_after = []
+        if after and self._index[after[0]] not in view:
+            self.video_search_var.set("")
+            self._m_filter = ""
+            self._refresh_list()
+            view = self.get("view") or []
+        if after:
+            self._reselect(after[:1])
+            self._load_track(after[0])
+        elif view:
             first = self._rows[view[0]]["rel"]
             self._reselect([first])
             self._load_track(first)
@@ -735,6 +976,7 @@ class VideoTab(BestQualityMixin, TabService):
         i = self._index.get(rel)
         if i is not None:
             self._put_row(i, self._row(slot))
+        self._m_meta(rel)
         if self._assign.get(rel) and not self._conv_kick:
             # its Convert answer can be worked out properly now
             self._conv_kick = True
@@ -773,6 +1015,8 @@ class VideoTab(BestQualityMixin, TabService):
             self._mark_change_scan(False)
             return
         self._mark_change_scan(True)
+        # PAD-444: a mode's own copy is the project's file, not the card's
+        copies = {r.get("rel") for r in self._m_records() if r.get("state") != "shared"}
 
         def _work():
             from ...core import folder_match
@@ -784,10 +1028,11 @@ class VideoTab(BestQualityMixin, TabService):
                          if r in rel_set}
                 to_hash = [r for r in rels if r not in snaps]
                 changed = snaps | checksums.changed_rels(
-                    path, to_hash, baseline=baseline)
+                    path, [r for r in to_hash if r not in copies],
+                    baseline=baseline)
                 if baseline:
-                    foreign, twins = folder_match.foreign_twins(rels,
-                                                                baseline)
+                    foreign, twins = folder_match.foreign_twins(
+                        [r for r in rels if r not in copies], baseline)
             except Exception:                               # noqa: BLE001
                 changed = set()
 
@@ -863,6 +1108,9 @@ class VideoTab(BestQualityMixin, TabService):
     def _rep_pane_empty_text(self, rel, default):
         """MainWindow._rep_pane_empty_text("video", rel, default)."""
         from ...core import staged_originals
+        follow = self._m_follow_text(rel)
+        if follow:
+            return follow
         if rel is None or not self._slot_changed_on_disk(rel):
             return default
         if rel in self._foreign:
@@ -992,7 +1240,10 @@ class VideoTab(BestQualityMixin, TabService):
         fmt = vh.fmt_cell(self._mfr_key(), s)
         conv = self._conv_cell(rel, rep)
         d = os.path.dirname(rel)
+        var = self._variants.get(rel) or []
         return {"rel": rel, "name": os.path.basename(rel),
+                # PAD-446: the slot's random clips, and the words for them
+                "var": len(var), "var_tip": self._variants_words(rel),
                 "dir": (d + "/") if d else "",
                 "len": self._length_cell(rel, length), "res": res,
                 "fmt": fmt, "fmt_bad": fmt.endswith("⚠"), "aud": aud,
@@ -1001,7 +1252,8 @@ class VideoTab(BestQualityMixin, TabService):
                 "col": self._color_state(rel), "col_own": rel in self._color,
                 "col_lock": self._color_locked(rel),
                 "col_stock": bool(self._color_stock
-                                  and not self._assign.get(rel))}
+                                  and not self._assign.get(rel)),
+                **self._m_row(rel)}
 
     # -- the chosen-files colour profile (PAD-312) ------------------------
     def _per_file_colour(self):
@@ -1030,6 +1282,7 @@ class VideoTab(BestQualityMixin, TabService):
                     and not self._color_stock and self._per_file_colour())
 
     @rpc
+    @undoable("Advanced")
     def set_color_stock(self, on):
         """The Advanced box (PAD-336): unlock the Color switch on the game's
         own clips.  Unticked, they lock again and any of them already built
@@ -1052,6 +1305,8 @@ class VideoTab(BestQualityMixin, TabService):
         self.log("Replace Video: %s." % msg, "info")
         self._save_staged()
         self._refresh_list()
+        if self._current:
+            self._reload_rep_pane(self._current)
         self._color_changed()
         self.publish_look()
         return True
@@ -1060,9 +1315,13 @@ class VideoTab(BestQualityMixin, TabService):
         """The Color profile tab moved its "every replaced video" box."""
         from ...core import staged_changes
         folder = self._assets_path()
-        self._color_all = bool(folder and staged_changes.load(folder).get(
+        was = self._color_all
+        self._color_all = bool(folder and staged_changes.peek(folder).get(
             "color_all_videos"))
-        self._refresh_list()
+        if self._color_all != was:
+            # PAD-464: only the box moving changes the rows (the Colors bar
+            # tells every change, a slider's too)
+            self._refresh_list()
         self.publish_look()
 
     def _color_changed(self):
@@ -1079,6 +1338,7 @@ class VideoTab(BestQualityMixin, TabService):
                     log.exception("video colour %s.%s", ns, name)
 
     @rpc
+    @undoable("the colors of %s")
     def set_color(self, rel, value):
         """This clip's own colour switch (PAD-312): True / False, or None
         to follow the Color profile tab's box again."""
@@ -1123,9 +1383,62 @@ class VideoTab(BestQualityMixin, TabService):
                 rel, " (its original file is back)" if back else ""), "info")
         self._save_staged()
         self._refresh_list()
+        self._reload_rep_pane(rel)
         self._color_changed()
         self.publish_look()
         return True
+
+    def color_targets(self, scope="profiled"):
+        """The clips the Colors bar's Apply to all gives its profile,
+        ``{rel: attached}`` (PAD-439).  *scope* (PAD-462): "profiled", the
+        clips with a color profile attached, replaced or (Advanced) the
+        game's own; "all", every clip that is not locked: each replaced one,
+        and with Advanced ticked every game's own clip."""
+        if not self._per_file_colour():
+            return {}
+        rels = (self._by_rel if scope == "all" and self._color_stock
+                else set(self._assign) | self._stock_on)
+        out = {}
+        for rel in rels:
+            on = self._color_state(rel) if rel in self._by_rel else None
+            if on is not None and (on or scope == "all"):
+                out[rel] = on
+        return out
+
+    def put_color_switches(self, switches):
+        """PAD-439: clips' own switches set at once (``True`` / ``False``,
+        ``None`` = follow the box again), one save and one redraw.  Returns
+        what each was, the same way (Apply to all's Undo).  PAD-462: a game's
+        own clip with Advanced ticked too (``True`` / ``False``); one turned
+        off that a build already gave the profile gets its original back."""
+        before, back = {}, []
+        for rel, value in (switches or {}).items():
+            if rel not in self._by_rel:
+                continue
+            if not self._assign.get(rel):
+                if not (self._color_stock and self._per_file_colour()):
+                    continue
+                was = rel in self._stock_on
+                before[rel] = was
+                if value and not was:
+                    self._stock_on.add(rel)
+                elif not value and was:
+                    self._stock_on.discard(rel)
+                    back.append(rel)
+                continue
+            before[rel] = self._color.get(rel)
+            if value is None:
+                self._color.pop(rel, None)
+            else:
+                self._color[rel] = bool(value)
+        if back and not self._is_running():
+            self._put_back(back)
+        if before:
+            self._save_staged()
+            self._refresh_list()
+            self._color_changed()
+            self.publish_look()
+        return before
 
     def _put_row(self, i, row):
         if 0 <= i < len(self._rows) and self._rows[i] != row:
@@ -1154,7 +1467,8 @@ class VideoTab(BestQualityMixin, TabService):
         mode = self.video_change_filter_var.get()
         if mode not in ("Changed", "Unchanged"):
             return None
-        touched = set(self._assign) | self._changed
+        # PAD-446: a slot given random clips is a change a build makes too
+        touched = set(self._assign) | self._changed | set(self._variants)
         want = mode == "Changed"
         return lambda rel: (rel in touched) == want
 
@@ -1190,19 +1504,23 @@ class VideoTab(BestQualityMixin, TabService):
         the callout under the preview."""
         if self._restoring:
             return
-        self._publish_rows([self._row(s) for s in self._slots])
+        listed = self._m_slots()            # PAD-444: + the followers' rows
+        self._publish_rows([self._row(s) for s in listed])
         query = (self.video_search_var.get() or "").strip().lower()
-        slots = [s for s in self._slots
-                 if not query or query in s.rel_path.lower()]
+        slots = [s for s in listed
+                 if not query or query in s.rel_path.lower()
+                 or query in self._m_of.get(s.rel_path, "").lower()]
         ok = self._change_pred()
         if ok is not None:
             slots = [s for s in slots if ok(s.rel_path)]
+        slots = [s for s in slots if self._m_keep(s.rel_path)]
         col, desc = self._sort
         slots.sort(key=self._sort_key(col), reverse=desc)
         view = [self._index[s.rel_path] for s in slots
                 if s.rel_path in self._index]
         total = len(self._slots)
-        changed_total = len(set(self._assign) | self._changed)
+        changed_total = len(set(self._assign) | self._changed
+                            | set(self._variants))
         values = {"view": view, "sort": {"key": col, "desc": bool(desc)}}
         if total == 0:
             values["status"] = ""
@@ -1217,8 +1535,10 @@ class VideoTab(BestQualityMixin, TabService):
                                 % (changed_total, total, extra)
                                 + (vh.CHANGE_SCAN_NOTE if self._change_running
                                    else ""))
-            values["empty"] = "" if shown else \
-                "No slots match the search and the Show filter."
+            values["empty"] = "" if shown else (
+                "No slots match the search, the Show filter and the mode."
+                if self._m_filter else
+                "No slots match the search and the Show filter.")
         values["counts"] = {"changed": changed_total, "total": total,
                             "shown": len(view)}
         values["color_offered"] = bool(total and self._per_file_colour())
@@ -1232,6 +1552,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._update_clear_all()
         self._probe_conv_async()
         self._update_note()
+        self._cmp_sync()
 
     # ---- Convert column (MainWindow._video_probe_conv_async) -----------
     def _probe_conv_async(self):
@@ -1299,6 +1620,7 @@ class VideoTab(BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("Trim / pad")
     def set_trim(self, value):
         """MainWindow._on_video_trim_toggle."""
         self.video_trim_var.set(bool(value))
@@ -1307,6 +1629,7 @@ class VideoTab(BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("Use my files as-is")
     def set_no_conversion(self, value):
         """MainWindow._video_on_no_conversion_toggle."""
         self.video_no_conversion_var.set(bool(value))
@@ -1371,6 +1694,19 @@ class VideoTab(BestQualityMixin, TabService):
         data["video_asis_slots"] = {rel: bool(v)
                                     for rel, v in self._asis.items()}
         data["video_length_slots"] = dict(self._length)
+        # PAD-446: the slots' random clips, and one history line per slot
+        old_var = data.get("video_variants")
+        old_var = old_var if isinstance(old_var, dict) else {}
+        for rel in sorted(set(old_var) | set(self._variants)):
+            o, n = old_var.get(rel) or [], self._variants.get(rel) or []
+            if list(o) != list(n):
+                hist.append("video  %s  random clips: %s" % (
+                    rel, ", ".join(n) if n else "none"))
+        if self._variants:
+            data["video_variants"] = {rel: list(v) for rel, v
+                                      in self._variants.items() if v}
+        else:
+            data.pop("video_variants", None)
         slots = {rel: v for rel, v in self._color.items() if rel in self._assign}
         if self._color_stock:
             slots.update((rel, True) for rel in self._stock_on
@@ -1399,6 +1735,7 @@ class VideoTab(BestQualityMixin, TabService):
     # picking a replacement
     # ==================================================================
     @rpc
+    @undoable("the pick for %s")
     def choose(self, rel):
         """MainWindow._video_assign_rel: the picker, the as-is gate, the
         pick, its log line."""
@@ -1436,6 +1773,11 @@ class VideoTab(BestQualityMixin, TabService):
                         "Replace Video: %s — %s; it goes on the card as it "
                         "is. Right-click the row → This clip's conversion to "
                         "change just this one." % (rel, why), "error")
+        if rel in self._m_follow:
+            # PAD-444: a mode that played its shared clip gets a clip of its own
+            if not self._m_materialize(rel):
+                return False
+            self._m_publish()
         self._assign[rel] = path
         self._save_staged()
         note = vh.conversion_note(self._by_rel.get(rel), rel, path,
@@ -1454,6 +1796,7 @@ class VideoTab(BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the conversion of %s")
     def set_asis(self, rel, value):
         """MainWindow._video_set_asis: this clip's own conversion setting
         (None = follow the box)."""
@@ -1479,6 +1822,7 @@ class VideoTab(BestQualityMixin, TabService):
         return True
 
     @rpc
+    @undoable("the length of %s")
     def set_length(self, rel, value):
         """This clip's own length (PAD-215): None follows the Trim / pad
         box, "stock" cuts or pads to the stock clip, "full" keeps the
@@ -1609,6 +1953,7 @@ class VideoTab(BestQualityMixin, TabService):
             if alive:
                 self._reselect(alive)
         self._update_clear_all()
+        self._m_after_clear(gone)
         return len(gone)
 
     def _clear_confirm_text(self, targets, question):
@@ -1626,6 +1971,7 @@ class VideoTab(BestQualityMixin, TabService):
                    "it goes" if one else "they go"))
 
     @rpc
+    @undoable("clearing %s", "clearing %d replacements")
     def clear(self, rels):
         """The row menu's "Clear replacement(s)": one row, or the selected
         rows (MainWindow._video_clear_selected /
@@ -1645,6 +1991,7 @@ class VideoTab(BestQualityMixin, TabService):
         return self._clear_picks(rels)
 
     @rpc
+    @undoable("Clear replacements")
     def clear_all(self):
         """The Clear replacements… button (MainWindow._clear_all_
         replacements("video"))."""
@@ -1674,11 +2021,13 @@ class VideoTab(BestQualityMixin, TabService):
 
     # ---- Replace from folder… (MainWindow._replace_from_folder) --------
     @rpc
+    @undoable("Replace from folder")
     def replace_from_folder(self):
         from ...core import folder_match
         if self._is_running():
             return False
-        slot_rels = [rel for rel in self._by_rel if rel not in self._foreign]
+        slot_rels = [rel for rel in self._by_rel if rel not in self._foreign
+                     and rel not in self._m_virtual]
         if not slot_rels:
             compat.messagebox.showinfo(
                 "Replace from folder",
@@ -1825,7 +2174,8 @@ class VideoTab(BestQualityMixin, TabService):
         into this project and re-scan."""
         from .. import tab_settings_ui
         return tab_settings_ui.load_media(
-            self, "video", self._settings_dir(), set(self._by_rel),
+            self, "video", self._settings_dir(),
+            set(self._by_rel) - set(self._m_virtual),
             self._is_running(), self._save_staged_changes,
             self._scan_async, path)
 
@@ -1907,10 +2257,135 @@ class VideoTab(BestQualityMixin, TabService):
                           self._color.get(rel)]),
             "color_follow": "corrected" if self._color_all else "own colors",
             "reveal": vh.reveal_menu_label(),
+            "variants": self._variant_menu(rel),
             "partition": bool(self.window.tab_visible("Partition Explorer")
                               and getattr(self.window, "find_in_partition",
                                           None) is not None),
+            # PAD-444: a mode's own clip an earlier build made plays the shared one again
+            "back": (self._m_preview(rel) or {}).get("back") or "",
         }
+
+    # -- random clips (PAD-446) ---------------------------------------------
+    def _variant_menu(self, rel):
+        """The row menu's "Random clips" part: ``{why, n, max, files}``, or
+        None where the plugin offers no random clips."""
+        offer = self._var_offer
+        files = self._variants.get(rel) or []
+        if offer is None and not files:
+            return None
+        offer = offer or {}
+        why = offer.get("why") or (offer.get("slots") or {}).get(rel, "")
+        if not why and rel in self._m_follow and not self._assign.get(rel):
+            # PAD-444: a mode's row that plays another mode's clip has no clip of its own
+            # to vary until it is given one; the clip it plays varies in that mode's row
+            why = ("this row plays the same clip as %s's; give it a replacement first, or "
+                   "add the random clips in that row" % self._m_label(self._m_follow[rel]))
+        elif rel in self._m_copy and rel not in ((self._m_clips.name_of if self._m_clips
+                                                   else {}) or {}):
+            why = ("this is %s's own clip, new to the card: random clips go on a clip the card "
+                   "already has, so build it onto the card first"
+                   % self._m_label(self._m_copy[rel]["mode"]))
+        return {"why": why or "", "n": len(files),
+                "max": int(offer.get("max") or 0),
+                "files": [{"i": i, "name": os.path.basename(f)}
+                          for i, f in enumerate(files)]}
+
+    def _variants_words(self, rel):
+        """What the row and the preview say of a slot's random clips, or
+        "" for a slot that has none."""
+        files = self._variants.get(rel) or []
+        if not files:
+            return ""
+        own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
+               else "the game's own clip")
+        return ("Plays one of %d clips at random each time, never the same "
+                "one twice in a row: %s, %s." % (
+                    1 + len(files), own,
+                    ", ".join(os.path.basename(f) for f in files)))
+
+    def _variants_changed(self, rel):
+        self._save_staged()
+        self._refresh_list()
+        if rel == self._current:
+            self._update_note(rel)
+        self._reselect([rel])
+
+    @rpc
+    @undoable("the random clips of %s")
+    def add_variants(self, rel):
+        """PAD-446: more clips the game may play in this slot's place, one
+        of them at random each time (the file picker takes several)."""
+        menu = self._variant_menu(rel) if rel in self._by_rel else None
+        if not menu or menu["why"]:
+            return False
+        files = list(self._variants.get(rel) or [])
+        room = menu["max"] - len(files)
+        if room <= 0:
+            self.log("Replace Video: %s already has %d random clips, the most "
+                     "a slot can have." % (rel, len(files)), "warning")
+            return False
+        if rel != self._current:
+            self._load_track(rel)
+        self.stop_all_preview_playback()
+        picked = self.window.ask_open(
+            "video_replacement",
+            "Choose clips the game can play at random in place of %s" % rel,
+            vh.PICK_FILETYPES, multiple=True)
+        if isinstance(picked, str):
+            picked = [picked] if picked else []
+        picked = [os.path.normpath(p) for p in (picked or ()) if p]
+        if not picked:
+            return False
+        if len(picked) > room:
+            self.log("Replace Video: %s can take %d more random clip(s); the "
+                     "first %d were added." % (rel, room, room), "warning")
+            picked = picked[:room]
+        files += picked
+        self._variants[rel] = files
+        self.log("Replace Video: %s ← %s, played at random (%d clips: the "
+                 "slot's own and %d more)."
+                 % (rel, ", ".join(os.path.basename(p) for p in picked),
+                    1 + len(files), len(files)), "info")
+        self._variants_changed(rel)
+        return True
+
+    @rpc
+    def variants_why(self, rel):
+        """PAD-446: why this slot cannot play other clips at random."""
+        menu = self._variant_menu(rel)
+        if not menu or not menu["why"]:
+            return False
+        compat.messagebox.showinfo("Random clips", menu["why"])
+        return True
+
+    @rpc
+    @undoable("the random clips of %s")
+    def remove_variant(self, rel, index):
+        """PAD-446: take one random clip off the slot."""
+        files = list(self._variants.get(rel) or [])
+        try:
+            gone = files.pop(int(index))
+        except (TypeError, ValueError, IndexError):
+            return False
+        if files:
+            self._variants[rel] = files
+        else:
+            self._variants.pop(rel, None)
+        self.log("Replace Video: %s no longer plays %s at random."
+                 % (rel, os.path.basename(gone)), "info")
+        self._variants_changed(rel)
+        return True
+
+    @rpc
+    @undoable("the random clips of %s")
+    def clear_variants(self, rel):
+        """PAD-446: the slot plays its one clip again."""
+        if not self._variants.pop(rel, None):
+            return False
+        self.log("Replace Video: %s plays one clip again (its random clips "
+                 "were taken off)." % rel, "info")
+        self._variants_changed(rel)
+        return True
 
     def _scene_browser(self):
         for name in ("_open_scene_browser", "open_scene_browser"):
@@ -2046,6 +2521,7 @@ class VideoTab(BestQualityMixin, TabService):
         self._current = None
         self._pane_seq += 1
         self.set(preview=self._empty_preview())
+        self._cmp_reset()
 
     @rpc
     def select(self, rel, autoplay=None):
@@ -2083,12 +2559,10 @@ class VideoTab(BestQualityMixin, TabService):
         self._load_track(rel, side)
         return True
 
-    def _load_track(self, rel, autoplay=None):
-        """MainWindow._video_load_track."""
-        if rel not in self._by_rel:
-            return
+    def _orig_pane(self, rel):
+        """The Original pane of *rel*: the stock clip (its snapshot when a
+        build already changed the slot on disk)."""
         from ...core import staged_originals
-        self._current = rel
         slot = self._by_rel.get(rel)
         opath = slot.abs_path if slot else None
         snap_used = False
@@ -2108,6 +2582,14 @@ class VideoTab(BestQualityMixin, TabService):
         else:
             orig = self._pane("orig", title)
         orig["seq"] = self._pane_seq
+        return orig
+
+    def _load_track(self, rel, autoplay=None):
+        """MainWindow._video_load_track."""
+        if rel not in self._by_rel:
+            return
+        self._current = rel
+        orig = self._orig_pane(rel)
         pv = dict(self.get("preview") or self._empty_preview())
         pv["rel"] = rel
         pv["orig"] = orig
@@ -2126,14 +2608,26 @@ class VideoTab(BestQualityMixin, TabService):
         return {"can_clear": bool(rel and self._targets([rel])),
                 "has_pick": bool(rel and self._assign.get(rel))}
 
+    def _stock_coloured(self, rel):
+        """A game's own clip with its color profile attached (Advanced,
+        PAD-336): the card gets its original through the profile."""
+        return bool(rel and not self._assign.get(rel)
+                    and self._color_state(rel))
+
     def _rep_pane(self, rel):
-        """MainWindow._video_load_rep_pane."""
+        """MainWindow._video_load_rep_pane.  PAD-462 (DragonRR): a game's own
+        clip with its color profile attached has no replacement, and this
+        player says so; its Original player shows it with its profile
+        (``_pane_views``), where PAD-448 put a second copy of it here."""
         from ...core import staged_originals
         self._pane_seq += 1
         rpath = self._assign.get(rel) if rel else None
         if rpath and os.path.isfile(rpath):
             pane = self._pane("rep", "Replacement", rpath,
                               label=os.path.basename(rpath))
+        elif self._stock_coloured(rel):
+            # built with its profile or not, it is the game's own clip
+            pane = self._pane("rep", "Replacement", hint=STOCK_ON_ORIG)
         elif rel and staged_originals.snapshot_path(self._scan_dir, rel):
             slot = self._by_rel.get(rel)
             cur = slot.abs_path if slot else None
@@ -2169,28 +2663,33 @@ class VideoTab(BestQualityMixin, TabService):
         self.set(preview=pv)
         if new.get("facts") is None:
             self._load_pane_async(new)
+        # PAD-454: its Original / With its color profile switch follows it
+        self.publish_look()
 
     def _load_pane_async(self, pane):
         """_VideoPreviewPane.load: probe the clip and render its
         representative still on a worker, then hand both to the page."""
         path, side, seq = pane.get("path"), pane["side"], pane["seq"]
-        if not path:
-            return
+        if path:
+            self._probe_async(path, lambda fields: self.ctx.loop.post(
+                self._pane_update, side, seq, fields))
 
+    @staticmethod
+    def _probe_async(path, post):
+        """Probe *path* and render its representative still on a worker,
+        handing each to *post(fields)* (called on the worker)."""
         def _work():
             try:
                 info, facts = vh.media_facts(path)
             except Exception:                               # noqa: BLE001
                 info, facts = None, {"dur": 0.0}
-            self.ctx.loop.post(self._pane_update, side, seq,
-                               {"facts": facts})
+            post({"facts": facts})
             try:
                 poster, note = vh.representative_poster(
                     path, info, facts.get("dur") or 0.0)
             except Exception as e:                          # noqa: BLE001
                 poster, note = None, "Couldn't show this frame: %s" % e
-            self.ctx.loop.post(self._pane_update, side, seq,
-                               {"poster": poster, "poster_note": note})
+            post({"poster": poster, "poster_note": note})
 
         threading.Thread(target=_work, daemon=True,
                          name="video-pane").start()
@@ -2216,20 +2715,228 @@ class VideoTab(BestQualityMixin, TabService):
             return False
         if pane.get("proxy") or pane.get("proxy_busy"):
             return True
-        path = pane["path"]
         self._pane_update(side, seq, {"proxy_busy": True, "proxy_err": ""})
+        self._proxy_async(pane["path"], fmt, lambda fields: self.ctx.loop.post(
+            self._pane_update, side, seq, fields))
+        return True
 
+    @staticmethod
+    def _proxy_async(path, fmt, post):
+        """Make a copy of *path* the page's engine can play, on a worker;
+        *post(fields)* gets ``proxy`` / ``proxy_err``."""
         def _work():
             try:
                 out, err = vh.browser_proxy(path, fmt), ""
             except Exception as e:                          # noqa: BLE001
                 out, err = None, str(e) or e.__class__.__name__
-            self.ctx.loop.post(self._pane_update, side, seq,
-                               {"proxy": out, "proxy_err": err,
-                                "proxy_busy": False})
+            post({"proxy": out, "proxy_err": err, "proxy_busy": False})
 
         threading.Thread(target=_work, daemon=True,
                          name="video-proxy").start()
+
+    # ==================================================================
+    # Compare (PAD-440, DragonRR): several clips side by side, big, each
+    # drawn through its own colors beside the Color profiles bar, so a
+    # profile picked or a slider moved for one is seen against the others
+    # ==================================================================
+    def _cmp_sides(self, rel):
+        """What a Compare player can show of *rel*: ``[[side, label]]``."""
+        if self._stock_coloured(rel):
+            return [["orig", "Original"], ["rep", STOCK_COLOURED]]
+        if self._rep_pane(rel).get("path"):
+            return [["orig", "Original"], ["rep", "Replacement"]]
+        return [["orig", "Original"]]
+
+    def _cmp_pane(self, rel, side):
+        if side == "rep" and self._stock_coloured(rel):
+            # PAD-448: a game's own clip with its color profile attached:
+            # Compare's other side is its original through the profile
+            pane = self._orig_pane(rel)
+            pane.update(side="rep", title=STOCK_COLOURED)
+            return pane
+        return self._rep_pane(rel) if side == "rep" else self._orig_pane(rel)
+
+    def _cmp_tile(self, tid):
+        return next((t for t in self._cmp if t["id"] == tid), None)
+
+    def _cmp_add(self, rel, side):
+        self._cmp_ids += 1
+        tile = {"id": self._cmp_ids, "rel": rel, "side": side,
+                "sides": self._cmp_sides(rel),
+                "pane": self._cmp_pane(rel, side), "look": [], "lut": None}
+        self._cmp.append(tile)
+        self._cmp_load(tile)
+
+    def _cmp_load(self, tile):
+        pane = tile["pane"]
+        if pane.get("path"):
+            tid, seq = tile["id"], pane["seq"]
+            self._probe_async(pane["path"], lambda fields: self.ctx.loop.post(
+                self._cmp_update, tid, seq, fields))
+
+    def _cmp_update(self, tid, seq, fields):
+        tile = self._cmp_tile(tid)
+        if tile is None or tile["pane"].get("seq") != seq:
+            return
+        tile["pane"] = dict(tile["pane"], **fields)
+        self._cmp_publish()
+
+    def _cmp_steps(self):
+        """Each tile's colour steps: the players' (publish_look), worked
+        out for the tile's own clip and side."""
+        look = self.get("look") or {}
+        folder = self._assets_path()
+        if not (look.get("offered") and look.get("on") and folder
+                and os.path.isdir(folder)):
+            for t in self._cmp:
+                t["look"] = []
+                t["lut"] = None
+            return
+        from ...core import colour_profile
+        sw, own, done = self._lsw, self._own_colours(), {}
+        for t in self._cmp:
+            rel = t["rel"]
+            if rel not in done:
+                try:
+                    kw = dict(overlay_on=sw["overlay"], files_on=sw["files"],
+                              screen_on=sw["screen"], rel=rel)
+                    switch = self._color_state(rel)
+                    done[rel] = (
+                        colour_profile.video_look(folder, switch, own, **kw),
+                        colour_profile.video_look_exact(folder, switch, own,
+                                                        **kw))
+                except Exception:                       # noqa: BLE001
+                    log.exception("video compare look")
+                    done[rel] = ({}, {})
+            steps, exact = done[rel]
+            t["look"] = steps.get(t["side"]) or []
+            t["lut"] = self._lut(exact.get(t["side"]), t.get("lut"))
+
+    def _cmp_publish(self):
+        st = {"open": self._cmp_open, "max": COMPARE_MAX, "tiles": [
+            {k: t[k] for k in ("id", "rel", "side", "sides", "pane", "look",
+                               "lut")}
+            for t in self._cmp] if self._cmp_open else []}
+        if st != self.get("compare"):
+            self.set(compare=st)
+
+    def _cmp_sync(self):
+        """The list changed (a pick, a clear, a switch, a scan): each tile
+        follows its clip, and a clip no longer listed leaves."""
+        if not self._cmp_open:
+            return
+        keep = []
+        moved = False
+        for t in self._cmp:
+            rel = t["rel"]
+            if rel not in self._by_rel:
+                moved = True
+                continue
+            sides = self._cmp_sides(rel)
+            side = t["side"] if any(k == t["side"] for k, _l in sides) \
+                else "orig"
+            if len(t["sides"]) == 1 and len(sides) > 1:
+                # PAD-448: a profile just attached to a game's own clip (or
+                # a replacement just picked) is what the player was put up
+                # to show
+                side = sides[-1][0]
+            pane = self._cmp_pane(rel, side)
+            moved = moved or side != t["side"] or sides != t["sides"]
+            t["sides"] = sides
+            t["side"] = side
+            if pane.get("path") != t["pane"].get("path"):
+                moved = True
+                t["pane"] = pane
+                self._cmp_load(t)
+            else:
+                t["pane"] = dict(t["pane"], **{k: pane[k] for k in (
+                    "side", "title", "label", "hint")})
+            keep.append(t)
+        self._cmp = keep
+        if not keep:
+            self._cmp_open = False
+        if moved:
+            self._cmp_steps()
+        self._cmp_publish()
+
+    def _cmp_reset(self):
+        self._cmp_open = False
+        self._cmp = []
+        self._cmp_publish()
+
+    @rpc
+    def compare_open(self, rels):
+        """Compare: the clips selected, side by side.  One clip: its
+        Original beside its Replacement.  Several: each one's Replacement
+        where it has one, else its Original, the first COMPARE_MAX of them.
+        Returns how many players it opened with."""
+        seen = set()
+        rels = [r for r in (rels or []) if r in self._by_rel
+                and not (r in seen or seen.add(r))]
+        if not rels:
+            return 0
+        if len(rels) > COMPARE_MAX:
+            self.toast("Compare shows %d clips at a time: the first %d "
+                       "selected are in it." % (COMPARE_MAX, COMPARE_MAX))
+            rels = rels[:COMPARE_MAX]
+        sides = self._cmp_sides(rels[0])
+        if len(rels) == 1 and len(sides) > 1:
+            want = [(rels[0], "orig"), (rels[0], "rep")]
+        else:
+            want = [(r, self._cmp_sides(r)[-1][0]) for r in rels]
+        self._cmp = []
+        for rel, side in want:
+            self._cmp_add(rel, side)
+        self._cmp_open = True
+        self.stop_all_preview_playback()
+        self._cmp_steps()
+        self._cmp_publish()
+        return len(self._cmp)
+
+    @rpc
+    def compare_close(self):
+        if not self._cmp_open:
+            return False
+        self._cmp_reset()
+        return True
+
+    @rpc
+    def compare_side(self, tid, side):
+        """One player shows the other side of its clip (Original /
+        Replacement)."""
+        tile = self._cmp_tile(tid)
+        if tile is None or side == tile["side"] or not any(
+                k == side for k, _l in tile["sides"]):
+            return False
+        tile["side"] = side
+        tile["pane"] = self._cmp_pane(tile["rel"], side)
+        self._cmp_load(tile)
+        self._cmp_steps()
+        self._cmp_publish()
+        return True
+
+    @rpc
+    def compare_remove(self, tid):
+        """A player's ×: the clip leaves Compare (the last one stays)."""
+        tile = self._cmp_tile(tid)
+        if tile is None or len(self._cmp) < 2:
+            return False
+        self._cmp.remove(tile)
+        self._cmp_publish()
+        return True
+
+    @rpc
+    def compare_make_proxy(self, tid, seq, fmt="mp4"):
+        """make_proxy for a Compare player."""
+        tile = self._cmp_tile(tid)
+        pane = tile["pane"] if tile else {}
+        if pane.get("seq") != seq or not pane.get("path"):
+            return False
+        if pane.get("proxy") or pane.get("proxy_busy"):
+            return True
+        self._cmp_update(tid, seq, {"proxy_busy": True, "proxy_err": ""})
+        self._proxy_async(pane["path"], fmt, lambda fields: self.ctx.loop.post(
+            self._cmp_update, tid, seq, fields))
         return True
 
     def _update_note(self, rel=None):
@@ -2273,10 +2980,17 @@ class VideoTab(BestQualityMixin, TabService):
                         "as-is\" for the lot, or pick a game-ready file."
                         % (conflict or ("%s can't play on the machine "
                                         "as it is" % os.path.basename(rep))))}
+            if note is None and self._variants.get(rel):
+                # PAD-446: the slot's random clips, where nothing is wrong
+                note = {"kind": "info", "text": self._variants_words(rel)}
         pv = self.get("preview") or {}
-        if pv.get("note") != note:
+        modes = self._m_preview(rel)
+        sounds = self._m_sounds(rel)
+        if pv.get("note") != note or pv.get("modes") != modes or pv.get("sounds") != sounds:
             pv = dict(pv)
             pv["note"] = note
+            pv["modes"] = modes
+            pv["sounds"] = sounds
             self.set(preview=pv)
 
     def _reselect(self, rels):

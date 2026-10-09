@@ -566,11 +566,10 @@ def delete(paths):
         if not _is_safe_staging_path(p):
             raise WslDiskError(
                 f"Refusing to delete a path outside PAD staging: {p!r}")
-    # Measure first (so we can report freed bytes), then unmount-if-mounted and
-    # remove.  A crashed DP/JJP run can leave a loop mount under the staging
-    # dir; `umount -R` is best-effort so a non-mount is silently fine.
-    # An emulator's folder is never deleted while a game of it runs - checked
-    # again here, not just at scan time (the game may have started since).
+    # Measure first (so we can report freed bytes), then unmount whatever is
+    # mounted inside and remove (_UNMOUNT_AND_REMOVE).  An emulator's folder
+    # is never deleted while a game of it runs - checked again here, not just
+    # at scan time (the game may have started since).
     roots = sorted({_RIG_PATH_RE.match(p).group(1) for p in paths
                     if _is_rig_path(p)})
     if roots:
@@ -587,12 +586,41 @@ def delete(paths):
         freed = int(freed_out.strip())
     except ValueError:
         freed = 0
-    # Unmount any loop mounts a crashed DP/JJP run left under these dirs
-    # (best-effort -- a non-mount errors to /dev/null), then remove.  Both
-    # take the quoted paths as direct args (no shell loop variable); the final
-    # `rm -rf` returns 0 even for already-gone paths, so the call won't raise.
-    _wsl_bash(f"umount -R {quoted} 2>/dev/null; rm -rf {quoted}", timeout=300)
+    left = _wsl_script(_UNMOUNT_AND_REMOVE % quoted, timeout=300).split("\n")
+    left = [p for p in (s.strip() for s in left) if p]
+    if left:
+        raise WslDiskError(
+            "Could not delete %s - something in it is still in use. Stop "
+            "every game on the Emulate tabs (or restart WSL) and try again."
+            % ", ".join(left))
     return freed
+
+
+# Unmount every mount at or under each path, deepest first, then remove.  A
+# mount can sit below the folder being deleted, not on it: the PB I/O-board
+# rig keeps a machine's OS image loop-mounted read-only at
+# cache/os-<iso>/mnt between runs, and a crashed DP/JJP run can leave an ISO
+# mount behind - `umount -R <folder>` missed those, and `rm -rf` walked into
+# the read-only image and failed on every file in it (PAD-422).  A mount that
+# will not come off is detached lazily (whatever holds it lets go later), and
+# `rm --one-file-system` never descends into one still there.  Prints each
+# path that is left.  The paths are quoted literals (%s), never a variable
+# wsl.exe's own shell could expand.
+_UNMOUNT_AND_REMOVE = r"""
+paths=(%s)
+for p in "${paths[@]}"; do
+  while read -r _ _ _ _ mp _; do
+    mp=${mp//\\040/ }
+    case "$mp" in "$p"|"$p"/*) echo "${#mp} $mp" ;; esac
+  done < /proc/self/mountinfo | sort -rn | cut -d' ' -f2- |
+  while IFS= read -r mp; do
+    umount "$mp" 2>/dev/null || umount -l "$mp" 2>/dev/null
+  done
+done
+rm -rf --one-file-system "${paths[@]}" 2>/dev/null
+for p in "${paths[@]}"; do [ -e "$p" ] && echo "$p"; done
+true
+"""
 
 
 def delete_all():

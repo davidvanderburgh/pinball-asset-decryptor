@@ -102,6 +102,7 @@ _CACHE_KINDS = (
     (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
     (_REV_TAG + ".sfxnames4.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
     (_REV_TAG + ".sites1.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
+    (_REV_TAG + ".requests1.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
 )
 
 
@@ -1716,6 +1717,7 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
     trees = {}
     asset_rels = _scene_asset_rels(output_dir)
     matched = 0
+    misaligned = 0
     for ri, (path, node) in enumerate(radiums):
         if cancel():
             return 0
@@ -1731,6 +1733,12 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
         except Exception:
             continue
         imgs = parse_radium_images(data)
+        if not set(off2rel) <= {im["data_off"] for im in imgs}:
+            # PAD-421: the scene's pictures are not where this project's
+            # extract found them - a card built with grown or added pictures
+            # (DragonRR's 1.96 over a project extracted from the stock card)
+            misaligned += 1
+            continue
         tables = _radium.parse_glyph_tables(data, imgs) if imgs else []
         tree = _scene_tree_entry(path, data, imgs, tables, off2rel, asset_rels)
         if tree is not None:
@@ -1750,6 +1758,15 @@ def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
             "it looks like a different card (or a different version), so most "
             "previews would be missing. Nothing was changed."
             % (matched, len(rels)), "warning")
+        return 0
+    if misaligned:
+        # one scene that does not line up means another build of the card:
+        # rewriting the trees from it drew every such scene without pictures
+        log("%d of this project's scene(s) are laid out differently on that "
+            "card, so their pictures would not line up with this project's "
+            "files. It looks like a card built from this project, or a "
+            "different card: re-read from the card this project was "
+            "extracted from. Nothing was changed." % misaligned, "warning")
         return 0
     if not layouts and not trees:
         log("No drawable scene layouts were found on this card.", "warning")
@@ -2203,6 +2220,66 @@ def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
     return name_map
 
 
+def _requests_cache_path(fp):
+    """Sibling of the params cache holding ``{request: [idx, ...]}``
+    (:func:`_write_sound_requests`). Carries the derive revision for the same
+    reason the SFX-name map does: the idx it names are the params' records."""
+    return os.path.join(_params_cache_dir(),
+                        fp[:32] + _REV_TAG + ".requests1.json")
+
+
+def _write_sound_requests(emu, game_real_path, image_path, params, output_dir,
+                          log):
+    """Write ``sound_requests.tsv`` at the assets root: every sound REQUEST the
+    game code can ask for, the ``idx`` records its sound ids resolve to, and
+    its Sound Test name (:mod:`.clip_sounds`). The Video tab reads it to name
+    the sound files a clip's code plays.
+
+    Resolved through the firmware's own ``get_asset_descriptor`` while *emu*
+    is still booted (the Sound Test names' chain); cached per card next to the
+    params, so a re-extract is instant. Best-effort: no request table, no
+    resolver or any failure writes nothing and the extract carries on.
+    ``PINBALL_SOUND_REQUESTS=0`` turns it off."""
+    if os.environ.get("PINBALL_SOUND_REQUESTS") == "0":
+        return 0
+    import json
+    try:
+        from . import clip_sounds as _cs
+        from .info import container_counts
+        with open(_lp(image_path), "rb") as f:
+            fragments = container_counts(f.read(0x100))[0]
+        with open(_lp(game_real_path), "rb") as f:
+            fw = f.read()
+        count, lists, _t, _r = _cs.request_table(fw, fragments)
+        if not count:
+            return 0
+        cache = _requests_cache_path(_fingerprint(game_real_path, image_path))
+        idx_of = None
+        if os.path.exists(cache):
+            try:
+                with open(cache, encoding="utf-8") as f:
+                    idx_of = {int(k): v for k, v in json.load(f).items()}
+            except Exception:
+                idx_of = None
+        if idx_of is None:
+            idx_of = _cs.resolve_requests(emu, params, lists, fw)
+            try:
+                with open(cache, "w", encoding="utf-8") as f:
+                    json.dump({str(k): v for k, v in idx_of.items()}, f)
+            except Exception:
+                pass
+        _cs.write_requests(os.path.join(output_dir, _cs.REQUESTS_TSV), lists,
+                           idx_of, _cs.menu_names(fw, lists))
+        if log:
+            log("Mapped %d of the game's %d sound requests to their sounds (%s)."
+                % (len(idx_of), count, _cs.REQUESTS_TSV), "info")
+        return len(idx_of)
+    except Exception as e:
+        if log:
+            log("The sound request map couldn't be written (%s)." % e, "info")
+        return 0
+
+
 SOUND_TEST_NAMES_CSV = "sound_test_names.csv"
 
 
@@ -2455,6 +2532,9 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         # rename the matching slot themselves (right-click -> Rename offers
         # these as suggestions; David's idea after the binding proved wrong).
         _write_sound_test_names(gr_path, output_dir, log)
+        # Which sounds each request plays, for the Video tab's "sounds this
+        # clip's code plays" (clip_sounds); the resolver needs this emu.
+        _write_sound_requests(emu, gr_path, img_path, params, output_dir, log)
         emu.close()
         emu = None   # decode runs in worker processes (or a fresh emu on fallback)
 
@@ -3439,7 +3519,7 @@ def _compute_patches_or_restore(restore_ok, log, *args, **kwargs):
 
 
 def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
-                         grow=None, shader=None):
+                         grow=None, shader=None, clips=None):
     """Resolve game-program (ELF) display-text edits for one firmware file.
 
     Three composition modes, mirroring how the firmware itself reaches the
@@ -3485,6 +3565,14 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
         shader = None
     if shader is not None and not over:
         # the profile alone: the census below needs the extension segment
+        over = [None]
+    if clips is not None and grow is not None and not grow.get("ok"):
+        # PAD-444: a mode's own copy names a clip the bank only gains on a
+        # build that can grow the game program
+        clips.fail(grow.get("why") or "the game program can't grow on this "
+                   "write")
+        clips = None
+    if clips is not None and not over:
         over = [None]
     reloc = None
     # Why longer text has nowhere to go, carried into plan_writes so each
@@ -3535,6 +3623,12 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
             log("Color profile: the corrected shaders don't fit the space the "
                 "game program can grow into; the colors are left as they are.",
                 "warning")
+    if clips is not None:
+        # PAD-444: each mode's own copy of a clip it shares - the new names
+        # after the text and the shaders, that mode's references moved to them
+        blob = _own_clip_program(raw, clips, reloc, file_writes, blob, log)
+        if clips.program is not None:
+            file_writes = list(file_writes) + clips.program.writes
     if blob:
         try:
             grown = _grow_program_text(raw, file_writes, blob, reloc,
@@ -3544,6 +3638,9 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
             log("Program text: couldn't place the longer text in new space "
                 "(%s); those edits are skipped and the rest patched in place."
                 % e, "warning")
+            if clips is not None:
+                clips.fail("placing the new names in the game program failed "
+                           "(%s)" % e)
             file_writes, n, blob = progtext.plan_writes(
                 raw, edits, log,
                 no_grow_why="placing longer text in new space failed (%s)" % e)
@@ -3568,6 +3665,145 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
             payload = payload[cnt:]
         ov.setdefault(ib, (node, {}))[1][off] = b
     return writes, n, ov, None
+
+
+def _own_clip_job(reader, assets_dir, records, log):
+    """PAD-444: this Write's own copies of shared clips as a
+    :class:`.clip_modes.WriteJob`, with the video banks their shared clips
+    are in read off the card; ``None`` (the log says why) when none can be
+    made here."""
+    from . import clip_modes
+    from . import mode_write as _MW
+    from . import video_bank as _VB
+    rows = clip_modes.manifest_rows(assets_dir)
+    banks = {}
+    for rec in records:
+        path = rows.get(rec.get("of") or "") or ""
+        if "/scene.assets/" not in path:
+            continue
+        d = path.split("/scene.assets/", 1)[0]
+        if d in banks:
+            continue
+        node = _MW.lookup(reader, d + "/scene.radium")
+        if node is None:
+            continue
+        try:
+            data = bytes(reader.read_file_bytes(node))
+            _VB.parse(data)
+        except Exception:                       # noqa: BLE001 - not a bank this app can grow
+            continue
+        banks[d] = data
+    if not banks:
+        log("Own clips: %d mode%s left sharing %s clip%s on this write: the "
+            "video bank the shared clips are in isn't on this card, or can't be "
+            "read." % (len(records), "" if len(records) == 1 else "s",
+                       "its" if len(records) == 1 else "their",
+                       "" if len(records) == 1 else "s"), "warning")
+        return None
+    try:
+        return clip_modes.WriteJob(records, rows, banks)
+    except Exception as e:                      # noqa: BLE001
+        log("Own clips: left out of this write (%s)." % e, "warning")
+        return None
+
+
+def _own_clip_files(reader, job, assets_dir, scratch, mode_plan,
+                    radium_overlays, radium_grow_jobs, log):
+    """PAD-444: the bank step of a Write's own copies (*job*, its program
+    part planned by the text step): ``{"replaced": [(card rel, file)],
+    "new": [(card rel, file)]}`` - each bank that gains a copy, rewritten,
+    and each copy's file - or ``None`` when no copy was made.  A bank the
+    modes rewrote in this same build gets the copies in ITS staged file.
+    Raises ``RuntimeError`` (nothing written) when a copy whose program part
+    landed can't be finished: the game would name a clip its bank lacks."""
+    from . import clip_modes
+    for rec, why in job.skipped:
+        log("Own clips: %s's own clip %s is left out: %s."
+            % (clip_modes.mode_label(rec["mode"]), rec["name"], why), "warning")
+    if not job.done:
+        if job.why:
+            log("Own clips: %d mode%s left sharing %s clip%s on this write (%s); "
+                "every mode plays the clips it shares, as the game shipped."
+                % (len(job.records), "" if len(job.records) == 1 else "s",
+                   "its" if len(job.records) == 1 else "their",
+                   "" if len(job.records) == 1 else "s", job.why), "warning")
+        return None
+    staged_banks, mode_src = {}, {}
+    if mode_plan is not None:
+        for rel, src in mode_plan.replaced:
+            d = "/" + rel[:-len("/scene.radium")] if rel.endswith("/scene.radium") else ""
+            if d in job.banks:
+                with open(_lp(src), "rb") as f:
+                    staged_banks[d] = f.read()
+                mode_src[rel] = src
+    # another edit that rewrites a bank the copies go in (a walk of the card
+    # only when some scene is patched in place)
+    touched = {_p.lstrip("/") for _p in (
+        [r for r, _s in radium_grow_jobs]
+        + ([_p for _p, _i, _n in reader.iter_regular_files(min_size=1, max_depth=20)
+            if bytes(_n["i_block"]) in radium_overlays] if radium_overlays else []))}
+    for d in job.banks:
+        if d.strip("/") + "/scene.radium" in touched:
+            raise RuntimeError(
+                "Own clips: another edit in this project changes the video bank "
+                "(%s) the copies are added to. Nothing was written." % d.strip("/"))
+    from ...core import staged_changes as _sc
+    originals = (_sc.load(assets_dir).get("video") or {})
+
+    def source_of(rec, staged):
+        # the user's own file when it can go on as it is (the Video tab's
+        # intact rule), else the copy the project staged for it
+        src = originals.get(rec.get("rel") or "")
+        if src and os.path.isfile(_lp(src)):
+            return _intact_copy_source(src, staged, os.path.basename(staged),
+                                       os.path.getsize(_lp(staged)), log)
+        return staged
+    try:
+        replaced, new, lines = job.bank_files(
+            assets_dir, os.path.join(scratch, "own_clips"), source_of, staged_banks)
+    except (clip_modes.ClipModesError, OSError, ValueError) as e:
+        raise RuntimeError("Own clips: %s. Nothing was written." % e) from None
+    out = []
+    for rel, src in replaced:
+        if rel in mode_src:
+            # the modes' staged bank now carries the copies too
+            with open(_lp(src), "rb") as f:
+                data = f.read()
+            with open(_lp(mode_src[rel]), "wb") as f:
+                f.write(data)
+        else:
+            out.append((rel, src))
+    for line in job.lines + lines:
+        log("Own clips: %s." % line, "info")
+    return {"replaced": out, "new": new}
+
+
+def _own_clip_program(raw, clips, reloc, file_writes, blob, log):
+    """PAD-444: plan a Write's own copies of shared clips (*clips*, a
+    :class:`.clip_modes.WriteJob`) on the game program *raw* as the text edits
+    in *file_writes* leave it, their new names placed after *blob* in the
+    extension segment *reloc* describes.  Returns *blob* with the names
+    appended; the moved references are ``clips.program.writes``.  Never
+    raises: a copy that can't be made leaves every copy out (``clips.fail``),
+    so no mode names a clip the bank won't have."""
+    if reloc is None:
+        clips.fail("the game program has no room for the copies' names")
+        return blob
+    blob = bytes(blob) + bytes(-len(blob) % 4)
+    buf = bytearray(raw)
+    for o, b in file_writes:
+        buf[o:o + len(b)] = b
+    try:
+        plan = clips.plan_program(bytes(buf),
+                                  reloc["base_va"] + reloc["used"] + len(blob))
+    except Exception as e:                      # noqa: BLE001 - never fail a Write over it
+        clips.fail("the game program could not be read for them (%s)" % e)
+        return blob
+    if reloc["used"] + len(blob) + len(plan.blob) > reloc["capacity"]:
+        clips.fail("their names don't fit the space the game program can grow "
+                   "into")
+        return blob
+    return blob + plan.blob
 
 
 def _grow_program_text(raw, file_writes, blob, reloc, patched_fw, grow_dir,
@@ -3841,16 +4077,26 @@ def _game_program_path(reader, cancel):
     return None, None
 
 
-def _radium_text_looks(data):
+def _radium_text_looks(data, ops=(), card_path=None):
     """``{text: [(align, multiline, top, fit)]}``: how each Text of the scene in *data*
     lays out its string (horizontal alignment, the Multiline flag byte, VerticalAlignment
-    top, ScaleToBounds), keyed as :func:`radium.enumerate_strings` decodes it.  Empty when
-    the scene doesn't parse."""
+    top, ScaleToBounds), keyed as :func:`radium.enumerate_strings` decodes it, with the
+    alignments, line breaks and shrinking to fit the Scenes window's *ops* set on it (PAD-433,
+    PAD-452: the same Write puts them on the card) and, for the scene at *card_path*, the
+    layout the game itself gives the lines it lays out (:mod:`game_text_layout`: middle,
+    shrunk to fit).  Empty when the scene doesn't parse."""
     from . import scene_tree as _scene_tree
     try:
         scene = _scene_tree.parse(data)
     except Exception:                                  # noqa: BLE001
         return {}
+    if any(op.get("op") in _LAYOUT_OPS for op in ops or ()):
+        from . import scene_edit as _scene_edit
+        _scene_edit.apply_scene(scene, [op for op in ops if op.get("op") in _LAYOUT_OPS],
+                                None)
+    if card_path:
+        from . import game_text_layout as _gtl
+        _gtl.mark_scene(scene, card_path)
     out = {}
     for o in scene.objects.values():
         if o.kind != "Text":
@@ -3861,6 +4107,20 @@ def _radium_text_looks(data):
         out.setdefault(b["text"].decode("latin1"), []).append(
             (int(b.get("align") or 0), bool(flags[0]), not tail[1], bool(tail[0])))
     return out
+
+
+#: the Scenes window's edits that change where a line's padding hides (its alignment;
+#: PAD-452: its line breaks and shrinking to fit)
+_LAYOUT_OPS = ("text_align", "text_flow")
+
+
+def _scene_align_ops(assets_dir, card_path):
+    """The Scenes window's alignment and layout edits (``text_align``, ``text_flow``) of the
+    scene at *card_path*."""
+    from . import scene_edit as _scene_edit
+    edits = _scene_edit.load(assets_dir) if assets_dir else {}
+    ops = edits.get(card_path) or edits.get(card_path.rstrip("/") + "/scene.radium") or ()
+    return [op for op in ops if op.get("op") in _LAYOUT_OPS]
 
 
 def _padded_text(new_bytes, orig_len, looks=()):
@@ -3888,7 +4148,8 @@ def _padded_text(new_bytes, orig_len, looks=()):
 
 
 def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
-                        grow_dir=None, dest_is_device=False, shader=None):
+                        grow_dir=None, dest_is_device=False, shader=None,
+                        clips=None):
     """Resolve the user's display-text edits to a flat list of in-place writes
     ``[(disk_offset, bytes), ...]`` (same form ``_compute_patches`` collects).
 
@@ -3931,12 +4192,15 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     # PAD-305: *shader* (a color profile) is a game-program edit of its own;
     # the program joins the edits even when no line of its text changed.
     fw_path = None
-    if shader is not None:
+    if shader is not None or clips is not None:
         fw_path, _fw_node = _game_program_path(reader, cancel)
         if fw_path is None:
-            log("Color profile: the game program wasn't found on the card; "
-                "the colors are left as they are.", "warning")
-            shader = None
+            if shader is not None:
+                log("Color profile: the game program wasn't found on the card; "
+                    "the colors are left as they are.", "warning")
+            if clips is not None:
+                clips.fail("the game program wasn't found on the card")
+            shader = clips = None
         else:
             edits = dict(edits)
             edits.setdefault(fw_path, [])
@@ -3948,7 +4212,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     # its original (the ext4 probe reaches for WSL; a write of same-length
     # edits never pays for it).  The color profile always needs it: the
     # corrected shaders are longer than the game's own.
-    over_any = (shader is not None) or any(
+    over_any = (shader is not None) or (clips is not None) or any(
         len(n) > len(o) for prs in edits.values() for o, n in prs)
     if over_any and grow_dir:
         g_ok, g_why = _text_grow_gate(dest_is_device)
@@ -3976,7 +4240,8 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         if is_fw:
             pw, pn, pov, pgrown = _program_text_writes(
                 reader, node, card_path, pairs, patched_fw, log, grow=grow,
-                shader=shader if card_path == fw_path else None)
+                shader=shader if card_path == fw_path else None,
+                clips=clips if card_path == fw_path else None)
             writes += pw
             n_strings += pn
             _merge_radium_overlays(overlays, pov)
@@ -3997,7 +4262,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         # a line with line breaks is in the manifest flattened (PAD-382)
         from ...core import text_manifest as _tm
         pairs = _tm.resolve(occ_by_text, pairs)
-        looks = _radium_text_looks(data)
+        looks = _radium_text_looks(data, _scene_align_ops(assets_dir, card_path), card_path)
         over = [(o, r) for o, r in pairs
                 if len(r.encode("latin1", "replace"))
                 > len(o.encode("latin1", "replace"))]
@@ -4162,6 +4427,10 @@ def _apply_tree_ops(data, card_path, ops, names, assets_dir, log):
         log("Scene %s: %d of its %d edit(s) from the Scenes window are already on this card's "
             "scene and are not applied again." % (card_path, len(ops) - len(todo), len(ops)),
             "info")
+    # PAD-438: the colour profile on its lines of text (absolute values, so a card built
+    # with them already is set to the same numbers again)
+    lines = _scene_line_colours(assets_dir, card_path, ops, log)
+    todo = list(todo) + lines
     if not todo:
         return data, 0
     n, notes = _scene_edit.apply_scene(sc, todo, assets_dir, names)
@@ -4170,6 +4439,47 @@ def _apply_tree_ops(data, card_path, ops, names, assets_dir, log):
     if not n:
         return data, 0
     return _scene_tree.serialize(sc), n
+
+
+def _scene_line_colours(assets_dir, card_path, ops, log):
+    """PAD-438: the ``line_colour`` edits for the switched-on lines of text of the scene at
+    *card_path* (:mod:`text_colour`), worked out on the project's scene with *ops* (its
+    stored Scenes edits) applied, as the preview draws them; what they write is kept."""
+    if not assets_dir:
+        return []
+    from . import scene_edit as _scene_edit
+    from . import text_colour as _text_colour
+    man = _load_scene_trees(assets_dir).get(card_path)
+    if man is None:
+        return []
+    try:
+        edited, _n = _scene_edit.apply_manifest(
+            man, _scene_edit.to_apply(assets_dir, card_path, man, ops))
+        lines, written = _text_colour.line_ops(assets_dir, card_path, edited, ops)
+    except Exception as e:                             # noqa: BLE001
+        log("Scene %s: the color profile on its text could not be worked out (%s); its "
+            "text keeps its colors." % (card_path, e), "warning")
+        return []
+    if lines:
+        _text_colour.remember(assets_dir, card_path, written)
+        # (a line may have two edits: its colours, and its own copy of its font, PAD-451)
+        nodes = {e["node"] for e in lines}
+        n_on = len(nodes & set(written))
+        msg = "Scene %s: the color profile goes into %d line(s) of text%s." % (
+            card_path, n_on, "" if len(nodes) == n_on else
+            "; %d line(s) get their own colors back" % (len(nodes) - n_on))
+        # a scene that grows is worked out twice in one Write (planned, then written whole)
+        said = getattr(_LINES_SAID, "v", None)
+        if said is None:
+            said = _LINES_SAID.v = {}
+        now = time.monotonic()
+        if now - said.get(msg, -1e9) > 120:
+            log(msg, "info")
+        said[msg] = now
+    return lines
+
+
+_LINES_SAID = threading.local()
 
 
 def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_overlays):
@@ -4184,6 +4494,9 @@ def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_ove
       image build only, so a direct-SD write says so and leaves the scene alone."""
     from . import scene_edit as _scene_edit
     edits = _scene_edit.load(assets_dir)
+    # PAD-438: a scene whose only change is the colour profile on a line of text
+    for card in _text_line_cards(assets_dir):
+        edits.setdefault(card, [])
     if not edits:
         return [], 0, {}
     trees = _load_scene_trees(assets_dir)
@@ -4240,6 +4553,19 @@ def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_ove
         else:
             whole[card_path] = (node, (ops, names, assets_dir))
     return writes, n_total, whole
+
+
+def _text_line_cards(assets_dir):
+    """PAD-438: the scenes with a line of text the colour profile reaches (or one a Write
+    corrected that may need its colours back), where the project's scenes are known."""
+    if not assets_dir:
+        return set()
+    try:
+        from . import text_colour as _text_colour
+        trees = _load_scene_trees(assets_dir)
+        return {c for c in _text_colour.cards_with_lines(assets_dir) if c in trees}
+    except Exception:                                  # noqa: BLE001
+        return set()
 
 
 def _load_scene_trees(assets_dir):
@@ -5714,14 +6040,18 @@ def _kept_size_growth(row, sizes):
     return max(0, n - int(length))
 
 
-def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits):
+def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits, variants=None):
     """What the pre-flight counts for the big whole-file copies that are only
     made after the encode, from what is on disk before it: each mode's own
     clip (:data:`_MODE_CLIP_BYTES_PER_S` for as long as it can run), its own
-    screen (:data:`_MODE_SCREEN_BYTES`), and each picture kept at its own
-    size (:func:`_kept_size_growth`).  Each is an upper bound, so a build
-    that passes has room for them."""
+    screen (:data:`_MODE_SCREEN_BYTES`), each picture kept at its own
+    size (:func:`_kept_size_growth`), and (PAD-446) each clip a slot plays
+    at random (:func:`.clip_variants.size_bound`).  Each is an upper bound,
+    so a build that passes has room for them."""
     total = 0
+    if variants:
+        from . import clip_variants as _CV
+        total += _CV.size_bound(assets_dir, variants)
     if mode_list or code_list:
         from . import mode_project as _MP
 
@@ -5803,7 +6133,8 @@ class _SpaceCard:
         self.avail = cs.usable_blocks(self.space, nb, route)
         self.room, self.current = {}, None
         if layout is not None:
-            own = cs.class_of(layout.laid_out)
+            # (a card built for the smaller 16 GB card is that size: PAD-465)
+            own = cs.layout_class(layout.laid_out)
             self.current = grow_to or own
             self.room = cs.room_by_class(layout, self.space,
                                          [own] + list(sizes or ()), route)
@@ -6141,7 +6472,7 @@ class _SpaceCheck:
 
 def _space_check(space, disk_f, parts, assets_dir, video_edits, log,
                  mode_list=(), code_list=(), radimg_edits=(), margin=0,
-                 cancel=None):
+                 cancel=None, variants=None):
     """The build's :class:`_SpaceCheck`, with its videos counted and settled,
     or None when the build isn't measured (*space* is None) or can't be: a
     card the reader can't size is left to the copy-time check, and the log
@@ -6158,7 +6489,8 @@ def _space_check(space, disk_f, parts, assets_dir, video_edits, log,
     from . import card_size as _cs
     route = _cs.ROUTE_PINNED if sys.platform == "darwin" else _cs.ROUTE_MOUNT
     try:
-        unsized = _unsized_bytes(assets_dir, mode_list, code_list, ())
+        unsized = _unsized_bytes(assets_dir, mode_list, code_list, (),
+                                 variants=variants)
         chk = _SpaceCheck(space, disk_f, parts, route, unsized, margin, log,
                           cancel=cancel, scenes=_kept_size_scenes(radimg_edits))
         if video_edits:
@@ -6291,6 +6623,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # patching its drawing shaders (plugins/stern/shader_profile.py) - a game
     # program edit with no file of the project behind it
     shader_prof = _shader_colour_profile(assets_dir)
+    # PAD-444: a mode's own copy of a clip it shares with another mode - a new
+    # clip in the video bank and that mode's references in the game program
+    # moved to its name (plugins/stern/clip_modes.py)
+    from . import clip_modes as _clip_modes
+    own_clips = _clip_modes.records(assets_dir)
     # Recoloured display text (text/colors.tsv) — the colour lives in the scene,
     # not in the font, so this is a radium patch too.
     color_edits = _changed_radium_text_colors(assets_dir)
@@ -6302,6 +6639,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     from . import scene_edit as _scene_edit
     tree_edits = ({} if getattr(_SKIP_SCENE_EDITS, "on", False)
                   else _scene_edit.load(assets_dir))
+    if not getattr(_SKIP_SCENE_EDITS, "on", False):
+        # PAD-438: a line of text with the colour profile on is a scene edit too
+        for card in _text_line_cards(assets_dir):
+            tree_edits.setdefault(card, [])
     # The game's own modes (item 145): staged timers / awards of the modes the
     # game shipped with - word patches in the game ELF, and the table's
     # operator-setting defaults (a battle timer) in the same ELF.
@@ -6443,13 +6784,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     if _family and not mode_list and not code_list:
         for _line in _MW.stock_lines(assets_dir, carried=False):
             log("Modes: %s." % _line, "warning")
+    # PAD-446: the clips that play one of several at random ride the modes'
+    # delivery (the runtime, its port and clips.cfg on p2) but not the mode
+    # maker's preview switch: a card of random clips carries no mode.
+    variant_slots, variant_prof = _variants_for_build(
+        assets_dir, dest_is_device, log, **_mode_gate_kw)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
             and not text_edits and not color_edits and not layout_edits
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
-            and not stock_mode_edits and shader_prof is None):
+            and not variant_slots
+            and not stock_mode_edits and shader_prof is None
+            and not own_clips):
         raise NothingToWrite(
             "Nothing to write: " + _modes_left_out_clause(_modes_left_out)
             + "every sound (idxNNNN.wav / music_catNN_*.wav) "
@@ -6572,6 +6920,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             "across %d radium scene(s) to write."
             % (sum(len(v) for v in layout_edits.values()),
                len(layout_edits)), "info")
+    if own_clips:
+        log("Found %d mode%s to give a clip of its own or put back on a shared "
+            "clip (Video tab, Played in): %s."
+            % (len(own_clips), "" if len(own_clips) == 1 else "s",
+               "; ".join("%s %s %s" % (
+                   _clip_modes.mode_label(r["mode"]),
+                   "plays the shared clip again:" if r.get("state") == "shared"
+                   else "gets a clip of its own instead of",
+                   r["clip"]) for r in own_clips)), "info")
 
     # PAD-176: what this build copies on whole, against the room on the games
     # partition, before the firmware and the sound bank are read out of the
@@ -6584,12 +6941,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     space = getattr(_BUILD_SPACE, "budget", None)
     space_chk = None
     if space is not None and not dest_is_device:
-        _modes_on = bool(mode_list or code_list)
+        _modes_on = bool(mode_list or code_list or variant_slots)
         space_chk = _space_check(
             space, disk_f, parts, assets_dir, video_edits, log,
             # the big files made after the encode, sized from their sources
             mode_list=mode_list, code_list=code_list,
-            radimg_edits=radimg_edits,
+            radimg_edits=radimg_edits, variants=variant_slots,
             # and the small ones (_SPACE_MARGIN)
             margin=(_SPACE_MARGIN if (text_edits or radimg_edits or _modes_on
                                       or shader_prof is not None
@@ -7254,7 +7611,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # the grow scratch dir and copied onto the card by the grow job, like
         # the cave's firmware.
         grown_text = None
-        if text_edits or shader_prof is not None:
+        # PAD-444: the copies' bank files are read before the program step
+        # that needs their names (a card without the banks: none are made)
+        clip_job = (_own_clip_job(reader, assets_dir, own_clips, log)
+                    if own_clips else None)
+        if text_edits or shader_prof is not None or clip_job is not None:
             if progress:
                 progress(90, 100, "Preparing display text...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
@@ -7262,7 +7623,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
              grown_text) = _radium_text_writes(
                 reader, assets_dir, log, cancel, patched_fw=patched_gr,
                 grow_dir=grow_work, dest_is_device=dest_is_device,
-                shader=shader_prof)
+                shader=shader_prof, clips=clip_job)
             _merge_radium_overlays(radium_overlays, _t_ov)
             if cancel():
                 return None, None, None, None, None
@@ -7433,22 +7794,28 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # clips are whole-file copies; the manifest is composed to match once
         # every other edit's record refresh is known (below).
         mode_plan = mode_payload = None
-        if mode_list or code_list:
+        _modes_on = bool(mode_list or code_list)
+        # PAD-446: a build of random clips and no mode says so in its own words
+        _who = "Modes" if _modes_on else "Random clips"
+        if _modes_on or variant_slots:
             t0 = time.monotonic()
             if progress:
-                progress(91, 100, "Building the project's modes...")
+                progress(91, 100, "Building the project's modes..." if _modes_on
+                         else "Adding the random clips to the video bank...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
                     _mprof = _MW.MP.profile(mode_list[0][1].title)
-                else:
+                elif code_list:
                     from . import code_modes as _CM
                     _mprof = _CM.profile_for(assets_dir, code_list)
                     if _mprof is None:
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
+                else:
+                    _mprof = variant_prof
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
-                    if not _rel:
+                    if not _rel or (not _modes_on and _rel != _MW.scene_rels(_mprof)[1]):
                         continue        # a part this title cannot do (item 148)
                     _mnodes[_rel] = _MW.lookup(reader, _rel)
                     if _mnodes[_rel] is None:
@@ -7459,6 +7826,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     raise _MW.ModeWriteError("the card's game program was not "
                                              "found")
                 _hud_rel, _bank_rel = _MW.scene_rels(_mprof)
+                if not _modes_on:
+                    _hud_rel = ""        # PAD-446: random clips change the bank only
                 # item 164: the system scene whose full font a HUD with too few glyphs
                 # takes for its screens' words (absent: the words keep the HUD's font)
                 from . import scene_write as _SWF
@@ -7480,7 +7849,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     stock_font=(bytes(reader.read_file_bytes(_font_node))
                                 if _font_node is not None else b""),
                     hud_font=(bytes(reader.read_file_bytes(_hudfont_node))
-                              if _hudfont_node is not None else b""))
+                              if _hudfont_node is not None else b""),
+                    modes_on=_modes_on, variants=bool(variant_slots),
+                    variants_prof=variant_prof, cancel=cancel)
+                if mode_plan is None:
+                    raise _MW.ModeWriteError("none of the project's random clips can go on "
+                                             "this card")
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
                           for p, _i, n in reader.iter_regular_files(
                               min_size=1, max_depth=20)}
@@ -7495,13 +7869,33 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         raise _MW.ModeWriteError("%s is not on the card" % _rel)
                     grown_files[bytes(_node["i_block"])] = _src
                 mode_payload = _MW.p2_payload(
-                    mode_plan, os.path.join(grow_work, "modes", "p2"))
+                    mode_plan, os.path.join(grow_work, "modes", "p2"), project=assets_dir)
             except _MW.ModeWriteError as e:
-                raise RuntimeError("Modes: %s. Nothing was written." % e) \
+                raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
             for _line in mode_plan.lines:
-                log("Modes: %s." % _line, "info")
-            _stage_done(log, "building %d mode(s)" % (len(mode_list) + len(code_list)), t0)
+                log("%s: %s." % ("Modes" if _modes_on else "Random clips",
+                                 _line[len("random clips: "):]
+                                 if _line.startswith("random clips: ") and not _modes_on
+                                 else _line), "info")
+            _stage_done(log, ("building %d mode(s)" % (len(mode_list) + len(code_list))
+                              if _modes_on else "adding %d random clip(s)"
+                              % len(mode_plan.variants.new)), t0)
+
+        # PAD-444: the own copies' bank entries and files, on the bank the
+        # modes just rewrote when they did.  The program part already landed
+        # (the text step), so a copy that can't be finished stops the Write:
+        # a mode must never name a clip its bank doesn't have.
+        clip_files = None
+        if clip_job is not None:
+            grow_work = grow_work or _work_dir(label, base="spike2_grow_")
+            clip_files = _own_clip_files(reader, clip_job, assets_dir,
+                                         grow_work, mode_plan, radium_overlays,
+                                         radium_grow_jobs, log)
+            for _rel, _src in (clip_files or {}).get("replaced", ()):
+                _node = _MW.lookup(reader, _rel)
+                if _node is not None:
+                    grown_files[bytes(_node["i_block"])] = _src
 
         video_patches = []     # (inode, payload bytes == inode size)
         video_grow_jobs = []   # (card_rel, source_file) — grown via ext4 driver
@@ -7569,6 +7963,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 and not radium_grow_jobs
                 and not boot_writes and boot_grow is None
                 and patched_gr is None and mode_plan is None
+                and not clip_files
                 and not stock_mode_edits):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
@@ -7675,39 +8070,60 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # writes, and the whole manifest is copied on after the files it names.
         manifest_job = None
         mode_info = None
-        if mode_plan is not None:
+        # PAD-444: an own copy is a new file too, and its bank is rewritten
+        _c_replaced = list((clip_files or {}).get("replaced", ()))
+        _c_new = list((clip_files or {}).get("new", ()))
+        if mode_plan is not None or _c_replaced or _c_new:
             from . import sidx as _sidx
+            # the modes' (or PAD-446's random clips') plan carries the manifest when
+            # there is one; a build of own clips alone composes it here
+            _who = _who if mode_plan is not None else "Own clips"
+            _m_replaced = list(mode_plan.replaced) if mode_plan else []
+            _m_new = list(mode_plan.new) if mode_plan else []
+            _m_rels = {r for r, _s in _m_replaced}
             try:
                 _man_path, _man_node = _sidx.find_sidx(reader)
                 if _man_node is None:
                     raise _MW.ModeWriteError(
                         "the card has no /spk/index/*.sidx manifest, so the "
-                        "modes' new files could not be indexed")
+                        "%s' new files could not be indexed"
+                        % ("modes" if _modes_on else "random clips"
+                           if mode_plan is not None else "own clips"))
                 _folded, writes = _MW.fold_writes(
                     writes, reader.disk_ranges(_man_node, 0,
                                                _man_node["size"]))
                 _new_man = _MW.compose_manifest(
                     bytes(reader.read_file_bytes(_man_node)), inplace=_folded,
-                    refreshed=mode_plan.replaced, new=mode_plan.new)
-                _man_src = os.path.join(grow_work, "modes",
-                                        os.path.basename(_man_path))
+                    refreshed=_m_replaced + [r for r in _c_replaced
+                                             if r[0] not in _m_rels],
+                    new=_m_new + _c_new)
+                _man_src = os.path.join(
+                    grow_work, "modes" if mode_plan is not None else "own_clips",
+                    os.path.basename(_man_path))
+                os.makedirs(_lp(os.path.dirname(_man_src)), exist_ok=True)
                 with open(_lp(_man_src), "wb") as f:
                     f.write(_new_man)
                 manifest_job = (_man_path.lstrip("/"), _man_src)
-                _p3_epoch = _MW.epoch_at(disk_f, reader.base)
-                _p2_off = _MW.p2_offset(disk_f)
-                _p2_epoch = _MW.epoch_at(disk_f, _p2_off)
+                if mode_plan is not None:
+                    _p3_epoch = _MW.epoch_at(disk_f, reader.base)
+                    _p2_off = _MW.p2_offset(disk_f)
+                    _p2_epoch = _MW.epoch_at(disk_f, _p2_off)
             except _MW.ModeWriteError as e:
-                raise RuntimeError("Modes: %s. Nothing was written." % e) \
+                raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
-            log("Modes: the SD-validation manifest gains %d record(s) (%s) "
+            _added = [r for r, _s in _m_new + _c_new]
+            log("%s: the SD-validation manifest gains %d record(s) (%s) "
                 "and %d in-place record refresh(es) are folded into it; it is "
                 "copied onto the card whole."
-                % (len(mode_plan.new), ", ".join(r for r, _s in mode_plan.new)
-                   or "none", len(_folded)), "info")
+                % (_who, len(_added), ", ".join(_added) or "none",
+                   len(_folded)), "info")
+        if mode_plan is not None:
             mode_info = {
                 "names": ([s.name for _g, s in mode_list]
                           + [c.name for _g, c in code_list]),
+                # PAD-446: the slots that play one of several clips at random
+                "variants": ([v.rel for v in mode_plan.variants.slots]
+                             if mode_plan.variants is not None else []),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -7746,6 +8162,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             # the files before the manifest that names them; the firmware, if
             # any, still goes last
             grow_jobs += mode_plan.jobs
+        if clip_files:
+            # PAD-444: the copies' bank (unless the modes' job carries it
+            # already) and their files
+            _mj = {r for r, _s in (mode_plan.jobs if mode_plan else ())}
+            grow_jobs += [j for j in _c_replaced if j[0] not in _mj]
+            grow_jobs += _c_new
+        if manifest_job is not None:
             grow_jobs.append(manifest_job)
         if patched_gr is not None and fw_node is not None:
             from .valpatch import _game_manifest_path
@@ -7759,7 +8182,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # survive until the caller has copied it onto the card, so the caller
         # removes it (see the note where grow_work is created).
         uses_work = (bool(radium_grow_jobs) or patched_gr is not None
-                     or image_grow_job is not None or mode_plan is not None)
+                     or image_grow_job is not None or mode_plan is not None
+                     or bool(clip_files))
         grow_plan = ({"offset": reader.base, "jobs": grow_jobs,
                       "n_video": len(video_grow_jobs),
                       # Where the grown sound bank sits in the queue, so a
@@ -7776,6 +8200,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                       # fixed clock a mode build delivers with so a second
                       # Write is byte-identical (ext4_grow.grow_files_pinned).
                       "modes": mode_info,
+                      # PAD-444: the own copies' new files and rewritten banks
+                      "own_clips": ({"added": [r for r, _s in _c_new],
+                                     "rewritten": [r for r, _s in _c_replaced]
+                                     + ([manifest_job[0]] if manifest_job
+                                        and mode_plan is None else [])}
+                                    if clip_files else None),
                       "epoch": (_p3_epoch if mode_plan is not None else None)}
                      if grow_jobs or boot_grow else None)
         # Only a plan that actually carries a staged file (the firmware, a
@@ -7790,7 +8220,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # display-text edits, just of the colour / position / size rather
         # than the letters.
         counts = (len(audio_patches) + len(music_patches),
-                  len(video_patches) + len(video_grow_jobs),
+                  len(video_patches) + len(video_grow_jobs) + len(_c_new),
                   len(image_patches) + len(texture_patches) + n_radimg + n_tree
                   + n_boot,
                   n_text + n_color + n_layout)
@@ -7961,6 +8391,18 @@ def build_update_reason(prev, original_path, output_path, assets_dir):
                     else "the original's card size")
         return ("it was built for %s, and this build is for %s"
                 % (_for(prev.get("card_size")), _for(want)))
+    if want and _cs.shrinks_card(original_path, want):
+        # PAD-465: making it smaller moved files the stock card's extent maps
+        # place elsewhere, which every in-place update is resolved through
+        return ("a build for a %s SD card is always made from the original"
+                % _cs.words(want))
+    # PAD-467: the same for a build made as small as it can be, and for the
+    # build after one (the card at the output is laid out shorter)
+    if _cs.fit_requested():
+        return ("a build made as small as it can be is always made from the "
+                "original")
+    if prev.get("fit"):
+        return "the last build here was made as small as it could be"
     try:
         from . import mode_write as _MW
         if _mode_family_on() and _MW.enabled() and (
@@ -8173,12 +8615,14 @@ def _whole_digests(whole, assets_dir, scratch):
 
 
 def _build_record(original_path, output_path, assets_dir, parts, by_file,
-                  whole_record, complete, modes=None, card_size=None):
+                  whole_record, complete, modes=None, card_size=None,
+                  fit=False):
     """The record :func:`write_image` leaves beside its output.  Taken LAST,
     after every byte is on the card, because the output's stamp is what the
     next build checks before trusting any of it.  *modes* (item 149) is what
     the build's modes put on the card, recorded so the next build knows to
-    start from the original."""
+    start from the original.  *fit* (PAD-467): the output was made as small
+    as it can be, which moved files, so the next build is made whole."""
     from ... import __version__
     rec = {
         "version": BUILD_MANIFEST_VERSION,
@@ -8199,6 +8643,8 @@ def _build_record(original_path, output_path, assets_dir, parts, by_file,
         # the class the output was grown to (card_size.py); *partitions*
         # stays the ORIGINAL's, which every in-place range was resolved in
         rec["card_size"] = card_size
+    if fit:
+        rec["fit"] = True
     return rec
 
 
@@ -8432,6 +8878,44 @@ def _drop_stale_p2_sidecar(output_path, log=None):
                     "warning")
 
 
+def _variants_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-446: ``(slots, profile)`` - the project's clips that play one of several at random
+    (:mod:`.clip_variants`) this build carries, and the title of the card they are for; ``({},
+    None)`` when it has none or they are left out (one warning says why). The modes' gate
+    without the mode maker's preview switch: an image file, a host that can add files to it
+    (not a Mac yet), and a title the swap was proven on."""
+    from . import clip_variants as _CV
+    from . import mode_write as _MW
+    slots = _CV.load(assets_dir)
+    if not slots:
+        return {}, None
+    if not _CV.enabled():
+        why = "%s=0 leaves them out" % _CV.GATE_ENV
+    elif dest_is_device:
+        why = ("a direct-SD write cannot add files to the card, and each random clip is "
+               "one; build an image file to carry them")
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _CV.project_title(assets_dir, probe=True)
+        why = _CV.title_refusal(prof)
+    if why:
+        log("Random clips: %d clip(s) set to play one of several at random are left out "
+            "of this build: %s." % (len(slots), why.rstrip(".")), "warning")
+        return {}, None
+    log("Found %d clip(s) that play one of several at random: %s."
+        % (len(slots), ", ".join(sorted(slots))), "info")
+    return slots, prof
+
+
 def _install_modes(output_path, modes, landed, planned, log):
     """Item 149: put the modes' runtime on the built card's system partition
     and say, file by file, what the modes added.  Only once every whole-file
@@ -8439,30 +8923,42 @@ def _install_modes(output_path, modes, landed, planned, log):
     make it would be a card that looks modded and is not.  Returns
     ``(record, ok)`` - *record* is what the build record keeps."""
     from . import mode_write as _MW
+    # PAD-446: a card of random clips and no mode
+    who = "Modes" if modes.get("names") or not modes.get("variants") else "Random clips"
     if landed < planned:
-        log("Modes: not every file reached the card, so the mode runtime was "
-            "NOT put on the system partition and no mode will run on this "
-            "card. Some of the modes' files may already be on it (the "
-            "rewritten HUD and bank scenes can name a clip that did not "
-            "land), so do not use this card: fix the issue above and Write "
-            "again.", "error")
+        if who == "Modes":
+            log("Modes: not every file reached the card, so the mode runtime was "
+                "NOT put on the system partition and no mode will run on this "
+                "card. Some of the modes' files may already be on it (the "
+                "rewritten HUD and bank scenes can name a clip that did not "
+                "land), so do not use this card: fix the issue above and Write "
+                "again.", "error")
+        else:
+            # words a copy with the mode maker switched off may show (PAD-446)
+            log("Random clips: not every file reached the card, so the program "
+                "that picks them was NOT put on the system partition. The "
+                "rewritten video bank may already be on it, so do not use this "
+                "card: fix the issue above and Write again.", "error")
         return None, False
     try:
         _MW.install_p2(output_path, modes["payload"], modes["p2_epoch"],
-                       log=log)
+                       log=log, modes=who == "Modes")
     except Exception as e:                   # the executor's CommandError too
-        log("Modes: the mode runtime could not be put on the card's system "
-            "partition, so this card carries no modes: %s" % e, "error")
+        log("%s: the %s could not be put on the card's system partition, so "
+            "this card carries no %s: %s"
+            % (who, "mode runtime" if who == "Modes" else "program that picks them",
+               "modes" if who == "Modes" else "random clips", e), "error")
         return None, False
     for rel in modes.get("added") or ():
-        log("Modes: added %s." % rel, "info")
+        log("%s: added %s." % (who, rel), "info")
     for rel in modes.get("rewritten") or ():
-        log("Modes: rewrote %s." % rel, "info")
+        log("%s: rewrote %s." % (who, rel), "info")
     for name in modes.get("p2") or ():
-        log("Modes: added %s/%s on the system partition." % (_MW.P2_DIR, name),
+        log("%s: added %s/%s on the system partition." % (who, _MW.P2_DIR, name),
             "info")
-    log("Modes: /etc/init.d/game_monitor now loads the mode runtime (port %s)."
-        % modes.get("port"), "info")
+    log("%s: /etc/init.d/game_monitor now loads the %s (port %s)."
+        % (who, "mode runtime" if who == "Modes" else "program that picks them",
+           modes.get("port")), "info")
     snd = modes.get("end_sound")
     if snd:
         log("Modes: request %d (sound idx %d) plays %s's own end sound."
@@ -8471,11 +8967,16 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("Modes: request %d (sound idx %d) plays %s's own %s."
             % (own["request"], own["idx"], own["name"],
                _MW.sound_words(own["key"])), "info")
-    log("Modes: %d mode(s) on the card: %s."
-        % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
-        "success")
+    if modes.get("names") or not modes.get("variants"):
+        log("Modes: %d mode(s) on the card: %s."
+            % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
+            "success")
+    if modes.get("variants"):
+        log("Random clips: %d clip(s) on the card play one of several at random "
+            "each time the game plays them: %s."
+            % (len(modes["variants"]), ", ".join(modes["variants"])), "success")
     rec = {k: modes.get(k) for k in ("names", "added", "rewritten", "port",
-                                     "p2", "end_sound")}
+                                     "p2", "end_sound", "variants")}
     if modes.get("own_sounds"):
         rec["own_sounds"] = modes.get("own_sounds")
     return rec, True
@@ -8614,13 +9115,32 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     # than after the encode.
     from . import card_size as _cs
     grow_to = _cs.preflight(original_path, _cs.requested(), tools=False)
-    if grow_to:
+    # PAD-465: the one size a card is made SMALLER for (a 16 GB card for a
+    # smaller 16 GB SD card).  resize2fs moves files to make it so, so it is
+    # done last, on the finished output (_shrink_card), never before a patch.
+    shrink = bool(grow_to) and _cs.shrinks_card(original_path, grow_to)
+    # PAD-467: made as small as it can be, the same way and as late
+    fit = _fit_asked(original_path, log)
+    if shrink and not fit:
+        log("This build is for a %s SD card: once everything is on the card, "
+            "its games partition is made %s shorter, so the image comes out "
+            "%s instead of Stern's %s."
+            % (_cs.words(grow_to), _cs.size_words(_cs.SMALL_CUT * _cs.SECTOR),
+               _cs.size_words(_cs.layout_size(grow_to)),
+               _cs.size_words(_cs.CARD_SIZES["16G"])), "info")
+    elif grow_to and fit:
+        log("This build is for a %s SD card: %s while the build puts its "
+            "files on." % (_cs.words(grow_to), "the games partition keeps "
+                           "Stern's 16 GB length" if shrink else "the games "
+                           "partition is grown to fill it"), "info")
+    elif grow_to:
         log("This build is for a %s SD card: the games partition is grown to "
             "fill it, so it needs an SD card of at least %s."
             % (_cs.words(grow_to), _cs.words(grow_to)), "info")
     elif _cs.requested():
-        # a card is never made smaller: say so rather than hand back a bigger
-        # image than the one the user thinks they asked for
+        # a card is never made smaller (but a 16 GB one for the smaller 16 GB
+        # card, above): say so rather than hand back a bigger image than the
+        # one the user thinks they asked for
         log("SD card size %s: the original is already a card that size or "
             "bigger, so this build keeps the original's size."
             % _cs.words(_cs.requested()), "info")
@@ -8748,9 +9268,13 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 copier.join()
                 if not copy_err:
                     # the original, at the SD card size this build is for
-                    if grow_to and not _expand_card(
+                    if grow_to and not shrink and not _expand_card(
                             original_path, output_path, parts, grow_to, log,
                             cancel):
+                        return (0, 0, 0, 0), None, None
+                    if (shrink or fit) and not _shrink_card(
+                            original_path, output_path, grow_to, log, cancel,
+                            fit=fit):
                         return (0, 0, 0, 0), None, None
                     try:
                         os.utime(_lp(output_path), None)
@@ -8760,7 +9284,8 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                         output_path,
                         _build_record(original_path, output_path, assets_dir,
                                       parts, {}, {}, True,
-                                      card_size=grow_to))
+                                      card_size=grow_to,
+                                      fit=_fitted(output_path, fit)))
                     if _mode_family_on():
                         log("The build at %s carried modes (%s) and %s, so it is "
                             "written as the original card: no modes, stock files."
@@ -8868,8 +9393,8 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 out.flush()
                 os.fsync(out.fileno())
             _stage_done(log, "writing the patched bytes into the image", t0)
-            if grow_to and not _expand_card(original_path, output_path,
-                                            parts, grow_to, log, cancel):
+            if grow_to and not shrink and not _expand_card(
+                    original_path, output_path, parts, grow_to, log, cancel):
                 return (0, 0, 0, 0), None, None     # cancelled
             # Grow the files that outgrew their slots (oversized videos kept at
             # full quality, and the rebuilt firmware when a blip-free build is
@@ -8928,6 +9453,13 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                                                 n_planned, log)
                 if not _mok:
                     complete = False
+            # PAD-465: a card made smaller for a smaller 16 GB SD card, now
+            # that every byte is on it (resize2fs moves files to do it), and
+            # PAD-467: one made as small as it can be
+            if (shrink or fit) and not _shrink_card(
+                    original_path, output_path, grow_to, log, cancel,
+                    fit=fit):
+                return (0, 0, 0, 0), None, None     # cancelled
             # The record of what this build put on the card, for the next one
             # to update: every in-place write traced back to its file, every
             # whole-file copy that landed (they land in order) with its
@@ -8959,7 +9491,8 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 output_path,
                 _build_record(original_path, output_path, assets_dir, parts,
                               by_file, whole_record, complete,
-                              modes=mode_rec, card_size=grow_to))
+                              modes=mode_rec, card_size=grow_to,
+                              fit=_fitted(output_path, fit)))
         except OSError as e:
             log("The build's record could not be written beside it (%s), so "
                 "the next build starts from the original." % e, "info")
@@ -9360,8 +9893,10 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                 # files, and the rig binds the set whole over the games tree -
                 # so they go BESIDE the set, in "<set>-modes", for Try it to
                 # hand the rig through PAD_MODE_SO and /dump.
+                own_out = (grow_plan or {}).get("own_clips") or {}
                 modes_out = _write_override_modes(
-                    out_dir, (grow_plan or {}).get("modes"), log)
+                    out_dir, (grow_plan or {}).get("modes"), log,
+                    also_added=own_out.get("added"))
 
                 # AND WHAT THE LAST BUILD LEFT THAT THIS ONE DOES NOT WANT: a
                 # file the user has reverted is absent from the new set, and a
@@ -9422,6 +9957,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         # PAD-305: the color profile the set's pictures and clips carry
         "colour_profile": _colour_signature(assets_dir),
     }
+    if own_out.get("added") or own_out.get("rewritten"):
+        manifest["own_clips"] = own_out
     if modes_out:
         manifest["modes"] = modes_out
     elif modes_left_out:
@@ -9442,9 +9979,10 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     # the set (whole when this build has one, removed when the last one did), so a
     # stage brought forward by overrides.sh never keeps a stale list.
     new_delta, new_removed = [], []
-    if (modes_out or {}).get("added"):
+    if (modes_out or {}).get("added") or own_out.get("added"):
         new_delta.append(("/" + OVERRIDE_NEW, None))
-    elif parent and ((previous or {}).get("modes") or {}).get("added"):
+    elif parent and (((previous or {}).get("modes") or {}).get("added")
+                     or ((previous or {}).get("own_clips") or {}).get("added")):
         new_removed.append("/" + OVERRIDE_NEW)
     _write_override_delta(out_dir, generation, parent, delta + new_delta,
                           removed + new_removed)
@@ -9470,15 +10008,18 @@ OVERRIDE_MODES_SUFFIX = "-modes"
 OVERRIDE_MODES_OBJECT = "pad_mode.so"
 
 
-def _write_override_modes(out_dir, modes, log):
+def _write_override_modes(out_dir, modes, log, also_added=None):
     """Item 149: lay the modes' p2 payload down in ``<out_dir>-modes`` (emptied
     first, removed when this build carries no modes) and return what
     ``overrides.json`` says about it, or ``None``.  The same payload a card
-    build installs on the system partition, built by the same code."""
+    build installs on the system partition, built by the same code.
+    *also_added*: other new files of the set (PAD-444's own clip copies), which
+    the set's new-file list names beside the modes' own."""
     import shutil
     dest = str(out_dir).rstrip("\\/") + OVERRIDE_MODES_SUFFIX
     _rmtree(dest)
-    _write_override_new_list(out_dir, (modes or {}).get("added"))
+    _write_override_new_list(out_dir, list((modes or {}).get("added") or ())
+                             + list(also_added or ()))
     if not modes:
         return None
     os.makedirs(_lp(dest), exist_ok=True)
@@ -9519,6 +10060,11 @@ def _override_whole_why(card_rel, grow_plan):
     rel = str(card_rel).strip("/")
     if rel in [str(r).strip("/") for r in modes.get("added") or ()]:
         return "a new file the modes add"
+    own = (grow_plan or {}).get("own_clips") or {}
+    if rel in [str(r).strip("/") for r in own.get("added") or ()]:
+        return "a mode's own copy of a clip, a new file"
+    if rel in [str(r).strip("/") for r in own.get("rewritten") or ()]:
+        return "rebuilt whole for a mode's own copy of a clip"
     if rel in [str(r).strip("/") for r in modes.get("rewritten") or ()]:
         return "rebuilt whole for the modes"
     return "it outgrew its slot on the card"
@@ -10043,7 +10589,7 @@ def scene_live_bytes(out_dir, assets_dir, card_path, log=None):
     with open(_lp(src), "rb") as f:
         base = f.read()
     ops = _scene_edit.ops_for(assets_dir, card_path)
-    if not ops:
+    if not ops and card_path not in _text_line_cards(assets_dir):
         return base
     trees = _load_scene_trees(assets_dir)
     names = _scene_edit.names_of(trees[card_path]) if card_path in trees else {}
@@ -10089,8 +10635,11 @@ def _expand_card(original_path, output_path, parts, target, log, cancel):
     except Exception:  # noqa: BLE001 - an unpinned grow is still a valid one
         epoch = None
     try:
-        _cs.expand_image(output_path, target, log=log, cancel=cancel,
-                         epoch=epoch)
+        if not _cs.expand_image(output_path, target, log=log, cancel=cancel,
+                                epoch=epoch):
+            # the original could grow to it (card_size.preflight), so the
+            # copy of it at the output must: never hand back another size
+            raise _cs.CardSizeError("it did not grow")
         moved = _cs.check_blocks_unmoved(original_path, output_path, parts,
                                          log=log)
         if moved:
@@ -10117,6 +10666,96 @@ def _expand_card(original_path, output_path, parts, target, log, cancel):
                 % (_cs.words(target), e, _cs.words(target))) from e
         raise
     _stage_done(log, "making the card a %s card" % _cs.words(target), t0)
+    return True
+
+
+def _fit_asked(original_path, log):
+    """PAD-467: whether this build is made as small as it can be once it is
+    finished (card_size.fit_requested, the Write tab's "Make the image as
+    small as it can be").  A card that can't be (not laid out the way Stern
+    lays a card out, a multi-boot card, a games partition not cleanly
+    unmounted, a computer without the tools) is built at its size, saying
+    why: the option asks for a smaller file, never for no build."""
+    from . import card_size as _cs
+    if not _cs.fit_requested():
+        return False
+    why = _cs.fit_refusal(original_path)
+    if not why:
+        try:
+            _cs._E2fs()
+        except _cs.CardSizeError as e:
+            why = "this computer can't: %s" % str(e).rstrip(".")
+    if why:
+        log("Make the image as small as it can be: %s, so the image keeps "
+            "its size." % why, "warning")
+        return False
+    log("Make the image as small as it can be: once everything is on the "
+        "card, its games partition is cut down to what it holds, with %s of "
+        "it left free, and the image is cut with it."
+        % _cs.size_words(_cs.FIT_SPARE), "info")
+    return True
+
+
+def _fitted(output_path, fit):
+    """Whether the build at *output_path* came out made as small as it can
+    be: asked to (*fit*), and laid out at no card size Stern's or this app's
+    (the fit can find nothing worth taking off, and a card that was also
+    built for the smaller 16 GB card may have been made just that)."""
+    if not fit:
+        return False
+    from . import card_size as _cs
+    try:
+        return _cs.layout_class(os.path.getsize(_lp(output_path))) is None
+    except OSError:
+        return False
+
+
+def _shrink_card(original_path, output_path, target, log, cancel, fit=False):
+    """PAD-465: make the FINISHED build at *output_path* fit a smaller
+    16 GB SD card (card_size.shrink_image), after every in-place patch and
+    whole-file copy is on it, since resize2fs moves the files at the end of
+    the games partition to do it.  With *fit* (PAD-467) it is made as small
+    as it can be instead (card_size.fit_image), and never bigger than the
+    *target* it was built for.  Returns True when it is done (a fit that
+    found nothing worth taking off leaves the build as it is), False when
+    the user cancelled; a cancel or any failure discards the output, as
+    :func:`_expand_card` does: a card the user asked to fit a smaller SD
+    card is never handed back at Stern's size, nor one that may be half
+    made smaller.  The clock is pinned as for a grow."""
+    from ...core import ext4_grow
+    from . import card_size as _cs
+    t0 = time.monotonic()
+    what = ("making the image as small as it can be" if fit
+            else "making the card fit a %s SD card" % _cs.words(target))
+    try:
+        epoch = ext4_grow.partition_epoch(original_path,
+                                          _cs.P3_START * _cs.SECTOR)
+    except Exception:  # noqa: BLE001 - an unpinned resize is still a valid one
+        epoch = None
+    try:
+        if fit:
+            _cs.fit_image(output_path, target, log=log, cancel=cancel,
+                          epoch=epoch)
+        elif not _cs.shrink_image(output_path, target, log=log,
+                                  cancel=cancel, epoch=epoch):
+            raise _cs.CardSizeError("it is not a card that is made smaller "
+                                    "for that size")
+    except _cs.Cancelled:
+        _discard_output(output_path)
+        log("Cancelled while %s; nothing was built." % what, "warning")
+        return False
+    except BaseException as e:
+        _discard_output(output_path)
+        if isinstance(e, (_cs.CardSizeError, OSError)):
+            if fit:
+                raise _cs.CardSizeError(
+                    "The image could not be made as small as it can be, so "
+                    "nothing was built: %s" % e) from e
+            raise _cs.CardSizeError(
+                "The card could not be made to fit a %s SD card, so nothing "
+                "was built: %s" % (_cs.words(target), e)) from e
+        raise
+    _stage_done(log, what, t0)
     return True
 
 
@@ -10202,11 +10841,11 @@ def _bigger_card_hint(err, image, part_offset, sizes=None):
         return ""
     try:
         with open(_lp(image), "rb") as f:
-            cls = _cs.class_of(_cs.read_layout(f).laid_out)
+            cls = _cs.layout_class(_cs.read_layout(f).laid_out)
     except Exception:  # noqa: BLE001 - a device, a multi-boot card, unreadable
         return ""
     bigger = [c for c in (_cs.CARD_SIZES if sizes is None else sizes)
-              if _cs.CARD_SIZES[c] > _cs.CARD_SIZES.get(cls, 1 << 62)]
+              if _cs.CARD_SIZES[c] > _cs.LAYOUT_SIZES.get(cls, 1 << 62)]
     if not bigger:
         return ""
     bigger.sort(key=_cs.CARD_SIZES.get)
@@ -14195,6 +14834,15 @@ def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
     game's sound container under a key of its own (the key moves with a
     record's geometry), so on its own it would sit there unplayed; the play
     tables are re-pointed at it afterwards (:func:`_repoint_descriptors`).
+
+    THERE IS NO LIMIT ON HOW MANY (PAD-445).  Each one is a record, so the
+    header's sounds word may pass its fragment word (Godzilla 1.16: 2599
+    fragments, 2534 sounds, and 11 code modes add 69).  The fragments are the
+    game's sound ids, which a grow never adds to - an appended record is
+    reached through a re-pointed id or the modes' key swap - and the game reads
+    the fragment word nowhere else; the emulator plays records past it.  The
+    one ceiling on the bank is its size
+    (:data:`~.spike2.emulator.MAX_IMAGE_BYTES`, :func:`_grows_within_bank_limit`).
 
     The appended body starts as the stock sound's own bytes, repeated to fill
     the new length.  It is a scaffold the encoder overwrites, but it has to be

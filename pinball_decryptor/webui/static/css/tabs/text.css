@@ -17,6 +17,7 @@
 .text-card > .bd.text-body { flex: 1 1 auto; min-height: 0; gap: 0; }
 .text-card .toolbar .text-scene { flex: 0 1 320px; min-width: 150px; }
 .text-card .toolbar .search { flex: 0 1 260px; }
+.text-card .toolbar .text-find-n { flex: none; padding-right: 8px; }
 .text-table { flex: 1 1 0; min-height: 132px; }
 .tbl .c.pre { white-space: pre; }
 

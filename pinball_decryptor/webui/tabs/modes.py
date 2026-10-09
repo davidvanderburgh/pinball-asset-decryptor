@@ -49,6 +49,7 @@ _BOOL_FIELDS = ("screen", "countdown", "lights", "advanced", "stack", "light_sho
                 "start_save",                                                      # PAD-225
                 "magnet", "scoop", "coil_on_0", "coil_on_1", "coil_on_2",          # PAD-381
                 "shield",                                                          # PAD-392
+                "shake_on_start", "shake_on_shot", "shake_on_end",                 # PAD-414
                 "seq_reset_any")                                                   # PAD-314
 _STR_FIELDS = (
     "name", "start_shot", "start_count", "seconds", "award", "screen_title", "panel_color",
@@ -68,7 +69,10 @@ _STR_FIELDS = (
     "seq_shot_0", "seq_shot_1", "seq_shot_2", "seq_shot_3",                           # PAD-314
     "seq_shot_4", "seq_shot_5", "seq_shot_6", "seq_shot_7",
     "game_modes",                                                                     # PAD-363
-    "show_start", "show_end")                                                         # PAD-418
+    "shake_what_start", "shake_what_shot", "shake_what_end",                          # PAD-414
+    "shake_s_start", "shake_s_shot", "shake_s_end", "shake_shot",
+    "show_start", "show_end",                                                         # PAD-418
+    "game_wizard", "wizard_how")                                                      # PAD-436
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -84,6 +88,11 @@ _DEFAULTS = {
     "magnet": False, "magnet_s": "2",                                          # PAD-381
     "scoop": False, "scoop_s": "3",                                            # PAD-381
     "shield": False,                                                           # PAD-392
+    # PAD-414: the shaker - as it starts, on a shot, as it ends; a shake of the mode's own (strength + seconds) or
+    # one of the game's ("game:<name>")
+    "shake_on_start": False, "shake_on_shot": False, "shake_on_end": False,
+    "shake_what_start": "hard", "shake_what_shot": "game:jackpot", "shake_what_end": "soft",
+    "shake_s_start": "0.5", "shake_s_shot": "0.5", "shake_s_end": "1", "shake_shot": "",
     "coil_on_0": False, "coil_on_1": False, "coil_on_2": False, "coil_s_0": "2", "coil_s_1": "2", "coil_s_2": "2",
     "coil_when_0": "(when it starts)", "coil_when_1": "(when it starts)", "coil_when_2": "(when it starts)",
     "mb_on_shot": "(when it starts)",
@@ -92,6 +101,7 @@ _DEFAULTS = {
     "seq_reset_any": False,                                                        # PAD-314
     "game_modes": "block",                                                         # PAD-363; PAD-398
     "show_start": "(none)", "show_end": "(none)",                                  # PAD-418
+    "game_wizard": "(none)", "wizard_how": "light",                                # PAD-436
     **{"seq_shot_%d" % i: "(no more shots)" for i in range(8)},
 }
 
@@ -117,6 +127,7 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"(?i)magnet", "mode"),                                                   # PAD-381
     (r"(?i)scoop", "mode"),                                                    # PAD-381
     (r"(?i)shield targets", "mode"),                                           # PAD-392
+    (r"(?i)shake", "mode"),                                                    # PAD-414
     (r"(?i)mechanism|holds \d", "mode"),                                       # PAD-381
     # Scoring: the first shot's points, the ladder, a shot's own points, the early end
     (r"^The first shot has to be worth something", "scoring"),
@@ -145,6 +156,7 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"other shots?\b|^A mode cannot wait for itself|starts only after|^The mode it starts after", "mode"),
     (r"in order|^Pick at least two shots", "mode"),                                # PAD-314
     (r"game's own modes|modes to hold off|mode the app can hold off", "mode"),       # PAD-363
+    (r"(?i)mini-wizard", "mode"),                                                    # PAD-436
 ))
 
 
@@ -247,7 +259,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     _LIGHT_PATTERN_WORDS = (("solid", "Solid"), ("blink", "Blink"), ("pulse", "Pulse"),
                             ("chase", "Chase"))
     _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save", "magnet", "scoop", "coils", "shield",
-                      "shows")
+                      "shaker", "shows", "wizard")
     _TWO_COLUMN_SHOTS = 18
     _PROBE_TRIES = 240
     _FILM_PARTS = (("clip", "clip", "a clip"), ("still", "screen", "a picture for the screen"),
@@ -260,6 +272,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     BALL_NONE = "(none)"
     #: PAD-418: the light-show lists' first entry
     SHOW_NONE = "(none)"
+    #: PAD-436: the mini-wizard list's first entry: a mode of its own
+    WIZARD_NONE = "(none)"
     #: PAD-228: the multiball's balls come when the mode starts, not on a shot
     MB_ON_START = "(when it starts)"
     #: PAD-227: the "and also" shot lists' first entry, the "only after" list's, and the rows shown
@@ -344,6 +358,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._stock_order = []
         self._game_mode = None         # the game's own mode shown instead (its id), or None
         self._title_read = None        # the finished read of the shown card, or None
+        self._title_key = None         # PAD-434: the card the shown title came from (_card_key)
+        self._title_files = None       # PAD-434: what that card was read from (_title_files_sig)
         self._init_tryit()
         self._init_check()
         self._init_reading()
@@ -412,12 +428,58 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         """The Emulate tab's card changed: the footer's verdict, and, for a project that
         names no card of its own, which game its modes are for (_title_card)."""
         self._show_emu()
+        self._refresh_if_title_stale()
+
+    def _refresh_if_title_stale(self, quick=False):
+        """PAD-434: refresh when the card the modes are for is no longer the one the title
+        shows. A project made bare and then given its card (Select card, Project > Save)
+        keeps its PATH, so nothing else here notices, and "This project names no card"
+        stayed up until a restart. ``quick`` (the ticker) first asks the files' size and
+        time whether anything was written. True when it refreshed."""
         project = self.project()
         if (project and getattr(self, "_visible", False) and self._preview_on()
-                and MP.project_card(project) is None):
+                and self._title_stale(project, quick)):
             self._save_if_edited()
             self.refresh()
             self.refresh_stock_modes()
+            return True
+        return False
+
+    @staticmethod
+    def _card_key(card, via):
+        """What a title is told apart by: the card's role, image and build."""
+        if card is None:
+            return None
+        image = os.path.normcase(os.path.abspath(card.image)) if card.image else ""
+        return via, image, card.game_dir, card.version
+
+    def _title_files_sig(self, project):
+        """The files _title_card reads (the anchor, the extract's record) by size and time,
+        and the "Try it on" path. Only stats them: safe on the loop every tick."""
+        from ...core import extract_source, project_file
+        var = self._export("emulate_card_var")
+        sig = [project or "", ((var.get() if var is not None else "") or "").strip()]
+        for name in (project_file.ANCHOR_NAME, extract_source.SIDE_CAR):
+            try:
+                st = os.stat(os.path.join(project, name)) if project else None
+            except OSError:
+                st = None
+            sig.append((st.st_size, st.st_mtime_ns) if st is not None else None)
+        return tuple(sig)
+
+    def _title_stale(self, project, quick=False):
+        """True when _title_card answers another card than the shown title's. It reads the
+        project's JSON, never an image."""
+        sig = self._title_files_sig(project)
+        if quick and sig == self._title_files:
+            return False
+        try:
+            stale = self._card_key(*self._title_card(project)) != self._title_key
+        except Exception:                                   # noqa: BLE001 - a check, never a failure
+            return False
+        if not stale:
+            self._title_files = sig
+        return stale
 
     def _post(self, fn, *args):
         if self._on_loop():
@@ -446,11 +508,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     def on_show(self):
         """The tab came forward: the list, the code modes and the stock table read again
         (another tab or the person may have changed the modes folder); the open mode is
-        reopened only when the project changed or it is gone."""
+        reopened only when the project changed or it is gone, or the card the modes are for
+        changed (PAD-434: a card saved into the same folder)."""
         self._hook_vars()
         if self.project() != (self.get("project") or "") or (
                 self._slug is not None and not os.path.isfile(
-                    os.path.join(MP.mode_folder(self._open_project, self._slug), MP.MODE_FILE))):
+                    os.path.join(MP.mode_folder(self._open_project, self._slug), MP.MODE_FILE))
+                ) or self._title_stale(self.project()):
             self._save_if_edited()
             self.refresh()
         else:
@@ -525,6 +589,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._tryit_tick()
             self._check_tick()
             self._show_emu(quiet=True)
+            if shown and not working:
+                self._refresh_if_title_stale(quick=True)   # PAD-434: a Save while the tab is up
         except Exception:                                   # noqa: BLE001
             pass
         self._ticker_job = self.ctx.loop.after(150 if working else 1000, self._tick)
@@ -786,6 +852,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._open_advanced(spec)
             self._open_trigger(spec)
             self._open_display_lights(spec)
+            self._open_wizard(spec)                         # PAD-436
             self._open_more_to_start(slug, spec)
         finally:
             self._loading = False
@@ -830,6 +897,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._collect_advanced(spec)
         self._collect_trigger(spec)
         self._collect_display_lights(spec)
+        self._collect_wizard(spec)                          # PAD-436
         self._collect_more_to_start(spec)
         return spec
 
@@ -1179,6 +1247,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         f["scoop"] = bool(ms)
         f["scoop_s"] = "%g" % (ms / 1000.0) if ms else "3"
         f["shield"] = getattr(spec, "shield", False) is True                       # PAD-392
+        self._load_shakes(f, spec)                                                 # PAD-414
         # PAD-381: the other mechanisms, one row each in the profile's held_coils order
         rows = {r[0]: r for r in (getattr(spec, "coil_holds", None) or []) if r}
         held = list(getattr(self._shown or self._profile, "held_coils", ()) or ())
@@ -1209,6 +1278,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.magnet_ms = self._magnet_ms(self.f["magnet_s"]) if self.f["magnet"] else 0   # PAD-381
         spec.scoop_hold_ms = self._magnet_ms(self.f["scoop_s"]) if self.f["scoop"] else 0  # PAD-381
         spec.shield = bool(self.f["shield"])                                                 # PAD-392
+        spec.shakes = self._collect_shakes()                                                 # PAD-414
         held = list(getattr(self._shown or self._profile, "held_coils", ()) or ())      # PAD-381
         spec.coil_holds = []
         for i, (name, _label) in enumerate(held[:self.COIL_ROWS]):
@@ -1216,6 +1286,42 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 when = str(self.f["coil_when_%d" % i]).strip()
                 spec.coil_holds.append([name, self._magnet_ms(self.f["coil_s_%d" % i]),
                                         "" if when == self.MB_ON_START else when])
+
+    #: PAD-414: the form's shake choices of the mode's own, by strength (MP.SHAKE_STRENGTHS); one of the game's
+    #: shakes is "game:<name>"
+    _SHAKE_OWN = {v: k for k, v in MP.SHAKE_STRENGTHS.items()}
+
+    def _load_shakes(self, f, spec):
+        """PAD-414: the first shake of each kind (start, shot, end) onto the form's three rows."""
+        rows = [r for r in (getattr(spec, "shakes", None) or []) if isinstance(r, (list, tuple)) and len(r) == 4]
+        for when in MP.SHAKE_WHEN:
+            row = next((r for r in rows if r[0] == when), None)
+            f["shake_on_" + when] = row is not None
+            if row is None:
+                continue
+            what, strength = row[1], row[2]
+            if isinstance(what, str):
+                f["shake_what_" + when] = "game:" + what
+            else:
+                f["shake_what_" + when] = MP.SHAKE_STRENGTHS.get(strength, str(strength))
+                ms = MP._int_or_none(what)
+                f["shake_s_" + when] = "%g" % (ms / 1000.0) if ms else str(what)
+            if when == "shot":
+                f["shake_shot"] = row[3] or ""
+
+    def _collect_shakes(self):
+        """PAD-414: the form's ticked shake rows as the mode's ``shakes``."""
+        out = []
+        for when in MP.SHAKE_WHEN:
+            if not self.f["shake_on_" + when]:
+                continue
+            what = str(self.f["shake_what_" + when]).strip()
+            shot = str(self.f["shake_shot"]).strip() if when == "shot" else ""
+            if what.startswith("game:"):
+                out.append([when, what[len("game:"):], 0, shot])
+            else:
+                out.append([when, self._magnet_ms(self.f["shake_s_" + when]), self._SHAKE_OWN.get(what, what), shot])
+        return out
 
     @staticmethod
     def _magnet_ms(text):
@@ -1250,6 +1356,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         for k in ("show_start", "show_end"):                                            # PAD-418
             v = str(self.f[k]).strip()
             setattr(spec, k, "" if v in ("", self.SHOW_NONE) else v)
+
+    # PAD-436: the game's own mini-wizard instead of a mode of its own; a name this title does not have is kept as
+    # typed, so validate_wizard names it
+    def _open_wizard(self, spec):
+        v = getattr(spec, "game_wizard", "")
+        self.f["game_wizard"] = v if isinstance(v, str) and v else self.WIZARD_NONE
+        how = getattr(spec, "wizard_how", "light")
+        self.f["wizard_how"] = how if how in MP.WIZARD_HOW else "light"
+
+    def _collect_wizard(self, spec):
+        v = str(self.f["game_wizard"]).strip()
+        spec.game_wizard = "" if v in ("", self.WIZARD_NONE) else v
+        spec.wizard_how = self.f["wizard_how"] if self.f["wizard_how"] in MP.WIZARD_HOW else "light"
 
     # PAD-227: more than one thing to meet before it starts
     def _other_modes(self):
@@ -1464,7 +1583,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                     "callouts": [], "callouts_none": "", "events": [],
                     "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
                     "mb_on_shots": [self.MB_ON_START], "game_modes": [], "magnet_shot": "",
-                    "held_coils": [], "shield_rule": "", "game_shows": []}
+                    "held_coils": [], "shield_rule": "", "game_shows": [], "shakes": [], "shake_max": [],
+                    "game_wizards": [], "wizard_shot": ""}
         names = [n for n, _m in p.shots]
         choices = [{"label": "%s (%d)" % (label, number), "number": number}
                    for label, number in MP.callout_choices(p) if number]
@@ -1483,7 +1603,14 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "held_coils": [{"name": n, "label": lab}
                                for n, lab in getattr(p, "held_coils", ())[:self.COIL_ROWS]],
                 "shield_rule": getattr(p, "shield_rule", ""),                   # PAD-392
-                "game_shows": self._game_show_rows(p)}                           # PAD-418
+                # PAD-414: what a shake can be - one of the mode's own at a strength, or one of the game's
+                "shakes": ([{"value": w, "label": "a %s shake" % w} for w in MP.SHAKE_STRENGTHS.values()]
+                           + [{"value": "game:" + n, "label": lab} for n, lab in getattr(p, "shakes", ())]),
+                "shake_max": list(getattr(p, "shake_max_ms", ()) or ()),
+                "game_shows": self._game_show_rows(p),                           # PAD-418
+                # PAD-436: the game's own mini-wizards a mode can hand over, and the shot that starts a lit one
+                "game_wizards": [{"name": n, "film": film} for n, film in getattr(p, "game_wizards", ()) or ()],
+                "wizard_shot": getattr(p, "wizard_shot", "")}
 
     @staticmethod
     def _game_show_rows(p):
@@ -1578,6 +1705,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         no default game: a project with no card, a card that cannot be read and a build with
         no port all leave the form greyed with the reason in words."""
         card, via = self._title_card(project)
+        self._title_key = self._card_key(card, via)          # PAD-434: _title_stale
+        self._title_files = self._title_files_sig(project)
         profile, text, note, no_port = None, "", "", ""
         self._title_read = None
         origin = ""
@@ -1749,7 +1878,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                      "end_game", "clip_both", "stack", "events", "film_clip",
                                      "film_still", "film_sound", "own_extra", "lit_shots",
                                      "show_order", "multiball", "ball_save", "give_way", "block",
-                                     "magnet", "scoop", "coils", "shield", "shows")}
+                                     "magnet", "scoop", "coils", "shield", "shaker", "shows", "wizard")}
             self.set(reasons={}, dis=dis, hide={}, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
@@ -2218,11 +2347,90 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._say("saved %s to %s" % (", ".join("modes/" + s for s in done), path))
         return path
 
+    def _card_image(self, key, title):
+        """A card image picked for Load from / Save from a card image (PAD-432), or ""."""
+        path = self.window.ask_open(key, title, [("Card images", "*.raw *.img"),
+                                                 ("All files", "*.*")])
+        return os.path.normpath(path) if path else ""
+
+    def _card_file(self, image, tmp, box):
+        """``(path, about, notes)`` of :func:`.mode_from_card.card_modes_file`, or None after
+        saying why in a message box titled ``box``. The image is opened OFF the UI loop
+        (:func:`..shellx_common.off_loop`): a card on a sleeping share or a cloud placeholder
+        must not freeze the app while it answers."""
+        from pinball_decryptor.plugins.stern import mode_from_card as MFC
+        from ..shellx_common import off_loop
+        try:
+            return off_loop(self.ctx, MFC.card_modes_file, image, tmp)
+        except (MP.ModeProjectError, OSError) as e:
+            compat.messagebox.showinfo(box, str(e).rstrip(".") + ".")
+            return None
+
     @rpc
-    def load_file(self, path=None):
+    def load_card(self, image=None):
+        """Load from a card image... (PAD-432): the modes of a card the app put modes on, straight
+        into this project - another version, model or custom image of the game included - as Load
+        from a file loads them, each matched to this card's shots. A card written since PAD-432
+        carries them whole; an older one gives back what its mode files hold, and the message
+        says what did not come back. Returns the report, or None."""
+        if not self.project():
+            return None
+        image = os.path.normpath(str(image)) if image else self._card_image(
+            "modes_card", "Load modes from a card image")
+        if not image:
+            return None
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="pad-card-modes-") as tmp:
+            got = self._card_file(image, tmp, "Load modes")
+            if got is None:
+                return None
+            path, about, notes = got
+            self._say("modes on %s%s" % (os.path.basename(image), ", made for %s" % about["label"]
+                                         if about.get("label") else ""))
+            for line in notes:
+                self._say("from %s: %s" % (os.path.basename(image), line))
+            return self.load_file(path, _from=image, _notes=notes, _made_for=about.get("label", ""))
+
+    @rpc
+    def save_card(self, image=None):
+        """Save a card image's modes to a file... (PAD-432): the modes on a card the app put modes
+        on, as one file Load from a file brings into any project (:func:`load_card` without
+        loading). Returns the file's path, or None."""
+        image = os.path.normpath(str(image)) if image else self._card_image(
+            "modes_card", "Save the modes of a card image to a file")
+        if not image:
+            return None
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="pad-card-modes-") as tmp:
+            got = self._card_file(image, tmp, "Save modes")
+            if got is None:
+                return None
+            path, about, notes = got
+            dest = self.window.ask_save(
+                "modes_file", "Save the modes of %s to a file" % os.path.basename(image),
+                initialfile=os.path.basename(path), filetypes=[("PAD modes", "*.zip")],
+                defaultextension=".zip")
+            if not dest:
+                return None
+            try:
+                shutil.copyfile(path, dest)
+            except OSError as e:
+                compat.messagebox.showinfo("Save modes", str(e))
+                return None
+        self._say("saved the modes of %s to %s" % (os.path.basename(image), dest))
+        if notes:
+            compat.messagebox.showinfo("Save modes", "Saved to %s.\n\n%s" % (
+                os.path.basename(dest), "\n".join(n[0].upper() + n[1:] + "." for n in notes)))
+        return dest
+
+    @rpc
+    def load_file(self, path=None, _from=None, _notes=(), _made_for=""):
         """Load from a file... (PAD-281): the modes in a zip Save to a file... wrote are added
         to this project, each matched to this card's shots as Copy to... matches them. A
-        message box sums it up. Returns the report, or None."""
+        message box sums it up. Returns the report, or None. PAD-432: ``_from`` is the card
+        image :func:`load_card` read the file from (the words name it), ``_notes`` what did not
+        come back from it, ``_made_for`` the card its modes were made for."""
         project = self.project()
         if not project:
             return None
@@ -2232,6 +2440,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                         filetypes=[("PAD modes", "*.zip"), ("All files", "*.*")])
         if not path:
             return None
+        shown = os.path.basename(_from or path)
         # PAD-402 (DragonRR): a mode of the file named as one here with other contents is a
         # collaborator's version of it: asked about, each one replacing or not, mine saved first
         conflicts, same = MP.share_conflicts(path, project)
@@ -2242,7 +2451,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "Load modes", "%d mode%s in %s %s the folder name of a mode here, with other "
                 "contents. Tick the ones the file's should replace, or answer for all of them. "
                 "Keep both loads the file's beside yours under a new name."
-                % (n, "" if n == 1 else "s", os.path.basename(path), "has" if n == 1 else "have"),
+                % (n, "" if n == 1 else "s", shown, "has" if n == 1 else "have"),
                 [{"id": c["slug"], "what": "%s (modes/%s)" % (c["file"], c["slug"]),
                   "mine": "%s, changed %s" % (c["here"], c["changed"]) if c["changed"]
                   else c["here"],
@@ -2268,7 +2477,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                                "a backup file, so nothing was loaded: %s" % e)
                     return None
                 self._say("saved every mode to %s before loading %s"
-                          % (backup, os.path.basename(path)))
+                          % (backup, shown))
         try:
             report = MP.import_modes(path, project, replace=replace, skip=skip)
         except (MP.ModeProjectError, OSError) as e:
@@ -2288,17 +2497,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 MP.BACKUP_DIR, os.path.basename(backup))
         if report is None:
             compat.messagebox.showinfo("Load modes", "Nothing was loaded from %s.%s"
-                                       % (os.path.basename(path), tail))
+                                       % (shown, tail))
             return None
         for line in report.lines():
-            self._say("loaded from %s: %s" % (os.path.basename(path), line))
+            self._say("loaded from %s: %s" % (shown, line))
         got = [m for m in report.modes if m.new_slug]
         if got and got[0].state == MP.COPY_CODE:
             self.refresh(select_code=got[0].new_slug)
         else:
             self.refresh(select=got[0].new_slug if got else None)
-        words = "Loaded %d mode%s from %s." % (len(got), "" if len(got) == 1 else "s",
-                                                os.path.basename(path)) + tail
+        words = "Loaded %d mode%s from %s%s." % (len(got), "" if len(got) == 1 else "s", shown,
+                                                  ", made for %s" % _made_for if _made_for else "") + tail
+        if _notes:
+            words += " " + " ".join(n[0].upper() + n[1:] + "." for n in _notes)
         if report.of(MP.COPY_TO_FIX):
             words += (" Open each one marked below and pick again what %s does not have."
                       % report.label)
@@ -2495,10 +2706,20 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "shield_feature": getattr(p, "shield_rule", "") if p is not None else "",
                 # PAD-420: the mechanisms this machine does not have: their blocks are left out of the palette
                 "absent": list(getattr(p, "absent", ()) or ()) if p is not None else [],
+                # PAD-414: the shaker - the game's own shakes a block can play, and why the blocks are greyed if not
+                "shaker_off": ("Not on this game: " + p.why_not("shaker")) if p is not None and not p.can("shaker")
+                              else "" if p is not None else "No card picked yet.",
+                "shakes": [{"name": n, "label": lab} for n, lab in getattr(p, "shakes", ())] if p is not None else [],
                 # PAD-418: the game's own light shows a block may play, and why the block is greyed if none
                 "game_shows": self._game_show_rows(p) if p is not None else [],
                 "game_shows_off": ("Not on this game: " + p.why_not("shows")) if p is not None and not p.can("shows")
                                   else "" if p is not None else "No card picked yet.",
+                # PAD-436: the game's own mini-wizards a block may hand over, and why the block is greyed if none
+                "game_wizards": ([{"name": n, "film": film} for n, film in getattr(p, "game_wizards", ())]
+                                 if p is not None and p.can("wizard") else []),
+                "wizard_shot": getattr(p, "wizard_shot", "") if p is not None else "",
+                "game_wizards_off": ("Not on this game: " + p.why_not("wizard")) if p is not None and not p.can("wizard")
+                                    else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else
                               "Not on this game yet: the app has not found where %s starts its own modes, so a "
                               "mode cannot keep them from starting; set to hold them off, it gives way to them "
@@ -2535,8 +2756,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         mechs = self._blocks_mechs(p) if p is not None else None
         scoop = p.can("scoop") if p is not None else None
         shield = (getattr(p, "shield_rule", "") if p.can("shield") else False) if p is not None else None   # PAD-392
+        shaker = ({"shakes": [n for n, _l in p.shakes], "max": list(p.shake_max_ms)} if p.can("shaker") else False) \
+            if p is not None else None                                                                          # PAD-414
         shows = [n for n, _k, _s in getattr(p, "game_shows", ())] if p is not None else None   # PAD-418
-        return BM.problems(program, shots, events, folder, mechs, scoop, shield, shows), BM.notes(program)
+        wizards = ([n for n, _f in getattr(p, "game_wizards", ())] if p.can("wizard") else []) if p is not None else None
+        return (BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards),   # PAD-436
+                BM.notes(program))
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

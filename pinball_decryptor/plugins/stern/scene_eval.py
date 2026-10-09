@@ -139,8 +139,21 @@ def manifest(scene, tex2rel=None, font_of=None, asset2rel=None):
             "labels": [[n, f] for n, f in scene.root["labels"]],
             "kids": [node(n) for n in scene.root["kids"]]}
     w, h, fps, rgba = scene.stage
-    return {"v": MANIFEST_VERSION, "stage": [w, h, fps, list(rgba)], "root": root,
-            "objects": objects}
+    out = {"v": MANIFEST_VERSION, "stage": [w, h, fps, list(rgba)], "root": root,
+           "objects": objects}
+    # PAD-452: every font size the scene carries, a line of text's choices of font and size
+    # (a size no line uses yet included); an older manifest has only the ones its lines use
+    fonts = {}
+    for sid, info in scene.font_sizes.items():
+        key_px = font_of.get(sid)
+        fonts[str(sid)] = {"font": key_px[0] if key_px else "",
+                           "font_px": key_px[1] if key_px else 0,
+                           "ascent": round(info.get("ascent", 0.0), 3),
+                           "line": round(info.get("line", 0.0), 3),
+                           "variant": info.get("variant") or "", "face": info.get("face") or ""}
+    if fonts:
+        out["fonts"] = fonts
+    return out
 
 
 def font_sizes(scene, data, images, tables, off2rel):
@@ -337,10 +350,12 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
             out.append(dict(common, kind="text", text=o["text"], rect=o["rect"],
                             align=o["align"], rgba=o["rgba"], font=o.get("font", ""),
                             font_px=o.get("font_px", 0), font_name=o.get("font_name", ""),
+                            font_id=o.get("font_id"),
                             spacing=o.get("spacing", [0, 0]), ascent=o.get("ascent", 0),
                             line=o.get("line", 0), styled=o.get("styled", False),
                             flags=o.get("flags"), fit=o.get("fit", 0),
-                            valign=o.get("valign", 0)))
+                            valign=o.get("valign", 0), profiled=o.get("profiled", False),
+                            art=o.get("art")))
         elif k == "Video":
             out.append(dict(common, kind="video", name=o["name"], w=o["w"], h=o["h"]))
         elif k == "Spine":

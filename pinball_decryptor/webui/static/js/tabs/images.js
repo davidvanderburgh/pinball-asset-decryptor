@@ -2,12 +2,18 @@
 // for image slots, filter and group them, pick / clear / keep-size a
 // replacement, and compare the original with it.  Every rule lives in
 // webui/tabs/images.py; this is the view.
+// PAD-463 (DragonRR): the Video tab's color work on pictures.  The panes draw
+// through the color profiles (Preview colors, and Original / With its color
+// profile on each), Compare puts up to four pictures side by side beside the
+// Colors bar, and several pictures selected are one target for the bar.
 
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState, PageHead, Button, Field, Select, Seg,
-         Check, Chip, Note, Table, Empty, Modal, openMenu, Icon, Spinner, tip, call, mediaUrl, cx }
+         Check, Chip, Note, Table, Empty, Modal, openMenu, menuOpen, Icon, Spinner, tip, call, mediaUrl, cx }
   from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { LookRow } from "../core/look.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
+import { OriginalsWindow } from "./originals.js";
 
 export const css = true;
 
@@ -24,11 +30,12 @@ const FONTS_TIP = "Preview any game font (type your own text, rendered from the 
 const MORE_TIP = "More: Export CSV, Clear replacements…, Save / load settings";
 const CSV_TIP = "Save every row of the list as a spreadsheet (CSV), exactly as it reads here.";
 const FOLDER_TIP = "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.";
+const ORIGINALS_TIP = "Find the files your replacements were made from in a folder of your own, by how they look: the names don't matter.\n\nFor picks that are copies off a card, like the ones \"Transfer Mods to New Version\" takes from an extract of a built card: those pictures were already squeezed into the card's format once by the Write that built that card. With your own files picked instead, the next Write converts from them. Nothing changes until you press Use.";
 const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.";
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
-const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build. Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own picture, never touched (tick Unlock extracted images to give it a palette too). A palette you click is this picture's own setting; the Color profile tab's Every replaced picture box sets the rest.";
+const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build. Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own picture, never touched (tick Unlock extracted images to give it a palette too). Click a palette to attach or detach it. Select several pictures (Shift-click or Ctrl-click) and pick a profile in the Colors bar to give it to all of them.";
 // PAD-368: the profile a file has, for its tooltips (null where the Color column is not offered);
 // PAD-369: a {profile} line, drawn in the one color every tooltip gives it (core/ui.js)
 const profileLine = (r, cs) => (r.cl ? { profile: "None" } : r.c == null ? null
@@ -44,8 +51,11 @@ const colorTip = (r, cs) => (r.cl
       ["Click", r.c ? "detach the color profile" : "attach the color profile"],
       r.c ? "Its color profile is baked into this picture when you build. Open Colors with it selected to give it one of its own."
         : "It goes on the card as it is.",
-      r.cg ? "The game's own picture, unlocked: corrected from its original when you build."
-        : r.co ? "Set for this picture." : "Follows the Color profile tab's box for every replaced picture."] });
+      r.cb ? "Your own picture from an earlier build: corrected from its uncorrected copy when you build."
+        : r.cg ? "The game's own picture, unlocked: corrected from its original when you build."
+        : r.co ? "Set for this picture." : r.c ? "Attached by the old Every replaced picture box, still ticked in this project." : null] });
+// PAD-463: Compare, as on the Video tab
+const COMPARE_TIP = "Show the selected pictures side by side, big, beside the Color profiles bar: up to 4 (Ctrl-click or Shift-click rows to select them). One picture shows its Original beside its Replacement.\n\nClick a picture there and the bar changes its colors, so you see a profile or a slider on it against the others as you go.";
 const UNLOCK_TIP = "Advanced. Off: the original extracted images are locked (blue lock), and only the pictures you replace can have the individual files color profile baked in. On: every picture on this tab gets a palette, so a color profile can be attached to an extracted image too, whatever is drawn in it now. It is staged from its original extracted copy when you build, so building again never corrects it twice. The same box as the Scenes tab's Advanced box beside Preview colors; Video has its own. Turning it off puts the extracted images back as they were.";
 
 const TAG_CLS = { assigned: "img-picked", changed: "img-ondisk", foreign: "img-stray" };
@@ -91,8 +101,9 @@ function slotAt(s, i) {
 }
 
 // A preview picture: the Tk panes' own renderer (core.image.thumbnail_png),
-// asked for at the size the box has on screen.
-function Thumb({ path, ver, empty, label, cls = "" }) {
+// asked for at the size the box has on screen.  look (PAD-463): the token of the
+// colour steps it is drawn through (images.py look.keys / a Compare picture's key).
+function Thumb({ path, ver, empty, label, cls = "", look = null }) {
   const ref = useRef(null);
   const [box, setBox] = useState(null);
   const [src, setSrc] = useState("");
@@ -119,17 +130,135 @@ function Thumb({ path, ver, empty, label, cls = "" }) {
     let alive = true;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     setBusy(true);
-    call("images.thumb", path, Math.round((box.w - 8) * dpr), Math.round((box.h - 8) * dpr)).then((r) => {
+    call("images.thumb", path, Math.round((box.w - 8) * dpr), Math.round((box.h - 8) * dpr), look || null).then((r) => {
       if (!alive) return;
       setSrc(r || "");
       setBusy(false);
     });
     return () => { alive = false; };
-  }, [path, ver, box && box.w, box && box.h]);
+  }, [path, ver, look, box && box.w, box && box.h]);
   return html`<div class=${cx("thumb img-pic", cls)} ref=${ref} aria-label=${label}>
     ${src ? html`<img src=${src} alt=${label || ""} />`
       : busy ? html`<${Spinner} />`
       : !path && empty ? html`<span class="img-empty small">${empty}</span>` : null}
+  </div>`;
+}
+
+// PAD-463 (DragonRR): the Video tab's Original / With its color profile switch, on each of
+// the two panes: the picture as it is, or drawn through its color profile, attached or not.
+// Only the pane changes (images.py set_pane_view); the palette is what attaches it.
+const PROFILE_WORDS = "With its color profile";
+function PaneView({ side, view, look }) {
+  if (!view) return null;
+  const filesOn = !!(look.on && (look.sw || {}).files);
+  const plainTip = side === "orig" ? "The game's picture without its color profile."
+    : "Your replacement as you made it, without its color profile.";
+  const options = [
+    { value: "plain", label: view.plain, title: { head: view.plain, lines: [plainTip,
+      "The other Preview colors switches still apply."] } },
+    { value: "profile", label: PROFILE_WORDS, disabled: !filesOn, title: { head: PROFILE_WORDS, lines: [
+      { profile: view.name },
+      filesOn ? (view.on ? "The picture drawn through the color profile attached to it, as the card gets it."
+        : "The picture drawn through its color profile as it would be attached. It is not attached: click its palette for that.")
+        : "Tick Individual files under Preview colors to see it.",
+      "Only this pane changes: nothing is attached or changed."] } },
+  ];
+  return html`<div class="row img-view">
+    <${Seg} value=${view.view} options=${options} onChange=${(v) => call("images.set_pane_view", side, v)} />
+    <span class="small ellip">${!filesOn ? html`<span class="muted">Individual files is off under Preview colors.</span>`
+      : html`Color profile: <span class="icm-cp">${view.name}</span>${view.on ? null
+        : html`<span class="muted">, not attached</span>`}`}</span>
+  </div>`;
+}
+
+// ----------------------------------------------------------------- Compare
+// PAD-463 (DragonRR): the Video tab's Compare (PAD-440) for pictures: up to four side by
+// side, big, beside the Color profiles bar.  Each is drawn through its own colors
+// (images.py _cmp_steps), so a profile picked or a slider moved shows on the picture
+// clicked, against the others, as it is made.  The picture clicked is the bar's.
+
+// a clear mark on each picture that is the game's own, locked or not
+function CmpBadge({ row, cs }) {
+  if (!row) return null;
+  if (row.cl) return html`<span class="icm-badge locked" ...${tip(colorTip(row, cs))}><${Icon} name="lock" />Locked</span>`;
+  if (row.cg && !row.cb && row.c != null) return html`<span class="icm-badge unlocked" ...${tip(colorTip(row, cs))}><${Icon} name="unlock" />Game's own picture</span>`;
+  return null;
+}
+
+// its palette under it, so a color profile is attached from here as from the list
+function CmpColor({ t, row, cs }) {
+  if (!row || (row.c == null && !row.cl)) return null;
+  if (row.cl) return html`<div class="row icm-color">
+    <span class="img-color locked" ...${tip(colorTip(row, cs))}><${Icon} name="lock" /></span>
+    <span class="small ellip muted">The game's own picture, locked: tick Unlock extracted images to give it a color profile.</span>
+  </div>`;
+  const stock = row.cg && !row.cb;
+  const line = profileLine(row, cs);
+  return html`<div class="row icm-color">
+    <button type="button" class=${cx("img-color", row.c ? "on" : "off", row.co && !row.cg && "own")}
+      aria-pressed=${row.c ? "true" : "false"} aria-label="Attach or detach this picture's color profile" ...${tip(colorTip(row, cs))}
+      onClick=${(e) => { e.stopPropagation(); call("images.set_color", row.r, !row.c); }}><${Icon} name="palette" /></button>
+    <span class="small ellip">${!row.c ? "No color profile attached"
+      : t.side === "orig" && !stock ? "The original, as it is now."
+      : html`Color profile: <span class="icm-cp">${line ? line.profile : ""}</span>`}</span>
+  </div>`;
+}
+
+function CmpTile({ t, row, cs, active, onPick, canRemove }) {
+  const pane = t.pane || {};
+  const sides = (t.sides || []).map(([value, label]) => ({ value, label }));
+  const name = base(t.rel);
+  return html`<div class=${cx("icm-tile", active && "on")}>
+    <div class="row icm-tilehd">
+      <span class="mono small ellip icm-name" ...${tip({ head: t.rel, lines: [pane.label ? `${pane.title}: ${pane.label}` : pane.title] })}>${name}</span>
+      <span class="grow"></span>
+      ${sides.length > 1 ? html`<${Seg} value=${t.side} options=${sides} onChange=${(v) => call("images.compare_side", t.id, v)} />`
+        : html`<span class="small muted nw">${pane.title || "Original"}</span>`}
+      <${Button} size="xs" kind="ghost" icon="x" title="Take this picture out of Compare" disabled=${!canRemove}
+        onClick=${() => call("images.compare_remove", t.id)} />
+    </div>
+    <div class="icm-screen" role="button" tabindex="0" aria-pressed=${active ? "true" : "false"}
+        aria-label=${"Pick " + name + " for the Color profiles bar"}
+        onClick=${onPick} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
+        ...${tip(active ? "The picture the Color profiles bar changes." : "Click: the Color profiles bar changes this picture's colors.")}>
+      <${Thumb} cls="icm-pic" path=${pane.path} ver=${t.id} look=${t.key} empty=${pane.path ? "" : "nothing to show"} label=${name} />
+      <${CmpBadge} row=${row} cs=${cs} />
+    </div>
+    <${CmpColor} t=${t} row=${row} cs=${cs} />
+  </div>`;
+}
+
+function CompareView({ cmp, byRel, cs, look, active, setActive, onOpenColors, unlock, running }) {
+  const tiles = cmp.tiles || [];
+  const ref = useRef(null);
+  useEffect(() => { if (ref.current) ref.current.focus({ preventScroll: true }); }, []);
+  const close = () => call("images.compare_close");
+  const onKey = (e) => { if (e.key === "Escape" && !menuOpen()) { e.stopPropagation(); close(); } };
+  const n = tiles.length;
+  return html`<div class="page fill img-page icm-page" ref=${ref} tabindex="-1" onKeyDown=${onKey}>
+    <section class="card icm" aria-label="Compare pictures">
+      <div class="icm-hd">
+        <div class="row icm-hdrow">
+          <${Icon} name="compare" cls="lg" />
+          <span class="h2">Compare</span>
+          <span class="grow"></span>
+          ${unlock && unlock.offered ? html`<span class="img-unlock">
+            <span class="eyebrow">Advanced</span>
+            <${Check} checked=${!!unlock.on} onChange=${(v) => call("images.set_color_unlocked", v)} disabled=${running}
+              label="Unlock extracted images" cls="small" title=${UNLOCK_TIP} />
+          </span>` : null}
+          <${Button} kind="ghost" icon="x" onClick=${close} title="Back to the list (Esc)">Close<//>
+        </div>
+        <div class="small muted">${look.offered
+          ? "Click a picture: the Color profiles bar changes its colors while you see the others."
+          : "Each picture as it is."}</div>
+      </div>
+      ${look.offered ? html`<div class="icm-look"><${LookRow} look=${look} ns="images" onOpen=${onOpenColors} /></div>` : null}
+      <div class=${cx("icm-grid", "n" + Math.min(n, 4))}>
+        ${tiles.map((t) => html`<${CmpTile} key=${t.id} t=${t} row=${byRel.get(t.rel)} cs=${cs} active=${t.id === active}
+          onPick=${() => setActive(t.id)} canRemove=${n > 1} />`)}
+      </div>
+    </section>
   </div>`;
 }
 
@@ -161,6 +290,12 @@ export default function ImagesTab() {
   const colorNs = useNs("color");
   const [colors, setColorsState] = useState(() => barOpenAtStart("images"));
   const setColors = (v) => { setColorsState(v); rememberBarOpen(v, "images"); };
+  // PAD-463: a name under Preview colors opens the bar on that profile
+  const openColors = async (mode) => { await call("color.set_mode", mode); setColors(true); };
+  const look = s.look || {};
+  const cmp = s.compare || {};
+  const cmpOpen = !!cmp.open;
+  const [cmpActive, setCmpActive] = useState(null);
   const view = s.view || [];
   const p = s.preview || {};
   const grouped = !!(s.cols && s.cols.n);
@@ -298,8 +433,14 @@ export default function ImagesTab() {
     const at = { x: ev.clientX, y: ev.clientY };
     const items = await call("images.menu", id, selIds);
     if (!items || !items.length) return;
+    // PAD-463: the pictures selected, side by side
+    const pics = selIds.filter((x) => !String(x).startsWith(GROUP));
+    const more = pics.length ? [{ sep: true }, { label: pics.length > 1
+      ? `Compare ${Math.min(pics.length, cmp.max || 4)} pictures side by side` : "Compare side by side",
+      onClick: () => openCompare(pics) }] : [];
     openMenu(at, items.map((it) => (it.sep ? { sep: true }
-      : { label: it.label, disabled: !!it.disabled, onClick: it.act ? () => runAct(it.act, id, selIds) : undefined })));
+      : { label: it.label, disabled: !!it.disabled, onClick: it.act ? () => runAct(it.act, id, selIds) : undefined }))
+      .concat(more));
   };
 
   const thumbCol = {
@@ -449,6 +590,54 @@ export default function ImagesTab() {
     : html`<${Empty} icon="search">No image matches the search and filters.<//>`;
 
   const prevRel = p.rel;
+  // PAD-463 (DragonRR): the rows by slot path, for the selected pictures' palettes and Compare
+  const byRel = useMemo(() => {
+    const m = new Map();
+    for (const c of chunks) for (const r of c || []) m.set(r.r, r);
+    return m;
+  }, chunks);
+  const picked = () => view.filter((e) => typeof e === "number" && sel.has(idOf(e))).map(idOf);
+  // several pictures selected: the bar is on every one of them that is not locked (the one on
+  // show named first), and a change gives them all the profile, attached (PAD-462's rule)
+  const selOpen = cmpOpen || sel.size < 2 ? [] : picked().map((r) => byRel.get(r)).filter((r) => r && r.c != null);
+  const cmpTiles = cmp.tiles || [];
+  const activeTile = cmpTiles.find((t) => t.id === cmpActive) || cmpTiles[0] || null;
+  let colorFile = null;
+  if (cmpOpen) {
+    const r = activeTile ? byRel.get(activeTile.rel) : null;
+    if (r && r.c != null) {
+      colorFile = { kind: "images", rel: r.r, label: !r.cg ? r.p : base(r.r), on: !!r.c,
+        attach: { ns: "images" } };
+    }
+  } else {
+    const one = prevRel && p.color ? { rel: prevRel, label: p.rep_name || base(prevRel), on: !!p.color.on }
+      : selOpen[0] ? { rel: selOpen[0].r, label: !selOpen[0].cg ? selOpen[0].p : base(selOpen[0].r),
+        on: !!selOpen[0].c } : null;
+    if (one) {
+      colorFile = { kind: "images", ...one, attach: { ns: "images" },
+        more: selOpen.filter((r) => r.r !== one.rel).map((r) => r.r) };
+    }
+  }
+  // the selected pictures, in list order, side by side; the Colors bar opens beside them
+  async function openCompare(rels) {
+    const n = await call("images.compare_open", rels);
+    if (!n) return;
+    setCmpActive(null);
+    if (look.offered && colorNs.has_project && !colors) setColors(true);
+  }
+  const compareRels = () => {
+    const pics = picked();
+    return pics.length ? pics : prevRel ? [prevRel] : [];
+  };
+  const bar = colorNs.has_project ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors}
+    file=${colorFile} />` : null;
+  if (cmpOpen) {
+    return html`<div class="cpd-shell"><${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
+      active=${activeTile ? activeTile.id : null} setActive=${setCmpActive}
+      onOpenColors=${colorNs.has_project ? openColors : undefined} unlock=${s.color_unlock} running=${running} />${bar}</div>`;
+  }
+  const views = look.offered ? look.views || {} : {};
+  const keys = look.offered && look.on ? look.keys || {} : {};
   return html`<div class="cpd-shell"><div class="page img-page">
     <${PageHead} title="Images" sub=${INTRO}>
       ${status ? html`<${Chip} kind=${s.changed ? "acc" : ""}>${status.trim()}<//>` : null}
@@ -456,6 +645,9 @@ export default function ImagesTab() {
         ? html`<${Button} icon="x" onClick=${() => call("images.cancel_scan")}>Cancel scan<//>`
         : html`<${Button} icon="refresh" onClick=${() => call("images.scan")}>Scan<//>`}
       <${Button} icon="folder" onClick=${() => call("images.from_folder")} disabled=${running} title=${FOLDER_TIP}>Replace from folder…<//>
+      <${Button} icon="search" onClick=${() => call("images.originals_open")} disabled=${running} title=${ORIGINALS_TIP}>Find originals…<//>
+      <${Button} icon="compare" cls="img-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!compareRels().length}
+        title=${COMPARE_TIP}>Compare<//>
       <${Button} kind="ghost" icon="text" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>
       <${Button} kind="ghost" icon="more" label="More" title=${MORE_TIP}
         onClick=${(e) => openMenu(e.currentTarget, [
@@ -494,7 +686,9 @@ export default function ImagesTab() {
         onSelect=${onSelect} onActivate=${onActivate} onContext=${onContext} rowClass=${rowClass}
         sort=${s.sort} onSort=${(k) => call("images.sort", k)} empty=${tableEmpty} rowHeight=${36}
         resizable widths=${widths} onResize=${onResize} />
-      <div class="ft img-prev">
+      <div class=${cx("ft img-prev", look.offered && "img-looks")}>
+        ${look.offered ? html`<div class="img-lk"><${LookRow} look=${look} ns="images" note=${false}
+          onOpen=${colorNs.has_project ? openColors : undefined} /></div>` : null}
         <div class="row img-panehd img-oh">
           <span class="eyebrow nw">${p.hdr_main || "Original"}</span>
           ${prevRel ? html`<span class="mono small muted ellip" title=${prevRel}>— ${base(prevRel)}</span>` : null}
@@ -518,17 +712,18 @@ export default function ImagesTab() {
           ${p.color ? html`<div class="img-keeprow img-colorrow">
             <${Check} checked=${!!p.color.on} onChange=${(v) => call("images.set_color", prevRel, v)}
               label="Correct its colors for the machine" title=${COLOR_TIP} />
-            <span class="small muted">${p.color.stock ? "The game's own picture (unlocked): corrected from its original" : p.color.built ? "Your picture from an earlier build: corrected from its uncorrected copy, which goes back when this is off" : p.color.own ? "Set for this picture" : p.color.all ? "Follows the Color profile tab (every replaced picture)" : "Follows the Color profile tab (no replaced picture)"}${p.color.on ? ` · “${p.color.name}” is baked in when you build.` : "."}</span>
+            <span class="small muted">${p.color.stock ? "The game's own picture (unlocked): corrected from its original" : p.color.built ? "Your picture from an earlier build: corrected from its uncorrected copy, which goes back when this is off" : p.color.own ? "Set for this picture" : p.color.on ? "Attached by the old Every replaced picture box, still ticked in this project" : "Not attached"}${p.color.on ? ` · “${p.color.name}” is baked in when you build.` : "."}</span>
           </div>` : null}
         </div>` : null}
-        <${Thumb} cls="img-op" path=${p.orig} ver=${p.ver} label="Original" />
-        <${Thumb} cls="img-rp" path=${p.rep} ver=${p.ver} empty=${p.empty} label="Replacement" />
+        <${Thumb} cls="img-op" path=${p.orig} ver=${p.ver} look=${keys.orig || null} label="Original" />
+        <${Thumb} cls="img-rp" path=${p.rep} ver=${p.ver} look=${keys.rep || null} empty=${p.empty} label="Replacement" />
+        ${views.orig || views.rep ? html`<div class="img-ov"><${PaneView} side="orig" view=${views.orig} look=${look} /></div>
+          <div class="img-rv"><${PaneView} side="rep" view=${views.rep} look=${look} /></div>` : null}
       </div>
     </section>
 
     ${s.note ? html`<p class="small muted img-note">${s.note}</p>` : null}
     ${rename ? html`<${RenameModal} spec=${rename} onClose=${() => setRename(null)} />` : null}
-  </div>${colorNs.has_project ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors}
-    file=${prevRel && p.color ? { kind: "images", rel: prevRel, label: p.rep_name || base(prevRel), on: !!p.color.on,
-      attach: { ns: "images" } } : null} />` : null}</div>`;
+    ${s.originals && s.originals.open ? html`<${OriginalsWindow} ns="images" o=${s.originals} />` : null}
+  </div>${bar}</div>`;
 }

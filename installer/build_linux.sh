@@ -82,6 +82,8 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/qoa_codec.py:pinball_decryptor/plugins/bof" \
+    `# the official Stern stock fingerprints (PAD-426): data, not code` \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/data/stock_prints.json.xz:pinball_decryptor/plugins/stern/data" \
     `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
     `# carried. The gear menu's "Install Prerequisites" looks for it beside` \
     `# the package (app.py::_find_prereqs_script_linux) and an AppImage user` \
@@ -129,6 +131,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.menu_visibility" \
     --hidden-import "pinball_decryptor.plugins.stern.info" \
     --hidden-import "pinball_decryptor.plugins.stern.compare" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_prints" \
     --hidden-import "pinball_decryptor.plugins.stern.multiimage" \
     --hidden-import "pinball_decryptor.plugins.stern.card_size" \
     --hidden-import "pinball_decryptor.core.image_info" \
@@ -147,6 +150,9 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.scene_eval" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_edit" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_share" \
+    --hidden-import "pinball_decryptor.plugins.stern.game_text_layout" \
+    --hidden-import "pinball_decryptor.plugins.stern.text_colour" \
+    --hidden-import "pinball_decryptor.plugins.stern.font_copy" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx_append" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx_deliver" \
     --hidden-import "pinball_decryptor.plugins.stern.film_cut" \
@@ -167,6 +173,10 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.mode_tryit" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_write" \
     --hidden-import "pinball_decryptor.plugins.stern.video_bank" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_modes" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_sounds" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_variants" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_from_card" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_mode_tables" \
     --hidden-import "pinball_decryptor.plugins.stern.lampmap" \

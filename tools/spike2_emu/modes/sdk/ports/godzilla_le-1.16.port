@@ -667,6 +667,35 @@ value building_at          44
 value building_target_at   48
 value building_floors      4
 
+# ---- PAD-414: the shaker motor (optional on a Premium, fitted on an LE) ---------------------------------------------
+# Every shake of the game's is one call, shake (0x189a54: ms, strength 0..4, force): it reads SHAKER MOTOR (OPTIONAL)
+# (adjustment 335, AD_SHAKER_MOTOR: 0 off .. 4) and cuts the time to that setting's longest (table 0x6487f4: 0, 100, 334,
+# 500, 5000 ms; a setting past 4 is error 317 "Shaker motor shake duration out of range"); unforced, it does nothing while
+# the mode mask has 0x310 (not in a game); a shake no longer than what is left of the running one does nothing; then
+# coil_fire(7, power, ms) - drive 7 is the SHAKER MOTOR record, coil 0 of the cabinet board (beside the coin and ticket
+# meters, coils 2 and 3), at the strength's power (table 0x648808: 51, 36, 31, 23, 3 /255). shake_stop (0x189b08) is
+# coil_fire(7, 0, 0): off. drive_left (0x3e8bcc: drive) is the ms left of a drive's running request.
+# The game's own shakes, from its ~340 calls: 200 ms at 0 on a battle's or a multiball's shot, 334 ms at 0 on a bigger one
+# (an add-a-ball), 500 ms at 0 on every super jackpot (Godzilla, Mechagodzilla, Monster Zero, Destruction Jackpot) and
+# King of the Monsters' victory, 3000 ms at 3 in O2 Destroyer, and the Godzilla Multiball start (BDLGodzillaMultiballStart
+# v[7]: at 0.266/0.633/1.6/2.56/4.0 s into its video 334/100/500/1000/5000 ms at 2). Longest per strength: 1000 ms at 0
+# and 1, 5000 ms at 2 and 3 (4 is never used). shake_setting_ms is the setting's table. pm_shake / pm_shake_game.
+# Emulator (PAD-414, stock card, PAD_COIL_PROBE=1): every shake reaches the board as [coildrive] node 1 coil 0, pulse
+# 51/255 at strength 0, 31 at 2, 23 at 3, for the time asked; the game itself shakes as a game starts (334 ms at 0,
+# then 4000 ms at 3).
+site shake                 0x00189a54 0xe92d40f0 0xe1a04000
+site shake_stop            0x00189b08 0xe52de004 0xe24dd00c
+site drive_left            0x003e8bcc 0xe3500000 0xe92d4038
+value shake_adj            335
+value shake_drive          7
+text shake_max_ms          1000 1000 5000 5000
+text shake_setting_ms      0 100 334 500 5000
+text shake_hit             0:200:0
+text shake_big_hit         0:334:0
+text shake_jackpot         0:500:0
+text shake_rumble          0:3000:3
+text shake_multiball_start 266:334:2 633:100:2 1600:500:2 2560:1000:2 4000:5000:2
+
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------
 # The Action button (the game's LOCKDOWN BUTTON) and the flipper buttons have no handler of their own
 # (descriptor flags 0), so the rules never send them as a shot and no switch_hit broadcasts them. The

@@ -472,7 +472,7 @@ class EmulateTab(TabService):
         def run():
             from ...core.extract_source import card_relation
             try:
-                rel = card_relation(card, assets)
+                rel = card_relation(card, assets, measure=True)
             except Exception:                            # noqa: BLE001
                 rel = None
             self._post(self._which_apply, token, rel)
@@ -754,9 +754,11 @@ class EmulateTab(TabService):
 
     def _project_has_scene_edits(self, assets):
         try:
-            from ...plugins.stern import scene_edit
+            from ...plugins.stern import scene_edit, text_colour
+            # PAD-438: a line of text with the colour profile on is a scene edit too
             return bool(scene_edit.load(assets)) or os.path.isfile(
-                os.path.join(assets, *scene_edit.RELDIR, scene_edit.BUILT_FILENAME))
+                os.path.join(assets, *scene_edit.RELDIR, scene_edit.BUILT_FILENAME)) or bool(
+                text_colour.cards_with_lines(assets))
         except Exception:                                # noqa: BLE001
             return False
 

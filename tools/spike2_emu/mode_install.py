@@ -77,14 +77,25 @@ PORT_FILE = ("game.port", 0o100644)
 EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 64))
 #: item 160: the "counts as" table of the game's own rules (sdk/MODE_SDK.md "Counts as"), the
 #: only other data file the runtime reads beside its mode files; placed when the install is
-#: given one (--file), taken off when it is not
-EXTRA_FILES = (("stock.cfg", 0o100644),)
+#: given one (--file), taken off when it is not. PAD-446: clips.cfg, the clips that play one of
+#: several at random (sdk/pad_mode_runtime.c "clip variants") - on its own it is a whole install
+EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644))
+#: the extra file that is enough for an install without a mode (PAD-446)
+CLIPS_FILE = "clips.cfg"
+#: PAD-432: the project's modes as the Modes tab saves them to a file (sources, pictures, clips and
+#: sounds), so another project can load them straight from this card. The runtime never reads it;
+#: placed when the install is given one (--bundle) and it fits, taken off when it is not
+BUNDLE_FILE = ("pad_modes.zip", 0o100644)
 #: everything an install can leave behind, for remove() and inspect(). Every slot is
 #: listed, so a removal takes a leftover mode1.cfg too and the rmdir cannot fail on it.
-ALL_FILES = CARD_FILES + (PORT_FILE,) + EXTRA_CFGS + EXTRA_FILES
+ALL_FILES = CARD_FILES + (PORT_FILE,) + EXTRA_CFGS + EXTRA_FILES + (BUNDLE_FILE,)
 #: a code mode's own assets file: <slug>.assets, the slug a card project folder name
 ASSET_SUFFIX = ".assets"
 ASSET_MODE = 0o100644
+
+
+#: PAD-432: why the last :func:`install` left its bundle off, or ""
+LEFT_OFF = ""
 
 
 def asset_name_ok(name):
@@ -157,7 +168,7 @@ def inspect(card):
 
 
 def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=(), assets=(),
-            extras=()):
+            extras=(), bundle=None):
     """Put mode.so + mode.cfg (+ game.port) on p2 and hook game_monitor. Idempotent.
     A port left on p2 by an earlier install is removed when this one brings none.
 
@@ -169,9 +180,16 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
     of code modes only has no ``cfg_path`` (None). An .assets file an earlier install left and
     this one does not bring is removed too.
 
-    ``extras`` (item 160): the runtime's other data files by their own names, today only
-    ``stock.cfg`` (:data:`EXTRA_FILES`); one an earlier install left and this one does not
-    bring is removed too."""
+    ``extras`` (item 160): the runtime's other data files by their own names, ``stock.cfg``
+    and (PAD-446) ``clips.cfg`` (:data:`EXTRA_FILES`); one an earlier install left and this one
+    does not bring is removed too. A ``clips.cfg`` is an install on its own: a card whose only
+    change of ours is which clip plays needs no mode file.
+
+    ``bundle`` (PAD-432): the project's modes file (:data:`BUNDLE_FILE`), placed when p2 has room
+    for it beside the rest; when it has not, the modes are installed without it and
+    :data:`LEFT_OFF` says why (an install never fails for want of it)."""
+    global LEFT_OFF
+    LEFT_OFF = ""
     mk.need_tools("debugfs", "e2fsck")
     extra_cfgs = list(extra_cfgs or ())
     assets = list(assets or ())
@@ -183,8 +201,8 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
     if len(extra_cfgs) > len(EXTRA_CFGS):
         raise mk.Refused("a card holds at most %d mode files - nothing has been written"
                          % (1 + len(EXTRA_CFGS)))
-    if not cfg_path and not assets:
-        raise mk.Refused("no mode file and no code mode's assets - nothing has been written")
+    if not cfg_path and not assets and CLIPS_FILE not in {os.path.basename(x) for x in extras}:
+        raise mk.Refused("no mode file, no code mode's assets and no clips.cfg - nothing has been written")
     if extra_cfgs and not cfg_path:
         raise mk.Refused("slot files without a mode.cfg - nothing has been written")
     for a in assets:
@@ -192,6 +210,8 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
             raise mk.Refused("%s is not a code mode's <slug>.assets - nothing has been written"
                              % os.path.basename(a))
     given = [so_path] + ([cfg_path] if cfg_path else []) + ([port_path] if port_path else [])
+    if bundle and not os.path.isfile(bundle):
+        raise mk.Refused("%s is not a file - nothing has been written" % bundle)
     for p in given + extra_cfgs + assets + extras:
         if not os.path.isfile(p):
             raise mk.Refused("%s is not a file - nothing has been written" % p)
@@ -220,6 +240,15 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
         with open(p, "rb") as f:
             payload[name] = f.read()
     need = sum(len(b) for b in payload.values()) + len(mon_after)
+    if bundle:
+        size = os.path.getsize(bundle)
+        if need + size > free - mk.P2_FREE_MARGIN:
+            LEFT_OFF = ("%s (%d KB) left off: p2 has %d KB free" % (BUNDLE_FILE[0], size >> 10, free >> 10))
+        else:
+            with open(bundle, "rb") as f:
+                payload[BUNDLE_FILE[0]] = f.read()
+            files += (BUNDLE_FILE,)
+            need += size
     if need > free - mk.P2_FREE_MARGIN:
         raise mk.Refused("p2 has %d KB free and the mode needs %d KB (margin %d KB)"
                          % (free >> 10, need >> 10, mk.P2_FREE_MARGIN >> 10))
@@ -334,8 +363,11 @@ def main(argv=None):
                         "several code modes. A card of code modes only needs no --cfg")
     p.add_argument("--file", action="append", default=[],
                    help="another data file the runtime reads beside its mode files, by its own "
-                        "name: stock.cfg, the counts-as table of the game's own rules (item 160)")
+                        "name: stock.cfg, the counts-as table of the game's own rules (item 160), "
+                        "or clips.cfg, the clips that play one of several at random (PAD-446)")
     p.add_argument("--port", help="the SDK runtime's port file for this game (item 134)")
+    p.add_argument("--bundle", help="the project's modes file (PAD-432), for another project to "
+                                    "load them from this card; left off when p2 has no room")
     p.add_argument("--workdir")
     p = sub.add_parser("remove")
     p.add_argument("card")
@@ -346,9 +378,10 @@ def main(argv=None):
     try:
         if a.cmd == "install":
             names = install(a.card, a.so, a.cfg[0] if a.cfg else None, a.port, a.workdir,
-                            extra_cfgs=a.cfg[1:], assets=a.asset, extras=a.file)
-            print("[mode] installed %s into %s and hooked %s"
-                  % (", ".join(names), MODE_DIR, GAME_MONITOR))
+                            extra_cfgs=a.cfg[1:], assets=a.asset, extras=a.file, bundle=a.bundle)
+            print("[mode] installed %s into %s and hooked %s%s"
+                  % (", ".join(names), MODE_DIR, GAME_MONITOR,
+                     "; " + LEFT_OFF if LEFT_OFF else ""))
         elif a.cmd == "remove":
             names = remove(a.card, a.workdir)
             print("[mode] removed %s; %s restored"

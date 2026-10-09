@@ -426,6 +426,126 @@ def test_the_scenes_tab_warns_of_missing_pictures_and_another_games_project(tmp_
         w.call("text_scenes.close")
 
 
+def _another_card(tmp_path, folder):
+    """PAD-421: *folder* holds the extract of the stock card; the Extract tab names a custom
+    card of the same game."""
+    stock = tmp_path / "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
+    stock.write_bytes(b"\0" * 16)
+    custom = tmp_path / "Godzilla Heisei Custom.raw"
+    custom.write_bytes(b"\0" * 32)
+    (folder / ".extract_source.json").write_text(json.dumps(
+        {"input_path": str(stock), "input_name": stock.name, "size": 16}), encoding="utf-8")
+    return stock, custom
+
+
+def test_re_read_from_card_reads_the_card_the_project_came_from(tmp_path, monkeypatch):
+    """PAD-421: DragonRR's Extract tab named a custom card over the stock card's extract;
+    Re-read from card read the custom card's scenes, whose pictures the project lacks, and
+    every one came back empty.  The scenes are read off the project's own card, and the
+    window says the card on the Extract tab is another one."""
+    from pinball_decryptor.plugins.stern import engine
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    tree_path = folder / "images" / "scene_textures" / "scene_tree.json"
+    os.remove(str(tree_path))
+    stock, custom = _another_card(tmp_path, folder)
+    calls = []
+
+    def fake_rebuild(image, assets, log=None, progress=None, cancel=None, **kw):
+        calls.append(image)
+        tree_path.write_text(json.dumps({CARD: man}), encoding="utf-8")
+        return 1
+
+    monkeypatch.setattr(engine, "rebuild_scene_layouts_from_card", fake_rebuild)
+    monkeypatch.setattr(engine, "card_title_index", lambda path: ("g-1_16_0.sidx",))
+    with web_app(tmp_path, mfr="stern") as w:
+        def _set():
+            w.window.write_assets_var.set(str(folder))
+            w.window.extract_input_var.set(str(custom))
+        w.run(_set)
+        text = w.window.service("text")
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        assert _wait(w, lambda: calls and not w.state("text_scenes")["rebuilding"])
+        assert calls == [str(stock)]
+        assert _wait(w, lambda: w.state("text_scenes").get("card_note"))
+        note = w.state("text_scenes")["card_note"]
+        assert stock.name in note and custom.name in note and "new project folder" in note
+
+        # pressed by hand: asked first, and No reads nothing
+        w.answers.append("no")
+        n = len(w.asked)
+        assert w.call("text_scenes.rebuild") is False
+        assert len(w.asked) == n + 1 and w.asked[-1]["title"] == "Re-read from card"
+        assert calls == [str(stock)]
+        w.call("text_scenes.close")
+
+
+def test_re_read_from_another_card_stops_when_the_projects_card_is_gone(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import engine
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    tree_path = folder / "images" / "scene_textures" / "scene_tree.json"
+    os.remove(str(tree_path))
+    stock, custom = _another_card(tmp_path, folder)
+    os.remove(str(stock))
+    calls = []
+    monkeypatch.setattr(engine, "rebuild_scene_layouts_from_card",
+                        lambda image, *a, **k: calls.append(image) or 1)
+    monkeypatch.setattr(engine, "card_title_index", lambda path: ())
+    with web_app(tmp_path, mfr="stern") as w:
+        def _set():
+            w.window.write_assets_var.set(str(folder))
+            w.window.extract_input_var.set(str(custom))
+        w.run(_set)
+        text = w.window.service("text")
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        assert _wait(w, lambda: stock.name in (w.state("text_scenes").get("rebuild_msg") or ""))
+        assert "Select card tab" in w.state("text_scenes")["rebuild_msg"]
+        assert calls == []
+        w.call("text_scenes.close")
+
+
+def test_re_read_from_a_card_built_from_this_project_reads_its_own_card(tmp_path, monkeypatch):
+    """PAD-421: a card PAD built from this project lays its grown scenes out differently
+    from the extract the project's pictures were listed from, so the scenes are re-read off
+    the project's own card, without a question (the card belongs to this project)."""
+    from pinball_decryptor.core.extract_source import BUILD_RECORD_SUFFIX
+    from pinball_decryptor.plugins.stern import engine
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    man = _seed(folder)
+    tree_path = folder / "images" / "scene_textures" / "scene_tree.json"
+    os.remove(str(tree_path))
+    stock, built = _another_card(tmp_path, folder)
+    (tmp_path / (built.name + BUILD_RECORD_SUFFIX)).write_text(
+        json.dumps({"version": 1, "assets": str(folder)}), encoding="utf-8")
+    calls = []
+
+    def fake_rebuild(image, assets, log=None, progress=None, cancel=None, **kw):
+        calls.append(image)
+        tree_path.write_text(json.dumps({CARD: man}), encoding="utf-8")
+        return 1
+
+    monkeypatch.setattr(engine, "rebuild_scene_layouts_from_card", fake_rebuild)
+    monkeypatch.setattr(engine, "card_title_index", lambda path: ("g-1_16_0.sidx",))
+    with web_app(tmp_path, mfr="stern") as w:
+        def _set():
+            w.window.write_assets_var.set(str(folder))
+            w.window.extract_input_var.set(str(built))
+        w.run(_set)
+        text = w.window.service("text")
+        assert w.run(text.open_scene_browser, str(folder)) is True
+        assert _wait(w, lambda: calls and not w.state("text_scenes")["rebuilding"])
+        n = len(w.asked)
+        assert w.call("text_scenes.rebuild") is True
+        assert _wait(w, lambda: len(calls) == 2 and not w.state("text_scenes")["rebuilding"])
+        assert calls == [str(stock), str(stock)] and len(w.asked) == n
+        assert not w.state("text_scenes").get("card_note")
+        w.call("text_scenes.close")
+
+
 def test_an_older_manifest_is_re_read_quietly_when_the_card_is_there(tmp_path, monkeypatch):
     from pinball_decryptor.plugins.stern import engine, scene_eval
     folder = tmp_path / "proj"

@@ -803,6 +803,8 @@ static void magnet_let_go(const char *why);   /* PAD-381: the magnet section */
 static void scoop_let_go(void);               /* PAD-381: the scoop section */
 static void building_let_go(const char *why); /* PAD-393: the building section */
 static void shield_let_go(const char *why);   /* PAD-392: the shield section */
+static void shake_mode_ended(void);           /* PAD-414: the shaker section */
+static void shake_let_go(const char *why);
 static const struct pm_mode *show_ended_by;   /* PAD-411: a mode's ending may still start its show */
 static unsigned long show_ended_ms;
 void pm_end(void)
@@ -814,6 +816,7 @@ void pm_end(void)
     if (!running) scoop_let_go();
     if (!running) building_let_go("the mode ended");
     if (!running) shield_let_go("the mode ended");
+    if (!running) shake_mode_ended();
 }
 int pm_running(void) { return running && running == current; }
 
@@ -3210,6 +3213,8 @@ static void block_defaults(unsigned *m)
     for (i = 0; i < BLOCK_WORDS; i++) m[i] = block_named[i];
 }
 
+static void wizard_refused(unsigned start);   /* PAD-436: the game's mini-wizards, below */
+
 static int on_block_start(unsigned *r, unsigned hook_n)
 {
     unsigned id;
@@ -3225,6 +3230,7 @@ static int on_block_start(unsigned *r, unsigned hook_n)
         nm = pm_port_text(key);
         say("block: the game's mode %u (%s) did not start - %s is running", id, nm ? nm : "?", block_who);
     }
+    wizard_refused(block_hooked[hook_n]);      /* PAD-436: a mini-wizard's start stays lit */
     return 1;                                  /* refused: the mode's start never runs */
 }
 
@@ -4957,6 +4963,652 @@ static void building_arm(void)
         pm_port_value("building_floors", 4) - 1, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
 }
 
+/* ---- the shaker (PAD-414) -----------------------------------------------------------------------
+ * David (2026-10-06): "We also should be able to have control over Shaker motor effects." A Godzilla
+ * Premium may have the optional shaker motor (an LE has it fitted; David's Premium does).
+ *
+ * What the game does (Premium/LE 1.16; docs/plans/mode_coils.md "The shaker"): every shake of the game's
+ * goes through ONE call, `site shake` (0x189a54: ms, strength, force), and `site shake_stop` (0x189b08)
+ * stops one. The shake reads the operator's SHAKER MOTOR (OPTIONAL) adjustment (`value shake_adj` 335,
+ * 0..4, 0 = off: the help text says the motor is an optional accessory for Premium games) and cuts the time
+ * to that setting's longest (its table: 0, 100, 334, 500, 5000 ms; a setting past 4 is the assert "Shaker
+ * motor shake duration out of range"); unless forced (the game never forces) it does nothing outside a game
+ * in play (the mode mask's 0x310); a shake shorter than what is left of the one running does nothing; and
+ * it sends the motor's drive (`value shake_drive` 7: coil 0 of the cabinet board) ONE timed request at the
+ * strength's power (its table: 0 51/255 .. 3 23/255) - the board stops it when the time is up.
+ * The game's own shakes (a census of its 340 calls, docs/plans/mode_coils.md): 200 ms at strength 0 on a
+ * battle's shot, 334 ms on a bigger one, 500 ms on every super jackpot, 3000 ms at 3 in O2 Destroyer, and
+ * the Godzilla Multiball start's five over 4 s. Strength 0 and 1 never run longer than 1000 ms; 2 and 3 up
+ * to 5000. The port names them (`text shake_<name>`: steps of at_ms:ms:strength) and the longest per
+ * strength (`text shake_max_ms`).
+ *
+ * THE LIMITS, none of them the mode's to change:
+ *   1. Only through the game's own call, so the operator's setting (off, or how long) always applies and
+ *      the board ends every shake by itself. Never forced.
+ *   2. Only the running mode, only in a game (not attract, not tilted); refused with the shaker set to off
+ *      (or not fitted), while one of the game's own shakes runs, while one of ours does.
+ *   3. A strength the game uses (0..3), never longer than the game's own longest shake at that strength;
+ *      at least SHAKE_MIN_MS.
+ *   4. At most SHAKE_PER_MIN shakes (a game shake of several steps counts once) and SHAKE_ON_MS of shaking
+ *      in any 60 s.
+ *   5. Stopped (the game's own stop) when the mode ends, the ball ends, or the game ends or tilts - unless
+ *      the game has since asked for a longer shake of its own, which then has the motor. */
+#define SHAKE_MIN_MS        100u
+#define SHAKE_STRENGTHS       4u
+#define SHAKE_PER_MIN        20u
+#define SHAKE_ON_MS       15000u   /* the motor's running time a mode may ask for in any 60 s */
+#define SHAKE_STEPS           8u
+
+struct shake_step { unsigned at, ms, strength; };
+
+static struct {
+    unsigned max_ms[SHAKE_STRENGTHS];       /* the game's own longest shake at each strength */
+    unsigned long until;                    /* pm_ms() our shake (or a game shake's last step) runs to; 0 none */
+    unsigned long sent_until;               /* pm_ms() the step we sent last runs to: the motor is ours till then */
+    unsigned long starts[SHAKE_PER_MIN];
+    unsigned on_ms[SHAKE_PER_MIN];
+    unsigned next;
+    struct shake_step step[SHAKE_STEPS];    /* a game shake under way: its steps after the first */
+    unsigned n_step, i_step;
+    unsigned long t0;
+    int outlast;                            /* pm_shake_outlast: the mode's ending shake runs out after the mode */
+    char name[24];
+} shk;
+
+/* The steps of a `text shake_<name>` line ("at:ms:strength ..."), each clamped to the game's own longest at
+ * its strength; the number read (0: none, or a bad line). (tests lift it verbatim) */
+static unsigned shake_parse(const char *t, const unsigned max_ms[SHAKE_STRENGTHS], struct shake_step *out,
+                            unsigned cap)
+{
+    unsigned n = 0, v[3], k;
+    while (t && *t && n < cap) {
+        while (*t == ' ') t++;
+        if (!*t) break;
+        for (k = 0; k < 3; k++) {
+            if (*t < '0' || *t > '9') return 0;
+            for (v[k] = 0; *t >= '0' && *t <= '9'; t++) v[k] = v[k] * 10 + (unsigned)(*t - '0');
+            if (k < 2 && *t++ != ':') return 0;
+        }
+        if (*t && *t != ' ') return 0;
+        if (v[2] >= SHAKE_STRENGTHS || !max_ms[v[2]]) return 0;
+        if (v[1] < SHAKE_MIN_MS) v[1] = SHAKE_MIN_MS;
+        if (v[1] > max_ms[v[2]]) v[1] = max_ms[v[2]];
+        out[n].at = v[0], out[n].ms = v[1], out[n].strength = v[2];
+        if (n && out[n].at < out[n - 1].at) return 0;   /* in order */
+        n++;
+    }
+    return n;
+}
+
+/* Why a shake of `ms` (all its steps) may not start now, or 0. (tests lift it verbatim) */
+static const char *shake_refusal(int running_mode, int in_game, unsigned setting, int game_shaking,
+                                 unsigned long ours_until, unsigned ms, unsigned long now,
+                                 const unsigned long starts[SHAKE_PER_MIN], const unsigned on_ms[SHAKE_PER_MIN])
+{
+    unsigned i, recent = 0, on = 0;
+    if (!running_mode) return "only the running mode may shake it";
+    if (!in_game) return "no game is being played (attract or a tilt)";
+    if (!setting) return "the operator has the shaker switched off (or none is fitted)";
+    if (ours_until && now < ours_until) return "a shake of the mode's is still running";
+    if (game_shaking) return "one of the game's own shakes is running";
+    for (i = 0; i < SHAKE_PER_MIN; i++)
+        if (starts[i] && now - starts[i] < 60000ul) recent++, on += on_ms[i];
+    if (recent >= SHAKE_PER_MIN) return "twenty shakes in the last minute already";
+    if (on + ms > SHAKE_ON_MS) return "the mode has shaken the cabinet for 15 s in the last minute already";
+    return 0;
+}
+
+static unsigned shake_setting(void)
+{
+    return ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))((unsigned)pm_port_value("shake_adj", 0))
+        & 0xffffu;
+}
+
+static unsigned shake_left(void)           /* ms left of whatever shake the motor runs now (the game's or ours) */
+{
+    return ((unsigned (*)(unsigned))(unsigned long)fn("drive_left"))((unsigned)pm_port_value("shake_drive", 0))
+        & 0xffffu;
+}
+
+/* The longest shake the operator's setting allows (the game's own table, the port's `text shake_setting_ms`) */
+static unsigned shake_setting_ms(unsigned setting)
+{
+    const char *t = pm_port_text("shake_setting_ms");
+    unsigned i, v = 0;
+    for (i = 0; t && *t; i++) {
+        while (*t == ' ') t++;
+        for (v = 0; *t >= '0' && *t <= '9'; t++) v = v * 10 + (unsigned)(*t - '0');
+        if (i == setting) return v;
+        while (*t && *t != ' ') t++;
+    }
+    return setting ? 5000u : 0u;
+}
+
+/* One step through the game's own call, limits already passed; the ms it runs (0: the game would not). The game
+ * stores the request and its coil service sends it a moment later (emulator: the drive's time left still reads 0
+ * straight after), so the length is the request's, cut to what the operator's setting allows, as the game cuts it. */
+static unsigned shake_send(unsigned ms, unsigned strength)
+{
+    unsigned r = ((unsigned (*)(unsigned, unsigned, unsigned))(unsigned long)fn("shake"))(ms, strength, 0) & 0xffu;
+    unsigned cap = shake_setting_ms(shake_setting());
+    if (!r) return 0;
+    if (ms > cap) ms = cap;
+    shk.sent_until = pm_ms() + ms;
+    if (shk.sent_until > shk.until) shk.until = shk.sent_until;
+    return ms;
+}
+
+static int shake_begin(const char *what, const struct shake_step *steps, unsigned n)
+{
+    unsigned long now = pm_ms();
+    unsigned total = 0, i, ran;
+    const char *why;
+    if (!(can & PM_CAN_SHAKER) || !n) return 0;
+    for (i = 0; i < n; i++) total += steps[i].ms;
+    why = shake_refusal(pm_running(), pm_in_game(), shake_setting(), shk.until && now < shk.until ? 0 : shake_left() != 0,
+                        shk.until, total, now, shk.starts, shk.on_ms);
+    if (why) {
+        say("shaker: no %s - %s", what, why);
+        return 0;
+    }
+    shk.n_step = shk.i_step = 0;
+    shk.until = shk.sent_until = 0;
+    shk.outlast = 0;
+    shk.t0 = now;
+    pm_snprintf(shk.name, sizeof shk.name, "%s", what);
+    if (steps[0].at) {                      /* a game shake whose first step waits: the tick sends it */
+        for (i = 0; i < n; i++) shk.step[i] = steps[i];
+        shk.n_step = n;
+        shk.until = now + steps[n - 1].at + steps[n - 1].ms;
+        ran = 1;
+    } else {
+        ran = shake_send(steps[0].ms, steps[0].strength);
+        for (i = 1; i < n; i++) shk.step[i - 1] = steps[i];
+        shk.n_step = ran ? n - 1 : 0;
+        if (shk.n_step) shk.until = now + steps[n - 1].at + steps[n - 1].ms;
+    }
+    if (!ran) {
+        say("shaker: no %s - the game's own shake call did nothing", what);
+        return 0;
+    }
+    shk.starts[shk.next % SHAKE_PER_MIN] = now;
+    shk.on_ms[shk.next++ % SHAKE_PER_MIN] = total;
+    say("shaker: %s - %u step(s), %u ms of shaking in all, through the game's own shake (setting %u)", what, n, total,
+        shake_setting());
+    return 1;
+}
+
+int pm_shake(unsigned ms, unsigned strength)
+{
+    struct shake_step s;
+    char what[32];
+    if (!(can & PM_CAN_SHAKER)) return 0;
+    if (strength >= SHAKE_STRENGTHS || !shk.max_ms[strength]) {
+        say("shaker: no shake - strength %u is not one the game uses (0 hardest .. 3 softest)", strength);
+        return 0;
+    }
+    s.at = 0;
+    s.ms = ms < SHAKE_MIN_MS ? SHAKE_MIN_MS : ms > shk.max_ms[strength] ? shk.max_ms[strength] : ms;
+    s.strength = strength;
+    pm_snprintf(what, sizeof what, "shake %u ms at %u", s.ms, strength);
+    return shake_begin(what, &s, 1);
+}
+
+int pm_shake_game(const char *name)
+{
+    struct shake_step s[SHAKE_STEPS];
+    char key[40], what[40];
+    unsigned n;
+    if (!(can & PM_CAN_SHAKER) || !name || !*name) return 0;
+    pm_snprintf(key, sizeof key, "shake_%s", name);
+    n = shake_parse(pm_port_text(key), shk.max_ms, s, SHAKE_STEPS);
+    if (!n) {
+        say("shaker: no shake - the port names no game shake \"%s\"", name);
+        return 0;
+    }
+    pm_snprintf(what, sizeof what, "the game's %s shake", name);
+    return shake_begin(what, s, n);
+}
+
+int pm_shaking(void) { return shk.until && pm_ms() < shk.until; }
+
+/* Stop ours: the steps still to come, and the motor if what it runs now is ours (the game's own stop) */
+static void shake_let_go(const char *why)
+{
+    unsigned long now = pm_ms();
+    unsigned left;
+    int steps = shk.n_step > shk.i_step;
+    shk.n_step = shk.i_step = 0;
+    shk.outlast = 0;
+    if (!shk.until) return;
+    if (now >= shk.until) { shk.until = shk.sent_until = 0; return; }
+    left = shake_left();
+    if (shk.sent_until > now && left <= shk.sent_until - now + 50ul) {
+        ((void (*)(void))(unsigned long)fn("shake_stop"))();
+        say("shaker: %s stopped with %lu ms left (%s)", shk.name, shk.sent_until - now, why);
+    } else if (left) {
+        say("shaker: %s - the shake running now is the game's own, left to run (%s)", shk.name, why);
+    } else if (steps) {
+        say("shaker: %s - its steps still to come dropped (%s)", shk.name, why);
+    }
+    shk.until = shk.sent_until = 0;
+}
+
+void pm_shake_stop(void)
+{
+    if (pm_running()) shake_let_go("the mode stopped it");
+}
+
+/* The shake under way is the mode's ending one: the mode's end leaves it to run out (its own length, every limit
+ * already passed); the ball, the game or a tilt ending still stops it. */
+void pm_shake_outlast(void)
+{
+    if (pm_running() && pm_shaking()) shk.outlast = 1;
+}
+
+/* pm_end: stop the mode's shake, unless it is the mode's ending one */
+static void shake_mode_ended(void)
+{
+    if (shk.outlast && pm_shaking()) say("shaker: %s runs out after the mode's end", shk.name);
+    else shake_let_go("the mode ended");
+}
+
+static void shake_tick(void)
+{
+    struct shake_step *s;
+    if (!shk.until) return;
+    if (!pm_in_game()) { shake_let_go("the game ended or tilted"); return; }
+    if (!running && !shk.outlast) { shake_let_go("no mode is running"); return; }
+    while (shk.i_step < shk.n_step && pm_ms() - shk.t0 >= shk.step[shk.i_step].at) {
+        s = &shk.step[shk.i_step++];
+        if (!shake_send(s->ms, s->strength))
+            say("shaker: %s, step %u - the game's own shake call did nothing (one of its own longer?)", shk.name,
+                shk.i_step);
+    }
+    if (shk.i_step >= shk.n_step && pm_ms() >= shk.until) shk.until = shk.sent_until = 0, shk.n_step = shk.i_step = 0;
+}
+
+static void shake_arm(void)
+{
+    static const char *const s[] = { "shake", "shake_stop", "drive_left", "adjustment", 0 };
+    static const char *const v[] = { "shake_adj", "shake_drive", 0 };
+    const char *t = pm_port_text("shake_max_ms");
+    unsigned i;
+    if (!site("shake")) return;                          /* a port without the shaker lines: silent */
+    for (i = 0; i < SHAKE_STRENGTHS && t; i++) {
+        while (*t == ' ') t++;
+        for (shk.max_ms[i] = 0; *t >= '0' && *t <= '9'; t++) shk.max_ms[i] = shk.max_ms[i] * 10 + (unsigned)(*t - '0');
+        if (shk.max_ms[i] > 5000u) shk.max_ms[i] = 5000u;
+    }
+    if (!have_sites(s) || !have_values(v) || !t || !shk.max_ms[0]) {
+        say("shaker: off - the port's shaker lines are incomplete or do not match this build");
+        return;
+    }
+    can |= PM_CAN_SHAKER;
+    say("shaker: a mode may shake the cabinet through the game's own shake 0x%08x (drive %ld, setting %ld); at most "
+        "%u/%u/%u/%u ms at strength 0..3, %u shakes and %u s of shaking a minute, stopped when the mode ends",
+        fn("shake"), pm_port_value("shake_drive", 0), pm_port_value("shake_adj", 0), shk.max_ms[0], shk.max_ms[1],
+        shk.max_ms[2], shk.max_ms[3], SHAKE_PER_MIN, SHAKE_ON_MS / 1000);
+}
+
+/* ---- the game's own mini-wizards (PAD-436) --------------------------------------------------------
+ * James Bond LE 1.06 keeps its four mini-wizards in a table (`data wizard_table`, `value wizard_entry` bytes
+ * each: its index, its bit, its insert, its start, ...) and each player's state in three arrays of words
+ * (`data wizard_state`: [player - 1] the selected one, +0x10 the lit mask, +0x20 the played mask). The game
+ * lights them when a part is collected in all six films: every one not played this game, one of them
+ * selected, and its lamps' refresh byte (`data lamps_dirty`) set. Its start shot (the Right ramp) calls
+ * `site wizard_start`, which starts the selected one when nothing of the game's is in its way (its own
+ * check), unlights them all and marks it played; 0 = it started nothing.
+ * pm_game_wizard does what the game's lighting does, for one: select it, OR its bit into the lit mask, set the
+ * refresh byte; PM_WIZARD_START then calls the game's start itself. Never a write the table does not vouch for:
+ * the arm checks every entry's index and bit and that its start is in the game's code.
+ * A mini-wizard's start is also one a mode of ours may hold off (`block_start_<id>`: Ahoy Mr. Bond's on Bond LE
+ * 1.06). The game's start goes on after a refused one as if it began: it unlights them all and marks it played,
+ * so the player would lose it. The runtime puts the player's three words back as they were on the next tick,
+ * and the start shot starts it once our mode has ended.
+ * PAD-457: one handed over stays THE one until the game starts it. The game's own lighting lights every one not
+ * played and its selection shots cycle among the lit ones, so the start shot could start another (a Bond owner
+ * finished From Russia With Love and the Right ramp gave Duel on the Disco Volante). Until it starts, it is the
+ * only one lit and the one selected; what the game lit itself meanwhile is owed, and given back once it has
+ * started. A `start` the game would not start then (a film's last part comes from a henchman, villain or Q
+ * Branch mode that is still running, and those are in its way) is started the moment the game would, that ball.
+ * PAD-457, then: a mini-wizard a mode of the card hands out is THAT mode's. The modes claim theirs when they load
+ * (pm_game_wizard_claim), and the game's own lighting (`site wizard_light`, hooked) leaves a claimed one unlit:
+ * once a part is in all six films, every more of that part lit them all again, so the same owner got the next
+ * one on the Right ramp with no film done. Nothing claimed is owed or given back. */
+#define WIZARDS_MAX 8
+#define WIZ_DUE_MAX 4
+static int wizards_n;
+static struct { int n; unsigned p, sel, lit, played; } wiz_hold;   /* a refused start, put back on the next tick */
+static struct {
+    unsigned char n[WIZ_DUE_MAX];     /* handed over and not started yet, in order: n[0] is the one lit */
+    unsigned char start[WIZ_DUE_MAX]; /* ... to be started at once (as soon as the game would), not only lit */
+    int count;
+    unsigned owed;                    /* the game's own lit ones, unlit while ours waits */
+    unsigned ball;                    /* the ball n[0] was handed over on (stock_ball_ends) */
+    unsigned long tried;              /* n[0]'s last start (pm_ms) */
+} wiz_due[4];
+static unsigned wiz_game;             /* the game the hand-overs belong to (its game_start events) */
+static unsigned wiz_claimed;          /* PAD-457: the ones this card's modes hand out: the game's lighting leaves them */
+static int wiz_light_hooked;          /* ... `site wizard_light` is hooked, so a claim holds */
+
+int pm_game_wizards(void)
+{
+    return (can & PM_CAN_GAME_WIZARDS) ? wizards_n : 0;
+}
+
+static unsigned *wizard_entry(int n)
+{
+    return (unsigned *)(unsigned long)(data("wizard_table") + (unsigned)(n - 1) * (unsigned)pm_port_value("wizard_entry", 0x20));
+}
+
+static const char *wizard_name(int n)
+{
+    char key[24];
+    const char *t;
+    pm_snprintf(key, sizeof key, "wizard_name_%d", n);
+    t = pm_port_text(key);
+    return t ? t : "?";
+}
+
+/* the block refused the start at `start`: when it is a mini-wizard's, keep the player's words as they are now (the
+ * game's start has not touched them yet) */
+static void wizard_refused(unsigned start)
+{
+    unsigned p = pm_player(), *st;
+    int n;
+    if (!(can & PM_CAN_GAME_WIZARDS) || p < 1 || p > 4) return;
+    for (n = 1; n <= wizards_n && wizard_entry(n)[3] != start; n++) ;
+    if (n > wizards_n) return;
+    st = (unsigned *)(unsigned long)data("wizard_state");
+    wiz_hold.n = n;
+    wiz_hold.p = p;
+    wiz_hold.sel = st[p - 1];
+    wiz_hold.lit = st[4 + p - 1];
+    wiz_hold.played = st[8 + p - 1];
+}
+
+/* the game's own running query for one (its table entry's fifth word: Ahoy Mr. Bond's tests its ACTIVE flag) */
+static int wizard_running(int n)
+{
+    return ((int (*)(void))(unsigned long)wizard_entry(n)[4])() != 0;
+}
+
+/* PAD-457: player p's first one handed over is the only one lit and the one selected, so the game's selection shots
+ * cannot move off it and its start shot starts it; what the game lit itself meanwhile is owed until it has started */
+static void wizard_pin(unsigned p)
+{
+    unsigned *st = (unsigned *)(unsigned long)data("wizard_state"), n = wiz_due[p - 1].n[0];
+    unsigned bit = wizard_entry((int)n)[1], extra = st[4 + p - 1] & ~bit;
+    if (!extra && (st[4 + p - 1] & bit) && st[p - 1] == n - 1) return;
+    if (extra & ~wiz_claimed) {
+        wiz_due[p - 1].owed |= extra & ~wiz_claimed;
+        say("game wizard %u (%s): the game lit 0x%x for player %u as well - those wait until this one has started", n,
+            wizard_name((int)n), extra & ~wiz_claimed, p);
+    }
+    st[4 + p - 1] = bit;
+    st[p - 1] = n - 1;
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+}
+
+/* player p's first one has started: the next one handed over is lit, or what the game lit itself is lit again */
+static void wizard_due_next(unsigned p)
+{
+    unsigned *st = (unsigned *)(unsigned long)data("wizard_state"), back;
+    int k;
+    for (k = 1; k < wiz_due[p - 1].count; k++) {
+        wiz_due[p - 1].n[k - 1] = wiz_due[p - 1].n[k];
+        wiz_due[p - 1].start[k - 1] = wiz_due[p - 1].start[k];
+    }
+    wiz_due[p - 1].ball = stock_ball_ends;
+    wiz_due[p - 1].tried = 0;
+    if (--wiz_due[p - 1].count > 0) {
+        wizard_pin(p);
+        return;
+    }
+    back = wiz_due[p - 1].owed & ~st[8 + p - 1] & ~wiz_claimed;
+    wiz_due[p - 1].owed = 0;
+    if (!back) return;
+    st[4 + p - 1] |= back;
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    say("game wizards: the ones the game lit itself (0x%x) are lit again for player %u", back, p);
+}
+
+/* player p's first one is to start at once: the game's own start, as its start shot would call it, tried until the
+ * game starts it (none of its modes in the way any more) while the ball it was handed over on lasts */
+static void wizard_due_start(unsigned p)
+{
+    int n = wiz_due[p - 1].n[0];
+    if (wiz_due[p - 1].ball != stock_ball_ends) {
+        wiz_due[p - 1].start[0] = 0;
+        say("game wizard %d (%s): the ball ended before the game would start it - lit for player %u, the game's start "
+            "shot starts it", n, wizard_name(n), p);
+        return;
+    }
+    if (p != pm_player() || !pm_in_game() || wiz_hold.n) return;
+    if (block_owner && running == block_owner) return;      /* a mode of ours holds the game's modes off */
+    if (pm_ms() - wiz_due[p - 1].tried < 250) return;
+    wiz_due[p - 1].tried = pm_ms();
+    if (!((int (*)(void))(unsigned long)fn("wizard_start"))()) return;   /* one of its modes is still in the way */
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    say("game wizard %d (%s): the game started it (its own start) now that nothing is in its way, player %u", n,
+        wizard_name(n), p);
+    wizard_due_next(p);
+}
+
+/* every tick: a refused start's words put back; each player's hand-overs kept lit until the game starts them */
+static void wizards_tick(void)
+{
+    unsigned *st, p = wiz_hold.p, game;
+    int ev, n;
+    if (!(can & PM_CAN_GAME_WIZARDS)) return;
+    st = (unsigned *)(unsigned long)data("wizard_state");
+    if (wiz_hold.n) {
+        st[p - 1] = wiz_hold.sel;
+        st[4 + p - 1] = wiz_hold.lit;
+        st[8 + p - 1] = wiz_hold.played;
+        *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+        say("game wizard %d (%s): its start was refused while %s runs - kept lit for player %u (lit 0x%x, played 0x%x), "
+            "so the game's start shot starts it once that mode ends", wiz_hold.n, wizard_name(wiz_hold.n), block_who, p,
+            wiz_hold.lit, wiz_hold.played);
+        wiz_hold.n = 0;
+    }
+    ev = pm_event("game_start");
+    game = ev >= 0 ? event_count(ev) : 0;
+    if (game != wiz_game || !pm_player()) {       /* a new game, or none: nothing handed over carries on */
+        wiz_game = game;
+        for (p = 0; p < 4; p++) wiz_due[p].count = 0, wiz_due[p].owed = 0;
+        return;
+    }
+    for (p = 1; p <= 4; p++) {
+        if (!wiz_due[p - 1].count) continue;
+        n = wiz_due[p - 1].n[0];
+        if (st[p - 1] == ~0u && !st[4 + p - 1] && !st[8 + p - 1]) {     /* the game set the player up anew */
+            wiz_due[p - 1].count = 0;
+            wiz_due[p - 1].owed = 0;
+            continue;
+        }
+        /* the game's start ran: only it unlights them all (the game's lighting lights at least one), or ours runs */
+        if (!st[4 + p - 1] || (!(st[4 + p - 1] & wizard_entry(n)[1]) && wizard_running(n))) {
+            say("game wizard %d (%s): the game started it for player %u", n, wizard_name(n), p);
+            wizard_due_next(p);
+            continue;
+        }
+        wizard_pin(p);
+        if (wiz_due[p - 1].start[0]) wizard_due_start(p);
+    }
+}
+
+int pm_game_wizard(int n, int how)
+{
+    const char *name;
+    unsigned p, bit, *st;
+    int r, k;
+    if (!(can & PM_CAN_GAME_WIZARDS)) return 0;
+    if (n < 1 || n > wizards_n) {
+        say("game wizard %d: not one of the game's mini-wizards the port names (1-%d)", n, wizards_n);
+        return 0;
+    }
+    name = wizard_name(n);
+    p = pm_player();
+    if (!pm_in_game() || p < 1 || p > 4) {
+        say("game wizard %d (%s): not handed over - no game", n, name);
+        return 0;
+    }
+    st = (unsigned *)(unsigned long)data("wizard_state");
+    bit = wizard_entry(n)[1];
+    say("game wizard %d (%s): player %u had selected %u, lit 0x%x, played 0x%x%s", n, name, p, st[p - 1],
+        st[4 + p - 1], st[8 + p - 1], st[8 + p - 1] & bit ? " - played this game already: it plays again" : "");
+    for (k = 0; k < wiz_due[p - 1].count && wiz_due[p - 1].n[k] != n; k++) ;
+    if (k == wiz_due[p - 1].count) {               /* each one is listed once, so there is room (WIZ_DUE_MAX) */
+        wiz_due[p - 1].n[k] = (unsigned char)n;
+        wiz_due[p - 1].start[k] = 0;
+        wiz_due[p - 1].count++;
+    }
+    if (how == PM_WIZARD_START) wiz_due[p - 1].start[k] = 1;
+    if (k) {
+        say("game wizard %d (%s): lit for player %u after %s, which was handed over first and has not started yet", n,
+            name, p, wizard_name(wiz_due[p - 1].n[0]));
+        return PM_WIZARD_LIT;
+    }
+    wiz_due[p - 1].ball = stock_ball_ends;
+    wizard_pin(p);
+    if (how == PM_WIZARD_START && block_owner && running == block_owner) {
+        say("game wizard %d (%s): %s holds the game's modes off, so it is lit, not started - started once that mode "
+            "ends, this ball", n, name, block_who);
+        how = PM_WIZARD_LIGHT;
+    }
+    if (how == PM_WIZARD_START) {
+        wiz_due[p - 1].tried = pm_ms();
+        r = ((int (*)(void))(unsigned long)fn("wizard_start"))();
+        *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+        if (r) {
+            say("game wizard %d (%s): the game started it (its own start), player %u", n, name, p);
+            wizard_due_next(p);
+            return PM_WIZARD_STARTED;
+        }
+        say("game wizard %d (%s): the game would not start it now (one of its own modes is in the way) - lit, and "
+            "started the moment the game would, this ball", n, name);
+        return PM_WIZARD_LIT;
+    }
+    say("game wizard %d (%s): lit and selected for player %u - the game's start shot starts it", n, name, p);
+    return PM_WIZARD_LIT;
+}
+
+/* the number of the one the port calls `name` (`text wizard_name_<n>`, any case); 0 = none */
+static int wizard_by_name(const char *name)
+{
+    char key[24];
+    const char *t;
+    int n, k;
+    for (n = 1; name && *name && n <= wizards_n; n++) {
+        pm_snprintf(key, sizeof key, "wizard_name_%d", n);
+        t = pm_port_text(key);
+        for (k = 0; t && name[k] && t[k] && (name[k] | 0x20) == (t[k] | 0x20); k++) ;
+        if (t && !name[k] && !t[k]) return n;
+    }
+    return 0;
+}
+
+/* by the port's name */
+int pm_game_wizard_named(const char *name, int how)
+{
+    int n;
+    if (!(can & PM_CAN_GAME_WIZARDS) || !name || !*name) return 0;
+    if ((n = wizard_by_name(name)) != 0) return pm_game_wizard(n, how);
+    say("game wizard \"%s\": not one of this game's mini-wizards", name);
+    return 0;
+}
+
+/* PAD-457: the game's own lighting (`site wizard_light`: every one not played lit, one of them selected) leaves a
+ * claimed one to its mode. It lights the rest as it would; refused (our copy ran instead) when it would light a
+ * claimed one. Nothing claimed: it runs as it always has. */
+static int wizard_light_veto(unsigned *r)
+{
+    unsigned p = pm_player(), *st, all, mine, keep, k;
+    (void)r;
+    if (!wiz_claimed || p < 1 || p > 4) return 0;
+    st = (unsigned *)(unsigned long)data("wizard_state");
+    all = (1u << wizards_n) - 1u;
+    mine = ~st[8 + p - 1] & all & wiz_claimed;          /* what it would light that a mode here hands out */
+    keep = ~st[8 + p - 1] & all & ~wiz_claimed;
+    if (!mine) return 0;
+    say("game wizards: the game would light 0x%x for player %u - 0x%x of them only this card's modes hand out: left "
+        "unlit%s", mine | keep, p, mine, keep ? ", the others lit" : "");
+    if (!keep) return 1;
+    st[4 + p - 1] |= keep;
+    if (st[p - 1] >= (unsigned)wizards_n || !(keep & (1u << st[p - 1]))) {   /* one of those it lit, selected */
+        for (k = 0; k < (unsigned)wizards_n && !(keep & (1u << k)); k++) ;
+        st[p - 1] = k;
+    }
+    *(volatile unsigned char *)(unsigned long)data("lamps_dirty") = 1;
+    return 1;
+}
+
+int pm_game_wizard_claim(int n)
+{
+    unsigned bit;
+    if (!(can & PM_CAN_GAME_WIZARDS) || n < 1 || n > wizards_n) return 0;
+    if (!wiz_light_hooked) {
+        say("game wizard %d (%s): this game's port names no wizard_light - the game's own lighting lights it too", n,
+            wizard_name(n));
+        return 0;
+    }
+    bit = 1u << (n - 1);
+    if (!(wiz_claimed & bit))
+        say("game wizard %d (%s): handed out by this card's modes only - the game's own lighting leaves it unlit", n,
+            wizard_name(n));
+    wiz_claimed |= bit;
+    return 1;
+}
+
+int pm_game_wizard_claim_named(const char *name)
+{
+    int n;
+    if (!(can & PM_CAN_GAME_WIZARDS) || !name || !*name) return 0;
+    if ((n = wizard_by_name(name)) != 0) return pm_game_wizard_claim(n);
+    say("game wizard \"%s\": not one of this game's mini-wizards - nothing claimed", name);
+    return 0;
+}
+
+static void wizards_arm(void)
+{
+    static const char *const s[] = { "wizard_start", 0 };
+    static const char *const d[] = { "wizard_state", "wizard_table", "lamps_dirty", 0 };
+    unsigned size = (unsigned)pm_port_value("wizard_entry", 0x20), *e;
+    char key[24];
+    int n;
+    if (!site("wizard_start")) return;                  /* a port without mini-wizard lines: silent */
+    for (n = 1; n <= WIZARDS_MAX; n++) {
+        pm_snprintf(key, sizeof key, "wizard_name_%d", n);
+        if (!pm_port_text(key)) break;
+    }
+    wizards_n = n - 1;
+    if (!have_sites(s) || !have_data(d) || !wizards_n || size < 20 ||
+        !maps_has(data("wizard_state"), 0x30, MAP_R) || !maps_has(data("lamps_dirty"), 1, MAP_R) ||
+        !maps_has(data("wizard_table"), size * (unsigned)wizards_n, MAP_R)) {
+        say("game wizards: off - the port's mini-wizard lines are incomplete or do not match this build");
+        wizards_n = 0;
+        return;
+    }
+    for (n = 1; n <= wizards_n; n++) {
+        e = wizard_entry(n);
+        if (e[0] != (unsigned)(n - 1) || e[1] != 1u << (n - 1) || !maps_has(e[3], 8, MAP_R | MAP_X | MAP_GAME) ||
+            !maps_has(e[4], 8, MAP_R | MAP_X | MAP_GAME)) {
+            say("game wizards: off - entry %d of the table at 0x%08x is not this build's (%u 0x%x 0x%08x)", n,
+                data("wizard_table"), e[0], e[1], e[3]);
+            wizards_n = 0;
+            return;
+        }
+    }
+    can |= PM_CAN_GAME_WIZARDS;
+    if (site("wizard_light") && !(wiz_light_hooked = hook_veto(fn("wizard_light"), wizard_light_veto)))
+        say("game wizards: the game's own lighting (0x%08x) could not be hooked - it lights a mode's mini-wizards too",
+            fn("wizard_light"));
+    say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08x, start 0x%08x%s)", wizards_n,
+        data("wizard_state"), fn("wizard_start"), wiz_light_hooked ? ", its own lighting hooked" : "");
+}
+
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN
  * A rule the game shipped with (a battle, a multiball) is a compiled object with a vtable, and
  * its SHOT HANDLER (one vtable slot) tests the RAW shot mask against fixed bits: Godzilla's
@@ -6124,7 +6776,9 @@ static void on_tick(unsigned *r)
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
     building_tick();                          /* PAD-393: a put-back owed */
     shows_tick();                             /* PAD-411: no show of ours past its 20 s */
+    wizards_tick();                           /* PAD-436: a mini-wizard's refused start, kept lit */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
+    shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
@@ -6162,6 +6816,7 @@ static void on_ball_end(unsigned *r)
     magnet_let_go("the ball ended");          /* PAD-381 */
     building_let_go("the ball ended");        /* PAD-393 */
     shield_let_go("the ball ended");          /* PAD-392 */
+    shake_let_go("the ball ended");           /* PAD-414 */
     roster_owed_ball_end();
 }
 
@@ -6423,6 +7078,9 @@ static void on_roster_start(unsigned *r)
  *   event <name> site <site name>             a CALL of a port site is the event: for what a
  *                                             title does without a broadcast (its skill shot
  *                                             award, a multiball mode's start)
+ *   event <name> site <site name> arg <n>     PAD-428: only a call with r0 = n (Bond 1.06's film
+ *                                             completed, r0 the film): one site, one event per n.
+ *                                             Every event on one site shares the site's one hook
  * The hooks only COUNT, lock-free, on whichever thread runs them; the tick hands each new
  * firing to every mode's .event. So a mode never runs inside the game's broadcast, and its
  * callbacks keep to the tick thread. A dispatch is counted whether or not one of the game's
@@ -6433,7 +7091,8 @@ static void on_roster_start(unsigned *r)
 #define N_SITE_EVENTS 8
 #define N_EVENT_IDS   (N_BUS_IDS + N_SITE_EVENTS)
 
-static struct { char name[40]; unsigned id; char site[40]; int armed; } event_names[N_EVENTS];
+/* arg: the r0 a site event wants (-1 any); hook: the site-event slot whose hook counts it */
+static struct { char name[40]; unsigned id; char site[40]; int armed, arg, hook; } event_names[N_EVENTS];
 static int n_event_names, n_site_events;
 static volatile unsigned event_fired[N_EVENT_IDS];
 static unsigned event_delivered[N_EVENT_IDS];
@@ -6450,8 +7109,14 @@ static void event_line(const char *s)
     t = word(s, how, sizeof how);
     if (str_eq(how, "site")) {
         if (n_site_events >= N_SITE_EVENTS) return;
-        word(t, event_names[n_event_names].site, sizeof event_names[n_event_names].site);
+        t = word(t, event_names[n_event_names].site, sizeof event_names[n_event_names].site);
         if (!event_names[n_event_names].name[0] || !event_names[n_event_names].site[0]) return;
+        event_names[n_event_names].arg = -1;
+        t = word(t, how, sizeof how);
+        if (str_eq(how, "arg")) {
+            event_names[n_event_names].arg = (int)number(&t, &ok);
+            if (!ok || event_names[n_event_names].arg < 0) return;
+        }
         event_names[n_event_names].id = N_BUS_IDS + (unsigned)n_site_events++;
         n_event_names++;
         return;
@@ -6494,8 +7159,17 @@ static void on_event_dispatch(unsigned *r)
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
 }
 
-/* one counter per site event: the trampoline hands a logger only the registers */
-#define SITE_EVENT(k) static void on_site_event##k(unsigned *r) { (void)r; __sync_fetch_and_add(&event_fired[N_BUS_IDS + k], 1u); }
+/* one counter per site event slot: the trampoline hands a logger only the registers, so each slot has its own
+ * logger, and it counts every event on that site whose arg (r0) matches (PAD-428) */
+static void site_event_fire(int k, const unsigned *r)
+{
+    int i;
+    for (i = 0; i < n_event_names; i++)
+        if (event_names[i].site[0] && event_names[i].hook == k
+            && (event_names[i].arg < 0 || r[0] == (unsigned)event_names[i].arg))
+            __sync_fetch_and_add(&event_fired[event_names[i].id], 1u);
+}
+#define SITE_EVENT(k) static void on_site_event##k(unsigned *r) { site_event_fire(k, r); }
 SITE_EVENT(0) SITE_EVENT(1) SITE_EVENT(2) SITE_EVENT(3) SITE_EVENT(4) SITE_EVENT(5) SITE_EVENT(6) SITE_EVENT(7)
 static const hook_fn site_event_hooks[N_SITE_EVENTS] = {
     on_site_event0, on_site_event1, on_site_event2, on_site_event3,
@@ -6565,13 +7239,22 @@ static void events_arm(void)
     }
     for (i = 0; i < n_event_names; i++) {
         struct site *x;
+        int j;
         if (!event_names[i].site[0]) continue;
+        /* PAD-428: an earlier event on the same site already hooked it; this one rides that hook */
+        for (j = 0; j < i && !(event_names[j].site[0] && str_eq(event_names[j].site, event_names[i].site)); j++) ;
+        if (j < i) {
+            event_names[i].hook = event_names[j].hook;
+            if (event_names[j].armed) { event_names[i].armed = 1; armed++; }
+            continue;
+        }
+        event_names[i].hook = (int)(event_names[i].id - N_BUS_IDS);
         x = site(event_names[i].site);
         if (!x || !x->ok) {
             say("event %s off: site %s is %s", event_names[i].name, event_names[i].site, !x ? "not in the port" : "wrong for this build");
             continue;
         }
-        if (hook(x->addr, site_event_hooks[event_names[i].id - N_BUS_IDS])) { event_names[i].armed = 1; armed++; }
+        if (hook(x->addr, site_event_hooks[event_names[i].hook])) { event_names[i].armed = 1; armed++; }
     }
     if (armed) can |= PM_CAN_EVENTS;
     say("events: %d of %d named events armed%s", armed, n_event_names,
@@ -6964,6 +7647,199 @@ static int insider_arm(void)
     return 1;
 }
 
+/* ---- clip variants (PAD-446): one of the game's clips, one of several at random -------------------
+ * The Video tab lets a clip of the in-game video bank have more clips than its own. The build adds each
+ * extra one to the bank under a name of its own and lists them in clips.cfg beside the mode files
+ * (/usr/local/padmode/clips.cfg on a card, /dump/clips.cfg in the rig), one TAB-separated line each:
+ *
+ *     only                                     the card carries no modes: arm this and nothing else
+ *     clip <TAB> <the game's name> <TAB> <name> [<TAB> <name> ...]
+ *
+ * Every time the game asks for the clip, one of the line's clips plays: its own (the game's, or the
+ * replacement over it) or one of the names after it, at random and never the same one twice in a row.
+ * The game asks by NAME (clip_play's r0, a C string; on a clip v2 build surface_set_video's r1, a
+ * std::string, on the video bank's own surface only), so the swap is the name in the saved registers,
+ * the way on_sound_lookup swaps a sound key. Asking again for the clip that is still playing gets the
+ * same pick: the game does not start a playing clip again, and a new pick would.
+ *
+ * "only" is the build's word for a card of variants and nothing else: the score gate (insider_arm)
+ * keeps a MODE's points off Insider Connected, and a card whose only change is which clip plays has
+ * no points of ours to keep off, so the runtime arms this hook and returns. The file is read once, at
+ * start; no line, or no file, and nothing here is hooked. */
+#define CLIPV_FILE_MAX  32768
+#define CLIPV_SLOTS     512
+#define CLIPV_PICKS     16                  /* the game's own clip and up to 15 more */
+#define CLIPV_SAY_MAX   200
+static const char *const CLIPV_FILES[] = { "/usr/local/padmode/clips.cfg", "/dump/clips.cfg" };
+struct clipv {
+    const char *name[CLIPV_PICKS];          /* [0] the game's own name */
+    unsigned str[CLIPV_PICKS];              /* clip v2: each name as a std::string, made at first use */
+    unsigned n, last, plays;
+};
+static char clipv_raw[CLIPV_FILE_MAX + 1];
+static struct clipv clipv[CLIPV_SLOTS];
+static unsigned n_clipv, clipv_rng, clipv_says;
+static int clipv_only, clipv_dropped;
+static struct clipv *volatile clipv_now;    /* the clip the game asked for last */
+static volatile int clipv_in;               /* clip v2: inside our own surface lookup */
+
+/* one line, split in place at its TABs */
+static void clipv_line(char *s)
+{
+    char *f[CLIPV_PICKS + 2];
+    unsigned n = 0, k;
+    struct clipv *v;
+    while (*s == ' ') s++;
+    if (*s == '#' || !*s) return;
+    for (;;) {
+        if (n < CLIPV_PICKS + 2) f[n++] = s;
+        while (*s && *s != '\t') s++;
+        if (!*s) break;
+        *s++ = 0;
+    }
+    if (n == 1 && str_eq(f[0], "only")) { clipv_only = 1; return; }
+    if (!str_eq(f[0], "clip") || n < 3 || !*f[1]) return;
+    if (n_clipv >= CLIPV_SLOTS) { clipv_dropped++; return; }
+    v = &clipv[n_clipv];
+    for (k = 1; k < n && v->n < CLIPV_PICKS; k++)
+        if (*f[k]) v->name[v->n++] = f[k];
+    if (v->n < 2) { v->n = 0; return; }
+    v->last = CLIPV_PICKS;
+    n_clipv++;
+}
+
+static int clipv_read(void)
+{
+    long n = -1, i, start = 0;
+    unsigned k;
+    for (k = 0; k < sizeof CLIPV_FILES / sizeof CLIPV_FILES[0] && n < 0; k++)
+        n = pm_read_file(CLIPV_FILES[k], clipv_raw, CLIPV_FILE_MAX);
+    if (n <= 0) return 0;
+    clipv_raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || clipv_raw[i] == '\n' || clipv_raw[i] == '\r') {
+            clipv_raw[i] = 0;
+            clipv_line(clipv_raw + start);
+            start = i + 1;
+        }
+    return 1;
+}
+
+static struct clipv *clipv_find(const char *name)
+{
+    unsigned i;
+    if (!name || !*name) return 0;
+    for (i = 0; i < n_clipv; i++)
+        if (str_eq(clipv[i].name[0], name)) return &clipv[i];
+    return 0;
+}
+
+/* xorshift32, stirred with the clock at every pick: when the game asks varies with the play */
+static unsigned clipv_rand(void)
+{
+    struct { long s, ns; } t;
+    unsigned x;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    x = clipv_rng ^ (unsigned)t.ns ^ ((unsigned)t.s << 20);
+    if (!x) x = 0x9e3779b9u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return clipv_rng = x;
+}
+
+/* which of the slot's clips plays: any, the first time; after that any but the last one */
+static unsigned clipv_pick(struct clipv *v)
+{
+    unsigned k;
+    if (v->last >= v->n) return clipv_rand() % v->n;
+    k = clipv_rand() % (v->n - 1);
+    return k >= v->last ? k + 1 : k;
+}
+
+static int clipv_playing(void *surface)
+{
+    return surface && ((int (*)(void *))(unsigned long)fn("surface_state"))(surface)
+                      == (int)pm_port_value("surface_playing", 2);
+}
+
+/* the pick for a game's ask of `v` (0 = its own clip), the same one while that clip still plays */
+static unsigned clipv_choose(struct clipv *v, void *surface)
+{
+    unsigned k;
+    if (v == clipv_now && v->last < v->n && clipv_playing(surface)) return v->last;
+    k = clipv_pick(v);
+    v->last = k;
+    v->plays++;
+    clipv_now = v;
+    if (clipv_says < CLIPV_SAY_MAX || !(v->plays % 50)) {
+        clipv_says++;
+        say("clip variants: \"%s\" asked for (%u time(s)) - \"%s\" plays, %u of %u", v->name[0], v->plays,
+            v->name[k], k + 1, v->n);
+    }
+    return k;
+}
+
+/* clip_play(name, loop, crop): the name in r0 */
+static void on_clipv_play(unsigned *r)
+{
+    struct clipv *v = clipv_find((const char *)(unsigned long)r[0]);
+    unsigned k;
+    if (!v) { clipv_now = 0; return; }
+    k = clipv_choose(v, ((void *(*)(void))(unsigned long)fn("video_surface"))());
+    if (k) r[0] = (unsigned)(unsigned long)v->name[k];
+}
+
+/* clip v2: surface_set_video(surface, &name), on the bank's surface only (a scene's own surface
+ * may have a clip of the same name, and none of ours) */
+static void on_clipv_set_video(unsigned *r)
+{
+    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    struct clipv *v;
+    void *bank;
+    unsigned k;
+    if (clipv_in || !s) return;
+    v = clipv_find((const char *)(unsigned long)s[0]);
+    if (!v) return;
+    clipv_in = 1;
+    bank = clip2_surface();
+    clipv_in = 0;
+    if (!bank || (unsigned)(unsigned long)bank != r[0]) return;
+    k = clipv_choose(v, bank);
+    if (!k) return;
+    if (!v->str[k]) v->str[k] = std_string(v->name[k]);
+    if (v->str[k]) r[1] = (unsigned)(unsigned long)&v->str[k];
+}
+
+/* from the constructor, after the port gate: read clips.cfg and hook the game's ask */
+static void clipv_arm(void)
+{
+    static const char *const v1_s[] = { "clip_play", "video_surface", "surface_state", 0 };
+    static const char *const v2_s[] = { "surface_find", "surface_set_video", "surface_state", "string_new",
+                                        "resource_get", "dynamic_cast", 0 };
+    static const char *const v2_d[] = { "resource_manager", "typeinfo_resource", "typeinfo_scene_player", 0 };
+    static const char *const v2_v[] = { "scene_player_scene", 0 };
+    if (!clipv_read()) return;
+    if (clipv_dropped)
+        say("clip variants: %d line(s) not read - the table holds %d clips", clipv_dropped, CLIPV_SLOTS);
+    if (!n_clipv) {
+        say("clip variants: %s has no clip line - nothing hooked", "clips.cfg");
+        return;
+    }
+    if (have_sites(v1_s) && hook(fn("clip_play"), on_clipv_play)) {
+        say("clip variants: %u clip(s) play one of several at random (clip_play 0x%08x)", n_clipv, fn("clip_play"));
+    } else if (have_sites(v2_s) && have_data(v2_d) && have_values(v2_v)
+               && (pm_scene_id("video_bank") || site("video_surface"))
+               && hook(fn("surface_set_video"), on_clipv_set_video)) {
+        say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08x, the bank's "
+            "surface only)", n_clipv, fn("surface_set_video"));
+    } else {
+        n_clipv = 0;
+        say("clip variants: off - the port has no clip_play, and no clip v2 lines that match this build; "
+            "every clip plays the game's own");
+    }
+}
+
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -6984,6 +7860,11 @@ static void pad_mode_start(void)
             port.dropped, port.n_site, N_SITES, port.n_data, N_DATA, port.n_value, N_VALUES, port.n_shot, N_SHOTS,
             port.n_switch, N_SWITCHES);
     if (!port_gate()) return;
+    clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
+    if (clipv_only) {
+        say("armed: clip variants only (clips.cfg says the card has no modes) - nothing else is hooked");
+        return;
+    }
     if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */
     {
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };
@@ -7066,7 +7947,9 @@ static void pad_mode_start(void)
     scoop_arm();                                    /* PAD-381: a ball held in the scoop */
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
     building_arm();                                 /* PAD-393: the Premium's building */
+    shake_arm();                                    /* PAD-414: the shaker motor */
     shows_arm();                                    /* PAD-411: the game's own light shows */
+    wizards_arm();                                  /* PAD-436: the game's own mini-wizards */
     if (pm_hit_sounds()) {                          /* PAD-415: the game's own hit sounds */
         char key[20];
         pm_snprintf(key, sizeof key, "hit_sound_%d", pm_hit_sounds());
@@ -7081,14 +7964,15 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
         can & PM_CAN_AWARD_SCREEN ? " award-screen" : "", can & PM_CAN_MULTIBALL ? " multiball" : "",
         can & PM_CAN_BACKDROP ? " backdrop" : "", can & PM_CAN_COILS ? " magnet" : "",
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
-        can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "");
+        can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
+        can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

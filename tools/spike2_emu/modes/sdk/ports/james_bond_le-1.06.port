@@ -453,6 +453,48 @@ event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
 
+# ---- PAD-428: a FILM completed (all four of its parts: henchman, villain, Q Branch, gadget). The game
+# keeps each player's progress per film at 0x820198 ([film 0-5][player][5 bytes]: a count per part, then the
+# total); its collect 0x1d0918(film, part) calls 0x1d49c0(film) once, the moment the film's fourth part is
+# in (0x1d0878(film) = all four). Films in the game's order, the order of its gadget table 0x62f168
+# (Geiger counter, attache case, DB5, powerpack, Little Nellie, ring): 0 Dr. No, 1 From Russia With Love,
+# 2 Goldfinger, 3 Thunderball, 4 You Only Live Twice, 5 Diamonds Are Forever. The four mini-wizards
+# (table 0x625da0, below) belong to Dr. No, From Russia With Love, Goldfinger and Thunderball: each has its insert
+# on the Right ramp (DR. NO, ROSA KLEBB, GOLDFINGER, LARGO); You Only Live Twice and Diamonds Are Forever have none.
+site film_complete   0x001d49c0 0xe92d4038 0xe1a05000
+event film_dr_no        site film_complete arg 0
+event film_frwl         site film_complete arg 1
+event film_goldfinger   site film_complete arg 2
+event film_thunderball  site film_complete arg 3
+event film_yolt         site film_complete arg 4
+event film_daf          site film_complete arg 5
+
+# ---- PAD-436: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards"). The table (4 entries of
+# 0x20 bytes: index, bit, insert lamp, start, running?, ...) and each player's words ([p-1] the selected one, +0x10
+# the lit mask, +0x20 the played mask). The game lights every one not played this game when a part is collected
+# in all six films (0x110cac, from the collect 0x1d0918) and sets the lamps' refresh byte; the Right ramp's handler
+# (0x1aee8c, shot 7) calls wizard_start, which starts the selected one through its table entry when nothing of the
+# game's is in the way (0x110c10), unlights them all and marks it played (1 = started, 0 = not). Starts: 0x92bd8,
+# 0x20530, 0xbd4dc, 0x7e0b0. The Right ramp inserts DR. NO, ROSA KLEBB, GOLDFINGER and LARGO are lamps 34, 35, 36, 43.
+site  wizard_start   0x00110d98 0xe92d4070 0xeb055daa
+# PAD-457: the game's own lighting (0x110cac, called from the collect when a part is in all six films - and again
+# for every more of that part): every one not played lit, one selected, the refresh byte set. Hooked with a veto so a
+# mini-wizard a mode of the card hands out (claimed as the modes load) stays unlit by it.
+site  wizard_light   0x00110cac 0xe30a09ac 0xe3a01004
+data  wizard_state   0x0081c3f4
+data  wizard_table   0x00625da0
+data  lamps_dirty    0x008268bc
+value wizard_entry   0x20
+text  wizard_name_1  Chaos at Crab Key
+text  wizard_name_2  Ahoy Mr. Bond
+text  wizard_name_3  Goldfinger's Jackpot
+text  wizard_name_4  Duel on the Disco Volante
+text  wizard_film_1  Dr. No
+text  wizard_film_2  From Russia With Love
+text  wizard_film_3  Goldfinger
+text  wizard_film_4  Thunderball
+text  wizard_shot    Right ramp
+
 # ---- named inserts (item 164): framework lamp layers, derived from this build's program
 #   the slot layout and fade: Godzilla's, checked in the emulator (item 164)
 value lamp_slot_size       40

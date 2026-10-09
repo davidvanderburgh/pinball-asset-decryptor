@@ -40,7 +40,15 @@ HELP_CONTENT = {
          "lit (a few seconds the first time; a card in a reader shows the first game's "
          "screen).\n\n"
          "**Card details**, under it, lists firmware, edition, games, asset counts and "
-         "partitions; **Copy** is for bug reports. Nothing on the card is changed."),
+         "partitions; on a Stern card, **Official release** says whether it is Stern's own "
+         "release or a changed one. **Copy** is for bug reports. Nothing on the card is changed."),
+        ("A card for another project",
+         "Pick a card while the open project was extracted from a different one (a James "
+         "Bond card over a Godzilla project) and **New project** comes up, filled in for "
+         "the card you picked: **Create** makes it a project of its own and switches to it; "
+         "**Stay in** keeps the open project. Until you switch, the panel on the right says "
+         "the project is another card's and keeps the button.\n\n"
+         "A card that already has a project of its own opens that project instead."),
         ("What works without an extract",
          "| Tab | Straight from the card |\n"
          "|---|---|\n"
@@ -102,8 +110,11 @@ HELP_CONTENT = {
                  "text": "Where available: `01m22s235 - idx0001.wav`, so the same "
                          "sounds sort together across firmware versions."}]},
             "Results also go to callouts.csv and music_titles.csv. Better call-out "
-            "names: raise **Voice recognition quality** in the ⚙ settings menu (slower; "
-            "bigger model).",
+            "names: pick a higher **Voice recognition quality** under these options "
+            "(slower; bigger model).",
+            "Extracted without them? **Auto-name now** names the sounds already in the "
+            "project folder, no new extract. Sounds that already have a name keep it, so "
+            "running it again names only what is left.",
         ]),
         ("Re-extracting", [
             {"note": "Extracting into a folder with files in it **overwrites your "
@@ -170,6 +181,24 @@ HELP_CONTENT = {
          "**Clear replacements…** drops them.\n\n"
          "> Keep your files in their own folder OUTSIDE the project folder. The "
          "project folder, or anything inside it, is refused."),
+        ("Find originals",
+         "**Find originals…**, beside **Replace from folder…**, finds the files "
+         "your picks were made from in a folder of yours, by how they sound: the "
+         "names, the level, the sample rate and the file type don't matter.\n\n"
+         "- For picks that are copies off a card, like the ones **Transfer Mods to "
+         "New Version** takes from an extract of a built card. Those were converted "
+         "once already by the Write that built that card; with your own files "
+         "picked instead, the next Write converts from them.\n"
+         "- Every pick on the tab is looked for, and every slot a build changed on "
+         "disk with no pick left. Files inside an extract are copies off a card and "
+         "are never offered.\n"
+         "- Where the folder has the same sound twice (a WAV master and an MP3 "
+         "export), the better copy is used. A file longer than the copy was cut to "
+         "length by Trim / pad when the card was built, and is cut the same way "
+         "again.\n"
+         "- Amber rows are worth a listen: ▶ plays the copy and the file found. "
+         "Nothing changes until **Use these files**, and what comes back are "
+         "ordinary picks."),
         ("Clearing and undo",
          "Your picks are saved in the project folder itself, so they survive "
          "closing the app and changing the card. They never vanish on their own.\n\n"
@@ -320,12 +349,18 @@ HELP_CONTENT = {
          "ffmpeg command ([more](#what-the-machine-can-play)) |\n"
          "| This clip's length | how long this one clip plays ([more](#clip-length)) |\n"
          "| Show scene contents… | the Scenes tab, on the scene that plays it |\n"
+         "| Random clips | more clips for this slot, one played at random each time "
+         "([more](#random-clips)) |\n"
          "| Remove / revert | drops a pick, or puts back a file a build changed "
          "([more](#clearing-and-undoing)) |"),
         ("Clearing and undoing",
          "Right-click a slot, or a selection (Shift-click a range, Ctrl-click to add), "
          "to drop picks. **Clear replacements…** (More menu, the ⋯ button at the top) "
          "drops every pick on this tab.\n\n"
+         "- **Undo** and **Redo** at the top (Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z) take back, "
+         "or make again, your last changes one at a time: a pick, a clear, Replace from "
+         "folder, a clip's own conversion, length, colors or random clips, and the boxes "
+         "over the list. They last until the app closes or another project opens.\n"
          "- Sort by **Replacement** to put every pick together.\n"
          "- A slot a build, or Start on the Emulate tab, already wrote gets the card's "
          "own file put back, so the list, the next build and the emulator agree. Your "
@@ -388,6 +423,16 @@ HELP_CONTENT = {
          "- **Original (stock)** shows the factory clip whenever its backup exists, and "
          "Convert measures your file against it, so a clip cut to the machine's real "
          "spec still reads As-is."),
+        ("Random clips",
+         "Spike 2, Godzilla Pro and Premium/LE 1.16. Right-click > **Random clips** > "
+         "**Add clips to play at random…** gives a slot more clips than its own: each "
+         "time the game plays it, one is picked at random, never the same twice in a "
+         "row, and the slot's own clip is one of them.\n\n"
+         "- The row shows a shuffle badge with the count; the same menu takes a clip "
+         "off.\n"
+         "- Only clips the game plays by name (modes, battles, awards, bonuses). A clip "
+         "a scene plays on its own says **Why not this clip?** instead.\n"
+         "- Needs an image build, not a direct SD write."),
         ("Clip length",
          "Right-click > **This clip's length**: follow the **Trim / pad** box (default), "
          "match the stock clip, keep your file's full length, or type seconds.\n\n"
@@ -465,8 +510,9 @@ HELP_CONTENT = {
         ]),
         ("Colors (Spike 2)", [
             "### The Color column\n"
-            "Each replaced clip shows a palette. The Color profile tab's **Every replaced "
-            "video** covers clips with no switch of their own.",
+            "Each replaced clip shows a palette: click it to attach or detach the color "
+            "profile. Select several clips and pick a profile in the **Colors** bar to give "
+            "it to all of them.",
             {"cards": [
                 {"icon": "palette", "tone": "ok", "title": "Green",
                  "text": "Color profile attached: the individual files profile is baked "
@@ -476,16 +522,70 @@ HELP_CONTENT = {
                 {"icon": "lock", "tone": "info", "title": "Blue lock",
                  "text": "The game's own clip, never changed. **Advanced** on the toolbar "
                          "gives it a palette; detaching puts the original back."}]},
+            "Under each player, **Original** (or **Replacement**) and **With its color "
+            "profile** switch that player between the clip as it is and the clip through "
+            "its color profile, attached or not, as a Compare player does. Only the "
+            "player changes; the palette is what attaches it.",
+            "The player of the file a profile is attached to opens on **With its color "
+            "profile**, and turns to it when you change that profile in the **Colors** "
+            "bar: the Replacement player for a replaced clip, the Original player for a "
+            "game's own clip (its Replacement player stays empty).",
+            "Select several rows (Ctrl-click, Shift-click) with the **Colors** bar open "
+            "and a profile you pick goes to every one of them that is not locked, each "
+            "attached.",
             "### Preview colors\n"
             "Switches above the players show the clips as the machine will (preview "
-            "only; no re-encode). All off is your PC's own colors; click a name to open "
-            "it on the Color profile tab.",
+            "only; no re-encode), drawn the same way Scenes draws a picture, color ranges "
+            "and curves included, while they play. All off is your PC's own colors; "
+            "click a name to open it on the Color profile tab.",
             {"flow": [
                 {"icon": "image", "title": "Whole screen", "text": "the overlay"},
                 {"icon": "palette", "title": "Individual files",
                  "text": "picks with a color profile attached"},
                 {"icon": "eye", "title": "Machine screen",
                  "text": "every clip, unless the gear menu lets unattached files skip it"}]},
+        ]),
+        ("Compare clips", [
+            "Select up to four rows (Ctrl-click, Shift-click) and press **Compare**: "
+            "they play side by side, big, beside the **Colors** bar. One clip shows its "
+            "Original beside its Replacement.",
+            "- Click a clip: the Colors bar changes that clip's profile, and you see it "
+            "against the others as you move a slider or pick a profile (Spike 2).\n"
+            "- The clip you clicked is the one you hear; the others are muted.\n"
+            "- **Play all**, **From the start** (every clip from its first frame, in "
+            "step) and **Loop**. Each clip can switch between Original and Replacement.\n"
+            "- A game's own clip is marked on its player: **Locked**, or with **Advanced** "
+            "ticked at the top of Compare, **Game's own clip** and a palette under it. "
+            "Attach its color profile there and the player turns to **With its color "
+            "profile**.\n"
+            "- **Close** or Esc goes back to the list.",
+        ]),
+        ("Which mode plays a clip (Spike 2)", [
+            "The **Played in** column names the battles, multiballs and other modes of the "
+            "game that play each clip, read from the card's game program (Stern titles "
+            "whose modes the app can tell apart, such as Godzilla). The list beside "
+            "**All / Changed / Unchanged** shows one mode's clips only.",
+            "Some modes share a clip: on Godzilla, the battle vs Gigan and the Ghidorah and "
+            "Gigan tag team play two of the same clips. Such a clip has a **row for each "
+            "mode**: the second row (marked ↳) says **Same clip as** the first until you "
+            "choose a replacement in it.",
+            {"flow": [
+                {"icon": "film", "title": "Find",
+                 "text": "the mode's own row of the clip (↳)"},
+                {"icon": "check", "title": "Choose",
+                 "text": "a replacement in that row"},
+                {"icon": "copy", "title": "Build",
+                 "text": "only that mode plays it"}]},
+            "- That mode's clip goes on the card as a new clip, so it needs an **image file** "
+            "build (a direct-SD write leaves it out); the other mode keeps the clip it had.\n"
+            "- Clear the replacement and the row is the **Same clip as** the first again.\n"
+            "- **Not played**: nothing in the game asks for the clip, so the machine never "
+            "shows it; a replacement there changes nothing.",
+            "**Sounds with a clip** (Spike 2): under the panes, the sounds the game plays "
+            "with the clip, read from its program: kept with the clip, asked for right after "
+            "it, or named after it. Each is named by its file in the project's audio folder "
+            "once the card is extracted with this version. A sound the game picks at random, "
+            "or a clip's own audio track, is not listed.",
         ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "
@@ -510,7 +610,18 @@ HELP_CONTENT = {
             "- A picture shows its size and scale; **Draw 1:1** draws it pixel for pixel.\n"
             "- Text: a corner or **W px / H px** resizes its box and the words wrap inside "
             "it; **Size %** scales the words.\n"
-            "- Text: **Add a drop shadow** and **Fit box to text**. Most text is a font "
+            "- Text: **Font controls** opens the **Font** bar on the right edge: "
+            "the line's font and **Size** (the sizes the scene was made at draw sharpest), "
+            "**Italic**, **Slant** and letter **Width**, letter and line **Spacing**, "
+            "**Across** (Left / Centre / Right) and **Up/down** "
+            "(Top / Middle / Bottom) in its box, wrapping, shrink to fit and line breaks, "
+            "**Fit box to text**, and **Add** / **Remove** a drop shadow, in "
+            "the preview and in the game. **Font as shipped** puts the font and style back. "
+            "Lines the "
+            "game fills in itself on Godzilla's mode screens (a battle's title and "
+            "instructions) always sit in the middle of their box and shrink to fit it; the "
+            "preview shows them that way.\n"
+            "- Text: most text is a font "
             "with baked-in colours, so **Tint** recolours it.\n"
             "- **Picture…** and **Text…** add new items.",
             "### Moment and switchable parts\n"
@@ -651,8 +762,14 @@ HELP_CONTENT = {
                 {"icon": "lock", "tone": "info", "title": "Blue lock",
                  "text": "The game's own picture: never changed."}]},
             "- The box under the preview does the same as the palette.\n"
-            "- The Color profile tab's **Every replaced picture** sets every picture "
-            "with no setting of its own.\n"
+            "- Select several pictures (Shift-click or Ctrl-click) and pick a profile in "
+            "the **Colors** bar: all of them get it, attached.\n"
+            "- **Preview colors** over the panes draws them as the machine shows them, "
+            "and each pane has **Original** / **With its color profile**. Only the "
+            "preview changes.\n"
+            "- **Compare** puts up to 4 selected pictures side by side beside the "
+            "**Colors** bar. Click one: the bar changes its colors while you see the "
+            "others.\n"
             "- Tick **Unlock extracted images** under Advanced to give the game's own "
             "pictures a palette too. Detaching one, or locking again, puts the "
             "original back.",
@@ -671,6 +788,24 @@ HELP_CONTENT = {
             "name with another file.",
             {"note": "Keep your files outside the project folder. It holds the card's "
                      "own files, so choosing it, or anything inside it, is refused."},
+        ]),
+        ("Find originals", [
+            "**Find originals…**, beside **Replace from folder…**, finds the files "
+            "your picks were made from in a folder of yours, by how they look: the "
+            "names, the size and the file type don't matter.",
+            "- For picks that are copies off a card, like the ones **Transfer Mods to "
+            "New Version** takes from an extract of a built card. Those were squeezed "
+            "into the card's format once already; with your own files picked instead, "
+            "the next Write converts from them.\n"
+            "- Every pick on the tab is looked for, and every slot a build changed on "
+            "disk with no pick left. Files inside an extract are copies off a card and "
+            "are never offered.\n"
+            "- Where the folder has the same picture twice, the biggest best copy is "
+            "used. A colour picture is never taken for its black-and-white twin.\n"
+            "- Each row shows the copy and the file found side by side. Glance down "
+            "them: a look-alike (the next frame of an animation, the same letter "
+            "from another font) can stand in when the real file isn't in the folder. "
+            "Nothing changes until **Use these files**.",
         ]),
         ("Clearing and undo", [
             "Your picks are saved in the project folder itself, so they survive "
@@ -744,7 +879,8 @@ HELP_CONTENT = {
          "- **Behind** sets a light backdrop or checkerboard, to see black borders.\n"
          "- **Re-read from card…** re-reads only the layouts off the Extract tab's "
          "card, leaving your pictures and fonts alone (a full re-extract overwrites "
-         "them).\n"
+         "them). When that card is not the one the project was extracted from, it "
+         "offers the project's own card instead.\n"
          "- **Export picture…** saves a PNG; on a moving scene, **Export video…** "
          "saves an MP4 (needs ffmpeg). **Export all pictures…** / **Export all "
          "videos…** do every listed scene into a folder, in the background, never "
@@ -767,8 +903,12 @@ HELP_CONTENT = {
          "log names them when you write.\n"
          "- **Back to the original layout** drops the edit. Nothing reaches the card "
          "until Write, which lists these with your other changes.\n"
-         "- The words are changed on Replace Text; the preview draws a typed "
-         "replacement (\"shows: …\", \"(not built yet)\")."),
+         "- The words: pick the line in the preview and type them in **Words** under "
+         "Selected, or change them on Replace Text. It is the same edit either way, and "
+         "the preview draws it at once (\"shows: …\", \"(not built yet)\").\n"
+         "- To proof-read every line, leave the search box empty and press its ▲ ▼ (or "
+         "the ones beside Words): each line of text of every scene is picked in turn, "
+         "where it sits. Typed words narrow it to the lines with them."),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and "
          "options in one small file. **Load settings from a file…** puts them back, "
@@ -902,9 +1042,11 @@ HELP_CONTENT = {
          "The overlay reaches the game's own art too, which Stern already made for "
          "that screen. **Individual files** is a second profile, baked only into the "
          "files it is attached to. It starts from Recommended.\n\n"
-         "- Attach it with **Every replaced picture** or **Every replaced video**, "
-         "or one file at a time in the Color column (Images, Video) or the palette "
-         "in the Scenes layers.\n"
+         "- Attach it one file at a time in the Color column (Images, Video) or the "
+         "palette in the Scenes layers, or to several selected at once.\n"
+         "- **All images…** / **All videos…** under Which files gives it to every "
+         "image or video that is not locked, attached. You are asked first; one "
+         "Undo puts them all back.\n"
          "- The game's own pictures show a blue lock until Advanced unlocks them "
          "on the Images or Video tab.\n"
          "- Both can be on: the overlay draws over the baked files like everything "
@@ -918,7 +1060,30 @@ HELP_CONTENT = {
          "gets it as its own (and is attached if it was not).\n\n"
          "- **Same as the other files** drops it: the file then gets the individual "
          "files profile, the one this tab shows.\n"
+         "- **Apply to all profiled images…** / **videos…** (Images and Video "
+         "only) gives every file there with a profile attached the shown file's "
+         "profile. Files with none attached are left as they are.\n"
+         "- **Apply to all images…** / **videos…** gives it to every file there "
+         "that is not locked (each replaced one, and the game's own once "
+         "unlocked), attached. For both you are asked first; one Undo puts them "
+         "all back.\n"
          "- Hover a file or a Scenes layer to see its Color profile, or None."),
+        ("Lines of text (Scenes)",
+         "A line of text in the Scenes layers has a palette too, and its own "
+         "profile like a file.\n\n"
+         "- A line you add has its own palette. The game's lines show a blue lock "
+         "until **Unlock extracted images and text** (Advanced, beside Preview "
+         "colors) is ticked.\n"
+         "- Most fonts have white letters the scene colors, so the profile goes into "
+         "the color the line is drawn in.\n"
+         "- A font whose letters have colors of their own (Godzilla's orange title "
+         "font) keeps them in its font pictures, which every line in that font "
+         "shares, in every scene. A line in it switched on gets its own copy of "
+         "the font when you build, the profile in it, so only that line changes. "
+         "The copy adds to the scene, so it needs an image build.\n"
+         "- To correct every line in such a font at once, attach the profile to "
+         "its pictures on the Images tab; its lines' palettes then show a link "
+         "mark."),
         ("Machine screen (Spike 2, preview only)",
          "Not a correction but your machine's screen itself. It is never written to "
          "the card, and Revert all leaves it alone.\n\n"
@@ -1005,9 +1170,35 @@ HELP_CONTENT = {
          "flashes slower.\n"
          "- Only room: the game still can't open a sound bank over about 2 GB, and "
          "nothing fitted to its slot gets bigger.\n"
-         "- Only bigger sizes are offered. Multi-boot cards are sized on the Multi-boot "
-         "tab. Not on macOS yet. A direct write and Port + build keep each card's own "
-         "size.\n\n"
+         "- Only bigger sizes are offered, and one smaller: see below. Multi-boot cards "
+         "are sized on the Multi-boot tab. Not on macOS yet. A direct write and Port + "
+         "build keep each card's own size.\n\n"
+         "### Smaller 16 GB card\n"
+         "Stern's 16 GB image (James Bond 1.06, Jaws, Rush...) is 15.49 GB, and some "
+         "SD cards sold as 16 GB hold a little less, so it won't fit them. **Smaller "
+         "16 GB card** builds a 14.82 GB image instead: the games partition gives up "
+         "671 MB of its free room, and nothing else on the card changes.\n\n"
+         "- The build takes a couple of minutes more: the files at the end of the "
+         "games partition are moved further in, then read back and checked.\n"
+         "- Each build is made whole from the original, never updated in place.\n"
+         "- The Build / flash dialog points at it when a 16 GB image won't fit the "
+         "SD card you picked.\n\n"
+         "### Make the image as small as it can be\n"
+         "A finished image still carries all the free room on its games partition: "
+         "gigabytes on a card built for a bigger SD card. Tick **Make the image as "
+         "small as it can be**, under SD card size, and once everything is on the "
+         "card its games partition is cut down to what it holds, with 268 MB left "
+         "free, and the image file ends there. The note under it says about how big "
+         "your original comes out; what the build adds comes on top.\n\n"
+         "- The SD card size above is the room the build has while it runs; the image "
+         "that comes out is never bigger than that size, and often much smaller.\n"
+         "- The build takes a few minutes more: the files at the end of the games "
+         "partition are moved further in, then read back and checked. Each build is "
+         "made whole from the original.\n"
+         "- A card with less than 134 MB to take off keeps its size.\n"
+         "- The machine only writes to the games partition to install a code update, "
+         "so a card made this small may not have the room for one.\n"
+         "- Not on macOS yet, and not for a multi-boot card or a direct write.\n\n"
          "### When it won't fit\n"
          "Before anything is written to the card image, a build adds up what goes on "
          "the games partition.\n\n"
@@ -1966,6 +2157,8 @@ HELP_CONTENT = {
             "**+**, **SELECT** for the operator menu), a coin door open/close button "
             "(open cuts 48V, like the real interlock) and the ball trough, each "
             "position clickable.\n"
+            "- A click on a VUK, scoop or eject drops a ball in: it stays there until "
+            "the game kicks it out, as on the machine. Click it again to take it out.\n"
             "- The keyboard works with this window focused too.\n"
             "- It builds itself from the title, so every Spike 2 game gets one. The "
             "switches appear a minute or so into a run, once the game lists them.\n"
@@ -2038,6 +2231,27 @@ HELP_CONTENT = {
          "- the sounds\n"
          "- adjustment defaults and the high-score board\n\n"
          "**Copy Report** puts the whole report on the clipboard as plain text."),
+        ("Two project folders", [
+            "Pick a project folder for A and for B (**Folder…**) to check two versions "
+            "of a mod, or a mod against the stock extract. Every manufacturer has this, "
+            "not only the ones whose cards can be compared.",
+            {"flow": [
+                {"icon": "folder", "title": "Folder A", "text": "say, version 1.0 of your mod"},
+                {"icon": "folder", "title": "Folder B", "text": "and version 1.1"},
+                {"icon": "compare", "title": "Compare",
+                 "text": "added, changed, moved and deleted files"}]},
+            "- Files are compared as they are in the folders now, so a replacement you "
+            "picked counts even though the folder was extracted from the stock card.\n"
+            "- By kind: sounds, videos, images, the Text tab's strings, everything else. "
+            "A file renamed or moved is one **Moved** row.\n"
+            "- **Project settings** lists what a build uses that no file holds: a "
+            "sound's Level, a clip's length or conversion, which files get the color "
+            "profile.\n"
+            "- Stern sounds pair up by slot, whatever names the two extracts gave them.\n"
+            "- The first compare of two big projects reads every file once (a few "
+            "seconds per GB); after that it is quick.\n"
+            "- **Double-click** a file row to open the file straight from its folder.",
+        ]),
         ("Reading the report",
          "Every list is complete: a version that renumbers 4,000 sounds lists 4,000 "
          "rows.\n\n"
@@ -2479,7 +2693,7 @@ def modes_games_rows(ports=None):
         if any("button" in n.lower() for n, _m in p.shots):
             also.append("buttons")
         also += [w for k, w in (("magnet", "magnet"), ("scoop", "scoop"), ("coils", "mechanisms"),
-                                ("shield", "shield"), ("shows", "light shows"))
+                                ("shield", "shield"), ("shaker", "shaker"), ("shows", "light shows"), ("wizard", "mini-wizards"))
                  if p.can(k)]                                       # PAD-381: what a mode may hold; PAD-392
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
@@ -2724,7 +2938,16 @@ PREVIEW_HELP = {
              "other contents is asked about: **Cancel**, **Keep both** (the file's gets "
              "_2), **Skip conflicts**, **Replace all**, or tick the ones to replace. "
              "Before any is replaced, every mode here is saved to a file in the "
-             "project's **Backups** folder (untick that to skip it)."),
+             "project's **Backups** folder (untick that to skip it).\n"
+             "- **Load modes from a card image…** takes the modes straight off a card "
+             "the app wrote modes onto: another version, model or custom image of this "
+             "game too, matched here as a loaded file is. Every card Write builds "
+             "carries its project's modes for this (the pictures, clips and sounds "
+             "only while they are small; the message names any left behind). A card "
+             "built on this PC loads from the project it was built from, whole. An "
+             "older card gives back what it holds, and says what did not come back. "
+             "**Save a card image's modes to a file…** makes the same .zip without "
+             "loading it."),
             ("Five things people ask for", _limits("Examples")),
             ("Why your mode always gives way", _limits("Why your mode always gives way")),
             ("Sizes", _limits("Sizes")),
@@ -2799,7 +3022,7 @@ GENERAL_CONTENT = [
      "- light / dark theme\n"
      "- **Check for updates**, and **Check automatically**: at startup only, hourly, "
      "every 6 hours or daily\n"
-     "- disk-space management and voice recognition quality\n"
+     "- disk-space management, and clearing the downloaded voice models\n"
      "- the prerequisite tools: status, re-check, install\n"
      "- **View disclaimer…**, the first-launch disclaimer again"),
     ("Prerequisites",

@@ -63,6 +63,14 @@ The game's own pictures are locked out of it, except on the advanced
 (PAD-335) and above the Scenes Layers list (PAD-344) (:data:`STOCK_IMAGES_KEY`): then a stock picture with its own switch on is
 staged from its pristine bytes with the profile baked in, the way a
 replacement is.  The tab-wide box never reaches a stock picture.
+
+LINES OF TEXT (PAD-438) get the same switches in the Scenes Layers list: a
+line added in Scenes has its own (the ``color`` key of its ``add_text``
+edit), a game line is locked until the same unlock box is ticked
+(:data:`TEXT_SLOTS_KEY`), and each can have a profile of its own (kind
+"text", keyed by :func:`text_rel`).  What is corrected is the colour the
+line is drawn in (plugins/stern/text_colour.py); a font whose letters carry
+their own colours is a picture, and its switch is that picture's.
 """
 
 import contextlib
@@ -95,8 +103,14 @@ STOCK_VIDEOS_KEY = "video_color_stock"
 #: PAD-368 (DragonRR): a file's own individual files profile, ``{rel: profile
 #: dict}`` per kind.  A file with none gets the project's one (ASSET_KEY).
 #: ``{"recommended": True}`` is the Recommended one, following the screen.
+#: PAD-438: "text" is a line of text in a scene, keyed by :func:`text_rel`.
 FILE_PROFILES_KEY = {"images": "image_color_profiles",
-                     "videos": "video_color_profiles"}
+                     "videos": "video_color_profiles",
+                     "text": "text_color_profiles"}
+#: PAD-438 (DragonRR): the game's own lines of text switched on behind the
+#: unlock box, ``{text_rel: True}`` (a line added in Scenes keeps its switch
+#: in its own ``add_text`` edit, as an added picture does).
+TEXT_SLOTS_KEY = "text_color_slots"
 
 #: Rec.601 luma weights: the grey a pixel is desaturated toward.
 _LUMA = (0.299, 0.587, 0.114)
@@ -252,7 +266,6 @@ def curve_table(points):
 def curve_values(points, inputs):
     """The curve through *points* (two or more) at each of *inputs* (any
     shades 0..255, fractions too), unrounded: :func:`curve_table`'s maths."""
-    import bisect
     xs = [float(p[0]) for p in points]
     ys = [float(p[1]) for p in points]
     n = len(xs)
@@ -270,21 +283,22 @@ def curve_values(points, inputs):
         if r > 9.0:
             t = 3.0 / r ** 0.5
             m[k], m[k + 1] = t * a * d[k], t * b * d[k]
-    out = []
-    for v in inputs:
-        if v <= xs[0]:
-            y = ys[0]
-        elif v >= xs[n - 1]:
-            y = ys[n - 1]
-        else:
-            k = bisect.bisect_left(xs, v) - 1
-            h = xs[k + 1] - xs[k]
-            t = (v - xs[k]) / h
-            t2, t3 = t * t, t * t * t
-            y = ((2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * h * m[k]
-                 + (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * h * m[k + 1])
-        out.append(y)
-    return out
+    # PAD-464: every input at once, each by the same sums in the same order
+    # as one at a time (the same numbers, bit for bit)
+    import numpy as np
+    v = np.fromiter(inputs, np.float64)
+    if not v.size:
+        return []
+    xa, ya, ma = (np.asarray(a, np.float64) for a in (xs, ys, m))
+    k = np.clip(np.searchsorted(xa, v, side="left") - 1, 0, n - 2)
+    with np.errstate(all="ignore"):
+        h = xa[k + 1] - xa[k]
+        t = (v - xa[k]) / h
+        t2, t3 = t * t, t * t * t
+        y = ((2 * t3 - 3 * t2 + 1) * ya[k] + (t3 - 2 * t2 + t) * h * ma[k]
+             + (-2 * t3 + 3 * t2) * ya[k + 1] + (t3 - t2) * h * ma[k + 1])
+    y = np.where(v <= xa[0], ya[0], np.where(v >= xa[n - 1], ya[n - 1], y))
+    return y.tolist()
 
 
 def _smooth(t):
@@ -295,21 +309,27 @@ def _smooth(t):
 
 def apply_ranges(rgb, ranges):
     """*rgb* (float ``(..., 3)``, 0..255) through each colour range in turn
-    (step 3 above); a pixel no range reaches comes back exactly as given."""
+    (step 3 above); a pixel no range reaches comes back exactly as given.
+    PAD-464: a grey is never reached and a range's new colour is worked out
+    only for the pixels it reaches (the same numbers, each pixel by the same
+    sums; most of a picture lies outside one band)."""
     import numpy as np
-    out = np.asarray(rgb, np.float64)
+    out = np.array(rgb, np.float64, order="C")
+    flat = out.reshape(-1, 3)                           # (a view of out)
     for hue, width, soft, shift, sat, bright, protect in ranges:
         if range_neutral((hue, width, soft, shift, sat, bright, protect)):
             continue
-        r, g, b = out[..., 0], out[..., 1], out[..., 2]
-        mx = out.max(-1)
-        mn = out.min(-1)
-        c = mx - mn
-        safe = np.where(c > 0, c, 1.0)
-        h = np.where(mx == r, ((g - b) / safe) % 6.0,
-                     np.where(mx == g, (b - r) / safe + 2.0,
-                              (r - g) / safe + 4.0)) * 60.0
-        s = np.where(mx > 0, c / np.where(mx > 0, mx, 1.0), 0.0)
+        mx = flat.max(-1)
+        c = mx - flat.min(-1)
+        idx = np.flatnonzero(c > 0)
+        if not idx.size:
+            continue
+        px = flat[idx]
+        r, g, b = px[:, 0], px[:, 1], px[:, 2]
+        mx, c = mx[idx], c[idx]
+        h = np.where(mx == r, ((g - b) / c) % 6.0,
+                     np.where(mx == g, (b - r) / c + 2.0,
+                              (r - g) / c + 4.0)) * 60.0
         dist = np.abs((h - hue + 180.0) % 360.0 - 180.0)
         half = width / 2.0
         if width >= 360.0:
@@ -321,8 +341,13 @@ def apply_ranges(rgb, ranges):
         if protect > 0:
             gw = _smooth(c / 255.0 / protect)
         else:
-            gw = (c > 0).astype(np.float64)
-        w = np.where(c > 0, hw * gw, 0.0)
+            gw = np.ones_like(c)
+        w = hw * gw
+        on = w > 0
+        if not on.any():
+            continue
+        idx, w, h, mx = idx[on], w[on], h[on], mx[on]
+        s = c[on] / mx
         h2 = (h + shift * w) % 360.0
         s2 = np.clip(s * (1.0 + (sat - 1.0) * w), 0.0, 1.0)
         v2 = np.clip(mx * (1.0 + (bright - 1.0) * w), 0.0, 255.0)
@@ -330,27 +355,174 @@ def apply_ranges(rgb, ranges):
         for n in (5.0, 3.0, 1.0):
             k = (n + h2 / 60.0) % 6.0
             chans.append(v2 - v2 * s2 * np.clip(np.minimum(k, 4.0 - k), 0, 1))
-        out = np.where((w > 0)[..., None], np.stack(chans, -1), out)
+        flat[idx] = np.stack(chans, -1)
     return out
 
 
-def _ranges_uint8(rgb, live):
-    """uint8 *rgb* through the colour ranges *live*, rounded back to uint8.
-    PAD-369 (DragonRR, ~3 s a change in Scenes): the ranges are per-pixel
-    float maths, so a whole frame is worked out once per distinct colour
-    (a frame has far fewer colours than pixels) and spread back: the same
-    numbers, several times faster."""
+#: below this many pixels a picture is worked out as it is, above it once
+#: per distinct colour (:func:`per_colour`)
+_COLOURS_FROM = 4096
+#: from this many pixels the distinct colours are found through a table of
+#: every 24-bit colour rather than a sort (three times faster on a 1080p
+#: frame, slower on a small picture)
+_TABLE_FROM = 300_000
+
+
+def _unique_colours(src):
+    """``(colours, inverse)`` of uint8 *src* (``(..., 3)``): its distinct
+    colours as a sorted ``(n, 3)`` array and each pixel's index into it, so
+    ``colours[inverse]`` is *src* flattened."""
     import numpy as np
-    src = np.asarray(rgb, np.uint8)
-    if src.size < 3 * 4096:
-        return np.clip(apply_ranges(src, live) + 0.5, 0, 255).astype(np.uint8)
     flat = src.reshape(-1, 3)
     key = ((flat[:, 0].astype(np.uint32) << 16)
            | (flat[:, 1].astype(np.uint32) << 8) | flat[:, 2])
-    u, inv = np.unique(key, return_inverse=True)
+    if key.size >= _TABLE_FROM:
+        seen = np.zeros(1 << 24, np.bool_)
+        seen[key] = True
+        u = np.flatnonzero(seen).astype(np.uint32)
+        index = np.empty(1 << 24, np.int32)
+        index[u] = np.arange(u.size, dtype=np.int32)
+        inv = index[key]
+    else:
+        u, inv = np.unique(key, return_inverse=True)
     cols = np.stack([u >> 16, (u >> 8) & 255, u & 255], -1).astype(np.uint8)
-    done = np.clip(apply_ranges(cols, live) + 0.5, 0, 255).astype(np.uint8)
-    return done[inv.reshape(-1)].reshape(src.shape)
+    return cols, inv.reshape(-1)
+
+
+def per_colour(rgb, fn):
+    """uint8 *rgb* (``(..., 3)``) through *fn*, which works each pixel out
+    from its own colour alone (any ``(..., 3)`` uint8 array to one of the
+    same shape).  PAD-369, then PAD-464 (DragonRR, "Color profiling is very
+    slow again"): a frame has far fewer colours than pixels, so a big one is
+    worked out once per distinct colour, a whole run of profiles at a time,
+    and spread back: the same numbers, many times faster."""
+    import numpy as np
+    src = np.asarray(rgb, np.uint8)
+    if src.size < 3 * _COLOURS_FROM:
+        return fn(src)
+    flat = src.reshape(-1, 3)
+    lit = (flat[:, 0] | flat[:, 1] | flat[:, 2]) != 0
+    n_lit = int(np.count_nonzero(lit))
+    if n_lit * 2 < lit.size:
+        # mostly black (the empty part of a Scenes layer): black worked out
+        # once, the rest as any frame
+        out = np.empty_like(flat)
+        black = fn(np.zeros((1, 3), np.uint8))[0]
+        if n_lit:
+            out[~lit] = black
+            out[lit] = per_colour(flat[lit], fn)
+        else:
+            out[:] = black
+        return out.reshape(src.shape)
+    cols, inv = _unique_colours(src)
+    return fn(cols)[inv].reshape(src.shape)
+
+
+#: the most colours a :class:`_Memo` keeps (7 bytes each)
+_MEMO_MAX = 4_000_000
+
+
+def _packed(flat):
+    import numpy as np
+    return ((flat[:, 0].astype(np.uint32) << 16)
+            | (flat[:, 1].astype(np.uint32) << 8) | flat[:, 2])
+
+
+class _Memo:
+    """:func:`run_steps` of *steps* that keeps every colour it worked out
+    (PAD-464): the Scenes preview sends a frame through the machine's
+    screen up to eight times (the scene, and with a layer selected the
+    layers under, at and over it, each also through the overlay alone), and
+    Play every frame of a scene, mostly the same colours each time."""
+
+    def __init__(self, steps):
+        self.steps = list(steps)
+        self.known = None          # (packed colours, sorted; their results)
+
+    def __call__(self, rgb):
+        import numpy as np
+        src = np.asarray(rgb, np.uint8)
+        if src.size < 3 * _COLOURS_FROM:
+            return _steps_px(self.steps, src)
+        return per_colour(src, self._px)
+
+    def _px(self, a):
+        import numpy as np
+        flat = a.reshape(-1, 3)
+        keys = _packed(flat)
+        out = np.empty_like(flat)
+        known = self.known
+        if known is not None:
+            pos = np.minimum(np.searchsorted(known[0], keys), known[0].size - 1)
+            hit = known[0][pos] == keys
+            out[hit] = known[1][pos[hit]]
+            miss = ~hit
+        else:
+            miss = np.ones(keys.shape, np.bool_)
+        if miss.any():
+            got = _steps_px(self.steps, flat[miss])
+            out[miss] = got
+            new, first = np.unique(keys[miss], return_index=True)
+            vals = got[first]
+            if known is not None and known[0].size + new.size <= _MEMO_MAX:
+                new = np.concatenate([known[0], new])
+                vals = np.concatenate([known[1], vals])
+                order = np.argsort(new, kind="stable")
+                new, vals = new[order], vals[order]
+            if new.size <= _MEMO_MAX:
+                self.known = (new, vals)
+        return out.reshape(a.shape)
+
+
+def _ranges_px(rgb, live):
+    import numpy as np
+    return np.clip(apply_ranges(rgb, live) + 0.5, 0, 255).astype(np.uint8)
+
+
+def _ranges_uint8(rgb, live):
+    """uint8 *rgb* through the colour ranges *live*, rounded back to uint8,
+    once per distinct colour (PAD-369, DragonRR: ~3 s a change in Scenes)."""
+    return per_colour(rgb, lambda a: _ranges_px(a, live))
+
+
+def _frozen_luts(rows):
+    import numpy as np
+    a = np.asarray(rows, np.uint8)
+    a.setflags(write=False)
+    return a
+
+
+@functools.lru_cache(maxsize=64)
+def _shade_luts(curve, undo=False):
+    """:meth:`Profile.table` (*undo*: :meth:`Profile.undo_table`) of the
+    three channels as one ``(3, 256)`` uint8 array, for a profile whose
+    folded gamma, gain and lift are *curve* (:meth:`Profile.curve`):
+    worked out once for those numbers (PAD-464)."""
+    prof = Profile(gamma=curve[0], gain=curve[1], lift=curve[2])
+    return _frozen_luts([prof.undo_table(c) if undo else prof.table(c)
+                         for c in range(3)])
+
+
+@functools.lru_cache(maxsize=64)
+def _curve_luts(curves):
+    """:meth:`Profile.curve_tables` of a profile with *curves*, as one
+    ``(3, 256)`` uint8 array (``None`` when no curve changes anything)."""
+    tabs = Profile(curves=curves).curve_tables()
+    return _frozen_luts(tabs) if tabs is not None else None
+
+
+def _cached(fn, key, *args):
+    """``fn(key, *args)`` from its cache, or worked out afresh for a profile
+    made with lists rather than tuples (no cache key)."""
+    try:
+        return fn(key, *args)
+    except TypeError:
+        return fn.__wrapped__(key, *args)
+
+
+def _lut3(luts, a):
+    import numpy as np
+    return np.stack([luts[c][a[..., c]] for c in range(3)], axis=-1)
 
 
 @dataclass(frozen=True)
@@ -402,15 +574,19 @@ class Profile:
     def extras_array(self, rgb):
         """*rgb* (uint8 ``(h, w, 3)``) through the colour ranges, then the
         curves (steps 3 and 4)."""
+        return per_colour(rgb, self._extras_px)
+
+    def _extras_px(self, out):
+        """:meth:`extras_array` worked out pixel by pixel (:func:`per_colour`
+        gives it the distinct colours)."""
         import numpy as np
-        out = np.asarray(rgb, np.uint8)
+        out = np.asarray(out, np.uint8)
         live = [r for r in self.ranges if not range_neutral(r)]
         if live:
-            out = _ranges_uint8(out, live)
-        tabs = self.curve_tables()
-        if tabs is not None:
-            luts = [np.asarray(t, np.uint8) for t in tabs]
-            out = np.stack([luts[c][out[..., c]] for c in range(3)], axis=-1)
+            out = _ranges_px(out, live)
+        luts = _cached(_curve_luts, self.curves)
+        if luts is not None:
+            out = _lut3(luts, out)
         return out
 
     def curve(self):
@@ -511,16 +687,19 @@ class Profile:
     def apply_array(self, rgb):
         """*rgb* (uint8 ``(h, w, 3)``) corrected, the same maths as
         :meth:`apply_image`."""
+        return per_colour(rgb, self._apply_px)
+
+    def _apply_px(self, out):
+        """:meth:`apply_array` worked out pixel by pixel."""
         import numpy as np
-        out = np.asarray(rgb, np.uint8)
+        out = np.asarray(out, np.uint8)
         if self.saturation != 1.0:
             m = np.asarray(self.matrix(), np.float32)
             out = np.clip(out.astype(np.float32) @ m.T + 0.5, 0, 255).astype(
                 np.uint8)
-        luts = [np.asarray(self.table(c), np.uint8) for c in range(3)]
-        out = np.stack([luts[c][out[..., c]] for c in range(3)], axis=-1)
+        out = _lut3(_cached(_shade_luts, self.curve()), out)
         if self.has_extras():
-            out = self.extras_array(out)
+            out = self._extras_px(out)
         return out
 
     def undo_table(self, channel):
@@ -561,10 +740,13 @@ class Profile:
         it, taking this profile as the correction measured for that screen:
         the inverse of :meth:`apply_array`.  Black and white (saturation 0)
         cannot be undone and is left as it is."""
+        return per_colour(rgb, self._undo_px)
+
+    def _undo_px(self, src):
+        """:meth:`undo_array` worked out pixel by pixel."""
         import numpy as np
-        src = np.asarray(rgb, np.uint8)
-        luts = [np.asarray(self.undo_table(c), np.uint8) for c in range(3)]
-        out = np.stack([luts[c][src[..., c]] for c in range(3)], axis=-1)
+        out = _lut3(_cached(_shade_luts, self.curve(), True),
+                    np.asarray(src, np.uint8))
         if self.saturation not in (0.0, 1.0):
             m = np.asarray(Profile(saturation=1.0 / self.saturation).matrix(),
                            np.float32)
@@ -780,19 +962,29 @@ def _from_dict(d):
         return None
 
 
+def _stored(assets_dir, key):
+    """The profile stored under *key* in the project's file, or ``None``:
+    parsed once for the file as it is (PAD-464: a slider move asked for each
+    of them a dozen times or more)."""
+    from . import staged_changes
+
+    def build(data):
+        d = data.get(key)
+        return _from_dict(d) if isinstance(d, dict) else None
+    return staged_changes.derived(assets_dir, ("profile", key), build)
+
+
 def for_project(assets_dir):
     """The profile staged for *assets_dir*, or ``None`` (none staged)."""
-    from . import staged_changes
-    d = staged_changes.load(assets_dir).get(KEY)
-    if isinstance(d, dict) and d.get(FOLLOW_SCREEN):
+    if follows_screen(assets_dir):
         return recommended(assets_dir)
-    return _from_dict(d) if isinstance(d, dict) else None
+    return _stored(assets_dir, KEY)
 
 
 def follows_screen(assets_dir):
     """Is the overlay the Recommended one, following the machine screen?"""
     from . import staged_changes
-    d = staged_changes.load(assets_dir).get(KEY)
+    d = staged_changes.peek(assets_dir).get(KEY)
     return bool(isinstance(d, dict) and d.get(FOLLOW_SCREEN))
 
 
@@ -908,16 +1100,14 @@ def asset_profile(assets_dir):
     """The profile baked into the chosen files of *assets_dir*: the one
     stored, else the Recommended one, the machine screen undone (PAD-346:
     it follows that screen)."""
-    from . import staged_changes
-    d = staged_changes.load(assets_dir).get(ASSET_KEY)
-    prof = _from_dict(d) if isinstance(d, dict) else None
+    prof = _stored(assets_dir, ASSET_KEY)
     return prof if prof is not None else recommended(assets_dir, files=True)
 
 
 def asset_stored(assets_dir):
     """Has the user set the chosen-files profile, or is it still the default?"""
     from . import staged_changes
-    return isinstance(staged_changes.load(assets_dir).get(ASSET_KEY), dict)
+    return isinstance(staged_changes.peek(assets_dir).get(ASSET_KEY), dict)
 
 
 def store_asset_profile(assets_dir, prof):
@@ -956,15 +1146,60 @@ def _own_from(stored, assets_dir, rec=None):
     return _from_dict(stored)
 
 
+#: in :func:`_own_parsed`: the file's own profile is the Recommended one
+_OWN_RECOMMENDED = "recommended"
+#: ``{(kind, rel): (stored dict, parsed)}`` of the last parse: a profile
+#: stored as it was then is not parsed again when the file changes elsewhere
+_OWN_LAST = {}
+_OWN_LAST_LOCK = threading.Lock()
+
+
+def _own_parsed(assets_dir, data=None):
+    """``{kind: {rel: Profile, None (unreadable) or _OWN_RECOMMENDED}}``: the
+    files' own profiles (PAD-368), parsed once for the project's file as it
+    is (PAD-464: hundreds of them after an Apply to all were all parsed again
+    for every look-up, a dozen look-ups a slider move).  *data*: a sidecar
+    the caller loaded itself, parsed here and now."""
+    from . import staged_changes
+
+    def build(d, keep=True):
+        with _OWN_LAST_LOCK:
+            last = dict(_OWN_LAST)
+        out, now = {}, {}
+        for kind in FILE_PROFILES_KEY:
+            m = {}
+            for rel, stored in _own_dicts(d, kind).items():
+                was = last.get((kind, rel))
+                if was is not None and was[0] == stored:
+                    m[rel] = was[1]
+                elif isinstance(stored, dict) and stored.get("recommended"):
+                    m[rel] = _OWN_RECOMMENDED
+                else:
+                    m[rel] = _own_from(stored, assets_dir)
+                now[(kind, rel)] = (stored, m[rel])
+            out[kind] = m
+        if keep:
+            # (only the shared file's dicts: they are never changed)
+            with _OWN_LAST_LOCK:
+                _OWN_LAST.clear()
+                _OWN_LAST.update(now)
+        return out
+    if data is None or data is staged_changes.peek(assets_dir):
+        return staged_changes.derived(assets_dir, "own_profiles", build)
+    return build(data, keep=False)
+
+
 def own_profile(assets_dir, kind, rel):
-    """File *rel*'s own profile (*kind* "images" / "videos"), or ``None``
-    when it has none and gets the project's individual files profile."""
-    _kind_keys(kind)
+    """File *rel*'s own profile (*kind* "images" / "videos" / "text"), or
+    ``None`` when it has none and gets the project's individual files
+    profile."""
+    _profile_kind(kind)
     if not assets_dir or not rel:
         return None
-    from . import staged_changes
-    return _own_from(_own_dicts(staged_changes.load(assets_dir), kind).get(rel),
-                     assets_dir)
+    prof = _own_parsed(assets_dir)[kind].get(rel)
+    if prof is _OWN_RECOMMENDED:
+        return recommended(assets_dir, files=True)
+    return prof
 
 
 def own_follows_screen(assets_dir, kind, rel):
@@ -972,7 +1207,7 @@ def own_follows_screen(assets_dir, kind, rel):
     if not assets_dir or not rel:
         return False
     from . import staged_changes
-    d = _own_dicts(staged_changes.load(assets_dir), kind).get(rel)
+    d = _own_dicts(staged_changes.peek(assets_dir), kind).get(rel)
     return bool(isinstance(d, dict) and d.get("recommended"))
 
 
@@ -980,17 +1215,28 @@ def store_own_profile(assets_dir, kind, rel, prof, follow=False):
     """Give file *rel* a profile of its own: *prof*, or with *follow* the
     Recommended one following the screen; neither puts it back on the
     project's individual files profile."""
-    _kind_keys(kind)
+    store_own_profiles(assets_dir, kind, [rel], prof, follow=follow)
+
+
+def store_own_profiles(assets_dir, kind, rels, prof, follow=False):
+    """:func:`store_own_profile` for every file in *rels* at once, one save
+    (PAD-462: several clips selected get the profile picked together)."""
+    _profile_kind(kind)
     from . import staged_changes
     data = staged_changes.load(assets_dir)
     key = FILE_PROFILES_KEY[kind]
     m = dict(_own_dicts(data, kind))
     if follow:
-        m[rel] = {"recommended": True}
+        value = {"recommended": True}
     elif prof is None:
-        m.pop(rel, None)
+        value = None
     else:
-        m[rel] = _profile_dict(prof)
+        value = _profile_dict(prof)
+    for rel in rels:
+        if value is None:
+            m.pop(rel, None)
+        else:
+            m[rel] = dict(value)
     if m:
         data[key] = m
     else:
@@ -1011,9 +1257,7 @@ def asset_resolver(assets_dir, data=None):
     that changes nothing.  The sidecar is read once."""
     if not assets_dir:
         return lambda kind, rel: None
-    from . import staged_changes
-    if data is None:
-        data = staged_changes.load(assets_dir)
+    owns = _own_parsed(assets_dir, data)
     shared, recs = [], []
 
     def _shared():
@@ -1026,10 +1270,10 @@ def asset_resolver(assets_dir, data=None):
             recs.append(recommended(assets_dir, files=True))
         return recs[0]
 
-    owns = {kind: _own_dicts(data, kind) for kind in FILE_PROFILES_KEY}
-
     def resolve(kind, rel):
-        prof = _own_from(owns.get(kind, {}).get(rel), assets_dir, _rec)
+        prof = owns.get(kind, {}).get(rel)
+        if prof is _OWN_RECOMMENDED:
+            prof = _rec()
         if prof is None:
             return _shared()
         return None if prof.is_identity() else prof
@@ -1044,7 +1288,7 @@ def any_asset_active(assets_dir):
     if asset_active(assets_dir) is not None:
         return True
     from . import staged_changes
-    data = staged_changes.load(assets_dir)
+    data = staged_changes.peek(assets_dir)
     if not any(_own_dicts(data, k) for k in FILE_PROFILES_KEY):
         return False
     resolve = asset_resolver(assets_dir, data)
@@ -1053,22 +1297,22 @@ def any_asset_active(assets_dir):
 
 
 def own_profile_names(assets_dir):
-    """``{"images": {rel: label}, "videos": {rel: label}}``: the files with a
-    profile of their own, by the name their tooltips show."""
-    out = {"images": {}, "videos": {}}
+    """``{"images": {rel: label}, "videos": {rel: label}, "text": {rel:
+    label}}``: the files (and lines of text, PAD-438) with a profile of their
+    own, by the name their tooltips show."""
+    out = {kind: {} for kind in FILE_PROFILES_KEY}
     if not assets_dir:
         return out
-    from . import staged_changes
-    data = staged_changes.load(assets_dir)
     recs = []
 
     def _rec():
         if not recs:
             recs.append(recommended(assets_dir, files=True))
         return recs[0]
-    for kind in FILE_PROFILES_KEY:
-        for rel, stored in _own_dicts(data, kind).items():
-            prof = _own_from(stored, assets_dir, _rec)
+    for kind, owns in _own_parsed(assets_dir).items():
+        for rel, prof in owns.items():
+            if prof is _OWN_RECOMMENDED:
+                prof = _rec()
             if prof is not None:
                 out[kind][str(rel)] = prof.label()
     return out
@@ -1085,12 +1329,18 @@ def _kind_keys(kind):
         raise ValueError("kind must be images or videos, not %r" % (kind,))
 
 
+def _profile_kind(kind):
+    if kind not in FILE_PROFILES_KEY:
+        raise ValueError("kind must be images, videos or text, not %r"
+                         % (kind,))
+
+
 def asset_settings(assets_dir):
     """The switches: ``{"all_images", "all_videos", "images": {rel: bool},
-    "videos": {rel: bool}}`` (a file with no switch of its own follows its
-    kind's box)."""
+    "videos": {rel: bool}, "text": {text_rel: bool}}`` (a file with no switch
+    of its own follows its kind's box; a line of text has no box)."""
     from . import staged_changes
-    data = staged_changes.load(assets_dir) if assets_dir else {}
+    data = staged_changes.peek(assets_dir) if assets_dir else {}
 
     def _slots(key):
         m = data.get(key)
@@ -1099,7 +1349,8 @@ def asset_settings(assets_dir):
     return {"all_images": bool(data.get(ALL_IMAGES_KEY)),
             "all_videos": bool(data.get(ALL_VIDEOS_KEY)),
             "images": _slots(IMAGE_SLOTS_KEY),
-            "videos": _slots(VIDEO_SLOTS_KEY)}
+            "videos": _slots(VIDEO_SLOTS_KEY),
+            "text": _slots(TEXT_SLOTS_KEY)}
 
 
 def set_asset_all(assets_dir, kind, on):
@@ -1161,6 +1412,55 @@ def asset_map(assets_dir, kind, rels):
     return out
 
 
+# -- lines of text in a scene (PAD-438) ----------------------------------------
+
+def text_rel(card, node):
+    """A line of text's key for its switch and its own profile: the card path
+    of its scene and its node there (a line added in Scenes: its edit's id)."""
+    return "%s#%d" % (card, int(node))
+
+
+def set_text_slot(assets_dir, rel, value):
+    """A game line's own switch, *value* True, or False / ``None`` for no
+    switch at all (it has no box to follow, as a game picture has none)."""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    m = data.get(TEXT_SLOTS_KEY)
+    m = dict(m) if isinstance(m, dict) else {}
+    if value:
+        m[str(rel)] = True
+    else:
+        m.pop(str(rel), None)
+    if m:
+        data[TEXT_SLOTS_KEY] = m
+    else:
+        data.pop(TEXT_SLOTS_KEY, None)
+    staged_changes.save(assets_dir, data)
+
+
+def drop_text_slots(assets_dir):
+    """The unlock box went off: the game's own lines are locked again, and
+    none keeps a switch for the next time it is ticked (as its pictures)."""
+    from . import staged_changes
+    data = staged_changes.load(assets_dir)
+    if data.pop(TEXT_SLOTS_KEY, None) is not None:
+        staged_changes.save(assets_dir, data)
+
+
+def text_lines_on(assets_dir, data=None):
+    """The game's own lines switched on: their :func:`text_rel` keys, while
+    the unlock box is ticked (only then does a game line's switch count)."""
+    if not assets_dir:
+        return set()
+    if data is None:
+        from . import staged_changes
+        data = staged_changes.peek(assets_dir)
+    if not data.get(STOCK_IMAGES_KEY):
+        return set()
+    m = data.get(TEXT_SLOTS_KEY)
+    return {str(r) for r, on in m.items() if on} if isinstance(m, dict) else set()
+
+
 def stock_videos_unlocked(data):
     """The Video tab's Advanced box, from a loaded sidecar *data*."""
     return bool(isinstance(data, dict) and data.get(STOCK_VIDEOS_KEY))
@@ -1189,7 +1489,7 @@ def stock_images_unlocked(assets_dir):
     if not assets_dir:
         return False
     from . import staged_changes
-    return bool(staged_changes.load(assets_dir).get(STOCK_IMAGES_KEY))
+    return bool(staged_changes.peek(assets_dir).get(STOCK_IMAGES_KEY))
 
 
 def stock_image_rels(assets_dir, assigned=()):
@@ -1221,7 +1521,7 @@ def built_image_rels(assets_dir, data=None):
         return set()
     if data is None:
         from . import staged_changes
-        data = staged_changes.load(assets_dir)
+        data = staged_changes.peek(assets_dir)
     names = data.get("replacement_names") or {}
     picks = data.get("image") or {}
     if not isinstance(names, dict):
@@ -1330,7 +1630,7 @@ def added_picture_colour(assets_dir, op, settings=None, prof=None):
 def _screen_stored(assets_dir):
     """What the project stores for its machine screen: a dict, or ``None``."""
     from . import staged_changes
-    d = staged_changes.load(assets_dir).get(SCREEN_KEY) if assets_dir else None
+    d = staged_changes.peek(assets_dir).get(SCREEN_KEY) if assets_dir else None
     return d if isinstance(d, dict) else None
 
 
@@ -1338,8 +1638,9 @@ def screen_profile(assets_dir):
     """The machine's screen stored for *assets_dir* (PAD-324), or ``None``:
     then the Scenes preview takes the Recommended screen (PAD-341), or the
     individual files profile, undone, when :func:`screen_follows`."""
-    d = _screen_stored(assets_dir)
-    return _from_dict(d) if d is not None and not d.get(SCREEN_FOLLOW)         else None
+    if not assets_dir or screen_follows(assets_dir):
+        return None
+    return _stored(assets_dir, SCREEN_KEY)
 
 
 def screen_follows(assets_dir):
@@ -1642,43 +1943,146 @@ def machine_view(assets_dir, overlay_on=True, screen_on=True):
     *overlay_on* / *screen_on* are two of the preview's switches (PAD-330;
     the third, the individual files bake, is the picture list's)."""
     display = active(assets_dir) if overlay_on else None
-    stored = screen_profile(assets_dir)
-    if not screen_on:
-        screen, undo = None, False
-    elif stored is not None:
-        screen, undo = (None if stored.is_identity() else stored), False
-    elif screen_follows(assets_dir):
-        screen, undo = asset_active(assets_dir), True
-    else:
-        screen, undo = SCREEN_PRESETS[0][1], False
+    screen = _screen_step(assets_dir) if screen_on else None
     if display is None and screen is None:
         return None
-
-    def overlay(rgb):
-        return display.apply_array(rgb)
-
-    def view(rgb):
-        if display is not None:
-            rgb = display.apply_array(rgb)
-        if screen is not None:
-            rgb = screen.undo_array(rgb) if undo else screen.apply_array(rgb)
-        return rgb
+    # both on each distinct colour at once, each colour worked out once for
+    # as long as the preview keeps this view (PAD-464)
+    view = _Memo(([("apply", display)] if display is not None else [])
+                 + ([screen] if screen is not None else []))
     # the overlay alone (PAD-328): what a picture that passes the screen by
     # still gets, since the game draws the overlay over everything
-    view.overlay = overlay if display is not None else None
+    view.overlay = _Memo([("apply", display)]) if display is not None else None
     return view
+
+
+def _screen_step(assets_dir):
+    """The machine screen the Scenes preview draws through, as one step of
+    :func:`run_steps`: the stored one, else (following) the individual files
+    profile undone, else the Recommended screen; ``None`` for none."""
+    stored = screen_profile(assets_dir)
+    if stored is not None:
+        return None if stored.is_identity() else ("apply", stored)
+    if screen_follows(assets_dir):
+        files = asset_active(assets_dir)
+        return None if files is None else ("undo", files)
+    return ("apply", SCREEN_PRESETS[0][1])
+
+
+def run_steps(steps, rgb):
+    """uint8 *rgb* through *steps*, ``[("apply" | "undo", Profile), ...]``
+    in turn: all of them on each distinct colour once (PAD-464)."""
+    steps = list(steps)
+    if not steps:
+        return rgb
+    return per_colour(rgb, lambda a: _steps_px(steps, a))
+
+
+def _steps_px(steps, a):
+    """:func:`run_steps` worked out pixel by pixel."""
+    for kind, prof in steps:
+        a = prof._undo_px(a) if kind == "undo" else prof._apply_px(a)
+    return a
+
+
+def video_look_exact(assets_dir, switch, own_colours, overlay_on=True,
+                     files_on=True, screen_on=True, rel=None, kind="videos"):
+    """:func:`video_look`'s steps as Scenes draws a picture through them
+    (PAD-448): ``{"orig", "rep"}`` lists of :func:`run_steps` steps, each the
+    whole profile (its colour ranges too, which a browser filter has no form
+    for) and the machine screen exactly as :func:`machine_view` has it.
+    *kind* (PAD-463): "images" for a picture on the Images tab, whose own
+    profile is looked up among the pictures'."""
+    overlay = active(assets_dir) if overlay_on else None
+    screen = _screen_step(assets_dir) if screen_on else None
+    files = ((asset_resolver(assets_dir)(kind, rel) if rel
+              else asset_active(assets_dir)) if files_on else None)
+    over = [("apply", overlay)] if overlay is not None else []
+    orig = over + ([screen] if screen is not None else [])
+    rep = [("apply", files)] if switch and files is not None else []
+    rep += over
+    if screen is not None and not (switch is False and own_colours):
+        rep.append(screen)
+    return {"orig": orig, "rep": rep}
+
+
+#: Grid points per side of a player's colour table (PAD-448): 52 puts a
+#: point on every 5th level, so each is worked out from whole levels by the
+#: same maths as a picture, and the GPU blends between them: a played clip
+#: is within half a level of that maths on average (2 levels at the 99th
+#: percentile; 86 points would cost four times the work for little more)
+LOOK_LUT_SIZE = 52
+
+
+def look_lut_path(steps):
+    """Where :func:`build_look_lut` keeps the table of *steps*, named by
+    every number in them (``None`` for no steps)."""
+    if not steps:
+        return None
+    import hashlib
+    import tempfile
+    key = "%d|" % LOOK_LUT_SIZE + "|".join(
+        "%s:%s" % (kind, prof.key()) for kind, prof in steps)
+    return os.path.join(tempfile.gettempdir(), "pad_colour_luts", "look_%s.lut"
+                        % hashlib.sha1(key.encode()).hexdigest()[:20])
+
+
+def build_look_lut(steps):
+    """The colour table a Video tab player draws through (PAD-448): every
+    grid colour through *steps*, :data:`LOOK_LUT_SIZE` cubed rgb bytes, red
+    fastest, then green, then blue (a WebGL 3D texture's order).  Written
+    once; returns its path (``None`` for no steps)."""
+    path = look_lut_path(steps)
+    if path is None or os.path.isfile(path):
+        return path
+    import numpy as np
+    n = LOOK_LUT_SIZE
+    axis = np.arange(n, dtype=np.uint16) * (255 // (n - 1))
+    b, g, r = np.meshgrid(axis, axis, axis, indexing="ij")
+    grid = np.stack([r, g, b], -1).astype(np.uint8).reshape(-1, 1, 3)
+    # every grid colour is a colour of its own: no sorting them out first
+    out = np.ascontiguousarray(_steps_px(list(steps), grid), np.uint8)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = "%s.%d.%d.tmp" % (path, os.getpid(), threading.get_ident())
+    with open(tmp, "wb") as f:
+        f.write(out.tobytes())
+    os.replace(tmp, path)
+    _prune_look_luts(os.path.dirname(path), keep=path)
+    return path
+
+
+#: the newest tables kept: each slider position dragged writes one (420 KB)
+LOOK_LUT_KEEP = 64
+
+
+def _prune_look_luts(folder, keep):
+    """Drop all but the :data:`LOOK_LUT_KEEP` newest tables (*keep* stays:
+    it is the one just written).  One gone that a player still names is
+    written again the next time it is asked for."""
+    try:
+        names = [n for n in os.listdir(folder)
+                 if n.startswith("look_") and n.endswith(".lut")]
+        if len(names) <= LOOK_LUT_KEEP:
+            return
+        paths = [os.path.join(folder, n) for n in names]
+        paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        for p in paths[LOOK_LUT_KEEP:]:
+            if os.path.normcase(p) != os.path.normcase(keep):
+                os.remove(p)
+    except OSError:
+        pass
 
 
 def asset_counts(assets_dir):
     """How many files the chosen-files profile reaches now: ``{"images",
-    "videos", "added"}`` (replaced pictures, replaced videos, pictures
-    added in Scenes), by the switches alone (the profile may still be No
-    change)."""
+    "videos", "added", "text"}`` (replaced pictures, replaced videos,
+    pictures added in Scenes, lines of text in Scenes: PAD-438), by the
+    switches alone (the profile may still be No change)."""
     from . import staged_changes
-    out = {"images": 0, "videos": 0, "added": 0}
+    out = {"images": 0, "videos": 0, "added": 0, "text": 0}
     if not assets_dir:
         return out
-    data = staged_changes.load(assets_dir)
+    data = staged_changes.peek(assets_dir)
     settings = asset_settings(assets_dir)
     for kind, key in (("images", "image"), ("videos", "video")):
         picks = data.get(key) or {}
@@ -1690,6 +2094,7 @@ def asset_counts(assets_dir):
     out["images"] += len(stock_image_rels(
         assets_dir, {r for r, src in picks.items() if src}))
     out["images"] += len(built_image_on(assets_dir))
+    out["text"] = len(text_lines_on(assets_dir, data))
     try:
         from ..plugins.stern import scene_edit
         for ops in scene_edit.load(assets_dir).values():
@@ -1699,6 +2104,10 @@ def asset_counts(assets_dir):
                                           op.get("image") or "",
                                           own=op.get("color"))):
                     out["added"] += 1
+                # a line added in Scenes: its own switch only (PAD-438)
+                if (isinstance(op, dict) and op.get("op") == "add_text"
+                        and op.get("color")):
+                    out["text"] += 1
     except Exception:                                   # noqa: BLE001
         pass
     return out
@@ -1736,15 +2145,15 @@ def asset_signature(assets_dir):
     if not any_asset_active(assets_dir):
         return ""
     from . import staged_changes
-    data = staged_changes.load(assets_dir)
+    data = staged_changes.peek(assets_dir)
     resolve = asset_resolver(assets_dir, data)
     own = sorted((k, rel, (resolve(k, rel) or Profile(name="")).key())
                  for k in FILE_PROFILES_KEY for rel in _own_dicts(data, k))
     s = asset_settings(assets_dir)
-    return "%s|%s|%s|%s|%s|%s%s" % (
+    return "%s|%s|%s|%s|%s|%s|%s%s" % (
         asset_profile(assets_dir).key(), own,
         s["all_images"], s["all_videos"], sorted(s["images"].items()),
-        sorted(s["videos"].items()),
+        sorted(s["videos"].items()), sorted(s["text"].items()),
         "|unlocked" if stock_images_unlocked(assets_dir) else "")
 
 

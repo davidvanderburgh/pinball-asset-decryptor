@@ -104,6 +104,7 @@ def test_scenes_unlock_is_offered_on_a_scene_with_no_pictures(tmp_path):
         png.unlink()
     with web_app(tmp_path, mfr="stern") as w:
         _open(w, folder)
-        assert not any(l["color"] for l in _tv(w)["layers"])
+        # (a line of text has its own lock since PAD-438)
+        assert not any(l["color"] for l in _tv(w)["layers"] if l["kind"] != "Text")
         assert _tv(w)["color_unlock"] == {"offered": True, "on": False}
         w.call("text_scenes.close")

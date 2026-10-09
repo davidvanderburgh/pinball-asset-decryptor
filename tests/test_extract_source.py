@@ -395,6 +395,62 @@ def test_card_relation_a_card_from_elsewhere(tmp_path):
     assert rel["source"] == str(src) and rel["build"] == str(built)
 
 
+def test_card_relation_a_renamed_card_is_still_the_source(tmp_path):
+    """PAD-421: a card renamed after its extract is still that card (its
+    old name gone, same size and modified time); a different card of the
+    same size, or a renamed copy while the original is still there, is not."""
+    img = tmp_path / "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
+    _make_image(str(img))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    write_extract_source(str(proj), str(img))
+    copy = tmp_path / "My Godzilla.raw"
+    _make_image(str(copy))
+    st = os.stat(str(img))
+    os.utime(str(copy), (st.st_atime, st.st_mtime))
+    assert card_relation(str(copy), str(proj))["kind"] == "other"   # original still there
+    os.remove(str(img))
+    assert card_relation(str(copy), str(proj))["kind"] == "source"
+    os.utime(str(copy), (st.st_atime, st.st_mtime + 60))
+    assert card_relation(str(copy), str(proj))["kind"] == "other"   # another card
+
+
+def test_card_relation_a_build_of_this_project_copied_elsewhere(tmp_path):
+    """PAD-421: DragonRR built his 1.96 card from one project folder, copied
+    the folder next to the card and deleted the first.  The build record
+    still names the deleted folder; the stock card it was built from is the
+    one this copy was extracted from, so the card is this project's build.
+    While the first folder is still there it stays that folder's build."""
+    stock = tmp_path / "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
+    _make_image(str(stock))
+    old = tmp_path / "BRAND NEW TEST 1.16 OG" / "EXTRACTED"
+    old.mkdir(parents=True)
+    write_extract_source(str(old), str(stock))
+    card = tmp_path / "1.96 TEST CLEAN" / "Heisei Custom V1.96.raw"
+    card.parent.mkdir()
+    _make_image(str(card))
+    st = os.stat(str(stock))
+    (tmp_path / "1.96 TEST CLEAN" / ("Heisei Custom V1.96.raw" + BUILD_RECORD_SUFFIX)).write_text(
+        json.dumps({"version": 1, "assets": str(old),
+                    "stock": {"path": str(stock), "size": st.st_size,
+                              "mtime_ns": st.st_mtime_ns}}), encoding="utf-8")
+    copy = tmp_path / "1.96 TEST CLEAN" / "EXTRACTED"
+    copy.mkdir()
+    (copy / SIDE_CAR).write_text((old / SIDE_CAR).read_text(encoding="utf-8"),
+                                 encoding="utf-8")
+    assert card_relation(str(card), str(copy))["kind"] == "other_build"
+    (old / SIDE_CAR).unlink()
+    old.rmdir()
+    assert card_relation(str(card), str(copy))["kind"] == "build"
+    # a project extracted from another stock card is still not its project
+    other = tmp_path / "other"
+    other.mkdir()
+    pro = tmp_path / "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw"
+    _make_image(str(pro))
+    write_extract_source(str(other), str(pro))
+    assert card_relation(str(card), str(other))["kind"] == "other_build"
+
+
 def test_card_relation_a_build_of_another_project(tmp_path):
     src, proj, built = _project_with_build(tmp_path)
     rel = card_relation(str(built), str(tmp_path / "Other project"))

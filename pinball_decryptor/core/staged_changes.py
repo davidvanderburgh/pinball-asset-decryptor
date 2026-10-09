@@ -22,7 +22,10 @@ here.)
 """
 
 import json
+import marshal
 import os
+import threading
+import time
 
 # Sidecar written at the root of the assets folder.  Dotfile so the
 # audio/video/image slot scanners (which skip dot-entries) ignore it — same
@@ -60,21 +63,128 @@ def _prune_non_slot_keys(data):
     return data
 
 
+# -- the file as last read (PAD-464) ------------------------------------------
+#
+# DragonRR: "Color profiling is very slow again".  One slider move in the
+# Colors bar read and parsed this file some 90 to 150 times (every switch,
+# count and profile asks it again), ~5 ms each once a project's files carry
+# profiles of their own: most of a second with the window waiting.  So each
+# folder's file is parsed once and kept until it changes on disk.  A change
+# is seen by its time and size, and where a write could have kept both (one
+# made in the same clock tick as the one read) by its bytes too, the way git
+# guards its index against "racy" writes.
+
+class _Entry:
+    """One folder's file as last read: its *stamp* (time, size), when it was
+    read (*read_ns*), its bytes, the parsed *data*, the same data marshalled
+    (a fresh copy for :func:`load` in a third of the time json takes), and
+    what callers worked out from it (:func:`derived`)."""
+    __slots__ = ("stamp", "read_ns", "raw", "data", "frozen", "derived")
+
+    def __init__(self, stamp, read_ns, raw, data, frozen=None, derived=None):
+        self.stamp, self.read_ns, self.raw, self.data = stamp, read_ns, raw, data
+        self.frozen = marshal.dumps(data) if frozen is None else frozen
+        self.derived = {} if derived is None else derived
+
+
+#: ``{path: _Entry}``, the newest last
+_CACHE = {}
+_CACHE_LOCK = threading.Lock()
+#: a file read within this long of its last change is checked byte for byte:
+#: a later write in the same tick of the file system's clock (up to 2 s on
+#: FAT) keeps the time and maybe the size
+_RACY_NS = 2_000_000_000
+_CACHE_MAX = 16
+
+
+def _cache_path(assets_dir):
+    return os.path.normcase(os.path.abspath(os.path.join(assets_dir,
+                                                         SIDE_CAR)))
+
+
+def _parsed(raw):
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return {}
+    return _prune_non_slot_keys(data) if isinstance(data, dict) else {}
+
+
+def _remember(path, entry):
+    with _CACHE_LOCK:
+        _CACHE.pop(path, None)
+        _CACHE[path] = entry
+        while len(_CACHE) > _CACHE_MAX:
+            _CACHE.pop(next(iter(_CACHE)))
+    return entry
+
+
+def _entry(assets_dir):
+    """The cache entry of *assets_dir*'s file, read again only when it
+    changed; ``None`` when there is no file to read."""
+    path = _cache_path(assets_dir)
+    try:
+        st = os.stat(path)
+    except OSError:
+        with _CACHE_LOCK:
+            _CACHE.pop(path, None)
+        return None
+    stamp = (st.st_mtime_ns, st.st_size)
+    with _CACHE_LOCK:
+        hit = _CACHE.get(path)
+    if hit is not None and hit.stamp == stamp \
+            and hit.read_ns - st.st_mtime_ns > _RACY_NS:
+        return hit
+    now = time.time_ns()
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    if hit is not None and hit.raw == raw:
+        # the same bytes: the same data, and what was worked out from it
+        return _remember(path, _Entry(stamp, now, raw, hit.data, hit.frozen,
+                                      hit.derived))
+    return _remember(path, _Entry(stamp, now, raw, _parsed(raw)))
+
+
+def peek(assets_dir):
+    """:func:`load`, shared and never to be changed: the caller only reads it
+    (PAD-464: no copy is made, so a look-up costs next to nothing)."""
+    if not assets_dir:
+        return {}
+    got = _entry(assets_dir)
+    return got.data if got is not None else {}
+
+
+def derived(assets_dir, name, build):
+    """``build(data)`` (*data* :func:`peek`'s) for the file as it is now,
+    worked out once and kept with it until the file changes (PAD-464: a
+    project's colour profiles, parsed once rather than for every look-up).
+    What it returns is shared too, never to be changed."""
+    got = _entry(assets_dir) if assets_dir else None
+    if got is None:
+        return build({})
+    try:
+        return got.derived[name]
+    except KeyError:
+        pass
+    out = got.derived[name] = build(got.data)
+    return out
+
+
 def load(assets_dir):
     """Return the staged-changes mapping recorded for *assets_dir*, or ``{}``.
 
     Best-effort: a missing/old/corrupt sidecar simply yields ``{}`` (the same
     empty state a folder that was never edited has), so callers never need to
-    special-case "no file yet".
+    special-case "no file yet".  The caller's own copy, free to change (one
+    only read is :func:`peek`'s).
     """
     if not assets_dir:
         return {}
-    try:
-        with open(os.path.join(assets_dir, SIDE_CAR), encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    return _prune_non_slot_keys(data) if isinstance(data, dict) else {}
+    got = _entry(assets_dir)
+    return marshal.loads(got.frozen) if got is not None else {}
 
 
 def save(assets_dir, payload):
@@ -84,12 +194,22 @@ def save(assets_dir, payload):
     """
     if not assets_dir or not os.path.isdir(assets_dir):
         return
+    text = json.dumps(payload, indent=2)
+    path = _cache_path(assets_dir)
+    now = time.time_ns()
     try:
         with open(os.path.join(assets_dir, SIDE_CAR), "w",
                   encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
+            f.write(text)
+        st = os.stat(path)
     except OSError:
-        pass
+        with _CACHE_LOCK:
+            _CACHE.pop(path, None)
+        return
+    # the bytes on disk: text mode wrote each newline as the system's
+    raw = text.replace("\n", os.linesep).encode("utf-8")
+    _remember(path, _Entry((st.st_mtime_ns, st.st_size), now, raw,
+                           _parsed(raw)))
 
 
 def live_assignments(saved, slots_by_rel):

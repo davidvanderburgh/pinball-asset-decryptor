@@ -623,72 +623,122 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
 # (debugfs `write` takes them from the HOST file, which on a Windows drive is
 # 0777), and gives a new file the stock asset mode 0100664 and its directory's
 # owner.
+#
+# The files go through a FEW debugfs sessions, not four per file.  Every session
+# opens the partition afresh - on Windows through WSL onto the image on the
+# Windows drive - and a writing one reads and rewrites its bitmaps and group
+# descriptors, so a session per step was most of what a big delivery cost (601
+# files: some 2,400 sessions, and minutes with nothing new in the log).  Now one
+# read-only session looks up every path the jobs name, the whole plan is made
+# from that (replaced or new, which mode and owner, which scene.assets to make)
+# before anything is written, and the files go in batches of one session each,
+# which stats what it wrote; the log names each file as its batch lands.
 
 #: The mode a new file gets: what every stock asset on a Spike 2 card carries.
 PINNED_NEW_MODE = 0o100664
+
+#: A batch of a pinned delivery ends at this many files or bytes (a bigger file
+#: is a batch of its own): few enough sessions to cost nothing next to the
+#: copies, small enough that the log moves while a big delivery lands.
+PINNED_BATCH_FILES = 32
+PINNED_BATCH_BYTES = 64 << 20
 
 _PINNED_HEAD = r'''set -e
 export E2FSPROGS_FAKE_TIME=@EPOCH@ E2FSCK_TIME=@EPOCH@
 DEV=@DEV@
 command -v debugfs >/dev/null && command -v e2fsck >/dev/null || { echo "PAD_GROW_NOTOOLS debugfs/e2fsck" >&2; exit 5; }
-# stat of a path -> "<size> <mode> <uid> <gid>", or nothing when it is not there
-fst() {
-    debugfs -R "stat \"$1\"" "$DEV" 2>/dev/null | awk '
-        /^Inode:/ { for (i = 1; i < NF; i++) if ($i == "Mode:") m = $(i + 1) }
-        /^User:/  { u = $2; g = $4; for (i = 1; i < NF; i++) if ($i == "Size:") s = $(i + 1) }
-        END { if (m != "") print s, m, u, g }'
-}
 stats=$(debugfs -R stats "$DEV" 2>/dev/null)
 fb=$(echo "$stats" | awk -F: '/^Free blocks:/ { gsub(/ /, "", $2); print $2 }')
 bs=$(echo "$stats" | awk -F: '/^Block size:/ { gsub(/ /, "", $2); print $2 }')
 [ -n "$fb" ] && [ -n "$bs" ] || { echo "PAD_GROW_NOFS" >&2; exit 7; }
 LOG=$(mktemp /var/tmp/pad_pinned_XXXXXX)
-trap 'rm -f "$LOG" "$LOG.cmd"' EXIT
+trap 'rm -f "$LOG" "$LOG".*' EXIT
+# a session's output -> for each `stat "<path>"` it ran, in order,
+# "<size> <mode> <uid> <gid> <path>", or "- - - - <path>" when it is not there
+stats_of() {
+    awk '
+        function out() {
+            if (p == "") return
+            v = (m != "") ? s " " m " " u " " g : "- - - -"
+            print v, p; p = m = ""
+        }
+        /^debugfs: / { out(); if (index($0, "debugfs: stat \"") == 1) p = substr($0, 16, length($0) - 16); next }
+        p != "" && /^Inode:/ { for (i = 1; i < NF; i++) if ($i == "Mode:") m = $(i + 1) }
+        p != "" && /^User:/  { u = $2; g = $4; for (i = 1; i < NF; i++) if ($i == "Size:") s = $(i + 1) }
+        END { out() }' "$1"
+}
+'''
+
+_PINNED_BODY = r'''
+# every path the jobs name, looked up in ONE read-only session
+for i in "${!REL[@]}"; do
+    printf 'stat "%s"\nstat "%s"\n' "${REL[$i]}" "${PAR[$i]}"
+    [ -z "${MKD[$i]}" ] || printf 'stat "%s"\nstat "%s"\n' "${MKD[$i]}" "${MKU[$i]}"
+done > "$LOG.cmd"
+debugfs -f "$LOG.cmd" "$DEV" > "$LOG.out" 2>/dev/null || { echo "PAD_GROW_DEBUGFS looking up the files on the card failed" >&2; exit 6; }
+stats_of "$LOG.out" > "$LOG.st"
+declare -A ST
+while read -r s m u g p; do
+    [ "$s" = - ] || ST["$p"]="$s $m $u $g"
+done < "$LOG.st"
+
 need=0
-'''
-
-_PINNED_NEED = r'''cur=$(fst @TGT@ | cut -d" " -f1); new=$(stat -c%s @SRC@)
-d=$((new - ${cur:-0}))
-if [ "$d" -gt 0 ]; then need=$((need + d))
-echo "PAD_GROW_ITEM $d @REL@"; fi
-'''
-
-_PINNED_MKDIR = r'''if [ -z "$(fst @DIR@)" ] && [ -n "$(fst @UP@)" ]; then
-    set -- $(fst @UP@); dmode=$(printf "%o" $((8#40000 | 8#$2)))
-    printf 'mkdir "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
-        @DIR@ @DIR@ "$dmode" @DIR@ "$3" @DIR@ "$4" > "$LOG.cmd"
-    debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
-    bad=$(grep -v '^debugfs\|^$' "$LOG" || true)
-    if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS "@DIR@": $bad" >&2; exit 6; fi
-    echo "PAD_GROW_MKDIR "@DIR@
-fi
-'''
-
-_PINNED_SPACE = r'''avail=$((fb * bs))
+for i in "${!REL[@]}"; do
+    cur=${ST[${REL[$i]}]%% *}
+    d=$((SZ[i] - ${cur:-0}))
+    if [ "$d" -gt 0 ]; then need=$((need + d)); echo "PAD_GROW_ITEM $d ${REL[$i]#/}"; fi
+done
+avail=$((fb * bs))
 if [ "$need" -gt "$avail" ]; then echo "PAD_GROW_ENOSPC need=$need avail=$avail" >&2; exit 3; fi
 echo "PAD_GROW_SPACE need=$need avail=$avail"
-'''
 
-_PINNED_JOB = r'''old=$(fst @TGT@)
-if [ -n "$old" ]; then
-    set -- $old; mode=$2; uid=$3; gid=$4
-    printf 'kill_file "%s"\nrm "%s"\n' @TGT@ @TGT@ > "$LOG.cmd"
-else
-    par=$(fst @PARENT@)
-    [ -n "$par" ] || { echo "PAD_GROW_NODIR "@REL@ >&2; exit 4; }
-    set -- $par; mode=@NEWMODE@; uid=$3; gid=$4
-    : > "$LOG.cmd"
-fi
-# debugfs prints a mode's permission bits only (0664); a FILE needs S_IFREG too
-case "$mode" in 10????) ;; *) mode=$(printf "%o" $((8#100000 | 8#$mode))) ;; esac
-printf 'write "%s" "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
-    @SRC@ @TGT@ @TGT@ "$mode" @TGT@ "$uid" @TGT@ "$gid" >> "$LOG.cmd"
-debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
-bad=$(grep -v '^debugfs\|^Allocated inode:\|^$' "$LOG" || true)
-if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS "@REL@": $bad" >&2; exit 6; fi
-got=$(fst @TGT@ | cut -d" " -f1); want=$(stat -c%s @SRC@)
-if [ "$got" != "$want" ]; then echo "PAD_GROW_SHORT "@REL@" $got/$want" >&2; exit 6; fi
-echo "PAD_GROW_OK @I@ "@REL@
+# the whole plan before anything is written: each batch's commands, ST kept as
+# each path will be once the jobs before it have run
+k=0
+for i in "${!REL[@]}"; do
+    [ "$i" -lt "${CUT[$k]}" ] || k=$((k + 1))
+    B="$LOG.b$k"; t=${REL[$i]}; dir=${MKD[$i]}
+    # a scene.assets the card never had: made with its scene directory's mode and owner
+    if [ -n "$dir" ] && [ -z "${ST[$dir]}" ] && [ -n "${ST[${MKU[$i]}]}" ]; then
+        set -- ${ST[${MKU[$i]}]}; dmode=$(printf "%o" $((8#40000 | 8#$2)))
+        printf 'mkdir "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
+            "$dir" "$dir" "$dmode" "$dir" "$3" "$dir" "$4" >> "$B"
+        ST[$dir]="0 $dmode $3 $4"; MADE[$i]=1
+    fi
+    if [ -n "${ST[$t]}" ]; then
+        set -- ${ST[$t]}; mode=$2; uid=$3; gid=$4
+        printf 'kill_file "%s"\nrm "%s"\n' "$t" "$t" >> "$B"
+    else
+        [ -n "${ST[${PAR[$i]}]}" ] || { echo "PAD_GROW_NODIR ${t#/}" >&2; exit 4; }
+        set -- ${ST[${PAR[$i]}]}; mode=$NEWMODE; uid=$3; gid=$4
+    fi
+    # debugfs prints a mode's permission bits only (0664); a FILE needs S_IFREG too
+    case "$mode" in 10????) ;; *) mode=$(printf "%o" $((8#100000 | 8#$mode))) ;; esac
+    printf 'write "%s" "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\nstat "%s"\n' \
+        "${SRC[$i]}" "$t" "$t" "$mode" "$t" "$uid" "$t" "$gid" "$t" >> "$B"
+    ST[$t]="${SZ[$i]} $mode $uid $gid"
+done
+
+# one writing session a batch; its stats read back what it wrote, in order
+i=0
+for k in "${!CUT[@]}"; do
+    last=$((CUT[k] - 1))
+    rc=0; debugfs -w -f "$LOG.b$k" "$DEV" > "$LOG.out" 2> "$LOG.err" || rc=$?
+    bad=$(grep -v '^debugfs\|^$' "$LOG.err" || true)
+    if [ "$rc" -ne 0 ] || [ -n "$bad" ]; then
+        echo "PAD_GROW_DEBUGFS ${REL[$i]#/} to ${REL[$last]#/} (exit $rc): $bad" >&2; exit 6
+    fi
+    stats_of "$LOG.out" > "$LOG.st"
+    while read -r s m u g p; do
+        [ "$i" -le "$last" ] && [ "$p" = "${REL[$i]}" ] && [ "$s" = "${SZ[$i]}" ] || {
+            echo "PAD_GROW_SHORT ${p#/} $s/${SZ[$i]}" >&2; exit 6; }
+        [ -z "${MADE[$i]}" ] || echo "PAD_GROW_MKDIR ${MKD[$i]}"
+        echo "PAD_GROW_OK $i ${REL[$i]#/}"
+        i=$((i + 1))
+    done < "$LOG.st"
+    [ "$i" -gt "$last" ] || { echo "PAD_GROW_SHORT ${REL[$i]#/} was not read back" >&2; exit 6; }
+done
+echo "PAD_GROW_CHECKING"
 '''
 
 _PINNED_TAIL = r'''rc=0; e2fsck -fy "$DEV" > "$LOG" 2>&1 || rc=$?
@@ -697,36 +747,69 @@ echo "PAD_GROW_DONE fsck=$rc"
 '''
 
 
-def _pinned_script(part_offset, jobs_exec, image_exec, epoch):
-    """The bash script :func:`grow_files_pinned` runs: a free-space check, then
-    per job one ``debugfs -w`` (kill_file/rm when the file exists, write, the
-    old or stock mode/uid/gid), a size check and a ``PAD_GROW_OK`` marker, then
-    one ``e2fsck -fy`` to reconcile the free counts debugfs leaves stale.  Every
-    tool runs with the clock pinned to *epoch*."""
+def _pinned_batches(sizes):
+    """Where each batch of a pinned delivery ends (one past its last job) for
+    jobs of *sizes* bytes: :data:`PINNED_BATCH_FILES` files and
+    :data:`PINNED_BATCH_BYTES` bytes at most, a bigger file a batch of its
+    own."""
+    cuts, n, total = [], 0, 0
+    for i, size in enumerate(sizes):
+        if n and (n >= PINNED_BATCH_FILES or total + size > PINNED_BATCH_BYTES):
+            cuts.append(i)
+            n = total = 0
+        n += 1
+        total += size
+    if n:
+        cuts.append(len(sizes))
+    return cuts
+
+
+def _pinned_script(part_offset, jobs_exec, image_exec, epoch, sizes=None):
+    """The bash script :func:`grow_files_pinned` runs: one read-only debugfs
+    session looks up every path the jobs name; a free-space check; the whole
+    plan (kill_file/rm when the file exists, write, the old or stock
+    mode/uid/gid, a scene.assets made where one may be) before anything is
+    written; then per batch (:func:`_pinned_batches`) one ``debugfs -w`` that
+    stats what it wrote, a size check and a ``PAD_GROW_OK`` marker per file in
+    order; then one ``e2fsck -fy`` to reconcile the free counts debugfs leaves
+    stale.  Every tool runs with the clock pinned to *epoch*.  *sizes* are the
+    sources' sizes in bytes (read here when not given, where the job paths are
+    this host's; a source not there counts 0, and grow_files_pinned refuses
+    one before it gets here).
+
+    A batch debugfs complains about counts as NOT written, every file in it:
+    the complaint does not say which file it is about (``write: Ext2 file
+    already exists``), and a file counted that is not on the card would go
+    into the build record as on it, where one not counted only makes the next
+    build whole."""
     q = shlex.quote
     for rel, src in jobs_exec:
         if '"' in src or '"' in rel:
             raise Ext4GrowError("a path contains a double quote, which debugfs "
                                 "cannot take: %s" % (src if '"' in src else rel))
-    out = [_PINNED_HEAD.replace("@EPOCH@", str(int(epoch))).replace(
-        "@DEV@", q("%s?offset=%d" % (image_exec, int(part_offset))))]
-    for rel, src in jobs_exec:
-        out.append(_PINNED_NEED.replace("@TGT@", q("/" + rel))
-                   .replace("@SRC@", q(src)).replace("@REL@", q(rel)))
-    out.append(_PINNED_SPACE)
-    for i, (rel, src) in enumerate(jobs_exec):
-        tgt = "/" + rel
-        made = _makes_dir(rel)
-        if made:
-            out.append(_PINNED_MKDIR.replace("@DIR@", q("/" + made[0])).replace("@UP@", q("/" + made[1])))
-        out.append(_PINNED_JOB.replace("@TGT@", q(tgt))
-                   .replace("@PARENT@", q(tgt.rsplit("/", 1)[0] or "/"))
-                   .replace("@SRC@", q(src))
-                   .replace("@REL@", q(rel))
-                   .replace("@NEWMODE@", "%o" % PINNED_NEW_MODE)
-                   .replace("@I@", str(i)))
-    out.append(_PINNED_TAIL)
-    return "".join(out)
+    if sizes is None:
+        sizes = [os.path.getsize(src) if os.path.isfile(src) else 0
+                 for _rel, src in jobs_exec]
+    tgts = ["/" + rel for rel, _src in jobs_exec]
+    made = [_makes_dir(rel) for rel, _src in jobs_exec]
+
+    def arr(name, values):
+        return "%s=(%s)\n" % (name, " ".join(q(str(v)) for v in values))
+    return "".join([
+        _PINNED_HEAD.replace("@EPOCH@", str(int(epoch))).replace(
+            "@DEV@", q("%s?offset=%d" % (image_exec, int(part_offset)))),
+        # per job: its card path, its directory, its source and size, and the
+        # scene.assets it may make with that directory's own parent
+        arr("REL", tgts),
+        arr("PAR", [t.rsplit("/", 1)[0] or "/" for t in tgts]),
+        arr("SRC", [src for _rel, src in jobs_exec]),
+        arr("SZ", [int(s) for s in sizes]),
+        arr("MKD", ["/" + m[0] if m else "" for m in made]),
+        arr("MKU", ["/" + m[1] if m else "" for m in made]),
+        arr("CUT", _pinned_batches(sizes)),
+        "NEWMODE=%o\n" % PINNED_NEW_MODE,
+        _PINNED_BODY,
+        _PINNED_TAIL])
 
 
 def partition_epoch(image_path, part_offset):
@@ -776,31 +859,58 @@ def grow_files_pinned(image_path, part_offset, jobs, epoch, log=None,
     jobs_exec = [(rel, ex.to_exec_path(os.path.abspath(src))) for rel, src in jobs]
     log("Writing %d file(s) onto the card with a fixed clock, so the next "
         "build of the same project is byte-identical..." % len(jobs), "info")
-    script = _pinned_script(part_offset, jobs_exec, image_exec, epoch)
+    script = _pinned_script(part_offset, jobs_exec, image_exec, epoch,
+                            sizes=[os.path.getsize(src) for _rel, src in jobs])
     import tempfile
+    import threading
     b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
     fd, tmp = tempfile.mkstemp(suffix=".b64", prefix="pad_pinned_")
+    # The script's lines are read as they come, so the log names each file as
+    # its batch lands instead of all of them once the last one has.  stream()
+    # sets no deadline while output flows, so the run is stopped at *timeout*
+    # here, as run() stopped it.
+    timed_out = []
+    timer = threading.Timer(timeout, lambda: (timed_out.append(True), ex.kill()))
+    timer.daemon = True
+    lines, grown = [], 0
     try:
         os.write(fd, b64.encode("ascii"))
         os.close(fd)
-        out = ex.run("base64 -d < %s | bash" % shlex.quote(ex.to_exec_path(tmp)),
-                     timeout=timeout)
+        timer.start()
+        for line in ex.stream("base64 -d < %s | bash"
+                              % shlex.quote(ex.to_exec_path(tmp)),
+                              timeout=timeout):
+            lines.append(line)
+            if line.startswith("PAD_GROW_OK "):
+                grown += 1
+                log("  wrote %s (%d of %d)"
+                    % (line.split(" ", 2)[-1], grown, len(jobs)), "info")
+            elif line.startswith("PAD_GROW_CHECKING"):
+                log("Checking the card's games partition after the copies "
+                    "(e2fsck)...", "info")
     except Exception as e:  # noqa: BLE001 - executor raises CommandError
-        text = str(e)
-        n_ok = text.count("PAD_GROW_OK ")
+        text = "\n".join(lines)
         if "PAD_GROW_ENOSPC" in text:
-            raise _no_space(text, grown=n_ok) from e
-        raise Ext4GrowError("Couldn't write files:\n%s" % text,
-                            grown=n_ok) from e
+            raise _no_space(text, grown=grown) from e
+        if timed_out:
+            raise Ext4GrowError("Couldn't write files: stopped after %d s "
+                                "with %d of %d written."
+                                % (timeout, grown, len(jobs)),
+                                grown=grown) from e
+        # what went wrong, without the progress lines that came before it
+        said = [ln for ln in lines if ln and not ln.startswith(
+            ("PAD_GROW_OK ", "PAD_GROW_ITEM ", "PAD_GROW_SPACE ",
+             "PAD_GROW_MKDIR ", "PAD_GROW_CHECKING"))]
+        raise Ext4GrowError("Couldn't write files (exit %s):\n%s"
+                            % (getattr(e, "returncode", "?"),
+                               "\n".join(said[-20:]) or e),
+                            grown=grown) from e
     finally:
+        timer.cancel()
         try:
             os.remove(tmp)
         except OSError:
             pass
-    grown = out.count("PAD_GROW_OK ")
-    for line in out.splitlines():
-        if line.startswith("PAD_GROW_OK "):
-            log("  wrote %s" % line.split(" ", 2)[-1], "info")
     log("Wrote %d file(s) with the clock fixed at %d (filesystem checked)."
         % (grown, int(epoch)), "success")
     return grown

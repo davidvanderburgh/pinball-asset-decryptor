@@ -368,8 +368,9 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
     # opening / closing
     # ------------------------------------------------------------------
     def open(self, assets, preselect_rel=None, preselect_video=None,
-             preselect_dir=None, focus_text=None):
-        """Tk ``_open_scene_browser`` + ``open_scene_browser``."""
+             preselect_dir=None, focus_text=None, search=None):
+        """Tk ``_open_scene_browser`` + ``open_scene_browser``; *search* goes in
+        the search box (a game-program line several screens hold, PAD-485)."""
         preselect = preselect_dir
         if preselect is None and (preselect_rel or preselect_video):
             rel = (preselect_rel or preselect_video).replace("\\", "/")
@@ -389,6 +390,8 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         if self._mlay is not None and self._mlay["assets"] != assets:
             self._mlay = None                  # PAD-323: another project's scenes
         if self._alive:
+            if search is not None:
+                self._search = search
             if self.assets_dir != assets:
                 self.assets_dir = assets
                 self.reload(preselect, focus_text)
@@ -398,7 +401,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             self._alive = True
             self.assets_dir = assets
             self._sort_col, self._sort_rev = "#0", False
-            self._search = ""
+            self._search = search or ""
             self._screen = _ALL_SCREENS
             self._fps_choice = _FPS_FROM_FILE
             self._bg = self._bg_names()[0]
@@ -999,7 +1002,12 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
     def _pending_texts(self, card, layout=None):
         """``{display string: replacement}`` the preview of *card* draws: its
         own Replace Text rows plus every game-program row whose original the
-        scene draws (decoded on both sides)."""
+        scene draws (decoded on both sides).  A scene line reading the same
+        but for a closing ``!``, ``.`` or ``?`` is a stand-in for the program
+        line too (PAD-485: the jackpot screen's "GIGAN JACKPOT" for the
+        game's "GIGAN JACKPOT!").  A program edit wins over the scene's own
+        row, as the game writes over the stand-in, and a program line
+        reading exactly the same wins over a near one."""
         if not card:
             return {}
         changed = self._load_text_changes()
@@ -1015,13 +1023,24 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         if not drawn:
             return out
         from ..plugins.stern import progtext
+        from .text_rules import stand_in_words
+        near = {}
+        for t in drawn:
+            near.setdefault(stand_in_words(t, True), []).append(t)
+        near.pop("", None)
+        exact, loose = {}, {}
         for path, pairs in changed.items():
             if (path or "").lower().endswith(".radium"):
                 continue
             for orig, rep in pairs:
                 o = progtext.decode_text(orig)
                 if o in drawn:
-                    out[o] = progtext.decode_text(rep)
+                    exact[o] = progtext.decode_text(rep)
+                else:
+                    for t in near.get(stand_in_words(o, True)) or ():
+                        loose.setdefault(t, progtext.decode_text(rep))
+        out.update(loose)
+        out.update(exact)
         return out
 
     def fonts_changed(self):

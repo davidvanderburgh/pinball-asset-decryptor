@@ -1067,25 +1067,40 @@ class TextTab(TabService):
                 "Pick a line of text first — the Scenes tab then opens on "
                 "the scene that draws it.")
             return False
+        search = None
         if not R.row_is_scene(r):
-            compat.messagebox.showinfo(
-                "Scenes",
-                "This is a game-program string — the game code draws it at "
-                "runtime, so there's no scene file to show. (It still writes "
-                "to the card like any other text edit.)")
-            return False
+            # PAD-485: the game fills its line into a text box on one of its
+            # screens; that box's own words are a stand-in reading the same
+            hits = R.stand_in_rows(self._text_rows, r)
+            if not hits:
+                compat.messagebox.showinfo(
+                    "Scenes",
+                    "This is a game-program string. The game puts it into a "
+                    "text box on one of its screens as it runs, and no "
+                    "screen's own text reads the same, so there's no screen "
+                    "to show. (It still writes to the card like any other "
+                    "text edit.)")
+                return False
+            dirs = {h["path"].replace("\\", "/").rsplit("/", 1)[0]
+                    for h in hits}
+            r = hits[0]
+            if len(dirs) > 1:
+                # several screens hold it: the search lists them all
+                search = R.stand_in_words(r["original"], True)
         scene_dir = (r["path"] or "").replace("\\", "/").rsplit("/", 1)[0]
         if not scene_dir:
             compat.messagebox.showinfo(
                 "Scenes", "This string isn't recorded against a scene file.")
             return False
         return self._open_scene_browser(preselect_dir=scene_dir,
-                                        focus_text=r["original"])
+                                        focus_text=r["original"],
+                                        search=search)
 
     def _open_scene_browser(self, preselect_rel=None, preselect_video=None,
-                            preselect_dir=None, focus_text=None):
+                            preselect_dir=None, focus_text=None, search=None):
         """Tk ``_open_scene_browser``: the Scenes window, optionally on the
-        scene holding an Images row / a Video row / a scene directory."""
+        scene holding an Images row / a Video row / a scene directory, and
+        with *search* in its search box."""
         assets = self._assets_path()
         if not assets or not os.path.isdir(assets):
             compat.messagebox.showinfo(
@@ -1096,7 +1111,7 @@ class TextTab(TabService):
         return self.scenes.open(assets, preselect_rel=preselect_rel,
                                 preselect_video=preselect_video,
                                 preselect_dir=preselect_dir,
-                                focus_text=focus_text)
+                                focus_text=focus_text, search=search)
 
     def open_scene_browser(self, assets=None, preselect=None, focus_text=None,
                            preselect_rel=None, preselect_video=None,

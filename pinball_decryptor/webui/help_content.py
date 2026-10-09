@@ -1003,9 +1003,11 @@ HELP_CONTENT = {
          "and the art behind it.\n\n"
          "- Your edits show there before anything is written (the Contents row says "
          "\"(not built yet)\"), so you can check a longer line fits its box.\n"
-         "- A game-program line whose scene is a placeholder shows your edit, since "
-         "that is what the machine draws.\n"
-         "- Game-program lines no scene draws have nothing to preview."),
+         "- A game-program line opens on the screen whose own text reads the same "
+         "(a closing ! . or ? aside): the game puts its line in that box as it runs, "
+         "so the box's words are a stand-in and the preview shows your edit there. "
+         "When several screens hold it, the Scenes search lists them all.\n"
+         "- Game-program lines no screen's text matches have nothing to preview."),
         ("Narrowing a big card down",
          "- **Show:** All, Changed or Unchanged. Unchanged is what you haven't done "
          "yet.\n"

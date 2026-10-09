@@ -473,6 +473,109 @@ def test_a_hidden_run_puts_nothing_on_the_desktop():
     assert "ok|remote|hidden)" in body[:body.index("\nesac")]
 
 
+#: pad_hidden_display against a synthetic machine: `listening` are the display
+#: numbers with an abstract socket in the (shared) network namespace, `ours`
+#: the command lines of this distro's processes, which is all pgrep can see.
+_HIDDEN_DRIVER = """#!/bin/bash
+RIG=$(pwd); export RIG
+PATH=$RIG/bin:$PATH; export PATH
+PAD_HOME=$RIG; export PAD_HOME
+PAD_NET_UNIX=$RIG/net_unix; export PAD_NET_UNIX
+. "$RIG/padpath.sh"
+if n=$(pad_hidden_display %s 2>"$RIG/said"); then echo "N=$n"; else echo "N=none"; fi
+echo "SAID=$(tr '\\n' ' ' < "$RIG/said")"
+"""
+
+_FAKE_PGREP = """#!/bin/sh
+# pgrep -f <pattern>: this distro's processes are the lines of $RIG/procs
+[ "$1" = -f ] || exit 2
+grep -Eq "$2" "$RIG/procs"
+"""
+
+
+def _hidden(tmp_path, slot, listening=(), ours=()):
+    rig = tmp_path / ("hid%d" % len(list(tmp_path.glob("hid*"))))
+    (rig / "bin").mkdir(parents=True)
+    shutil.copy(os.path.join(RIG, "padpath.sh"), str(rig / "padpath.sh"))
+    files = {
+        "net_unix": "Num       RefCount Protocol Flags    Type St Inode Path\n" + "".join(
+            "ffff89a935521100: 00000002 00000000 00010000 0001 01 615474%02d "
+            "@/tmp/.X11-unix/X%d\n" % (i, n) for i, n in enumerate(listening))
+            + "ffff89a453473740: 00000002 00000000 00010000 0001 01 54239166 "
+              "/tmp/.X11-unix/X0\n",
+        "procs": "".join(line + "\n" for line in ours) or "init\n",
+        "bin/pgrep": _FAKE_PGREP,
+        "driver.sh": _HIDDEN_DRIVER % slot,
+    }
+    for name, text in files.items():
+        with open(str(rig / name), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        os.chmod(str(rig / name), 0o755)
+    out = subprocess.run([BASH, "driver.sh"], cwd=str(rig), capture_output=True,
+                         text=True)
+    facts = dict(line.partition("=")[::2] for line in out.stdout.splitlines()
+                 if "=" in line)
+    return facts.get("N", "?" + out.stderr), facts.get("SAID", "")
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_a_hidden_run_starts_its_display_where_nothing_listens(tmp_path):
+    assert _hidden(tmp_path, 1)[0] == "71"
+    # another rig's display, and a number that merely STARTS with ours, are not it
+    assert _hidden(tmp_path, 1, listening=(72, 710, 7100),
+                   ours=("Xvfb :710 -screen 0 1920x1080x24",))[0] == "71"
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_a_hidden_run_reuses_this_distros_display(tmp_path):
+    assert _hidden(tmp_path, 1, listening=(71,),
+                   ours=("Xvfb :71 -screen 0 1920x1080x24 -nolisten tcp",))[0] == "71"
+    assert _hidden(tmp_path, 3, listening=(73,),
+                   ours=("/usr/bin/Xvfb :73 -screen 0 1920x1080x24",))[0] == "73"
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_a_hidden_run_passes_over_another_distros_display(tmp_path):
+    """PAD-488: the WSL distros share one network namespace, so PAD-Runtime's
+    Xvfb on :71 is listed in Ubuntu's /proc/net/unix - but not one SysV IPC
+    namespace, and on it every frame failed Mesa's shared-memory attach."""
+    n, said = _hidden(tmp_path, 1, listening=(71,))
+    assert n == "1071"
+    assert "display :71 is another WSL distro" in said
+    # ...and the next time, this distro's own :1071 is reused
+    assert _hidden(tmp_path, 1, listening=(71, 1071),
+                   ours=("Xvfb :1071 -screen 0 1920x1080x24",))[0] == "1071"
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_a_hidden_run_with_every_display_foreign_gets_none(tmp_path):
+    n, said = _hidden(tmp_path, 2, listening=(72, 1072, 2072, 3072))
+    assert n == "none"
+    assert said.count("another WSL distro") == 4
+
+
+def test_watch_asks_for_this_distros_display():
+    text = src("watch.sh")
+    block = text[text.index('if [ "$PAD_HIDDEN" = 1 ]; then'):]
+    block = block[:block.index("\nfi\n")]
+    assert 'HID_N=$(pad_hidden_display "$PAD_SLOT")' in block
+    assert "HID_N=$((70 + PAD_SLOT))" not in block
+
+
+def test_only_a_hidden_run_presents_less():
+    """PAD-488: the hidden window gets one frame in 30 (the renderer's FBO,
+    which glshot.sh reads, still gets every one); a caller's own value wins,
+    and a visible run - on the GPU, watched - still presents every frame."""
+    text = src("watch.sh")
+    block = text[text.index('if [ "$PAD_HIDDEN" = 1 ]; then'):]
+    block = block[:block.index("\nfi\n")]
+    assert "export PAD_GL_WIN_EVERY=${PAD_GL_WIN_EVERY:-30}" in block
+    assert text.count("PAD_GL_WIN_EVERY=") == 1
+    gl = src("padglhost.c")
+    assert "static int win_every = 1;" in gl
+    assert "if (win_every > 1 && (frames_done % win_every)) return;" in gl
+
+
 def test_the_board_says_a_run_is_hidden():
     """The triage dashboard's rig pill names the game of a hidden run - the
     run record is how it knows the run has no window."""

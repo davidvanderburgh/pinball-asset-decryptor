@@ -67,6 +67,13 @@ fi
 # looks for the socket FILE.
 # Readiness is Xvfb's own -displayfd, not a probe tool the distro may lack.
 #
+# ★ THE DISPLAY MUST BE THIS DISTRO'S OWN XVFB (PAD-488; pad_hidden_display in
+# padpath.sh). The WSL distros share one network namespace but not SysV IPC,
+# and this used to reuse whatever Xvfb listened on :70+N - measured 2026-10-09,
+# rigs 1-4's were PAD-Runtime's while the sweeps ran in Ubuntu, and every frame
+# failed Mesa's shared-memory attach ("MESA: error: Failed to attach to x11
+# shm") and was dropped. Another distro's display is passed over for :1070+N.
+#
 # UNSAID, A RUN FOR A TICKET OR A SESSION IS HIDDEN (PAD-309). David,
 # 2026-10-01: "shouldn't the rigs always be headless (no window) when
 # running?" - the rule was the sessions' to remember, and one that did not
@@ -86,7 +93,11 @@ if [ -z "${PAD_HIDDEN:-}" ]; then
 fi
 export PAD_HIDDEN
 if [ "$PAD_HIDDEN" = 1 ]; then
-    HID_N=$((70 + PAD_SLOT))
+    if ! HID_N=$(pad_hidden_display "$PAD_SLOT"); then
+        echo "[watch] PAD_HIDDEN=1: no private X display for rig $PAD_SLOT" \
+             "(:$((70 + PAD_SLOT)) and up are other distros')" >&2
+        exit 1
+    fi
     if ! grep -qa "@/tmp/.X11-unix/X$HID_N\$" /proc/net/unix 2>/dev/null; then
         if ! command -v Xvfb >/dev/null 2>&1; then
             echo "[watch] PAD_HIDDEN=1 needs Xvfb, which is not installed:" >&2
@@ -108,8 +119,20 @@ if [ "$PAD_HIDDEN" = 1 ]; then
     fi
     export DISPLAY=":$HID_N"
     export PAD_PLAYFIELD=0
+    # ★ AND THE HIDDEN WINDOW GETS ONE FRAME IN 30 (PAD-488). Nobody looks at
+    # it: glshot.sh, the picture check and every sweep read the guest's FBO,
+    # which the renderer fills for every frame either way. Presenting is the
+    # letterbox blit and the swap, in software here (Xvfb has no DRI3, so no
+    # GPU): Godzilla Pro 1.16 in attract, one rig, 40 s each, interleaved -
+    # the renderer took 105-108% of a core presenting every frame, 74%
+    # presenting none, 75-76% presenting one in 30. One in 30 keeps the window
+    # a live picture, about once a second, for next to nothing. The game sees
+    # nothing of it - a frame is acknowledged the same either way.
+    # A caller who names PAD_GL_WIN_EVERY still wins (1 = every frame).
+    export PAD_GL_WIN_EVERY=${PAD_GL_WIN_EVERY:-30}
     echo "[watch] hidden run: no windows on the desktop (private display" \
-         "$DISPLAY, no playfield window; pictures with glshot.sh)"
+         "$DISPLAY, no playfield window; pictures with glshot.sh;" \
+         "the window gets 1 frame in $PAD_GL_WIN_EVERY)"
 fi
 
 # ★ RIG-LOCAL EXTRA ENVIRONMENT (item 67). The app assembles the run's

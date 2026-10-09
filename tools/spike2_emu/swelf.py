@@ -277,6 +277,14 @@ def _ent_by_walkback(e, dev, dev_bound=2048, min_count=16):
     n = 0
     while _entry_ok(e, va, dev_bound):
         n += 1
+        # ★ STOP AT THE DUMMY (PAD-367). It is entry 0 - `_rows_roots` skips
+        # sid 0 as "a dummy with a null name" - so the table starts at it, and
+        # walking on lands one record early whenever the record in front still
+        # passes _entry_ok. On foo_fighters_le 1.03.0 it does: a descriptor
+        # pointing at the table reads as device 35, and every id came out one
+        # too high (READY at 2, the coin door at 34). See `_gen2_entry_ids`.
+        if _dummy_entry(e, va, ENTRY_STRIDE):
+            return va if n >= min_count else None
         va -= ENTRY_STRIDE
     return (va + ENTRY_STRIDE) if n >= min_count else None
 
@@ -576,18 +584,29 @@ def _entry_plausible(e, va, stride, dev_count):
     dev = e.u16(va + ENTRY_DEV_OFF)
     if num is None or dev is None or dev >= dev_count or num >= 1024:
         return False
-    if dev == 0:
-        off = e.off(va)
-        if off is None:
-            return False
-        raw = e.d[off:off + stride]
-        if len(raw) < stride:
-            return False
-        filled = sum(1 for i in range(0, stride - 3, 4)
-                     if struct.unpack_from("<I", raw, i)[0])
-        if filled > 1:
-            return False
+    if dev == 0 and not _dummy_entry(e, va, stride):
+        return False
     return True
+
+
+def _dummy_entry(e, va, stride):
+    """Is the `stride`-byte entry at `va` the table's DUMMY - device 0, and
+    otherwise empty: at most one non-zero word (the pointer that says INVALID,
+    or on the 44-byte generation the tail of the record in front)?
+
+    Entry 0 of every switch table measured is this record, so wherever a walk
+    meets it, the table starts there. See `_gen2_entry_ids`.
+    """
+    if e.u16(va + ENTRY_DEV_OFF) != 0:
+        return False
+    off = e.off(va)
+    if off is None:
+        return False
+    raw = e.d[off:off + stride]
+    if len(raw) < stride:
+        return False
+    return sum(1 for i in range(0, stride - 3, 4)
+               if struct.unpack_from("<I", raw, i)[0]) <= 1
 
 
 def _gen2_entry_ids(e, dev_start, dev_count, switch_devs):
@@ -603,10 +622,16 @@ def _gen2_entry_ids(e, dev_start, dev_count, switch_devs):
 
     foo_fighters_le PROVES they are different rather than merely bigger,
     because one machine answers twice: 1.03.0 has a stored address, is read
-    through its 44-byte entry table, and puts the coin door at id 34; 1.04.0's
+    through its 44-byte entry table, and puts the coin door at id 33; 1.04.0's
     addresses have moved, it falls through to here, and its device position is
-    583. This walk gives 1.04.0 ids 2..106 against 1.03.0's 2..106 - the same
+    583. This walk gives 1.04.0 ids 1..105 against 1.03.0's 1..105 - the same
     numbering for the same 105 switches, matched wire for wire.
+
+    ★ Both readings said 2..106 (coin door 34) until PAD-367, and agreeing
+    with each other proved nothing: both walks stepped one record past the
+    dummy, onto the same descriptor. A live run on foo_fighters_pro 1.04.0
+    found the door and the service buttons one switch off, and every one of
+    them right with each id one lower. See the dummy note in the walk below.
 
     HOW IT IS FOUND, and it is the method `_ent_by_walkback` already uses for
     the 44-byte generation: the table sits immediately before the device array,
@@ -637,24 +662,35 @@ def _gen2_entry_ids(e, dev_start, dev_count, switch_devs):
         # A gap of `stride` or more is the same alignment one record earlier,
         # so every distinct alignment is covered by gaps below the stride.
         for gap in range(0, stride, 2):
-            va, n, dummies = dev_start - gap - stride, 0, 0
+            va, n, base = dev_start - gap - stride, 0, None
             while n < ENTRY_WALK_CAP:
                 if not _entry_plausible(e, va, stride, dev_count):
                     break
-                # ★ ONE DUMMY, NEVER TWO IN A ROW. Every title measured has
-                # exactly one - device 0, empty - immediately before its first
-                # switch, so the walk must pass through it; a SECOND is not a
-                # table, it is the zeroed run in front of one, and an all-zero
-                # record satisfies every other test here for as far back as the
-                # zeros go.
-                dummies = dummies + 1 if not e.u16(va + ENTRY_DEV_OFF) else 0
-                if dummies > 1:
-                    break
                 n += 1
+                # ★ THE DUMMY IS ENTRY 0, AND THE TABLE STARTS THERE. Every
+                # title measured has exactly one - device 0, empty - right
+                # before its first switch, so the walk must take it in; and it
+                # must STOP there, because what lies in front is not the table.
+                # It used to walk on until a record failed, which only stops at
+                # the right place when the record in front of the dummy happens
+                # to fail. On Foo Fighters (LE 1.03/1.04, Pro 1.04) it does not:
+                # it is a small descriptor holding a pointer to the dummy, and
+                # it reads as device 37 / number 60, so it was counted as entry
+                # 0 and every id came out ONE TOO HIGH (PAD-367: the coin door
+                # held as the wrong switch, Service Select acting as the next
+                # button). The game's own root pointer on stranger_things_le
+                # 1.12.0, which has the same layout, lands on the dummy.
+                # Stopping here also covers what the old "never two dummies in
+                # a row" rule was for: elvira3's zeroed run in front of its
+                # table is never reached.
+                if not e.u16(va + ENTRY_DEV_OFF):
+                    base = va
+                    break
                 va -= stride
             if n < 16:
                 continue
-            base = va + stride
+            if base is None:
+                base = va + stride          # no dummy: the old boundary
             seen, out = [], {}
             for i in range(n):
                 dev = e.u16(base + stride * i + ENTRY_DEV_OFF)

@@ -115,10 +115,26 @@ PLAYFIELD_IMAGE = "playfield"
 #:
 #: A blank-image record is therefore accepted, but on TIGHTER terms than a
 #: positioned one, because the image name is the evidence a positioned record
-#: is validated by: every one of x, y, w, h, conn and part must be zero, and
-#: the class must be a real one. A run of four of those at a true 0x30 stride
-#: is not something a data blob produces by accident.
+#: is validated by: every one of x, y, w, h must be zero, the class must be a
+#: real one, and the connector and part fields must each be null or point at
+#: TEXT (see _text_ptr). A run of four of those at a true 0x30 stride is not
+#: something a data blob produces by accident.
+#:
+#: ★ THE CONNECTOR AND PART FIELDS ARE NOT ALWAYS EMPTY (PAD-367, 2026-10-09,
+#: foo_fighters_pro 1.04.0). This rule used to demand conn == part == 0, which
+#: is led_zeppelin's shape and not every artwork-less title's. Foo Fighters Pro
+#: ships 522 artwork-less records, and most of them carry a part number -
+#: `part:041-5029-04`, an opto pair spelled over two lines (`part:520-5344-00
+#: tx\n520-8516-00 rx`), or a pointer to the shared empty string. Each such
+#: record ended the run it sat in, so the read stopped after the last speaker
+#: LED: 86 records (71 LED, 15 switch, 0 coil) out of 522 (409 LED, 96 switch,
+#: 17 coil), and no coil at all for the trough eject to fire.
 BLANK_IMAGE = ""
+
+#: Longest connector or part-number text an artwork-less record may point at.
+#: The longest in the library is 41 characters (`part:112-5034-08F 520-7000-00
+#: (Bot.Arch)`); this only bounds the NUL search, it is not a limit to tune.
+TEXT_MAX = 200
 
 #: How many times a word must appear before it is taken for a candidate shared
 #: empty string. The pointer is repeated once per record and once more per
@@ -262,6 +278,40 @@ def blank_str(d, va):
     return 0 <= o < len(d) and d[o] == 0
 
 
+def _text_ptr(d, va):
+    """True if `va` is null or points at a NUL-terminated run of TEXT.
+
+    What an artwork-less record's connector and part fields hold (BLANK_IMAGE).
+    Looser than cstr() on purpose, in the two ways real records need: an EMPTY
+    string counts (Foo Fighters Pro points many part fields at the shared empty
+    string), and so do line breaks, because an opto's part number names its
+    transmitter and its receiver on two lines. Anything else non-printable is
+    still refused - that is what keeps a run of arbitrary words from reading
+    as a table.
+    """
+    if not va:
+        return True
+    o = va - VA_BIAS
+    if o < 0 or o >= len(d):
+        return False
+    e = d.find(b"\0", o, o + TEXT_MAX + 1)
+    if e < 0:
+        return False
+    return all(32 <= c < 127 or c in (9, 10, 13) for c in d[o:e])
+
+
+def _token(text):
+    """`text` if it is one whitespace-free word, else "".
+
+    A CONNECTOR IS ONE WORD (`8b`), and device_xy.txt depends on that: its
+    reader counts columns from the right, so a connector with a space in it
+    shifts every field and the row is dropped on read-back. Foo Fighters Pro's
+    TOPPER HEAD SERVO points its connector and part fields at its own NAME,
+    which is not a connector - it is recorded as having none.
+    """
+    return text if text and not any(c.isspace() for c in text) else ""
+
+
 def _one(d, cstr, va):
     """Parse a record at `va`, or None if it does not validate."""
     o = va - VA_BIAS
@@ -288,7 +338,10 @@ def _one(d, cstr, va):
     part = struct.unpack_from("<I", d, o + 0x1C)[0]
     cls = struct.unpack_from("<h", d, o + 0x08)[0]
     if blank:
-        if x or y or w or h or conn or part or cls not in (1, 2, 3):
+        if x or y or w or h or cls not in (1, 2, 3):
+            return None
+        # Null, or text - see BLANK_IMAGE for the title that needed this.
+        if not (_text_ptr(d, conn) and _text_ptr(d, part)):
             return None
     elif not (0 <= x <= 4000 and 0 <= y <= 4000
               and 0 < w <= 200 and 0 < h <= 200):
@@ -296,7 +349,7 @@ def _one(d, cstr, va):
     grp, idx = struct.unpack_from("<hh", d, o + 0x04)
     return dict(va=va, image=img, x=x, y=y, w=w, h=h, group=grp, index=idx,
                 cls=cls, kind={1: "switch", 2: "coil", 3: "led"}.get(cls, "?"),
-                conn=cstr(conn) or "", part=cstr(part) or "",
+                conn=_token(cstr(conn)), part=cstr(part) or "",
                 name=name)
 
 
@@ -533,6 +586,21 @@ def counts(keep):
     return out
 
 
+#: ★ THE READERS' REVISION, written into every cached table beside the binary
+#: it came from (PAD-367, 2026-10-09). The `# binary:` line proves a cached
+#: table came from THIS binary; it cannot prove it came from THIS reader, and a
+#: reader fix changes what the same binary yields: foo_fighters_pro 1.04.0
+#: reads 86 device records under revision 1 and 522 under 2, and every switch
+#: id swelf derives on 16 cards moved down by one. A table cached by revision 1
+#: names the same binary, so it would have been served for ever and the fix
+#: would never have reached a title anyone had already run. mktables now
+#: refuses a table recording another revision, or none, which re-derives it
+#: once through the same path a new build takes. BUMP THIS whenever a change to
+#: devicexy or swelf would alter a cached table for an unchanged binary.
+READER_REV = 2
+READER_TAG = "# reader: "
+
+
 def binary_id(elf_path):
     """`<basename> <size>`, the identity a cached table records for its source.
 
@@ -560,6 +628,7 @@ def text(game, keep, art, pf_w, pf_h, elf=None):
     c = counts(keep)
     lines = ["# %s device positions, from the game binary." % game,
              "# binary: %s" % (binary_id(elf) or "(unknown)"),
+             "%s%d" % (READER_TAG, READER_REV),
              "# %d records (%s), %d on the playfield image."
              % (len(keep), " ".join("%s=%d" % kv for kv in sorted(c.items())),
                 len(pf)),

@@ -164,6 +164,7 @@ def test_the_written_table_records_the_binary_and_still_parses(tmp_path):
     out.write_text(devicexy.text("t", recs, None, 313, 710, str(elf)),
                    newline="")
     assert "# binary: game 99 bytes" in out.read_text()
+    assert "# reader: %d" % devicexy.READER_REV in out.read_text()
     # The extra header line must not disturb the reader, which counts fields
     # from the RIGHT because the name is the multi-word one.
     assert [r["name"] for r in devicexy.read_table(str(out))] == NAMES
@@ -192,7 +193,31 @@ def test_a_table_naming_this_binary_stays_cached(tmp_path):
     elf.write_bytes(b"z" * 500)
     dest = _table(tmp_path, "# t device positions, from the game binary.\n"
                             "# binary: game 500 bytes\n"
-                            "# 0 records (), 0 on the playfield image.\n")
+                            "# reader: %d\n"
+                            "# 0 records (), 0 on the playfield image.\n"
+                  % devicexy.READER_REV)
+    assert mktables._built_from(dest, str(elf))
+
+
+def test_a_table_from_an_older_reader_is_rebuilt_once(tmp_path):
+    """PAD-367. The binary is the same, the reader is not: foo_fighters_pro
+    1.04.0's cached table holds the 86 records revision 1 read, and naming its
+    binary is all it ever had to do to be served for good. A table with no
+    reader line, or another revision's, is re-derived; this revision's stays."""
+    elf = tmp_path / "game"
+    elf.write_bytes(b"z" * 500)
+    head = ("# t device positions, from the game binary.\n"
+            "# binary: game 500 bytes\n")
+    tail = "# 86 records (led=71 switch=15), 0 on the playfield image.\n"
+    dest = _table(tmp_path, head + tail)
+    assert mktables._recorded_reader(dest) is None
+    assert not mktables._built_from(dest, str(elf))
+    dest = _table(tmp_path, head + "# reader: 1\n" + tail)
+    assert not mktables._built_from(dest, str(elf))
+    assert "older reader (revision 1, now %d)" % devicexy.READER_REV \
+        in mktables._stale_why(dest, str(elf))
+    dest = _table(tmp_path, head + "# reader: %d\n" % devicexy.READER_REV
+                  + tail)
     assert mktables._built_from(dest, str(elf))
 
 
@@ -244,8 +269,9 @@ def test_the_switch_list_records_the_binary_it_came_from(tmp_path):
     elf.write_bytes(b"z" * 500)
     dest = _sw_list(tmp_path, swtable.text("t", SW_ROWS, str(elf)))
     assert mktables._recorded_binary(dest) == "game 500 bytes"
+    assert mktables._recorded_reader(dest) == devicexy.READER_REV  # PAD-367
     assert mktables._built_from(dest, str(elf))
-    # ...and the extra header line does not cost the readers a row. The C
+    # ...and the extra header lines do not cost the readers a row. The C
     # parser in padglhost skips `#` the same way this one does.
     assert len(mktables._read_list(dest)) == len(SW_ROWS)
     assert mktables._read_list(dest)[0][4] == "SERVICE SELECT"
@@ -447,7 +473,10 @@ def test_a_blank_record_with_a_position_is_refused(tmp_path):
     A positioned record proves itself with its image NAME; a blank one has no
     name to prove anything with, so it must be empty everywhere a positioned
     record is full. A run that is blank in the image field but carries a
-    coordinate, a size, a connector or a part number is not this table.
+    coordinate or a size is not this table - nor is one whose connector or
+    part field holds a value that does not point at text (40 here, which is
+    not an address in the binary at all). Real text there is accepted: see
+    test_a_blank_record_may_name_its_connector_and_part.
     """
     for field in ("+10", "+14", "+18", "+1c"):
         recs, _ = _records(tmp_path, _blank_blob(**{field: 40}), "f" + field)
@@ -496,3 +525,82 @@ def test_the_checks_say_the_position_tests_did_not_apply(tmp_path):
     recs, _ = _records(tmp_path, _blank_blob(), "checks")
     text = " ".join(devicexy.checks(recs, 313, 710))
     assert "carry no artwork" in text
+
+
+# ---------------------------------------------------------------------------
+# PAD-367: AN ARTWORK-LESS RECORD MAY STILL NAME ITS CONNECTOR AND PART
+#
+# foo_fighters_pro 1.04.0 ships 522 artwork-less records, and most of them
+# carry a part number: `part:041-5029-04`, an opto pair written over two lines
+# (`part:520-5344-00 tx\n520-8516-00 rx`), or a pointer to the shared empty
+# string. The rule demanded both fields be zero (led_zeppelin's shape), so
+# every such record ended its run and the read stopped after the last speaker
+# LED: 86 records - 71 LED, 15 switch, no coil - instead of 409 / 96 / 17.
+# ---------------------------------------------------------------------------
+
+#: Where the texts go: past the string pool, the table and the empty-string
+#: references _blank_blob() parks at 0x1000.
+TEXT_AT = 0x1800
+
+
+def _blank_with_text(conn, part):
+    """_blank_blob() whose every record points its connector at `conn` and its
+    part field at `part` (bytes, NUL added; None leaves that field null)."""
+    texts, va = {}, {}
+    at = TEXT_AT
+    for field, raw in (("+18", conn), ("+1c", part)):
+        if raw is None:
+            continue
+        texts[at] = raw + b"\x00"
+        va[field] = at + BIAS
+        at += len(raw) + 1
+    buf = bytearray(_blank_blob(**va))
+    for off, raw in texts.items():
+        buf[off:off + len(raw)] = raw
+    return bytes(buf)
+
+
+def test_a_blank_record_may_name_its_connector_and_part(tmp_path):
+    recs, _ = _records(tmp_path, _blank_with_text(b"8b", b"part:041-5029-04"),
+                       "text")
+    assert [r["name"] for r in recs] == BLANK_NAMES
+    assert all(r["conn"] == "8b" for r in recs)
+    assert all(r["part"] == "part:041-5029-04" for r in recs)
+
+
+def test_an_opto_part_number_over_two_lines_is_text(tmp_path):
+    """Transmitter and receiver, one per line - cstr() alone would refuse it."""
+    recs, _ = _records(tmp_path, _blank_with_text(
+        None, b"part:520-5344-00 tx\n520-8516-00 rx"), "opto")
+    assert [r["name"] for r in recs] == BLANK_NAMES
+
+
+def test_a_part_field_pointing_at_the_empty_string_is_text(tmp_path):
+    recs, _ = _records(tmp_path, _blank_with_text(None, b""), "emptypart")
+    assert [r["name"] for r in recs] == BLANK_NAMES
+
+
+def test_a_connector_that_is_not_one_word_is_recorded_as_none(tmp_path):
+    """device_xy.txt's reader counts columns from the right, so a connector
+    with a space in it would shift every field and drop the row on read-back.
+    Foo Fighters Pro's TOPPER HEAD SERVO points its connector at its own name.
+    """
+    recs, _ = _records(tmp_path, _blank_with_text(b"TOPPER HEAD SERVO", None),
+                       "spaced")
+    assert [r["name"] for r in recs] == BLANK_NAMES
+    assert all(r["conn"] == "" for r in recs)
+    rows = devicexy.read_table(_written(tmp_path, recs))
+    assert [r["name"] for r in rows] == BLANK_NAMES
+
+
+def test_a_part_pointer_landing_on_binary_data_is_refused(tmp_path):
+    """Text is the evidence; arbitrary bytes are not."""
+    recs, _ = _records(tmp_path, _blank_with_text(None, b"\x01\x02\x03"),
+                       "junk")
+    assert recs == []
+
+
+def _written(tmp_path, recs):
+    p = tmp_path / "device_xy.txt"
+    p.write_text(devicexy.text("t", recs, None, 313, 710))
+    return str(p)

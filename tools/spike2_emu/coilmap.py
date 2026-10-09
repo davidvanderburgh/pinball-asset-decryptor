@@ -670,6 +670,13 @@ def for_game(tables_dir):
 SHAKER = "SHAKER MOTOR"
 SHAKER_GROUP, SHAKER_INDEX = 5, 0
 
+#: Group-5 records that say nothing about whether group 5 is a playfield board.
+#: COIN ENABLE is the coin door's lockout output and every cabinet's table
+#: carries it at group 5 index 0 - but devicexy only reads it since PAD-367
+#: (its part field had made it unreadable), and on beatles 1.29.0 it is the one
+#: group-5 row there is. Counting it would have turned that title's shaker off.
+SHAKER_GROUP_IGNORED = frozenset(("COIN ENABLE",))
+
 
 def shaker_address(table_path):
     """(node, index) of the cabinet's shaker motor for a device_xy.txt, or None.
@@ -677,14 +684,18 @@ def shaker_address(table_path):
     The named row when the table has one. Otherwise group 5 index 0 - but only
     when no row of the table uses group 5 at all, which is what keeps the HOME
     EDITIONS out: their whole machine is group 5 (fixed_group_node()), so index
-    0 there is a playfield coil or nothing, and they have no shaker.
+    0 there is a playfield coil or nothing, and they have no shaker. A platform
+    record every cabinet has (SHAKER_GROUP_IGNORED) does not count as a use.
     """
     coils = load(table_path)
     got = address(coils, SHAKER)
     if got is not None:
         return got
     rows = parse_rows(_maybe_lines(table_path) or [])
-    if not rows or any(r.get("group") == SHAKER_GROUP for r in rows):
+    if not rows or any(
+            r.get("group") == SHAKER_GROUP
+            and (r.get("name") or "").upper().strip() not in SHAKER_GROUP_IGNORED
+            for r in rows):
         return None
     node = group_node_for(table_path, dev_rows=rows).get(SHAKER_GROUP)
     return (node, SHAKER_INDEX) if node is not None and node < NODES else None

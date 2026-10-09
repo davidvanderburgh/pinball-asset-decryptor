@@ -567,9 +567,14 @@ def _title(monkeypatch, tmp_path, size, recorded):
     (root / "games" / "t" / "game").write_bytes(b"z" * size)
     (tables / "t").mkdir(parents=True)
     if recorded is not None:
+        import devicexy
+        # A stamped list is one the current code wrote, so it records the
+        # current reader too (PAD-367); "" is a list from before either stamp.
         (tables / "t" / "switch_list.txt").write_text(
             "# t switch list, from the shim's reading of the game's own table.\n"
-            + ("# binary: %s\n" % recorded if recorded else "")
+            + ("# binary: %s\n%s%d\n" % (recorded, devicexy.READER_TAG,
+                                         devicexy.READER_REV)
+               if recorded else "")
             + "36     73    1     11   START BUTTON\n")
     monkeypatch.setenv("PAD_ROOT", str(root))
     monkeypatch.setenv("PAD_TABLES", str(tables))
@@ -595,6 +600,21 @@ def test_another_builds_switch_list_is_not_current(monkeypatch, tmp_path, record
     _title(monkeypatch, tmp_path, 6349656, recorded)
     ok, why = mktables.list_current("t")
     assert not ok and why.startswith(says)
+
+
+def test_an_older_readers_switch_list_is_not_current(monkeypatch, tmp_path):
+    """PAD-367: the same binary, but a list derived before the reader fix -
+    swelf's ids on 16 cards were one too high. It names the binary that is
+    running, so only the reader stamp can refuse it, and watch.sh removes it on
+    this answer exactly as it does on "another build's"."""
+    import mktables
+    _title(monkeypatch, tmp_path, 6349656, None)
+    lst = tmp_path / "tables" / "t" / "switch_list.txt"
+    lst.write_text("# t switch list, from the shim's reading of the game's own table.\n"
+                   "# binary: game 6349656 bytes\n"
+                   "37     73    1     11   START BUTTON\n")
+    ok, why = mktables.list_current("t")
+    assert not ok and why.startswith("an older reader's (revision 1, now ")
 
 
 def test_the_check_starts_a_game_only_on_this_builds_switch_list():
@@ -624,7 +644,9 @@ def test_another_builds_switch_list_goes_before_anything_reads_it():
     i = w.index("# PAD-484: ANOTHER BUILD'S SWITCH LIST GOES BEFORE ANYTHING READS IT.")
     blk = w[i:w.index("\nfi\n", i)]
     assert 'python3 "$RIG/mktables.py" --current --game "$GAME" --elf "$GAME_ELF"' in blk
-    assert '"switch list: another build\'s"*)' in blk                  # only that answer removes anything
+    # only these two answers remove anything - PAD-367 added the second
+    assert ('"switch list: another build\'s"*|"switch list: an older reader\'s"*)'
+            in blk)
     assert 'rm -f "$PAD_TABLES/$GAME/switch_list.txt" "$PAD_TABLES/$GAME/switch_xy.txt"' in blk
     assert w.index('GAME_ELF="$CARD_PATH/game"') < i < w.index('echo "[watch] starting renderer')
     assert i < w.index('"$S/autoattract.sh"') and i < w.index('"$S/ballfeed.py"')

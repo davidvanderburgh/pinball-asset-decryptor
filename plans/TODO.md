@@ -126,6 +126,18 @@ These have each been violated at least once and each cost a run or a window:
       And the 48-byte layout's `num` was NOT the Stern number: it reads 0 on
       two titles and 145 on munsters_le's TILT PENDULUM, which Stern numbers
       81. The real number comes from the entry table with the id.
+      **★ CORRECTED BY PAD-367 (2026-10-09): every id here was ONE TOO HIGH.**
+      Both walks (this one and `_ent_by_walkback`) stepped one record past the
+      dummy onto a small descriptor that points at the table and reads as a
+      plausible entry, so the "validation" above - foo_fighters 1.03/1.04
+      agreeing on door 34, and the eight Service Select ids "item 73 measured"
+      - was two copies of one mistake (item 73's lists WERE these lists). A
+      live run on foo_fighters_pro 1.04.0 found the door and the service
+      buttons one switch off and everything right one lower, and the game's
+      own entry-table root on stranger_things_le 1.12.0 lands on the dummy.
+      The walks now stop at the dummy: all 16 cards read through them give
+      READY 1 / SERVICE SELECT 25 / door 33 (batman was 3 off, mando_pro had
+      no entry table found at all and now does).
       **Left for a later pass:** munsters_le is 102 rows, not 103 - its RIGHT
       SPINNER device record has no entry, so the game does not carry it in its
       switch array and it has no id to give. It is the only one in the library.

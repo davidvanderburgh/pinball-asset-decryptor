@@ -1274,6 +1274,35 @@ pad_display_state() {
     echo nosocket
 }
 
+# ★ A HIDDEN RUN'S DISPLAY NUMBER: rig N's own Xvfb, from THIS distro (PAD-488).
+# Prints the number (no colon) and returns 0; the X server is up there already
+# when /proc/net/unix lists its abstract socket, and watch.sh starts one when
+# not. Returns 1 when every candidate is another distro's.
+#
+# The WSL distros share ONE network namespace, so another distro's Xvfb on
+# :70+N is in /proc/net/unix here too - and a renderer here can connect to it
+# and open its window. But each distro has its own SysV IPC namespace, and
+# Mesa's software renderer gives the X server every frame as a shared-memory
+# segment to attach: from another distro the attach fails ("MESA: error:
+# Failed to attach to x11 shm", once a frame) and the frame is dropped. So a
+# display whose Xvfb is not a process HERE (pgrep sees this distro's only) is
+# passed over for :1070+N, then :2070+N and :3070+N. The first distro to start
+# a rig's display keeps :70+N; the other gets its own, and each reuses its own.
+# PAD_NET_UNIX points the socket table elsewhere, for the tests.
+pad_hidden_display() {   # <slot>
+    local k n
+    for k in 0 1 2 3; do
+        n=$((70 + $1 + 1000 * k))
+        grep -qa "@/tmp/.X11-unix/X$n\$" "${PAD_NET_UNIX:-/proc/net/unix}" 2>/dev/null \
+            || { echo "$n"; return 0; }                    # free: start one
+        pgrep -f "(^|/)Xvfb :$n( |\$)" >/dev/null 2>&1 \
+            && { echo "$n"; return 0; }                    # this distro's
+        echo "[watch] display :$n is another WSL distro's Xvfb (no shared" \
+             "memory from here); trying the next" >&2
+    done
+    return 1
+}
+
 # The command that puts a masked socket back, printed for a user who is not
 # root and run by us when we are. ONE STRING, so what is advised and what is
 # done cannot drift.

@@ -136,13 +136,74 @@ and the time goes on presenting: `swap 5-17 ms/f` in padglhost's own log, agains
 run also logs `MESA: error: Failed to attach to x11 shm`, so each frame goes to Xvfb through the X socket, not shared
 memory. llvmpipe's own threads are not it (held to 2: 205% against 229%).
 
+## A cheaper hidden renderer (PAD-488)
+
+Measured first, on one hidden rig in Godzilla Pro 1.16's attract (`slotcpu.py`/`thrcpu.py` in the ticket's scratch,
+C:\tmp\PAD-488): the renderer took **108% of a core and the game 16%**. All of it was llvmpipe's ten raster threads
+(105%); padglhost's own thread was under 5%. Two of the guesses above were wrong:
+
+- **No frame was presented at all.** In 30 s, 900 of 900 frames logged `Failed to attach to x11 shm`, and Mesa drops a
+  frame whose attach fails (`swrastPutImageShm`, platform_x11.c) - it never fell back to the X socket. The cause:
+  rigs 1-4's displays :71-:74 were Xvfbs in the **PAD-Runtime** distro (root, from app runs), and the sweeps ran in
+  **Ubuntu**. The WSL distros share one network namespace, so watch.sh found the other distro's abstract socket in
+  /proc/net/unix and reused it; they do not share SysV IPC, so the X server could not attach Ubuntu's segment. A
+  plain client copying Mesa's attach (0600 `IPC_PRIVATE`, `IPC_RMID` at once) worked against a root and a user Xvfb
+  in the same distro. Fixed: `pad_hidden_display` (padpath.sh) passes over a display whose Xvfb is not a process in
+  this distro, for :1070+N, then :2070+N. With shared memory working the renderer took **105%** - unchanged, because
+  presenting was never where the core went.
+- **The core is drawing, a third of it the window.** Presenting is the letterbox blit plus the swap, drawn in software
+  like everything else. Interleaved A/B, 40 s windows, two rounds: every frame **105-108%** (the rig 131%), one frame
+  in 30 **75-76%** (96%), none **74%** (94%). Nobody looks at a hidden window - glshot.sh and the picture check read
+  the FBO, which gets every frame either way (served at the frame boundary, `jgl_poll`), and every window grabber in
+  the rig reads the Windows desktop. So a hidden run now presents **one frame in 30** (watch.sh exports
+  `PAD_GL_WIN_EVERY=30` on a hidden run; a caller's own value wins; visible runs untouched, still every frame on
+  the GPU).
+- The other ~74% is the game's own pictures, 30 a second in llvmpipe. Capped at 15 (`PAD_SWAP_VBLANKS=4`) the
+  renderer took 39%.
+
+**Four rigs at 4x, the 7-build check** (`rigbatch.sh -n 4 --speed 4`, cards cached, `cpuall2.py`: cpuall.py plus
+reaped children), main against the branch, two interleaved rounds:
+
+| | wall | VM in a game | busiest 30 s | peak | renderers, mean / in a game | passed |
+|---|---|---|---|---|---|---|
+| PAD-484 (for reference) | 2m57s | 7.7 | 9.4 | 9.7 | 229% / 298% | 7/7 |
+| main | 2m50s, 2m45s | 7.2, 7.2 | 8.8, 9.0 | 9.5, 9.5 | 219%, 205% / 290%, 292% | 14/14 |
+| own display + 1 in 30, at 30 fps | 3m46s, 3m08s | 5.7, 7.0 | 8.2, 9.2 | 8.6, 9.5 | 127%, 165% / 189%, 210% | 14/14 |
+| the same at 15 fps | 2m42s, 2m42s | 5.5, 5.5 | 6.9, 6.9 | 8.1, 7.5 | 77%, 76% / 101%, 100% | 14/14 |
+| rigbatch's own defaults (4 rigs, 15 fps) | 2m38s | 5.3 | 6.7 | 7.1 | 70% / 93% | 7/7 |
+
+(Cores of 10; "in a game" = samples with the games at 50% or more. The 3m46s is one Mando LE whose attract show was
+not seen in 60 s and whose first Start was ignored - one run of seven, and it passed.)
+
+- **At 30 frames a second the freed core went straight back into frames**, as the ticket feared: the renderers were no
+  longer starved, drew the full 30, and the games built more of them (132-179% in a game against ~145%). Only
+  the cap gets the VM clearly below saturation, in both rounds.
+- So **rigbatch.sh builds 15 pictures a second by default** (`--fps 60|30|20|15`, PAD_SWAP_VBLANKS=60/F to every job; a
+  line's own value wins; `--fps 30` is the machine's cadence). The game's clock and logic are unchanged; it skips a
+  frame build while the renderer is busy, as on a machine with a slower GPU (PAD-301) - which PAD-484's starved
+  sweep already ran at (8.5-12 frames a second, 22/22 passing). bootcheck's `fps=` reads 15 under it.
+- **The rig count.** A rig costs ~1.7 cores at four rigs' busiest 30 s at 15, so rigbatch now fits `nproc*10/20` rigs
+  at 15 or fewer pictures a second (5 on this VM: every free rig of the 4 slots), and keeps `nproc*10/28` at 30. Untested
+  beyond four rigs (PAD_SLOTS_MAX); the 1.7 says a fifth would land near 8.5 of 10 at the busiest.
+- **Pictures are unchanged.** glshot.sh at the end of every check, main against the branch at 30 and at 15, all 21
+  frames complete game pictures (ball 2, score, HUD, the mode's art).
+- **The lights proof too.** PAD-420's lights job (a game started with the feeder, light_all held magenta, the LED view
+  judged) through rigbatch's defaults, four rigs at 15: Stranger Things LE 1.13, Deadpool LE 1.16 and Iron Maiden LE
+  1.18 PROVEN, as in PAD-420. Guardians 1.15 is not proven - and not on main's tools either, nor the branch at 30:
+  the mode holds all 117 inserts, but the shim's LED view decodes ~440-510 frames where PAD-420's proving run
+  decoded 14,540. Older than this ticket, and not about the renderer.
+- **What is left in a game is mostly the harness.** With reaped children counted, the four rigs in a game at 15
+  pictures a second: python3 ~1.7 cores (switch presses, the feeder), bash and what it starts ~1.7 (the check's
+  loops; the sweep's own job script stamps every output line with a `date` and a `bc`), the games ~1.8, the
+  renderers ~1.1. A sampler that counts live processes only never saw the first two.
+
 ## Not done, and what is next
 
-- **More rigs at once.** rigbatch still fits `nproc*10/28` rigs (3 on this VM's 10 processors); four hidden rigs at
-  4x ran 22 of 22 jobs clean but saturated the VM in a game, so the count is left alone. The renderers' presentation
-  to the hidden display is the CPU to take back first: a hidden renderer that presents only when glshot asks (it
-  reads the FBO, not the window), or a working MIT-SHM, would free ~2 of the 10 cores. ~/.wslconfig gives WSL 10 of
-  the 9800X3D's 16 logical processors (David's choice, for the desktop's sake).
+- **More rigs at once.** Since PAD-488 rigbatch fits `nproc*10/20` rigs at its default 15 pictures a second - every
+  free rig of the 4 on this VM. Beyond 4 needs PAD_SLOTS_MAX raised and a run to prove it. ~/.wslconfig gives WSL 10
+  of the 9800X3D's 16 logical processors (David's choice, for the desktop's sake).
+- **The harness's own processes** are now the biggest CPU in a sweep's game (PAD-488's last bullet above, ~3.4 of the
+  ~5.8 busy cores): one python3 per switch press is ~80 ms of a core each.
 - **Staging is still a floor**, now ~0.5-1 minute an 8 GB card. And a sweep that runs several job kinds should run them
   per BUILD in one pass (one copy, one boot), not one pass per kind over every build as PAD-420 did; the cache keeps
   30 GB of the WSL disk free and evicts least recently booted first, so a second pass over 50 builds copies again.

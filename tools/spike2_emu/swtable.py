@@ -85,7 +85,9 @@ def text(game, rows, elf=None, static_asked=False):
     binary = devicexy.binary_id(elf) or "(unknown)"
     lines = ["# %s switch list, from the shim's reading of the game's own table."
              % game,
-             "# binary: %s" % binary]
+             "# binary: %s" % binary,
+             # PAD-367: which reader made it - see devicexy.READER_REV
+             "%s%d" % (devicexy.READER_TAG, devicexy.READER_REV)]
     if static_asked:
         lines.append("# static-names: %s" % binary)
     lines += ["# %d switches on nodes %s." % (len(rows), nodes),

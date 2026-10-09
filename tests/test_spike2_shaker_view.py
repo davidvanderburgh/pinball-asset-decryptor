@@ -50,6 +50,18 @@ def test_a_table_without_the_cabinet_board_gets_group_5_index_0(tmp_path):
     assert coilmap.shaker_address(p) == (1, 0)
 
 
+def test_the_coin_door_lockout_is_not_a_use_of_the_cabinet_board(tmp_path):
+    # PAD-367: devicexy now reads COIN ENABLE, a group-5 index-0 lamp every cabinet
+    # carries; on beatles 1.29.0 it is the only group-5 row, and counting it turned
+    # the shaker off. A real group-5 row still does.
+    p = _table(tmp_path, "led COIN ENABLE 0 0 0 0 5 0 - -",
+               "coil TROUGH 260 613 20 20 6 1 - playfield")
+    assert coilmap.shaker_address(p) == (1, 0)
+    p = _table(tmp_path, "led COIN ENABLE 0 0 0 0 5 0 - -",
+               "coil AUTO PLUNGER 219 453 20 20 5 4 - Test/pf")
+    assert coilmap.shaker_address(p) is None
+
+
 def test_a_home_edition_has_no_shaker(tmp_path):
     p = _table(tmp_path, "coil AUTO PLUNGER 219 453 20 20 5 4 - Test/pf",
                "coil T-REX 98 111 20 20 5 6 - Test/pf")

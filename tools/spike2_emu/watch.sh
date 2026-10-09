@@ -600,8 +600,10 @@ PROV=$(python3 "$RIG/gameinfo.py" --provenance "$GAME_ELF" 2>/dev/null)
 # build's" removes anything - a python that fails says nothing of the kind.
 if [ -f "$GAME_ELF" ] && [ -f "$PAD_TABLES/$GAME/switch_list.txt" ]; then
     SWCUR=$(python3 "$RIG/mktables.py" --current --game "$GAME" --elf "$GAME_ELF" 2>/dev/null)
+    # PAD-367: "an older reader's" is the same verdict for the same binary -
+    # the list was derived before a reader fix and its ids may be one off.
     case "$SWCUR" in
-        "switch list: another build's"*)
+        "switch list: another build's"*|"switch list: an older reader's"*)
             rm -f "$PAD_TABLES/$GAME/switch_list.txt" "$PAD_TABLES/$GAME/switch_xy.txt"
             echo "[watch] $GAME's cached switch list is ${SWCUR#switch list: } -" \
                  "removed; this run derives its own" ;;

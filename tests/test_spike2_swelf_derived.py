@@ -163,17 +163,19 @@ def test_a_board_table_that_collides_two_slots_is_refused(swelf):
 #
 # foo_fighters_le proves they are different rather than merely bigger, because
 # ONE MACHINE ANSWERS TWICE: 1.03.0 still has a stored address, is read through
-# its 44-byte entry table, and puts the coin door at id 34; 1.04.0's addresses
+# its 44-byte entry table, and puts the coin door at id 33; 1.04.0's addresses
 # have moved, so it falls through to the derived reader, whose device position
 # for the same switch is 583. With the entry table read, both builds give
-# 2..106 and both put SERVICE SELECT on 26.
+# 1..105 and both put SERVICE SELECT on 25.
 #
-# Measured over the card library once the entry table is read: every title's
-# ids fall under 256, all eight titles whose SERVICE SELECT id item 73
-# established from their own real switch lists come back with that id
-# (aerosmith 26, batman 28, elvira3 25, foo_fighters 26, guardians 26, iron
-# maiden 26, mando 26, rush 26), and both cross-build pairs agree with
-# themselves (foo_fighters 1.03/1.04 = 26, munsters 1.27/1.28 = 25).
+# ★ PAD-367 (2026-10-09): the numbers above said 2..106 / 26 / 34 until a live
+# run on foo_fighters_pro 1.04.0 found the door and the service buttons one
+# switch off. The "ids item 73 established from their own real switch lists"
+# were these same derived lists, so agreeing with them proved nothing. Measured
+# over the 90-card library once the walks stop at the dummy: all 16 cards read
+# through them put QR SCANNER STATUS READY at 1, SERVICE SELECT at 25 and the
+# COIN DOOR INTERLOCK at 33 - Godzilla's compiled door id - where they used to
+# read 26/34 (batman 28/36, mando_pro 268/276 with no entry table found).
 # ---------------------------------------------------------------------------
 
 class FakeElf:
@@ -228,9 +230,15 @@ def test_a_blank_device_zero_record_is_the_dummy_and_a_busy_one_is_not(swelf):
 
 
 def test_a_record_naming_a_real_device_is_not_held_to_the_dummy_rule(swelf):
-    """foo_fighters_le 1.04.0's id 0 is a COIL entry, nine words full, and it
-    is part of the table - the emptiness test is only for a record claiming
-    device 0."""
+    """The emptiness test is only for a record claiming device 0: a record
+    naming a real device, nine words full, still reads as plausible.
+
+    ★ This record is foo_fighters_le 1.04.0's, and it was taken for that
+    title's id 0 - "a COIL entry, part of the table" - until PAD-367. It is
+    not: it sits IN FRONT of the dummy and holds a pointer to it, and a live
+    run found every id one too high while it was counted. Plausible is all it
+    is; where the walk stops is the dummy's business - see
+    test_the_walk_stops_at_the_dummy_whatever_lies_in_front."""
     S = 40
     e = FakeElf(_rec(S, num=60, dev=37, filler=b"\x32\x00\x25\x00\x2c\x72\x50"))
     assert swelf._entry_plausible(e, 0, S, 400)
@@ -358,3 +366,61 @@ def test_a_second_dummy_in_a_row_ends_the_walk(swelf):
     got = swelf._gen2_entry_ids(e, DEV, 400, list(range(300, 330)))
     assert got[300] == (1, 1), "the zeros in front were walked into"
     assert got[329] == (30, 30)
+
+
+# ---------------------------------------------------------------------------
+# THE DUMMY IS ENTRY 0, AND THE WALK STOPS THERE (PAD-367)
+#
+# A tester's live run on foo_fighters_pro 1.04.0 found the coin door held as
+# the wrong switch (48 V off, no coils or lamps), the service buttons one
+# button off ("select" acting as "down") and Guided Setup coming back - and
+# every one of them right with each id one lower. The backward walk passed
+# the dummy and counted one more record: a small descriptor sitting in front
+# of the table, holding a pointer to the dummy, that happens to read as
+# device 37 / number 60. LE 1.03.0 (stored address, 44-byte walk) and LE
+# 1.04.0 (derived, 40-byte) carry the same record and made the same mistake,
+# which is why the two builds agreeing with each other proved nothing. The
+# game's own root pointer on stranger_things_le 1.12.0 - same layout - lands
+# on the dummy, and that title's list starts at id 1.
+# ---------------------------------------------------------------------------
+
+#: The record in front of Foo Fighters' table, word for word in the fields the
+#: walk reads (device 37, number 60) with its leading words as found.
+DESCRIPTOR = b"\x32\x00\x25\x00\xd0\x3b\x50\x00\x5c\xa7\x4f\x00\xbc\xa7\x4f\x00"
+
+
+def test_the_walk_stops_at_the_dummy_whatever_lies_in_front(swelf):
+    S, DEV = 40, 0x4000
+    recs = ([_rec(S, num=60, dev=37, filler=DESCRIPTOR), _rec(S)]
+            + [_rec(S, num=i + 1, dev=d) for i, d in enumerate(range(300, 330))])
+    e, _base = _image(S, recs, DEV - 12)
+    got = swelf._gen2_entry_ids(e, DEV, 400, list(range(300, 330)))
+    assert got[300] == (1, 1), "the record in front of the dummy was counted"
+    assert got[329] == (30, 30)
+
+
+def test_the_stored_address_walk_stops_at_the_dummy_too(swelf):
+    """`_ent_by_walkback` reads the 44-byte tables of the titles with stored
+    addresses (foo_fighters_le 1.03.0 among them) and had no dummy rule at
+    all: it walked on while records looked plausible. The descriptor in front
+    of 1.03.0's table reads as device 35, so the table's start was put one
+    record early and `_rows_roots` - which skips sid 0 as the dummy - skipped
+    the descriptor instead and numbered the real switches from 2."""
+    S = swelf.ENTRY_STRIDE
+    switches = [_rec(S, num=i + 1, dev=d) for i, d in enumerate(range(3, 40))]
+    recs = [_rec(S, num=58, dev=35, filler=DESCRIPTOR), _rec(S)] + switches
+    dev = 0x4000
+    e, base = _image(S, recs, dev)
+    assert swelf._ent_by_walkback(e, dev) == base + S, (
+        "the table must start AT the dummy")
+
+
+def test_the_stored_address_walk_without_a_dummy_keeps_its_old_boundary(swelf):
+    """A table with no dummy at all ends where the plausible run ends, exactly
+    as before - the dummy rule only ever moves the start LATER."""
+    S = swelf.ENTRY_STRIDE
+    recs = [_rec(S, num=i + 1, dev=d) for i, d in enumerate(range(3, 40))]
+    dev = 0x4000
+    e, base = _image(S, recs, dev)
+    e.d[base - S:base] = b"\xff" * S          # implausible: ends the walk
+    assert swelf._ent_by_walkback(e, dev) == base

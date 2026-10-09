@@ -265,6 +265,7 @@ def test_reuse_copies_a_current_table_and_refuses_anything_else(nbdir,
 
 DEV_HEADER = ("# t device positions, from the game binary.\n"
               "# binary: %s\n"
+              "# reader: %d\n"              # PAD-367: and by which reader
               "# %d records (), 0 on the playfield image.\n")
 DEV_ROW = ("switch    LEFT RAMP MADE OPTO   153   103   20   20    7"
            "     0  -      playfield\n")
@@ -283,7 +284,8 @@ def _tables(tmp_path, monkeypatch, rows, game="testtitle"):
     elf = tmp_path / "game"
     elf.write_bytes(b"\x7fELF" + b"\0" * 64)
     (tdir / "device_xy.txt").write_text(
-        DEV_HEADER % (devicexy.binary_id(str(elf)), rows) + DEV_ROW * rows)
+        DEV_HEADER % (devicexy.binary_id(str(elf)), devicexy.READER_REV, rows)
+        + DEV_ROW * rows)
     (tdir / "switch_list.txt").write_text(SW_LIST)
     for nm in ("led_io.txt", "group_node.txt"):
         (tdir / nm).write_text("# cached\n")
@@ -313,6 +315,34 @@ def test_an_empty_device_table_is_not_asked_for_again(tmp_path, monkeypatch,
                         lambda *a, **k: calls.append(a) or [])
     mktables.build(game="testtitle", say=lambda *a: None)
     assert bool(calls) is expect_scan
+
+
+def test_a_relisted_switch_list_rewrites_the_positions(tmp_path, monkeypatch):
+    """PAD-367: switch_xy.txt carries switch IDS, and it was only rebuilt when
+    it was missing. A list re-derived because it came from another build or an
+    older reader can move every id - on 16 swelf cards each one moved down by
+    one - so the positioned switch was still clicked on the old id. Now a list
+    written in this pass rewrites the positions with it."""
+    import devicexy
+    import mktables
+    tdir = _tables(tmp_path, monkeypatch, 1)
+    # where gameinfo.elf() looks; same name and size, so the device table's
+    # `# binary:` still matches and only the unstamped switch list is refused
+    run_elf = tmp_path / "games" / "testtitle" / "game"
+    run_elf.parent.mkdir(parents=True)
+    run_elf.write_bytes((tmp_path / "game").read_bytes())
+    (tdir / "switch_xy.txt").write_text(
+        "# cached\n67     9     0     LEFT RAMP MADE OPTO   153   103\n")
+    monkeypatch.setattr(mktables.swelf, "rows",
+                        lambda elf, game: [(66, 59, 9, 0, "LEFT RAMP MADE OPTO")])
+    monkeypatch.setattr(devicexy, "build", lambda *a, **k: [dict(
+        va=0, kind="switch", cls=1, name="LEFT RAMP MADE OPTO", x=153, y=103,
+        w=20, h=20, group=7, index=0, conn="", part="", image="playfield")])
+    made = mktables.build(game="testtitle", say=lambda *a: None)
+    assert "switch_list.txt" in made, "the unstamped list is re-derived"
+    rows = [ln.split() for ln in (tdir / "switch_xy.txt").read_text().splitlines()
+            if ln and not ln.startswith("#")]
+    assert [r[0] for r in rows] == ["66"], "the positions kept the old id"
 
 
 #: hwshim.c nb_fident_load() reads node_ident.txt through `char line[256]`.

@@ -200,6 +200,35 @@ def _recorded_binary(dest):
     return None
 
 
+def _recorded_reader(dest):
+    """The reader revision `dest` records (devicexy.READER_REV), or None if it
+    does not say - every table cached before PAD-367."""
+    try:
+        with open(dest) as f:
+            for line in f:
+                if not line.startswith("#"):
+                    return None            # past the header, nothing found
+                if line.startswith(devicexy.READER_TAG):
+                    try:
+                        return int(line[len(devicexy.READER_TAG):].strip())
+                    except ValueError:
+                        return None
+    except OSError:
+        return None
+    return None
+
+
+def _stale_why(dest, source):
+    """Why `dest` is not this binary's table by this reader - for the log."""
+    was = _recorded_binary(dest)
+    if was == devicexy.binary_id(source):
+        return ("it was made by an older reader (revision %s, now %d)"
+                % (_recorded_reader(dest) or 1, devicexy.READER_REV))
+    return ("it was built from %s, this run is %s"
+            % (was or "an unrecorded build",
+               devicexy.binary_id(source) or "(unknown)"))
+
+
 def _built_from(dest, source):
     """Whether `dest` records having come from the binary that is there NOW.
 
@@ -225,12 +254,20 @@ def _built_from(dest, source):
     checked here. A table that names no binary was built without one and is
     rebuilt; a table naming a different one is rebuilt; the legitimate empty
     names its binary, matches, and stays cached exactly as before.
+
+    ★ AND THE READER THAT MADE IT (PAD-367). The same binary yields a different
+    table after a reader fix, so a table must also record devicexy.READER_REV
+    and match it. One cached before the stamp existed records none and is
+    re-derived once, which is what carries a reader fix to a title someone has
+    already run - foo_fighters_pro's 86-record table and every swelf title's
+    off-by-one switch list would otherwise have stayed cached for good.
     """
     if not os.path.exists(dest):
         return True                # _stale() already answers this one
     if not source or not os.path.exists(source):
         return True                # nothing to compare against; keep what we have
-    return _recorded_binary(dest) == devicexy.binary_id(source)
+    return (_recorded_binary(dest) == devicexy.binary_id(source)
+            and _recorded_reader(dest) == devicexy.READER_REV)
 
 
 #: The header swtable.text() writes when swnames' STATIC name source has
@@ -449,11 +486,8 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     wrong_build = (os.path.exists(sw_list) and not force
                    and not _built_from(sw_list, elf))
     if wrong_build:
-        was = _recorded_binary(sw_list)
-        say("  switches     cached list was built from %s, this run is %s - "
-            "re-deriving from this run's own dump"
-            % (was or "an unrecorded build",
-               devicexy.binary_id(elf) or "(unknown)"))
+        say("  switches     cached list refused: %s - re-deriving it"
+            % _stale_why(sw_list, elf))
     if os.path.exists(sw_list) and not force and not wrong_build:
         # ★ REPAIR A CACHED LIST WHOSE NAMES ARE STILL `?`. The dump branch
         # below used to write the shim's rows as-is, and on a title whose
@@ -588,7 +622,13 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     # `repaired` forces the join: the positions are keyed on the names the
     # repair just filled in, so a switch_xy.txt from before the repair (or a
     # join the nameless list made impossible) is stale by construction.
-    if (force or repaired or not os.path.exists(sw_xy)) \
+    # ★ So does a list written this pass (PAD-367). switch_xy.txt carries the
+    # switch IDS, and a list re-derived for a new build or a newer reader can
+    # move every one of them; a positioned switch would otherwise still be
+    # clicked on the id the old list gave it. watch.sh deletes both files when
+    # it refuses a list up front - this covers the refusal made here instead.
+    relisted = "switch_list.txt" in made
+    if (force or repaired or relisted or not os.path.exists(sw_xy)) \
             and os.path.exists(sw_list):
         # ★ A TABLE WITH NO DEVICES IN IT IS AN ANSWER, AND THIS ASKED THE
         # BINARY AGAIN ON EVERY START FOR EVER (rush_le, 2026-09-07).
@@ -713,6 +753,11 @@ def list_current(game=None, elf=None):
         return True, "there (no game binary to compare it with)"
     if _built_from(sw_list, elf):
         return True, "this build's (%s)" % devicexy.binary_id(elf)
+    # watch.sh removes the list on either answer, before anything reads it
+    # (PAD-484) - so both keep their exact opening words.
+    if _recorded_binary(sw_list) == devicexy.binary_id(elf):
+        return False, ("an older reader's (revision %s, now %d)"
+                       % (_recorded_reader(sw_list) or 1, devicexy.READER_REV))
     return False, ("another build's (%s; this run is %s)"
                    % (_recorded_binary(sw_list) or "an unrecorded build",
                       devicexy.binary_id(elf)))

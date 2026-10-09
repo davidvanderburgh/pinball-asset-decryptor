@@ -82,6 +82,19 @@ PAD-420's sweep of the newest builds was 581 rigbatch jobs, 52 rig-hours, a mean
    - gamecheck.sh waits for `mktables.py --current` (this build's list), not for the file to exist.
    - Rig 3, also holding the older list: removed at the start, autoattract on Service Back (28), coins on Left Coin
      (39), the feeder resolved 8 s in, attract at 26 s, the first Start taken; pass in 65 s.
+9. **The card cache reads only what a card uses** (`cardcopy.py`). The cache's copy was `dd conv=sparse`: the holes
+   landed as holes, but every byte was READ, through 9p, off the spinning D:. A Spike 2 card is half empty (the 8 GB
+   newest builds hold 1.5-6.0 GB). Now the partition table (`sfdisk -J`) says where each partition is, each ext
+   partition's own bitmaps (`dumpe2fs`, metadata only) say which blocks are used, and those are read in long runs (a
+   free gap under 4 MB read through, not seeked over); everything outside the ext partitions - the table, the FAT
+   boot partition, the extended partition's links - is copied whole. A partition whose bitmaps do not add up to its
+   group counts is copied whole; anything else that fails falls back to the old dd (`PAD_CARD_COPY_USED=0` forces
+   it). Not `e2image -ra`: it reads one block per call, which over 9p is the latency the cache exists to avoid.
+   - Cold, 8 GB cards: Munsters LE 1.28 in 24.0 s (3.10 GB read), Sword of Rage Pro 1.19 in 25.5 s (3.06 GB); the
+     old dd took 126.7 s (Led Zeppelin LE 1.22) and 57.9 s (Star Wars Pro 1.31), and 78-101 s a card in the 4x sweep
+     below.
+   - Sword of Rage Pro's copy against its card: every ext partition `e2fsck -fn` clean and file for file the same
+     (3453 files in the root partition, 358 in the game's), the 13.6 MB outside them byte for byte.
 
 ## Measured
 
@@ -97,18 +110,41 @@ Godzilla Pro 1.16, the Modes tab's Check this game (start, every playfield switc
 At 4x the guest uses ~60% of a core in attract (3.5x its 1x load); the renderer does not grow (the picture stays on
 the wall clock).
 
-(The seven-build sweep below is being measured.)
+The same check over seven newest builds (Godzilla Pro 1.16, Guardians 1.15, Stranger Things LE 1.13, Deadpool LE
+1.16, Mando LE 1.45, Iron Maiden LE 1.18, Jaws LE 1.02), through rigbatch:
+
+| | wall | the jobs one after another | passed |
+|---|---|---|---|
+| main's tools as PAD-420 ran them (cards staged to C:, 1x), one rig | 25m15s | 18m29s | 7/7 |
+| this branch, cards cached, 1x, one rig | 15m09s | 14m56s | 7/7 |
+| this branch, 4x, one rig (the cards copied into the cache on the way, by dd) | 21m23s | 9m01s | 6/7 * |
+| this branch, cached, 4x, **four rigs** | **2m57s** | 9m15s | 7/7 |
+| the same, llvmpipe held to 2 threads | 2m47s | 8m43s | 7/7 |
+
+\* Iron Maiden LE 1.18 on a rig holding an older build's switch list - item 8, fixed since; it passed on that rig in
+the four-rig sweeps.
+
+From nothing cached: eight more newest builds (Avengers Pro 1.10, Bond 60th LE 1.11, Jurassic Park Pro 1.16, Iron
+Maiden Pro 1.18, Guardians LE 1.15, Aerosmith 1.16, Stranger Things 1.13, Star Wars LE 1.31), four rigs at 4x, every
+card copied in by cardcopy.py on the way: **8/8 in 8m19s**, the copies 16-59 s each (1.5-6.0 GB read) but one
+(Guardians LE, 5.95 GB, 149 s while four rigs ran). Every one of the 22 four-rig jobs passed.
+
+**Where four rigs' CPU goes** (whole VM, 5 s samples, `cpuall.py` in the ticket's scratch): while all four are in a
+game the VM is at 9.2-9.7 of its 10 cores - the renderers 300-450% of a core between them, the four games ~210%,
+everything else (fuse2fs, ffmpeg, the harness's python) under 1. The renderers manage 8.5-12 frames a second there,
+and the time goes on presenting: `swap 5-17 ms/f` in padglhost's own log, against 2 ms with one rig. Every hidden
+run also logs `MESA: error: Failed to attach to x11 shm`, so each frame goes to Xvfb through the X socket, not shared
+memory. llvmpipe's own threads are not it (held to 2: 205% against 229%).
 
 ## Not done, and what is next
 
-- **More rigs at once.** rigbatch still fits `nproc*10/28` rigs (2.8 cores a rig was a VISIBLE run's cost, ~70% of it
-  the Windows-side RDP client). A hidden rig is ~0.5 core at 1x and ~1 at 4x, but the renderer's CPU swings with GPU
-  contention (two other tickets' renderers read 115-145% while four rigs ran), so the count is left alone until a
-  multi-rig run at speed is measured. A renderer that does not present to the hidden display between glshots would
-  take most of it away.
-- **Staging is the next floor.** D: reads ~75-90 MB/s: an 8 GB card is ~1m45s to stage, and a job is now under a
-  minute. Copying only the ext4 partitions' used blocks (e2image) halves a 16 GB card (13.8 GB partition, 7.8 GB used)
-  and takes a 32 GB one from 29 to 12 GB. And a sweep that runs several job kinds should run them per BUILD in one
-  pass (one copy, one boot), not one pass per kind over every build as PAD-420 did.
+- **More rigs at once.** rigbatch still fits `nproc*10/28` rigs (3 on this VM's 10 processors); four hidden rigs at
+  4x ran 22 of 22 jobs clean but saturated the VM in a game, so the count is left alone. The renderers' presentation
+  to the hidden display is the CPU to take back first: a hidden renderer that presents only when glshot asks (it
+  reads the FBO, not the window), or a working MIT-SHM, would free ~2 of the 10 cores. ~/.wslconfig gives WSL 10 of
+  the 9800X3D's 16 logical processors (David's choice, for the desktop's sake).
+- **Staging is still a floor**, now ~0.5-1 minute an 8 GB card. And a sweep that runs several job kinds should run them
+  per BUILD in one pass (one copy, one boot), not one pass per kind over every build as PAD-420 did; the cache keeps
+  30 GB of the WSL disk free and evicts least recently booted first, so a second pass over 50 builds copies again.
 - **Speeding the boot itself** is unsafe as above; from the cache it is ~23 s anyway.
 - Beyond 8x the harness's own latency shows (each `python3 swpoke.py` is ~80 ms of the wall).

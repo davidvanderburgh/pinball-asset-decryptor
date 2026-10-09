@@ -972,6 +972,15 @@ exception and cannot be made otherwise: the game builds its switch table on the
 heap, so the id belonging to a name is not in the binary anywhere. It is cached
 per title, so only the first run of a title waits for it.
 
+**Per title, not per build — so each list names its build** (`# binary: game
+<size> bytes`), and the ids do move between builds (Iron Maiden LE 1.18's are
+one off its older builds'). `watch.sh` removes a list that names another build
+before anything reads it (`mktables.py --current --elf <binary>`), and the run
+derives this build's like a first run; `gamecheck.sh` waits for this build's
+list. Hidden runs build the tables too: `PAD_PLAYFIELD=0` only skips the window
+(PAD-484 — a sweep on a slot that last ran another build pressed the wrong
+switches).
+
 **These were checked into git until 2026-08-06, and only Godzilla's existed** —
 so every other title got a schematic and it read like a property of the title
 rather than of the repository. The artwork was worse: it sat here ignored by

@@ -582,3 +582,63 @@ def test_another_builds_switch_list_goes_before_anything_reads_it():
     assert 'rm -f "$PAD_TABLES/$GAME/switch_list.txt" "$PAD_TABLES/$GAME/switch_xy.txt"' in blk
     assert w.index('GAME_ELF="$CARD_PATH/game"') < i < w.index('echo "[watch] starting renderer')
     assert i < w.index('"$S/autoattract.sh"') and i < w.index('"$S/ballfeed.py"')
+
+
+# --------------------------------------------------------------------------
+# the card cache reads only what a card uses
+# --------------------------------------------------------------------------
+
+_CARDCOPY = r'''
+set -e
+t=$(mktemp -d)
+trap 'rm -rf "$t"' EXIT
+img=$t/card.raw off=$((10240 * 512))
+head -c $((64 << 20)) /dev/urandom > "$img"            # free blocks hold old data, as a used card's do
+printf 'label: dos\nstart=2048, size=8192, type=c\nstart=10240, type=83\n' | sfdisk -q "$img"
+mkdir -p "$t/src/sub"
+head -c 3000000 /dev/urandom > "$t/src/big.bin"
+echo hello > "$t/src/sub/small.txt"
+mkfs.ext4 -q -F -E offset=$off,nodiscard -d "$t/src" "$img" "$(( ((64 << 20) - off) / 1024 ))k"
+python3 "$R/cardcopy.py" --plan "$img"
+python3 "$R/cardcopy.py" "$img" "$t/copy.raw"
+echo "size $(stat -c %s "$img") $(stat -c %s "$t/copy.raw")"
+cmp -n $off "$img" "$t/copy.raw" && echo "head same"            # the table and the FAT partition, whole
+cmp -s "$img" "$t/copy.raw" || echo "free blocks differ"
+[ "$(du -k "$t/copy.raw" | cut -f1)" -lt 30000 ] && echo "copy sparse"
+dd if="$t/copy.raw" of="$t/p2" bs=512 skip=10240 status=none
+e2fsck -fn "$t/p2" > /dev/null 2>&1 && echo "fsck clean"
+debugfs -R "dump /big.bin $t/big.out" "$t/p2" > /dev/null 2>&1
+cmp "$t/src/big.bin" "$t/big.out" && echo "big same"
+[ "$(debugfs -R "cat /sub/small.txt" "$t/p2" 2>/dev/null)" = hello ] && echo "small same"
+printf 'not a card' > "$t/junk.raw"
+python3 "$R/cardcopy.py" "$t/junk.raw" "$t/junk.out" > /dev/null 2>&1 || echo "junk refused"
+'''
+
+
+@pytest.mark.skipif(not (os.path.isdir("/proc/1") and shutil.which("mkfs.ext4") and shutil.which("sfdisk")
+                         and shutil.which("debugfs")), reason="Linux with e2fsprogs, like the rig")
+def test_the_card_cache_reads_only_what_the_card_uses():
+    """The used blocks and everything outside the ext partitions arrive byte for byte, the free blocks as holes
+    (zeros where the card held old data), and the filesystem checks clean; an image with no partition table is
+    refused, so cardmount.sh copies it the old way."""
+    out = subprocess.run(["bash", "-c", _CARDCOPY], env=dict(os.environ, R=RIG), capture_output=True, text=True,
+                         timeout=120)
+    lines = out.stdout.split("\n")
+    assert any(re.match(r"read 0\.0\d of 0\.07 GB in \d+ runs", ln) for ln in lines), out.stdout + out.stderr
+    for want in ("size 67108864 67108864", "head same", "free blocks differ", "copy sparse", "fsck clean",
+                 "big same", "small same", "junk refused"):
+        assert want in lines, (want, out.stdout, out.stderr)
+
+
+def test_the_cache_copier_tries_the_used_blocks_first_and_falls_back_to_dd():
+    cm = _text("cardmount.sh")
+    start = "setsid bash -c '\n            img=\"$1\"; copy=\"$2\""
+    body = cm[cm.index(start) + len("setsid bash -c '"):]
+    body = body[:body.index("' _ \"$img\" \"$copy\" \"$stamp\" \"$pidf\" \"$SELF\"")]
+    assert "'" not in body                             # one single-quoted string
+    assert 'python3 "$self/cardcopy.py" "$img" "$copy.partial"' in body
+    assert 'dd if="$img" of="$copy.partial" bs=4M conv=sparse status=none' in body
+    assert body.index("cardcopy.py") < body.index("dd if=")
+    assert '[ "${PAD_CARD_COPY_USED:-1}" != 0 ]' in body
+    # the whole-image size gate still decides what is published
+    assert body.index("dd if=") < body.index('mv "$copy.partial" "$copy"')

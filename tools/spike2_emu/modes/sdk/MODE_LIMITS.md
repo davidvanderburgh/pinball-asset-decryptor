@@ -171,7 +171,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
-| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
+| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
@@ -208,7 +208,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
 | Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
@@ -222,7 +222,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |

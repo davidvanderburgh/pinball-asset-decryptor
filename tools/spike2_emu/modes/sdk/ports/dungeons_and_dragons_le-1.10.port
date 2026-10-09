@@ -558,3 +558,64 @@ value magnet_shot          0x2000000
 site lamp_free_owner      0x0025cd28 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0x120
 value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x000df040 0xe92d4038 0xeb06baa4   # dungeons_and_dragons_pro-1.10's Wide white glow: its lit lights 100% alike; 276 lights in its lamp groups, 0 light-runner commands, white, 4.0 s
+text show_name_1          Wide white glow
+text show_kind_1          flashy
+value show_secs_1         4
+site show_2               0x001aaefc 0xe92d43f0 0xe24dd014   # dungeons_and_dragons_pro-1.10's Wide red and white strobe: its lit lights 100% alike; 272 lights in its lamp groups, 0 light-runner commands, red, white, 5.6 s
+text show_name_2          Wide red and white strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x000be784 0xe92d4070 0xe24dd008   # dungeons_and_dragons_pro-1.10's Wide blue and white strobe: its lit lights 100% alike; 272 lights in its lamp groups, 0 light-runner commands, white, 7.0 s
+text show_name_3          Wide blue and white strobe
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x001f8a34 0xe92d4070 0xeb025427   # dungeons_and_dragons_pro-1.10's Wide fast blue and white strobe: its lit lights 100% alike; 267 lights in its lamp groups, 0 light-runner commands, white, 4.8 s
+text show_name_4          Wide fast blue and white strobe
+text show_kind_4          flashy
+value show_secs_4         5
+site show_5               0x0009ae5c 0xe92d4ff0 0xe24dd03c   # dungeons_and_dragons_pro-1.10's Wide red and blue strobe: its lit lights 100% alike; 256 lights in its lamp groups, 0 light-runner commands, red, white, 3.9 s
+text show_name_5          Wide red and blue strobe
+text show_kind_5          flashy
+value show_secs_5         3
+site show_6               0x000e46c8 0xe92d47f0 0xe24dd010   # dungeons_and_dragons_pro-1.10's Wide cyan and white chase: its lit lights 100% alike; 228 lights in its lamp groups, 0 light-runner commands, cyan, white, 3.0 s
+text show_name_6          Wide cyan and white chase
+text show_kind_6          flashy
+value show_secs_6         3
+site show_7               0x001aa0fc 0xe92d41f0 0xe24dd008   # dungeons_and_dragons_pro-1.10's Wide slow yellow and white fade: its lit lights 100% alike; 252 lights in its lamp groups, 0 light-runner commands, yellow, white, 6.8 s
+text show_name_7          Wide slow yellow and white fade
+text show_kind_7          subdued
+value show_secs_7         8
+site show_8               0x00156f1c 0xe92d4ff0 0xe24dd014   # dungeons_and_dragons_pro-1.10's Wide slow yellow and green fade: its lit lights 100% alike; 231 lights in its lamp groups, 0 light-runner commands, yellow, green, 7.5 s
+text show_name_8          Wide slow yellow and green fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x0013d5b8 0xe92d41f0 0xe24dd008   # dungeons_and_dragons_pro-1.10's Wide red and white fade: its lit lights 100% alike; 221 lights in its lamp groups, 0 light-runner commands, red, white, 2.9 s
+text show_name_9          Wide red and white fade
+text show_kind_9          subdued
+value show_secs_9         3
+site show_10              0x00157194 0xe92d4ff0 0xe24dd01c   # dungeons_and_dragons_pro-1.10's Slow red and green fade: its lit lights 100% alike; 206 lights in its lamp groups, 0 light-runner commands, red, green, 7.9 s
+text show_name_10         Slow red and green fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x000b4890 0xe92d4070 0xe24dd008   # dungeons_and_dragons_pro-1.10's Wide orange and white strobe: its lit lights 100% alike; 272 lights in its lamp groups, 0 light-runner commands, orange, white, 2.2 s
+text show_name_11         Wide orange and white strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x000bec1c 0xe92d4038 0xeb073bad   # dungeons_and_dragons_pro-1.10's Wide white strobe: its lit lights 100% alike; 262 lights in its lamp groups, 0 light-runner commands, white, 2.0 s
+text show_name_12         Wide white strobe
+text show_kind_12         accent
+value show_secs_12        2

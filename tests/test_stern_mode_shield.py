@@ -347,9 +347,11 @@ def test_the_tab_offers_it_on_the_premium_le_and_greys_it_on_a_pro(tmp_path):
             _project(w, proj)
             w.call("modes.new")
             st = w.state("modes")
-            assert st["dis"]["shield"] and "Godzilla Pro 1.16" in st["reasons"]["shield"]
+            # PAD-420: a Pro has no shield platform, so its section is left out rather than greyed with a reason
+            assert st["dis"]["shield"] and st["hide"].get("shield") and "shield" not in st["reasons"]
             w.call("modes.new_blocks_mode", "Shields")
             ch = w.state("modes")["code"]["blocks"]["choices"]
             assert ch["shield_off"].startswith("Not on this game: The app has not found a shield platform on Godzilla Pro")
+            assert "shield" in ch["absent"]
     finally:
         preview.enabled = old

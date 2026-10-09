@@ -129,7 +129,7 @@ function stmtTemplates(ch, vars, prog = {}) {
     ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
       { op: "scoop_hold", ms: num(3000), which: "next" }, { op: "let_go", what: "*" },
       { op: "shield", where: "toward" }, { op: "shake", ms: num(500), strength: "hard" },
-      { op: "shake_game", shake: ((ch.shakes || [])[0] || {}).name || "jackpot" }]],
+      { op: "shake_game", shake: ((ch.shakes || [])[0] || {}).name || "jackpot" }].filter((t) => !machineLacks(t, ch))],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
       { op: "change", var: v, by: num(1) }]],
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
@@ -455,7 +455,7 @@ function Stack({ list, path, ed }) {
 
 function addMenu(ed, path) {
   const out = [];
-  stmtTemplates(ed.ch, ed.vars, ed.prog).forEach(([group, items], gi) => {
+  stmtTemplates(ed.ch, ed.vars, ed.prog).filter(([_g, items]) => items.length).forEach(([group, items], gi) => {
     if (gi) out.push({ sep: true });
     out.push({ header: group });
     items.forEach((t) => out.push({ label: stmtLabel(t), onClick: () => ed.insert(path, at(ed.prog, path).length, clone(t)) }));
@@ -513,6 +513,17 @@ function stmtLabel(b) {
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 
+// PAD-420: a mechanism block for hardware this machine does not have is left out of the palette
+function machineLacks(t, ch) {
+  const no = new Set(ch.absent || []);
+  if (t.op === "hold") return no.has("magnet") && no.has("coils");
+  if (t.op === "scoop_hold") return no.has("scoop");
+  if (t.op === "let_go") return no.has("magnet") && no.has("coils") && no.has("scoop");
+  if (t.op === "shield") return no.has("shield");
+  if (t.op === "shake" || t.op === "shake_game") return no.has("shaker");
+  return false;
+}
+
 // PAD-395: why a palette block cannot be used on this card's game ("" = it can)
 function whyOff(t, ch) {
   if (t.op === "hold") return ch.mechs_off || "";
@@ -535,7 +546,7 @@ function Palette({ ed }) {
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
     ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
-    ${stmtTemplates(ed.ch, ed.vars, ed.prog).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
+    ${stmtTemplates(ed.ch, ed.vars, ed.prog).filter(([_g, items]) => items.length).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t)), null, whyOff(t, ed.ch)))}`)}
     <div class="bk-pal-h">Values</div>
     ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, "Drag into a value slot (the round holes)"))}

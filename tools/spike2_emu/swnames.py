@@ -114,6 +114,31 @@ TITLE_MEASURED = {
     "jurassic_park_the_pin": {(8, 39): "START BUTTON"},
 }
 
+#: PAD-420: a title whose own tables name none of its playfield switches, from the SAME TITLE's other build by
+#: the wire: Jaws Pro 1.02's device table indices land on no single shift of its live bits (56 of 56 left `?`),
+#: and Jaws LE 1.02's switch list names 53 of the same (node, bit) - each of those 53 a switch in Jaws Pro's OWN
+#: device table. Used last, only for a row still `?`.
+TITLE_SIBLING = {
+    "jaws_pro": {
+        (8, 8): "QUICKSHOT BOTTOM", (8, 9): "BOTTOM RT TGT", (8, 10): "MID FLIPPER LANE",
+        (8, 11): "QUICKSHOT GATE", (8, 14): "MID RT FLIPPER EOS", (8, 16): "LEFT FLIPPER EOS",
+        (8, 24): "RIGHT FLIPPER BUTTON", (8, 25): "LEFT FLIPPER BUTTON", (8, 26): "UP RIGHT FLIPPER BUTTON",
+        (8, 28): "SHOOTER LANE", (8, 29): "RIGHT SLINGSHOT", (8, 30): "LEFT SLINGSHOT",
+        (8, 31): "RIGHT FLIPPER EOS", (8, 32): "TROUGH 6", (8, 33): "TROUGH 5", (8, 34): "TROUGH 4",
+        (8, 35): "TROUGH 3", (8, 36): "TROUGH 2", (8, 37): "TROUGH 1", (8, 38): "TROUGH JAM",
+        (9, 0): "LEFT RAMP MADE OPTO", (9, 1): "RIGHT RAMP MADE OPTO", (9, 2): "3 BANK BOT", (9, 3): "3 BANK MID",
+        (9, 4): "3 BANK TOP", (9, 5): "TGT 1", (9, 6): "LEFT RAMP ENTER", (9, 7): "TGT 2",
+        (9, 8): "BOAT HIT- LEFT OPTO", (9, 9): "BOAT HIT- CENTER OPTO", (9, 10): "BOAT HIT- RIGHT OPTO",
+        (9, 11): "LEFT LOOP ENTRANCE", (9, 15): "TGT 3", (9, 16): "SPINNER OPTO", (9, 17): "LEFT OUTLANE",
+        (9, 18): "LEFT RETURN LANE", (9, 19): "RIGHT RETURN LANE", (9, 20): "RIGHT OUTLANE",
+        (9, 21): "BOT R OUTLANE", (9, 22): "CHUM BUCKET TGT", (9, 23): "FISHING REEL MAG SW",
+        (9, 28): "CENTER RAMP MADE", (9, 29): "RIGHT POP BUMPER", (9, 30): "QUICKSHOT MID",
+        (9, 31): "QUICKSHOT TOP", (9, 32): "SHARK POSITION 7", (9, 33): "SHARK POSITION 6",
+        (9, 34): "SHARK POSITION 5", (9, 35): "SHARK POSITION 4", (9, 36): "SHARK POSITION 3",
+        (9, 37): "SHARK POSITION 2", (9, 38): "SHARK POSITION 1", (9, 39): "SHARK FIN TGT",
+    },
+}
+
 
 def _fit(recs, bits_by_node, names):
     """The one (node, shift) a group's device indices ALL land on, or None.
@@ -407,6 +432,9 @@ def fill(rows, game=None, elf_path=None, use_static=True):
                 from_plat += 1
             elif (node, bit) in TITLE_MEASURED.get(game or "", {}):
                 name = TITLE_MEASURED[game][(node, bit)]
+                from_plat += 1
+            elif (node, bit) in TITLE_SIBLING.get(game or "", {}):
+                name = TITLE_SIBLING[game][(node, bit)]
                 from_plat += 1
         out.append((sid, num, node, bit, name))
 

@@ -1,0 +1,93 @@
+{
+ "key": "guardians-1.15",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Super Scoring",
+   "start": "0x103810",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000ee"
+   ],
+   "how": "counts AUD_SUPER_SCORING_STARTED (id 193) at 0x103924; sets game flag 95; creates record(s) 238 (body 0x1035c8),175 (body 0x103418); reached by bl 0xb4c28 (fn 0xb4a18); tail b 0x103974 (fn 0x103960); a caller uses the result (0x103974: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Headphone Hurryup",
+   "start": "0x665bc",
+   "words": [
+    "0xe92d40d0",
+    "0xe30612c0"
+   ],
+   "how": "counts AUD_HEADPHONE_HURRYUP_STARTED (id 229) at 0x6663c; sets game flag 95; creates record(s) 234 (body 0x662c0),174 (body 0x66298); reached by bl 0xa0ec0 (fn 0xa0ce8)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Double Scoring",
+   "start": "0x3d248",
+   "words": [
+    "0xe92d4008",
+    "0xe3a000ec"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 231) at 0x3d298; sets game flag 95; creates record(s) 236 (body 0x3caf8); reached by bl 0xddaa8 (fn 0xddaa4)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "Double Scoring",
+   "start": "0x3d6b0",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000ec"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 231) at 0x3d720; sets game flag 95; creates record(s) 236 (body 0x3caf8); reached by bl 0xddbfc (fn 0xddb2c); bl 0xddc18 (fn 0xddb2c)",
+   "confidence": "high",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Groot Multiball",
+   "start": "0x58808",
+   "words": [
+    "0xe92d4370",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_GROOT_MULTIBALL_STARTED; serves balls via 0x58808 -> 0x215e04 (count None)"
+  },
+  {
+   "name": "Cherry Bomb Multiball",
+   "start": "0x2f704",
+   "words": [
+    "0xe92d4ff0",
+    "0xe24dd014"
+   ],
+   "why": "multiball: named AUD_CHERRY_BOMB_MULTIBALL_STARTED; serves balls via 0x2f704 -> 0x215e04 (count 6)"
+  },
+  {
+   "name": "Orb Multiball",
+   "start": "0xc870c",
+   "words": [
+    "0xe92d4370",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_ORB_MULTIBALL_STARTED; serves balls via 0xc870c -> 0x215e04 (count 2)"
+  },
+  {
+   "name": "Wizard Mode Multiball",
+   "start": "0x115074",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_WIZARD_MODE_MULTIBALL_STARTED; serves balls via 0x115074 -> 0x215e04 (count 4)"
+  }
+ ],
+ "notes": "engine: audit_add 0x211c70, flag set 0x204de0, create-process 0x2f9858, live_records 0x2f9bc0, multiball_serve 0x215e04. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). "
+}

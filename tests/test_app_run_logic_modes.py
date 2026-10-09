@@ -1431,8 +1431,8 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         assert not st["dis"]["countdown"] and not st["dis"]["own_sound"]
         assert "time-up" in st["reasons"]["sound"]              # nothing of the game's own plays then
         assert st["editor_on"] is True                          # the shots stay live
-        # no named inserts and no measured carriers on TMNT: both greyed, with the reason
-        assert st["dis"]["lit_shots"] and "TMNT Pro 1.59" in st["reasons"]["lit_shots"]
+        # PAD-420: its inserts are tied to its shots (by the game's names), so the shots that score light up
+        assert not st["dis"]["lit_shots"] and "lit_shots" not in st["reasons"]
         # item 163: TMNT Pro 1.59 carries a mode's own start sound, shot sound and music now
         assert not st["dis"]["own_extra"] and "own_extra" not in st["reasons"]
         assert st["own_extra_ok"] is True

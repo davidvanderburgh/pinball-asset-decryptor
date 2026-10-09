@@ -1,0 +1,668 @@
+# rush_pro 1.19 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a build check (modes/gamecheck.sh play, the stock card, hidden, muted):
+# the runtime hooked the game, 35 of its 37 shots came from their switches, a drain ended a ball,
+# events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end.
+# Shots no press made: Left outlane, Right outlane.
+
+game           rush_pro
+version        1.19
+
+# ---- functions ----
+site tick             0x0017075c 0xe92d4038 0xe3a00037
+site ball_end         0x0016e1f0 0xe92d4070 0xe1a06000
+site sound_lookup     0x002fd970 0xe92d4038 0xe1a05000
+site score_add        0x00324b0c 0xe3041b5a 0xe3401b66
+site callout          0x00264370 0xe92d4010 0xe30eecb8
+site callout_nth      0x00264524 0xe92d4010 0xe30eecb8
+site lamp_group       0x003baf20 0xe92d4038 0xe1a04000
+site award_screen     0x00358500 0xe92d4070 0xe24dd008
+site string_new       0x0001679c 0xe28fc605 0xe28ccab5
+site dynamic_cast     0x0001619c 0xe28fc605 0xe28ccab5
+site resource_get     0x0023ba64 0xe92d43f0 0xe1a04000
+site find_node        0x004968bc 0xe92d4070 0xe24dd008
+site find_text        0x00496358 0xe92d4070 0xe24dd008
+site set_text         0x0047a084 0xe92d47f0 0xe1a06000
+site surface_state    0x004895e8 0xe5900550 0xe2800008
+site player_advance   0x003588f8 0xe2501000 0x012fff1e
+site display_draw     0x00411f54 0xe3520001 0x812fff1e
+site sound_play       0x00264370 0xe92d4010 0xe30eecb8
+site sound_nth        0x00264524 0xe92d4010 0xe30eecb8
+site sound_active     0x00264ae4 0xe59f3034 0xe2831e62
+site sound_stop       0x00264c3c 0xe92d40f8 0xe1a06000
+site sound_worker     0x0026395c 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x003eeffc 0xe35000cf 0xe92d4038
+site display_effect_start 0x0042dadc 0xe92d47f0 0xe2516000
+site display_effect_next 0x0042dee4 0xe30934c0 0xe3403b6c
+site display_priority_now 0x0042e36c 0xe5d0000e 0xe12fff1e
+site stock_rule_get   0x0011a2d8 0xe3510023 0xe92d4008
+site caward_add       0x0003953c 0xe92d41f0 0xe1a04000
+site caward_add_scaled 0x000396e8 0xe92d4ff8 0xe1a09002
+site game_event       0x003eebe4 0xe92d47f0 0xe1a09000
+site event_post_replacing 0x003d960c 0xe92d4070 0xe1a05001
+site event_cancel     0x003d957c 0xe92d40f8 0xe30661a0
+site switch_hit       0x001bf548 0xe2503000 0x012fff1e
+site switch_hit2      0x001bf5e8 0xe92d4010 0xe2504000
+site scene_show       0x00358924 0xe92d4070 0xe30641a4
+site frame_end        0x00358b2c 0xe3500000 0xe92d40f8
+site frame_kick       0x00411808 0xe92d4070 0xe2906008
+site surface_find     0x00496bb0 0xe92d4070 0xe24dd008
+site surface_set_video 0x0048e294 0xe5d030d4 0xe92d4ff0
+site surface_play     0x0048c0a0 0xe5d030d4 0xe92d43f0
+site surface_stop     0x0048b850 0xe5d030d4 0xe92d40f0
+site agent_header     0x004e3900 0xe92d40f8 0xe2505000
+site agent_begin      0x004ee26c 0xe590c004 0xe1a00001
+site balls_in_play    0x003c3fb0 0xe92d4010 0xe3054944
+site multiball_serve  0x003c412c 0xe92d41f0 0xe304eb5a
+site coil_fire        0x0035499c 0xe3500000 0xe52de004
+site adjustment       0x001560e0 0xe92d40f0 0xe2504000
+site proc_exists      0x003d992c 0xe30621a0 0xe3402b68
+site proc_create      0x003d92dc 0xe306c1a0 0xe340cb68
+site proc_sleep       0x003d942c 0xe30631a0 0xe3403b68
+site switch_edge      0x00221eb8 0xe30032b4 0xe3403b66
+site switch_drain     0x00222ae0 0xe92d4ff0 0xe3079704
+site live_records     0x003d9974 0xe30621a0 0xe3402b68
+site layer_add        0x0002054c 0xe306c1a4 0xe1a03002
+site layer_remove     0x00020564 0xe92d40f8 0xe5913004
+
+# ---- globals ----
+data cur_player             0x0b5ec8a4
+data scores                 0x0b6607a8
+data mode_mask              0x0b664b5a
+data event_head             0x0b6861a0
+data event_current          0x0b6861a4
+data resource_manager       0x0b682b68
+data typeinfo_resource      0x005257e4
+data typeinfo_scene_player  0x0054780c
+data display_holder         0x0b682ae8
+data award_screen_arg       0x005ce424
+data sound_channels         0x0b65edc4
+data sound_queue            0x0b65f638
+data sound_requests         0x0b62d86c
+data sound_request_count    0x00521810
+data stock_mode_manager     0x0b645ce0
+data layered_displays       0x005cdb74
+data lamp_layers            0x0b653cfc
+data light_count            0x0b654838
+data score_mult             0x0b5ec8cc
+data switch_records         0x0b65570c
+data switch_count           0x0b6602b4
+data stock_mode_table       0x0b5e3870
+data typeinfo_cmode         0x00537c8c
+data game_flags             0x0b66047c
+data game_flag_count        0x00504e70
+data typeinfo_cmode_mball   0x0053911c
+data typeinfo_vmi           0x00531ecc
+
+# ---- values ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value surface_playing       2
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      36
+value stock_slot_active     46
+value stock_slot_start      40
+value node_visible_vfn      0xa8
+value scene_player_scene    0x10
+value clip_layer            0
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+value stock_slot_shot   42
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value clip_surface_hide     1
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value switch_desc_via       0x8
+
+# ---- shots from the switch drain ----
+switch 46   0x1                Instrument target
+switch 47   0x2                3 Bank drop left
+switch 48   0x4                3 Bank drop cent
+switch 49   0x8                3 Bank drop right
+switch 50   0x10               Rt ramp lt target
+switch 51   0x20               Rt ramp rt target
+switch 52   0x40               Skill shot
+switch 53   0x80               (R)ush target
+switch 54   0x100              R(u)sh target
+switch 55   0x200              Ru(s)h target
+switch 56   0x400              Rus(h) target
+switch 59   0x800              Left outlane
+switch 60   0x1000             Left return lane
+switch 61   0x2000             Right return lane
+switch 62   0x4000             Right outlane
+switch 63   0x8000             Right return lane-inner
+switch 68   0x10000            Right slingshot
+switch 69   0x20000            Left slingshot
+switch 78   0x40000            Side scoop opto
+switch 79   0x80000            Top target
+switch 80   0x100000           Left ramp enter
+switch 81   0x200000           Right ramp exit opto
+switch 82   0x400000           Center ramp opto
+switch 83   0x800000           Spinner opto
+switch 84   0x1000000          Right orbit
+switch 85   0x2000000          R ramp enter opto
+switch 86   0x4000000          L ramp exit opto
+switch 87   0x8000000          Left orbit
+switch 88   0x10000000         Inner loop
+switch 89   0x20000000         Left pop bumper
+switch 90   0x40000000         Right pop bumper
+switch 91   0x80000000         Bottom pop bumper
+switch 92   0x100000000        Main scoop opto
+switch 93   0x200000000        Extra ball (front left) switch
+switch 94   0x400000000        Advance time machine (back left) switch
+switch 95   0x800000000        Frenzy (front right) switch
+switch 96   0x1000000000       Millions (back right) switch
+
+# ---- scenes ----
+scene video_bank           28aff8e66e7c61dc4722a30ee31e22d1afe094d6/efd9321ee61c0467eaaecb1369842d69eed4a6aa
+scene hud                  28aff8e66e7c61dc4722a30ee31e22d1afe094d6/efd9321ee61c0467eaaecb1369842d69eed4a6aa
+
+# ---- callouts and text ----
+text example_start_shot     Rt ramp lt target
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47
+
+# ---- PAD-420: the inserts, read from this build's own program (lampmap.port_lines); none tied to a shot ----
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
+lamp 442,443,444  0              SPEAKER 1  # lamp 4, I/O group 6 index 1, at 0,0
+lamp 445,446,447  0              SPEAKER 2  # lamp 5, I/O group 6 index 4, at 0,0
+lamp 448,449,450  0              SPEAKER 3  # lamp 6, I/O group 6 index 7, at 0,0
+lamp 451,452,453  0              SPEAKER 4  # lamp 7, I/O group 6 index 10, at 0,0
+lamp 454,455,456  0              SPEAKER 5  # lamp 8, I/O group 6 index 13, at 0,0
+lamp 457,458,459  0              SPEAKER 6  # lamp 9, I/O group 6 index 16, at 0,0
+lamp 460,461,462  0              SPEAKER 7  # lamp 10, I/O group 6 index 19, at 0,0
+lamp 463,464,465  0              SPEAKER 8  # lamp 11, I/O group 6 index 22, at 0,0
+lamp 466,467,468  0              SPEAKER 9  # lamp 12, I/O group 6 index 25, at 0,0
+lamp 469,470,471  0              SPEAKER 10  # lamp 13, I/O group 6 index 28, at 0,0
+lamp 472,473,474  0              SPEAKER 11  # lamp 14, I/O group 6 index 31, at 0,0
+lamp 475,476,477  0              SPEAKER 12  # lamp 15, I/O group 6 index 34, at 0,0
+lamp 478,479,480  0              SPEAKER 13  # lamp 16, I/O group 6 index 37, at 0,0
+lamp 481,482,483  0              SPEAKER 14  # lamp 17, I/O group 6 index 40, at 0,0
+lamp 484,485,486  0              SPEAKER 15  # lamp 18, I/O group 6 index 43, at 0,0
+lamp 487,488,489  0              SPEAKER 16  # lamp 19, I/O group 6 index 46, at 0,0
+lamp 490,491,492  0              SPEAKER 17  # lamp 20, I/O group 6 index 49, at 0,0
+lamp 493,494,495  0              SPEAKER 18  # lamp 21, I/O group 6 index 52, at 0,0
+lamp 496,497,498  0              SPEAKER 19  # lamp 22, I/O group 6 index 55, at 0,0
+lamp 499,500,501  0              SPEAKER 20  # lamp 23, I/O group 6 index 58, at 0,0
+lamp 502,503,504  0              SPEAKER 21  # lamp 24, I/O group 6 index 61, at 0,0
+lamp 505,506,507  0              SPEAKER 22  # lamp 25, I/O group 6 index 64, at 0,0
+lamp 508,509,510  0              SPEAKER 23  # lamp 26, I/O group 6 index 67, at 0,0
+lamp 127,128,129  0              EXPRESSIVE LIGHTING L 1  # lamp 27, I/O group 1 index 1, at 0,0
+lamp 130,131,132  0              EXPRESSIVE LIGHTING L 2  # lamp 28, I/O group 1 index 4, at 0,0
+lamp 133,134,135  0              EXPRESSIVE LIGHTING L 3  # lamp 29, I/O group 1 index 7, at 0,0
+lamp 136,137,138  0              EXPRESSIVE LIGHTING L 4  # lamp 30, I/O group 1 index 10, at 0,0
+lamp 139,140,141  0              EXPRESSIVE LIGHTING L 5  # lamp 31, I/O group 1 index 13, at 0,0
+lamp 142,143,144  0              EXPRESSIVE LIGHTING L 6  # lamp 32, I/O group 1 index 16, at 0,0
+lamp 145,146,147  0              EXPRESSIVE LIGHTING L 7  # lamp 33, I/O group 1 index 19, at 0,0
+lamp 148,149,150  0              EXPRESSIVE LIGHTING L 8  # lamp 34, I/O group 1 index 22, at 0,0
+lamp 151,152,153  0              EXPRESSIVE LIGHTING L 9  # lamp 35, I/O group 1 index 25, at 0,0
+lamp 154,155,156  0              EXPRESSIVE LIGHTING L 10  # lamp 36, I/O group 1 index 28, at 0,0
+lamp 157,158,159  0              EXPRESSIVE LIGHTING L 11  # lamp 37, I/O group 1 index 31, at 0,0
+lamp 160,161,162  0              EXPRESSIVE LIGHTING L 12  # lamp 38, I/O group 1 index 34, at 0,0
+lamp 163,164,165  0              EXPRESSIVE LIGHTING L 13  # lamp 39, I/O group 1 index 37, at 0,0
+lamp 166,167,168  0              EXPRESSIVE LIGHTING L 14  # lamp 40, I/O group 1 index 40, at 0,0
+lamp 169,170,171  0              EXPRESSIVE LIGHTING L 15  # lamp 41, I/O group 1 index 43, at 0,0
+lamp 172,173,174  0              EXPRESSIVE LIGHTING L 16  # lamp 42, I/O group 1 index 46, at 0,0
+lamp 175,176,177  0              EXPRESSIVE LIGHTING L 17  # lamp 43, I/O group 1 index 49, at 0,0
+lamp 178,179,180  0              EXPRESSIVE LIGHTING L 18  # lamp 44, I/O group 1 index 52, at 0,0
+lamp 181,182,183  0              EXPRESSIVE LIGHTING L 19  # lamp 45, I/O group 1 index 55, at 0,0
+lamp 184,185,186  0              EXPRESSIVE LIGHTING L 20  # lamp 46, I/O group 1 index 58, at 0,0
+lamp 187,188,189  0              EXPRESSIVE LIGHTING L 21  # lamp 47, I/O group 1 index 61, at 0,0
+lamp 190,191,192  0              EXPRESSIVE LIGHTING L 22  # lamp 48, I/O group 1 index 64, at 0,0
+lamp 193,194,195  0              EXPRESSIVE LIGHTING L 23  # lamp 49, I/O group 1 index 67, at 0,0
+lamp 196,197,198  0              EXPRESSIVE LIGHTING L 24  # lamp 50, I/O group 1 index 70, at 0,0
+lamp 199,200,201  0              EXPRESSIVE LIGHTING L 25  # lamp 51, I/O group 1 index 73, at 0,0
+lamp 202,203,204  0              EXPRESSIVE LIGHTING L 26  # lamp 52, I/O group 1 index 76, at 0,0
+lamp 205,206,207  0              EXPRESSIVE LIGHTING L 27  # lamp 53, I/O group 1 index 79, at 0,0
+lamp 208,209,210  0              EXPRESSIVE LIGHTING L 28  # lamp 54, I/O group 1 index 82, at 0,0
+lamp 211,212,213  0              EXPRESSIVE LIGHTING L 29  # lamp 55, I/O group 1 index 85, at 0,0
+lamp 214,215,216  0              EXPRESSIVE LIGHTING L 30  # lamp 56, I/O group 1 index 88, at 0,0
+lamp 217,218,219  0              EXPRESSIVE LIGHTING L 31  # lamp 57, I/O group 1 index 91, at 0,0
+lamp 220,221,222  0              EXPRESSIVE LIGHTING L 32  # lamp 58, I/O group 1 index 94, at 0,0
+lamp 223,224,225  0              EXPRESSIVE LIGHTING L 33  # lamp 59, I/O group 1 index 97, at 0,0
+lamp 226,227,228  0              EXPRESSIVE LIGHTING L 34  # lamp 60, I/O group 1 index 100, at 0,0
+lamp 229,230,231  0              EXPRESSIVE LIGHTING L 35  # lamp 61, I/O group 1 index 103, at 0,0
+lamp 232,233,234  0              EXPRESSIVE LIGHTING L 36  # lamp 62, I/O group 1 index 106, at 0,0
+lamp 235,236,237  0              EXPRESSIVE LIGHTING L 37  # lamp 63, I/O group 1 index 109, at 0,0
+lamp 238,239,240  0              EXPRESSIVE LIGHTING L 38  # lamp 64, I/O group 1 index 112, at 0,0
+lamp 241,242,243  0              EXPRESSIVE LIGHTING L 39  # lamp 65, I/O group 1 index 115, at 0,0
+lamp 244,245,246  0              EXPRESSIVE LIGHTING L 40  # lamp 66, I/O group 1 index 118, at 0,0
+lamp 247,248,249  0              EXPRESSIVE LIGHTING L 41  # lamp 67, I/O group 1 index 121, at 0,0
+lamp 250,251,252  0              EXPRESSIVE LIGHTING L 42  # lamp 68, I/O group 1 index 124, at 0,0
+lamp 253,254,255  0              EXPRESSIVE LIGHTING L 43  # lamp 69, I/O group 1 index 127, at 0,0
+lamp 256,257,258  0              EXPRESSIVE LIGHTING L 44  # lamp 70, I/O group 1 index 130, at 0,0
+lamp 259,260,261  0              EXPRESSIVE LIGHTING L 45  # lamp 71, I/O group 1 index 133, at 0,0
+lamp 262,263,264  0              EXPRESSIVE LIGHTING L 46  # lamp 72, I/O group 1 index 136, at 0,0
+lamp 265,266,267  0              EXPRESSIVE LIGHTING L 47  # lamp 73, I/O group 1 index 139, at 0,0
+lamp 268,269,270  0              EXPRESSIVE LIGHTING L 48  # lamp 74, I/O group 1 index 142, at 0,0
+lamp 271,272,273  0              EXPRESSIVE LIGHTING R 49  # lamp 75, I/O group 1 index 145, at 0,0
+lamp 274,275,276  0              EXPRESSIVE LIGHTING R 50  # lamp 76, I/O group 1 index 148, at 0,0
+lamp 277,278,279  0              EXPRESSIVE LIGHTING R 51  # lamp 77, I/O group 1 index 151, at 0,0
+lamp 280,281,282  0              EXPRESSIVE LIGHTING R 52  # lamp 78, I/O group 1 index 154, at 0,0
+lamp 283,284,285  0              EXPRESSIVE LIGHTING R 53  # lamp 79, I/O group 1 index 157, at 0,0
+lamp 286,287,288  0              EXPRESSIVE LIGHTING R 54  # lamp 80, I/O group 1 index 160, at 0,0
+lamp 289,290,291  0              EXPRESSIVE LIGHTING R 55  # lamp 81, I/O group 1 index 163, at 0,0
+lamp 292,293,294  0              EXPRESSIVE LIGHTING R 56  # lamp 82, I/O group 1 index 166, at 0,0
+lamp 295,296,297  0              EXPRESSIVE LIGHTING R 57  # lamp 83, I/O group 1 index 169, at 0,0
+lamp 298,299,300  0              EXPRESSIVE LIGHTING R 58  # lamp 84, I/O group 1 index 172, at 0,0
+lamp 301,302,303  0              EXPRESSIVE LIGHTING R 59  # lamp 85, I/O group 1 index 175, at 0,0
+lamp 304,305,306  0              EXPRESSIVE LIGHTING R 60  # lamp 86, I/O group 1 index 178, at 0,0
+lamp 307,308,309  0              EXPRESSIVE LIGHTING R 61  # lamp 87, I/O group 1 index 181, at 0,0
+lamp 310,311,312  0              EXPRESSIVE LIGHTING R 62  # lamp 88, I/O group 1 index 184, at 0,0
+lamp 313,314,315  0              EXPRESSIVE LIGHTING R 63  # lamp 89, I/O group 1 index 187, at 0,0
+lamp 316,317,318  0              EXPRESSIVE LIGHTING R 64  # lamp 90, I/O group 1 index 190, at 0,0
+lamp 319,320,321  0              EXPRESSIVE LIGHTING R 65  # lamp 91, I/O group 1 index 193, at 0,0
+lamp 322,323,324  0              EXPRESSIVE LIGHTING R 66  # lamp 92, I/O group 1 index 196, at 0,0
+lamp 325,326,327  0              EXPRESSIVE LIGHTING R 67  # lamp 93, I/O group 1 index 199, at 0,0
+lamp 328,329,330  0              EXPRESSIVE LIGHTING R 68  # lamp 94, I/O group 1 index 202, at 0,0
+lamp 331,332,333  0              EXPRESSIVE LIGHTING R 69  # lamp 95, I/O group 1 index 205, at 0,0
+lamp 334,335,336  0              EXPRESSIVE LIGHTING R 70  # lamp 96, I/O group 1 index 208, at 0,0
+lamp 337,338,339  0              EXPRESSIVE LIGHTING R 71  # lamp 97, I/O group 1 index 211, at 0,0
+lamp 340,341,342  0              EXPRESSIVE LIGHTING R 72  # lamp 98, I/O group 1 index 214, at 0,0
+lamp 343,344,345  0              EXPRESSIVE LIGHTING R 73  # lamp 99, I/O group 1 index 217, at 0,0
+lamp 346,347,348  0              EXPRESSIVE LIGHTING R 74  # lamp 100, I/O group 1 index 220, at 0,0
+lamp 349,350,351  0              EXPRESSIVE LIGHTING R 75  # lamp 101, I/O group 1 index 223, at 0,0
+lamp 352,353,354  0              EXPRESSIVE LIGHTING R 76  # lamp 102, I/O group 1 index 226, at 0,0
+lamp 355,356,357  0              EXPRESSIVE LIGHTING R 77  # lamp 103, I/O group 1 index 229, at 0,0
+lamp 358,359,360  0              EXPRESSIVE LIGHTING R 78  # lamp 104, I/O group 1 index 232, at 0,0
+lamp 361,362,363  0              EXPRESSIVE LIGHTING R 79  # lamp 105, I/O group 1 index 235, at 0,0
+lamp 364,365,366  0              EXPRESSIVE LIGHTING R 80  # lamp 106, I/O group 1 index 238, at 0,0
+lamp 367,368,369  0              EXPRESSIVE LIGHTING R 81  # lamp 107, I/O group 1 index 241, at 0,0
+lamp 370,371,372  0              EXPRESSIVE LIGHTING R 82  # lamp 108, I/O group 1 index 244, at 0,0
+lamp 373,374,375  0              EXPRESSIVE LIGHTING R 83  # lamp 109, I/O group 1 index 247, at 0,0
+lamp 376,377,378  0              EXPRESSIVE LIGHTING R 84  # lamp 110, I/O group 1 index 250, at 0,0
+lamp 379,380,381  0              EXPRESSIVE LIGHTING R 85  # lamp 111, I/O group 1 index 253, at 0,0
+lamp 382,383,384  0              EXPRESSIVE LIGHTING R 86  # lamp 112, I/O group 1 index 256, at 0,0
+lamp 385,386,387  0              EXPRESSIVE LIGHTING R 87  # lamp 113, I/O group 1 index 259, at 0,0
+lamp 388,389,390  0              EXPRESSIVE LIGHTING R 88  # lamp 114, I/O group 1 index 262, at 0,0
+lamp 391,392,393  0              EXPRESSIVE LIGHTING R 89  # lamp 115, I/O group 1 index 265, at 0,0
+lamp 394,395,396  0              EXPRESSIVE LIGHTING R 90  # lamp 116, I/O group 1 index 268, at 0,0
+lamp 397,398,399  0              EXPRESSIVE LIGHTING R 91  # lamp 117, I/O group 1 index 271, at 0,0
+lamp 400,401,402  0              EXPRESSIVE LIGHTING R 92  # lamp 118, I/O group 1 index 274, at 0,0
+lamp 403,404,405  0              EXPRESSIVE LIGHTING R 93  # lamp 119, I/O group 1 index 277, at 0,0
+lamp 406,407,408  0              EXPRESSIVE LIGHTING R 94  # lamp 120, I/O group 1 index 280, at 0,0
+lamp 409,410,411  0              EXPRESSIVE LIGHTING R 95  # lamp 121, I/O group 1 index 283, at 0,0
+lamp 412,413,414  0              EXPRESSIVE LIGHTING R 96  # lamp 122, I/O group 1 index 286, at 0,0
+lamp 30,31,32     0x20000000     LEFT POP BUMPER  # lamp 123, I/O group 7 index 29, at 0,0; tie: Left pop bumper
+lamp 39,40,41     0x8000000      SHOOT ME LEFT ORBIT  # lamp 124, I/O group 7 index 32, at 0,0; tie: Left orbit
+lamp 42,43,44     0x8000000      RECORD LEFT ORBIT  # lamp 125, I/O group 7 index 35, at 0,0; tie: Left orbit
+lamp 33,34,35     0x40000000     RIGHT POP BUMPER  # lamp 126, I/O group 7 index 40, at 0,0; tie: Right pop bumper
+lamp 36,37,38     0x80000000     BOTTOM POP BUMPER  # lamp 127, I/O group 7 index 43, at 0,0; tie: Bottom pop bumper
+lamp 48,49,50     0x4100000      SHOOT ME SIDE RAMP  # lamp 128, I/O group 8 index 8, at 0,0; tie: Left ramp enter, L ramp exit opto
+lamp 69,70,71     0x10000000     SHOOT ME MINI ORBIT  # lamp 129, I/O group 8 index 11, at 0,0; tie: Inner loop
+lamp 72,73,74     0x10000000     RECORD MINI ORBIT  # lamp 130, I/O group 8 index 14, at 0,0; tie: Inner loop
+lamp 53,54,55     0              SHOOT ME UPPER SCOOP  # lamp 131, I/O group 8 index 21, at 0,0
+lamp 77,78,79     0              SHOOT ME TOP TARGET  # lamp 132, I/O group 8 index 24, at 0,0
+lamp 80,81,82     0x80000        RECORD TOP TARGET  # lamp 133, I/O group 8 index 27, at 0,0; tie: Top target
+lamp 85,86,87     0              SHOOT ME SPINNER  # lamp 134, I/O group 8 index 34, at 0,0
+lamp 88,89,90     0x800000       RECORD SPINNER  # lamp 135, I/O group 8 index 37, at 0,0; tie: Spinner opto
+lamp 61,62,63     0x2200000      SHOOT ME RIGHT RAMP  # lamp 136, I/O group 8 index 42, at 0,0; tie: Right ramp exit opto, R ramp enter opto
+lamp 64,65,66     0x2200000      RECORD RIGHT RAMP  # lamp 137, I/O group 8 index 45, at 0,0; tie: Right ramp exit opto, R ramp enter opto
+lamp 93,94,95     0x1000000      SHOOT ME RIGHT ORBIT  # lamp 138, I/O group 8 index 64, at 0,0; tie: Right orbit
+lamp 96,97,98     0x1000000      RECORD RIGHT ORBIT  # lamp 139, I/O group 8 index 67, at 0,0; tie: Right orbit
+lamp 105,0,0      0              BOTTOM GI  # lamp 140, I/O group 7 index 0, at 0,0
+lamp 107,0,0      0              TOP GI  # lamp 141, I/O group 8 index 0, at 0,0
+lamp 123          0              BACKPANEL FLASH  # lamp 142, I/O group 8 index 3, at 0,0
+lamp 104          0              COIN DOOR GI  # lamp 143, I/O group 5 index 1, at 0,0
+lamp 4            0              START BUTTON  # lamp 144, I/O group 5 index 2, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 145, I/O group 5 index 3, at 0,0
+lamp 125          0              SHOOTER ILLUM. 1 (OPTIONAL)  # lamp 146, I/O group 5 index 9, at 0,0
+lamp 126          0              SHOOTER ILLUM. 2 (OPTIONAL)  # lamp 147, I/O group 5 index 10, at 0,0
+lamp 106          0              BOTTOM GI-WHT  # lamp 148, I/O group 7 index 1, at 0,0
+lamp 9            0x800          LEFT OUTLANE  # lamp 149, I/O group 7 index 3, at 0,0; tie: Left outlane
+lamp 10           0x1000         LEFT RETURN LANE  # lamp 150, I/O group 7 index 4, at 0,0; tie: Left return lane
+lamp 11           0x8000         RIGHT RETURN LANE INNER  # lamp 151, I/O group 7 index 5, at 0,0; tie: Right return lane-inner
+lamp 12           0x2000         RIGHT RETURN LANE OUTER  # lamp 152, I/O group 7 index 6, at 0,0; tie: Right return lane
+lamp 13           0x4000         RIGHT OUTLANE  # lamp 153, I/O group 7 index 7, at 0,0; tie: Right outlane
+lamp 19           0              LA VILLA STRANGIATO  # lamp 154, I/O group 7 index 8, at 0,0
+lamp 20           0              LIMELIGHT  # lamp 155, I/O group 7 index 9, at 0,0
+lamp 109          0              LEFT SLING FLASH  # lamp 156, I/O group 7 index 10, at 0,0
+lamp 110          0              RIGHT SLING FLASH  # lamp 157, I/O group 7 index 11, at 0,0
+lamp 113          0              2112 FLASH  # lamp 158, I/O group 7 index 15, at 0,0
+lamp 15           0              THE BIG MONEY  # lamp 159, I/O group 7 index 16, at 0,0
+lamp 111          0              CYGNUS X1 BOOK 1 FLASH  # lamp 160, I/O group 7 index 17, at 0,0
+lamp 112          0              CYGNUS X1 BOOK 2 FLASH  # lamp 161, I/O group 7 index 18, at 0,0
+lamp 16           0              THE SPIRIT OF RADIO  # lamp 162, I/O group 7 index 19, at 0,0
+lamp 17           0              WORKING MAN  # lamp 163, I/O group 7 index 21, at 0,0
+lamp 18           0              TOM SAWYER  # lamp 164, I/O group 7 index 22, at 0,0
+lamp 14           0              SHOOT AGAIN (X2)  # lamp 165, I/O group 7 index 23, at 0,0
+lamp 23           0              DRUM DROP  # lamp 166, I/O group 7 index 24, at 0,0
+lamp 22           0xe            ELECTRIC GUITAR DROP  # lamp 167, I/O group 7 index 25, at 0,0; tie: 3 Bank drop left, 3 Bank drop cent, 3 Bank drop right
+lamp 21           0xe            BASS DROP  # lamp 168, I/O group 7 index 26, at 0,0; tie: 3 Bank drop left, 3 Bank drop cent, 3 Bank drop right
+lamp 114          0              UPPER LEFT FLASH  # lamp 169, I/O group 7 index 28, at 0,0
+lamp 45           0              LEFT ORBIT COMBO 2  # lamp 170, I/O group 7 index 38, at 0,0
+lamp 46           0              LEFT ORBIT COMBO 1  # lamp 171, I/O group 7 index 39, at 0,0
+lamp 115          0              LOWER LEFT FLASH  # lamp 172, I/O group 7 index 46, at 0,0
+lamp 120          0              DRUM CLOCK FLASH  # lamp 173, I/O group 7 index 47, at 0,0
+lamp 108          0              TOP GI-WHT  # lamp 174, I/O group 8 index 1, at 0,0
+lamp 75           0              MINI ORBIT COMBO 3  # lamp 175, I/O group 8 index 17, at 0,0
+lamp 76           0              MINI ORBIT COMBO 2  # lamp 176, I/O group 8 index 18, at 0,0
+lamp 51           0              SIDE RAMP COMBO 3  # lamp 177, I/O group 8 index 19, at 0,0
+lamp 52           0              SIDE RAMP COMBO 2  # lamp 178, I/O group 8 index 20, at 0,0
+lamp 83           0              TOP TARGET COMBO 3  # lamp 179, I/O group 8 index 30, at 0,0
+lamp 84           0              TOP TARGET COMBO 1  # lamp 180, I/O group 8 index 31, at 0,0
+lamp 56           0              UPPER SCOOP EXTRA BALL  # lamp 181, I/O group 8 index 32, at 0,0
+lamp 59           0              LITE LOCK LEFT  # lamp 182, I/O group 8 index 33, at 0,0
+lamp 91           0              SPINNER COMBO 2  # lamp 183, I/O group 8 index 40, at 0,0
+lamp 92           0              SPINNER COMBO 1  # lamp 184, I/O group 8 index 41, at 0,0
+lamp 124          0              CENTER RAMP FLASH  # lamp 185, I/O group 8 index 53, at 0,0
+lamp 47           0              SUPER JACKPOT SIDE RAMP  # lamp 186, I/O group 8 index 54, at 0,0
+lamp 60           0              LITE LOCK RIGHT  # lamp 187, I/O group 8 index 55, at 0,0
+lamp 27           0x400          RUS(H) TARGET  # lamp 188, I/O group 8 index 56, at 0,0; tie: Rus(h) target
+lamp 26           0x200          RU(S)H TARGET  # lamp 189, I/O group 8 index 57, at 0,0; tie: Ru(s)h target
+lamp 25           0x100          R(U)SH TARGET  # lamp 190, I/O group 8 index 58, at 0,0; tie: R(u)sh target
+lamp 24           0x80           (R)USH TARGET  # lamp 191, I/O group 8 index 59, at 0,0; tie: (R)ush target
+lamp 67           0              RIGHT RAMP COMBO 1  # lamp 192, I/O group 8 index 60, at 0,0
+lamp 68           0              RIGHT RAMP LITE LOCK  # lamp 193, I/O group 8 index 61, at 0,0
+lamp 101          0              TIME MACHINE LEFT  # lamp 194, I/O group 8 index 4, at 0,0
+lamp 102          0              TIME MACHINE CENTER  # lamp 195, I/O group 8 index 5, at 0,0
+lamp 103          0              TIME MACHINE RIGHT  # lamp 196, I/O group 8 index 6, at 0,0
+lamp 28           0              DRUM SOLO UP RIGHT FLIP  # lamp 197, I/O group 8 index 62, at 0,0
+lamp 29           0              EXTRA BALL UP RIGHT FLIP  # lamp 198, I/O group 8 index 63, at 0,0
+lamp 99           0              RIGHT ORBIT COMBO 2  # lamp 199, I/O group 8 index 70, at 0,0
+lamp 100          0              RIGHT ORBIT MULTI BALL  # lamp 200, I/O group 8 index 71, at 0,0
+lamp 117          0              LOWER RIGHT FLASH  # lamp 201, I/O group 8 index 72, at 0,0
+lamp 118          0              LOCK FLASH  # lamp 202, I/O group 8 index 73, at 0,0
+lamp 119          0              MYSTERY FLASH (X2)  # lamp 203, I/O group 8 index 74, at 0,0
+lamp 121          0              TIME MACHINE FLASH  # lamp 204, I/O group 8 index 75, at 0,0
+lamp 122          0              RIGHT RAMP FLASH  # lamp 205, I/O group 8 index 76, at 0,0
+lamp 116          0              UPPER RIGHT FLASH  # lamp 206, I/O group 8 index 77, at 0,0
+lamp 57           0              LOCK UPPER SCOOP  # lamp 207, I/O group 8 index 78, at 0,0
+lamp 58           0              LOCK LOWER SCOOP  # lamp 208, I/O group 8 index 79, at 0,0
+lamp 441          0              BACK GI (X8)  # lamp 209, I/O group 9 index 0, at 0,0
+lamp 415          0              ALBUM 1  # lamp 210, I/O group 9 index 1, at 0,0
+lamp 416          0              ALBUM 2  # lamp 211, I/O group 9 index 2, at 0,0
+lamp 417          0              ALBUM 3  # lamp 212, I/O group 9 index 3, at 0,0
+lamp 418          0              ALBUM 4  # lamp 213, I/O group 9 index 4, at 0,0
+lamp 419          0              ALBUM 5  # lamp 214, I/O group 9 index 5, at 0,0
+lamp 420          0              ALBUM 6  # lamp 215, I/O group 9 index 6, at 0,0
+lamp 421          0              ALBUM 7  # lamp 216, I/O group 9 index 7, at 0,0
+lamp 422          0              ALBUM 8  # lamp 217, I/O group 9 index 8, at 0,0
+lamp 423          0              ALBUM 9  # lamp 218, I/O group 9 index 9, at 0,0
+lamp 424          0              ALBUM 10  # lamp 219, I/O group 9 index 10, at 0,0
+lamp 425          0x1000000000   MILLIONS (X2)  # lamp 220, I/O group 9 index 13, at 0,0; tie: Millions (back right) switch
+lamp 426          0x200000000    EXTRA BALL (X2)  # lamp 221, I/O group 9 index 12, at 0,0; tie: Extra ball (front left) switch
+lamp 427          0x800000000    FRENZY (X2)  # lamp 222, I/O group 9 index 11, at 0,0; tie: Frenzy (front right) switch
+lamp 428          0x400000000    ADVANCE TIME MACHINE (X2)  # lamp 223, I/O group 9 index 14, at 0,0; tie: Advance time machine (back left) switch
+lamp 429,430,431  0              GI1  # lamp 224, I/O group 9 index 20, at 0,0
+lamp 432,433,434  0              GI2  # lamp 225, I/O group 9 index 23, at 0,0
+lamp 435,436,437  0              GI3  # lamp 226, I/O group 9 index 26, at 0,0
+lamp 438,439,440  0              GI4  # lamp 227, I/O group 9 index 29, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# #
+#  
+# P
+# A
+# D
+# -
+# 4
+# 2
+# 0
+# :
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# r
+# e
+# a
+# d
+#  
+# f
+# r
+# o
+# m
+#  
+# t
+# h
+# i
+# s
+#  
+# p
+# r
+# o
+# g
+# r
+# a
+# m
+#  
+# w
+# i
+# t
+# h
+#  
+# t
+# h
+# e
+#  
+# v
+# t
+# a
+# b
+# l
+# e
+#  
+# s
+# l
+# o
+# t
+#  
+# r
+# u
+# s
+# h
+# _
+# l
+# e
+# -
+# 1
+# .
+# 1
+# 8
+# '
+# s
+#  
+# o
+# w
+# n
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# p
+# o
+# i
+# n
+# t
+#  
+# a
+# t
+#  
+# (
+# 4
+# 0
+# )
+site block_start_2      0x000b0974 0xe92d43f0 0xe1a04000
+data block_obj_2        0x0b646a80
+text block_name_2       La Villa Strangiato
+site block_start_3      0x000b7620 0xe92d4ff0 0xe1a04000
+data block_obj_3        0x0b646b50
+text block_name_3       Tom Sawyer
+site block_start_4      0x000ba150 0xe92d4ff0 0xe1a04000
+data block_obj_4        0x0b646c08
+text block_name_4       Working Man
+site block_start_5      0x000b4bb0 0xe92d47f0 0xe1a04000
+data block_obj_5        0x0b646cf8
+text block_name_5       The Big Money
+site block_start_6      0x000b61b0 0xe92d41f0 0xe1a04000
+data block_obj_6        0x0b646dd8
+text block_name_6       The Spirit of Radio
+site block_start_7      0x000b2c84 0xe92d47f0 0xe1a04000
+data block_obj_7        0x0b646ea0
+text block_name_7       Limelight
+site block_start_15     0x000f72f8 0xe92d47f0 0xe1a04000
+data block_obj_15       0x0b647378
+text block_name_15      Bastille Day Hurry Up
+site block_start_16     0x0010cca8 0xe92d43f0 0xe1a07000
+data block_obj_16       0x0b647430
+text block_name_16      Topper Frenzy
+site block_start_35     0x000f5ca0 0xe92d4ff0 0xe1a05000
+data block_obj_35       0x0b6481c0
+text block_name_35      2112 Wizard
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         298   # One. / Two!
+callout ten_seconds       323   # Hurry up, you're gonna miss your flight! / There's a man out there crawling on the wing.
+callout time_up           267   # Better luck next time, dude! / Your time is up, Hozer!
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+value scoop_event          2
+site scoop_handler         0x000f2d64 0xe2400002 0xe92d4030
+data scoop_slot           0x0b603560
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c3.sh: held 2000 ms as a mode started, ONE command at the game's own powers, ended on the board
+# by itself; let go early by a mode stop, the game's OFF). Its TimeMachineMagnet (device 15) takes its powers from
+# its object; the GAME's own grab was seen in the magnet census when the Center ramp opto was made: 255 for 80 ms,
+# then 100 (for 20 s; held at most 5 s)
+data coil_count            0x0b65483c
+data coil_table            0x0b664aa4
+value magnet_proc          13185
+text magnet_hold_label    Magnet
+text magnet_hold_drive    9 7 255 80 100
+text held_coils            magnet_hold
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x00210688 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x001220a4 0xe92d43f0 0xe24dd00c   # rush_le-1.19's Wide orange and green strobe: its lit lights 84% alike; 379 lights in its lamp groups, 0 light-runner commands, orange, magenta, 11.5 s
+text show_name_1          Wide orange and green strobe
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x00122000 0xe92d40f0 0xe24dd00c   # rush_le-1.19's Wide orange and magenta strobe: its lit lights 84% alike; 379 lights in its lamp groups, 0 light-runner commands, orange, white, 11.8 s
+text show_name_2          Wide orange and magenta strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x001240d0 0xe92d4ff0 0xe24dd034   # rush_le-1.19's Magenta strobe: its lit lights 77% alike; 255 lights in its lamp groups, 0 light-runner commands, yellow, 11.7 s
+text show_name_3          Magenta strobe
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x00135f68 0xe92d43f0 0xe24dd01c   # rush_le-1.19's Magenta and white glow: its lit lights 78% alike; 257 lights in its lamp groups, 0 light-runner commands, yellow, white, 11.5 s
+text show_name_4          Magenta and white glow
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x0012f628 0xe92d4ff0 0xe3a00020   # rush_le-1.19's Magenta glow: its lit lights 78% alike; 252 lights in its lamp groups, 0 light-runner commands, red, yellow, 11.8 s
+text show_name_5          Magenta glow
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x000f7bb8 0xe92d40f0 0xe24dd024   # rush_le-1.19's Blue and magenta chase: its lit lights 87% alike; 192 lights in its lamp groups, 0 light-runner commands, orange, yellow, 11.7 s
+text show_name_6          Blue and magenta chase
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x0010aaa0 0xe92d40f0 0xe24dd024   # 238 lights in its lamp groups, 0 light-runner commands, green, magenta, 11.5 s
+text show_name_7          Green and magenta chase
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x000fd394 0xe92d4010 0xe24dd020   # 237 lights in its lamp groups, 0 light-runner commands, orange, white, 9.0 s
+text show_name_8          Orange and white chase
+text show_kind_8          flashy
+value show_secs_8         9
+site show_9               0x000fb5f0 0xe92d4030 0xe24dd024   # 220 lights in its lamp groups, 0 light-runner commands, yellow, white, 2.5 s
+text show_name_9          Yellow and white chase
+text show_kind_9          flashy
+value show_secs_9         3
+site show_10              0x000d4700 0xe92d4010 0xeb052909   # rush_le-1.19's Small slow white fade: its lit lights 100% alike; 9 lights in its lamp groups, 0 light-runner commands, white, 11.2 s
+text show_name_10         Small slow white fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x0012263c 0xe92d4010 0xe24dd018   # rush_le-1.19's Wide green and blue strobe: its lit lights 91% alike; 445 lights in its lamp groups, 0 light-runner commands, yellow, white, 0.9 s
+text show_name_11         Wide green and blue strobe
+text show_kind_11         accent
+value show_secs_11        1
+site show_12              0x00122560 0xe92d4010 0xe24dd018   # rush_le-1.19's Wide red and cyan strobe: its lit lights 91% alike; 445 lights in its lamp groups, 0 light-runner commands, red, green, 0.9 s
+text show_name_12         Wide red and cyan strobe
+text show_kind_12         accent
+value show_secs_12        1

@@ -105,3 +105,28 @@ def test_the_object_logs_the_lines_the_reader_reads():
     assert 'say "switch $id $name"' in sh and '"$DUMP/census.mark"' in sh
     tryit = (SDK.parent / "tryit.sh").read_text(encoding="utf-8")
     assert '"$S/%s"' % GC.FLAG_NAME in tryit and '"$DUMP/%s"' % GC.FLAG_NAME in tryit
+
+
+def test_a_saver_that_keeps_giving_the_ball_back_is_waited_out_longer_each_time():
+    """PAD-420: Batman 1.14's saver outlasted the 15 s after the three switches, so every drain was given back and the
+    check never saw a ball end; the wait grows with each saved drain (30, 40, 50 s), and 30 s ended its ball."""
+    sh = (SDK.parent / "gamecheck.sh").read_text(encoding="utf-8")
+    body = sh[sh.index("drain_until_end() {"):]
+    body = body[:body.index("\n}\n")]
+    assert "sleep $(( 10 * n + 10 ))" in body and "sleep 15\n" not in body
+    # and the ball it served back is launched first (Batman's shooter lane: no auto launch)
+    assert body.index('plunge.py" plunge') < body.index('for id in "${ids[@]:0:3}"; do press "$id"; done')
+
+
+def test_a_mechanism_s_position_sensors_are_left_alone_and_each_drain_says_what_it_did():
+    """PAD-420: Batman 66 1.14 names its mechanism sensors "Turntable Pos. #2" and "Crane Pos. #5" - past the POSITION
+    rule - and pressed they left its ball in play for ever: a drain filled the trough and the game neither ended the
+    ball nor served one (two checks failed so). Skipped, the first drain ended the ball. And a drain's own answer goes
+    on its line: the check had said "the ball saver gave it back" after drains the rig refused (the trough full)."""
+    sh = (SDK.parent / "gamecheck.sh").read_text(encoding="utf-8")
+    rule = sh[sh.index("skipped() {"):]
+    rule = rule[:rule.index("\n}\n")]
+    assert "|POSITION|POS\.|HOME|" in rule
+    body = sh[sh.index("drain_until_end() {"):]
+    body = body[:body.index("\n}\n")]
+    assert 'say "drain $n: $(python3 "$RIG/plunge.py" drain 2>&1 | head -n 1)"' in body

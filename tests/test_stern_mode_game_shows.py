@@ -45,8 +45,10 @@ def _shows():
 def test_the_port_names_every_show_as_a_mode_asks_for_it():
     p = _port()
     assert re.search(r"^value show_proc\s+\d+", p, re.M)
-    for s in ("proc_create", "proc_exists", "event_cancel"):
+    for s in ("proc_create", "proc_exists", "event_cancel", "lamp_free_owner"):
         assert re.search(r"^site %s\s+0x[0-9a-f]+ 0x[0-9a-f]{8} 0x[0-9a-f]{8}" % s, p, re.M), s
+    for v in ("proc_exit_hooks", "proc_exit_slots"):
+        assert re.search(r"^value %s\s+(0x[0-9a-f]+|\d+)" % v, p, re.M), v
     shows = _shows()
     ns = sorted(n for n, _k, _s in shows.values())
     assert ns == list(range(1, len(ns) + 1)) and len(ns) >= 8          # numbered from 1, no gaps
@@ -55,6 +57,38 @@ def test_the_port_names_every_show_as_a_mode_asks_for_it():
     # measured on the machine and in the emulator: the 2 s Colour sweep went unseen as a start
     assert shows["Colour sweep"][1] == "accent"
     assert shows["Insert chase"][1] == "flashy" and shows["Playfield wave"][1] == "flashy"
+
+
+def test_every_port_with_shows_has_what_the_runtime_arms():
+    """PAD-420: every other build's shows (found by playing each process-registry candidate with its lamp groups and
+    light-runner commands recorded) obey the same lines: the process calls, show_proc, numbered from 1 with no gap
+    and at most the runtime's SHOWS_MAX - 1, each named (unique, shorter than mode_file.c's 40 bytes) with a kind
+    and a length of 1..20 s."""
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    shows_max = int(re.search(r"^#define SHOWS_MAX (\d+)", src, re.M).group(1))
+    with_shows = 0
+    for port in sorted((SDK / "ports").glob("*.port")):
+        p = port.read_text(encoding="utf-8")
+        ns = sorted(int(k) for k in re.findall(r"^site show_(\d+) ", p, re.M))
+        if not ns:
+            assert not re.search(r"^text show_name_\d+", p, re.M), port.name
+            continue
+        with_shows += 1
+        assert re.search(r"^value show_proc\s+\d+", p, re.M), port.name
+        for s in ("proc_create", "proc_exists", "event_cancel", "lamp_free_owner"):
+            assert re.search(r"^site %s\s+0x[0-9a-f]+ 0x[0-9a-f]{8} 0x[0-9a-f]{8}" % s, p, re.M), (port.name, s)
+        assert re.search(r"^value proc_exit_hooks\s+0x(d0|e0|f0|120)$", p, re.M), port.name    # the record's hooks
+        assert re.search(r"^value proc_exit_slots\s+4$", p, re.M), port.name
+        assert ns == list(range(1, len(ns) + 1)) and len(ns) < shows_max, port.name
+        names = []
+        for n in ns:
+            name = re.search(r"^text show_name_%d\s+(.+?)\s*$" % n, p, re.M).group(1)
+            kind = re.search(r"^text show_kind_%d\s+(\S+)" % n, p, re.M).group(1)
+            secs = int(re.search(r"^value show_secs_%d\s+(\d+)" % n, p, re.M).group(1))
+            assert len(name) < 40 and kind in ("flashy", "subdued", "accent") and 0 < secs <= 20, (port.name, n)
+            names.append(name.lower())
+        assert len(set(names)) == len(names), port.name
+    assert with_shows >= 1
 
 
 @pytest.mark.parametrize("slug", EXAMPLES)
@@ -80,6 +114,17 @@ def test_the_runtime_limits():
     assert "show_now.limit" in tick[:tick.index("\n}\n")]
     kill = src[src.index("static void show_kill("):]
     assert 'fn("event_cancel")' in kill[:kill.index("\n}\n")]               # the game's own kill by id
+    # PAD-420: every show it starts frees its lamp groups as it ends - the game's clean-up, from an exit hook of the
+    # show's process record (a process the runtime starts is not flagged as a show, so the game's exit skipped it and
+    # every show played kept a lamp group: King Kong LE 0.97's pool was gone after 26 plays)
+    assert "rec = ((unsigned (*)(unsigned, void (*)(void), unsigned))" in body and "if (!show_exit_hook(rec)) {" in body
+    hook = src[src.index("static int show_exit_hook("):]
+    hook = hook[:hook.index("\n}\n")]
+    assert "if (slot[0]) continue;" in hook and "slot[0] = (unsigned)(unsigned long)show_exit;" in hook
+    assert 'fn("lamp_free_owner"))(rec);' in src[src.index("static void show_exit("):]
+    arm = src[src.index("static void shows_arm("):]
+    arm = arm[:arm.index("\n}\n")]
+    assert '"lamp_free_owner"' in arm and '"proc_exit_hooks", "proc_exit_slots"' in arm
     assert "ball_end_at = pm_ms() | 1;" in src[src.index("static void on_ball_end("):]
 
 

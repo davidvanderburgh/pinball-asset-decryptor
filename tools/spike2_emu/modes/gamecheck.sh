@@ -47,9 +47,11 @@ press() {   # press <id>: a mark the object logs, then a 150 ms press
     python3 "$RIG/swpoke.py" "$1" 150 > /dev/null 2>&1 || say "swpoke $1 failed"
     sleep 1.1
 }
-#: a switch the check leaves alone, by its name in the switch list
+#: a switch the check leaves alone, by its name in the switch list. A mechanism's position sensor is one
+#: (POSITION, HOME, and Batman 66's "Turntable Pos. #2" / "Crane Pos. #5": PAD-420, pressed they left its
+#: ball in play for ever - a drain with the trough full again neither ended the ball nor served one)
 skipped() {
-    echo "$1" | grep -qiE 'TROUGH|FLIPPER|SHOOTER|COIN|SERVICE|^DIP|START|TILT|DOOR|VOLUME|HEADPHONE|ENCODER|QR SCANNER|MOTOR|LOCKDOWN|LOCK [0-9]|TICKET|OUTLANE|OUT LANE|EOS|DETECT|BUTTON|POSITION|HOME|INTERLOCK|OPTO BOARD|JAM'
+    echo "$1" | grep -qiE 'TROUGH|FLIPPER|SHOOTER|COIN|SERVICE|^DIP|START|TILT|DOOR|VOLUME|HEADPHONE|ENCODER|QR SCANNER|MOTOR|LOCKDOWN|LOCK [0-9]|TICKET|OUTLANE|OUT LANE|EOS|DETECT|BUTTON|POSITION|POS\.|HOME|INTERLOCK|OPTO BOARD|JAM'
 }
 
 #: the rig's ball feeder answers the game's trough eject; on a title whose device table has no
@@ -111,7 +113,7 @@ guided_setup() {
 }
 #: drain until the object logs one more end of ball: 0 when one did. A drain inside the ball saver
 #: comes back as a new ball, and a ball drained before any playfield switch since its launch is given
-#: back every time (John Wick, Venom), so after a saved drain three switches are hit and the saver
+#: back every time (John Wick, Venom), so after a saved drain three switches are hit and the saver (30, 40, 50 s)
 #: is waited out before the next one
 drain_until_end() {
     local before n end id
@@ -120,8 +122,9 @@ drain_until_end() {
     before=$(count "check ball end")
     for n in 1 2 3 4 5; do
         game_up || return 1
-        say "drain $n"
-        python3 "$RIG/plunge.py" drain > /dev/null 2>&1
+        # PAD-420: the drain's own answer goes on the line - "the ball saver gave it back" was said after a drain the
+        # rig refused (the trough already full: no ball in play to drain), which is a game that kept no ball out
+        say "drain $n: $(python3 "$RIG/plunge.py" drain 2>&1 | head -n 1)"
         end=$(( $(date +%s) + 7 ))
         while [ "$(date +%s)" -lt "$end" ]; do
             [ "$(count "check ball end")" -gt "$before" ] && return 0
@@ -129,8 +132,13 @@ drain_until_end() {
         done
         [ "$n" -ge 2 ] || continue
         say "the ball saver gave it back: playing past it"
+        # PAD-420: launch the ball it served back first (a title with no auto launch leaves it in the shooter lane,
+        # and a drain then is not that ball's; plunge moves nothing with the lane empty)
+        python3 "$RIG/plunge.py" plunge > /dev/null 2>&1; sleep 2
         for id in "${ids[@]:0:3}"; do press "$id"; done
-        sleep 15
+        # PAD-420: longer each time - Batman 1.14's saver outlasts 15 s after the first switch (every drain was given
+        # back); 30 s ended its ball
+        sleep $(( 10 * n + 10 ))
         echo drain > "$DUMP/census.mark"
     done
     return 1

@@ -357,9 +357,10 @@ def test_the_beatles_profile():
     assert p.proven and not p.proven_note
     assert p.score_bits == 32 and p.shot_mask_bits == 32
     rule = [n for n, m in p.shots if m < (1 << 32)]
-    assert len(rule) == 27 and len(p.shots) == 35
+    assert len(rule) == 27 and len(p.shots) == 36          # PAD-420: the magnet switch a shot too
     assert p.switch_shots == ("Target 1", "Target 2", "Target 3", "Target 4", "Left outlane",
-                              "Left return lane", "Right return lane", "Right outlane")
+                              "Left return lane", "Right return lane", "Right outlane",
+                              "Top magnet opto")                    # PAD-420: the magnet's own opto
     assert dict(p.shots)["Target 1"] == 0x100000000
     assert all(m >= (1 << 32) for n, m in p.shots if n in p.switch_shots)       # bits the rules never send
     assert p.switch_shots_note == ""                   # beatles-1.29 is in SWITCH_SHOTS_PROVEN
@@ -378,7 +379,7 @@ def test_the_beatles_profile():
     # item 164: its screen was seen; with no time-up call known, a mode's own end sound rides a carrier
     # (heard at time-up in the emulator), so nothing is left out
     # item 167: a multiball of the mode's own is greyed until the build is emulator-proven
-    assert cannot == (set() if "beatles-1.29" in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if "beatles-1.29" in MP.BALL_SAVE_PROVEN else {"ball_save"}) | {"magnet", "scoop", "coils", "shield", "shaker", "shows", "wizard"}     # PAD-225; PAD-381: no magnet, scoop or held coils in its port; PAD-392: no shield platform; PAD-418: no light shows named; PAD-414: no shaker; PAD-436: no mini-wizards
+    assert cannot == (set() if "beatles-1.29" in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if "beatles-1.29" in MP.BALL_SAVE_PROVEN else {"ball_save"}) | {"scoop", "shield", "shaker", "wizard"}     # PAD-225; PAD-381: no scoop in its port; PAD-392: no shield platform; PAD-414: no shaker; PAD-436: no mini-wizards; PAD-420: its top magnet held (magnet, coils) and twelve light shows
     assert p.light_route == "inserts"
     assert "multiballs" in p.stack_note          # item 164: the framework's balls in play, multiballs only
     for part in cannot:

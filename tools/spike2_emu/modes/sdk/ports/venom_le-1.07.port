@@ -388,6 +388,10 @@ value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
 # ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 # 169 inserts on the  picture; light table 0x6ce544, device table 0x6d167c, lamp table 0x6ab900 (171 lamps)
 # shot masks: the code that builds the cshot objects was not found
 lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
@@ -404,15 +408,15 @@ lamp 185          0              LOWER RIGHT FLASH  # lamp 11, I/O group 7 index
 lamp 181          0              RIGHT GI-1  # lamp 12, I/O group 8 index 0, at 0,0
 lamp 182          0              RIGHT GI-RED  # lamp 13, I/O group 8 index 1, at 0,0
 lamp 183          0              RIGHT GI-2/BACKPANEL  # lamp 14, I/O group 8 index 2, at 0,0
-lamp 186          0              LEFT POP FLASH  # lamp 15, I/O group 8 index 3, at 0,0
-lamp 187          0              RIGHT POP FLASH  # lamp 16, I/O group 8 index 4, at 0,0
+lamp 186          0x1000000000   LEFT POP FLASH  # lamp 15, I/O group 8 index 3, at 0,0; tie: Left pop bumper
+lamp 187          0x2000000000   RIGHT POP FLASH  # lamp 16, I/O group 8 index 4, at 0,0; tie: Right pop bumper
 lamp 188          0              UP LEFT FLASH  # lamp 17, I/O group 8 index 5, at 0,0
 lamp 189          0              UP RIGHT FLASH  # lamp 18, I/O group 8 index 6, at 0,0
 lamp 74           0              1X  # lamp 19, I/O group 7 index 14, at 0,0
 lamp 75           0              2X  # lamp 20, I/O group 7 index 13, at 0,0
 lamp 76           0              4X  # lamp 21, I/O group 7 index 12, at 0,0
-lamp 12           0              RIGHT OUTLANE  # lamp 22, I/O group 7 index 11, at 0,0
-lamp 11           0              RIGHT RETURN LANE  # lamp 23, I/O group 7 index 10, at 0,0
+lamp 12           0x2000         RIGHT OUTLANE  # lamp 22, I/O group 7 index 11, at 0,0; tie: Right outlane
+lamp 11           0x1000         RIGHT RETURN LANE  # lamp 23, I/O group 7 index 10, at 0,0; tie: Right return lane
 lamp 50,51,52     0              LASHER  # lamp 24, I/O group 7 index 84, at 0,0
 lamp 53,54,55     0              LASHER 1  # lamp 25, I/O group 7 index 87, at 0,0
 lamp 56,57,58     0              LASHER 2  # lamp 26, I/O group 7 index 90, at 0,0
@@ -430,8 +434,8 @@ lamp 23,24,25     0              RIOT 3  # lamp 37, I/O group 7 index 57, at 0,0
 lamp 20,21,22     0              RIOT 2  # lamp 38, I/O group 7 index 54, at 0,0
 lamp 17,18,19     0              RIOT 1  # lamp 39, I/O group 7 index 51, at 0,0
 lamp 14,15,16     0              RIOT  # lamp 40, I/O group 7 index 48, at 0,0
-lamp 9            0              LEFT OUTLANE  # lamp 41, I/O group 7 index 8, at 0,0
-lamp 10           0              LEFT RETURN LANE  # lamp 42, I/O group 7 index 9, at 0,0
+lamp 9            0x400          LEFT OUTLANE  # lamp 41, I/O group 7 index 8, at 0,0; tie: Left outlane
+lamp 10           0x800          LEFT RETURN LANE  # lamp 42, I/O group 7 index 9, at 0,0; tie: Left return lane
 lamp 64           0              MILES  # lamp 43, I/O group 7 index 18, at 0,0
 lamp 63           0              SLEEPER  # lamp 44, I/O group 7 index 17, at 0,0
 lamp 71,72,73     0              GRENDEL  # lamp 45, I/O group 7 index 24, at 0,0
@@ -440,10 +444,10 @@ lamp 67           0              WOLVERINE  # lamp 47, I/O group 7 index 31, at 
 lamp 66           0              CAPTAIN AMERICA  # lamp 48, I/O group 7 index 30, at 0,0
 lamp 65           0              HULK  # lamp 49, I/O group 7 index 32, at 0,0
 lamp 62           0              HYBRID  # lamp 50, I/O group 7 index 16, at 0,0
-lamp 77           0              LEFT TARGET  # lamp 51, I/O group 7 index 19, at 0,0
-lamp 159          0              LEFT BB LOCK 1  # lamp 52, I/O group 8 index 32, at 0,0
-lamp 160          0              LEFT BB LOCK 2  # lamp 53, I/O group 8 index 33, at 0,0
-lamp 161          0              LEFT BB LOCK 3  # lamp 54, I/O group 8 index 34, at 0,0
+lamp 77           0x40           LEFT TARGET  # lamp 51, I/O group 7 index 19, at 0,0; tie: Left target
+lamp 159          0x80           LEFT BB LOCK 1  # lamp 52, I/O group 8 index 32, at 0,0; tie: Left lock 1 opto
+lamp 160          0x100          LEFT BB LOCK 2  # lamp 53, I/O group 8 index 33, at 0,0; tie: Left lock 2 opto
+lamp 161          0x200          LEFT BB LOCK 3  # lamp 54, I/O group 8 index 34, at 0,0; tie: Left lock 3 opto
 lamp 152          0              EDDIE BROCK  # lamp 55, I/O group 7 index 40, at 0,0
 lamp 153          0              FLASH THOMPSON  # lamp 56, I/O group 7 index 41, at 0,0
 lamp 154          0              GWEN STACY  # lamp 57, I/O group 7 index 42, at 0,0
@@ -452,21 +456,21 @@ lamp 156          0              HULK  # lamp 59, I/O group 7 index 44, at 0,0
 lamp 157          0              CAPTAIN AMERICA  # lamp 60, I/O group 7 index 45, at 0,0
 lamp 158          0              WOLVERINE  # lamp 61, I/O group 7 index 46, at 0,0
 lamp 146          0              DOPPEL PROGRESS LEFT  # lamp 62, I/O group 7 index 36, at 0,0
-lamp 143          0              DOPPELGANGER LEFT ARROW  # lamp 63, I/O group 7 index 33, at 0,0
-lamp 144          0              DOPPELGANGER CENTER ARROW  # lamp 64, I/O group 7 index 34, at 0,0
+lamp 143          0x1            DOPPELGANGER LEFT ARROW  # lamp 63, I/O group 7 index 33, at 0,0; tie: Down 3 bank-left
+lamp 144          0x2            DOPPELGANGER CENTER ARROW  # lamp 64, I/O group 7 index 34, at 0,0; tie: Down 3 bank-center
 lamp 147          0              DOPPEL PROGRESS CENTER  # lamp 65, I/O group 7 index 37, at 0,0
 lamp 149          0              RAMPAGE  # lamp 66, I/O group 7 index 39, at 0,0
-lamp 78           0              RIGHT TARGET  # lamp 67, I/O group 7 index 15, at 0,0
-lamp 145          0              DOPPELGANGER RIGHT ARROW  # lamp 68, I/O group 7 index 35, at 0,0
+lamp 78           0x4000         RIGHT TARGET  # lamp 67, I/O group 7 index 15, at 0,0; tie: Right target
+lamp 145          0x4            DOPPELGANGER RIGHT ARROW  # lamp 68, I/O group 7 index 35, at 0,0; tie: Down 3 bank-right
 lamp 148          0              DOPPEL PROGRESS RIGHT  # lamp 69, I/O group 7 index 38, at 0,0
-lamp 162          0              RIGHT BB LOCK 1  # lamp 70, I/O group 8 index 35, at 0,0
-lamp 163          0              RIGHT BB LOCK 2  # lamp 71, I/O group 8 index 36, at 0,0
-lamp 164          0              RIGHT BB LOCK 3  # lamp 72, I/O group 8 index 37, at 0,0
+lamp 162          0x8            RIGHT BB LOCK 1  # lamp 70, I/O group 8 index 35, at 0,0; tie: Right lock 1 opto
+lamp 163          0x10           RIGHT BB LOCK 2  # lamp 71, I/O group 8 index 36, at 0,0; tie: Right lock 2 opto
+lamp 164          0x20           RIGHT BB LOCK 3  # lamp 72, I/O group 8 index 37, at 0,0; tie: Right lock 3 opto
 lamp 140,141,142  0              RIGHT ORBIT LOCK  # lamp 73, I/O group 8 index 62, at 0,0
 lamp 139          0              RIGHT ORBIT WEB  # lamp 74, I/O group 8 index 48, at 0,0
-lamp 136,137,138  0              RIGHT ORBIT  # lamp 75, I/O group 8 index 59, at 0,0
-lamp 129,130,131  0              RIGHT LOOP  # lamp 76, I/O group 8 index 56, at 0,0
-lamp 119          0              MINI TARGET RIGHT  # lamp 77, I/O group 8 index 50, at 0,0
+lamp 136,137,138  0x2000000      RIGHT ORBIT  # lamp 75, I/O group 8 index 59, at 0,0; tie: Right orbit
+lamp 129,130,131  0x20200000     RIGHT LOOP  # lamp 76, I/O group 8 index 56, at 0,0; tie: Loop hole entrance opto, Right loop entrance
+lamp 119          0x8000000      MINI TARGET RIGHT  # lamp 77, I/O group 8 index 50, at 0,0; tie: Right mini target
 lamp 132          0              RIGHT LOOP WEB  # lamp 78, I/O group 8 index 55, at 0,0
 lamp 133,134,135  0              RIGHT LOOP LOCK  # lamp 79, I/O group 8 index 65, at 0,0
 lamp 128          0              EXTRA BALL  # lamp 80, I/O group 8 index 54, at 0,0
@@ -485,14 +489,14 @@ lamp 175          0              RAVENCROFT WHITE FLASH  # lamp 92, I/O group 8 
 lamp 176          0              RAVENCROFT RED FLASH  # lamp 93, I/O group 8 index 39, at 0,0
 lamp 124,125,126  0              SCOOP LOCK  # lamp 94, I/O group 8 index 68, at 0,0
 lamp 123          0              SCOOP WEB  # lamp 95, I/O group 8 index 24, at 0,0
-lamp 120,121,122  0              SCOOP  # lamp 96, I/O group 8 index 21, at 0,0
-lamp 118          0              MINI TARGET LEFT  # lamp 97, I/O group 8 index 49, at 0,0
-lamp 111,112,113  0              LEFT LOOP  # lamp 98, I/O group 8 index 74, at 0,0
+lamp 120,121,122  0x80000        SCOOP  # lamp 96, I/O group 8 index 21, at 0,0; tie: Scoop made opto
+lamp 118          0x4000000      MINI TARGET LEFT  # lamp 97, I/O group 8 index 49, at 0,0; tie: Left mini target
+lamp 111,112,113  0x10000000     LEFT LOOP  # lamp 98, I/O group 8 index 74, at 0,0; tie: Left loop enter opto
 lamp 114          0              LEFT LOOP WEB  # lamp 99, I/O group 8 index 52, at 0,0
 lamp 115,116,117  0              LEFT LOOP LOCK  # lamp 100, I/O group 8 index 71, at 0,0
 lamp 110          0              BELL TOWER INFECTED  # lamp 101, I/O group 8 index 51, at 0,0
-lamp 107,108,109  0              BELL TOWER  # lamp 102, I/O group 8 index 77, at 0,0
-lamp 97,98,99     0              CENTER RAMP  # lamp 103, I/O group 8 index 18, at 0,0
+lamp 107,108,109  0x40000000     BELL TOWER  # lamp 102, I/O group 8 index 77, at 0,0; tie: Bell tower target
+lamp 97,98,99     0x100000000    CENTER RAMP  # lamp 103, I/O group 8 index 18, at 0,0; tie: Center ramp made
 lamp 100          0              CENTER RAMP WEB  # lamp 104, I/O group 8 index 17, at 0,0
 lamp 101,102,103  0              CENTER RAMP LOCK  # lamp 105, I/O group 8 index 13, at 0,0
 lamp 104,105,106  0              START  # lamp 106, I/O group 8 index 10, at 0,0
@@ -500,14 +504,14 @@ lamp 96           0              CARNAGE INFECTED  # lamp 107, I/O group 8 index
 lamp 95           0              BLOOD LUST  # lamp 108, I/O group 8 index 8, at 0,0
 lamp 94           0              HURRY UP  # lamp 109, I/O group 8 index 16, at 0,0
 lamp 91,92,93     0              CARNAGE  # lamp 110, I/O group 8 index 29, at 0,0
-lamp 83,84,85     0              LEFT RAMP  # lamp 111, I/O group 8 index 40, at 0,0
+lamp 83,84,85     0x400000000    LEFT RAMP  # lamp 111, I/O group 8 index 40, at 0,0; tie: Left ramp made opto
 lamp 86           0              LEFT RAMP WEB  # lamp 112, I/O group 8 index 43, at 0,0
 lamp 87,88,89     0              LEFT RAMP LOCK  # lamp 113, I/O group 8 index 44, at 0,0
 lamp 90           0              CHANGE HOST  # lamp 114, I/O group 8 index 47, at 0,0
 lamp 82           0              LEFT ORBIT WEB  # lamp 115, I/O group 7 index 23, at 0,0
-lamp 79,80,81     0              LEFT ORBIT  # lamp 116, I/O group 7 index 20, at 0,0
-lamp 150          0              TOP LANE LEFT  # lamp 117, I/O group 8 index 25, at 0,0
-lamp 151          0              TOP LANE RIGHT  # lamp 118, I/O group 8 index 26, at 0,0
+lamp 79,80,81     0x800000000    LEFT ORBIT  # lamp 116, I/O group 7 index 20, at 0,0; tie: Left orbit
+lamp 150          0x4000000000   TOP LANE LEFT  # lamp 117, I/O group 8 index 25, at 0,0; tie: Top lane-left
+lamp 151          0x8000000000   TOP LANE RIGHT  # lamp 118, I/O group 8 index 26, at 0,0; tie: Top lane-right
 lamp 232,233,234  0              GHOST RIDER STANDEE  # lamp 119, I/O group 9 index 1, at 0,0
 lamp 235,236,237  0              TOPPER BACK WHEEL  # lamp 120, I/O group 9 index 4, at 0,0
 lamp 238,239,240  0              TOPPER BIKE  # lamp 121, I/O group 9 index 7, at 0,0
@@ -804,3 +808,94 @@ site block_rule_17         0x001ae0d0 0xe92d4010 0xe24dd008  # ctoxin_teamup_rul
 text block_rule_name_17    Toxin Teamup
 site block_rule_18         0x001e5800 0xe92d47f0 0xe1c066d8  # cweb_combos::v[40]
 text block_rule_name_18    Web Combos
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+site proc_exists          0x001edb8c 0xe30023f8 0xe3402074      # placed by signature
+site proc_create          0x001ed53c 0xe300c3f8 0xe340c074      # placed by signature
+site proc_sleep           0x001ed68c 0xe30033f8 0xe3403074      # placed by signature
+site scoop_handler         0x00150948 0xe92d4070 0xe3a00006
+data scoop_slot           0x006b01e8
+value scoop_event          2
+value scoop_event_arg      1
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site adjustment           0x003a5ed0 0xe92d40f0 0xe2504000
+site coil_fire             0x002c9220 0xe3500000 0xe52de004
+data coil_count            0x007c04cc
+data coil_table            0x00746024
+value magnet_proc          13185
+text up_post_label        Up post
+text up_post_drive        9 1 255 32 48 1032
+text held_coils            up_post
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x004882b8 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x001b0b88 0xe92d4ff0 0xe24dd014   # 336 lights in its lamp groups, 0 light-runner commands, yellow, white, 5.0 s
+text show_name_1          Wide yellow and white strobe
+text show_kind_1          flashy
+value show_secs_1         5
+site show_2               0x00173a24 0xe92d4038 0xeb081543   # 316 lights in its lamp groups, 0 light-runner commands, blue, white, 7.5 s
+text show_name_2          Wide fast blue and white strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x0016f768 0xe92d4070 0xe24dd008   # 301 lights in its lamp groups, 0 light-runner commands, blue, white, 5.4 s
+text show_name_3          Wide blue and white strobe
+text show_kind_3          flashy
+value show_secs_3         5
+site show_4               0x001a7758 0xe92d4ff0 0xe24dd02c   # 294 lights in its lamp groups, 0 light-runner commands, red, white, 7.7 s
+text show_name_4          Wide fast red and white strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x0008ac78 0xe92d43f0 0xe3a0002e   # 267 lights in its lamp groups, 0 light-runner commands, red, white, 7.7 s
+text show_name_5          Red and white strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x001350b4 0xe92d4ff0 0xe3a00012   # 260 lights in its lamp groups, 0 light-runner commands, red, purple, 2.8 s
+text show_name_6          Red and purple strobe
+text show_kind_6          flashy
+value show_secs_6         3
+site show_7               0x0019d984 0xe92d4ff0 0xe24dd01c   # 69 lights in its lamp groups, 0 light-runner commands, white, 7.8 s
+text show_name_7          Small slow white fade
+text show_kind_7          subdued
+value show_secs_7         8
+site show_8               0x000bfdc4 0xe92d4030 0xe24dd014   # 57 lights in its lamp groups, 0 light-runner commands, red, white, 7.7 s
+text show_name_8          Small slow red and white fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x0019dbb8 0xe92d4030 0xe24dd08c   # 46 lights in its lamp groups, 0 light-runner commands, purple, 7.8 s
+text show_name_9          Small slow purple fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x000c1fac 0xe92d43f0 0xe3a0003f   # 18 lights in its lamp groups, 0 light-runner commands, red, 7.5 s
+text show_name_10         Small slow red fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x000c20ec 0xe92d4038 0xeb0adb91   # 267 lights in its lamp groups, 0 light-runner commands, yellow, white, 2.0 s
+text show_name_11         Yellow and white strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x000c2158 0xe92d4038 0xe3a01000   # 267 lights in its lamp groups, 0 light-runner commands, blue, white, 2.0 s
+text show_name_12         Blue and white strobe
+text show_kind_12         accent
+value show_secs_12        2

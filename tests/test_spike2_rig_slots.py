@@ -643,6 +643,62 @@ rm -rf "$t"
 
 
 @needs_proc
+def test_a_batchs_end_leaves_other_batches_copies_in_flight():
+    """PAD-420: several batches stage into one folder at once; each copies into a folder of its own under .inflight
+    (named from its out dir) and its end removes only that one. The shared .partial emptied at one batch's end had
+    deleted another batch's card mid-copy (that build then failed staging)."""
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    rb = open(os.path.join(RIG, "rigbatch.sh"), encoding="utf-8").read()
+    own = '$(printf %s "$OUT" | md5sum | cut -c1-12)'
+    assert 'P=$STAGE/.inflight/%s' % own in cs and 'copy "$card" "$P"' in cs and '"$STAGE/.partial"' not in cs
+    assert 'rm -rf "$STAGE/.inflight/%s"' % own in rb and 'rm -rf "$STAGE/.partial"\n' not in rb
+    # and never evicts a card another batch's rig has mounted, nor a fresh copy first (robocopy keeps the source's
+    # date, which made a card staged a minute ago the oldest file: Jurassic Park Pro's, under a running job)
+    assert 'busy=$( [ -n "$out" ] && in_use "$out"; mounted "$dir")' in cs
+    assert 'pgrep -a fuse2fs 2>/dev/null | grep -o "$1/[^ ]*"' in cs
+    assert cs.index('mv -f "$P/$name" "$dest"') < cs.index('touch "$dest"             # robocopy keeps')
+
+
+def test_a_running_job_keeps_its_slot_and_copies_take_turns():
+    """PAD-420: a worker refreshes its slot's lease while its JOB runs, not only while it waits for a card (a job longer
+    than the lease looked free and the next batch took its slot - its killgame killed the job's game); and the card
+    copies of every batch take turns (several at once off the one spinning disk made each crawl)."""
+    rb = open(os.path.join(RIG, "rigbatch.sh"), encoding="utf-8").read()
+    w = rb[rb.index("worker() {"):]
+    assert '"$key" "$card" > "$log" 2>&1 < /dev/null &' in w and 'while kill -0 "$jp"' in w and 'wait "$jp"' in w
+    loop = w[w.index('while kill -0 "$jp"'):w.index('wait "$jp"')]
+    assert 'riglock.sh" use "$slot" "$WHO"' in loop and "sleep 2" in loop
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    c = cs[cs.index("copy() {"):cs.index("copy_now() {")]
+    assert "exec 9> /tmp/pad-cardstage-copy.lock" in c and "flock 9" in c and 'copy_now "$@"' in c
+
+
+def test_a_copy_is_staged_only_whole():
+    """PAD-420: Windows refused to rename a fresh copy out of .inflight for a moment ("Permission denied", the new file
+    still held open), and the touch after the move made an EMPTY card at its place: Munsters Pro's job booted it ("no
+    MBR signature") and the .src stamp offered it to the next batch. The move is retried, a card is staged only when
+    it is there at its full size, and a staged card is reused only at the source's size."""
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    reuse = cs[cs.index('if [ -f "$dest" ] && [ "$(cat "$dest.src"'):cs.index('echo "$(date +%T) reuse $name"')]
+    assert '[ "$(stat -c %s "$dest")" = "$(stat -c %s "$card")" ]' in reuse
+    move = cs[cs.index('until mv -f "$P/$name" "$dest"'):cs.index("copying $card to $STAGE failed: the copy could not")]
+    assert 'if [ ! -e "$P/$name" ] && [ -f "$dest" ] && [ "$(stat -c %s "$dest")" = "$size" ]; then' in move
+    assert move.index("if [ ! -e") < move.index('touch "$dest"') < move.index('echo "$dest" > "$S/$i"')
+
+
+def test_a_copy_has_a_time_limit_and_a_cut_copy_counts_only_whole():
+    """PAD-420: WSL's interop wrapper sometimes never returns once robocopy.exe has gone - a copy held the shared copy
+    lock for 24 minutes with three rigs waiting for cards. robocopy runs under `timeout`; a copy the limit cut short
+    is done only when its last 4 MB are the card's (robocopy writes the file at its full size first)."""
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    c = cs[cs.index("copy_now() {"):]
+    c = c[:c.index("\n}\n")]
+    assert 'timeout "${PAD_STAGE_COPY_S:-1500}" "$ROBO"' in c
+    assert 'if [ $rc = 124 ] && cmp -s <(tail -c 4194304 "$1") <(tail -c 4194304 "$2/$(basename "$1")"); then' in c
+    assert c.index("local rc=$?") < c.index("[ $rc -lt 8 ]")
+
+
+@needs_proc
 def test_rigbatch_boots_staged_copies_and_reuses_them():
     """cardstage.sh: every rig boots a copy staged off the slow disk; a card
     that cannot be staged fails its build (not the batch); a second sweep

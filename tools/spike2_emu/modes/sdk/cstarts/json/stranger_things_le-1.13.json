@@ -1,0 +1,240 @@
+{
+ "key": "stranger_things_le-1.13",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Bullshit Scoring",
+   "start": "0x359d0",
+   "words": [
+    "0xe92d4010",
+    "0xe3000143"
+   ],
+   "how": "counts AUD_BULLSHIT_SCORING_STARTED (id 193) at 0x35ae8; sets game flag 116,136; creates record(s) 323 (body 0x349cc); reached by tail b 0x35bb4 (fn 0x35ba0); tail b 0x10a754 (fn 0x10a718); a caller uses the result (0x35bb4: tail, 0x10a754: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Break Out",
+   "start": "0x32338",
+   "words": [
+    "0xe92d40f8",
+    "0xebffff93"
+   ],
+   "how": "counts AUD_BREAK_OUT_STARTED (id 194) at 0x32428; creates record(s) 301 (body 0x2f59c),201 (body 0x2f568); reached by table word 0x5e79d4",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Its a Trap",
+   "start": "0xa7cd4",
+   "words": [
+    "0xe3061520",
+    "0xe3000132"
+   ],
+   "how": "counts AUD_ITS_A_TRAP_STARTED (id 195) at 0xa7e00; creates record(s) 306 (body 0xa6520),202 (body 0xa64ec); reached by table word 0x5e7a04",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "Junk Yard",
+   "start": "0xad014",
+   "words": [
+    "0xe30c1cf4",
+    "0xe3a00e13"
+   ],
+   "how": "counts AUD_JUNK_YARD_STARTED (id 196) at 0xad0d4; creates record(s) 304 (body 0xaccf4),203 (body 0xaccc0); reached by table word 0x5e79ec",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 4,
+   "name": "Bust Out",
+   "start": "0x3e10c",
+   "words": [
+    "0xe92d40d0",
+    "0xebffffd1"
+   ],
+   "how": "counts AUD_BUST_OUT_STARTED (id 197) at 0x3e1d4; sets game flag 83,47; creates record(s) 204 (body 0x3dc04),309 (body 0x3dee0),310 (body 0x3dc38); reached by table word 0x5e85e4",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 5,
+   "name": "Whats That",
+   "start": "0x190a5c",
+   "words": [
+    "0xe92d40d0",
+    "0xebffffcc"
+   ],
+   "how": "counts AUD_WHATS_THAT_STARTED (id 201) at 0x190b2c; sets game flag 85; creates record(s) 205 (body 0x19054c),313 (body 0x19081c),314 (body 0x190580); reached by table word 0x5e85fc",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 6,
+   "name": "Upside Down Hurryup",
+   "start": "0x188624",
+   "words": [
+    "0xe92d40f8",
+    "0xe306165c"
+   ],
+   "how": "counts AUD_UPSIDE_DOWN_HURRYUP_STARTED (id 255) at 0x1886e8; sets game flag 37; creates record(s) 297 (body 0x18665c),198 (body 0x186564); reached by table word 0x5fca80",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 7,
+   "name": "Upside Down 2 Hurryup",
+   "start": "0x18c5f4",
+   "words": [
+    "0xe92d40f8",
+    "0xe30a162c"
+   ],
+   "how": "counts AUD_UPSIDE_DOWN_2_HURRYUP_STARTED (id 257) at 0x18c6b8; sets game flag 37; creates record(s) 299 (body 0x18a62c),199 (body 0x18a52c); reached by table word 0x5fca88",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 8,
+   "name": "Double Scoring",
+   "start": "0x7aa60",
+   "words": [
+    "0xe92d4008",
+    "0xe3000141"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 260) at 0x7aab0; sets game flag 136; creates record(s) 321 (body 0x7a698); reached by bl 0x39978 (fn 0x39974); bl 0x50928 (fn 0x50924)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 9,
+   "name": "Double Scoring",
+   "start": "0x7aaf4",
+   "words": [
+    "0xe92d4038",
+    "0xe3000141"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 260) at 0x7ab78; sets game flag 136; creates record(s) 321 (body 0x7a698); reached by bl 0x7abd8 (fn 0x7abc0); a caller uses the result (0x7abd8: 0x7abdc)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 10,
+   "name": "Victory Laps",
+   "start": "0x18e7d8",
+   "words": [
+    "0xe92d4010",
+    "0xebffffdb"
+   ],
+   "how": "counts AUD_VICTORY_LAPS_STARTED (id 364) at 0x18e854; sets game flag 114; creates record(s) 229 (body 0x18da6c); reached by bl 0x198fa4 (fn 0x198f94)",
+   "confidence": "high",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Mystery Multiball",
+   "why": "multiball (AUD_MYSTERY_MULTIBALL); its count is not a constant anywhere"
+  },
+  {
+   "name": "Mystery Mode",
+   "why": "no function counts AUD_MYSTERY_MODE_START (id 284) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Wheres Barb",
+   "why": "no function counts AUD_WHERES_BARB_STARTED (id 290) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Monster Hunting",
+   "why": "no function counts AUD_MONSTER_HUNTING_STARTED (id 293) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Bullies",
+   "why": "no function counts AUD_BULLIES_STARTED (id 296) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Get Me Out",
+   "why": "no function counts AUD_GET_ME_OUT_STARTED (id 299) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Operation Mirkwood",
+   "why": "no function counts AUD_OPERATION_MIRKWOOD_STARTED (id 302) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Follow the Compass",
+   "why": "no function counts AUD_FOLLOW_THE_COMPASS_STARTED (id 305) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Quarter Hunt",
+   "why": "no function counts AUD_QUARTER_HUNT_STARTED (id 308) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Save Will",
+   "why": "no function counts AUD_SAVE_WILL_STARTED (id 311) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "What Mama Says",
+   "why": "no function counts AUD_WHAT_MAMA_SAYS_STARTED (id 314) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Morse Code",
+   "why": "no function counts AUD_MORSE_CODE_STARTED (id 317) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Lure Dart",
+   "why": "no function counts AUD_LURE_DART_STARTED (id 320) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Turn Up the Heat",
+   "why": "no function counts AUD_TURN_UP_THE_HEAT_STARTED (id 323) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Demogorgon Multiball",
+   "why": "multiball (AUD_DEMOGORGON_MULTIBALL_STARTED); its count is not a constant anywhere"
+  },
+  {
+   "name": "Run Will Multiball",
+   "why": "multiball (AUD_RUN_WILL_MULTIBALL_STARTED); its count is not a constant anywhere"
+  },
+  {
+   "name": "Cant Stop This Multiball",
+   "why": "multiball (AUD_CANT_STOP_THIS_MULTIBALL_STARTED); its count is not a constant anywhere"
+  },
+  {
+   "name": "Demogorgon Challenge",
+   "why": "no function counts AUD_DEMOGORGON_CHALLENGE_STARTED (id 347) with a constant id: counted from data (an index or a descriptor)"
+  },
+  {
+   "name": "Telekinesis Multiball",
+   "start": "0x160910",
+   "words": [
+    "0xe92d4370",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_TELEKINESIS_MULTIBALL_STARTED; serves balls via 0x160910 -> 0x434de8 (count None)"
+  },
+  {
+   "name": "Story Mode",
+   "start": "0xff564",
+   "words": [
+    "0xe3500001",
+    "0xe59fc178"
+   ],
+   "why": "entry not movable (words 0xe3500001 0xe59fc178: a branch or a pc-relative load)"
+  },
+  {
+   "name": "Wizard Mode Multiball",
+   "start": "0x198c34",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_WIZARD_MODE_MULTIBALL_STARTED; serves balls via 0x198c34 -> 0x434de8 (count None)"
+  }
+ ],
+ "notes": "engine: audit_add 0x485868, flag set 0x4836e8, create-process 0x2c73b4, live_records 0x2c771c, multiball_serve 0x434de8. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). "
+}

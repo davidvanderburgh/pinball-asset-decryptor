@@ -356,24 +356,28 @@ value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
 # ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 # 52 inserts on the Test/jurassic_park_the_pin_playfield picture; light table 0x582ae4, device table 0x583f54, lamp table 0x56bf78 (84 lamps)
 # shot masks: no class cshot in this program
 lamp 45           0              PLAYFIELD GI-RED  # lamp 3, I/O group 5 index 0, at 0,0
 lamp 46           0              Playfield GI-WHT  # lamp 4, I/O group 5 index 1, at 0,0
 lamp 3            0              LEFT OUTLANE  # lamp 6, I/O group 5 index 3, at 27,352
-lamp 4            0              LEFT RETURN LANE  # lamp 7, I/O group 5 index 4, at 44,342
-lamp 5            0              RIGHT RETURN LANE  # lamp 8, I/O group 5 index 5, at 183,342
+lamp 4            0x80000000     LEFT RETURN LANE  # lamp 7, I/O group 5 index 4, at 44,342; tie: Left return lane
+lamp 5            0x100000000    RIGHT RETURN LANE  # lamp 8, I/O group 5 index 5, at 183,342; tie: Right return lane
 lamp 6            0              RIGHT OUTLANE  # lamp 9, I/O group 5 index 6, at 200,352
 lamp 7            0              SHOOT AGAIN  # lamp 10, I/O group 5 index 7, at 113,445
 lamp 13           0              ESCAPE NUBLAR  # lamp 11, I/O group 5 index 8, at 77,261
 lamp 14           0              TRICERITOPS MODE  # lamp 12, I/O group 5 index 9, at 73,284
-lamp 22           0              CONTROL ROOM TOP  # lamp 13, I/O group 5 index 10, at 50,270
-lamp 21           0              CONTROL ROOM MID  # lamp 14, I/O group 5 index 11, at 48,283
-lamp 20           0              CONTROL ROOM BOTTOM  # lamp 15, I/O group 5 index 12, at 46,297
-lamp 23           0              LEFT ORBIT ARROW  # lamp 16, I/O group 5 index 13, at 32,192
+lamp 22           0x200          CONTROL ROOM TOP  # lamp 13, I/O group 5 index 10, at 50,270; tie: Control room target (x2)
+lamp 21           0x200          CONTROL ROOM MID  # lamp 14, I/O group 5 index 11, at 48,283; tie: Control room target (x2)
+lamp 20           0x200          CONTROL ROOM BOTTOM  # lamp 15, I/O group 5 index 12, at 46,297; tie: Control room target (x2)
+lamp 23           0x400          LEFT ORBIT ARROW  # lamp 16, I/O group 5 index 13, at 32,192; tie: Left orbit
 lamp 24           0              LEFT ORBIT C  # lamp 17, I/O group 5 index 14, at 35,206
 lamp 25           0              LEFT ORBIT RESCUE  # lamp 18, I/O group 5 index 15, at 38,220
-lamp 26           0              LEFT RAMP ARROW  # lamp 19, I/O group 5 index 16, at 59,208
+lamp 26           0x2000         LEFT RAMP ARROW  # lamp 19, I/O group 5 index 16, at 59,208; tie: Left ramp opto
 lamp 27           0              LEFT RAMP H  # lamp 20, I/O group 5 index 17, at 62,223
 lamp 28           0              LEFT RAMP RESCUE  # lamp 21, I/O group 5 index 18, at 64,236
 lamp 17           0              BRACHIOSAURUS MODE  # lamp 22, I/O group 5 index 19, at 76,310
@@ -384,32 +388,32 @@ lamp 12           0              RESTORE POWER  # lamp 26, I/O group 5 index 23,
 lamp 29           0              LEFT LOOP ARROW  # lamp 27, I/O group 5 index 24, at 72,146
 lamp 30           0              LEFT LOOP A  # lamp 28, I/O group 5 index 25, at 74,160
 lamp 31           0              LEFT LOOP RESCUE  # lamp 29, I/O group 5 index 26, at 77,173
-lamp 53           0              LEFT SPINNER FLASH  # lamp 30, I/O group 5 index 27, at 64,106
+lamp 53           0x10000        LEFT SPINNER FLASH  # lamp 30, I/O group 5 index 27, at 64,106; tie: Left spinner
 lamp 16           0              STEGOSAURUS MODE  # lamp 31, I/O group 5 index 28, at 109,292
 lamp 15           0              PTERANODON MODE  # lamp 32, I/O group 5 index 29, at 98,275
 lamp 19           0              DOUBLE SCORE  # lamp 33, I/O group 5 index 30, at 93,299
 lamp 50           0              LEFT T-REX FLASH  # lamp 34, I/O group 5 index 31, at 24,236
 lamp 32           0              SUPER JACKPOT  # lamp 35, I/O group 5 index 32, at 102,131
 lamp 54           0              T-REX BOLT FLASH  # lamp 36, I/O group 5 index 33, at 106,163
-lamp 48           0              TOP POP BUMPER  # lamp 37, I/O group 5 index 34, at 134,115
-lamp 49           0              BOTTOM POP BUMPER  # lamp 38, I/O group 5 index 35, at 155,154
-lamp 33           0              SMART MISSLE  # lamp 39, I/O group 5 index 36, at 142,147
+lamp 48           0x20           TOP POP BUMPER  # lamp 37, I/O group 5 index 34, at 134,115; tie: Top pop bumper
+lamp 49           0x40           BOTTOM POP BUMPER  # lamp 38, I/O group 5 index 35, at 155,154; tie: Bot pop bumper
+lamp 33           0x10000000     SMART MISSLE  # lamp 39, I/O group 5 index 36, at 142,147; tie: Smart missile
 lamp 51           0              RIGHT T-REX FLASH  # lamp 40, I/O group 5 index 37, at 186,130
 lamp 52           0              BACKPANEL FLASH  # lamp 41, I/O group 5 index 38, at 163,32
 lamp 18           0              GALLIMIMUS MODE  # lamp 42, I/O group 5 index 39, at 108,320
-lamp 42           0              DNA LEFT  # lamp 43, I/O group 5 index 40, at 145,51
-lamp 43           0              DNA CENTER  # lamp 44, I/O group 5 index 41, at 164,57
-lamp 44           0              DNA RIGHT  # lamp 45, I/O group 5 index 42, at 182,51
-lamp 36           0              RIGHT RAMP ARROW  # lamp 46, I/O group 5 index 43, at 144,249
+lamp 42           0x100000       DNA LEFT  # lamp 43, I/O group 5 index 40, at 145,51; tie: Top lane left
+lamp 43           0x200000       DNA CENTER  # lamp 44, I/O group 5 index 41, at 164,57; tie: Top lane center
+lamp 44           0x400000       DNA RIGHT  # lamp 45, I/O group 5 index 42, at 182,51; tie: Top lane right
+lamp 36           0x8000         RIGHT RAMP ARROW  # lamp 46, I/O group 5 index 43, at 144,249; tie: Right ramp opto
 lamp 37           0              RIGHT RAMP O  # lamp 47, I/O group 5 index 44, at 138,262
 lamp 38           0              RIGHT RAMP RESCUE  # lamp 48, I/O group 5 index 45, at 133,274
-lamp 34           0              SPINO ARROW  # lamp 49, I/O group 5 index 46, at 132,235
+lamp 34           0x8000000      SPINO ARROW  # lamp 49, I/O group 5 index 46, at 132,235; tie: Spino 10pt
 lamp 35           0              EXTRA BALL  # lamp 50, I/O group 5 index 47, at 173,295
-lamp 55           0              RIGHT SPINNER FLASH  # lamp 51, I/O group 5 index 48, at 189,200
-lamp 39           0              RIGHT ORBIT ARROW  # lamp 52, I/O group 5 index 49, at 177,234
+lamp 55           0x1000         RIGHT SPINNER FLASH  # lamp 51, I/O group 5 index 48, at 189,200; tie: Right spinner
+lamp 39           0x800          RIGHT ORBIT ARROW  # lamp 52, I/O group 5 index 49, at 177,234; tie: Right orbit
 lamp 40           0              RIGHT ORBIT S  # lamp 53, I/O group 5 index 50, at 172,248
 lamp 41           0              RIGHT ORBIT RESCUE  # lamp 54, I/O group 5 index 51, at 167,261
-lamp 56           0              RAPTOR PEN BOLT FLASH  # lamp 55, I/O group 5 index 52, at 193,267
+lamp 56           0x3800000      RAPTOR PEN BOLT FLASH  # lamp 55, I/O group 5 index 52, at 193,267; tie: Raptor pen target, Raptor pen 10 pt sw-right, Raptor pen 10 pt sw-bot
 
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
@@ -457,3 +461,61 @@ site block_start_4      0x00072bdc 0xe92d4038 0xeb0081ac
 text block_name_4       Brachiosaurus
 site block_start_5      0x00068090 0xe92d4010 0xe1a04000
 text block_name_5       Restore Power
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site proc_exists          0x00186f74 0xe30725d8 0xe3402059
+site proc_create          0x00186924 0xe307c5d8 0xe340c059
+site proc_sleep           0x00186a74 0xe30735d8 0xe3403059
+site adjustment           0x0027e1a8 0xe92d40f0 0xe2504000
+site coil_fire             0x000b1700 0xe3500000 0xe52de004
+data coil_count            0x005a459c
+data coil_table            0x00593d58
+value magnet_proc          13185
+text gate_label           Control gate
+text gate_drive           8 7 255 250 255 1488
+data gate_obj            0x0059300c
+value gate_ctl            12
+value gate_off_slot       5
+text held_coils            gate
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x0016c24c 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x00028ae0 0xe92d4010 0xeb0d557d   # 81 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_1          Wide strobe
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x00036564 0xe92d4030 0xe24dd00c   # 27 lights in its lamp groups, 0 light-runner commands, no colour given, 8.2 s
+text show_name_2          Strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x000920b8 0xe92d4ff0 0xe24dd014   # 19 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_3          Small strobe
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x0009493c 0xe92d43f0 0xe24dd00c   # 10 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_4          Small glow
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x00077960 0xe92d4010 0xeb0c19dd   # 10 lights in its lamp groups, 0 light-runner commands, no colour given, 8.2 s
+text show_name_5          Small fast strobe
+text show_kind_5          flashy
+value show_secs_5         8

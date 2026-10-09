@@ -1,0 +1,387 @@
+# munsters_pro 1.28 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a build check (modes/gamecheck.sh play, the stock card, hidden, muted):
+# the runtime hooked the game, 14 of its 27 shots came from their switches, a drain ended a ball,
+# events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end.
+# Shots no press made: Lower p/f left orbit opto, Lower p/f machine target, Lower p/f right ramp, Shot 0x10, Shot 0x1000, Shot 0x1000000, Shot 0x2, Shot 0x20, Shot 0x200, Shot 0x200000, Shot 0x2000000, Shot 0x4000000, Shot 0x80000.
+
+game           munsters_pro
+version        1.28
+
+# ---- functions ----
+site tick             0x0025494c 0xe92d4038 0xe3a00037
+site shot_dispatch    0x000bddbc 0xe92d43f8 0xe1a09001
+site ball_end         0x00329a78 0xe92d4070 0xe1a06000
+site sound_lookup     0x001ebc58 0xe92d4038 0xe1a05000
+site score_add        0x0030afc0 0xe30b109a 0xe340105f
+site callout          0x00152448 0xe92d4010 0xe30ce998
+site callout_nth      0x001525fc 0xe92d4010 0xe30ce998
+site lamp_group       0x00326ca8 0xe92d4038 0xe1a04000
+site award_screen     0x00344e14 0xe92d4070 0xe24dd008
+site string_new       0x000168ec 0xe28fc605 0xe28cca3a
+site dynamic_cast     0x000162ec 0xe28fc605 0xe28cca3a
+site resource_get     0x00306f20 0xe92d43f0 0xe1a04000
+site find_node        0x0043315c 0xe92d4070 0xe24dd008
+site set_text         0x00416924 0xe92d47f0 0xe1a06000
+site surface_state    0x00425e88 0xe5900550 0xe2800008
+site player_advance   0x0034520c 0xe2501000 0x012fff1e
+site display_draw     0x003b4894 0xe3520001 0x812fff1e
+site sound_play       0x00152448 0xe92d4010 0xe30ce998
+site sound_nth        0x001525fc 0xe92d4010 0xe30ce998
+site sound_active     0x00152bbc 0xe59f3034 0xe2831e62
+site sound_stop       0x00152d14 0xe92d40f8 0xe1a06000
+site sound_worker     0x00151a34 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x0013b918 0xe35000cf 0xe92d4038
+site display_effect_start 0x003684bc 0xe92d47f0 0xe2516000
+site display_effect_next 0x003688c4 0xe303361c 0xe3403062
+site display_priority_now 0x00368d4c 0xe5d0000e 0xe12fff1e
+site game_event       0x00115bec 0xe92d47f0 0xe1a09000
+site event_post_replacing 0x0039e270 0xe92d4070 0xe1a05001
+site event_cancel     0x0039e1e0 0xe92d40f8 0xe3036fa8
+site switch_hit       0x0010ffa4 0xe2503000 0x012fff1e
+site switch_hit2      0x00110044 0xe92d4010 0xe2504000
+site surface_find     0x00433450 0xe92d4070 0xe24dd008
+site surface_set_video 0x0042ab34 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00428940 0xe5d030d4 0xe92d43f0
+site surface_stop     0x004280f0 0xe5d030d4 0xe92d40f0
+site find_text        0x00432bf8 0xe92d4070 0xe24dd008
+site agent_header     0x004801a0 0xe92d40f8 0xe2505000
+site agent_begin      0x0048ab0c 0xe590c004 0xe1a00001
+site balls_in_play    0x0032ce7c 0xe92d4010 0xe3034768
+site multiball_serve  0x0032cff8 0xe92d41f0 0xe30be09a
+site stock_rule_get   0x000bdff4 0xe3510026 0xe92d4008
+site scene_show       0x00345238 0xe92d4070 0xe3034fac
+site frame_end        0x00345440 0xe3500000 0xe92d40f8
+site frame_kick       0x003b4148 0xe92d4070 0xe2906008
+site coil_fire        0x0010a6d4 0xe3500000 0xe52de004
+site adjustment       0x0020efb0 0xe92d40f0 0xe2504000
+site proc_exists      0x0039e590 0xe3032fa8 0xe3402062
+site proc_create      0x0039df40 0xe303cfa8 0xe340c062
+site proc_sleep       0x0039e090 0xe3033fa8 0xe3403062
+site switch_edge      0x000fb5b8 0xe30b30d0 0xe340305f
+site switch_drain     0x000fc1e0 0xe92d4ff0 0xe30994e8
+site live_records     0x0039e5d8 0xe3032fa8 0xe3402062
+site layer_add        0x00089f78 0xe303cfac 0xe1a03002
+site layer_remove     0x00089f90 0xe92d40f8 0xe5913004
+
+# ---- globals ----
+data cur_player             0x0055b8f4
+data scores                 0x00601448
+data mode_mask              0x005fb09a
+data event_head             0x00623fa8
+data event_current          0x00623fac
+data resource_manager       0x00621ac8
+data typeinfo_resource      0x004b7438
+data typeinfo_scene_player  0x004e271c
+data display_holder         0x00621a48
+data award_screen_arg       0x005527a8
+data sound_channels         0x005ecaa4
+data sound_queue            0x005ed318
+data sound_requests         0x0058bc3c
+data sound_request_count    0x004b51c4
+data lamp_layers            0x006027b8
+data light_count            0x005ec4bc
+data score_mult             0x0055e3f0
+data stock_mode_table       0x005542d0
+data typeinfo_cmode         0x004bfcac
+data typeinfo_cmode_mball   0x004bfe18
+data message_count          0x0049f01c
+data message_remap          0x005aa0d4
+data message_table          0x0056ddb0
+data switch_records         0x005a74f0
+data switch_count           0x005fb0d0
+data game_flags             0x005a8cb0
+data game_flag_count        0x0049e800
+data typeinfo_vmi           0x004dc33c
+
+# ---- values ----
+value clip_surface_hide     1
+value mode_mask_busy        0x210
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value stock_slot_shot   42
+value stock_slot_active     39
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      33
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value countdown_step -1
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      39
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+value game_flags_at         4
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value shot_mask_at          1
+value shot_mask_bits        32
+
+# ---- shots ----
+shot 0x1             Left orbit
+shot 0x2             Shot 0x2
+shot 0x4             Left ramp made
+shot 0x8             Right ramp made
+shot 0x10            Shot 0x10
+shot 0x20            Shot 0x20
+shot 0x40            Left top lane
+shot 0x80            Right top lane
+shot 0x100           Lower p/f left orbit opto
+shot 0x200           Shot 0x200
+shot 0x400           Lower p/f machine target
+shot 0x800           Lower p/f right ramp
+shot 0x1000          Shot 0x1000
+shot 0x2000          Target 1
+shot 0x4000          Target 2
+shot 0x8000          Target 3
+shot 0x10000         Target 4
+shot 0x20000         Kitty target
+shot 0x40000         Herman opto
+shot 0x80000         Shot 0x80000
+shot 0x100000        Dragula target (x2)
+shot 0x200000        Shot 0x200000
+shot 0x400000        Lily target (x2)
+shot 0x800000        Spot opto
+shot 0x1000000       Shot 0x1000000
+shot 0x2000000       Shot 0x2000000
+shot 0x4000000       Shot 0x4000000
+
+# ---- scenes ----
+scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
+scene video_bank           9d57875196c613785a1eee010c55223a0f1aa821
+scene attract              60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- callouts and text ----
+text example_start_shot     Lower p/f machine target
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47
+
+# ---- lamps ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 50           0              EXTRA BALL  # lamp 68, I/O group 7 index 41, at 0,0
+lamp 51           0              GRANDPA'S LAB  # lamp 67, I/O group 7 index 40, at 0,0
+lamp 52           0              MUNSTER MADNESS ARROW  # lamp 65, I/O group 7 index 38, at 0,0
+lamp 23           0              ADD-A-BALL  # lamp 34, I/O group 6 index 24, at 0,0
+lamp 101          0              BOTTOM GI-GRN  # lamp 3, I/O group 6 index 1, at 0,0
+lamp 103          0              TOP GI-GRN  # lamp 4, I/O group 7 index 1, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 5, I/O group 5 index 5, at 0,0
+lamp 57,58,59     0              RIGHT ORBIT JACKPOT  # lamp 6, I/O group 7 index 27, at 0,0
+lamp 53,54,55     0x8            RIGHT RAMP JACKPOT  # lamp 7, I/O group 7 index 34, at 0,0; tie: Right ramp made
+lamp 44,45,46     0x40000        HERMAN JACKPOT  # lamp 8, I/O group 7 index 50, at 0,0; tie: Herman opto
+lamp 41,42,43     0x4            LEFT RAMP JACKPOT  # lamp 9, I/O group 7 index 57, at 0,0; tie: Left ramp made
+lamp 38,39,40     0x1            LEFT ORBIT JACKPOT  # lamp 10, I/O group 6 index 27, at 0,0; tie: Left orbit
+lamp 99           0              COIN DOOR GI  # lamp 11, I/O group 5 index 1, at 0,0
+lamp 4            0              START BUTTON  # lamp 12, I/O group 5 index 2, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 13, I/O group 5 index 3, at 0,0
+lamp 100          0              BOTTOM GI-WHT  # lamp 14, I/O group 6 index 0, at 0,0
+lamp 13           0              RIGHT OUTLANE  # lamp 17, I/O group 6 index 5, at 0,0
+lamp 12           0              RIGHT RETURN LANE  # lamp 16, I/O group 6 index 4, at 0,0
+lamp 36           0              LIL(Y)  # lamp 50, I/O group 7 index 8, at 0,0
+lamp 35           0              LI(L)Y  # lamp 51, I/O group 7 index 9, at 0,0
+lamp 34           0              L(I)LY  # lamp 52, I/O group 7 index 10, at 0,0
+lamp 33           0              (L)ILY  # lamp 53, I/O group 7 index 11, at 0,0
+lamp 14           0              MUNSTER MADNESS  # lamp 19, I/O group 6 index 9, at 0,0
+lamp 15           0              HERMAN COMPLETE  # lamp 20, I/O group 6 index 10, at 0,0
+lamp 16           0              RAVEN COMPLETE  # lamp 25, I/O group 6 index 15, at 0,0
+lamp 17           0              LILY COMPLETE  # lamp 18, I/O group 6 index 8, at 0,0
+lamp 19           0              GRANDPA COMPLETE  # lamp 24, I/O group 6 index 14, at 0,0
+lamp 18           0x800000       SPOT COMPLETE  # lamp 21, I/O group 6 index 11, at 0,0; tie: Spot opto
+lamp 20           0              2X  # lamp 22, I/O group 6 index 12, at 0,0
+lamp 21           0              3X  # lamp 23, I/O group 6 index 13, at 0,0
+lamp 22           0              SHOOT AGAIN  # lamp 15, I/O group 6 index 3, at 0,0
+lamp 64           0x10000        TARGET 4  # lamp 61, I/O group 7 index 31, at 0,0; tie: Target 4
+lamp 102          0              TOP GI-WHT  # lamp 45, I/O group 7 index 0, at 0,0
+lamp 113          0              BOTTOM POP FLASH  # lamp 56, I/O group 7 index 21, at 0,0
+lamp 62           0x20000        KITTY  # lamp 58, I/O group 7 index 23, at 0,0; tie: Kitty target
+lamp 63           0x8000         TARGET 3  # lamp 64, I/O group 7 index 37, at 0,0; tie: Target 3
+lamp 47           0              HERMAN 1  # lamp 78, I/O group 7 index 53, at 0,0
+lamp 48           0              HERMAN 2  # lamp 80, I/O group 7 index 54, at 0,0
+lamp 49           0              HERMAN 3  # lamp 81, I/O group 7 index 55, at 0,0
+lamp 61           0x4000         TARGET 2  # lamp 79, I/O group 7 index 56, at 0,0; tie: Target 2
+lamp 65           0x40           TOP LANE LEFT  # lamp 43, I/O group 6 index 54, at 0,0; tie: Left top lane
+lamp 66           0x80           TOP LANE RIGHT  # lamp 44, I/O group 6 index 55, at 0,0; tie: Right top lane
+lamp 75           0              RIGHT RAMP SPOT  # lamp 63, I/O group 7 index 33, at 0,0
+lamp 76           0              RIGHT RAMP MARILYN  # lamp 62, I/O group 7 index 32, at 0,0
+lamp 114          0              POP FLASH  # lamp 57, I/O group 7 index 22, at 0,0
+lamp 111          0              LEFT POP FLASH  # lamp 54, I/O group 7 index 19, at 0,0
+lamp 112          0              RIGHT POP FLASH  # lamp 55, I/O group 7 index 20, at 0,0
+lamp 37           0              EDDIE LEFT ORBIT  # lamp 36, I/O group 6 index 26, at 0,0
+lamp 56           0              EDDIE RIGHT ORBIT  # lamp 60, I/O group 7 index 30, at 0,0
+lamp 106          0              SPOT RAMP FLASH  # lamp 42, I/O group 6 index 49, at 0,0
+lamp 104          0x100000       DRAGULA FLASH  # lamp 46, I/O group 7 index 3, at 0,0; tie: Dragula target (x2)
+lamp 105          0x400000       LILY FLASH  # lamp 47, I/O group 7 index 4, at 0,0; tie: Lily target (x2)
+lamp 109          0              HERMAN FLASH  # lamp 48, I/O group 7 index 5, at 0,0
+lamp 107          0              GRANDPA FLASH  # lamp 49, I/O group 7 index 6, at 0,0
+lamp 108          0              GRANDPA EJECT FLASH  # lamp 59, I/O group 7 index 24, at 0,0
+lamp 110          0              HERMAN SPOTLIGHT FLASH  # lamp 41, I/O group 6 index 48, at 0,0
+lamp 24           0              5X DRAGULA  # lamp 37, I/O group 6 index 30, at 0,0
+lamp 25           0              SUPER JACKPOT  # lamp 26, I/O group 6 index 16, at 0,0
+lamp 60           0x2000         TARGET 1  # lamp 35, I/O group 6 index 25, at 0,0; tie: Target 1
+lamp 26           0              (D)RAGULA  # lamp 27, I/O group 6 index 17, at 0,0
+lamp 27           0              D(R)AGULA  # lamp 28, I/O group 6 index 18, at 0,0
+lamp 28           0              DR(A)GULA  # lamp 29, I/O group 6 index 19, at 0,0
+lamp 29           0              DRA(G)ULA  # lamp 30, I/O group 6 index 20, at 0,0
+lamp 30           0              DRAG(U)LA  # lamp 31, I/O group 6 index 21, at 0,0
+lamp 31           0              DRAGU(L)A  # lamp 32, I/O group 6 index 22, at 0,0
+lamp 32           0              DRAGUL(A)  # lamp 33, I/O group 6 index 23, at 0,0
+lamp 10           0              LEFT RETURN LANE-LEFT  # lamp 39, I/O group 6 index 32, at 0,0
+lamp 11           0              LEFT RETURN LANE-RIGHT  # lamp 40, I/O group 6 index 33, at 0,0
+lamp 9            0              LEFT OUTLANE  # lamp 38, I/O group 6 index 31, at 0,0
+lamp 83           0              TOPPER MOTOR  # lamp 86, I/O group 8 index 0, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+site block_start_3      0x000940a8 0xe92d41f0 0xe1a04000
+data block_obj_3        0x005a2290
+text block_name_3       Lily Mode
+site block_start_5      0x00071e4c 0xe92d4038 0xe1a04000
+data block_obj_5        0x005a2398
+text block_name_5       Herman Hurry Up 1
+site block_start_6      0x000742bc 0xe92d4010 0xe1a04000
+data block_obj_6        0x005a2440
+text block_name_6       Herman Hurry Up 2
+site block_start_9      0x0006ccd4 0xe92d40f0 0xe1a04000
+data block_obj_9        0x005a265c
+text block_name_9       Grandpa Multiball
+site block_start_10     0x0004d82c 0xe92d4370 0xe1a04000
+data block_obj_10       0x005a26e8
+text block_name_10      Enlarge Ray
+site block_start_17     0x000d97a4 0xe92d4ff0 0xe1a04000
+data block_obj_17       0x005a2a90
+text block_name_17      Spot Mode
+site block_start_19     0x00047108 0xe92d40f0 0xe1a04000
+data block_obj_19       0x005a2bcc
+text block_name_19      Eddie Mode
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         611   # One! / 2
+callout ten_seconds       613   # Hurry, Hurry, you've got this! / I think you can do it.
+callout time_up           616   # I apologize, but you run out of time! / I'm sorry, but your time is up!
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+value scoop_event          2
+site scoop_handler         0x0009aed4 0xe2400002 0xe92d4030
+data scoop_slot           0x0056d834
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x005ec808
+data coil_table            0x005a8cc8
+value magnet_proc          13185
+text up_post_label        Up post
+text magnet_hold_label    Magnet
+text up_post_drive        9 0 255 150 64
+text magnet_hold_drive    9 7 255 1200 18
+text held_coils            up_post magnet_hold
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x003245a4 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x000e0dc8 0xe92d41f0 0xe24dd010   # munsters_le-1.28's Wide fast cyan and white strobe: its lit lights 79% alike; 92 lights in its lamp groups, 0 light-runner commands, white, 7.7 s
+text show_name_1          Wide fast cyan and white strobe
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x000e0f48 0xe92d4070 0xe24dd010   # 99 lights in its lamp groups, 0 light-runner commands, red, white, 5.9 s
+text show_name_2          Wide fast red and white strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x00051634 0xe92d40f0 0xe24dd014   # 98 lights in its lamp groups, 0 light-runner commands, red, 8.0 s
+text show_name_3          Wide red strobe
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x0008ac14 0xe92d4ff0 0xe3a000e9   # 91 lights in its lamp groups, 0 light-runner commands, orange, yellow, 7.2 s
+text show_name_4          Wide orange and yellow strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x000e10f8 0xe92d4010 0xebff76e4   # 78 lights in its lamp groups, 0 light-runner commands, red, 7.7 s
+text show_name_5          Red glow
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x0006b864 0xe92d4030 0xe24dd014   # 77 lights in its lamp groups, 0 light-runner commands, purple, 5.3 s
+text show_name_6          Purple glow
+text show_kind_6          flashy
+value show_secs_6         5
+site show_7               0x000cc740 0xe92d4008 0xeb058f7e   # 17 lights in its lamp groups, 0 light-runner commands, white, 7.7 s
+text show_name_7          Small white strobe
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x0009c0f0 0xe92d4070 0xe24dd018   # 76 lights in its lamp groups, 0 light-runner commands, magenta, 8.0 s
+text show_name_8          Slow magenta fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x000d7d18 0xe92d4070 0xe24dd018   # 37 lights in its lamp groups, 0 light-runner commands, red, 3.7 s
+text show_name_9          Red fade
+text show_kind_9          subdued
+value show_secs_9         4
+site show_10              0x000ebe84 0xe92d4010 0xeb0511ad   # 15 lights in its lamp groups, 0 light-runner commands, no colour given, 7.7 s
+text show_name_10         Small slow fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x0009c208 0xe92d4010 0xe24dd010   # 99 lights in its lamp groups, 0 light-runner commands, magenta, 0.9 s
+text show_name_11         Wide magenta fade
+text show_kind_11         accent
+value show_secs_11        1
+site show_12              0x0004c6e0 0xe92d4038 0xeb078f96   # 87 lights in its lamp groups, 0 light-runner commands, purple, 1.0 s
+text show_name_12         Wide purple strobe
+text show_kind_12         accent
+value show_secs_12        1

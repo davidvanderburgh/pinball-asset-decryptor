@@ -1,0 +1,493 @@
+# foo_fighters_pro 1.04 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a full build check (modes/gamecheck.sh play full, the stock card, hidden, muted):
+# the runtime hooked the game, 31 of its 35 shots came from their switches, a drain ended a ball,
+# a tilted ball and three balls to the game's end; events seen firing: game_start, ball_start, ball_end, bonus_end, tilt_warning, tilt, game_over.
+# Shots no press made: Shot 0x200, Shot 0x200000000, Shot 0x400000000, Shot 0x80000.
+
+game           foo_fighters_pro
+version        1.04
+
+# ---- functions ----
+site tick             0x0022c92c 0xe92d4038 0xe3a00037
+site ball_end         0x00212098 0xe92d4070 0xe1a06000
+site sound_lookup     0x00335790 0xe92d4038 0xe1a05000
+site score_add        0x00169248 0xe30c1792 0xe34013ba
+site callout          0x0029c280 0xe92d4010 0xe307ea10
+site callout_nth      0x0029c434 0xe92d4010 0xe307ea10
+site lamp_group       0x00181438 0xe92d4038 0xe1a04000
+site award_screen     0x001c8638 0xe92d4070 0xe24dd008
+site string_new       0x000167e4 0xe28fc605 0xe28ccad7
+site dynamic_cast     0x000161e4 0xe28fc605 0xe28ccad7
+site resource_get     0x00271264 0xe92d43f0 0xe1a04000
+site find_node        0x00482184 0xe92d4070 0xe24dd008
+site set_text         0x0046594c 0xe92d47f0 0xe1a06000
+site surface_state    0x00474eb0 0xe5900550 0xe2800008
+site player_advance   0x001c8a30 0xe2501000 0x012fff1e
+site display_draw     0x00199340 0xe3520001 0x812fff1e
+site sound_play       0x0029c280 0xe92d4010 0xe307ea10
+site sound_active     0x0029c9e8 0xe59f3034 0xe2831e62
+site sound_stop       0x0029cb40 0xe92d40f8 0xe1a06000
+site sound_worker     0x0029b868 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x002813d4 0xe35000cf 0xe92d4038
+site display_effect_start 0x00200320 0xe92d47f0 0xe2516000
+site display_effect_next 0x00200704 0xe30733ec 0xe34033bd
+site display_priority_now 0x00200b98 0xe5d0000e 0xe12fff1e
+site layered_priority 0x0002f200 0xe92d4008 0xe59030f0
+site caward_add       0x0002d5b0 0xe92d41f0 0xe1a04000
+site caward_add_scaled 0x0002d670 0xe92d4ff8 0xe1a09002
+site game_event       0x00187474 0xe92d47f0 0xe1a09000
+site event_post_replacing 0x0020caa4 0xe92d4070 0xe1a05001
+site event_cancel     0x0020ca14 0xe92d40f8 0xe3076758
+site switch_hit       0x00359660 0xe2503000 0x012fff1e
+site switch_hit2      0x00359700 0xe92d4010 0xe2504000
+site switch_edge      0x0017c168 0xe307312c 0xe34033bd
+site switch_drain     0x0017cd90 0xe92d4ff0 0xe30f900c
+site surface_find     0x00482478 0xe92d4070 0xe24dd008
+site surface_set_video 0x00479b5c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x00477968 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00477118 0xe5d030d4 0xe92d40f0
+site find_text        0x00481c20 0xe92d4070 0xe24dd008
+site agent_header     0x004cf2d0 0xe92d40f8 0xe2505000
+site agent_begin      0x004d9c3c 0xe590c004 0xe1a00001
+site balls_in_play    0x00207ddc 0xe92d4010 0xe307465c
+site multiball_serve  0x00207f58 0xe92d41f0 0xe30ce792
+site shot_dispatch    0x00128220 0xe92d4070 0xe1a05001
+site stock_rule_get   0x0011d5a0 0xe3510027 0xe92d4008
+site scene_show       0x001c8a5c 0xe92d4070 0xe307475c
+site frame_end        0x001c8c64 0xe3500000 0xe92d40f8
+site frame_kick       0x00198bf4 0xe92d4070 0xe2906008
+site coil_fire        0x001fc5c4 0xe3500000 0xe52de004
+site adjustment       0x00262644 0xe92d40f0 0xe2504000
+site proc_exists      0x0020cdc4 0xe3072758 0xe34023bd
+site proc_create      0x0020c794 0xe307c758 0xe340c3bd
+site proc_sleep       0x0020c8c4 0xe3073758 0xe34033bd
+site live_records     0x0020ce0c 0xe3072758 0xe34023bd
+site layer_add        0x000e5378 0xe307c75c 0xe1a03002
+site layer_remove     0x000e5390 0xe92d40f8 0xe5913004
+
+# ---- globals ----
+data cur_player             0x03b2cf4c
+data scores                 0x03bacc00
+data mode_mask              0x03bac792
+data event_head             0x03bd7758
+data event_current          0x03bd775c
+data resource_manager       0x03bd4db0
+data typeinfo_resource      0x00508c08
+data typeinfo_scene_player  0x0057204c
+data display_holder         0x03bd4d30
+data award_screen_arg       0x005f03d0
+data sound_channels         0x03be1b78
+data sound_queue            0x03be76a4
+data sound_requests         0x03b86f50
+data sound_request_count    0x005068b0
+data display_effects        0x03bd73ec
+data lamp_layers            0x03bb21f4
+data light_count            0x03bd9afc
+data score_mult             0x03b2a480
+data switch_records         0x03bad014
+data switch_count           0x03bd712c
+data stock_mode_table       0x005f1e84
+data typeinfo_cmode         0x0052d818
+data typeinfo_cmode_mball   0x0052edb4
+data message_count          0x004edbe8
+data message_remap          0x03bd70c4
+data message_table          0x03b61d70
+data game_flags             0x03be96b4
+data game_flag_count        0x004ed2d4
+data typeinfo_vmi           0x0056aa7c
+
+# ---- values ----
+value mode_mask_busy        0x210
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value stock_slot_shot   42
+value stock_slot_active     49
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      41
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value countdown_first 1
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      40
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value shot_mask_at          0
+value shot_mask_bits        64
+
+# ---- shots ----
+# PAD-420: shot names from the switch that made each in the build check (a shot no press made keeps its bit)
+shot 0x1             Sonic radio-bottom
+shot 0x2             Sonic radio-top
+shot 0x4             L crossover opto
+shot 0x8             L crossover exit
+shot 0x10            Left ramp exit
+shot 0x20            3 drop left opto
+shot 0x40            3 drop center opto
+shot 0x80            3 drop right opto
+shot 0x100           3 drop right opto (2)
+shot 0x200           Shot 0x200
+shot 0x400           Mod target (x2)
+shot 0x800           Left loop opto
+shot 0x1000          Up l ramp opto
+shot 0x2000          Up left ramp target
+shot 0x4000          Ufo rollover
+shot 0x8000          Center loop
+shot 0x10000         Center spinner opto
+shot 0x20000         Overlord l target
+shot 0x40000         Overlord r target
+shot 0x80000         Shot 0x80000
+shot 0x100000        Overlord hit target
+shot 0x200000        Overlord opto
+shot 0x400000        R ramp opto
+shot 0x800000        R ramp l target
+shot 0x1000000       R ramp r target
+shot 0x2000000       Right orbit
+shot 0x4000000       Kick target
+shot 0x8000000       Lower right target
+shot 0x10000000      Rock-o-meter exit
+shot 0x20000000      Left inlane
+shot 0x40000000      Right inlane
+shot 0x80000000      Left inlane target
+shot 0x100000000     Right inlane target
+shot 0x200000000     Shot 0x200000000
+shot 0x400000000     Shot 0x400000000
+
+# ---- scenes ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
+scene hud                  2c8ffcac48035d12ef91df61fb7a796ec391f1e7
+
+# ---- callouts and text ----
+text example_start_shot     Lower right target
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+site block_start_8      0x0012b270 0xe92d40f8 0xe1a04000
+data block_obj_8        0x03ba8af8
+text block_name_8       Super Skill Shot
+site block_start_10     0x000f6114 0xe92d43f0 0xe1a06000
+data block_obj_10       0x03ba8c28
+text block_name_10      Radio
+site block_start_11     0x000ed2e8 0xe92d43f0 0xe24dd00c
+data block_obj_11       0x03ba8d08
+text block_name_11      Bot Frenzy
+site block_start_25     0x000fa7c4 0xe92d43f0 0xe1a06000
+data block_obj_25       0x03ba95c0
+text block_name_25      Van Seattle
+site block_start_26     0x000fd1a0 0xe92d43f0 0xe1a06000
+data block_obj_26       0x03ba96f0
+text block_name_26      Van Roswell
+site block_start_27     0x000fbb40 0xe92d43f0 0xe1a04000
+data block_obj_27       0x03ba9838
+text block_name_27      Van Los Angeles
+site block_start_28     0x000fe340 0xe92d43f0 0xe1a04000
+data block_obj_28       0x03ba9968
+text block_name_28      Van New Orleans
+site block_start_29     0x000ff810 0xe92d43f0 0xe1a04000
+data block_obj_29       0x03ba9a98
+text block_name_29      Van Chicago
+site block_start_30     0x00100e88 0xe92d43f0 0xe1a04000
+data block_obj_30       0x03ba9bd0
+text block_name_30      Van New York
+site block_start_32     0x000f7514 0xe92d41f0 0xe1a04000
+data block_obj_32       0x03ba9f88
+text block_name_32      Lightning
+site block_start_39     0x000f80dc 0xe92d4010 0xe1a04000
+data block_obj_39       0x03baaab0
+text block_name_39      Super Modulator
+
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x000bac1c 0xe3530000 0x03520302  # cextra_ball::v[34]
+text block_rule_name_0     Extra Ball
+site block_rule_1          0x0010d400 0xe92d4070 0xe1a04000  # cmultipliers::v[34]
+text block_rule_name_1     Multipliers
+site block_rule_2          0x0010eeec 0xe92d41f0 0xe24dd008  # crule_area_51::v[34]
+text block_rule_name_2     Area 51
+site block_rule_3          0x001102ec 0xe92d43f0 0xe1a07003  # crule_bot_targets::v[34]
+text block_rule_name_3     Bot Targets
+site block_rule_4          0x001188f0 0xe92d41f0 0xe1a07003  # crule_combotron::v[34]
+text block_rule_name_4     Combotron
+site block_rule_5          0x0011b150 0xe2022010 0xe3a03000  # crule_foo_bot::v[34]
+text block_rule_name_5     Foo Bot
+site block_rule_6          0x0011c7fc 0xe92d43f0 0xe1a05003  # crule_lightning_kicker::v[34]
+text block_rule_name_6     Lightning Kicker
+site block_rule_7          0x00110f84 0xe92d43f0 0xe1a06002  # crule_loops::v[34]
+text block_rule_name_7     Loops
+site block_rule_8          0x0011fa90 0xe92d41f0 0xe1a04002  # crule_outlanes::v[34]
+text block_rule_name_8     Outlanes
+site block_rule_9          0x00122054 0xe92d4ff0 0xe24dd00c  # crule_overlord::v[34]
+text block_rule_name_9     Overlord
+site block_rule_10         0x001238a0 0xe92d41f0 0xe24dd010  # crule_radio_targets::v[34]
+text block_rule_name_10    Radio Targets
+site block_rule_11         0x0012488c 0xe92d43f0 0xe1a04000  # crule_spinner::v[34]
+text block_rule_name_11    Spinner
+site block_rule_12         0x00125910 0xe92d4070 0xe24dd008  # crule_topper::v[34]
+text block_rule_name_12    Topper
+site block_rule_13         0x00126274 0xe92d47f0 0xe1a04002  # crule_ufo_captive_ball::v[34]
+text block_rule_name_13    Ufo Captive Ball
+site block_rule_14         0x00126ec0 0xe92d43f8 0xe1a07003  # crule_van::v[34]
+text block_rule_name_14    Van
+site block_rule_15         0x00112dcc 0xe92d43f0 0xe2028b01  # crule_van_mods::v[34]
+text block_rule_name_15    Van Mods
+site block_rule_16         0x00128b14 0xe92d4ff0 0xe24dd01c  # cskill_shot::v[34]
+text block_rule_name_16    Skill Shot
+
+# ---- PAD-420: the inserts, read from this build's own program (lampmap.port_lines); none tied to a shot ----
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 6,7,8        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
+lamp 134          0              COIN DOOR GI  # lamp 4, I/O group 5 index 1, at 0,0
+lamp 4            0              START BUTTON  # lamp 5, I/O group 5 index 2, at 0,0
+lamp 5            0              TOURNAMENT START  # lamp 6, I/O group 5 index 3, at 0,0
+lamp 24           0              SHOOT AGAIN  # lamp 7, I/O group 7 index 45, at 0,0
+lamp 23           0              POST SAVE  # lamp 8, I/O group 7 index 36, at 0,0
+lamp 135          0              BOTTOM GI-WHT(X14)  # lamp 9, I/O group 7 index 0, at 0,0
+lamp 136          0              BOTTOM GI-RED(X6)  # lamp 10, I/O group 7 index 1, at 0,0
+lamp 137          0              TOP GI-WHT(X10)  # lamp 11, I/O group 8 index 0, at 0,0
+lamp 138          0              TOP GI-RED(X9)  # lamp 12, I/O group 8 index 1, at 0,0
+lamp 28           0x2            SONIC RADIO-TOP  # lamp 13, I/O group 7 index 30, at 0,0; tie: Sonic radio-top
+lamp 29           0x1            SONIC RADIO-BOTTOM  # lamp 14, I/O group 7 index 31, at 0,0; tie: Sonic radio-bottom
+lamp 30           0              SONIC RADIO-RIGHT  # lamp 15, I/O group 7 index 32, at 0,0
+lamp 37,38,39     0x10           LEFT RAMP  # lamp 16, I/O group 7 index 20, at 0,0; tie: Left ramp exit
+lamp 40,41,42     0              LEFT RAMP COMBO  # lamp 17, I/O group 7 index 23, at 0,0
+lamp 43           0              START VAN  # lamp 18, I/O group 7 index 26, at 0,0
+lamp 44           0              LEFT RAMP BOLT  # lamp 19, I/O group 7 index 27, at 0,0
+lamp 139          0              VAN FLASH  # lamp 20, I/O group 7 index 16, at 0,0
+lamp 31,32,33     0xc            LEFT CROSSOVER  # lamp 21, I/O group 7 index 10, at 0,0; tie: L crossover opto, L crossover exit
+lamp 34,35,36     0              LEFT CROSSOVER COMBO  # lamp 22, I/O group 7 index 13, at 0,0
+lamp 97,98,99     0x10000        CENTER SPINNER  # lamp 23, I/O group 8 index 19, at 0,0; tie: Center spinner opto
+lamp 100,101,102  0              CENTER SPINNER COMBO  # lamp 24, I/O group 8 index 16, at 0,0
+lamp 143          0              CENTER SPINNER FLASH  # lamp 25, I/O group 8 index 3, at 0,0
+lamp 77,78,79     0x800          UPPER LEFT LOOP  # lamp 26, I/O group 8 index 33, at 0,0; tie: Left loop opto
+lamp 80,81,82     0              UPPER LEFT LOOP COMBO  # lamp 27, I/O group 8 index 37, at 0,0
+lamp 45,46,47     0              MOD 1  # lamp 28, I/O group 8 index 43, at 0,0
+lamp 48,49,50     0              MOD 2  # lamp 29, I/O group 8 index 50, at 0,0
+lamp 51,52,53     0              MOD 3  # lamp 30, I/O group 8 index 54, at 0,0
+lamp 54,55,56     0              MOD 4  # lamp 31, I/O group 8 index 40, at 0,0
+lamp 57,58,59     0              MOD 5  # lamp 32, I/O group 8 index 47, at 0,0
+lamp 60,61,62     0              MOD 6  # lamp 33, I/O group 8 index 57, at 0,0
+lamp 63           0              MOD A  # lamp 34, I/O group 8 index 46, at 0,0
+lamp 0,0,64       0x400          MOD  # lamp 35, I/O group 8 index 53, at 0,0; tie: Mod target (x2)
+lamp 84,85,86     0x1000         UPPER LEFT RAMP  # lamp 36, I/O group 8 index 27, at 0,0; tie: Up l ramp opto
+lamp 87,88,89     0              UPPER LEFT RAMP COMBO  # lamp 37, I/O group 8 index 30, at 0,0
+lamp 90           0              COMBOTRON  # lamp 38, I/O group 8 index 36, at 0,0
+lamp 83           0x2000         UPPER LEFT RAMP TARGET  # lamp 39, I/O group 8 index 23, at 0,0; tie: Up left ramp target
+lamp 91           0x4000         UFO  # lamp 40, I/O group 8 index 22, at 0,0; tie: Ufo rollover
+lamp 92           0              UFO LOOP BOT  # lamp 41, I/O group 8 index 61, at 0,0
+lamp 93           0              UFO LOOP MID  # lamp 42, I/O group 8 index 62, at 0,0
+lamp 94,95,96     0              UFO LOOP TOP  # lamp 43, I/O group 8 index 63, at 0,0
+lamp 103          0x20000        OVERLORD LEFT TARGET  # lamp 44, I/O group 8 index 15, at 0,0; tie: Overlord l target
+lamp 104          0x40000        OVERLORD RIGHT TARGET  # lamp 45, I/O group 8 index 10, at 0,0; tie: Overlord r target
+lamp 105,106,107  0x200000       OVERLORD  # lamp 46, I/O group 8 index 11, at 0,0; tie: Overlord opto
+lamp 108          0              ALL MY LIFE  # lamp 47, I/O group 8 index 14, at 0,0
+lamp 109          0              MONKEY WRENCH  # lamp 48, I/O group 8 index 9, at 0,0
+lamp 110          0              THE PRETENDER  # lamp 49, I/O group 8 index 8, at 0,0
+lamp 141          0              LEFT SPOTLIGHT  # lamp 50, I/O group 7 index 17, at 0,0
+lamp 142          0              RIGHT SPOTLIGHT  # lamp 51, I/O group 7 index 54, at 0,0
+lamp 118          0x800000       RIGHT RAMP LEFT TARGET  # lamp 52, I/O group 8 index 25, at 0,0; tie: R ramp l target
+lamp 119          0x1000000      RIGHT RAMP RIGHT TARGET  # lamp 53, I/O group 8 index 26, at 0,0; tie: R ramp r target
+lamp 120,121,122  0x400000       RIGHT RAMP  # lamp 54, I/O group 7 index 71, at 0,0; tie: R ramp opto
+lamp 123,124,125  0              RIGHT RAMP COMBO  # lamp 55, I/O group 7 index 74, at 0,0
+lamp 117          0              RIGHT RAMP BOLT  # lamp 56, I/O group 8 index 24, at 0,0
+lamp 126          0              AREA 51  # lamp 57, I/O group 7 index 77, at 0,0
+lamp 127,128,129  0x2000000      RIGHT ORBIT  # lamp 58, I/O group 7 index 64, at 0,0; tie: Right orbit
+lamp 130,131,132  0              RIGHT ORBIT COMBO  # lamp 59, I/O group 7 index 67, at 0,0
+lamp 133          0              RIGHT ORBIT BATTERY  # lamp 60, I/O group 7 index 78, at 0,0
+lamp 74           0              ROCK-O-METER TOP  # lamp 61, I/O group 7 index 51, at 0,0
+lamp 75           0              ROCK-O-METER MID  # lamp 62, I/O group 7 index 52, at 0,0
+lamp 76           0              ROCK-O-METER BOTTOM  # lamp 63, I/O group 7 index 53, at 0,0
+lamp 140          0x4000000      KICK TARGET FLASH  # lamp 64, I/O group 7 index 79, at 0,0; tie: Kick target
+lamp 71           0              BOT TARGET  # lamp 65, I/O group 7 index 61, at 0,0
+lamp 73           0              EXTRA BALL  # lamp 66, I/O group 7 index 63, at 0,0
+lamp 72           0              BOT AWARD  # lamp 67, I/O group 7 index 62, at 0,0
+lamp 12           0              2X  # lamp 68, I/O group 7 index 37, at 0,0
+lamp 13           0              3X  # lamp 69, I/O group 7 index 46, at 0,0
+lamp 17           0              SEATTLE  # lamp 70, I/O group 7 index 8, at 0,0
+lamp 18           0              ROSWELL  # lamp 71, I/O group 7 index 19, at 0,0
+lamp 19           0              LOS ANGELES  # lamp 72, I/O group 7 index 29, at 0,0
+lamp 20           0              NEW ORLEANS  # lamp 73, I/O group 7 index 9, at 0,0
+lamp 21           0              CHICAGO  # lamp 74, I/O group 7 index 28, at 0,0
+lamp 22           0              NEW YORK  # lamp 75, I/O group 7 index 18, at 0,0
+lamp 15           0x200000       OVERLORD  # lamp 76, I/O group 7 index 47, at 0,0; tie: Overlord opto
+lamp 14           0              AUSTIN  # lamp 77, I/O group 7 index 55, at 0,0
+lamp 16           0              D.C.  # lamp 78, I/O group 7 index 38, at 0,0
+lamp 9            0              OVERDRIVE  # lamp 79, I/O group 7 index 33, at 0,0
+lamp 10           0x20000000     LEFT INLANE  # lamp 80, I/O group 7 index 34, at 0,0; tie: Left inlane
+lamp 25           0x40000000     RIGHT INLANE  # lamp 81, I/O group 7 index 48, at 0,0; tie: Right inlane
+lamp 26           0              RIGHT OUTLANE  # lamp 82, I/O group 7 index 49, at 0,0
+lamp 11           0x80000000     LEFT INLANE TARGET  # lamp 83, I/O group 7 index 35, at 0,0; tie: Left inlane target
+lamp 27           0x100000000    RIGHT INLANE TARGET  # lamp 84, I/O group 7 index 50, at 0,0; tie: Right inlane target
+lamp 65           0              FOOBOT HEAD  # lamp 85, I/O group 7 index 70, at 0,0
+lamp 66           0              FOOBOT RIGHT ARM  # lamp 86, I/O group 7 index 57, at 0,0
+lamp 67           0              FOOBOT LEFT ARM  # lamp 87, I/O group 7 index 60, at 0,0
+lamp 68           0              FOOBOT TORSO  # lamp 88, I/O group 7 index 56, at 0,0
+lamp 69           0              FOOBOT RIGHT LEG  # lamp 89, I/O group 7 index 58, at 0,0
+lamp 70           0              FOOBOT LEFT LEG  # lamp 90, I/O group 7 index 59, at 0,0
+lamp 111,112,113  0              OVERLORD MECH LEFT  # lamp 91, I/O group 8 index 66, at 0,0
+lamp 114,115,116  0              OVERLORD MECH RIGHT  # lamp 92, I/O group 8 index 69, at 0,0
+lamp 144          0              OVERLORD MECH FLASH  # lamp 93, I/O group 8 index 60, at 0,0
+lamp 145          0              AREA 51 FLASH  # lamp 102, I/O group 8 index 4, at 0,0
+lamp 149,150,151  0              SPEAKER 1  # lamp 201, I/O group 6 index 1, at 0,0
+lamp 152,153,154  0              SPEAKER 2  # lamp 202, I/O group 6 index 4, at 0,0
+lamp 155,156,157  0              SPEAKER 3  # lamp 203, I/O group 6 index 7, at 0,0
+lamp 158,159,160  0              SPEAKER 4  # lamp 204, I/O group 6 index 10, at 0,0
+lamp 161,162,163  0              SPEAKER 5  # lamp 205, I/O group 6 index 13, at 0,0
+lamp 164,165,166  0              SPEAKER 6  # lamp 206, I/O group 6 index 16, at 0,0
+lamp 167,168,169  0              SPEAKER 7  # lamp 207, I/O group 6 index 19, at 0,0
+lamp 170,171,172  0              SPEAKER 8  # lamp 208, I/O group 6 index 22, at 0,0
+lamp 173,174,175  0              SPEAKER 9  # lamp 209, I/O group 6 index 25, at 0,0
+lamp 176,177,178  0              SPEAKER 10  # lamp 210, I/O group 6 index 28, at 0,0
+lamp 179,180,181  0              SPEAKER 11  # lamp 211, I/O group 6 index 31, at 0,0
+lamp 182,183,184  0              SPEAKER 12  # lamp 212, I/O group 6 index 34, at 0,0
+lamp 185,186,187  0              SPEAKER 13  # lamp 213, I/O group 6 index 37, at 0,0
+lamp 188,189,190  0              SPEAKER 14  # lamp 214, I/O group 6 index 40, at 0,0
+lamp 191,192,193  0              SPEAKER 15  # lamp 215, I/O group 6 index 43, at 0,0
+lamp 194,195,196  0              SPEAKER 16  # lamp 216, I/O group 6 index 46, at 0,0
+lamp 197,198,199  0              SPEAKER 17  # lamp 217, I/O group 6 index 49, at 0,0
+lamp 200,201,202  0              SPEAKER 18  # lamp 218, I/O group 6 index 52, at 0,0
+lamp 203,204,205  0              SPEAKER 19  # lamp 219, I/O group 6 index 55, at 0,0
+lamp 206,207,208  0              SPEAKER 20  # lamp 220, I/O group 6 index 58, at 0,0
+lamp 209,210,211  0              SPEAKER 21  # lamp 221, I/O group 6 index 61, at 0,0
+lamp 212,213,214  0              SPEAKER 22  # lamp 222, I/O group 6 index 64, at 0,0
+lamp 215,216,217  0              SPEAKER 23  # lamp 223, I/O group 6 index 67, at 0,0
+lamp 404,405,406  0              TOPPER GLASSES  # lamp 224, I/O group 9 index 1, at 0,0
+lamp 407,408,409  0              TOPPER MOUTH  # lamp 225, I/O group 9 index 4, at 0,0
+lamp 218,219,220  0              TOPPER FRONT RAMI  # lamp 254, I/O group 10 index 130, at 0,0
+lamp 227,228,229  0              TOPPER FRONT TAYLOR  # lamp 255, I/O group 10 index 133, at 0,0
+lamp 236,237,238  0              TOPPER FRONT CHRIS  # lamp 256, I/O group 10 index 136, at 0,0
+lamp 347,348,349  0              TOPPER FRONT PAT  # lamp 257, I/O group 10 index 1, at 0,0
+lamp 356,357,358  0              TOPPER FRONT DAVE  # lamp 258, I/O group 10 index 4, at 0,0
+lamp 365,366,367  0              TOPPER FRONT NATE  # lamp 259, I/O group 10 index 7, at 0,0
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         163   # Uh oh! / One!
+callout ten_seconds       160   # Hurry up man! / Only a few seconds left!
+
+# PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
+# build's own transcribed voice lines, tu_wide.py)
+callout time_up           878   # Better luck next time.
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c3.sh: held 2000 ms as a mode started, ONE command at the game's own powers, ended on the board
+# by itself; let go early by a mode stop, the game's OFF). A Pro has one of Foo Fighters LE's three: the van up post,
+# device 12 - its command 0x80fd0 (255 for 32 ms, then 128) is the twin of the LE's van post call
+data coil_count            0x03be7b5c
+data coil_table            0x03bd7134
+value magnet_proc          13185
+text van_up_post_label    Van up post
+text van_up_post_drive    9 7 255 32 128
+text held_coils            van_up_post
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x001ad454 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0x120
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x000ba354 0xe92d40f8 0xeb0300e4   # 128 lights in its lamp groups, 0 light-runner commands, blue, white, 2.6 s
+text show_name_1          Blue and white strobe
+text show_kind_1          flashy
+value show_secs_1         3
+site show_2               0x000cad4c 0xe92d47f0 0xe24dd020   # 128 lights in its lamp groups, 0 light-runner commands, blue, white, 7.2 s
+text show_name_2          Blue and white glow
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x000bba00 0xe92d4038 0xeb018c11   # 108 lights in its lamp groups, 0 light-runner commands, orange, blue, 4.3 s
+text show_name_3          Orange and blue strobe
+text show_kind_3          flashy
+value show_secs_3         4
+site show_4               0x00127578 0xe92d4ff0 0xe3a0001f   # 15 lights in its lamp groups, 0 light-runner commands, white, 7.7 s
+text show_name_4          Small white glow
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x000ec178 0xe92d4ff0 0xe3a00025   # 11 lights in its lamp groups, 0 light-runner commands, green, blue, 8.0 s
+text show_name_5          Small green and blue glow
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x000bd3c4 0xe92d4010 0xeb02f4c8   # 7 lights in its lamp groups, 0 light-runner commands, no colour given, 8.0 s
+text show_name_6          Small glow
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x00102124 0xe92d4010 0xe3a0000e   # 7 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_7          Small strobe
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x0012d218 0xe92d4010 0xeb013533   # 176 lights in its lamp groups, 0 light-runner commands, yellow, green, 7.2 s
+text show_name_8          Wide slow yellow and green fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x0012d2c0 0xe92d4010 0xe24dd008   # 176 lights in its lamp groups, 0 light-runner commands, green, cyan, 7.7 s
+text show_name_9          Wide slow green and cyan fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x00083d48 0xe92d43f0 0xe24dd014   # 74 lights in its lamp groups, 0 light-runner commands, white, 6.8 s
+text show_name_10         Slow white fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x0004041c 0xe92d4ff0 0xe24dd024   # 125 lights in its lamp groups, 0 light-runner commands, blue, white, 0.7 s
+text show_name_11         Fast blue and white strobe
+text show_kind_11         accent
+value show_secs_11        1
+site show_12              0x0004a1b4 0xe92d4ff0 0xe24dd01c   # 83 lights in its lamp groups, 0 light-runner commands, blue, white, 1.2 s
+text show_name_12         Blue and white fade
+text show_kind_12         accent
+value show_secs_12        1

@@ -1,0 +1,399 @@
+# aerosmith_le 1.16 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a full build check (modes/gamecheck.sh play full, the stock card, hidden, muted):
+# the runtime hooked the game, 38 of its 43 shots came from their switches, a drain ended a ball,
+# a tilted ball and three balls to the game's end; events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end, tilt_warning, tilt, game_over.
+# Shots no press made: Left outlane, Right outlane, Spinner, Toy box enter 1, U/p left orbit.
+
+game           aerosmith_le
+version        1.16
+
+# ---- functions ----
+site tick             0x00147d04 0xe92d4038 0xe3a00037
+site ball_end         0x0032d6fc 0xe92d4070 0xe1a06000
+site sound_lookup     0x002da948 0xe92d4038 0xe1a05000
+site score_add        0x0016e5d4 0xe30b1cd2 0xe3401064
+site callout          0x00241b70 0xe92d4010 0xe30aea78
+site callout_nth      0x00241d24 0xe92d4010 0xe30aea78
+site lamp_group       0x001df7cc 0xe92d4038 0xe1a04000
+site show_priority    0x001dfb7c 0xe30f3b54 0xe3403064
+site award_screen     0x001d755c 0xe92d4070 0xe24dd008
+site string_new       0x000167e0 0xe28fc605 0xe28ccab4
+site dynamic_cast     0x000161e0 0xe28fc605 0xe28ccab4
+site resource_get     0x00175aa8 0xe92d43f0 0xe1a04000
+site find_node        0x00480014 0xe92d4070 0xe24dd008
+site find_text        0x0047fab0 0xe92d4070 0xe24dd008
+site set_text         0x004637dc 0xe92d47f0 0xe1a06000
+site surface_state    0x00472d40 0xe5900550 0xe2800008
+site player_advance   0x001d7954 0xe2501000 0x012fff1e
+site display_draw     0x002ff764 0xe3520001 0x812fff1e
+site sound_play       0x00241b70 0xe92d4010 0xe30aea78
+site sound_nth        0x00241d24 0xe92d4010 0xe30aea78
+site sound_active     0x002422e4 0xe59f3034 0xe2831e62
+site sound_stop       0x0024243c 0xe92d40f8 0xe1a06000
+site sound_worker     0x0024115c 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x001e0084 0xe35000cf 0xe92d4038
+site surface_find     0x00480308 0xe92d4070 0xe24dd008
+site surface_set_video 0x004779ec 0xe5d030d4 0xe92d4ff0
+site surface_play     0x004757f8 0xe5d030d4 0xe92d43f0
+site surface_stop     0x00474fa8 0xe5d030d4 0xe92d40f0
+site agent_header     0x004cd058 0xe92d40f8 0xe2505000
+site agent_begin      0x004d79c4 0xe590c004 0xe1a00001
+site balls_in_play    0x00383094 0xe92d4010 0xe3014f40
+site multiball_serve  0x00383210 0xe92d41f0 0xe30becd2
+site switch_edge      0x0013abfc 0xe3073f38 0xe3403062
+site switch_drain     0x0013b824 0xe92d4ff0 0xe3009ffc
+site live_records     0x0034bdd0 0xe30f2b50 0xe3402064
+
+# ---- globals ----
+data cur_player             0x005d13d4
+data scores                 0x00625868
+data mode_mask              0x0064bcd2
+data event_head             0x0064fb50
+data event_current          0x0064fb54
+data resource_manager       0x00647e78
+data typeinfo_resource      0x00506c30
+data typeinfo_scene_player  0x0056e234
+data display_holder         0x00647df8
+data award_screen_arg       0x005cca34
+data sound_channels         0x0064ab84
+data sound_queue            0x0064b3f8
+data sound_requests         0x0060bc6c
+data sound_request_count    0x005055e8
+data lamp_layers            0x00620dd8
+data light_count            0x006926fc
+data switch_records         0x0061f004
+data switch_count           0x00627f38
+
+# ---- values ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value surface_playing       2
+value scene_player_scene    0x10
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value node_visible_vfn      0xa8
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_first NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+
+# ---- shots from the switch drain ----
+switch 46   0x1                Spinner
+switch 49   0x2                Top scoop
+switch 51   0x4                Left scoop
+switch 52   0x8                Right ramp enter
+switch 53   0x10               Aerosmit(h) target
+switch 54   0x20               Aerosmi(t)h target
+switch 55   0x40               Aerosm(i)th target
+switch 56   0x80               Aeros(m)ith target
+switch 58   0x100              Left outlane
+switch 59   0x200              Left return lane-l.
+switch 60   0x400              Right return lane
+switch 61   0x800              Right outlane
+switch 62   0x1000             Left return lane-r.
+switch 63   0x2000             A(e)rosmith target
+switch 64   0x4000             Ae(r)osmith target
+switch 67   0x8000             (A)erosmith target
+switch 70   0x10000            Right slingshot
+switch 71   0x20000            Left slingshot
+switch 80   0x40000            Toy box enter 1
+switch 81   0x80000            Toy box enter 2
+switch 82   0x100000           Toy box enter 3
+switch 83   0x200000           Toy box lid
+switch 84   0x400000           Toy box hit
+switch 85   0x800000           Aer(o)smith target
+switch 86   0x1000000          Aero(s)mith target
+switch 87   0x2000000          Right eject
+switch 88   0x4000000          Right orbit
+switch 89   0x8000000          Left ramp exit
+switch 90   0x10000000         Toy box target-left
+switch 91   0x20000000         Toy box target-right
+switch 92   0x40000000         Left pop bumper
+switch 93   0x80000000         Right pop bumper
+switch 94   0x100000000        Top pop bumper
+switch 95   0x200000000        Left orbit
+switch 96   0x400000000        U/p left orbit
+switch 97   0x800000000        U/p right orbit
+switch 98   0x1000000000       U/p target 1 (l)
+switch 99   0x2000000000       U/p target 2
+switch 100  0x4000000000       U/p target 3
+switch 101  0x8000000000       U/p target 4
+switch 102  0x10000000000      U/p target 5 (r)
+switch 103  0x20000000000      Center drop target
+switch 104  0x40000000000      U/p exit
+
+# ---- scenes ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene hud                  11ce95fe13add22617598c5e7afbcc0f8356be9b
+
+# ---- callouts and text ----
+text example_start_shot     Aerosmit(h) target
+text mode_records_name_1   Super Scoring
+text mode_records_name_2   Double Scoring
+text mode_records_name_3   Upper Playfield Orbit Rule
+text mode_records_name_4   Headphone Hurryup
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc8
+event tilt           0xc6
+event game_over      0x47
+
+# ---- PAD-420: placed by port_tool.py from aerosmith_le-1.15.port (the same title), unverified ----
+value switch_level_before   0x1
+value switch_level_via      0x0
+
+# ---- PAD-420: lamps COPIED from aerosmith_le-1.15.port (the same model's machine) ----
+lamp 9            0x100          LEFT OUTLANE  # node/channel 8/3; tie: Left outlane
+lamp 10               0              SHOOT AGAIN  # node/channel 8/19
+lamp 11               0              LAST CHILD  # node/channel 8/16
+lamp 12               0              WALK THIS WAY  # node/channel 8/14
+lamp 13               0              SAME OLD SONG N DANCE  # node/channel 8/15
+lamp 14               0              SWEET EMOTION  # node/channel 8/13
+lamp 15               0              DUDE LOOKS LIKE A LADY  # node/channel 8/11
+lamp 16               0              BACK IN THE SADDLE  # node/channel 8/12
+lamp 17               0              RATS IN THE CELLAR  # node/channel 8/10
+lamp 18               0              TOYS IN THE ATTIC  # node/channel 8/8
+lamp 19,20,21         0              LOVE IN AN ELEVATOR  # node/channel 8/23 8/22 8/21
+lamp 22           0x800          RIGHT OUTLANE  # node/channel 8/6; tie: Right outlane
+lamp 23           0x8000         (A)EROSMITH  # node/channel 8/38; tie: (A)erosmith target
+lamp 24           0x2000         A(E)ROSMITH  # node/channel 8/37; tie: A(e)rosmith target
+lamp 25           0x4000         AE(R)OSMITH  # node/channel 8/36; tie: Ae(r)osmith target
+lamp 26               0              LEFT SCOOP X  # node/channel 8/41
+lamp 27               0              EXTRA BALL  # node/channel 8/40
+lamp 28               0              LEFT SCOOP-3  # node/channel 8/39
+lamp 29,30,31     0x4            LEFT SCOOP ARROW  # node/channel 8/34 8/33 8/32; tie: Left scoop
+lamp 32               0              LEFT SCOOP-RECT  # node/channel 8/35
+lamp 33               0              BILBOARD-1  # node/channel 8/44
+lamp 34               0              BILBOARD-2  # node/channel 8/45
+lamp 35           0x10           AEROSMIT(H)  # node/channel 8/24; tie: Aerosmit(h) target
+lamp 36           0x20           AEROSMI(T)H  # node/channel 8/25; tie: Aerosmi(t)h target
+lamp 37           0x40           AEROSM(I)TH  # node/channel 8/26; tie: Aerosm(i)th target
+lamp 38           0x80           AEROS(M)ITH  # node/channel 8/27; tie: Aeros(m)ith target
+lamp 39               0              RIGHT RAMP X  # node/channel 8/30
+lamp 40,41,42         0              UP-ARROW  # node/channel 10/37 10/38 10/39
+lamp 43,44,45     0x40000000     LEFT POP BUMPER  # node/channel 9/42 9/41 9/40; tie: Left pop bumper
+lamp 46,47,48     0x80000000     RIGHT POP BUMPER  # node/channel 9/45 9/44 9/43; tie: Right pop bumper
+lamp 49,50,51     0x100000000    TOP POP BUMPER  # node/channel 9/48 9/47 9/46; tie: Top pop bumper
+lamp 52,53,54     0x200000000    LEFT ORBIT ARROW  # node/channel 9/54 9/53 9/52; tie: Left orbit
+lamp 55               0              LEFT ORBIT-ELEVATOR  # node/channel 8/9
+lamp 56               0              LEFT ORBIT X  # node/channel 9/50
+lamp 57           0x800000       AER(O)SMITH  # node/channel 9/8; tie: Aer(o)smith target
+lamp 58           0x1000000      AERO(S)MITH  # node/channel 9/9; tie: Aero(s)mith target
+lamp 59           0x10000000     TOY BOX TARGET-LEFT  # node/channel 9/49; tie: Toy box target-left
+lamp 60           0x20000000     TOY BOX TARGET-RIGHT  # node/channel 9/22; tie: Toy box target-right
+lamp 61               0              LOCK 1  # node/channel 9/17
+lamp 62               0              LOCK 2  # node/channel 9/18
+lamp 63               0              LOCK 3  # node/channel 9/19
+lamp 64               0              LOCK 4  # node/channel 9/20
+lamp 65               0              LOCK 5  # node/channel 9/21
+lamp 66               0              LOCK 6  # node/channel 9/16
+lamp 67,68,69     0x1c0000       TOY BOX ARROW  # node/channel 9/32 9/31 9/30; tie: Toy box enter 1, Toy box enter 2, Toy box enter 3
+lamp 70               0              TOY BOX X  # node/channel 9/10
+lamp 71,72,73     0x8000000      LEFT RAMP ARROW  # node/channel 9/38 9/37 9/36; tie: Left ramp exit
+lamp 74               0              LEFT RAMP X  # node/channel 9/15
+lamp 75,76,77     0x2            TOP SCOOP ARROW  # node/channel 9/35 9/34 9/33; tie: Top scoop
+lamp 78               0              TOP SCOOP-RECT  # node/channel 9/14
+lamp 79               0              TOP SCOOP X  # node/channel 9/13
+lamp 80,81,82     0x2000000      RIGHT EJECT ARROW  # node/channel 9/29 9/28 9/27; tie: Right eject
+lamp 83               0              R EJECT-2  # node/channel 9/12
+lamp 84               0              RIGHT EJECT X  # node/channel 9/11
+lamp 85,86,87     0x8            RIGHT RAMP ARROW  # node/channel 9/26 9/25 9/24; tie: Right ramp enter
+lamp 88,89,90     0x4000000      RIGHT ORBIT ARROW  # node/channel 9/3 9/4 9/5; tie: Right orbit
+lamp 91               0              RIGHT ORBIT-ELEVATOR  # node/channel 8/20
+lamp 92               0              RIGHT ORBIT X  # node/channel 9/7
+lamp 93,94,95     0x1000000000   U/P TARGET 1 (L)  # node/channel 10/18 10/17 10/16; tie: U/p target 1 (l)
+lamp 96,97,98     0x2000000000   U/P TARGET 2  # node/channel 10/30 10/29 10/28; tie: U/p target 2
+lamp 99,100,101   0x4000000000   U/P TARGET 3  # node/channel 10/27 10/26 10/25; tie: U/p target 3
+lamp 102,103,104  0x8000000000   U/P TARGET 4  # node/channel 10/33 10/32 10/31; tie: U/p target 4
+lamp 105,106,107  0x10000000000  U/P TARGET 5 (R)  # node/channel 10/36 10/35 10/34; tie: U/p target 5 (r)
+lamp 109              0              PLAYFIELD GI-1  # node/channel 8/0
+lamp 110              0              PLAYFIELD GI-2  # node/channel 8/1
+lamp 111              0              PLAYFIELD GI-3  # node/channel 9/0
+lamp 112              0              GI-BACKPANEL  # node/channel 9/1
+lamp 113              0              GI-UPPER PLAYFIELD  # node/channel 10/0
+lamp 114              0              LEFT SLING FLASH  # node/channel 8/18
+lamp 115              0              RIGHT SLING FLASH  # node/channel 8/17
+lamp 116              0              LOWER LEFT FLASH  # node/channel 8/43
+lamp 117              0              LEFT SCOOP FLASH  # node/channel 8/42
+lamp 118              0              RIGHT ORBIT FLASH  # node/channel 8/28
+lamp 119          0x1            SPINNER FLASH  # node/channel 8/29; tie: Spinner
+lamp 120              0              RIGHT RAMP FLASH  # node/channel 8/31
+lamp 121              0              POP BUMPERS FLASH  # node/channel 9/55
+lamp 122          0x200000       TOY BOX LID FLASH  # node/channel 9/56; tie: Toy box lid
+lamp 123              0              TOY BOX ENTER FLASH (X2)  # node/channel 9/57
+lamp 124          0x400000       TOY BOX FLASH (X2)  # node/channel 9/39; tie: Toy box hit
+lamp 125              0              LEFT RAMP FLASH  # node/channel 9/23
+lamp 126              0              L ORBIT-RECT  # node/channel 9/51
+lamp 127              0              R ORBIT-RECT  # node/channel 9/6
+lamp 128          0x200          LEFT RETURN LANE-LEFT  # node/channel 8/4; tie: Left return lane-l.
+lamp 129          0x1000         LEFT RETURN LANE-RIGHT  # node/channel 8/7; tie: Left return lane-r.
+lamp 130          0x400          RIGHT RETURN LANE  # node/channel 8/5; tie: Right return lane
+lamp 131              0              U/P FLASH 1  # node/channel 10/24
+lamp 132              0              U/P FLASH 2  # node/channel 10/23
+lamp 133              0              U/P FLASH 3  # node/channel 10/22
+lamp 134              0              U/P FLASH 4  # node/channel 10/21
+lamp 135              0              U/P FLASH 5  # node/channel 10/20
+lamp 136              0              U/P ELEVATOR FLASH  # node/channel 10/19
+lamp 137              0              UPPER LEFT RAMP FLASH  # node/channel 9/2
+lamp 138,139,140      0              WING LEFT 1  # node/channel 12/32 12/33 12/34
+lamp 141,142,143      0              WING LEFT 2  # node/channel 12/35 12/36 12/37
+lamp 144,145,146      0              WING LEFT 3  # node/channel 12/39 12/40 12/41
+lamp 147,148,149      0              WING LEFT 4  # node/channel 12/42 12/43 12/44
+lamp 150,151,152      0              WING LEFT 5  # node/channel 12/45 12/46 12/47
+lamp 153,154,155      0              WING RIGHT 1  # node/channel 12/0 12/1 12/2
+lamp 156,157,158      0              WING RIGHT 2  # node/channel 12/3 12/4 12/5
+lamp 159,160,161      0              WING RIGHT 3  # node/channel 12/7 12/8 12/9
+lamp 162,163,164      0              WING RIGHT 4  # node/channel 12/10 12/11 12/12
+lamp 165,166,167      0              WING RIGHT 5  # node/channel 12/13 12/14 12/15
+lamp 168,169,170      0              LOGO 1  # node/channel 12/16 12/17 12/18
+lamp 171,172,173      0              LOGO 2  # node/channel 12/19 12/20 12/21
+lamp 174,175,176      0              LOGO 3  # node/channel 12/23 12/24 12/25
+lamp 177,178,179      0              LOGO 4  # node/channel 12/26 12/27 12/28
+lamp 180,181,182      0              LOGO 5  # node/channel 12/29 12/30 12/31
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+site block_start_0      0x000fa4d0 0xe92d4038 0xe3a000f3
+text block_name_0       Super Scoring
+site block_start_1      0x0003b724 0xe92d4038 0xe3a000f1
+text block_name_1       Double Scoring
+site block_start_2      0x001308e0 0xe92d4070 0xe3a000f6
+text block_name_2       Upper Playfield Orbit Rule
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout ten_seconds       246   # Time is running out!
+callout time_up           248   # Time to- / Time is up for you!
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+site proc_exists      0x0034bd88 0xe30f2b50 0xe3402064
+site proc_create      0x0034b738 0xe30fcb50 0xe340c064
+site proc_sleep       0x0034b888 0xe30f3b50 0xe3403064
+value scoop_event          2
+site scoop_handler         0x00087430 0xe2400002 0xe92d41f0
+data scoop_slot           0x005eac4c
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x0068ff90
+data coil_table            0x0064b6d8
+value magnet_proc          13185
+site coil_fire        0x002e3ac4 0xe3500000 0xe52de004
+site adjustment       0x00233ba4 0xe92d40f0 0xe2504000
+text upper_gate_label     Upper control gate
+text upper_gate_drive     10 0 255 250 255 1488
+data upper_gate_obj      0x0061eb38
+value upper_gate_ctl      12
+value upper_gate_off_slot 5
+text toy_box_magnet_label Toy box magnet
+text toy_box_magnet_drive 9 0 255 1000 16
+text held_coils            upper_gate toy_box_magnet
+
+# PAD-420: the other modes' record ids, from aerosmith_le-1.15's proven port (the game's own ids; proven here by a stack run)
+value mode_records_1       0x00f500f3      # Super Scoring: ids 243..245 (the older build's + 4: its start's mov r0, #id)
+value mode_records_2       0x00f200f1      # Double Scoring: ids 241..242 (the older build's + 4: its start's mov r0, #id)
+value mode_records_3       0x00f700f6      # Upper Playfield Orbit Rule: ids 246..247 (the older build's + 4: its start's mov r0, #id)
+value mode_records_4       0x00f000ef      # Headphone Hurryup: ids 239..240 (the older build's 235..236 + 4; its start creates its record without asking first)
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x00148ef4 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+# PAD-420: the game's kill by id (id, 0xffff), which stops a show of the runtime's - the same code as the
+# event_cancel of the 45 other ports that name it (shows/findcancel.py)
+site event_cancel     0x0034b9d8 0xe92d40f8 0xe30f6b50
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x00078640 0xe92d4008 0xeb059d4c   # 123 lights in its lamp groups, 0 light-runner commands, white, 7.7 s
+text show_name_1          Wide white glow
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x00080c0c 0xe92d4ff0 0xe3a0000b   # 105 lights in its lamp groups, 0 light-runner commands, red, blue, 2.8 s
+text show_name_2          Wide fast red and blue strobe
+text show_kind_2          flashy
+value show_secs_2         3
+site show_3               0x00039948 0xe92d4070 0xeb06988a   # 96 lights in its lamp groups, 0 light-runner commands, cyan, white, 3.0 s
+text show_name_3          Cyan and white strobe
+text show_kind_3          flashy
+value show_secs_3         3
+site show_4               0x00128570 0xe92d4ff0 0xe3a00008   # 94 lights in its lamp groups, 0 light-runner commands, yellow, white, 6.9 s
+text show_name_4          Yellow and white strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x00085e58 0xe92d4ff0 0xe3a0000b   # 87 lights in its lamp groups, 0 light-runner commands, red, 2.8 s
+text show_name_5          Fast red strobe
+text show_kind_5          flashy
+value show_secs_5         3
+site show_6               0x00082954 0xe92d4070 0xeb057487   # 83 lights in its lamp groups, 0 light-runner commands, red, 8.2 s
+text show_name_6          Red strobe
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x001284b8 0xe92d4070 0xeb02ddae   # 83 lights in its lamp groups, 0 light-runner commands, orange, yellow, 7.8 s
+text show_name_7          Orange and yellow strobe
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x0012326c 0xe92d41f0 0xe3a04f4e   # 39 lights in its lamp groups, 0 light-runner commands, white, 5.6 s
+text show_name_8          White glow
+text show_kind_8          flashy
+value show_secs_8         8
+site show_9               0x00106894 0xe92d4008 0xeb0364b7   # 35 lights in its lamp groups, 0 light-runner commands, red, green, 7.7 s
+text show_name_9          Red and green strobe
+text show_kind_9          flashy
+value show_secs_9         8
+site show_10              0x000fe610 0xe92d4038 0xeb038558   # 19 lights in its lamp groups, 0 light-runner commands, no colour given, 4.5 s
+text show_name_10         Small strobe
+text show_kind_10         flashy
+value show_secs_10        5
+site show_11              0x00099c10 0xe92d4070 0xe24dd020   # 118 lights in its lamp groups, 0 light-runner commands, green, white, 1.9 s
+text show_name_11         Wide green and white strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x00061c94 0xe92d4ff0 0xe3a0000d   # 104 lights in its lamp groups, 0 light-runner commands, blue, 1.0 s
+text show_name_12         Wide blue chase
+text show_kind_12         accent
+value show_secs_12        1

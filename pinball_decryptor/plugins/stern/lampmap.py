@@ -30,6 +30,9 @@ import re
 import struct
 
 KIND_LIGHTS = {1: 1, 4: 1, 5: 1, 2: 3, 3: 6}
+#: a fixture this model does not carry: a Pro's place for its Premium/LE's insert, its words no light list
+#: (Foo Fighters Pro 1.04 has 105 of them, Deadpool Pro and TMNT Pro a few) - read as a lamp with no lights
+KIND_NOT_FITTED = 6
 
 
 class Elf:
@@ -135,12 +138,29 @@ def _lamp_accessors(elf):
     return out
 
 
+def _name(elf, va):
+    """A device's name, read as UTF-8 with curly quotes straightened: Stranger Things 1.13 calls an insert
+    TRAP ‘EM, and a stricter read ended its light table there (50 of 2000 lights)."""
+    o = elf.off(va) if va else None
+    if o is None:
+        return None
+    end = elf.b.find(b"\0", o, o + 96)
+    raw = elf.b[o:end] if end > o else b""
+    if not raw or not all(32 <= c < 127 or c >= 128 for c in raw):
+        return None
+    try:
+        s = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        s = raw.decode("latin1")
+    return s.replace("‘", "'").replace("’", "'").replace("“", '"').replace("”", '"')
+
+
 def _device(elf, dev_tab, dev):
     va = dev_tab + 48 * dev
     o = elf.off(va)
     if o is None or o + 48 > len(elf.b):
         return None
-    name = elf.cstr(struct.unpack_from("<I", elf.b, o + 0x0C)[0])
+    name = _name(elf, struct.unpack_from("<I", elf.b, o + 0x0C)[0])
     image = elf.cstr(struct.unpack_from("<I", elf.b, o + 0x18)[0]) or ""
     grp, idx = struct.unpack_from("<hh", elf.b, o + 0x1C)
     cls = struct.unpack_from("<H", elf.b, o + 0x20)[0]
@@ -175,7 +195,7 @@ def _read_lamps(elf, lamp_tab, count):
             return None
         p, kind = struct.unpack_from("<II", elf.b, o)
         n = KIND_LIGHTS.get(kind, 0)
-        if i and not n:
+        if i and not n and kind != KIND_NOT_FITTED:
             # a kind this reader does not know (Deadpool Pro 1.16, TMNT Pro 1.59: kind 6, whose
             # words are no light list) is left without lights; many of them = not a lamp table
             unknown += 1
@@ -187,13 +207,18 @@ def _read_lamps(elf, lamp_tab, count):
     return lamps
 
 
+#: a light's colour in its device name: "LEFT RAMP-R"; Venom "TOPPER BIKE - R"; Aerosmith 1.16, Guardians
+#: 1.15 "RIGHT ORBIT ARROW-RED / -GRN / -BLU"; Rush 1.19 "LEFT POP BUMPER R" (a space, no dash)
+_COLOUR = re.compile(r"(?:\s*-\s*(R|G|B|RED|GRN|GREEN|BLU|BLUE)|\s+([RGB]))$")
+
+
 def _suffix(name):
-    m = re.search(r"\s*-\s*([RGB])$", name or "")      # "LEFT RAMP-R"; Venom: "TOPPER BIKE - R"
-    return m.group(1) if m else None
+    m = _COLOUR.search(name or "")
+    return (m.group(1) or m.group(2))[0] if m else None
 
 
 def _stem(name):
-    return re.sub(r"\s*-\s*[RGB]$", "", name or "").strip()
+    return _COLOUR.sub("", name or "").strip()
 
 
 def find_tables(elf):

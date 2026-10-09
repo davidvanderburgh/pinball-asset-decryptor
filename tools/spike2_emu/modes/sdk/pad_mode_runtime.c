@@ -2841,6 +2841,32 @@ static void stock_generic_tick(void)
     }
 }
 
+/* PAD-420: modes the PORT names as the game's base play (`text stack_base_names cmode_location_`, comma-separated
+ * class-name prefixes): John Wick's locations start a few shots into a ball - past the ball-start window above -
+ * and one runs for nearly all of every ball, so a stack-no mode that waited for them would hardly ever start
+ * (Beatles' songs, which the Modes tab notes instead). Never a multiball: those are always waited for. */
+static int stock_named_base(const char *nm)
+{
+    const char *p = pm_port_text("stack_base_names"), *q;
+    static int said;
+    long k;
+    if (!p || !nm) return 0;
+    while (*p) {
+        for (q = p; *q && *q != ','; q++) ;
+        for (k = 0; p + k < q && nm[k] == p[k]; k++) ;     /* nm starts with p[0 .. q) */
+        if (q > p && p + k == q) {
+            if (!said) {
+                said = 1;
+                say("stock modes: %s and the others the port names (%s) are the game's base play, never waited for",
+                    nm, pm_port_text("stack_base_names"));
+            }
+            return 1;
+        }
+        p = *q ? q + 1 : q;
+    }
+    return 0;
+}
+
 static int stock_generic(unsigned kinds)
 {
     const unsigned *tab = (const unsigned *)(unsigned long)data("stock_mode_table");
@@ -2856,6 +2882,7 @@ static int stock_generic(unsigned kinds)
             unsigned ti = ((const unsigned *)(unsigned long)o[0])[-1];
             const char *nm = ti ? (const char *)(unsigned long)((const unsigned *)(unsigned long)ti)[1] : 0;
             while (nm && *nm >= '0' && *nm <= '9') nm++;          /* the mangled name's length */
+            if (c == 1 && stock_named_base(nm)) continue;
             pm_snprintf(stock_generic_what, sizeof stock_generic_what, "%s (%s)",
                         c == 2 ? "a multiball" : "one of the game's modes", nm ? nm : "?");
             return c == 2 ? (int)PM_STOCK_MULTIBALL : (int)PM_STOCK_BATTLE;
@@ -3626,7 +3653,45 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  * The powers are read from the object (v[29] pulse power, v[30] pulse ms, v[31] hold power): what the game
  * itself would fire it with now (the Godzilla magnet's LO/HI settings, the Mechagodzilla magnet's
  * adjustments 380-383, the bridge's own constants). */
-#define COILS_MAX 4
+#define COILS_MAX 6
+
+/* ---- PAD-420: held coils on every generation - by the coil's board address -----------------------
+ * Godzilla's ControlCoil route above needs the object's virtuals at Godzilla's slots, and only four builds
+ * have them (docs/plans/mode_coils_census.md). Every Spike 2 build, though, sends a coil command through
+ * the SAME framework call (`site coil_fire`, the same 0x150-byte request function behind it on all 53
+ * newest builds), which keeps one record per coil device in a table: `data coil_table` (the word holding
+ * the table's address) and `data coil_count` (the number of devices). A record is COIL_REC_SIZE bytes:
+ * the end of the command running (a u64, 0 when none), the id of the latest request (coil_fire returns it;
+ * a counter that is never 0, cleared to 0 when its command runs out), the coil on its board, the board
+ * itself (the `8n` of the frame: `node` in hwshim's [coildrive]), and the state (bits 0-4: a request is
+ * waiting to be sent; the 0x60000 bits at +0x10 mark a coil linked to another).
+ *
+ * So a coil of any title may be held by its BOARD ADDRESS: `text <name>_drive <node> <coil> <pulse power>
+ * <pulse ms> <hold power> [<longest ms>]` (each power or time a number, or `a<id>`: the operator's adjustment
+ * <id>, read live; the last, when there, the longest ONE command of the game's own on that coil - a hold is never
+ * longer, whatever the mode asks). The runtime finds the one record with that address (or the coil is not armed),
+ * and holds it the same way and with the same limits as above: ONE bounded command from a process of ours, never
+ * re-sent.
+ *   - The game wins: a record busy with a command that is not ours (running or waiting) refuses the hold;
+ *     a request of the game's for that coil while we hold (any: a fire, an OFF) replaces ours on the board,
+ *     and the hold ends there without a command of ours. Its processes (`text <name>_procs`) refuse it too.
+ *   - Letting go early is the game's own OFF (an all-zero coil_fire), sent only while the latest request
+ *     on the record is still ours; at its time the command ends by itself.
+ *   - The operator's "disabled": `value <name>_off_slot`, the object's own virtual that answers it (spike::ControlCoil
+ *     v[30], the 47-virtual ControlCoil v[31]); else `value <name>_off_adj` (an operator adjustment that is not 0
+ *     when the coil is disabled) or `value <name>_on_adj` (one that is 0 then). Each refuses it like Godzilla's v[40].
+ *   - Where the game's own code switches an uncontrolled coil off (Godzilla's ControlCoil::v[38]), the coil
+ *     needs its object taken: `site <name>_get` (the object's getter) or `data <name>_obj` (the object itself,
+ *     where a static initializer builds it once and nothing gets it), `value <name>_ctl` (where it keeps the id of
+ *     the process controlling it), and the take/give calls (`site <name>_take` / `<name>_give`, or the
+ *     port's `coil_take` / `coil_give`); `value <name>_devoff` checks the object's device against the
+ *     record's. The process takes it, sends, and gives it back (the give's own update switches it off). */
+#define COIL_REC_SIZE  0x68u   /* the framework's coil record, the same on every newest build (coilrec.py) */
+#define COIL_REC_ID    0x14u   /* u32: the latest request's id; 0 when its command has run out */
+#define COIL_REC_LINK  0x10u   /* u32: 0x60000 = a coil linked to another (a flipper's pair): never held */
+#define COIL_REC_COIL  0x1au   /* u16: the coil on its board */
+#define COIL_REC_STATE 0x22u   /* u16: bits 0-4 a request waiting to be sent */
+#define COIL_REC_NODE  0x24u   /* u8: the board */
 
 struct held_coil {
     char name[16];
@@ -3638,8 +3703,18 @@ struct held_coil {
     struct magnet_cmd cmd;                  /* what the process sends */
     int proc;                               /* our process holds control of the coil */
     int release;                            /* the runtime asked it to let go */
+    int game_took;                          /* PAD-420: ... because the game wants the coil (it sends its own) */
     int checked;                            /* the device check: 0 not yet, 1 matches, -1 does not */
     const char *why;                        /* ... and why */
+    /* PAD-420: the coil by its board address (route 1) */
+    int route;                              /* 0 Godzilla's ControlCoil (its virtuals); 1 its board address */
+    unsigned node, coilno;                  /* route 1: the address the port names */
+    unsigned drv[3];                        /* route 1: pulse power, pulse ms, hold power (or adjustment ids) */
+    unsigned drv_adj;                       /* bit i: drv[i] is an adjustment id */
+    unsigned cap_ms;                        /* route 1: the game's own longest command on it (0 = MAGNET_MAX_MS) */
+    unsigned rec;                           /* route 1: the game's coil record */
+    unsigned req;                           /* route 1: the id of our command's request */
+    unsigned ctl;                           /* the object's controlling-process offset; 0 = no object control */
 };
 static struct held_coil coils[COILS_MAX];
 static int n_coils;
@@ -3665,18 +3740,63 @@ static unsigned coil_virtual(unsigned obj, unsigned slot)
     return ((unsigned (*)(unsigned))(unsigned long)(*(const unsigned *)(unsigned long)(vt + 4u * slot)))(obj);
 }
 
-/* Is the GAME using this coil: a process of its own controls it, it asked for an on-time, or one of the
- * game's processes the port names for it runs? */
+/* route 1: a word of the coil's record (0 when the record is not readable) */
+static unsigned coil_rec_word(const struct held_coil *c, unsigned off)
+{
+    if (!c->rec || !maps_has(c->rec + off, 4, MAP_R)) return 0;
+    return *(const unsigned *)(unsigned long)(c->rec + off);
+}
+
+/* route 1: is a command of the GAME's on this coil running or waiting (a request that is not ours)? */
+static int coil_rec_busy(const struct held_coil *c)
+{
+    unsigned id = coil_rec_word(c, COIL_REC_ID);
+    int active = coil_rec_word(c, 0) || coil_rec_word(c, 4)
+        || (coil_rec_word(c, COIL_REC_STATE & ~3u) >> (8u * (COIL_REC_STATE & 3u)) & 0x1fu);
+    return active && id && id != c->req;
+}
+
+/* route 1: the pulse power / pulse ms / hold power the port names, an `a<id>` read from the operator's
+ * adjustment now (0xffffffff when it cannot be read: the plan refuses that) */
+static unsigned coil_drive(const struct held_coil *c, int i)
+{
+    if (!(c->drv_adj & (1u << i))) return c->drv[i];
+    if (!fn("adjustment")) return 0xffffffffu;
+    return ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(c->drv[i]);
+}
+
+/* Is the coil disabled by the operator? route 0: the object's v[40]; route 1: the object's own "disabled" virtual
+ * (`value <name>_off_slot`: spike::ControlCoil's v[30], the 47-virtual ControlCoil's v[31]), else the port's
+ * adjustments */
+static int coil_disabled(const struct held_coil *c)
+{
+    char key[40];
+    long id;
+    if (!c->route) return (coil_virtual(c->obj, 40) & 0xffu) != 0;
+    pm_snprintf(key, sizeof key, "%s_off_slot", c->name);
+    if (c->obj && (id = pm_port_value(key, 0)) > 0) return (coil_virtual(c->obj, (unsigned)id) & 0xffu) != 0;
+    pm_snprintf(key, sizeof key, "%s_off_adj", c->name);
+    if ((id = pm_port_value(key, 0)) > 0)
+        return !fn("adjustment") || ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))((unsigned)id) != 0;
+    pm_snprintf(key, sizeof key, "%s_on_adj", c->name);
+    if ((id = pm_port_value(key, 0)) > 0)
+        return !fn("adjustment") || ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))((unsigned)id) == 0;
+    return 0;
+}
+
+/* Is the GAME using this coil: a process of its own controls it, it asked for an on-time, one of the
+ * game's processes the port names for it runs, or (route 1) a command of its own is on the coil? */
 static int coil_game_busy(const struct held_coil *c)
 {
     char key[40];
     const char *t;
     unsigned id, ctl;
-    if (c->obj) {
-        ctl = *(const unsigned short *)(unsigned long)(c->obj + 44);
+    if (c->obj && c->ctl) {
+        ctl = *(const unsigned short *)(unsigned long)(c->obj + c->ctl);
         if (ctl && ctl != c->id) return 1;
-        if (*(const unsigned *)(unsigned long)(c->obj + 36)) return 1;
+        if (!c->route && *(const unsigned *)(unsigned long)(c->obj + 36)) return 1;
     }
+    if (c->route && coil_rec_busy(c)) return 1;
     pm_snprintf(key, sizeof key, "%s_procs", c->name);
     t = pm_port_text(key);
     while (t && *t) {
@@ -3688,50 +3808,103 @@ static int coil_game_busy(const struct held_coil *c)
     return 0;
 }
 
-static void magnet_send(const struct held_coil *c, unsigned p1, unsigned t1, unsigned p2, unsigned t2)
+static unsigned magnet_send(const struct held_coil *c, unsigned p1, unsigned t1, unsigned p2, unsigned t2)
 {
-    ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("coil_fire"))
+    return ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("coil_fire"))
         (c->dev, p1, t1, p2, t2, 0);
+}
+
+/* route 1, letting go early: the game's own OFF (an all-zero request), only while the latest request on the
+ * coil is still ours - a command of the game's since then is the game's to end */
+static void coil_off(struct held_coil *c, const char *why)
+{
+    unsigned id = coil_rec_word(c, COIL_REC_ID);
+    if (!id || id != c->req) return;
+    ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("coil_fire"))
+        (c->dev, 0, 0, 0, 0, 0);
+    say("%s: OFF - %s", c->name, why);
 }
 
 static void magnet_done(struct held_coil *c)
 {
     c->proc = 0;
     c->release = 0;
+    c->game_took = 0;
     c->until = 0;
     c->ended = pm_ms();
 }
 
+/* the object's take / give (route 0 and a route 1 coil with an object): the coil's own, or the port's */
+static unsigned coil_call(const struct held_coil *c, const char *what)
+{
+    char key[40];
+    unsigned a;
+    pm_snprintf(key, sizeof key, "%s_%s", c->name, what);
+    if ((a = fn(key))) return a;
+    pm_snprintf(key, sizeof key, "coil_%s", what);
+    return fn(key);
+}
+
+/* Does a hold of ours CONTROL the coil (take it, then give it back - its exit hook gives it back if the game ends
+ * the process): an object, its take and give, and (route 1) where it keeps its controlling process. Otherwise the
+ * hold only drives it: its command runs out on the board, or the runtime sends the game's OFF. */
+static int coil_controlled(const struct held_coil *c)
+{
+    return c->obj && coil_call(c, "take") && coil_call(c, "give") && (!c->route || c->ctl);
+}
+
 /* THE HOLD, as a game process (the game's scheduler runs it on its own stack, like the game's own magnet
- * processes; it ends by returning). It takes control, sends the ONE bounded command, waits a tick at a
- * time, and gives control back: the game's coil update then switches the coil off. */
+ * processes; it ends by returning). It takes control (when the coil has an object), sends the ONE bounded
+ * command, waits a tick at a time, and gives control back - the game's coil update then switches the coil
+ * off - or, with no object, lets the command run out (or sends the game's OFF when let go early). */
 static void magnet_proc(struct held_coil *c)
 {
     unsigned long sent;
-    unsigned total = c->cmd.draw_ms + c->cmd.hold_ms;
+    unsigned total = c->cmd.draw_ms + c->cmd.hold_ms, id;
+    int has_obj = coil_controlled(c);
+    const char *end = "its time ran out";
     if (!c->until || c->release) {
         say("%s: let go before the hold began (%s)", c->name, c->why ? c->why : "asked to");
         magnet_done(c);
         return;
     }
-    if (!(((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_take"))(c->obj, 0) & 0xffu)) {
+    if (has_obj && !(((unsigned (*)(unsigned, unsigned))(unsigned long)coil_call(c, "take"))(c->obj, 0) & 0xffu)) {
         say("%s: no hold - a process of the game's controls it", c->name);
         magnet_done(c);
         return;
     }
     c->proc = 1;
-    magnet_send(c, c->cmd.draw_pwr, c->cmd.draw_ms, c->cmd.hold_pwr, c->cmd.hold_ms);
+    c->req = magnet_send(c, c->cmd.draw_pwr, c->cmd.draw_ms, c->cmd.hold_pwr, c->cmd.hold_ms);
     sent = pm_ms();
+    if (c->route && !c->req) {              /* the coil service refused it (no such device): nothing was sent */
+        say("%s: no hold - the game's coil call refused the command", c->name);
+        if (has_obj) ((unsigned (*)(unsigned, unsigned))(unsigned long)coil_call(c, "give"))(c->obj, 1);
+        magnet_done(c);
+        return;
+    }
     c->until = sent + total;                /* the deadline counts from the command itself */
-    say("%s: holding - process %u controls it; ONE command: draw %u/255 for %u ms, then hold %u/255 for %u "
-        "ms, which the board ends by itself", c->name, c->id, c->cmd.draw_pwr, c->cmd.draw_ms, c->cmd.hold_pwr,
-        c->cmd.hold_ms);
-    while (!c->release && pm_ms() < c->until)
+    say("%s: holding - process %u %s it; ONE command: draw %u/255 for %u ms, then hold %u/255 for %u "
+        "ms, which the board ends by itself", c->name, c->id, has_obj ? "controls" : "drives", c->cmd.draw_pwr,
+        c->cmd.draw_ms, c->cmd.hold_pwr, c->cmd.hold_ms);
+    while (!c->release && pm_ms() < c->until) {
+        if (c->route && (id = coil_rec_word(c, COIL_REC_ID)) != c->req) {
+            end = id ? "the game sent the coil a command of its own" : "the board's time ran out";
+            break;
+        }
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
-    ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_give"))(c->obj, 1);
-    say("%s: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
-        "game's coil update switches it off", c->name, c->release && c->why ? c->why : "its time ran out",
-        pm_ms() - sent, (long)(c->until - pm_ms()));
+    }
+    if (c->release && c->why) end = c->why;
+    if (has_obj) {
+        ((unsigned (*)(unsigned, unsigned))(unsigned long)coil_call(c, "give"))(c->obj, 1);
+        say("%s: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
+            "game's coil update switches it off", c->name, end, pm_ms() - sent, (long)(c->until - pm_ms()));
+    } else {
+        if (c->release && !c->game_took) coil_off(c, end);   /* PAD-420: the game's own command replaces ours, no OFF
+                                                              * of ours first (a gate it drives outside the coil
+                                                              * records would drop for a moment) */
+        say("%s: let go - %s, after %lu ms (%ld ms before the command's own end)%s", c->name, end, pm_ms() - sent,
+            (long)(c->until - pm_ms()), c->release && c->game_took ? "; no OFF of ours, the game drives it" : "");
+    }
     magnet_done(c);
 }
 
@@ -3740,7 +3913,10 @@ static void coil_proc0(void) { magnet_proc(&coils[0]); }
 static void coil_proc1(void) { magnet_proc(&coils[1]); }
 static void coil_proc2(void) { magnet_proc(&coils[2]); }
 static void coil_proc3(void) { magnet_proc(&coils[3]); }
-static void (*const coil_procs[COILS_MAX])(void) = { coil_proc0, coil_proc1, coil_proc2, coil_proc3 };
+static void coil_proc4(void) { magnet_proc(&coils[4]); }
+static void coil_proc5(void) { magnet_proc(&coils[5]); }
+static void (*const coil_procs[COILS_MAX])(void) = { coil_proc0, coil_proc1, coil_proc2, coil_proc3, coil_proc4,
+                                                      coil_proc5 };
 
 /* Ask a hold to let go: the process gives control back on its next wake, within a tick. */
 static void coil_let_go(struct held_coil *c, const char *why)
@@ -3756,15 +3932,71 @@ static void magnet_let_go(const char *why)  /* every held coil (the mode ended, 
     for (i = 0; i < n_coils; i++) coil_let_go(&coils[i], why);
 }
 
-/* The port's device against the game's object, once, on the first hold: not at arm time, which is before
- * the game's main() has run (the objects are built on first use). A mismatch takes that coil away. */
+/* route 1: the one record with the port's board address, or 0 (none, or more than one) */
+static unsigned coil_find_record(struct held_coil *c)
+{
+    unsigned tab = data("coil_table"), cnt = data("coil_count"), base, n, d, rec, found = 0, dev = 0;
+    if (!tab || !cnt || !maps_has(tab, 4, MAP_R) || !maps_has(cnt, 4, MAP_R)) return 0;
+    base = *(const unsigned *)(unsigned long)tab;
+    n = *(const unsigned *)(unsigned long)cnt;
+    if (!base || !n || n > 512) return 0;
+    if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) maps_read();   /* the table is the game's heap, grown since the gate */
+    if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) return 0;
+    for (d = 1; d < n; d++) {
+        rec = base + d * COIL_REC_SIZE;
+        if (*(const unsigned char *)(unsigned long)(rec + COIL_REC_NODE) == c->node
+            && *(const unsigned short *)(unsigned long)(rec + COIL_REC_COIL) == c->coilno) {
+            found++;
+            dev = d;
+        }
+    }
+    if (found != 1) return 0;
+    c->dev = dev;
+    return base + dev * COIL_REC_SIZE;
+}
+
+/* The port's device against the game's: once, on the first hold - not at arm time, which is before the
+ * game's main() has run (the objects and the coil table are built then). A mismatch takes that coil away. */
 static int coil_device_ok(struct held_coil *c)
 {
     char key[40];
-    unsigned obj, dev;
+    unsigned obj = 0, dev, want, off;
     if (c->checked) return c->checked > 0;
     pm_snprintf(key, sizeof key, "%s_get", c->name);
-    obj = ((unsigned (*)(void))(unsigned long)fn(key))();
+    if (fn(key)) obj = ((unsigned (*)(void))(unsigned long)fn(key))();
+    else if (c->route) {                    /* PAD-420: an object a static initializer built once (no getter to call:
+                                             * calling that initializer again would build it again) - its address */
+        pm_snprintf(key, sizeof key, "%s_obj", c->name);
+        obj = data(key);
+        if (obj && !maps_has(obj, 4, MAP_R)) obj = 0;
+    }
+    if (c->route) {
+        want = c->dev;
+        if (!(c->rec = coil_find_record(c))) {
+            c->checked = -1;
+            say("%s: switched OFF for this run - no one coil of the game's is node %u coil %u", c->name, c->node,
+                c->coilno);
+            return 0;
+        }
+        if ((want && want != c->dev) || (coil_rec_word(c, COIL_REC_LINK) & 0x60000u)) {
+            c->checked = -1;
+            say("%s: switched OFF for this run - node %u coil %u is device %u (the port says %u)%s", c->name,
+                c->node, c->coilno, c->dev, want, coil_rec_word(c, COIL_REC_LINK) & 0x60000u ? ", a linked coil" : "");
+            return 0;
+        }
+        pm_snprintf(key, sizeof key, "%s_devoff", c->name);
+        off = (unsigned)pm_port_value(key, 0);
+        if (obj && off && (!maps_has(obj + off, 2, MAP_R) || *(const unsigned short *)(unsigned long)(obj + off) != c->dev)) {
+            c->checked = -1;
+            say("%s: switched OFF for this run - its object is not device %u", c->name, c->dev);
+            return 0;
+        }
+        c->obj = obj;
+        c->checked = 1;
+        say("%s: node %u coil %u is the game's device %u%s", c->name, c->node, c->coilno, c->dev,
+            obj ? ", its object taken while it holds" : "");
+        return 1;
+    }
     dev = obj && maps_has(obj + 4, 2, MAP_R) ? *(const unsigned short *)(unsigned long)(obj + 4) : 0xffffu;
     if (dev != c->dev) {
         c->checked = -1;
@@ -3784,11 +4016,15 @@ int pm_coil_hold(const char *name, unsigned ms)
     unsigned long now = pm_ms();
     struct magnet_cmd cmd;
     const char *why;
+    unsigned asked = ms;
     if (!(can & PM_CAN_COILS) || !c || !coil_device_ok(c)) return 0;
-    why = magnet_refusal(pm_running(), pm_in_game(), (coil_virtual(c->obj, 40) & 0xffu) != 0,
-                         coil_game_busy(c), c->until, c->ended, now, c->starts);
+    why = magnet_refusal(pm_running(), pm_in_game(), coil_disabled(c), coil_game_busy(c), c->until, c->ended, now,
+                         c->starts);
     if (!why && proc_alive(c->id)) why = "the last hold's process is still ending";
-    if (!why)
+    if (c->route && c->cap_ms && ms > c->cap_ms) ms = c->cap_ms;   /* PAD-420: never longer than the game's own */
+    if (!why && c->route)
+        magnet_plan(ms, coil_drive(c, 0), coil_drive(c, 1), coil_drive(c, 2), &cmd, &why);
+    else if (!why)
         magnet_plan(ms, coil_virtual(c->obj, 29) & 0xffu, coil_virtual(c->obj, 30) & 0xffffu,
                     coil_virtual(c->obj, 31) & 0xffu, &cmd, &why);
     if (why) {
@@ -3797,6 +4033,7 @@ int pm_coil_hold(const char *name, unsigned ms)
     }
     c->cmd = cmd;
     c->release = 0;
+    c->game_took = 0;
     c->why = 0;
     c->started = now;
     c->until = now + cmd.draw_ms + cmd.hold_ms;
@@ -3807,8 +4044,8 @@ int pm_coil_hold(const char *name, unsigned ms)
         return 0;
     }
     c->starts[c->next++ % MAGNET_PER_MIN] = now;
-    say("%s: HOLD for %u ms (asked %u) - process %u takes control of it and sends ONE command", c->name,
-        cmd.draw_ms + cmd.hold_ms, ms, c->id);
+    say("%s: HOLD for %u ms (asked %u) - process %u %s and sends ONE command", c->name, cmd.draw_ms + cmd.hold_ms,
+        asked, c->id, c->obj && c->ctl ? "takes control of it" : "drives it");
     return 1;
 }
 
@@ -3830,41 +4067,107 @@ int pm_coil_known(const char *name)
     return (can & PM_CAN_COILS) && c && c->checked >= 0;
 }
 
-int pm_magnet_grab(unsigned ms) { return pm_coil_hold("magnet", ms); }
-void pm_magnet_release(void) { pm_coil_release("magnet"); }
-int pm_magnet_holding(void) { return pm_coil_holding("magnet"); }
+/* PAD-420: a title whose magnet is one of its held coils (`text magnet_coil spider_magnet`) grabs with that coil -
+ * one coil, one set of limits, whichever part of a mode asks for it; otherwise the coil named "magnet" */
+static const char *magnet_coil_name(void)
+{
+    const char *t = pm_port_text("magnet_coil");
+    return t && *t ? t : "magnet";
+}
+
+int pm_magnet_grab(unsigned ms) { return pm_coil_hold(magnet_coil_name(), ms); }
+void pm_magnet_release(void) { pm_coil_release(magnet_coil_name()); }
+int pm_magnet_holding(void) { return pm_coil_holding(magnet_coil_name()); }
 
 /* Every tick, each coil: the game taking over, ending or killing the hold, and the deadline (the process
  * checks that too). A hold whose process is gone was ended by the game (a tilt or the end of a ball kills
- * it): its exit hook gave control back, which switched the coil off. */
+ * it): with an object its exit hook gave control back, which switched the coil off; with none (route 1) the
+ * tick sends the game's OFF while the command on the coil is still ours. */
+/* PAD-420, for whoever writes a port (`value coil_list 1`): once a game is on, every coil device's board address
+ * and the last command the game sent it (pulse power/ms, hold power/ms), in mode.log */
+static void coil_list(void)
+{
+    static int done;
+    unsigned tab = data("coil_table"), cnt = data("coil_count"), base, n, d, r;
+    char line[300];
+    int k = 0;
+    if (done || !pm_in_game() || !pm_port_value("coil_list", 0) || !tab || !cnt) return;
+    done = 1;
+    if (!maps_has(tab, 4, MAP_R) || !maps_has(cnt, 4, MAP_R)) return;
+    base = *(const unsigned *)(unsigned long)tab;
+    n = *(const unsigned *)(unsigned long)cnt;
+    if (!base || !n || n > 512) return;
+    if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) maps_read();
+    if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) return;
+    line[0] = 0;
+    for (d = 1; d < n; d++) {
+        r = base + d * COIL_REC_SIZE;
+        k += pm_snprintf(line + k, sizeof line - (unsigned)k, " %u=%u:%u(%u/%u,%u/%u)", d,
+                         *(const unsigned char *)(unsigned long)(r + COIL_REC_NODE),
+                         *(const unsigned short *)(unsigned long)(r + COIL_REC_COIL),
+                         *(const unsigned char *)(unsigned long)(r + 0x29), *(const unsigned short *)(unsigned long)(r + 0x2a),
+                         *(const unsigned char *)(unsigned long)(r + 0x2c), *(const unsigned short *)(unsigned long)(r + 0x2e));
+        if (k > 200 || d + 1 == n) {
+            say("coil devices:%s", line);
+            k = 0;
+            line[0] = 0;
+        }
+    }
+}
+
 static void magnet_tick(void)
 {
     int i;
+    coil_list();
     for (i = 0; i < n_coils; i++) {
         struct held_coil *c = &coils[i];
         if (!c->until) continue;
         if (!proc_alive(c->id)) {
             if (c->proc || pm_ms() - c->started > 1000ul) {
-                say("%s: the hold's process is gone (the game ended it) - its exit gave control back", c->name);
+                say("%s: the hold's process is gone (the game ended it) - %s", c->name,
+                    c->route && !coil_controlled(c) ? "the tick lets go" : "its exit gave control back");
+                if (c->route && !coil_controlled(c) && pm_ms() < c->until) coil_off(c, "the hold's process is gone");
                 magnet_done(c);
             }
             continue;
         }
         if (c->release) continue;           /* the process is letting go */
-        if (coil_game_busy(c)) coil_let_go(c, "the game wants it");
+        if (coil_game_busy(c)) { c->game_took = 1; coil_let_go(c, "the game wants it"); }
         else if (pm_ms() >= c->until) coil_let_go(c, "its time ran out");
         else if (!pm_in_game()) coil_let_go(c, "the game ended or tilted");
         else if (!running) coil_let_go(c, "no mode is running");
     }
 }
 
+/* route 1: `<node> <coil> <pulse power> <pulse ms> <hold power> [<longest ms>]`, each power or time a number or
+ * `a<id>`; the longest a plain number */
+static int coil_drive_parse(struct held_coil *c, const char *t)
+{
+    unsigned v[6], i, adj = 0, any;
+    for (i = 0; i < 6; i++) {
+        while (*t == ' ') t++;
+        if (i == 5 && (!*t || *t == '#')) { v[5] = 0; break; }   /* no longest: the runtime's own cap */
+        if (*t == 'a' && i >= 2 && i < 5) { adj |= 1u << (i - 2); t++; }
+        for (v[i] = 0, any = 0; *t >= '0' && *t <= '9'; t++, any = 1) v[i] = v[i] * 10 + (unsigned)(*t - '0');
+        if (!any) return 0;
+    }
+    if (v[0] > 127 || v[1] > 15 || (v[5] && v[5] < MAGNET_MIN_MS)) return 0;
+    c->cap_ms = v[5];
+    c->node = v[0];
+    c->coilno = v[1];
+    c->drv[0] = v[2];
+    c->drv[1] = v[3];
+    c->drv[2] = v[4];
+    c->drv_adj = adj;
+    return 1;
+}
+
 static int have_values(const char *const *names);   /* the gate section, below */
 static void coils_arm(void)
 {
-    static const char *const s[] = { "coil_fire", "proc_exists", "proc_create", "proc_sleep", "coil_take",
-                                     "coil_give", 0 };
+    static const char *const s[] = { "coil_fire", "proc_exists", "proc_create", "proc_sleep", 0 };
     static const char *const v[] = { "magnet_proc", 0 };
-    const char *t = pm_port_text("held_coils");
+    const char *t = pm_port_text("held_coils"), *d;
     char key[40];
     unsigned base;
     if (!have_sites(s) || !have_values(v)) return;
@@ -3878,20 +4181,37 @@ static void coils_arm(void)
         c->name[k] = 0;
         while (*t && *t != ' ') t++;
         if (!k) break;
-        pm_snprintf(key, sizeof key, "%s_get", c->name);
-        if (!fn(key)) { say("%s: the port names no %s - not armed", c->name, key); continue; }
-        pm_snprintf(key, sizeof key, "%s_dev", c->name);
-        c->dev = (unsigned)pm_port_value(key, 0);
-        if (!c->dev) { say("%s: the port names no %s - not armed", c->name, key); continue; }
+        pm_snprintf(key, sizeof key, "%s_drive", c->name);
+        if ((d = pm_port_text(key))) {                     /* PAD-420: by its board address */
+            if (!coil_drive_parse(c, d) || !data("coil_table") || !data("coil_count")) {
+                say("%s: the port's %s or its coil table is not usable - not armed", c->name, key);
+                continue;
+            }
+            c->route = 1;
+            pm_snprintf(key, sizeof key, "%s_dev", c->name);
+            c->dev = (unsigned)pm_port_value(key, 0);      /* optional: checked against the record's */
+            pm_snprintf(key, sizeof key, "%s_ctl", c->name);
+            c->ctl = (unsigned)pm_port_value(key, 0);
+        } else {
+            pm_snprintf(key, sizeof key, "%s_get", c->name);
+            if (!fn(key)) { say("%s: the port names no %s - not armed", c->name, key); continue; }
+            if (!fn("coil_take") || !fn("coil_give")) { say("%s: the port names no coil_take / coil_give - not armed", c->name); continue; }
+            pm_snprintf(key, sizeof key, "%s_dev", c->name);
+            c->dev = (unsigned)pm_port_value(key, 0);
+            if (!c->dev) { say("%s: the port names no %s - not armed", c->name, key); continue; }
+            c->ctl = 44;                                   /* Godzilla's ControlCoil: the controlling process */
+        }
         c->id = base + (unsigned)n_coils;
         n_coils++;
     }
     if (!n_coils) return;
     can |= PM_CAN_COILS;
-    say("held coils: %d (%s%s%s%s%s%s%s) through 0x%08x by processes %u..; each at most %u ms as one command, %u s "
-        "between holds, %u a minute", n_coils, coils[0].name, n_coils > 1 ? " " : "", n_coils > 1 ? coils[1].name : "",
+    say("held coils: %d (%s%s%s%s%s%s%s%s%s%s%s) through 0x%08x by processes %u..; each at most %u ms as one command, "
+        "%u s between holds, %u a minute", n_coils, coils[0].name, n_coils > 1 ? " " : "", n_coils > 1 ? coils[1].name : "",
         n_coils > 2 ? " " : "", n_coils > 2 ? coils[2].name : "", n_coils > 3 ? " " : "",
-        n_coils > 3 ? coils[3].name : "", fn("coil_fire"), base, MAGNET_MAX_MS, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
+        n_coils > 3 ? coils[3].name : "", n_coils > 4 ? " " : "", n_coils > 4 ? coils[4].name : "",
+        n_coils > 5 ? " " : "", n_coils > 5 ? coils[5].name : "", fn("coil_fire"), base, MAGNET_MAX_MS,
+        MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
 }
 
 /* ---- the scoop: a ball held there for the mode, then the game kicks it out (PAD-381) ----------
@@ -3925,18 +4245,25 @@ static struct {
     unsigned slot;                          /* the device record's handler pointer */
     unsigned (*orig)(unsigned, unsigned, unsigned, unsigned);
     unsigned event;                         /* the event a settled ball is held in */
+    unsigned event_arg;                     /* PAD-420: which argument carries it (0 = the first) */
     unsigned hold_ms;                       /* the running mode's hold; 0 = none */
     unsigned long until;                    /* pm_ms() a hold ends; 0 = not holding */
     int release;                            /* the mode let go */
     int armed;                              /* 0 not swapped yet, 1 wrapped, -1 refused */
+    unsigned log, logged;                   /* PAD-420: `value scoop_log 1` - the handler's first 64 calls in mode.log */
 } scoop;
 
 static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
 {
-    unsigned r = scoop.orig(ev, a1, a2, a3);
+    unsigned r, e;
     unsigned long t0;
     const char *why;
-    if (ev != scoop.event || !scoop.hold_ms || !running || !pm_in_game()) return r;
+    if (scoop.log && scoop.logged < 64)     /* for whoever finds a title's "settled" event: what the game hands it */
+        say("scoop: the handler's call %u: event %u, args %u %u %u%s", ++scoop.logged, ev, a1, a2, a3,
+            running ? " (a mode runs)" : "");
+    r = scoop.orig(ev, a1, a2, a3);
+    e = scoop.event_arg == 1 ? a1 : scoop.event_arg == 2 ? a2 : scoop.event_arg == 3 ? a3 : ev;
+    if (e != scoop.event || !scoop.hold_ms || !running || !pm_in_game()) return r;
     t0 = pm_ms();
     scoop.until = t0 + scoop.hold_ms;
     scoop.release = 0;
@@ -4006,6 +4333,9 @@ static void scoop_arm(void)
     if (!have_sites(s) || !have_data(d) || !have_values(v)) return;
     scoop.slot = data("scoop_slot");
     scoop.event = (unsigned)pm_port_value("scoop_event", 2);
+    scoop.event_arg = (unsigned)pm_port_value("scoop_event_arg", 0);
+    scoop.log = pm_port_value("scoop_log", 0) != 0;
+    if (scoop.event_arg > 3) return;                /* the game's handler takes four arguments at most */
     can |= PM_CAN_SCOOP;
     say("scoop: a mode may hold a ball there, up to %u ms; the kick-out stays the game's", SCOOP_MAX_MS);
 }
@@ -4522,11 +4852,39 @@ static void shows_tick(void)
         show_kill(show_now.limit < SHOW_MAX_MS ? "its time is up" : "its 20 s are up");
 }
 
+/* PAD-420: a show the game starts itself is flagged as one (0x20 at +2 of its process record), and the game's process
+ * exit then frees the lamp groups the show made (the game's "free every lamp group this process owns", `site
+ * lamp_free_owner`). A process the runtime starts is not flagged, so every show it played kept its lamp group after
+ * it ended - until the game's pool of groups ran out (King Kong LE 0.97 in the emulator: 26 plays of one 2 s show,
+ * groups 22 -> 48, then every show failed at once, and so would every lamp group the game itself asked for). So the
+ * runtime gives its show process an exit hook, as the game gives its own processes theirs (a free {fn, arg} slot of
+ * the record: `value proc_exit_hooks`, the slots' offset, `value proc_exit_slots`, how many): the game's exit runs it
+ * as the show ends or is stopped, before the record is reused, and it frees that record's groups. */
+static void show_exit(unsigned rec, unsigned arg)
+{
+    (void)arg;
+    ((void (*)(unsigned))(unsigned long)fn("lamp_free_owner"))(rec);
+}
+
+static int show_exit_hook(unsigned rec)
+{
+    unsigned off = (unsigned)pm_port_value("proc_exit_hooks", 0), n = (unsigned)pm_port_value("proc_exit_slots", 0), i;
+    if (!rec || !off || n < 1 || n > 8) return 0;
+    for (i = 0; i < n; i++) {
+        unsigned *slot = (unsigned *)(unsigned long)(rec + off + 8u * i);
+        if (slot[0]) continue;
+        slot[1] = 0;
+        slot[0] = (unsigned)(unsigned long)show_exit;
+        return 1;
+    }
+    return 0;
+}
+
 int pm_game_show(int n)
 {
     char key[24];
     const char *name;
-    unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    unsigned id = (unsigned)pm_port_value("show_proc", 0), rec;
     if (!(can & PM_CAN_GAME_SHOWS)) return 0;
     pm_snprintf(key, sizeof key, "show_%d", n);
     if (n < 1 || n >= SHOWS_MAX || !site(key)) {
@@ -4547,9 +4905,15 @@ int pm_game_show(int n)
         return 0;
     }
     if (proc_alive(id)) show_kill("another show begins");
-    if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
-            id, (void (*)(void))(unsigned long)fn(key), 0)) {
+    rec = ((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
+        id, (void (*)(void))(unsigned long)fn(key), 0);
+    if (!rec) {
         say("show %d: not played - the game would not start its process %u", n, id);
+        return 0;
+    }
+    if (!show_exit_hook(rec)) {                         /* none free (a new record has all four): stopped before */
+        ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("event_cancel"))(id, 0xffffu);   /* it makes a group */
+        say("show %d: not played - its process had no free exit hook for the clean-up of its lights", n);
         return 0;
     }
     show_now.n = n;
@@ -4563,8 +4927,8 @@ int pm_game_show(int n)
 
 static void shows_arm(void)
 {
-    static const char *const s[] = { "proc_create", "proc_exists", "event_cancel", 0 };
-    static const char *const v[] = { "show_proc", 0 };
+    static const char *const s[] = { "proc_create", "proc_exists", "event_cancel", "lamp_free_owner", 0 };
+    static const char *const v[] = { "show_proc", "proc_exit_hooks", "proc_exit_slots", 0 };
     char key[24];
     int n;
     for (n = 1; n < SHOWS_MAX; n++) {
@@ -6379,6 +6743,7 @@ static void note_thread(const char *what, int *said)
 }
 
 static void events_deliver(void);             /* the events section below */
+static void event_census(void);
 static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
 static void stock_tick(void);             /* item 160 */
@@ -6403,6 +6768,7 @@ static void on_tick(unsigned *r)
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
     sound_swaps_tick();                       /* item 163: swapped carrier keys come back */
     events_deliver();
+    event_census();                           /* PAD-420: `value event_census 1` */
     switches_deliver();
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
@@ -6829,6 +7195,29 @@ static void events_deliver(void)
         while (n--) EACH_MODE(m) if (m->event) { current = m; m->event(id); }
         current = 0;
     }
+}
+
+/* PAD-420, for whoever writes a port (`value event_census 1`): every 2 s, the bus ids the dispatch carried since the
+ * last look and how often - the ids a build's own rules use, where another build's are wrong (Jaws Pro 1.02: its
+ * dispatch ran, none of Jaws LE's named ids ever came). Off unless the port asks. */
+static void event_census(void)
+{
+    static unsigned seen[N_BUS_IDS];
+    static unsigned long next;
+    char line[300];
+    unsigned id, d;
+    int k = 0, n = 0;
+    if (!pm_port_value("event_census", 0) || pm_ms() < next) return;
+    next = pm_ms() + 2000;
+    line[0] = 0;
+    for (id = 0; id < N_BUS_IDS; id++) {
+        d = event_fired[id] - seen[id];
+        seen[id] = event_fired[id];
+        if (!d || k > 240) continue;
+        k += pm_snprintf(line + k, sizeof line - (unsigned)k, " 0x%x+%u", id, d);
+        n++;
+    }
+    if (n) say("event census (in_game %d):%s", pm_in_game(), line);
 }
 
 static void events_arm(void)

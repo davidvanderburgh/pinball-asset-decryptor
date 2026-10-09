@@ -1113,6 +1113,11 @@ data typeinfo_vmi           0x006dfe78   # any multiple-inheritance typeinfo: it
   ball's start. The runtime notes every entry running from a ball's start until 2 s after its
   first score and does not count it until it is seen stopped. A ball is the player up plus the
   `ball_start` events (or the ball ends) seen so far.
+- **Base play the port names** (PAD-420): `text stack_base_names cmode_location_` - comma-separated
+  class-name prefixes the runtime never counts as one of the game's modes (never a multiball;
+  those are always waited for). John Wick's locations (`cmode_location_john_wicks_house`, ...)
+  start a few shots into a ball, past the window above, and one runs for nearly all of every ball:
+  a `stack no` mode that waited for them would hardly ever start.
 
 `stackport.py` (the item's scratch tool) derives all of these from the ELF.
 
@@ -1483,6 +1488,16 @@ command instead. The process calls: create-if-absent (id, entry, flags 0) `0x3ab
 take control `0x5079c` (coil, wait ticks), give control back `0x50860` (coil, 1); the coil's update
 `0x4ffc8`, its controller at +44.
 
+**A magnet that is one of the title's held coils** (PAD-420): `text magnet_coil spider_magnet` makes that held
+coil (its `_drive` or `_get` lines, below) the one `pm_magnet_grab` holds - one coil, one set of limits, whether a
+mode's `magnet` line or its `coil_hold` asks. `value magnet_shot` is then the shot whose switch is nearest the
+magnet on the playfield picture, as on Godzilla: Jurassic Park LE's Left ramp enter opto (12 px from the T-Rex
+mouth magnet), James Bond LE's Tank hood target (17 px from the jet pack magnet). Not where the game answers that
+shot with the magnet itself: King Kong pulses its spider pit magnet 4 x 20 ms on a pit target hit (each pulse ends
+a hold - the runtime's log still says held; `[coildrive]` shows it) and Avengers grabs the ball in its tower on a
+tower opto (the grab gives way at once), so a mode's grab adds nothing there. A port value is 32 bits on the
+machine: a shot past bit 31 reaches the `magnet` line only as its mask, which the Modes tab always writes.
+
 **From a mode file, and the Modes tab.** `magnet <ms> [mask]`: while the mode runs, every hit of the shot the
 magnet sits at holds the ball there for `<ms>`, the hit that starts the mode included, through `pm_magnet_grab`
 with all of the limits above (a refused hit is logged as `magnet shot ... - no grab` and the mode carries on).
@@ -1597,6 +1612,17 @@ vtable. Emulator-proven (rig 2, the stock cards): each held 2000 ms as the mode 
 object's own powers (King Kong 255/500 then 30, 180/200 then 48, 255/64 then 48; Jaws 255/128 then 51), the game's
 OFF 2015-2016 ms on; a mode stop let all go with about 500 ms left; no abort. Which other titles can follow, and
 why the rest cannot yet: docs/plans/mode_coils_census.md.
+
+**By the board address (PAD-420).** Where a title's coil object is not Godzilla's, a coil is held through the
+framework's own coil call and its coil table (`site coil_fire`, `data coil_table`, `data coil_count`), named by
+where it sits on the boards: `text <name>_drive <node> <coil> <pulse power> <pulse ms> <hold power> [<longest
+ms>]`. The powers are always the GAME's own for that coil, read off its program (a number, or `a<id>`: the
+operator's adjustment, read live); the last word, when there, is the longest ONE command of the game's own on it
+(a post the game holds 128 for 1500 ms at most: `9 8 255 64 128 1500`), and a hold is cut to it whatever the mode
+asks - the Modes tab says "holds 0.1 to 1.5 seconds" for that coil. The game still wins: a command of its own on
+the coil (the record's latest request is not ours) refuses a hold and ends one. Where the game's code switches an
+uncontrolled coil off, the port also names its object (`site <name>_get` or `data <name>_obj`), where it keeps its
+controlling process (`value <name>_ctl`) and its "disabled" virtual (`value <name>_off_slot`).
 
 ## The scoop (PAD-381)
 
@@ -1922,7 +1948,19 @@ Godzilla examples then play their own kit show instead.
 **The port lines** (`ports/godzilla_le-1.16.port`, "PAD-411"): `value show_proc`, then a show a block -
 `site show_<n>` (its body), `text show_name_<n>` (the name a mode asks for), `text show_kind_<n>` (`flashy` for a
 start, `subdued` for an end, `accent` for a moment) and `value show_secs_<n>`. The process calls are `site
-proc_create`, `site proc_exists` and `site event_cancel`. PM_CAN_GAME_SHOWS says a port has them all.
+proc_create`, `site proc_exists` and `site event_cancel`, and the clean-up below needs `site lamp_free_owner`,
+`value proc_exit_hooks` and `value proc_exit_slots`. PM_CAN_GAME_SHOWS says a port has them all.
+
+**Each show hands its lights back as it ends (PAD-420).** A show the game starts itself is flagged as one in its
+process record, and the game's process exit then frees the lamp groups the show made (the game's "free every lamp
+group this process owns", `site lamp_free_owner`). A process the runtime starts is not flagged, so until PAD-420 every
+show it played kept its lamp group after it ended; the game has a fixed pool of them, and in the emulator King Kong LE
+0.97 ran out after 26 plays of one 2 s show (groups 22 -> 48), after which every show failed at once - and so would
+every lamp group the game itself asked for. Now the runtime gives its show process an exit hook, as the game gives
+its own processes theirs: a free {fn, arg} slot of the record (`value proc_exit_hooks` is the slots' offset - 0xd0,
+0xe0, 0xf0 or 0x120 by framework - and `value proc_exit_slots` how many, 4 on every build), which the game's exit runs
+as the show ends or is stopped, before the record is reused; it calls `lamp_free_owner` on the record. A port without
+these lines plays no shows.
 
 | Show | Kind | Length | What it is (measured) |
 |---|---|---|---|
@@ -1944,6 +1982,21 @@ what it did to the playfield measured at the shim's LED view, sampled every 20 m
 4 s before it taken out (how many light channels it moved, the most at once, for how long). Two machine tests on
 David's Premium: the first played every start and end show; the second showed the 2 s Colour sweep went unnoticed
 and the endings on a drain were cut, which gave the bigger starts and the ball-end rule above.
+
+**Every other build (PAD-420).** The other latest builds' ports name up to twelve shows each (six for a start, four
+fades for an end, two accents, as many as the game has), in a block headed "PAD-420: the game's own light shows";
+the Modes tab's "Which games" table marks them *light shows*. Each build's show-process candidates (bodies from its
+process registry that light lamps) were played one by one in the emulator through `pm_game_show`, with two recorders
+in a scratch runtime: the lamp groups the show process owned (every build; the older framework lights its shows
+through lamp groups alone) and, on Godzilla 1.16, Jaws 1.02 and King Kong 0.97, the light runner's commands. Each is
+named from what it did - its colours (the RGB inserts its groups lit, or the commands' colours), toggling (a strobe),
+in-between levels (a fade), lights coming on in turn (a chase), how many lights next to the build's biggest show
+(wide / small) - and how long it ran; a show still going after the scan's wait runs until stopped and is offered for
+8 s. Never offered: one whose direct calls reach the game's sound, callout, score, award, clip, coil, multiball or
+event calls; one the game crashed during or after; one lighting fewer than 6 lights. A Pro offers its LE's shows by
+the LE's names where they are the same show (the same commands, or 75% or more of the same lights for as long), and
+Godzilla Pro eight of the Premium/LE's by PAD-411's names, so a mode moves between models with its shows. Tested in
+the emulator so far.
 
 **From the Modes tab (PAD-418).** A form mode picks a show for its start and one for its end on its Lights page ("The
 game's light shows": the port's shows by name, grouped flashy / subdued / accent; none by default). They are written

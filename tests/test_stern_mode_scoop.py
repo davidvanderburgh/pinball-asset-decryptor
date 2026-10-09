@@ -66,11 +66,21 @@ def test_the_game_holds_first_and_the_mode_after():
     src = RUNTIME.read_text(encoding="utf-8")
     wrap = _lift(src, "static unsigned scoop_wrap(")
     body = wrap[wrap.index("{"):]
-    assert body.index("scoop.orig(ev, a1, a2, a3)") < body.index("ev != scoop.event")
+    assert body.index("scoop.orig(ev, a1, a2, a3)") < body.index("e != scoop.event")
     assert "return r;" in body                              # the game's own answer, unchanged
     loop = body[body.index("while ("):body.index('fn("proc_sleep"))(1);')]
     for cond in ("!scoop.release", "scoop.hold_ms", "running", "pm_in_game()", "pm_ms() < scoop.until"):
         assert cond in loop, cond
+
+
+def test_the_handlers_calls_are_logged_only_when_the_port_asks():
+    """PAD-420: `value scoop_log 1` puts the game handler's first 64 calls (event and arguments) in mode.log - how a
+    title's "a ball settled" event is found - before the game's own handling, which it never changes."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    body = _lift(src, "static unsigned scoop_wrap(")
+    assert "if (scoop.log && scoop.logged < 64)" in body
+    assert body.index("scoop.logged < 64") < body.index("r = scoop.orig(ev, a1, a2, a3);")
+    assert 'scoop.log = pm_port_value("scoop_log", 0) != 0;' in _lift(src, "static void scoop_arm(void)")
 
 
 def test_every_end_lets_go_and_the_swap_is_checked():

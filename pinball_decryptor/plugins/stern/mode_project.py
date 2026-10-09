@@ -81,12 +81,16 @@ class TitleProfile:
     hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
     magnet_shot: str = ""            # PAD-381: the shot whose hit is the ball over the magnet; "" = no magnet
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
+    coil_caps: tuple = ()            # PAD-420: ((name, ms), ...) a held coil's longest hold where the game's own
+    #                                  longest command on it is shorter than COIL_MAX_MS (its `_drive` line's last word)
     shield_rule: str = ""            # PAD-392: the game's own shield feature (the port's `text shield_rule`, one of
     #                                  game_rules): it turns the platform back while it counts shots
     shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
     shake_max_ms: tuple = ()         # PAD-414: the game's own longest shake at strength 0..3 (`text shake_max_ms`)
     game_shows: tuple = ()           # PAD-418: ((name, kind, secs), ...) the game's own light shows a mode can play
     #                                  (the port's show_<n> lines, in number order; kind flashy / subdued / accent)
+    absent: tuple = ()               # PAD-420: HARDWARE_PARTS this machine does not have (machine_absent): the tab
+    #                                  leaves their sections out rather than saying why they cannot be used
     game_wizards: tuple = ()         # PAD-436: ((name, film), ...) the game's own mini-wizards a mode can hand over
     #                                  (the port's wizard_name_<n> / wizard_film_<n> lines, in number order)
     wizard_shot: str = ""            # PAD-436: the game's shot that starts a lit mini-wizard (`text wizard_shot`)
@@ -273,6 +277,84 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
          "magnet", "scoop", "coils", "shield", "shaker", "shows", "wizard")
 
+#: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
+HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "shaker")
+
+#: PAD-420: which of HARDWARE_PARTS each model's machine has, by its game directory (the same machine on every
+#: version), from the coil names in each newest build's device table: a magnet that catches the ball (not
+#: Metallica's grave marker or electric chair, which fling it), a scoop / VUK / eject the ball settles in, another
+#: mechanism a mode may hold (a second magnet, a diverter, a gate, an up post; not a lock post), the shield
+#: platform's motor, the shaker motor. Foo Fighters' parts were first read off its adjustments (the Overlord magnet,
+#: the upper playfield diverter, the outlane up post); its device tables name them now, and the Pro's has only the
+#: van up post of them. Venom's scoops are named
+#: by its switches and adjustments (the center and 180 scoops), not by a coil. A game directory not listed here
+#: shows every section.
+MACHINE_HARDWARE = {
+    "aerosmith": ("magnet", "scoop", "shaker"),
+    "aerosmith_le": ("magnet", "scoop", "coils", "shaker"),
+    "avengers_infinity_le": ("magnet", "scoop", "coils"),
+    "avengers_infinity_pro": ("magnet", "coils"),
+    "batman": ("magnet", "scoop", "coils"),
+    "beatles": ("magnet", "coils"),
+    "deadpool_le": ("scoop", "coils"),
+    "deadpool_pro": ("scoop", "coils"),
+    "dungeons_and_dragons_le": ("magnet", "scoop", "coils"),
+    "dungeons_and_dragons_pro": ("magnet", "scoop", "coils"),
+    "elvira3": ("scoop", "coils", "shaker"),
+    "foo_fighters_le": ("magnet", "coils"),
+    "foo_fighters_pro": ("coils",),       # run 21: its device table (the names resolve now) has no OVERLORD MAGNET - the LE's only
+    "godzilla_le": ("magnet", "scoop", "coils", "shield", "shaker"),   # its shaker drive is no coil name: PAD-414 shakes it
+    "godzilla_pro": ("magnet", "scoop", "shaker"),   # the shaker kit is optional; the game's own shake call is the LE's
+    "guardians": ("magnet", "scoop", "coils", "shaker"),
+    "guardians_le": ("magnet", "scoop", "coils", "shaker"),
+    "iron_maiden_le": ("scoop", "coils"),
+    "iron_maiden_pro": ("coils",),
+    "james_bond_60th_le": ("scoop", "coils"),
+    "james_bond_le": ("magnet", "scoop", "coils"),
+    "james_bond_pro": ("scoop", "coils"),
+    "jaws_le": ("coils",),
+    "jaws_pro": ("coils",),
+    "john_wick_le": ("scoop", "coils"),
+    "john_wick_pro": ("scoop",),
+    "jurassic_park_le": ("magnet", "coils"),
+    "jurassic_park_pro": ("coils",),
+    "jurassic_park_the_pin": ("coils",),
+    "king_kong_le": ("magnet", "scoop", "coils"),
+    "king_kong_pro": ("magnet", "scoop", "coils"),
+    "led_zeppelin_le": ("magnet", "scoop", "coils", "shaker"),
+    "led_zeppelin_pro": ("scoop", "coils", "shaker"),
+    "mando_le": ("magnet", "scoop", "coils", "shaker"),
+    "mando_pro": ("scoop", "coils", "shaker"),
+    "metallica_spike": ("magnet", "scoop", "coils"),
+    "munsters_le": ("magnet", "scoop", "coils", "shaker"),
+    "munsters_pro": ("magnet", "scoop", "coils", "shaker"),
+    "rush_le": ("magnet", "scoop", "coils", "shaker"),
+    "rush_pro": ("magnet", "scoop", "coils", "shaker"),
+    "star_wars_elg": ("coils",),
+    "star_wars_le": ("scoop", "coils"),
+    "star_wars_pro": ("scoop", "coils"),
+    "stranger_things": ("scoop", "coils"),
+    "stranger_things_le": ("scoop", "coils"),
+    "sword_of_rage_le": ("magnet", "scoop", "coils", "shaker"),
+    "sword_of_rage_pro": ("magnet", "scoop", "coils", "shaker"),
+    "turtles_le": ("magnet", "coils", "shaker"),
+    "turtles_pro": ("magnet", "coils", "shaker"),
+    "uncanny_xmen_le": ("magnet", "coils"),
+    "uncanny_xmen_pro": ("magnet", "coils"),
+    "venom_le": ("scoop", "coils", "shaker"),
+    "venom_pro": ("scoop", "coils", "shaker"),
+}
+
+
+def machine_absent(game_dir):
+    """PAD-420: the HARDWARE_PARTS game ``game_dir``'s machine does not have, as a tuple; () for a machine not in
+    MACHINE_HARDWARE (every section shows)."""
+    has = MACHINE_HARDWARE.get(game_dir)
+    if has is None:
+        return ()
+    return tuple(p for p in HARDWARE_PARTS if p not in has)
+
+
 #: What ``stack no`` (item 140) needs from a port before pad_mode_runtime.c's
 #: pm_stock_mode_running can tell a battle or a multiball is on: (sites, data). Without
 #: them mode_file.c logs "this game's port cannot tell" and starts the mode anyway.
@@ -292,6 +374,30 @@ STACK_PROVEN = frozenset({
     "venom_le-1.07", "dungeons_and_dragons_le-1.00", "king_kong_le-0.97", "mando_le-1.44",
     "iron_maiden_le-1.16", "sword_of_rage_le-1.18", "rush_le-1.18", "star_wars_le-1.30",
     "john_wick_le-1.01", "led_zeppelin_pro-1.22", "foo_fighters_le-1.04", "turtles_le-1.59",
+    "deadpool_le-1.16",                  # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's battles started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Battle Mystique: the runtime says one of the game's modes (cbattle_mystique) is running | WAITER not started (trigger file): one of the game's modes (cbattle_mystique) is running
+    "dungeons_and_dragons_le-1.10",      # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's battles started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Mimic Hurry Up: the runtime says one of the game's modes (cmimic_hurry_up) is running | WAITER not started (trigger file): one of the game's modes (cmimic_hurry_up) is running
+    "foo_fighters_pro-1.04",             # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's battles started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Super Skill Shot: the runtime says one of the game's modes (csuper_skill_shot) is running | WAITER not started (trigger file): one of the game's modes (csuper_skill_shot) is running
+    "iron_maiden_le-1.18",               # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's battles started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Soul Shard Hurry Up: the runtime says one of the game's modes (cmode_soul_shard_hurry_up) is running | WAITER not started (trigger file): one of the game's modes (cmode_soul_shard_hurry_up) is running
+    "iron_maiden_pro-1.18",              # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's battles started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Soul Shard Hurry Up: the runtime says one of the game's modes (cmode_soul_shard_hurry_up) is running | WAITER not started (trigger file): one of the game's modes (cmode_soul_shard_hurry_up) is running
+    "john_wick_pro-1.02",                # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Tick Tock: the runtime says one of the game's modes (cmode_tick_tock) is running | WAITER not started (trigger file): one of the game's modes (cmode_tick_tock) is running
+                                         # re-run 2026-10-08 with its locations base play (440aecb0): the same, Tick Tock refused it
+    "munsters_pro-1.28",                 # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Lily Mode: the runtime says one of the game's modes (clily_mode) is running | WAITER not started (trigger file): one of the game's modes (clily_mode) is running
+    "rush_le-1.19",                      # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started La Villa Strangiato: the runtime says one of the game's modes (cmode_la_villa_strangiato) is running | WAITER not started (trigger file): one of the game's modes (cmode_la_villa_strangiato) is running
+    "sword_of_rage_le-1.19",             # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Sand Worm: the runtime says one of the game's modes (cmode_sand_worm) is running | WAITER not started (trigger file): one of the game's modes (cmode_sand_worm) is running
+    "sword_of_rage_pro-1.19",            # PAD-420 2026-10-07 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Sand Worm: the runtime says one of the game's modes (cmode_sand_worm) is running | WAITER not started (trigger file): one of the game's modes (cmode_sand_worm) is running
+    "avengers_infinity_le-1.10",         # PAD-420 2026-10-08 st3_job (stock card, hidden, muted; re-run on the direct harness): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Soul Gem: the runtime says one of the game's modes (cmode_soul_gem) is running | WAITER not started (trigger file): one of the game's modes (cmode_soul_gem) is running
+    "avengers_infinity_pro-1.10",        # PAD-420 2026-10-08 st3_job (stock card, hidden, muted; re-run on the direct harness): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Soul Gem: the runtime says one of the game's modes (cmode_soul_gem) is running | WAITER not started (trigger file): one of the game's modes (cmode_soul_gem) is running
+    "dungeons_and_dragons_pro-1.10",     # PAD-420 2026-10-08 st3_job (stock card, hidden, muted; re-run on the direct harness): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Mimic Hurry Up: the runtime says one of the game's modes (cmimic_hurry_up) is running | WAITER not started (trigger file): one of the game's modes (cmimic_hurry_up) is running
+    "jurassic_park_pro-1.16",            # PAD-420 2026-10-08 st3_job (stock card, hidden, muted; re-run on the direct harness): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Trex Chase: the runtime says one of the game's modes (cmode_trex_chase) is running | WAITER not started (trigger file): one of the game's modes (cmode_trex_chase) is running
+    "rush_pro-1.19",                     # PAD-420 2026-10-08 st3_job (stock card, hidden, muted; re-run on the direct harness): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started La Villa Strangiato: the runtime says one of the game's modes (cmode_la_villa_strangiato) is running | WAITER not started (trigger file): one of the game's modes (cmode_la_villa_strangiato) is running
+    "star_wars_le-1.31",                 # PAD-420 2026-10-08 st3_job (stock card, hidden, muted; re-run on the direct harness): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Hoth I: the runtime says one of the game's modes (choth_i) is running | WAITER not started (trigger file): one of the game's modes (choth_i) is running
+    "star_wars_pro-1.31",                # PAD-420 2026-10-08 st3_job (stock card, hidden, muted; re-run on the direct harness): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Hoth I: the runtime says one of the game's modes (choth_i) is running | WAITER not started (trigger file): one of the game's modes (choth_i) is running
+    "venom_pro-1.07",                    # PAD-420 2026-10-08 st3_job (stock card, hidden, muted; re-run on the direct harness): a stack no mode started with nothing of the game's running; one of the game's modes started through its own start (the port's block start) and the mode, asked for at once, was refused while it ran: stackgo: started Riot Mode: the runtime says one of the game's modes (criot_mode) is running | WAITER not started (trigger file): one of the game's modes (criot_mode) is running
+    "king_kong_pro-0.97",                # PAD-420 2026-10-08 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running (WAITER asked right after the plunge): stackgo: started Island Scene Escape the Swamp: the runtime says one of the game's modes (cmode_island_scene_escape_the_swamp) is running | WAITER not started (trigger file): one of the game's modes (cmode_island_scene_escape_the_swamp) is running
+    "mando_le-1.45",                     # PAD-420 2026-10-08 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running (WAITER asked right after the plunge, before the bounty's first shot): stackgo: started Super Skill Shot: the runtime says one of the game's modes (csuper_skill_shot) is running | WAITER not started (trigger file): one of the game's modes (csuper_skill_shot) is running
+    "mando_pro-1.45",                    # PAD-420 2026-10-08 st3_job (stock card, hidden, muted): a stack no mode started with nothing of the game's running (WAITER asked right after the plunge, before the bounty's first shot): stackgo: started Super Skill Shot: the runtime says one of the game's modes (csuper_skill_shot) is running | WAITER not started (trigger file): one of the game's modes (csuper_skill_shot) is running
+    "john_wick_le-1.02",                 # PAD-420 2026-10-08 st3_job (stock card, fresh NVRAM, hidden, muted; its locations base play, 440aecb0): a stack no mode started with nothing of the game's running: stackgo: started Tick Tock: the runtime says one of the game's modes (cmode_tick_tock) is running | WAITER not started (trigger file): one of the game's modes (cmode_tick_tock) is running
+    "jaws_pro-1.02",                     # PAD-420 2026-10-08 st3_job (stock card, past Guided Setup, hidden, muted): a stack no mode started with nothing of the game's running; stackgo: started Cast N Catch 1, the runtime said cmode_cast_n_catch_1 is running and WAITER was refused
 })
 
 
@@ -344,6 +450,37 @@ MULTIBALL_PROVEN = frozenset({
     "godzilla_le-1.16",                # 2026-09-26 mb_e2e.sh: the same on the Premium (David's card): served 3, jackpots, add-a-ball to 4, drains to 1, END (one ball left)
     "beatles-1.29",                    # 2026-09-26 mb_e2e.sh: the same on its switch shots (Target 1-4): served 3, jackpots, add-a-ball to 4, drains to 1, END (one ball left)
     "godzilla_pro-1.15",               # 2026-09-26 mb_e2e.sh: served 3 on the start, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left), then the game's own ball end
+    "aerosmith-1.16",                    # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "aerosmith_le-1.16",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "avengers_infinity_le-1.10",         # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "avengers_infinity_pro-1.10",        # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "deadpool_le-1.16",                  # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "dungeons_and_dragons_le-1.10",      # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "foo_fighters_pro-1.04",             # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "dungeons_and_dragons_pro-1.10",     # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "guardians_le-1.15",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "guardians-1.15",                    # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "iron_maiden_le-1.18",               # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "iron_maiden_pro-1.18",              # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "james_bond_pro-1.06",               # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "jaws_pro-1.02",                     # PAD-420 2026-10-08 mb_job3 (stock card, hidden, muted; past Guided Setup, coins one at a time after the tech alerts): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "john_wick_le-1.02",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "john_wick_pro-1.02",                # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "jurassic_park_pro-1.16",            # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "king_kong_pro-0.97",                # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "mando_le-1.45",                     # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "mando_pro-1.45",                    # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "rush_le-1.19",                      # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "rush_pro-1.19",                     # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "star_wars_pro-1.31",                # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "stranger_things_le-1.13",           # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "sword_of_rage_le-1.19",             # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "sword_of_rage_pro-1.19",            # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "stranger_things-1.13",              # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "star_wars_le-1.31",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "venom_pro-1.07",                    # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "batman-1.14",                       # PAD-420 2026-10-08 mb_job (stock card, hidden, muted; the port's 22 block lines in): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
 })
 
 
@@ -402,6 +539,42 @@ BALL_SAVE_PROVEN = frozenset({
     "turtles_pro-1.58",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "turtles_pro-1.59",                 # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "uncanny_xmen_le-0.98",             # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
+    "aerosmith_le-1.16",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 8 shots, awarded 36000000
+    "avengers_infinity_le-1.10",         # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 3 shots, awarded 6000000
+    "avengers_infinity_pro-1.10",        # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "iron_maiden_le-1.18",               # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "james_bond_pro-1.06",               # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "iron_maiden_pro-1.18",              # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "john_wick_le-1.02",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "john_wick_pro-1.02",                # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "jurassic_park_pro-1.16",            # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "mando_le-1.45",                     # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 30000000
+    "mando_pro-1.45",                    # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 30000000
+    "munsters_pro-1.28",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "rush_le-1.19",                      # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "rush_pro-1.19",                     # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "star_wars_le-1.31",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "star_wars_pro-1.31",                # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "stranger_things-1.13",              # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "stranger_things_le-1.13",           # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "sword_of_rage_le-1.19",             # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "sword_of_rage_pro-1.19",            # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "aerosmith-1.16",                    # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "deadpool_le-1.16",                  # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 2 shots, awarded 3000000
+    "dungeons_and_dragons_le-1.10",      # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "foo_fighters_pro-1.04",             # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "guardians-1.15",                    # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "king_kong_pro-0.97",                # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "venom_pro-1.07",                    # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 8 shots, awarded 36000000
+    "dungeons_and_dragons_pro-1.10",     # PAD-420 2026-10-07 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "godzilla_le-1.16",                  # PAD-420 2026-10-07 bs_job (stock card, hidden, muted; jackpots from its own check): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 3 shots, awarded 6000000
+    "guardians_le-1.15",                 # PAD-420 2026-10-07 bs_job (stock card, hidden, muted; orbit jackpots, not drop targets): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 2 shots, awarded 3000000
+    "venom_le-1.07",                     # PAD-420 2026-10-07 bs_job (stock card, hidden, muted; jackpots from its own check, NOPF: pressing every switch starts its own multiball): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 8 shots, awarded 36000000
+    "batman-1.14",                       # PAD-420 2026-10-08 bs_job (stock card, hidden, muted; jackpot presses only, NOPF - its VUK and eject switches left alone): the save taken, the drain inside it served back (auto-launched), shots scored on it, the next drain ended the ball: END (ball ended): 14 shots, awarded 105000000
+    "elvira3-1.13",                      # PAD-420 2026-10-08 bs_job (stock card, hidden, muted; fresh NVRAM, coins one at a time): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    "jaws_pro-1.02",                     # PAD-420 2026-10-08 bs_job2 (stock card, hidden, muted; past Guided Setup, coins one at a time after the tech alerts): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 3 shots, awarded 6000000
+    "turtles_le-1.59",                   # PAD-420 2026-10-08 bs_job3 (stock card, hidden, muted, fresh NVRAM; the rig's van stocked with two balls - PAD_BALL_VAN_STOCK=2: the TMNT LE has 8, and the game serves a saved ball from the van): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
 })
 
 
@@ -432,21 +605,69 @@ MAGNET_PROVEN = frozenset({
     "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: the starting hit grabbed 2000 ms (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, held to its end), a hit mid-grab refused with no OFF from the game, a grab 6 s later held to its end, a mode stop let go 565 ms early, a drain mid-grab: the game ended the grab's process and the magnet went off 798 ms early, no abort
     "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: the same (held 2000 to its end, mode stop 584 ms early, drain 782 ms early, no abort); and the first hit started a magnet process of the game's, which the grab stood aside for
     "godzilla_pro-1.15",               # PAD-394 2026-10-05 rig 2, the stock card: two grabs held to their end (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, the game's OFF 2017 / 2000 ms on), a hit 1 s in refused with no OFF from the game, a mode stop let go 115 ms early, no abort
+    "jurassic_park_le-1.16",           # PAD-420 2026-10-08 magnet_job (stock card on its slot's own NVRAM, hidden, muted): the T-Rex mouth magnet (held coil trex_magnet, text magnet_coil); the Left ramp enter opto's hit started the mode and grabbed 2000 ms (255 for 300, then 128 for 1700, [coildrive] node 9 coil 7, the game's OFF 2010 ms on), a hit 6 s later grabbed again and a mode stop 1.4 s in let go (OFF, 635 ms of the command left); nothing else of the game's on the coil while it held; no abort
+    "james_bond_le-1.06",              # PAD-420 2026-10-08 magnet_job (stock card on its slot's own NVRAM, hidden, muted): the jet pack magnet (held coil jet_pack_magnet, text magnet_coil); the Tank hood target's hit started the mode and grabbed 2000 ms (255 for 1000, then 15 for 1000, [coildrive] node 9 coil 0, ended by the board), a hit 6 s later grabbed again and a mode stop 1.3 s in let go (OFF, 734 ms of the command left); nothing else of the game's on the coil while it held; no abort
+    "dungeons_and_dragons_pro-1.10",   # PAD-420 2026-10-08 magnet_job (stock card on its slot's own NVRAM, hidden, muted): the magnet (held coil magnet_hold, its cmagnet's grab: 255 for 64 ms then 128, at most 864 ms) on the bottom right orbit opto, 24.5 px away: two hits, two grabs, each ONE command of ours on node 9 coil 2 and nothing of the game's on it while it held; both ran their 864 ms (the second ended before the mode stop 1 s in); no abort
+    "dungeons_and_dragons_le-1.10",    # PAD-420 2026-10-08 magnet_job (stock card on its slot's own NVRAM, hidden, muted): the magnet (held coil magnet_hold, its cmagnet's grab: 255 for 64 ms then 128, at most 864 ms) on the bottom right orbit opto, 24.5 px away: two hits, two grabs, each ONE command of ours on node 9 coil 2 and nothing of the game's on it while it held; both ran their 864 ms (the second ended before the mode stop 1 s in); no abort
+    "mando_le-1.45",                   # PAD-420 2026-10-08 magnet_job (stock card on its slot's own NVRAM, hidden, muted): the Child magnet (held coil magnet_hold, its cthe_child_magnet grab: 255 for 800 ms then 20) on the Child opto (the switch named for it): the hit started the mode and grabbed 2000 ms (ONE command of ours on node 9 coil 7, ended by the board), a hit 6 s later grabbed again and a mode stop 1.4 s in let go; nothing of the game's on the coil while it held; no abort
+    "uncanny_xmen_le-0.98",            # PAD-420 2026-10-08 magnet_job2 (stock card, fresh NVRAM, hidden, muted): the magnet (held coil magnet_hold) on the Right ramp tgt (the switch nearest it on the playfield picture, 67 px): the hit started the mode and grabbed 2000 ms (ONE command of ours on node 9 coil 0, 255 for 1000 ms then 82, ended by the board), a hit 6 s later grabbed again and a mode stop 1.4 s in let go; nothing of the game's on the coil while it held; no abort
+    "uncanny_xmen_pro-0.98",           # PAD-420 2026-10-08 magnet_job2 (stock card, hidden, muted): the magnet (held coil magnet_hold) on the Right ramp tgt, as the LE: the hit started the mode and grabbed its own longest 1200 ms (ONE command of ours on node 9 coil 0, ended by the board), a hit 6 s later grabbed again and a mode stop 1.0 s in (STOP_IN 0.4: its 1200 ms ends before the 1 s stop of the first run) let go; nothing of the game's on the coil while it held; no abort
+    "beatles-1.29",                    # PAD-420 2026-10-08 magnet_job2 (stock card, hidden, muted; SETTLE 25 s past the game's ball-start magnet release): the top magnet (held coil magnet_top) on the Top magnet opto (25 px from it; its own switch line, flags 0x1400 as the standups'): the hit started the mode and grabbed 2000 ms (ONE command of ours on node 9 coil 6, 190 for 1000 ms then 22, ended by the board), a hit 6 s later grabbed again and a mode stop 1.5 s in let go; nothing of the game's on the coil while it held; no abort
+    "rush_le-1.19",                    # PAD-420 2026-10-08 magnet_job2 (stock card, hidden, muted): the Time Machine magnet (held coil magnet_hold, the game's own grab 255/80 then 100) on the Lift ramp opto (the shot the game's own magnet answers, seen in the magnet census): the hit started the mode and grabbed 2000 ms (ONE command of ours on node 9 coil 7, ended by the board), a hit 6 s later grabbed again and a mode stop 1.5 s in let go; nothing of the game's on the coil while it held; no abort
 })
 
 
 def _magnet_shot_name(port):
     """The name of the port's shot the magnet sits at (``value magnet_shot``), or "" when it has none."""
     mask = port["value"].get("magnet_shot", 0) if port else 0
-    return next((name for name, m in port["shot"] if m == mask), "") if mask else ""
+    if not mask:
+        return ""
+    return next((name for name, m in port["shot"] if m == mask), "") or next(   # PAD-420: shots from switches
+        (name for _sw, m, name in port.get("switch", ()) if m == mask), "")
+
+
+#: PAD-420: a coil held by its BOARD ADDRESS (pad_mode_runtime.c "held coils on every generation"): the framework's
+#: coil call and its coil table, the process calls, and per coil `text <name>_drive <node> <coil> <pulse power>
+#: <pulse ms> <hold power> [<longest ms>]` (the game's own hold command for that coil; an `a<id>` is the operator's
+#: adjustment; the last, when there, the longest ONE command of the game's own on it, which a hold never exceeds).
+COIL_ROUTE_NEEDS = (("coil_fire", "proc_exists", "proc_create", "proc_sleep"), ("coil_table", "coil_count"),
+                    ("magnet_proc",))
+
+
+def _drive_ok(port, name):
+    """Does the port hold coil `name` by its board address: a parseable `<name>_drive` line and the calls and the
+    coil table the runtime needs for it?"""
+    if not port:
+        return False
+    sites, data, values = COIL_ROUTE_NEEDS
+    words = port["text"].get("%s_drive" % name, "").split("#")[0].split()
+    if len(words) not in (5, 6) or not all(re.fullmatch(r"a?\d+", w) for w in words[:5]) \
+            or any(w.startswith("a") for w in words[:2]) \
+            or (len(words) == 6 and not (words[5].isdigit() and int(words[5]) >= COIL_MIN_MS)):
+        return False
+    return (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+            and all(n in port["value"] for n in values))
+
+
+def _magnet_ports(port):
+    """Does the port name the magnet the runtime can hold: Godzilla's ControlCoil route, or by its board address
+    (PAD-420), or (PAD-420) one of its held coils, `text magnet_coil <name>` (King Kong's spider_magnet: one coil,
+    one set of limits, for Magnet and Mechanisms alike)?"""
+    if not port:
+        return False
+    alias = port["text"].get("magnet_coil", "").split("#")[0].strip()
+    if alias:
+        return any(name == alias for name, _l in _held_coils(port))
+    sites, values, texts = MAGNET_NEEDS
+    route0 = (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
+              and all(port["text"].get(n) for n in texts))
+    return route0 or _drive_ok(port, "magnet")
 
 
 def _magnet_cannot(key, label, port=None):
     """The ``cannot`` entry for holding the ball on the magnet on build ``key``, or () when it can: the port
-    names the magnet's calls, its device, its processes and its shot, and the build is proven."""
-    sites, values, texts = MAGNET_NEEDS
-    if not port or not (all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
-                        and all(port["text"].get(n) for n in texts) and _magnet_shot_name(port)):
+    names the magnet's calls, its device or its board address, and its shot, and the build is proven."""
+    if not port or not (_magnet_ports(port) and _magnet_shot_name(port)):
         return (("magnet", "The app has not found how %s drives its magnet, so a mode of yours cannot "
                            "hold the ball on it." % label),)
     if key in MAGNET_PROVEN:
@@ -469,6 +690,42 @@ SCOOP_PROVEN = frozenset({
     "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: no mode, kicked 1782 ms after landing; scoop_hold 4000, 5776 ms (held 4016); the mode stopped 1.5 s in, let go then (2998 ms); no abort
     "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: 1785 / 5770 (held 4016) / let go at the mode's end (2591 ms); a TILT during a 10 s hold ended the ball, the hold let go and the game kicked the ball out, no abort
     "godzilla_pro-1.15",               # PAD-394 2026-10-05 rig 2, the stock card: no mode, kicked 1829 ms after landing; scoop_hold 4000, 5850 ms (held 4016); the mode stopped 3 s into a hold, let go then (the kick 912 ms later); after the mode ended, 1832 ms; no abort
+    "avengers_infinity_le-1.10",       # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): no mode, kicked 1988 ms after landing; scoop_hold 4000, 6003 ms (held 4016); the mode stopped 2.5 s into a hold, kicked 1149 ms later; after the mode, 1986 ms ([coildrive] node 8 coil 7, 200 for 60 ms); no abort
+    "dungeons_and_dragons_le-1.10",    # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): its handler takes the event in its second argument (value scoop_event_arg 1): no mode, 1674 ms; scoop_hold 4000, 5698 ms (held 4016); a mode stop 2.5 s in, kicked 996 ms later; after, 1677 ms ([coildrive] node 8 coil 8, 140 for 60 ms); no abort
+    "guardians_le-1.15",               # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): no mode, 6326 ms (the game's own first landing); scoop_hold 4000, 5701 ms (held 4000); a mode stop 2.5 s in, kicked 1402 ms later; after, 1713 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
+    "iron_maiden_le-1.18",             # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): no mode, 2924 ms; scoop_hold 4000, 6958 ms (held 4000); a mode stop 2.5 s in, kicked 2089 ms later; after, 2928 ms ([coildrive] node 9 coil 8, 255 for 60 ms); no abort
+    "aerosmith_le-1.16",               # PAD-420 2026-10-07 the mechanisms helper's run (stock card, hidden, muted): the game's own first landings settle slowly (5776 ms with no mode); scoop_hold 4000: settled, held 4000, then kicked; a mode stop 2.5 s in, kicked 1311 ms later; after, 1728 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
+    "john_wick_le-1.02",               # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 787 ms after landing; scoop_hold 4000, 4789 ms (held 4000); a mode stop 2.5 s into a hold, kicked 158 ms later; after the mode, 781 ms ([coildrive] node 8 coil 8, 200 for 60 ms); no abort
+    "king_kong_le-0.97",               # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 777 ms after landing; scoop_hold 4000, 4813 ms (held 4000); a mode stop 2.5 s into a hold, kicked 107 ms later; after the mode, 831 ms ([coildrive] node 8 coil 8, 150 for 60 ms); no abort
+    "mando_le-1.45",                   # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1715 ms after landing; scoop_hold 4000, 5708 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1195 ms later; after the mode, 1715 ms ([coildrive] node 9 coil 1, 200 for 30 ms); no abort
+    "mando_pro-1.45",                  # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1711 ms after landing; scoop_hold 4000, 5700 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1039 ms later; after the mode, 1712 ms ([coildrive] node 9 coil 1, 200 for 30 ms); no abort
+    "munsters_le-1.28",                # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1868 ms after landing; scoop_hold 4000, 5700 ms (held 4000); a mode stop 2.5 s into a hold, kicked 1090 ms later; after the mode, 1715 ms ([coildrive] node 9 coil 1, 196 for 40 ms); no abort
+    "munsters_pro-1.28",               # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 13993 ms after landing; scoop_hold 4000, 5709 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1195 ms later; after the mode, 1714 ms ([coildrive] node 9 coil 1, 196 for 40 ms); no abort
+    "rush_le-1.19",                    # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1453 ms after landing; scoop_hold 4000, 5336 ms (held 4000); a mode stop 2.5 s into a hold, kicked 834 ms later; after the mode, 1297 ms ([coildrive] node 9 coil 5, 185 for 60 ms); no abort
+    "rush_pro-1.19",                   # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1458 ms after landing; scoop_hold 4000, 5335 ms (held 4000); a mode stop 2.5 s into a hold, kicked 779 ms later; after the mode, 1295 ms ([coildrive] node 9 coil 5, 185 for 60 ms); no abort
+    "stranger_things-1.13",            # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 5225 ms after landing; scoop_hold 4000, 5695 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1244 ms later; after the mode, 1710 ms ([coildrive] node 8 coil 8, 255 for 10 ms); no abort
+    "stranger_things_le-1.13",         # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 5334 ms after landing; scoop_hold 4000, 5703 ms (held 4000); a mode stop 2.5 s into a hold, kicked 988 ms later; after the mode, 1713 ms ([coildrive] node 8 coil 8, 255 for 10 ms); no abort
+    "sword_of_rage_le-1.19",           # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1348 ms after landing; scoop_hold 4000, 5336 ms (held 4016); a mode stop 2.5 s into a hold, kicked 830 ms later; after the mode, 1298 ms ([coildrive] node 9 coil 1, 200 for 60 ms); no abort
+    "sword_of_rage_pro-1.19",          # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1299 ms after landing; scoop_hold 4000, 5342 ms (held 4016); a mode stop 2.5 s into a hold, kicked 735 ms later; after the mode, 1298 ms ([coildrive] node 9 coil 1, 128 for 60 ms); no abort
+    "venom_le-1.07",                   # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 830 ms after landing; scoop_hold 4000, 5695 ms (held 4000); a mode stop 2.5 s into a hold, kicked 1038 ms later; after the mode, 1710 ms ([coildrive] node 9 coil 4, 225 for 30 ms); no abort
+    "venom_pro-1.07",                  # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1709 ms after landing; scoop_hold 4000, 5694 ms (held 4000); a mode stop 2.5 s into a hold, kicked 934 ms later; after the mode, 1710 ms ([coildrive] node 9 coil 4, 225 for 30 ms); no abort
+    "dungeons_and_dragons_pro-1.10",   # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1713 ms after landing; scoop_hold 4000, 5700 ms (held 4000); a mode stop 2.5 s into a hold, kicked 935 ms later; after the mode, 1712 ms ([coildrive] node 8 coil 8, 140 for 60 ms); no abort
+    "guardians-1.15",                  # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 4299 ms after landing; scoop_hold 4000, 5694 ms (held 4000); a mode stop 2.5 s into a hold, kicked 1040 ms later; after the mode, 1709 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
+    "john_wick_pro-1.02",              # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1451 ms after landing; scoop_hold 4000, 5336 ms (held 4000); a mode stop 2.5 s into a hold, kicked 623 ms later; after the mode, 1296 ms ([coildrive] node 8 coil 8, 200 for 60 ms); no abort
+    "led_zeppelin_le-1.22",            # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 14070 ms after landing; scoop_hold 4000, 5349 ms (held 4016); a mode stop 2.5 s into a hold, kicked 884 ms later; after the mode, 1298 ms ([coildrive] node 8 coil 8, 100 for 60 ms); no abort
+    "led_zeppelin_pro-1.22",           # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 14072 ms after landing; scoop_hold 4000, 5302 ms (held 4000); a mode stop 2.5 s into a hold, kicked 732 ms later; after the mode, 1300 ms ([coildrive] node 8 coil 8, 100 for 60 ms); no abort
+    "star_wars_le-1.31",               # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1713 ms after landing; scoop_hold 4000, 5698 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1041 ms later; after the mode, 15546 ms ([coildrive] node 13 coil 7, 93 for 500 ms) (the game kept that ball itself - its own mode at the scoop; the runtime held nothing once the mode had ended); no abort
+    "star_wars_pro-1.31",              # PAD-420 2026-10-08 scoop_job (stock card, hidden, muted): no mode, kicked 1716 ms after landing; scoop_hold 4000, 5688 ms (held 4000); a mode stop 2.5 s into a hold, kicked 1193 ms later; after the mode, 12739 ms ([coildrive] node 8 coil 6, 128 for 40 ms) (the game kept that ball itself - its own mode at the scoop; the runtime held nothing once the mode had ended); no abort
+    "james_bond_le-1.06",              # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted): its game reports a landed ball settled ~3 s in and then keeps it ~5 s itself (no mode: kicked 8169 ms after landing); scoop_hold 10000: settled, held 10000, let go, kicked 0.9 s later (13942 ms after landing - the hold in place of the game's own keep, so a hold under ~5 s shows nothing here); a mode stop 4.1 s into a hold let go at once, kicked 993 ms later; after the mode 15451 ms (the game kept it, nothing of ours); [coildrive] node 8 coil 8, 255 for 10 ms; no abort
+    "james_bond_pro-1.06",             # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; James Bond LE's handler found on the Pro by its code): no mode, the game kept a landed ball and kicked it 8825 ms after landing; scoop_hold 10000: settled, held 10002 ms, let go, kicked 14002 ms after landing (the hold in place of the game's own keep, as on the LE); a mode stop 4.0 s into a hold let go at once, kicked 1023 ms later; after the mode 15597 ms (the game kept it, nothing of ours); [coildrive] node 8 coil 8, 255 for 10 ms; no abort
+    "aerosmith-1.16",                  # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; Aerosmith LE's handler found on the Pro by its code): no mode, kicked 4336 ms after landing; scoop_hold 4000, 5735 ms (held 4016); a mode stop 2.5 s into a hold, kicked 1273 ms later; after the mode, 1700 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
+    "batman-1.14",                     # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the Penguin VUK): no mode, kicked 785 ms after landing; scoop_hold 4000, 4840 ms (held 4017); a mode stop 2.5 s into a hold, kicked 262 ms later; after the mode, 782 ms ([coildrive] node 8 coil 6, 255 for 60 ms); no abort
+    "deadpool_le-1.16",                # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the Hellhouse eject - the game keeps its first landing ~7.7 s itself): no mode, kicked 7716 ms after landing; scoop_hold 4000, 5293 ms (held 4000); a mode stop 2.5 s into a hold, kicked 781 ms later; after the mode, 1299 ms ([coildrive] node 8 coil 6, 255 for 60 ms); no abort
+    "deadpool_pro-1.16",               # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the Hellhouse eject - the game keeps its first landing ~7.7 s itself): no mode, kicked 7737 ms after landing; scoop_hold 4000, 5337 ms (held 4000); a mode stop 2.5 s into a hold, kicked 935 ms later; after the mode, 1298 ms ([coildrive] node 8 coil 6, 255 for 60 ms); no abort
+    "elvira3-1.13",                    # PAD-420 2026-10-08 scoop_job6 (stock card, hidden, muted; the Crypt VUK; coins one at a time after the tech alerts): no mode, kicked 1667 ms after landing; scoop_hold 4000, 5550 ms (held 4000); a mode stop 2.5 s into a hold, let go at once (held 1834), kicked 885 ms after the stop; after the mode, 1558 ms ([coildrive] node 9 coil 1, 255 for 60 ms); no abort
+    "metallica_spike-1.04",            # PAD-420 2026-10-08 scoop_job6 (stock card, hidden, muted; the RT EJECT; coins one at a time after the tech alerts - its earlier run had no game): no mode, the game kept its first landing and kicked 7690 ms after; scoop_hold 4000, 5557 ms (held 4000); a mode stop 2.5 s into a hold, let go at once (held 1967), kicked 1041 ms after the stop; after the mode, 1558 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
+    "james_bond_60th_le-1.11",         # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the TOP LEFT SCOOP): no mode, kicked 3312 ms after landing; scoop_hold 4000: settled 0.8 s after landing, held 4000 ms, the game's kick 344 ms after the let-go (5130 ms after landing - its own kick, 2.5 s after the settle, waited for the hold); a mode stop 2.5 s into a hold let go at once (held 1917), kicked 623 ms after the stop; after the mode, 3162 ms ([coildrive] node 9 coil 1, 125 for 90 ms); no abort
+    "king_kong_pro-0.97",              # PAD-420 2026-10-08 scoop_job6 (stock card staged on the NVMe, hidden, muted; the KONG CAVE VUK, King Kong LE's twin handler - its run-18 segvs were the D: card stall): no mode, kicked 1723 ms after landing; scoop_hold 4000, 5724 ms (held 4016); a mode stop 2.5 s into a hold, let go at once (held 2050), kicked 1253 ms after the stop; after the mode, 1718 ms ([coildrive] node 8 coil 8, 150 for 60 ms); no abort
 })
 
 
@@ -551,7 +808,10 @@ def _shake_max_ms(port):
     return v if len(v) == len(SHAKE_STRENGTHS) else ()
 #: PAD-418: the game's own light shows (PAD-411, MODE_SDK.md "The game's own light shows"). What pad_mode_runtime.c's
 #: shows_arm needs besides the `site show_<n>` lines before it plays one - (sites, values) - and the kinds a show is.
-SHOWS_NEEDS = (("proc_create", "proc_exists", "event_cancel"), ("show_proc",))
+#: PAD-420: and the game's clean-up of a show's lamp groups as it ends (pad_mode_runtime.c show_exit_hook): without
+#: it every show played kept a lamp group until the game's pool ran out
+SHOWS_NEEDS = (("proc_create", "proc_exists", "event_cancel", "lamp_free_owner"),
+               ("show_proc", "proc_exit_hooks", "proc_exit_slots"))
 SHOW_KINDS = ("flashy", "subdued", "accent")
 #: mode_file.c's show_start / show_end hold this many bytes, the end included
 SHOW_NAME_MAX = 40
@@ -651,15 +911,113 @@ HELD_COILS_PROVEN = frozenset({
     # both down with 489 ms left; no abort
     ("jaws_le-1.02", "left_post"),
     ("jaws_le-1.02", "right_post"),
+    # PAD-420 2026-10-08 coil_job_g (stock Jaws Pro 1.02 card, hidden, muted; Jaws LE's getters found by their code):
+    # both posts up 2000 ms as the mode started (255 for 128 ms, then 51; [coildrive] node 9 coils 6 and 7, the game's
+    # OFF 2016 ms on), a mode stop 1.5 s into a second hold let both down with 490 ms left; no abort
+    ("jaws_pro-1.02", "left_post"),
+    ("jaws_pro-1.02", "right_post"),
+    ("led_zeppelin_pro-1.22", "control_gates"),  # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("star_wars_elg-1.10", "right_gate"),        # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 8 coil 2, 255 for 60 ms then 128 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("sword_of_rage_le-1.19", "control_gates"),  # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("sword_of_rage_pro-1.19", "control_gates"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("deadpool_le-1.16", "control_gates"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("deadpool_pro-1.16", "control_gate"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
+    ("led_zeppelin_le-1.22", "control_gates"),   # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 60 ms then 96 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("jurassic_park_le-1.16", "trex_magnet"),    # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 7, 255 for 300 ms then 128 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("jurassic_park_le-1.16", "raptor_post"),    # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 120 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("jurassic_park_le-1.16", "orbit_post"),     # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 8, 255 for 60 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("jurassic_park_le-1.16", "room_post"),      # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("iron_maiden_le-1.18", "left_post"),        # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
+    ("iron_maiden_le-1.18", "right_post"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
+    ("iron_maiden_pro-1.18", "left_post"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
+    ("iron_maiden_pro-1.18", "right_post"),      # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 200 for 60 ms then 64 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("avengers_infinity_le-1.10", "tower_magnet"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 300 ms then 100 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("avengers_infinity_le-1.10", "tower_post"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 120 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("guardians_le-1.15", "orbit_gates"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; when the game raised it mid-hold, let go with no OFF of its own; no abort
+    ("mando_le-1.45", "center_ramp_gat"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 5, 255 for 64 ms then 128 (the game's own), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("mando_le-1.45", "diverter_mini_p"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 64 (the game's own), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("mando_le-1.45", "top_up_post"),            # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 8, 255 for 64 ms then 128 (the game's own), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("mando_pro-1.45", "center_ramp_gat"),       # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 5, 255 for 64 ms then 128 (the game's own), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("mando_pro-1.45", "diverter_mini_p"),       # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 64 (the game's own), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("mando_pro-1.45", "top_up_post"),           # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 8, 255 for 64 ms then 128 (the game's own), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("munsters_le-1.28", "up_post"),             # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 150 ms then 64 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("munsters_le-1.28", "magnet_hold"),         # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 1200 ms then 18 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("avengers_infinity_pro-1.10", "tower_magnet"), # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 9 coil 0, 255 for 300 ms then 100 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
+    ("avengers_infinity_pro-1.10", "tower_post"), # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 9 coil 5, 255 for 120 ms then 64 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1501 ms on; no abort
+    ("munsters_pro-1.28", "up_post"),            # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 150 ms then 64 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("munsters_pro-1.28", "magnet_hold"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 1200 ms then 18 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("jurassic_park_pro-1.16", "orbit_post"),    # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 9 coil 8, 255 for 60 ms then 64 (its own); OFF 2016 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("jurassic_park_pro-1.16", "room_post"),     # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 64 (its own); OFF 2016 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("jurassic_park_pro-1.16", "inlane_post"),   # PAD-420 2026-10-08 coil_job (re-run 3) (stock card, hidden, muted): node 8 coil 6, 255 for 120 ms then 64 (its own); OFF 2016 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    ("king_kong_pro-0.97", "spider_magnet"),  # PAD-420 2026-10-08 coil_job_k0 (stock card on its slot's own NVRAM, hidden, muted): node 9 coil 0, 255 for 500 ms then 30 (the object's own); held 2000 ms as the mode started, the game's OFF 2016 ms on; a mode stop 0.7 s into a second hold let go; no abort
+    ("king_kong_pro-0.97", "river_diverter"), # PAD-420 2026-10-08 coil_job_k0 (stock card on its slot's own NVRAM, hidden, muted): node 9 coil 1, 180 for 200 ms then 48 (the object's own); held 2000 ms as the mode started, the game's OFF 2016 ms on; a mode stop 0.7 s into a second hold let go; no abort
+    ("star_wars_le-1.31", "gates"),              # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 5, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("star_wars_le-1.31", "outlane_gate"),       # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 8, 255 for 500 ms then 56 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("star_wars_pro-1.31", "gates"),             # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 5, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("stranger_things-1.13", "left_down_post"),  # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 6, 255 for 16 ms then 95 (the game's own), at most 416 ms; held 410 ms to its end (the game's own longest, 416 ms, ends before a stop could); no abort
+    ("stranger_things_le-1.13", "left_down_post"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 6, 255 for 16 ms then 95 (the game's own), at most 416 ms; held 410 ms to its end; the game's own longest ends before a mode stop could; no abort
+    ("venom_le-1.07", "up_post"),                # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 1, 255 for 32 ms then 48 (the game's own), at most 1032 ms; held 1030 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("james_bond_le-1.06", "jet_pack_magnet"),   # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 1000 ms then 15 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("james_bond_le-1.06", "gate"),              # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("james_bond_pro-1.06", "gate"),             # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("elvira3-1.13", "gate"),                    # PAD-420 2026-10-08 coil_job_c2 (stock card, hidden, muted; coins one at a time): node 9 coil 5, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("aerosmith_le-1.16", "upper_gate"),         # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 10 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; when the game raised it mid-hold, let go with no OFF of its own; no abort
+    ("aerosmith_le-1.16", "toy_box_magnet"),     # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 1000 ms then 16 (the game's own, its ToyBoxMagnet's grab - device 17 by its static object; its hold runs 5 s, so the runtime's 5 s cap); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("guardians-1.15", "orbit_gates"),           # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("foo_fighters_le-1.04", "outlane_up_post"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 8, 255 for 64 ms then 64 (the game's own), at most 2064 ms; held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("foo_fighters_le-1.04", "up_pf_diverter"),  # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 32 ms then 64 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("foo_fighters_le-1.04", "van_up_post"),     # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 32 ms then 128 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("foo_fighters_pro-1.04", "van_up_post"),    # PAD-420 2026-10-08 coil_job_c3 (stock card, hidden, muted; coins one at a time): node 9 coil 7 (device 12), 255 for 32 ms then 128 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("beatles-1.29", "magnet_top"),             # PAD-420 2026-10-08 coil_job_c3 (stock card, hidden, muted; the holds 25 s into the game - run 18's 8 s met the game's own ball-start OFF): node 9 coil 6 (device 15), 190 for 1000 ms then 22 (its TopMagnet's own hold); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("jurassic_park_the_pin-1.05", "gate"),      # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 7, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("turtles_pro-1.59", "pizza_magnet"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 1200 ms then 128 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("james_bond_60th_le-1.11", "left_gate"),    # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 40 ms then 96 (the game's own), at most 940 ms; held 940 ms to its end; the game's own longest ends before a mode stop could; no abort
+    ("james_bond_60th_le-1.11", "right_gate"),   # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 5, 255 for 40 ms then 96 (the game's own), at most 940 ms; held 940 ms to its end; the game's own longest ends before a mode stop could; no abort
+    ("john_wick_le-1.02", "diverter"),           # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, a209 for 150 ms then a210 (the game's own, its RampDiverter's; 150 and 16 on the stock card); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("rush_le-1.19", "up_post"),                 # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 6, a171 for 64 ms then a172 (the game's own, its DoubleUpPost's; 255 and 64 on the stock card); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("rush_le-1.19", "magnet_hold"),             # PAD-420 2026-10-08 coil_job_c3 (stock card, hidden, muted): node 9 coil 7 (device 19, its TimeMachineMagnet), 255 for 80 ms then 100 (the game's own grab, seen in the magnet census on the Lift ramp opto); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("rush_pro-1.19", "magnet_hold"),            # PAD-420 2026-10-08 coil_job_c3 (stock card, hidden, muted): node 9 coil 7 (device 15, its TimeMachineMagnet), 255 for 80 ms then 100 (the game's own grab, seen in the magnet census on the Center ramp opto); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("batman-1.14", "diverter_power"),           # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 16 (the game's own, its TurntableDiverter's - device 13 by its constructor); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("batman-1.14", "gate"),                     # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 64 ms then 96 (the game's own, its LeftControlGate's - device 16 by its constructor); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("batman-1.14", "magnet_hold"),              # PAD-420 2026-10-08 coil_job_c3 (stock card, hidden, muted): node 9 coil 0 (device 14, its TurntableMagnet), 255 for 1000 ms then 16 (the game's own grab, seen in the magnet census on the Bat Phone Target); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("uncanny_xmen_pro-0.98", "right_return_up"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 7, a169 for 0 ms then a169 (the game's own hold-only command - 0 for 0, then adj 169: 82 on the stock card), at most 1250 ms; held 1250 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("uncanny_xmen_pro-0.98", "magnet_hold"),    # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for a182 ms then 82 (the game's own, its magnet's - device 13 by its constructor; 1000 ms on the stock card), at most 1200 ms; held 1200 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("uncanny_xmen_le-0.98", "right_return_up"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 8 coil 7, a169 for 0 ms then a169 (the game's own hold-only command: 82 on the stock card), at most 1250 ms; held 1250 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("uncanny_xmen_le-0.98", "magnet_hold"),     # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for a196 ms then 82 (the game's own; 1000 ms on the stock card), at most 2500 ms; held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("uncanny_xmen_le-0.98", "diverter"),        # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 1, a163 for a164 ms then a165 (the game's own; 180 for 60 ms then 64 on the stock card), at most 1250 ms; held 1240 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("dungeons_and_dragons_pro-1.10", "up_post"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 128 (the game's own, its cup_post's - device 11 by its constructor), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("dungeons_and_dragons_pro-1.10", "magnet_hold"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 2, 255 for 64 ms then 128 (the game's own, its cmagnet's grab - device 13 by its constructor), at most 864 ms; held 860 ms to its end; the game's own longest ends before a mode stop could; no abort
+    ("dungeons_and_dragons_le-1.10", "diverter"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 64 ms then 128 (the game's own, its cdiverter's - device 14 by its constructor), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("dungeons_and_dragons_le-1.10", "up_post"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 128 (the game's own, its cup_post's - device 11 by its constructor), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("dungeons_and_dragons_le-1.10", "magnet_hold"), # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 2, 255 for 64 ms then 128 (the game's own, its cmagnet's grab - device 13 by its constructor), at most 864 ms; held 860 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("venom_pro-1.07", "top_post"),              # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 64 ms then 128 (the game's own, its ctop_post_device's - device 13 by its constructor), at most 1564 ms; held 1560 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("led_zeppelin_le-1.22", "electric_magic"),  # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 2000 ms then 64 (the game's own, its ElectricMagicMagnet's grab - device 17 by its static object), at most 2500 ms; held 2000 ms to its end (the draw alone: the board's hold phase empty); a mode stop 0.7 s in sent the game's OFF; no abort
+    ("mando_le-1.45", "magnet_hold"),            # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 7, 255 for 800 ms then 20 (the game's own, its cthe_child_magnet's grab - device 14 by its constructor; its hold runs 10 s, so the runtime's 5 s cap); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("metallica_spike-1.04", "loop_up_post"),    # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 11 coil 2, 170 for 32 ms then 68 (the game's own, its cdevice_loop_diverter's - device 22; the coins dropped one at a time, 1 s apart - Metallica counted 3 of 8 dropped 0.7 s apart), at most 1032 ms; held 1030 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("turtles_le-1.59", "pizza_magnet"),         # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 1200 ms then 128 (the game's own; the coins dropped one at a time and the title's NVRAM fresh - its earlier runs on the slot's own NVRAM never got a second game); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
 })
 
 
 def _held_coils(port):
-    """The port's held coils besides the magnet, ``((name, label), ...)``: each with its getter and device."""
+    """The port's held coils besides the magnet, ``((name, label), ...)``: each with its getter and device, or
+    (PAD-420) its board address and the game's own hold command."""
     out = []
     for name in (port["text"].get("held_coils", "") if port else "").split():
-        if name != "magnet" and ("%s_get" % name) in port["site"] and port["value"].get("%s_dev" % name):
+        if name == "magnet":
+            continue
+        if _drive_ok(port, name) or (("%s_get" % name) in port["site"] and port["value"].get("%s_dev" % name)):
             out.append((name, port["text"].get("%s_label" % name, name)))
+    return tuple(out)
+
+
+def _coil_caps(port, names):
+    """PAD-420: ``((name, ms), ...)`` for the held coils whose `_drive` line names the game's own longest command
+    on the coil, where that is shorter than COIL_MAX_MS: a hold of it is never longer (pad_mode_runtime.c)."""
+    out = []
+    for name in names:
+        words = port["text"].get("%s_drive" % name, "").split("#")[0].split() if port else []
+        if len(words) == 6 and words[5].isdigit() and int(words[5]) < COIL_MAX_MS:
+            out.append((name, int(words[5])))
     return tuple(out)
 
 
@@ -709,6 +1067,15 @@ STACK_BALLS_PROVEN = frozenset({
     "guardians_le-1.14", "aerosmith_le-1.15", "elvira3-1.13", "jurassic_park_the_pin-1.05",
     "metallica_spike-1.04",           # PAD-306 2026-10-01: the framework's serve asked for two (0x3e3008), the
                                       # stack no mode refused ("a multiball"); one drained, started
+    "aerosmith_le-1.16",                 # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "guardians-1.15",                    # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "guardians_le-1.15",                 # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "james_bond_pro-1.06",               # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "stranger_things-1.13",              # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "stranger_things_le-1.13",           # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "aerosmith-1.16",                    # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "batman-1.14",                       # PAD-420 2026-10-08 st_job (stock card, hidden, muted; the port's 22 block lines in): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
 })
 
 
@@ -731,6 +1098,10 @@ STACK_FLAGS_PROVEN = frozenset({
     "stranger_things_le-1.12",        # Bust out (flag 78)
     "james_bond_le-1.06",             # Bust out (flag 102), and the flag cleared when it ended
     "batman-1.13",                    # Shame (flag 71, its start takes one argument), cleared when it ended
+    "james_bond_pro-1.06",            # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; James Bond LE 1.06's mode flags, the same version): Bullshit Scoring started through its block start set flag 141 and a stack no mode was refused for it; with nothing running it had started
+    "stranger_things-1.13",           # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; Stranger Things LE 1.12's flags + 5, each read off its start here): with nothing running a stack no mode started; Bullshit Scoring's block start set flags 116 and 136 and the mode was refused (flag 136)
+    "stranger_things_le-1.13",        # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; Stranger Things LE 1.12's flags + 5, each read off its start here): with nothing running a stack no mode started; Bullshit Scoring's block start set flags 116 and 136 and the mode was refused (flag 136)
+    "batman-1.14",                    # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; its own flags, 1.13's + 5 and the episodes', each read off its start here - the draft's 86 / 88 were not modes'): with nothing running a stack no mode started; Catwoman (episodes 19-20)'s start set flag 51 and the mode was refused
 })
 
 
@@ -755,6 +1126,10 @@ STACK_RECORDS_PROVEN = frozenset({
                                       # -> nothing, started
     "james_bond_60th_le-1.11",        # a Villain Mode (its start 0x9bb10 runs game timer 2, records 137..138):
                                       # named and refused; the framework's kill 137..138 -> nothing, started
+    "aerosmith-1.16",                 # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; Aerosmith LE 1.15's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 243..245) was named running and the mode refused
+    "aerosmith_le-1.16",              # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; Aerosmith LE 1.15's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 243..245) was named running and the mode refused
+    "guardians_le-1.15",              # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; Guardians LE 1.14's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 238..240) was named running and the mode refused
+    "guardians-1.15",                 # PAD-420 2026-10-08 st3_job18 (stock card, hidden, muted; Guardians LE 1.14's record ids + 4, read off each start's mov r0): with nothing running a stack no mode started; Super Scoring's block start (ids 238..240) was named running and the mode refused
 })
 
 
@@ -769,6 +1144,7 @@ STACK_BYTES_PROVEN = frozenset({
     "uncanny_xmen_le-0.98",           # 2026-09-26: nothing running -> started; A Fiery Assault's start called ->
                                       # "one of the game's modes (A Fiery Assault)", refused; its own stop called
                                       # -> nothing, started (the score shows Fiery Assault's 500,000 had paid)
+    "uncanny_xmen_pro-0.98",          # PAD-420 2026-10-08 st3_job16 (stock card, hidden, muted; each battle's object through its own class's constructor, as on X-Men LE 0.98): with nothing running a stack no mode started; A Fiery Assault's start, called with its object, was named running from its byte (object + 0x74) and the mode refused
 })
 
 
@@ -938,7 +1314,11 @@ def core_missing(port):
 #:   bank e0e29301 (84 clips); both walk, and neither port has clip functions.
 #: item 164: titles whose voice never says a lone number - every callout on the card transcribed
 #: (t2/numscan.py, 2026-09-26) - so no countdown can be made of the game's own voice
-COUNTDOWN_NO_NUMBERS = frozenset({"aerosmith_le-1.15", "john_wick_le-1.01", "elvira3-1.13"})
+#: PAD-420: Aerosmith Pro and LE 1.16 and John Wick Pro and LE 1.02 - every short mono clip their requests name
+#: (<= 1.3 s, the ones numscan.py transcribed) is one of 1.15's / 1.01's, length for length (174 and 131 of them,
+#: none new), so their voices say no lone number either
+COUNTDOWN_NO_NUMBERS = frozenset({"aerosmith_le-1.15", "john_wick_le-1.01", "elvira3-1.13",
+                                  "aerosmith-1.16", "aerosmith_le-1.16", "john_wick_le-1.02", "john_wick_pro-1.02"})
 
 TITLE_SCENES = {
     "godzilla_pro-1.15": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,
@@ -981,6 +1361,38 @@ TITLE_SCENES = {
     "star_wars_elg-1.10": dict(hud="354935f6d901c89105d1a97edd4a559e", screen_proven=True, bank="895f74e53622cf5acfa55a1df89a8fc8", clip_proven=True),   # item 164: our clip seen on the glass (its bank read with the marked-clips list)
     "batman-1.13": dict(screen_proven=True, hud="322b14238d0351d6e6ddeb6333e07c8a", bank="322b14238d0351d6e6ddeb6333e07c8a", clip_proven=True),   # item 164: our clip seen on the glass, in a Video grafted into the HUD
     "jurassic_park_the_pin-1.05": dict(screen_proven=True, hud="6f3c2dbd6a176794ca54794f41f699fd", bank="6f3c2dbd6a176794ca54794f41f699fd", clip_proven=True),   # item 164: our clip and screen seen on the glass, one scene is both its HUD and its video bank
+    "aerosmith-1.16": dict(screen_proven=True, hud="025316286cba4a960ef130421f7dacdd", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 48% clip, 47.7% screen, 0.0% before)
+    "aerosmith_le-1.16": dict(screen_proven=True, hud="19d3c55effef1206080481e7e7faa16c", bank="dab80a17b8977c603e9094be6f072a58", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 48% clip, 47.4% screen, 0.0% before)
+    "avengers_infinity_le-1.10": dict(screen_proven=True, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 55% clip, 6.5% screen, 0.0% before)
+    "avengers_infinity_pro-1.10": dict(screen_proven=True, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 50% clip, 6.5% screen, 0.0% before)
+    "batman-1.14": dict(screen_proven=True, hud="e16ea0837bc81a0381884c70d0c29d2e", bank="e16ea0837bc81a0381884c70d0c29d2e", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 6: straight to the mode game - its census game ended at the first drain and no second game started) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 70% clip, 6.5% screen, 0.0% before), the clip in a Video grafted into the HUD
+    "deadpool_le-1.16": dict(screen_proven=True, hud="93e0751c2a35c8c46fc31dba43ed5eae", bank="e0e293019ac1e6977049c83dc8485496", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 65% clip, 6.5% screen, 0.0% before)
+    "dungeons_and_dragons_le-1.10": dict(screen_proven=True, hud="e8bbe9670a9a212f18408a602d7b187b", bank="046915f6ff0a53b5608c8e7c4c2a976f", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 41% clip, 41.7% screen, 0.0% before)
+    "dungeons_and_dragons_pro-1.10": dict(screen_proven=True, hud="76ac5e79ac7d5f8f3b916d925041f266", bank="046915f6ff0a53b5608c8e7c4c2a976f", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 43% clip, 42.7% screen, 0.0% before)
+    "foo_fighters_pro-1.04": dict(screen_proven=True, hud="3f34991c6809a039dd47b2086a12937a", bank="469deda43d1ebfe2c5d371d5a800d0a9", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 52% clip, 54.2% screen, 0.0% before)
+    "guardians-1.15": dict(screen_proven=True, hud="987ea6e129780ab93e8c704ac7ac3d1b", bank="a0683942e100705db906181685dd842e", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 47% clip, 47.0% screen, 0.0% before)
+    "guardians_le-1.15": dict(screen_proven=True, hud="a252085d6b75ad25f754abda30430f6d", bank="a0683942e100705db906181685dd842e", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 47% clip, 47.3% screen, 0.0% before)
+    "iron_maiden_le-1.18": dict(screen_proven=True, hud="efbfca7eef8fac5676abf224aa407d30", bank="efbfca7eef8fac5676abf224aa407d30", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 88% clip, 6.5% screen, 0.0% before)
+    "iron_maiden_pro-1.18": dict(screen_proven=True, hud="dd66e6b1892401e2f70c79cfd3372965", bank="dd66e6b1892401e2f70c79cfd3372965", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 85% clip, 6.5% screen, 0.0% before)
+    "james_bond_pro-1.06": dict(screen_proven=True, hud="832c77c669803d557c730a3be09fb9e5", bank="63f6bc13a70ee6f16f24fa6ab6e908fa", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 32% clip, 31.8% screen, 0.0% before)
+    "jaws_pro-1.02": dict(screen_proven=True, hud="ca1567f39874d2cc3496216d132a4645", bank="908389471bb1044c57d8ad25b0471ca8", clip_proven=True),   # PAD-420 2026-10-08 media proof (stock card, hidden, muted, past Guided Setup): our screen and clip seen on the glass (magenta 62% clip, 6.5% screen, 0.0% before)
+    "john_wick_le-1.02": dict(screen_proven=True, hud="3987a174e6faee23ca3cc20f1be66a70", bank="89fb64f9687944a2fd1eaeea22acfe01", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 74% clip, 73.9% screen, 0.0% before)
+    "john_wick_pro-1.02": dict(screen_proven=True, hud="b61de78dc2e3379ec56f4922d55b1fc6", bank="89fb64f9687944a2fd1eaeea22acfe01", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 74% clip, 73.9% screen, 0.0% before)
+    "jurassic_park_pro-1.16": dict(screen_proven=True, hud="40102c9e31901712d3534f1389c7666e", bank="3e222871d6c38b6b493fdfe59f788133", bank_tree="demand_loaded", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 53% clip, 53.2% screen, 0.0% before)
+    "king_kong_pro-0.97": dict(screen_proven=True, hud="729b8fa01c630d32c25eecb7d9cf074a", bank="ed379c6514e73bead614fee25e93d862", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 56% clip, 74.9% screen, 0.0% before)
+    "mando_le-1.45": dict(screen_proven=True, hud="35ae0bc3d1a5b4decda4c3717a7c0774", bank="390b28f5b7ef5b5e3f49edcee3088a29", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 40% clip, 39.5% screen, 0.0% before)
+    "mando_pro-1.45": dict(screen_proven=True, hud="987328afe511ff4e5c7030d194ddc806", bank="390b28f5b7ef5b5e3f49edcee3088a29", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 40% clip, 39.5% screen, 0.0% before)
+    "munsters_pro-1.28": dict(screen_proven=True, hud="056ab46ff95f247af8217f23eae382df", bank="056ab46ff95f247af8217f23eae382df", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 87% clip, 6.5% screen, 0.0% before)
+    "rush_le-1.19": dict(screen_proven=True, hud="85f8f187e7bffe0d434076d406d7366c", bank="85f8f187e7bffe0d434076d406d7366c", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass over the song video (magenta 73%) in a Video grafted into the HUD
+    "rush_pro-1.19": dict(screen_proven=True, hud="4509258cd7d67da57a14d337ae421721", bank="4509258cd7d67da57a14d337ae421721", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass over the song video (magenta 73%) in a Video grafted into the HUD
+    "star_wars_le-1.31": dict(screen_proven=True, hud="9183de0da4e6ed603f16064ec7a8493b", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (stock card, hidden, muted; the ball-start hero / path choice confirmed with the Action Button first): our screen and clip seen on the glass (magenta 44% clip, 45% screen, 0.0% before)
+    "star_wars_pro-1.31": dict(screen_proven=True, hud="101c344663e5acdcf0e9e5d42ef0f2ae", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 4: two playfield switches first, its ball-start path/hero choice off the glass) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 44% clip, 45.1% screen, 0.0% before)
+    "stranger_things-1.13": dict(screen_proven=True, hud="e3bb429535838471027451e9f6f86950", bank="e3bb429535838471027451e9f6f86950", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass (magenta 75%) in a Video grafted into the HUD - its HUD draws no video bank in play
+    "stranger_things_le-1.13": dict(screen_proven=True, hud="667b28929132f94722c28268ce559de8", bank="a6c50224ebf14f37444b84bb632c1b68", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 70% clip, 69.5% screen, 0.0% before)
+    "sword_of_rage_le-1.19": dict(screen_proven=True, hud="20774409779b6a580c751be1b10f1767", bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 65% clip, 66.2% screen, 0.0% before)
+    "sword_of_rage_pro-1.19": dict(screen_proven=True, hud="d21160f53c007b8147a3d1961efc498d", bank="ca3bab9c0f7e7f02272fddb8ac269dfb", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 66% clip, 66.2% screen, 0.0% before)
+    "uncanny_xmen_pro-0.98": dict(screen_proven=True, hud="9d96a539bb3e5fda93d0429f3c7845ad", bank="4c5e3bd248dc09f1373c91111543f92e", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 44% clip, 44.0% screen, 0.0% before)
+    "venom_pro-1.07": dict(screen_proven=True, hud="a9f8dc36cc2d7f144dcb00bd3e1adf71", bank="a9f8dc36cc2d7f144dcb00bd3e1adf71", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass (magenta 84%) in a Video grafted into the HUD - its HUD draws no video bank in play
 }
 
 #: Titles whose callouts ran in the emulator but were never HEARD (the rig is always
@@ -1350,10 +1762,13 @@ def profile_from_port(path):
         hud_tree=measured.get("hud_tree", "auto_loaded"),
         magnet_shot=_magnet_shot_name(port),                 # PAD-381
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
+        coil_caps=_coil_caps(port, [n for n, _l in _held_coils(port) if (key, n) in HELD_COILS_PROVEN]),   # PAD-420
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         shakes=_shakes(port),                                                # PAD-414
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
+        # PAD-420: a machine part this build can do is never hidden, whatever MACHINE_HARDWARE read off its coils
+        absent=tuple(a for a in machine_absent(game) if a in dict(cannot)),
         game_wizards=_game_wizards(port),                    # PAD-436
         wizard_shot=port["text"].get("wizard_shot", "").strip(),
     )
@@ -1394,6 +1809,92 @@ LAMPS_PROVEN = frozenset((
     "aerosmith_le-1.15", "batman-1.13", "guardians_le-1.14", "mando_le-1.44", "rush_le-1.18",
     "avengers_infinity_le-1.09", "sword_of_rage_le-1.18", "iron_maiden_le-1.16",
     "stranger_things_le-1.12",
+    # PAD-420 2026-10-07 (lights/lights_job.sh, stock card, hidden, muted): a mode file's light_all ff00ff held every
+    # insert the port names; the shim's LED view had every addressed insert magenta while it ran and none before:
+    #   aerosmith-1.16: 12/12 RGB, 68/68 single
+    #   aerosmith_le-1.16: 18/18 RGB, 74/74 single
+    #   deadpool_le-1.16: 7/7 RGB, 80/80 single
+    #   dungeons_and_dragons_le-1.10: 36/36 RGB, 54/54 single
+    #   dungeons_and_dragons_pro-1.10: 36/36 RGB, 54/54 single
+    #   guardians-1.15: 10/10 RGB, 75/75 single
+    #   iron_maiden_le-1.18: 42/42 RGB, 150/150 single
+    "aerosmith-1.16",
+    "aerosmith_le-1.16",
+    "deadpool_le-1.16",
+    "dungeons_and_dragons_le-1.10",
+    "dungeons_and_dragons_pro-1.10",
+    "guardians-1.15",
+    "iron_maiden_le-1.18",
+    # PAD-420 2026-10-07 (lights/lights_job.sh, stock card, hidden, muted): a mode file's light_all ff00ff held every
+    # insert the port names; the shim's LED view had every addressed insert magenta while it ran and none before:
+    #   guardians_le-1.15: 76/76 RGB, 39/39 single
+    #   iron_maiden_pro-1.18: 16/16 RGB, 138/138 single
+    #   james_bond_pro-1.06: 10/10 RGB, 78/78 single
+    #   jurassic_park_pro-1.16: 9/9 RGB, 76/76 single
+    #   star_wars_le-1.31: 15/15 RGB, 85/85 single
+    "guardians_le-1.15",
+    "iron_maiden_pro-1.18",
+    "james_bond_pro-1.06",
+    "jurassic_park_pro-1.16",
+    "star_wars_le-1.31",
+    # PAD-420 2026-10-07 (lights/lights_job.sh, stock card, hidden, muted): a mode file's light_all ff00ff held every
+    # insert the port names; the shim's LED view had every addressed insert magenta while it ran and none before:
+    #   star_wars_pro-1.31: 15/15 RGB, 82/82 single
+    #   stranger_things-1.13: 8/8 RGB, 78/78 single
+    #   stranger_things_le-1.13: 8/8 RGB, 78/78 single
+    #   sword_of_rage_le-1.19: 48/48 RGB, 102/102 single
+    #   sword_of_rage_pro-1.19: 44/44 RGB, 84/84 single
+    #   uncanny_xmen_pro-0.98: 15/15 RGB, 70/70 single
+    #   venom_pro-1.07: 57/57 RGB, 70/70 single
+    "star_wars_pro-1.31",
+    "stranger_things-1.13",
+    "stranger_things_le-1.13",
+    "sword_of_rage_le-1.19",
+    "sword_of_rage_pro-1.19",
+    "uncanny_xmen_pro-0.98",
+    "venom_pro-1.07",
+    # PAD-420 2026-10-08, the same proof on Batman 66 1.14's new port (its 22 block lines in): 6/6 RGB, 82/82 single
+    # (8 and 7 single lit before and after: the game's own)
+    "batman-1.14",
+    # PAD-420 2026-10-08 run 16, the ball launched and 15 s settled first: Munsters Pro 1.28 5/5 RGB, 60/60 single
+    # (9 lit before and after: the game's own); light_shots lit its 4 tied RGB and 10 tied single inserts
+    "munsters_pro-1.28",
+    # PAD-420 2026-10-08 (lights/lights_job2.sh + judge2.py, stock card, hidden, muted): a mode file's light_all ff00ff held
+    # every insert the port names; the shim's LED view had every readable playfield insert magenta while it ran and
+    # none before, and light_shots held every tied insert cyan. The cabinet's own lighting (the expressive-lighting
+    # strip on node 2, the speaker lights on node 7) took no colour of ours - only the game's own shows; they are
+    # not inserts, as Rush 1.18's proof counted:
+    #   rush_le-1.19: 17/17 RGB, 79/79 single; shots 16/16
+    #   rush_pro-1.19: 17/17 RGB, 64/64 single; shots 14/14
+    "rush_le-1.19",
+    "rush_pro-1.19",
+    # PAD-420 2026-10-08 (lights/lights_job3.sh with PAD_NB_TRACE=1, lights/busjudge.py; stock card, hidden, muted) -
+    # judged on the NODE BUS, the observable item mode-leds proved Godzilla's lights on: the shim's LED view misses
+    # the bulk frames these games send when a mode holds every insert (it showed King Kong Pro's shot inserts in
+    # the game's blue while the wire had them in ours). Each frame to the insert boards decoded with leddecode;
+    # light_all ff00ff held every playfield insert in magenta (single-colour ones lit) while it ran, not before
+    # nor 1.5 s after; light_shots held every tied insert cyan and no untied one. The cabinet's own lighting
+    # (expressive strip, speaker, topper) is no insert, as above:
+    #   avengers_infinity_le-1.10: 50/50 RGB, 132/132 single; shots 18/18
+    #   avengers_infinity_pro-1.10: 44/44 RGB, 132/132 single; shots 18/18
+    #   foo_fighters_pro-1.04: 24/24 RGB, 64/64 single; shots 8/8
+    #   john_wick_le-1.02: 8/8 RGB, 98/98 single; shots 8/8
+    #   john_wick_pro-1.02: 8/8 RGB, 97/97 single; shots 7/7
+    #   king_kong_pro-0.97: 9/9 RGB, 100/100 single; shots 9/9
+    #   mando_le-1.45: 15/15 RGB, 65/65 single; shots 11/11
+    #   mando_pro-1.45: 13/13 RGB, 56/56 single; shots 9/9
+    "avengers_infinity_le-1.10",
+    "avengers_infinity_pro-1.10",
+    "foo_fighters_pro-1.04",
+    "john_wick_le-1.02",
+    "john_wick_pro-1.02",
+    "king_kong_pro-0.97",
+    "mando_le-1.45",
+    "mando_pro-1.45",
+    # PAD-420 2026-10-08 (lights/lights_job4.sh with PAD_NB_TRACE=1, past Guided Setup; stock card, hidden, muted): light_all
+    # in the LED view AND on the node bus - 13/13 RGB magenta, 94/94 single lit, none before or after; light_shots on
+    # the bus only (the LED view showed none: the bulk frames it misses), 6/6 tied RGB inserts cyan, no untied one
+    "jaws_pro-1.02",
 ))
 
 
@@ -1478,6 +1979,7 @@ try:
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),
+        absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
                      if c[0] not in ("magnet", "scoop", "coils", "shield", "shaker", "shows"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
@@ -3359,8 +3861,9 @@ def validate_coils(spec, p):
             out.append("%s has no mechanism called %r a mode can hold." % (p.label, name))
             continue
         n = _int_or_none(ms)
-        if n is None or not COIL_MIN_MS <= n <= COIL_MAX_MS:
-            out.append("The %s holds %g to %g seconds." % (label, COIL_MIN_MS / 1000, COIL_MAX_MS / 1000))
+        top = min(COIL_MAX_MS, dict(getattr(p, "coil_caps", ()) or ()).get(name, COIL_MAX_MS))   # PAD-420: the game's own
+        if n is None or not COIL_MIN_MS <= n <= top:
+            out.append("The %s holds %g to %g seconds." % (label, COIL_MIN_MS / 1000, top / 1000))
         if shot and shot not in shots:
             out.append("%s has no shot called %r to hold the %s on." % (p.label, shot, label))
     if spec.coil_holds and not p.can("coils"):

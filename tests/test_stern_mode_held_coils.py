@@ -42,10 +42,12 @@ def _lift(src, signature):
 # ---- the runtime ---------------------------------------------------------------------------
 def test_every_held_coil_is_the_magnets_code():
     src = RUNTIME.read_text(encoding="utf-8")
-    for api, body in (("int pm_magnet_grab(", 'pm_coil_hold("magnet", ms)'),
-                      ("void pm_magnet_release(", 'pm_coil_release("magnet")'),
-                      ("int pm_magnet_holding(", 'pm_coil_holding("magnet")')):
+    # PAD-420: the coil is the port's `text magnet_coil` (one of its held coils), "magnet" when there is none
+    for api, body in (("int pm_magnet_grab(", "pm_coil_hold(magnet_coil_name(), ms)"),
+                      ("void pm_magnet_release(", "pm_coil_release(magnet_coil_name())"),
+                      ("int pm_magnet_holding(", "pm_coil_holding(magnet_coil_name())")):
         assert body in _lift(src, api)
+    assert 'return t && *t ? t : "magnet";' in _lift(src, "static const char *magnet_coil_name(void)")
     arm = _lift(src, "static void coils_arm(void)")
     assert 'pm_port_text("held_coils")' in arm and 't = "magnet";' in arm      # a port without the line: the magnet
     assert "c->id = base + (unsigned)n_coils;" in arm                        # a process id each
@@ -55,13 +57,91 @@ def test_every_held_coil_is_the_magnets_code():
 def test_the_game_wins_for_every_coil():
     src = RUNTIME.read_text(encoding="utf-8")
     busy = _lift(src, "static int coil_game_busy(")
-    assert "c->obj + 44" in busy and "ctl != c->id" in busy                  # a process of the game's controls it
+    assert "c->obj + c->ctl" in busy and "ctl != c->id" in busy              # a process of the game's controls it
+    assert "c->ctl = 44;" in _lift(src, "static void coils_arm(void)")       # +44 on Godzilla's ControlCoil
     assert "c->obj + 36" in busy                                              # the game asked for an on-time
     assert "_procs" in busy                                                   # the game's own processes the port names
     assert "coil_game_busy(c)" in _lift(src, "int pm_coil_hold(")
     assert 'coil_let_go(c, "the game wants it")' in _lift(src, "static void magnet_tick(")
     lets = _lift(src, "static void magnet_let_go(")
     assert "for (i = 0; i < n_coils; i++) coil_let_go(&coils[i], why);" in lets   # a mode's end lets all go
+
+
+def test_an_operator_disabled_coil_is_refused_on_every_route():
+    """PAD-420: a coil held by its board address asks its own object whether the operator disabled it (the object's
+    "disabled" virtual, `<name>_off_slot`), before any adjustment the port names - as Godzilla's route asks v[40]."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    dis = _lift(src, "static int coil_disabled(")
+    assert "coil_virtual(c->obj, 40)" in dis
+    assert dis.index('"%s_off_slot"') < dis.index('"%s_off_adj"') < dis.index('"%s_on_adj"')
+    assert "c->obj && (id = pm_port_value(key, 0)) > 0) return (coil_virtual(c->obj, (unsigned)id)" in dis
+    assert "coil_disabled(c)" in _lift(src, "int pm_coil_hold(")
+
+
+def test_a_statically_built_coil_object_is_named_not_built_again():
+    """PAD-420: where a static initializer builds the coil's object (Deadpool, Led Zeppelin, Sword of Rage, Star Wars
+    ELG), the port names the object (`data <name>_obj`); the runtime never calls that initializer as a getter."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    ok = _lift(src, "static int coil_device_ok(")
+    assert ok.index('"%s_get"') < ok.index('"%s_obj"')
+    assert "else if (c->route) {" in ok and "obj = data(key);" in ok
+    assert "if (obj && !maps_has(obj, 4, MAP_R)) obj = 0;" in ok
+
+
+def test_a_coil_the_game_takes_gets_no_off_of_ours_and_a_killed_hold_one():
+    """PAD-420: a coil a hold only DRIVES (no take/give - the Device framework's gates, which the game raises through a
+    driver outside the coil records): when the game wants it mid-hold the runtime lets go WITHOUT its own OFF (the
+    game's command replaces ours; an OFF first would drop its gate for a moment), and when the game kills the hold's
+    process (a drain, a tilt) the tick sends the OFF, as no exit hook gives such a coil back."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    proc = _lift(src, "static void magnet_proc(")
+    tick = _lift(src, "static void magnet_tick(")
+    assert "int has_obj = coil_controlled(c);" in proc
+    assert "if (c->release && !c->game_took) coil_off(c, end);" in proc
+    assert '{ c->game_took = 1; coil_let_go(c, "the game wants it"); }' in tick
+    assert "c->route && !coil_controlled(c) && pm_ms() < c->until) coil_off(c, \"the hold's process is gone\")" in tick
+    assert "c->game_took = 0;" in _lift(src, "int pm_coil_hold(") and "c->game_took = 0;" in _lift(src, "static void magnet_done(")
+
+
+def test_a_hold_is_never_longer_than_the_games_own_command(tmp_path):
+    """PAD-420: a `_drive` line's optional last word is the longest ONE command of the game's own on that coil (a
+    Mandalorian post: 128 for 1500 ms at most); the hold asked for is cut to it before it is planned, and a line
+    without it keeps the runtime's own cap. Lifted verbatim and compiled for the host."""
+    import shutil
+    import subprocess
+    src = RUNTIME.read_text(encoding="utf-8")
+    hold = _lift(src, "int pm_coil_hold(")
+    assert hold.index("ms = c->cap_ms;") < hold.index("magnet_plan(ms, coil_drive(c, 0)")
+    cc = shutil.which("gcc") or shutil.which("cc")
+    if not cc:
+        pytest.skip("no C compiler on this host")
+    code = "#include <stdio.h>\n" + re.search(r"^#define MAGNET_MIN_MS .*$", src, re.M).group(0) + """
+struct held_coil { unsigned node, coilno, drv[3], drv_adj, cap_ms; };
+""" + _lift(src, "static int coil_drive_parse(") + r"""
+static void t(const char *s)
+{
+    struct held_coil c = {0, 0, {0, 0, 0}, 0, 77};
+    int ok = coil_drive_parse(&c, s);
+    printf("%d %u %u %u %u %u %u %u|", ok, c.node, c.coilno, c.drv[0], c.drv[1], c.drv[2], c.drv_adj, c.cap_ms);
+}
+int main(void)
+{
+    t("9 0 255 300 100"); t("9 8 255 64 128 1500"); t("9 6 255 64 a171 20000"); t("9 8 255 64 128 50");
+    t("9 8 255 64 128 1500   # the game's own"); t("9 8 255 64"); t("9 8 255 64 128 a1500");
+    return 0;
+}
+"""
+    (tmp_path / "t.c").write_text(code)
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-o", str(tmp_path / "t"), str(tmp_path / "t.c")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    rows = subprocess.run([str(tmp_path / "t")], capture_output=True, text=True, timeout=30).stdout.split("|")
+    assert rows[0] == "1 9 0 255 300 100 0 0"           # five words: no longest, the runtime's cap
+    assert rows[1] == "1 9 8 255 64 128 0 1500"          # the game's own longest command
+    assert rows[2] == "1 9 6 255 64 171 4 20000"         # the hold power the operator's adjustment
+    assert rows[3].startswith("0 ")                      # under 100 ms: not a usable line
+    assert rows[4] == "1 9 8 255 64 128 0 1500"          # a trailing comment is not a word
+    assert rows[5].startswith("0 ") and rows[6].startswith("0 ")   # too short; an adjustment is no longest
 
 
 def test_the_interpreter_holds_on_its_shot_or_as_it_starts():
@@ -118,6 +198,7 @@ def test_the_getter_builds_the_ports_device(name):
 OTHER_PORTS = {
     "king_kong_le-0.97": (("spider_magnet", 10), ("log_diverter", 13), ("ramp_diverter", 15)),
     "jaws_le-1.02": (("left_post", 14), ("right_post", 13)),
+    "king_kong_pro-0.97": (("spider_magnet", 10), ("river_diverter", 12)),   # PAD-420: its log diverter is device 12
 }
 ELVES = [os.environ.get("PAD_ELVES", ""), r"C:\tmp\PAD-363\elves", "/mnt/c/tmp/PAD-363/elves"]
 
@@ -201,6 +282,25 @@ def test_validate_names_each_problem(row, problem):
     assert any(problem in x for x in problems), problems
     from pinball_decryptor.webui.tabs.modes import problem_pages
     assert problem_pages(problems) == ["mode"] * len(problems)
+
+
+def test_a_coil_is_offered_up_to_the_games_own_longest_command():
+    """PAD-420: the profile carries a held coil's longest hold where the port's `_drive` line names one under 5 s,
+    and validation states that limit; a sixth word that is not a plain time keeps the coil off the route."""
+    port = {"text": {"post_drive": "9 8 255 64 128 1500", "bad_drive": "9 8 255 64 128 a1500",
+                     "short_drive": "9 8 255 64 128 50", "plain_drive": "9 0 255 300 100"},
+            "site": {n: (0, 0, 0) for n in MP.COIL_ROUTE_NEEDS[0]}, "data": {n: 1 for n in MP.COIL_ROUTE_NEEDS[1]},
+            "value": {n: 1 for n in MP.COIL_ROUTE_NEEDS[2]}}
+    assert MP._drive_ok(port, "post") and MP._drive_ok(port, "plain")
+    assert not MP._drive_ok(port, "bad") and not MP._drive_ok(port, "short")
+    assert MP._coil_caps(port, ["post", "plain"]) == (("post", 1500),)
+    capped = MP.replace(LE, coil_caps=(("bridge", 1500),))
+    spec = MP.blank_spec(capped, name="HELD")
+    spec.start_shot, spec.scoring_shots = "Godzilla target", ["Left ramp"]
+    spec.coil_holds = [["bridge", 2000, ""]]
+    assert any("The bridge holds 0.1 to 1.5 seconds." in x for x in MP.validate_coils(spec, capped))
+    spec.coil_holds = [["bridge", 1500, ""], ["mg_magnet", 4000, ""]]
+    assert MP.validate_coils(spec, capped) == []
 
 
 def test_the_field_round_trips(tmp_path):

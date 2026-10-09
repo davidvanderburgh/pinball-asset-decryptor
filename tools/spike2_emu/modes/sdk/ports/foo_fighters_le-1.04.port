@@ -405,6 +405,10 @@ value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
 # ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 # 235 inserts on the  picture; light table 0x3b80498, device table 0x3b858e8, lamp table 0x3b4477c (265 lamps)
 # shot masks: the code that builds the cshot objects was not found
 lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
@@ -419,20 +423,20 @@ lamp 156          0              BOTTOM GI-WHT(X15)  # lamp 9, I/O group 7 index
 lamp 157          0              BOTTOM GI-RED(X6)  # lamp 10, I/O group 7 index 1, at 0,0
 lamp 158          0              TOP GI-WHT(X10)  # lamp 11, I/O group 8 index 0, at 0,0
 lamp 159          0              TOP GI-RED(X9)  # lamp 12, I/O group 8 index 1, at 0,0
-lamp 27           0              SONIC RADIO-TOP  # lamp 13, I/O group 7 index 30, at 0,0
-lamp 28           0              SONIC RADIO-BOTTOM  # lamp 14, I/O group 7 index 31, at 0,0
+lamp 27           0x1            SONIC RADIO-TOP  # lamp 13, I/O group 7 index 30, at 0,0; tie: Sonic radio-top
+lamp 28           0x2            SONIC RADIO-BOTTOM  # lamp 14, I/O group 7 index 31, at 0,0; tie: Sonic radio-bottom
 lamp 29           0              SONIC RADIO-RIGHT  # lamp 15, I/O group 7 index 32, at 0,0
-lamp 36,37,38     0              LEFT RAMP  # lamp 16, I/O group 7 index 20, at 0,0
+lamp 36,37,38     0x100000000    LEFT RAMP  # lamp 16, I/O group 7 index 20, at 0,0; tie: Left ramp exit
 lamp 39,40,41     0              LEFT RAMP COMBO  # lamp 17, I/O group 7 index 23, at 0,0
 lamp 42           0              START VAN  # lamp 18, I/O group 7 index 26, at 0,0
 lamp 43           0              LEFT RAMP BOLT  # lamp 19, I/O group 7 index 27, at 0,0
 lamp 160          0              VAN FLASH  # lamp 20, I/O group 7 index 16, at 0,0
-lamp 30,31,32     0              LEFT CROSSOVER  # lamp 21, I/O group 7 index 10, at 0,0
+lamp 30,31,32     0x200040000    LEFT CROSSOVER  # lamp 21, I/O group 7 index 10, at 0,0; tie: L crossover exit, L crossover opto
 lamp 33,34,35     0              LEFT CROSSOVER COMBO  # lamp 22, I/O group 7 index 13, at 0,0
-lamp 96,97,98     0              CENTER SPINNER  # lamp 23, I/O group 8 index 19, at 0,0
+lamp 96,97,98     0x4000000      CENTER SPINNER  # lamp 23, I/O group 8 index 19, at 0,0; tie: Center spinner opto
 lamp 99,100,101   0              CENTER SPINNER COMBO  # lamp 24, I/O group 8 index 16, at 0,0
 lamp 164          0              CENTER SPINNER FLASH  # lamp 25, I/O group 8 index 3, at 0,0
-lamp 76,77,78     0              UPPER LEFT LOOP  # lamp 26, I/O group 8 index 33, at 0,0
+lamp 76,77,78     0x100000       UPPER LEFT LOOP  # lamp 26, I/O group 8 index 33, at 0,0; tie: Left loop opto
 lamp 79,80,81     0              UPPER LEFT LOOP COMBO  # lamp 27, I/O group 8 index 37, at 0,0
 lamp 44,45,46     0              MOD 1  # lamp 28, I/O group 8 index 43, at 0,0
 lamp 47,48,49     0              MOD 2  # lamp 29, I/O group 8 index 50, at 0,0
@@ -442,35 +446,35 @@ lamp 56,57,58     0              MOD 5  # lamp 32, I/O group 8 index 47, at 0,0
 lamp 59,60,61     0              MOD 6  # lamp 33, I/O group 8 index 57, at 0,0
 lamp 62           0              MOD A  # lamp 34, I/O group 8 index 46, at 0,0
 lamp 63           0              MOD B  # lamp 35, I/O group 8 index 53, at 0,0
-lamp 83,84,85     0              UPPER LEFT RAMP  # lamp 36, I/O group 8 index 27, at 0,0
+lamp 83,84,85     0x8000         UPPER LEFT RAMP  # lamp 36, I/O group 8 index 27, at 0,0; tie: Up l ramp opto
 lamp 86,87,88     0              UPPER LEFT RAMP COMBO  # lamp 37, I/O group 8 index 30, at 0,0
 lamp 89           0              COMBOTRON  # lamp 38, I/O group 8 index 36, at 0,0
-lamp 82           0              UPPER LEFT RAMP TARGET  # lamp 39, I/O group 8 index 23, at 0,0
-lamp 90           0              UFO  # lamp 40, I/O group 8 index 22, at 0,0
+lamp 82           0x400000000    UPPER LEFT RAMP TARGET  # lamp 39, I/O group 8 index 23, at 0,0; tie: Up left ramp target
+lamp 90           0x80000        UFO  # lamp 40, I/O group 8 index 22, at 0,0; tie: Ufo rollover
 lamp 91           0              UFO LOOP BOT  # lamp 41, I/O group 8 index 61, at 0,0
 lamp 92           0              UFO LOOP MID  # lamp 42, I/O group 8 index 62, at 0,0
 lamp 93,94,95     0              UFO LOOP TOP  # lamp 43, I/O group 8 index 63, at 0,0
-lamp 102          0              OVERLORD LEFT TARGET  # lamp 44, I/O group 8 index 15, at 0,0
-lamp 103          0              OVERLORD RIGHT TARGET  # lamp 45, I/O group 8 index 10, at 0,0
-lamp 104,105,106  0              OVERLORD  # lamp 46, I/O group 8 index 11, at 0,0
+lamp 102          0x200000       OVERLORD LEFT TARGET  # lamp 44, I/O group 8 index 15, at 0,0; tie: Overlord l target
+lamp 103          0x400000       OVERLORD RIGHT TARGET  # lamp 45, I/O group 8 index 10, at 0,0; tie: Overlord r target
+lamp 104,105,106  0x800000       OVERLORD  # lamp 46, I/O group 8 index 11, at 0,0; tie: Overlord opto
 lamp 107          0              ALL MY LIFE  # lamp 47, I/O group 8 index 14, at 0,0
 lamp 108          0              MONKEY WRENCH  # lamp 48, I/O group 8 index 9, at 0,0
 lamp 109          0              THE PRETENDER  # lamp 49, I/O group 8 index 8, at 0,0
 lamp 162          0              LEFT SPOTLIGHT  # lamp 50, I/O group 7 index 17, at 0,0
 lamp 163          0              RIGHT SPOTLIGHT  # lamp 51, I/O group 7 index 54, at 0,0
-lamp 117          0              RIGHT RAMP LEFT TARGET  # lamp 52, I/O group 8 index 25, at 0,0
-lamp 118          0              RIGHT RAMP RIGHT TARGET  # lamp 53, I/O group 8 index 26, at 0,0
-lamp 119,120,121  0              RIGHT RAMP  # lamp 54, I/O group 7 index 71, at 0,0
+lamp 117          0x10           RIGHT RAMP LEFT TARGET  # lamp 52, I/O group 8 index 25, at 0,0; tie: R ramp l target
+lamp 118          0x20           RIGHT RAMP RIGHT TARGET  # lamp 53, I/O group 8 index 26, at 0,0; tie: R ramp r target
+lamp 119,120,121  0x10000        RIGHT RAMP  # lamp 54, I/O group 7 index 71, at 0,0; tie: R ramp opto
 lamp 122,123,124  0              RIGHT RAMP COMBO  # lamp 55, I/O group 7 index 74, at 0,0
 lamp 116          0              RIGHT RAMP BOLT  # lamp 56, I/O group 8 index 24, at 0,0
 lamp 125          0              AREA 51  # lamp 57, I/O group 7 index 77, at 0,0
-lamp 126,127,128  0              RIGHT ORBIT  # lamp 58, I/O group 7 index 64, at 0,0
+lamp 126,127,128  0x20000        RIGHT ORBIT  # lamp 58, I/O group 7 index 64, at 0,0; tie: Right orbit
 lamp 129,130,131  0              RIGHT ORBIT COMBO  # lamp 59, I/O group 7 index 67, at 0,0
 lamp 132          0              RIGHT ORBIT BATTERY  # lamp 60, I/O group 7 index 78, at 0,0
 lamp 73           0              ROCK-O-METER TOP  # lamp 61, I/O group 7 index 51, at 0,0
 lamp 74           0              ROCK-O-METER MID  # lamp 62, I/O group 7 index 52, at 0,0
 lamp 75           0              ROCK-O-METER BOTTOM  # lamp 63, I/O group 7 index 53, at 0,0
-lamp 161          0              KICK TARGET FLASH  # lamp 64, I/O group 7 index 79, at 0,0
+lamp 161          0x80000000     KICK TARGET FLASH  # lamp 64, I/O group 7 index 79, at 0,0; tie: Kick target
 lamp 70           0              BOT TARGET  # lamp 65, I/O group 7 index 61, at 0,0
 lamp 72           0              EXTRA BALL  # lamp 66, I/O group 7 index 63, at 0,0
 lamp 71           0              BOT AWARD  # lamp 67, I/O group 7 index 62, at 0,0
@@ -482,15 +486,15 @@ lamp 18           0              LOS ANGELES  # lamp 72, I/O group 7 index 29, a
 lamp 19           0              NEW ORLEANS  # lamp 73, I/O group 7 index 9, at 0,0
 lamp 20           0              CHICAGO  # lamp 74, I/O group 7 index 28, at 0,0
 lamp 21           0              NEW YORK  # lamp 75, I/O group 7 index 18, at 0,0
-lamp 14           0              OVERLORD  # lamp 76, I/O group 7 index 47, at 0,0
+lamp 14           0x800000       OVERLORD  # lamp 76, I/O group 7 index 47, at 0,0; tie: Overlord opto
 lamp 13           0              AUSTIN  # lamp 77, I/O group 7 index 55, at 0,0
 lamp 15           0              D.C.  # lamp 78, I/O group 7 index 38, at 0,0
 lamp 8            0              OVERDRIVE  # lamp 79, I/O group 7 index 33, at 0,0
-lamp 9            0              LEFT INLANE  # lamp 80, I/O group 7 index 34, at 0,0
-lamp 24           0              RIGHT INLANE  # lamp 81, I/O group 7 index 48, at 0,0
-lamp 25           0              RIGHT OUTLANE  # lamp 82, I/O group 7 index 49, at 0,0
-lamp 10           0              LEFT INLANE TARGET  # lamp 83, I/O group 7 index 35, at 0,0
-lamp 26           0              RIGHT INLANE TARGET  # lamp 84, I/O group 7 index 50, at 0,0
+lamp 9            0x80           LEFT INLANE  # lamp 80, I/O group 7 index 34, at 0,0; tie: Left inlane
+lamp 24           0x100          RIGHT INLANE  # lamp 81, I/O group 7 index 48, at 0,0; tie: Right inlane
+lamp 25           0x200          RIGHT OUTLANE  # lamp 82, I/O group 7 index 49, at 0,0; tie: Right outlane
+lamp 10           0x400          LEFT INLANE TARGET  # lamp 83, I/O group 7 index 35, at 0,0; tie: Left inlane target
+lamp 26           0x800          RIGHT INLANE TARGET  # lamp 84, I/O group 7 index 50, at 0,0; tie: Right inlane target
 lamp 64           0              FOOBOT HEAD  # lamp 85, I/O group 7 index 70, at 0,0
 lamp 65           0              FOOBOT RIGHT ARM  # lamp 86, I/O group 7 index 57, at 0,0
 lamp 66           0              FOOBOT LEFT ARM  # lamp 87, I/O group 7 index 60, at 0,0
@@ -505,16 +509,16 @@ lamp 148          0              UPPER PF GI WHT 1  # lamp 95, I/O group 8 index
 lamp 149          0              UPPER PF GI WHT 2  # lamp 96, I/O group 8 index 74, at 0,0
 lamp 150          0              UPPER PF GI RED 1  # lamp 97, I/O group 8 index 75, at 0,0
 lamp 151          0              UPPER PF GI RED 2  # lamp 98, I/O group 8 index 76, at 0,0
-lamp 133,134,135  0              UPPER PF SPINNER  # lamp 99, I/O group 8 index 88, at 0,0
+lamp 133,134,135  0x2000000000   UPPER PF SPINNER  # lamp 99, I/O group 8 index 88, at 0,0; tie: Up pf spinner opto
 lamp 136,137,138  0              UPPER PF SPINNER COMBO  # lamp 100, I/O group 8 index 91, at 0,0
-lamp 139,140,141  0              UPPER PF OUTER LOOP  # lamp 101, I/O group 8 index 84, at 0,0
+lamp 139,140,141  0x800000000    UPPER PF OUTER LOOP  # lamp 101, I/O group 8 index 84, at 0,0; tie: Up pf outer loop
 lamp 142,143,144  0              UPPER PF OUTER LOOP COMBO  # lamp 102, I/O group 8 index 81, at 0,0
-lamp 145          0              UPPER PF TARGET-LEFT  # lamp 103, I/O group 8 index 95, at 0,0
-lamp 146          0              UPPER PF TARGET-CENTER  # lamp 104, I/O group 8 index 94, at 0,0
-lamp 147          0              UPPER PF TARGET-RIGHT  # lamp 105, I/O group 8 index 87, at 0,0
+lamp 145          0x4000000000   UPPER PF TARGET-LEFT  # lamp 103, I/O group 8 index 95, at 0,0; tie: Up pf left target
+lamp 146          0x8000000000   UPPER PF TARGET-CENTER  # lamp 104, I/O group 8 index 94, at 0,0; tie: Up pf center target
+lamp 147          0x10000000000  UPPER PF TARGET-RIGHT  # lamp 105, I/O group 8 index 87, at 0,0; tie: Up pf right target
 lamp 166          0              UPPER PF CENTER FLASH  # lamp 106, I/O group 8 index 72, at 0,0
 lamp 167          0              UPPER PF AREA 51 FLASH  # lamp 107, I/O group 8 index 80, at 0,0
-lamp 168          0              UPPER PF BACK TGT FLASH  # lamp 108, I/O group 8 index 4, at 0,0
+lamp 168          0x4000         UPPER PF BACK TGT FLASH  # lamp 108, I/O group 8 index 4, at 0,0; tie: Up pf back target
 lamp 241,242,243  0              EXPRESSIVE LIGHTING L 1  # lamp 110, I/O group 1 index 1, at 0,0
 lamp 244,245,246  0              EXPRESSIVE LIGHTING L 2  # lamp 111, I/O group 1 index 4, at 0,0
 lamp 247,248,249  0              EXPRESSIVE LIGHTING L 3  # lamp 112, I/O group 1 index 7, at 0,0
@@ -751,3 +755,94 @@ site block_rule_15         0x001141fc 0xe92d43f0 0xe2028b01  # crule_van_mods::v
 text block_rule_name_15    Van Mods
 site block_rule_16         0x0012a40c 0xe92d4ff0 0xe24dd01c  # cskill_shot::v[34]
 text block_rule_name_16    Skill Shot
+
+# PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
+# build's own transcribed voice lines, tu_wide.py)
+callout time_up           878   # Better luck next time.
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+site proc_exists          0x003983d8 0xe3042ab0 0xe34023c3
+site proc_create          0x00397da8 0xe304cab0 0xe340c3c3
+site proc_sleep           0x00397ed8 0xe3043ab0 0xe34033c3
+site adjustment           0x002a31b8 0xe92d40f0 0xe2504000
+site coil_fire             0x00210394 0xe3500000 0xe52de004
+data coil_count            0x03c29c8c
+data coil_table            0x03be2398
+value magnet_proc          13185
+text outlane_up_post_label Outlane up post
+text up_pf_diverter_label Up pf diverter
+text van_up_post_label    Van up post
+text outlane_up_post_drive 8 8 255 64 64 2064
+text up_pf_diverter_drive 9 6 255 32 64
+text van_up_post_drive    9 7 255 32 128
+text held_coils            outlane_up_post up_pf_diverter van_up_post
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x002e08e0 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0x120
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x00086900 0xe92d47f0 0xe1a03002   # 280 lights in its lamp groups, 0 light-runner commands, green, magenta, 5.0 s
+text show_name_1          Green and magenta strobe
+text show_kind_1          flashy
+value show_secs_1         5
+site show_2               0x000ba994 0xe92d40f8 0xeb0597c2   # 60 lights in its lamp groups, 0 light-runner commands, white, 2.6 s
+text show_name_2          Small white strobe
+text show_kind_2          flashy
+value show_secs_2         3
+site show_3               0x000cb3a0 0xe92d47f0 0xe24dd020   # 60 lights in its lamp groups, 0 light-runner commands, white, 7.3 s
+text show_name_3          Small white glow
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x000bc040 0xe92d4038 0xeb01901c   # 45 lights in its lamp groups, 0 light-runner commands, orange, 4.3 s
+text show_name_4          Small orange strobe
+text show_kind_4          flashy
+value show_secs_4         4
+site show_5               0x000ec82c 0xe92d4ff0 0xe3a00025   # 17 lights in its lamp groups, 0 light-runner commands, green, blue, 8.0 s
+text show_name_5          Small green and blue glow
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x000bb2dc 0xe92d4ff0 0xe24dd01c   # 8 lights in its lamp groups, 0 light-runner commands, no colour given, 3.2 s
+text show_name_6          Small strobe
+text show_kind_6          flashy
+value show_secs_6         3
+site show_7               0x000bda18 0xe92d4010 0xeb058ba1   # 7 lights in its lamp groups, 0 light-runner commands, no colour given, 7.2 s
+text show_name_7          Small glow
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x00084384 0xe92d43f0 0xe24dd014   # 362 lights in its lamp groups, 0 light-runner commands, red, white, 6.8 s
+text show_name_8          Wide slow red and white fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x0012ed68 0xe92d4010 0xeb03c6cd   # 177 lights in its lamp groups, 0 light-runner commands, green, cyan, 8.0 s
+text show_name_9          Slow green and cyan fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x000403bc 0xe92d4ff0 0xe24dd024   # 142 lights in its lamp groups, 0 light-runner commands, red, white, 0.7 s
+text show_name_10         Fast red and white strobe
+text show_kind_10         accent
+value show_secs_10        1
+site show_11              0x00036bb0 0xe92d4ff0 0xe24dd01c   # 118 lights in its lamp groups, 0 light-runner commands, cyan, white, 1.2 s
+text show_name_11         Fast cyan and white strobe
+text show_kind_11         accent
+value show_secs_11        1
+site show_12              0x00034730 0xe92d4ff0 0xe24dd01c   # 70 lights in its lamp groups, 0 light-runner commands, red, 1.2 s
+text show_name_12         Small fast red strobe
+text show_kind_12         accent
+value show_secs_12        1

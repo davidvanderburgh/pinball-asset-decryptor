@@ -366,6 +366,10 @@ value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
 # ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 # 212 inserts on the  picture; light table 0x422920c, device table 0x422cd74, lamp table 0x420ef4c (213 lamps)
 # shot masks: the code that builds the cshot objects was not found
 lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
@@ -378,15 +382,15 @@ lamp 32,33,34     0              ROBERT PLANT  # lamp 7, I/O group 7 index 29, a
 lamp 29,30,31     0              JOHN BONHAM  # lamp 8, I/O group 7 index 33, at 0,0
 lamp 26,27,28     0              JOHN PAUL JONES  # lamp 9, I/O group 7 index 37, at 0,0
 lamp 23,24,25     0              JIMMY PAGE  # lamp 10, I/O group 7 index 41, at 0,0
-lamp 82,83,84     0              RIGHT RAMP  # lamp 11, I/O group 7 index 50, at 0,0
-lamp 53,54,55     0              LEFT RAMP  # lamp 12, I/O group 8 index 8, at 0,0
-lamp 49,50,51     0              LEFT ORBIT  # lamp 13, I/O group 8 index 12, at 0,0
-lamp 78,79,80     0              ICARUS TARGET  # lamp 14, I/O group 8 index 16, at 0,0
-lamp 71,72,73     0              SIDE RAMP  # lamp 15, I/O group 8 index 19, at 0,0
+lamp 82,83,84     0x400000       RIGHT RAMP  # lamp 11, I/O group 7 index 50, at 0,0; tie: Right ramp exit opto
+lamp 53,54,55     0x80000        LEFT RAMP  # lamp 12, I/O group 8 index 8, at 0,0; tie: Left ramp exit opto
+lamp 49,50,51     0x40000        LEFT ORBIT  # lamp 13, I/O group 8 index 12, at 0,0; tie: Left orbit
+lamp 78,79,80     0x800          ICARUS TARGET  # lamp 14, I/O group 8 index 16, at 0,0; tie: Icarus target
+lamp 71,72,73     0x200000       SIDE RAMP  # lamp 15, I/O group 8 index 19, at 0,0; tie: Side ramp exit opto
 lamp 56           0              LEFT LOCK  # lamp 16, I/O group 8 index 24, at 0,0
-lamp 75,76,77     0              CENTER RAMP  # lamp 17, I/O group 8 index 25, at 0,0
+lamp 75,76,77     0x100000       CENTER RAMP  # lamp 17, I/O group 8 index 25, at 0,0; tie: Center ramp exit opto
 lamp 45,46,47     0              LEFT EJECT  # lamp 18, I/O group 8 index 36, at 0,0
-lamp 87,88,89     0              RIGHT ORBIT  # lamp 19, I/O group 8 index 46, at 0,0
+lamp 87,88,89     0x800000       RIGHT ORBIT  # lamp 19, I/O group 8 index 46, at 0,0; tie: Right orbit
 lamp 409,410,411  0              SPEAKER 1  # lamp 20, I/O group 6 index 1, at 0,0
 lamp 412,413,414  0              SPEAKER 2  # lamp 21, I/O group 6 index 4, at 0,0
 lamp 415,416,417  0              SPEAKER 3  # lamp 22, I/O group 6 index 7, at 0,0
@@ -514,20 +518,20 @@ lamp 5            0              TOURNAMENT START  # lamp 143, I/O group 5 index
 lamp 92           0              BOTTOM GI-WHT  # lamp 144, I/O group 7 index 1, at 0,0
 lamp 100          0              LEFT EJECT FLASH  # lamp 145, I/O group 7 index 6, at 0,0
 lamp 16           0              SONG WIZARD MODE  # lamp 146, I/O group 7 index 8, at 0,0
-lamp 40           0              LEFT 2 BANK LOWER  # lamp 147, I/O group 7 index 9, at 0,0
-lamp 41           0              LEFT 2 BANK UPPER  # lamp 148, I/O group 7 index 10, at 0,0
+lamp 40           0x5            LEFT 2 BANK LOWER  # lamp 147, I/O group 7 index 9, at 0,0; tie: Left 2 bank target bottom, Left 2 bank target bottom 2
+lamp 41           0x2            LEFT 2 BANK UPPER  # lamp 148, I/O group 7 index 10, at 0,0; tie: Left 2 bank target top
 lamp 9            0              LEFT OUTLANE  # lamp 149, I/O group 7 index 11, at 0,0
-lamp 10           0              LEFT RETURN LANE  # lamp 150, I/O group 7 index 12, at 0,0
+lamp 10           0x2000000      LEFT RETURN LANE  # lamp 150, I/O group 7 index 12, at 0,0; tie: Left return lane
 lamp 13           0              LEFT BALL SAVE  # lamp 151, I/O group 7 index 13, at 0,0
 lamp 15           0              FINAL WIZARD MODE  # lamp 152, I/O group 7 index 14, at 0,0
 lamp 14           0              SHOOT AGAIN  # lamp 153, I/O group 7 index 15, at 0,0
 lamp 17           0              TOUR WIZARD MODE  # lamp 154, I/O group 7 index 16, at 0,0
 lamp 19           0              EARLS COURT  # lamp 155, I/O group 7 index 17, at 0,0
-lamp 57           0              (R)OCK  # lamp 156, I/O group 7 index 18, at 0,0
-lamp 58           0              R(O)CK  # lamp 157, I/O group 7 index 19, at 0,0
-lamp 59           0              RO(C)K  # lamp 158, I/O group 7 index 20, at 0,0
-lamp 60           0              ROC(K)  # lamp 159, I/O group 7 index 21, at 0,0
-lamp 11           0              RIGHT RETURN LANE  # lamp 160, I/O group 7 index 22, at 0,0
+lamp 57           0x1000         (R)OCK  # lamp 156, I/O group 7 index 18, at 0,0; tie: Right 4 bank target-r
+lamp 58           0x2000         R(O)CK  # lamp 157, I/O group 7 index 19, at 0,0; tie: Right 4 bank target-o
+lamp 59           0x4000         RO(C)K  # lamp 158, I/O group 7 index 20, at 0,0; tie: Right 4 bank target-c
+lamp 60           0x18000        ROC(K)  # lamp 159, I/O group 7 index 21, at 0,0; tie: Right 4 bank target-k, Right 4 bank target-k 2
+lamp 11           0x4000000      RIGHT RETURN LANE  # lamp 160, I/O group 7 index 22, at 0,0; tie: Right return lane
 lamp 12           0              RIGHT OUTLANE  # lamp 161, I/O group 7 index 23, at 0,0
 lamp 22           0              USA 1975  # lamp 162, I/O group 7 index 24, at 0,0
 lamp 21           0              UK 1971  # lamp 163, I/O group 7 index 25, at 0,0
@@ -550,16 +554,16 @@ lamp 70           0              SIDE RAMP COMBO  # lamp 179, I/O group 8 index 
 lamp 99           0              BACKPANEL FLASH  # lamp 180, I/O group 8 index 23, at 0,0
 lamp 52           0              LEFT RAMP COMBO  # lamp 181, I/O group 8 index 15, at 0,0
 lamp 74           0              CENTER RAMP COMBO  # lamp 182, I/O group 8 index 28, at 0,0
-lamp 61           0              (L)ED  # lamp 183, I/O group 8 index 31, at 0,0
-lamp 62           0              L(E)D  # lamp 184, I/O group 8 index 30, at 0,0
-lamp 63           0              LE(D)  # lamp 185, I/O group 8 index 29, at 0,0
+lamp 61           0x48           (L)ED  # lamp 183, I/O group 8 index 31, at 0,0; tie: Mid 3 bank target-l, Mid 3 bank target-l 2
+lamp 62           0x10           L(E)D  # lamp 184, I/O group 8 index 30, at 0,0; tie: Mid 3 bank target-e
+lamp 63           0x20           LE(D)  # lamp 185, I/O group 8 index 29, at 0,0; tie: Mid 3 bank target-d
 lamp 48           0              LEFT ORBIT COMBO  # lamp 186, I/O group 8 index 32, at 0,0
 lamp 42           0              EXTRA BALL  # lamp 187, I/O group 8 index 33, at 0,0
 lamp 43           0              TOUR LOCK  # lamp 188, I/O group 8 index 34, at 0,0
 lamp 44           0              LEFT EJECT COMBO  # lamp 189, I/O group 8 index 35, at 0,0
-lamp 64           0              (Z)EP  # lamp 190, I/O group 8 index 43, at 0,0
-lamp 65           0              Z(E)P  # lamp 191, I/O group 8 index 44, at 0,0
-lamp 66           0              ZE(P)  # lamp 192, I/O group 8 index 45, at 0,0
+lamp 64           0x80           (Z)EP  # lamp 190, I/O group 8 index 43, at 0,0; tie: 3 Bank drop-z
+lamp 65           0x100          Z(E)P  # lamp 191, I/O group 8 index 44, at 0,0; tie: 3 Bank drop-e
+lamp 66           0x600          ZE(P)  # lamp 192, I/O group 8 index 45, at 0,0; tie: 3 Bank drop-p, 3 Bank drop-p 2
 lamp 86           0              RIGHT ORBIT COMBO  # lamp 193, I/O group 8 index 49, at 0,0
 lamp 85           0              TOP LOCK  # lamp 194, I/O group 8 index 50, at 0,0
 lamp 96           0              LEFT POP BUMPER  # lamp 195, I/O group 8 index 51, at 0,0
@@ -650,3 +654,99 @@ text block_name_20      Tour Mode Uk 1971
 site block_start_21     0x000e59d0 0xe5903000 0xe92d4070
 data block_obj_21       0x0424c374
 text block_name_21      Tour Mode Earls Court
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+site proc_exists          0x00309c78 0xe3042448 0xe3402428
+site proc_create          0x00309628 0xe304c448 0xe340c428
+site proc_sleep           0x00309778 0xe3043448 0xe3403428
+site adjustment           0x002b68b0 0xe92d40f0 0xe2504000
+site coil_fire             0x001d90ac 0xe3500000 0xe52de004
+data coil_count            0x0425ea30
+data coil_table            0x04255874
+value magnet_proc          13185
+site coil_take            0x000e11dc 0xe92d40f8 0xe304744c
+site coil_give            0x000e12a0 0xe3510000 0xe92d4038
+text control_gates_label  Orbit control gates
+value control_gates_dev   11
+value control_gates_ctl   32
+value control_gates_devoff 4
+value control_gates_off_slot 30
+data control_gates_obj   0x0424a918
+text control_gates_drive  9 5 255 64 96
+text held_coils            control_gates
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+site scoop_handler         0x00093e7c 0xe2400002 0xe92d4030
+data scoop_slot           0x04211aa0
+value scoop_event          2
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x002f5010 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x000ab180 0xe92d4070 0xe24dd008   # 82 lights in its lamp groups, 0 light-runner commands, orange, white, 4.7 s
+text show_name_1          Orange and white strobe
+text show_kind_1          flashy
+value show_secs_1         5
+site show_2               0x0009211c 0xe92d4ff0 0xe24dd014   # 69 lights in its lamp groups, 0 light-runner commands, orange, blue, 7.3 s
+text show_name_2          Orange and blue chase
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x000eb970 0xe92d4038 0xeb0124fa   # 58 lights in its lamp groups, 0 light-runner commands, blue, 3.2 s
+text show_name_3          Small blue strobe
+text show_kind_3          flashy
+value show_secs_3         3
+site show_4               0x000ab0a0 0xe92d4070 0xe3a00026   # 44 lights in its lamp groups, 0 light-runner commands, red, 2.9 s
+text show_name_4          Small red strobe
+text show_kind_4          flashy
+value show_secs_4         3
+site show_5               0x000a031c 0xe92d4ff0 0xe24dd00c   # 12 lights in its lamp groups, 0 light-runner commands, white, 7.3 s
+text show_name_5          Small white strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x000ebb40 0xe92d40f0 0xe24dd01c   # 9 lights in its lamp groups, 0 light-runner commands, green, 7.7 s
+text show_name_6          Small green glow
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x0006b668 0xe92d40f0 0xe24dd00c   # 7 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_7          Small glow
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x000eba14 0xe92d43f0 0xe24dd01c   # 7 lights in its lamp groups, 0 light-runner commands, no colour given, 7.3 s
+text show_name_8          Small strobe
+text show_kind_8          flashy
+value show_secs_8         8
+site show_9               0x000d9a64 0xe92d43f0 0xe24dd024   # 271 lights in its lamp groups, 0 light-runner commands, cyan, 4.7 s
+text show_name_9          Wide cyan fade
+text show_kind_9          subdued
+value show_secs_9         5
+site show_10              0x000d91a0 0xe92d4ff0 0xe24dd07c   # 7 lights in its lamp groups, 0 light-runner commands, green, cyan, 7.5 s
+text show_name_10         Small slow green and cyan fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x000b8cc0 0xe92d4038 0xeb01f026   # led_zeppelin_le-1.22's Fast white strobe: its lit lights 77% alike; 83 lights in its lamp groups, 0 light-runner commands, white, 2.0 s
+text show_name_11         Fast white strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x000bf8f0 0xe92d4038 0xeb01d51a   # 77 lights in its lamp groups, 0 light-runner commands, white, 0.9 s
+text show_name_12         White strobe
+text show_kind_12         accent
+value show_secs_12        1

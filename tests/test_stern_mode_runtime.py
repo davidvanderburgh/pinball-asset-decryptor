@@ -22,43 +22,75 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SDK = os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk")
 
 PORTS = [
+    ("aerosmith", "1.16"),
     ("aerosmith_le", "1.15"),
+    ("aerosmith_le", "1.16"),
     ("avengers_infinity_le", "1.09"),
+    ("avengers_infinity_le", "1.10"),
+    ("avengers_infinity_pro", "1.10"),
     ("batman", "1.13"),
+    ("batman", "1.14"),
     ("beatles", "1.29"),
     ("deadpool_le", "1.14"),
+    ("deadpool_le", "1.16"),
     ("deadpool_pro", "1.16"),
     ("dungeons_and_dragons_le", "1.00"),
+    ("dungeons_and_dragons_le", "1.10"),
+    ("dungeons_and_dragons_pro", "1.10"),
     ("elvira3", "1.13"),
     ("foo_fighters_le", "1.04"),
+    ("foo_fighters_pro", "1.04"),
     ("godzilla_le", "1.16"),
     ("godzilla_pro", "1.15"),
     ("godzilla_pro", "1.16"),
+    ("guardians", "1.15"),
     ("guardians_le", "1.14"),
+    ("guardians_le", "1.15"),
     ("iron_maiden_le", "1.16"),
+    ("iron_maiden_le", "1.18"),
+    ("iron_maiden_pro", "1.18"),
     ("james_bond_60th_le", "1.11"),
     ("james_bond_le", "1.06"),
+    ("james_bond_pro", "1.06"),
     ("jaws_le", "1.02"),
+    ("jaws_pro", "1.02"),
     ("john_wick_le", "1.01"),
+    ("john_wick_le", "1.02"),
+    ("john_wick_pro", "1.02"),
     ("jurassic_park_le", "1.16"),
+    ("jurassic_park_pro", "1.16"),
     ("jurassic_park_the_pin", "1.05"),
     ("king_kong_le", "0.97"),
+    ("king_kong_pro", "0.97"),
     ("led_zeppelin_le", "1.22"),
     ("led_zeppelin_pro", "1.22"),
     ("mando_le", "1.44"),
+    ("mando_le", "1.45"),
+    ("mando_pro", "1.45"),
     ("metallica_spike", "1.03"),
     ("metallica_spike", "1.04"),
     ("munsters_le", "1.28"),
+    ("munsters_pro", "1.28"),
     ("rush_le", "1.18"),
+    ("rush_le", "1.19"),
+    ("rush_pro", "1.19"),
     ("star_wars_elg", "1.10"),
     ("star_wars_le", "1.30"),
+    ("star_wars_le", "1.31"),
+    ("star_wars_pro", "1.31"),
+    ("stranger_things", "1.13"),
     ("stranger_things_le", "1.12"),
+    ("stranger_things_le", "1.13"),
     ("sword_of_rage_le", "1.18"),
+    ("sword_of_rage_le", "1.19"),
+    ("sword_of_rage_pro", "1.19"),
     ("turtles_le", "1.59"),
     ("turtles_pro", "1.58"),
     ("turtles_pro", "1.59"),
     ("uncanny_xmen_le", "0.98"),
+    ("uncanny_xmen_pro", "0.98"),
     ("venom_le", "1.07"),
+    ("venom_pro", "1.07"),
 ]
 
 
@@ -351,3 +383,31 @@ def test_a_port_value_can_be_negative():
     body = rt[rt.index("static uint64_t number(const char **p, int *ok)"):]
     body = body[:body.index("\n}\n")]
     assert "if (s[0] == '-') { neg = 1; s++; }" in body and "return neg ? (uint64_t)0 - x : x;" in body
+
+
+def test_stack_no_never_waits_for_the_base_play_a_port_names():
+    """PAD-420: John Wick's locations (cmode_location_john_wicks_house, ...) start a few shots into a ball - past the
+    ball-start window that marks Venom's mini modes as base play - and one runs for nearly all of every ball, so a
+    `stack no` mode that waited for them would hardly ever start. `text stack_base_names` lists class-name prefixes
+    the generic route skips; a multiball is never skipped."""
+    src = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    body = src[src.index("static int stock_named_base(const char *nm)"):]
+    body = body[:body.index("\n}\n") + 3]
+    assert 'pm_port_text("stack_base_names")' in body and "*q != ','" in body
+    gen = src[src.index("static int stock_generic(unsigned kinds)"):]
+    gen = gen[:gen.index("\n}\n") + 3]
+    assert "if (c == 1 && stock_named_base(nm)) continue;" in gen
+    for key in ("john_wick_le-1.02", "john_wick_pro-1.02"):
+        port = open(os.path.join(SDK, "ports", key + ".port"), encoding="utf-8").read()
+        assert re.search(r"^text stack_base_names +cmode_location_$", port, re.M), key
+
+
+def test_a_port_can_ask_for_the_bus_ids_its_build_fires():
+    """PAD-420: `value event_census 1` logs, every 2 s, the dispatch's ids since the last look - how a port finds a
+    build's own event ids (Jaws Pro 1.02: its dispatch ran, none of Jaws LE's named ids came). Off unless asked."""
+    src = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    body = src[src.index("static void event_census(void)\n{"):]
+    body = body[:body.index("\n}\n") + 3]
+    assert 'if (!pm_port_value("event_census", 0) || pm_ms() < next) return;' in body
+    assert "d = event_fired[id] - seen[id];" in body
+    assert "event_census();                           /* PAD-420: `value event_census 1` */" in src

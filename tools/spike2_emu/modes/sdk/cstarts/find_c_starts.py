@@ -45,7 +45,7 @@ from cstart_lib import (S, Title, audit_functions, ball_evidence, fmt_refs, hx, 
                         movable, port_int, return_used, serves_balls, track_entry)
 from pinball_decryptor.plugins.stern import stock_scan_cpp as C  # noqa: E402
 
-C_TITLES = ["aerosmith_le-1.15", "batman-1.13", "beatles-1.29", "elvira3-1.13", "guardians_le-1.14",
+C_TITLES = ["aerosmith_le-1.15", "batman-1.13", "batman-1.14", "beatles-1.29", "elvira3-1.13", "guardians_le-1.14",
             "james_bond_60th_le-1.11", "james_bond_le-1.06", "jurassic_park_the_pin-1.05", "metallica_spike-1.03",
             "metallica_spike-1.04", "star_wars_elg-1.10", "stranger_things_le-1.12", "uncanny_xmen_le-0.98"]
 CPP_TITLES = ["jurassic_park_le-1.16", "rush_le-1.18"]
@@ -111,6 +111,21 @@ HAND = {
                  "sets the villain's flag (major: flags 46-55) and creates its records. Catwoman 83-84 (0x5f980) and "
                  "Joker 118 (0xcb2d8) are compiled in but nothing refers to them (not in the episode tables): not "
                  "reachable on 1.13.",
+    },
+    "batman-1.14": {
+        "medium": _merge({f: "a major villain's episode start, called through the villain's episode table by the "
+                           "villain's start wrapper, which on a non-zero result marks the episode played and counts "
+                           "it: a refused episode counts as played for that player (as on 1.13; 1.14's tables not "
+                           "re-read)"
+                        for f in (0x4e968, 0x74664, 0xb1b30, 0xc0eec, 0x158b6c, 0x16bfcc, 0x18ad88, 0x199374)},
+                       {f: "a minor villain's episode start from the episode table (as on 1.13: the dispatch site was "
+                             "not located statically, so how a non-zero result is used is unchecked)"
+                          for f in (0x42210, 0x96938, 0x86218, 0x8e3e8, 0xdcd68, 0xe5048, 0xed158, 0xf598c, 0xfd208,
+                                    0x109300, 0x111534, 0x14aee8)},
+                       {0x2f1e4: "takes the hurry-up kind in r0 (as on 1.13: its callers count a hurry-up on a "
+                                   "non-zero result, bookkeeping only)"}),
+        "notes": "PAD-420: the same 22 starts as 1.13 (Batman 66 1.14), found by the generic audit witness and named "
+                 "from the audits; the confidence notes are 1.13's, by name.",
     },
     "beatles-1.29": {
         "rejected": [

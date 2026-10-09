@@ -209,15 +209,17 @@ def test_own_sounds_cannot_be_picked_where_the_card_cannot_carry_them(tmp_path, 
 
 def test_the_mechanism_blocks_are_offered_where_the_game_can_hold_them(tmp_path, preview_on):  # noqa: F811
     """PAD-395: Godzilla Premium/LE 1.16 offers the magnet, the Mechagodzilla magnet, the bridge and the scoop;
-    a game whose port names none of them (TMNT Pro 1.59; Godzilla Pro 1.15 gains the magnet and the scoop with
-    PAD-394) offers none, and says why (the palette greys them with it)."""
+    a game whose port names none of them (Metallica Remastered 1.03 - TMNT Pro 1.59 and Metallica 1.04 were this
+    example until PAD-420 proved the pizza magnet and the loop up post; Godzilla Pro 1.15 gains the magnet and the
+    scoop with PAD-394) offers none, and says why
+    (the palette greys them with it)."""
     with web_app(tmp_path, mfr="stern") as w:
-        _project(w, tmp_path / "tmnt", card="turtles_pro-1_59_0.raw")
+        _project(w, tmp_path / "mtl", card="metallica_spike-1_03_0.raw")
         w.call("modes.new_blocks_mode", "Coils")
         ch = w.state("modes")["code"]["blocks"]["choices"]
         assert ch["mechs"] == []
-        assert ch["mechs_off"].startswith("Not on this game: The app has not found how TMNT Pro 1.59 drives")
-        assert ch["scoop_off"].startswith("Not on this game: The app has not found how TMNT Pro 1.59 runs")
+        assert ch["mechs_off"].startswith("Not on this game: The app has not found how Metallica Remastered 1.03 drives")
+        assert ch["scoop_off"].startswith("Not on this game: The app has not found how Metallica Remastered 1.03 runs")
         prog = w.state("modes")["code"]["blocks"]["program"]
         prog["scripts"][0]["do"].append({"op": "hold", "what": "magnet", "ms": {"k": "num", "v": 2000}})
         got = w.call("modes.blocks_save", "coils", prog)

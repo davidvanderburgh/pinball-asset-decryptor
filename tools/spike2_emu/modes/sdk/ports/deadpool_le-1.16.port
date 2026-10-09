@@ -1,0 +1,435 @@
+# deadpool_le 1.16 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a full build check (modes/gamecheck.sh play full, the stock card, hidden, muted):
+# the runtime hooked the game, 25 of its 25 shots came from their switches, a drain ended a ball,
+# a tilted ball and three balls to the game's end; events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end, tilt_warning, game_over.
+# Shots no press made: none.
+
+game           deadpool_le
+version        1.16
+
+# ---- functions ----
+site tick             0x002e2dcc 0xe92d4038 0xe3a00037
+site shot_dispatch    0x00100094 0xe92d4ff0 0xe1a07003
+site ball_end         0x000fee68 0xe92d4038 0xe1a05000
+site sound_lookup     0x00462f30 0xe92d4038 0xe1a05000
+site score_add        0x0021dbc0 0xe30a16fe 0xe3401073
+site callout          0x003ca440 0xe92d4010 0xe30beb30
+site callout_nth      0x003ca5f4 0xe92d4010 0xe30beb30
+site lamp_group       0x003a595c 0xe92d4038 0xe1a04000
+site show_priority    0x002f7d94 0xe3013484 0xe3403073
+site award_screen     0x0015ee48 0xe92d4070 0xe24dd008
+site string_new       0x00016938 0xe28fc606 0xe28cca21
+site dynamic_cast     0x0001632c 0xe28fc606 0xe28cca21
+site resource_get     0x002b5c10 0xe92d43f0 0xe1a04000
+site set_text         0x004d8974 0xe92d47f0 0xe1a06000
+site surface_state    0x004e7ed8 0xe5900550 0xe2800008
+site player_advance   0x0015f240 0xe2501000 0x012fff1e
+site display_draw     0x00278c18 0xe3520001 0x812fff1e
+site layer_add        0x000e0a74 0xe301c484 0xe1a03002
+site layer_remove     0x000e0a8c 0xe92d40f8 0xe5913004
+site layer_video      0x00145458 0xe92d4038 0xe1a04000
+site layer_playing    0x0014547c 0xe92d4008 0xe5903008
+site sound_play       0x003ca440 0xe92d4010 0xe30beb30
+site sound_nth        0x003ca5f4 0xe92d4010 0xe30beb30
+site sound_active     0x003cabb4 0xe59f3034 0xe2831e62
+site sound_stop       0x003cad0c 0xe92d40f8 0xe1a06000
+site sound_worker     0x003c9a2c 0xe92d4ff0 0xe2507000
+site hook_dispatch    0x00150180 0xe35000cf 0xe92d4038
+site find_node        0x004f51ac 0xe92d4070 0xe24dd008
+site find_text        0x004f4c48 0xe92d4070 0xe24dd008
+site agent_header     0x00542390 0xe92d40f8 0xe2505000
+site agent_begin      0x0054ccfc 0xe590c004 0xe1a00001
+site balls_in_play    0x002a4930 0xe92d4010 0xe30f4e04
+site multiball_serve  0x002a4aac 0xe92d41f0 0xe30ae6fe
+
+# ---- globals ----
+data cur_player             0x00641bd4
+data scores                 0x0072c180
+data mode_mask              0x0073a6fe
+data event_head             0x00731480
+data event_current          0x00731484
+data resource_manager       0x006dcc40
+data typeinfo_resource      0x00588188
+data typeinfo_scene_player  0x005b083c
+data display_holder         0x006dcbc0
+data message_count          0x00567734
+data message_remap          0x00738ea0
+data message_table          0x00662e70
+data award_screen_arg       0x00639cc8
+data layer_stack            0x006b0a30
+data video_layer            0x006b0a14
+data sound_channels         0x0073bc3c
+data sound_queue            0x0073c4b0
+data sound_requests         0x00688e68
+data sound_request_count    0x0058436c
+data lamp_layers            0x00735070
+data light_count            0x00730028
+data stock_mode_table       0x006b3e18
+data typeinfo_cmode         0x0059b9f0
+data typeinfo_cmode_mball   0x0059de14
+data typeinfo_vmi           0x00588d64
+
+# ---- values ----
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value display_at            0x7c
+value surface_playing       2
+value clip_layer            0
+value clip_layer_priority   5
+value layer_video_at        0x14
+value countdown_first 5
+value countdown_stride 5
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      26
+value stock_slot_active     23
+value stock_slot_start      13
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+
+# ---- shots ----
+shot 0x2               Left orbit
+shot 0x20              Inner loop
+shot 0x40              Colossal jackpot target
+shot 0x400             Left Lil Deadpool drop
+shot 0x800             Middle Lil Deadpool drop
+shot 0x1000            Right Lil Deadpool drop
+shot 0x4000            Lil Deadpool target
+shot 0x8000            Left ramp
+shot 0x40000           Right orbit
+shot 0x1000000         DEAD target D
+shot 0x2000000         DEAD target E
+shot 0x4000000         DEAD target A
+shot 0x8000000         DEAD target last D
+shot 0x10000000        POOL target P
+shot 0x20000000        POOL target O
+shot 0x40000000        POOL target second O
+shot 0x80000000        POOL target L
+shot 0x100000000       BAM target B
+shot 0x200000000       BAM target A
+shot 0x400000000       BAM target M
+shot 0x800000000       BAM target !
+shot 0x10000000000     BOOM target B
+shot 0x20000000000     BOOM target M
+shot 0x40000000000     BOOM target O
+shot 0x80000000000     BOOM target second O
+
+# ---- scenes ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene hud                  c3328c39b0e29f78e9ff45db674248b1d245887d/0d167902e97be9e342b1950754601e41c79f615e
+
+# ---- callouts and text ----
+text example_start_shot     Lil Deadpool target
+
+# ---- events ----
+event game_start      0x4d     # the Start that began a game
+event ball_start      0x25     # game start, and after each ball's bonus (at once after a tilted ball)
+event ball_end        0x34     # each drain that ended a ball, and a tilted ball's
+event bonus_start     0x27     # just after a drain's end of ball; not after a tilt
+event bonus_end       0x28     # a few seconds later, before the next ball starts
+event tilt_warning    0xc6     # each of the first two tilt pendulum hits (Godzilla's 0xc8)
+event tilt            0xc4     # the third hit (Godzilla's 0xc6)
+event game_over       0x47     # the last ball's drain, after its bonus
+
+# ---- lamps ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
+lamp 285          0              LEFT OUTLANE  # lamp 98, I/O group 7 index 16, at 38,482
+lamp 286          0              LEFT INLANE  # lamp 99, I/O group 7 index 17, at 61,469
+lamp 287          0              RIGHT INLANE  # lamp 100, I/O group 7 index 22, at 243,469
+lamp 288          0              RIGHT OUTLANE  # lamp 101, I/O group 7 index 23, at 266,482
+lamp 289          0              REGENERATE  # lamp 102, I/O group 7 index 15, at 38,456
+lamp 290          0              JUGGERNAUT  # lamp 103, I/O group 7 index 18, at 106,472
+lamp 291          0              MYSTIQUE  # lamp 104, I/O group 7 index 19, at 152,472
+lamp 292          0              SABRETOOTH  # lamp 105, I/O group 7 index 20, at 198,472
+lamp 293          0              T-REX  # lamp 106, I/O group 7 index 9, at 129,503
+lamp 294          0              MEGALODON  # lamp 107, I/O group 7 index 8, at 175,503
+lamp 298          0              2X  # lamp 108, I/O group 7 index 13, at 152,550
+lamp 295          0              3X  # lamp 109, I/O group 7 index 10, at 131,542
+lamp 297          0              4X  # lamp 110, I/O group 7 index 14, at 173,542
+lamp 296          0              5X  # lamp 111, I/O group 7 index 12, at 152,533
+lamp 299          0              SHOOT AGAIN  # lamp 112, I/O group 7 index 11, at 152,603
+lamp 300          0x1000000      (D)EAD  # lamp 113, I/O group 8 index 13, at 72,365; tie: DEAD target D
+lamp 301          0x2000000      D(E)AD  # lamp 114, I/O group 8 index 14, at 72,383; tie: DEAD target E
+lamp 302          0x4000000      DE(A)D  # lamp 115, I/O group 8 index 15, at 72,401; tie: DEAD target A
+lamp 303          0x8000000      DEA(D)  # lamp 116, I/O group 8 index 8, at 72,419; tie: DEAD target last D
+lamp 304          0x10000000     (P)OOL  # lamp 117, I/O group 7 index 41, at 245,366; tie: POOL target P
+lamp 305          0x20000000     P(O)OL  # lamp 118, I/O group 7 index 40, at 245,384; tie: POOL target O
+lamp 306          0x40000000     PO(O)L  # lamp 119, I/O group 7 index 25, at 245,402; tie: POOL target second O
+lamp 307          0x80000000     POO(L)  # lamp 120, I/O group 7 index 24, at 245,420; tie: POOL target L
+lamp 308          0              SAURON  # lamp 121, I/O group 7 index 21, at 211,442
+lamp 309          0              MR SINISTER  # lamp 122, I/O group 7 index 32, at 195,403
+lamp 310          0              DAZZLER TEAM UP  # lamp 123, I/O group 8 index 20, at 63,325
+lamp 311          0              DISCO  # lamp 124, I/O group 8 index 21, at 53,282
+lamp 312          0x2            LEFT ORBIT WEAPON  # lamp 125, I/O group 8 index 22, at 46,256; tie: Left orbit
+lamp 313,314,315  0x2            LEFT ORBIT ARROW  # lamp 126, I/O group 8 index 23, at 41,237; tie: Left orbit
+lamp 316          0              LEFT KATANA 1  # lamp 127, I/O group 8 index 9, at 114,379
+lamp 317          0              LEFT KATANA 2  # lamp 128, I/O group 8 index 10, at 108,362
+lamp 318          0              LEFT KATANA 3  # lamp 129, I/O group 8 index 11, at 102,345
+lamp 319          0x8000         LEFT RAMP WEAPON  # lamp 130, I/O group 8 index 12, at 97,329; tie: Left ramp
+lamp 320,321,322  0x8000         LEFT RAMP ARROW  # lamp 131, I/O group 8 index 18, at 90,310; tie: Left ramp
+lamp 323          0              SPECIAL  # lamp 132, I/O group 8 index 33, at 103,263
+lamp 324          0              COLOSSUS TEAM UP  # lamp 133, I/O group 8 index 32, at 98,256
+lamp 325          0x20           INNER LOOP WEAPON  # lamp 134, I/O group 8 index 55, at 94,226; tie: Inner loop
+lamp 326,327,328  0x20           INNER LOOP ARROW  # lamp 135, I/O group 8 index 52, at 90,246; tie: Inner loop
+lamp 329          0              QUEST  # lamp 136, I/O group 8 index 34, at 123,301
+lamp 330          0              MYSTERY  # lamp 137, I/O group 8 index 35, at 129,280
+lamp 331          0              EXTRA BALL  # lamp 138, I/O group 8 index 36, at 124,259
+lamp 332          0              WEAPON JACKPOT  # lamp 139, I/O group 8 index 43, at 121,238
+lamp 333          0              BATTLE  # lamp 140, I/O group 8 index 51, at 117,216
+lamp 334          0              LEFT EYE  # lamp 141, I/O group 7 index 35, at 152,347
+lamp 335          0              RIGHT EYE  # lamp 142, I/O group 7 index 36, at 175,346
+lamp 336          0x400          3-BANK DROP TARGET LEFT  # lamp 143, I/O group 7 index 37, at 165,285; tie: Left Lil Deadpool drop
+lamp 337          0x800          3-BANK DROP TARGET CENTER  # lamp 144, I/O group 7 index 38, at 181,293; tie: Middle Lil Deadpool drop
+lamp 338          0x1000         3-BANK DROP TARGET RIGHT  # lamp 145, I/O group 7 index 39, at 197,301; tie: Right Lil Deadpool drop
+lamp 339          0x40           COLOSSAL JACKPOT  # lamp 146, I/O group 8 index 44, at 140,235; tie: Colossal jackpot target
+lamp 340,341,342  0x4000         LIL DP FLOOD  # lamp 147, I/O group 7 index 3, at 195,263; tie: Lil Deadpool target
+lamp 343          0              RIGHT KATANA 1  # lamp 148, I/O group 7 index 33, at 208,378
+lamp 344          0              RIGHT KATANA 2  # lamp 149, I/O group 7 index 34, at 213,361
+lamp 345          0              RIGHT KATANA 3  # lamp 150, I/O group 7 index 47, at 219,344
+lamp 346          0              RIGHT RAMP WEAPON  # lamp 151, I/O group 7 index 48, at 224,327
+lamp 347,348,349  0              RIGHT RAMP ARROW  # lamp 152, I/O group 7 index 51, at 231,308
+lamp 350          0              LOCK  # lamp 153, I/O group 7 index 63, at 243,272
+lamp 351          0              DOMINO TEAM UP  # lamp 154, I/O group 7 index 42, at 250,340
+lamp 352          0x40000        RIGHT ORBIT WEAPON  # lamp 155, I/O group 7 index 43, at 259,321; tie: Right orbit
+lamp 353,354,355  0x40000        RIGHT ORBIT ARROW  # lamp 156, I/O group 7 index 44, at 265,303; tie: Right orbit
+lamp 356          0              WOLVERINE TEAM UP  # lamp 157, I/O group 8 index 45, at 142,186
+lamp 357          0              CENTER LOOP WEAPON  # lamp 158, I/O group 8 index 46, at 142,144
+lamp 358,359,360  0              CENTER LOOP ARROW  # lamp 159, I/O group 8 index 47, at 142,125
+lamp 390          0              BOTTOM POP BUMPER  # lamp 160, I/O group 8 index 37, at 173,228
+lamp 391          0              LEFT POP BUMPER  # lamp 161, I/O group 8 index 38, at 177,154
+lamp 392          0              RIGHT POP BUMPER  # lamp 162, I/O group 8 index 39, at 223,183
+lamp 361          0x800000000    BAM(!)  # lamp 163, I/O group 7 index 26, at 174,69; tie: BAM target !
+lamp 362          0x400000000    BA(M)!  # lamp 164, I/O group 7 index 27, at 199,73; tie: BAM target M
+lamp 363          0              TOP LANE RIGHT CENTER  # lamp 165, I/O group 7 index 28, at 224,77
+lamp 364          0              TOP LANE RIGHT  # lamp 166, I/O group 7 index 29, at 249,80
+lamp 365          0              KATANA HANDLE 1  # lamp 167, I/O group 7 index 52, at 266,233
+lamp 366          0              KATANA HANDLE 2  # lamp 168, I/O group 7 index 53, at 266,219
+lamp 367          0              KATANA HANDLE 3  # lamp 169, I/O group 7 index 54, at 266,204
+lamp 368          0              KATANA HANDLE 4  # lamp 170, I/O group 7 index 55, at 266,191
+lamp 369          0              KATANA HANDLE 5  # lamp 171, I/O group 7 index 56, at 266,176
+lamp 370          0              KATANA HANDLE 6  # lamp 172, I/O group 7 index 57, at 266,162
+lamp 371          0              KATANA HANDLE 7  # lamp 173, I/O group 7 index 58, at 266,148
+lamp 373          0              BOTTOM GI  # lamp 175, I/O group 7 index 0, at 0,0
+lamp 374          0              MID LEFT GI  # lamp 176, I/O group 7 index 1, at 0,0
+lamp 375          0              MID RIGHT GI  # lamp 177, I/O group 7 index 2, at 0,0
+lamp 376          0              UPPER LEFT GI  # lamp 178, I/O group 8 index 0, at 0,0
+lamp 377          0              UPPER RIGHT GI  # lamp 179, I/O group 8 index 1, at 0,0
+lamp 379          0              DAZZLER SPINNER FLASH  # lamp 181, I/O group 8 index 19, at 59,303
+lamp 380          0              WOLVERINE SPINNER FLASH  # lamp 182, I/O group 8 index 50, at 142,113
+lamp 381          0              TRUCK FLASH  # lamp 183, I/O group 7 index 30, at 262,78
+lamp 382          0              POP BUMPER FLASH  # lamp 184, I/O group 8 index 40, at 214,146
+lamp 383          0              DISCO BALL FLASH (X2)  # lamp 185, I/O group 8 index 26, at 58,177
+lamp 389          0              EJECT FLASH  # lamp 191, I/O group 8 index 41, at 112,168
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+site block_start_1      0x000f0aac 0xe92d40d0 0xe1a04000
+data block_obj_1        0x006b4188
+text block_name_1       Battle Mystique
+site block_start_2      0x000f34e0 0xe92d4010 0xe1a04000
+data block_obj_2        0x006b4310
+text block_name_2       Battle Sabretooth
+site block_start_3      0x000edc00 0xe92d40f0 0xe1a04000
+data block_obj_3        0x006b4470
+text block_name_3       Battle Juggernaut Sauron
+site block_start_4      0x000f0aac 0xe92d40d0 0xe1a04000
+data block_obj_4        0x006b45f0
+text block_name_4       Battle Mystique Sauron
+site block_start_5      0x000f34e0 0xe92d4010 0xe1a04000
+data block_obj_5        0x006b4778
+text block_name_5       Battle Sabretooth Sauron
+site block_start_6      0x0010a300 0xe92d4010 0xe1a04000
+data block_obj_6        0x006b48d8
+text block_name_6       Quest
+site block_start_7      0x0010a300 0xe92d4010 0xe1a04000
+data block_obj_7        0x006b4988
+text block_name_7       Quest
+site block_start_10     0x00104ee4 0xe92d4010 0xe1a04000
+data block_obj_10       0x006b54c8
+text block_name_10      Mrsinister Rex
+site block_start_13     0x000e7524 0xe92d4038 0xe1a04000
+data block_obj_13       0x006b4be0
+text block_name_13      Bashpool Hurry Up
+site block_start_14     0x000e6b2c 0xe92d4010 0xe1a04000
+data block_obj_14       0x006b4c58
+text block_name_14      Bashpool Frenzy
+site block_start_15     0x000ea444 0xe92d4038 0xe1a04000
+data block_obj_15       0x006b4cc8
+text block_name_15      Bashpool Trampoline
+site block_start_19     0x000f7bb0 0xe92d4ff0 0xe1a04000
+data block_obj_19       0x006b4ab8
+text block_name_19      Disco Loops
+site block_start_20     0x000f7d64 0xe92d4030 0xe1a04000
+data block_obj_20       0x006b4b60
+text block_name_20      Disco Loops Hurry Up
+site block_start_21     0x000f6410 0xe92d4010 0xe1a04000
+data block_obj_21       0x006b4e38
+text block_name_21      Chimichanga
+site block_start_22     0x00109ab0 0xe92d4070 0xe1a06000
+data block_obj_22       0x006b4d50
+text block_name_22      Ninja Pops
+site block_start_23     0x000f9490 0xe92d41f0 0xe24dd008
+data block_obj_23       0x006b4f08
+text block_name_23      Katanarama Time
+site block_start_24     0x000f510c 0xe92d40d0 0xe1a04000
+data block_obj_24       0x006b5790
+text block_name_24      Berserker Rage
+site block_start_25     0x0010e670 0xe92d4010 0xe1a04000
+data block_obj_25       0x006b4a38
+text block_name_25      Trex Hurryup
+site block_start_127    0x000edc00 0xe92d40f0 0xe1a04000
+data block_obj_127      0x006b4008
+text block_name_127     Battle Juggernaut
+
+# PAD-398: every rule of the game's that reads shots (game_mode_blocks.read_rules, from the game
+# program): while a mode of ours runs, each sees none of its shots unless the mode keeps it (no
+# block_rule_lo/hi lines: every bit); the battle rule is block_battle_shots. `text block_rule_name_<n>`
+# is what the Modes tab lists.
+site block_rule_0          0x0011ad14 0xe92d4070 0xe1a05003  # RuleBashpool::v[32]
+text block_rule_name_0     Bashpool
+site block_rule_1          0x0011d70c 0xe92d41f0 0xe1a06002  # RuleColossalJackpot::v[32]
+text block_rule_name_1     Colossal Jackpot
+site block_rule_2          0x0011eb60 0xe30e1d1c 0xe340106a  # RuleDazzlerSpinner::v[32]
+text block_rule_name_2     Dazzler Spinner
+site block_rule_3          0x0011f34c 0xe3530000 0x03520602  # RuleDeadpoolTargets::v[32]
+text block_rule_name_3     Deadpool Targets
+site block_rule_4          0x0011fef4 0xe92d43f0 0xe1a07003  # RuleKatanaGems::v[32]
+text block_rule_name_4     Katana Gems
+site block_rule_5          0x001255f4 0xe92d4ff0 0xe1a06002  # RuleNinjapocalypse::v[32]
+text block_rule_name_5     Ninjapocalypse
+site block_rule_6          0x0012645c 0xe2033a02 0xe3a02000  # RulePlayfieldMultiplier::v[32]
+text block_rule_name_6     Playfield Multiplier
+site block_rule_7          0x00126bac 0xe3530c01 0x03520000  # RuleRegenerate::v[32]
+text block_rule_name_7     Regenerate
+site block_rule_8          0x001275e0 0xe3a00001 0xe12fff1e  # RuleSniktTarget::v[32]
+text block_rule_name_8     Snikt Target
+site block_rule_9          0x001285c4 0xe92d43f0 0xe1a07003  # RuleTeamUpShot::v[32]
+text block_rule_name_9     Team Up Shot
+site block_rule_10         0x00129a64 0xe590c000 0xe3081934  # RuleWeapons::v[32]
+text block_rule_name_10    Weapons
+site block_rule_11         0x0012a938 0xe2022010 0xe3a03000  # RuleWolverineSpinner::v[32]
+text block_rule_name_11    Wolverine Spinner
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         967   # 10 / 10; deadpool_le-1.14's 962 says the same lines
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+data coil_count            0x0073b3ac
+data coil_table            0x00730bf4
+value magnet_proc          13300
+site coil_fire        0x002cbdf4 0xe3500000 0xe52de004
+site adjustment       0x003ba724 0xe92d40f0 0xe2504000
+site proc_exists      0x002f69f4 0xe3012480 0xe3402073
+site proc_create      0x002f63a4 0xe301c480 0xe340c073
+site proc_sleep       0x002f64f4 0xe3013480 0xe3403073
+site coil_take            0x00134880 0xe92d40f8 0xe3017484
+site coil_give            0x00134944 0xe3510000 0xe92d4038
+text control_gates_label  Control gates
+value control_gates_dev   18
+value control_gates_ctl   32
+value control_gates_devoff 4
+value control_gates_off_slot 30
+data control_gates_obj   0x006b5b48
+text control_gates_drive  9 6 255 64 96
+text held_coils            control_gates
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+site scoop_handler         0x000e3dfc 0xe2400002 0xe92d4030
+data scoop_slot           0x006628a8
+value scoop_event          2
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x0033c880 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+# PAD-420: the game's kill by id (id, 0xffff), which stops a show of the runtime's - the same code as the
+# event_cancel of the 45 other ports that name it (shows/findcancel.py)
+site event_cancel     0x002f6644 0xe92d40f8 0xe3016480
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x000e11b0 0xe92d4ff0 0xe24dd02c   # deadpool_pro-1.16's Wide red and blue chase: its lit lights 99% alike; 457 lights in its lamp groups, 0 light-runner commands, orange, blue, 7.8 s
+text show_name_1          Wide red and blue chase
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x0003ebe4 0xe92d47f0 0xe30e4d1c   # deadpool_pro-1.16's Fast yellow strobe: its lit lights 84% alike; 321 lights in its lamp groups, 0 light-runner commands, yellow, 3.6 s
+text show_name_2          Fast yellow strobe
+text show_kind_2          flashy
+value show_secs_2         4
+site show_3               0x0011ef44 0xe92d4070 0xe24dd008   # deadpool_pro-1.16's White strobe: its lit lights 97% alike; 287 lights in its lamp groups, 0 light-runner commands, white, 7.3 s
+text show_name_3          White strobe
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x0011db84 0xe92d4030 0xe24dd00c   # deadpool_pro-1.16's Glow: its lit lights 97% alike; 281 lights in its lamp groups, 0 light-runner commands, no colour given, 8.0 s
+text show_name_4          Glow
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x00265148 0xe92d4ff0 0xe24dd044   # deadpool_pro-1.16's Strobe: its lit lights 99% alike; 280 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_5          Strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x00263ddc 0xe92d4ff0 0xe24dd08c   # deadpool_pro-1.16's Chase: its lit lights 99% alike; 280 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_6          Chase
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x001259bc 0xe92d41f0 0xe30f47a0   # 364 lights in its lamp groups, 0 light-runner commands, blue, 4.4 s
+text show_name_7          Blue strobe
+text show_kind_7          flashy
+value show_secs_7         4
+site show_8               0x000ba740 0xe92d47f0 0xed2d8b02   # deadpool_pro-1.16's Slow blue fade: its lit lights 100% alike; 283 lights in its lamp groups, 0 light-runner commands, blue, 7.5 s
+text show_name_8          Slow blue fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x00130bb0 0xe92d4ff0 0xe24dd024   # 165 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_9          Slow fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x0011b6cc 0xe92d4010 0xeb0771af   # 36 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_10         Small slow fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x0011cce8 0xe92d4070 0xe30f47a0   # deadpool_pro-1.16's Wide fast white strobe: its lit lights 97% alike; 455 lights in its lamp groups, 0 light-runner commands, white, 2.4 s
+text show_name_11         Wide fast white strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x0010c17c 0xe92d43f0 0xe30f47a0   # deadpool_pro-1.16's Wide fast red and cyan strobe: its lit lights 88% alike; 409 lights in its lamp groups, 0 light-runner commands, red, cyan, 2.3 s
+text show_name_12         Wide fast red and cyan strobe
+text show_kind_12         accent
+value show_secs_12        2

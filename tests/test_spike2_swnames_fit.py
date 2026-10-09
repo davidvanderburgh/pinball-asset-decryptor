@@ -415,3 +415,21 @@ def test_the_memo_line_does_not_disturb_the_readers(tmp_path, monkeypatch):
     assert mktables._read_list(str(p)) == [(1, 2, 8, 3, "LEFT RAMP")]
     assert mktables._recorded_binary(str(p)) == "game 32 bytes"
     assert mktables._built_from(str(p), str(elf))
+
+
+def test_jaws_pro_takes_its_playfield_names_from_jaws_le_by_the_wire(monkeypatch):
+    """PAD-420: Jaws Pro 1.02 names none of its 56 playfield switches (its device table's indices land on no single
+    shift of the live bits), so Check this game pressed its trough and shooter lane and the ball tools fell back to
+    Godzilla's ids. TITLE_SIBLING carries Jaws LE 1.02's names for the same wires - each one a switch in Jaws Pro's own
+    device table - and fill() uses them last, only for a row still `?`."""
+    monkeypatch.setattr(swnames, "device_switches", lambda *a, **k: {})
+    rows = [(55, 22, 8, 28, "?"), (59, 15, 8, 32, "?"), (66, 0, 9, 0, "?"), (99, 0, 9, 61, "?"),
+            (34, 90, 1, 2, "Action Button")]
+    out, report = swnames.fill(rows, game="jaws_pro", use_static=False)
+    names = {(r[2], r[3]): r[4] for r in out}
+    assert names[(8, 28)] == "SHOOTER LANE" and names[(8, 32)] == "TROUGH 6"
+    assert names[(9, 0)] == "LEFT RAMP MADE OPTO"
+    assert names[(9, 61)] == "?"                       # unnamed on the LE too
+    assert names[(1, 2)] == "Action Button"            # the game's own name is never replaced
+    assert len(swnames.TITLE_SIBLING["jaws_pro"]) == 53
+    assert "filled 3 of 4 unnamed" in report[-1]

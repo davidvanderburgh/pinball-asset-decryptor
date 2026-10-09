@@ -389,13 +389,17 @@ text example_start_shot     Target-bottom right
 # ---- events: COPIED, unverified - prove them with event_probe.c (MODE_SDK.md, Events) ----
 
 # ---- lamps: the build's own inserts (lamp_map.py), shot ties from its cshot objects ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 lamp 105          0              BOTTOM GI-RIGHT (X6)  # lamp 9, I/O group 7 index 0, at 0,0
 lamp 106          0              BOTTOM GI-LEFT (X7)  # lamp 10, I/O group 7 index 1, at 0,0
-lamp 13           0              RIGHT OUTLANE  # lamp 11, I/O group 7 index 3, at 263,495
-lamp 12           0     RIGHT RETURN LANE  # lamp 12, I/O group 7 index 4, at 241,469
+lamp 13           0x80           RIGHT OUTLANE  # lamp 11, I/O group 7 index 3, at 263,495; tie: Right outlane
+lamp 12           0x40           RIGHT RETURN LANE  # lamp 12, I/O group 7 index 4, at 241,469; tie: Right return lane
 lamp 11           0              SHOOT AGAIN  # lamp 13, I/O group 7 index 5, at 147,619
-lamp 10           0      LEFT RETURN LANE  # lamp 14, I/O group 7 index 6, at 53,469
-lamp 9            0              LEFT OUTLANE  # lamp 15, I/O group 7 index 7, at 30,495
+lamp 10           0x20           LEFT RETURN LANE  # lamp 14, I/O group 7 index 6, at 53,469; tie: Left return lane
+lamp 9            0x10           LEFT OUTLANE  # lamp 15, I/O group 7 index 7, at 30,495; tie: Left outlane
 lamp 29           0              ESCAPE NUBLAR  # lamp 16, I/O group 7 index 8, at 159,333
 lamp 28           0              SECURE CONTROL ROOM  # lamp 17, I/O group 7 index 9, at 162,358
 lamp 37           0              2X PLAYFIELD  # lamp 18, I/O group 7 index 10, at 87,440
@@ -421,34 +425,34 @@ lamp 35           0              CONTROL ROOM RESCUE  # lamp 37, I/O group 7 ind
 lamp 109          0              ESCAPE FLASH  # lamp 38, I/O group 7 index 30, at 31,430
 lamp 32,33,34     0              CONTROL ROOM ARROW  # lamp 39, I/O group 7 index 31, at 49,389
 lamp 31           0              (C)HAOS  # lamp 40, I/O group 7 index 34, at 37,366
-lamp 36           0            LITE ESCAPE  # lamp 41, I/O group 7 index 35, at 47,421
+lamp 36           0x400          LITE ESCAPE  # lamp 41, I/O group 7 index 35, at 47,421; tie: Target-lite escape
 lamp 77           0          AMBER BONUS  # lamp 42, I/O group 7 index 36, at 220,134
 lamp 78           0              SMART MISSILE  # lamp 43, I/O group 7 index 37, at 215,162
 lamp 79           0              CHAOS  # lamp 44, I/O group 7 index 38, at 209,189
-lamp 75           0          4X4 RIGHT TARGET  # lamp 45, I/O group 7 index 39, at 193,204
+lamp 75           0x100000       4X4 RIGHT TARGET  # lamp 45, I/O group 7 index 39, at 193,204; tie: 4X4 target right
 lamp 76           0              4X4 RIGHT TARGET ARROW  # lamp 46, I/O group 7 index 40, at 194,227
 lamp 73           0      4X4 RIGHT DIRECTION  # lamp 47, I/O group 7 index 41, at 185,254
 lamp 74           0              ADVANCE T-REX  # lamp 48, I/O group 7 index 42, at 178,277
 lamp 84           0              RIGHT RAMP RESCUE  # lamp 49, I/O group 7 index 43, at 201,309
 lamp 83           0              CH(A)OS  # lamp 50, I/O group 7 index 44, at 208,290
-lamp 80,81,82     0       RIGHT RAMP ARROW  # lamp 51, I/O group 7 index 45, at 215,272
+lamp 80,81,82     0x4            RIGHT RAMP ARROW  # lamp 51, I/O group 7 index 45, at 215,272; tie: Right ramp exit
 lamp 89           0              RIGHT ORBIT RESCUE  # lamp 52, I/O group 7 index 48, at 240,287
 lamp 114          0              RIGHT HALFPIPE SPOTLIGHT  # lamp 53, I/O group 7 index 49, at 281,247
 lamp 88           0              CHA(O)S  # lamp 54, I/O group 7 index 50, at 247,268
 lamp 100          0              RIGHT HALFPIPE SIGN  # lamp 55, I/O group 7 index 51, at 281,258
-lamp 85,86,87     0       RIGHT LOOP ARROW  # lamp 56, I/O group 7 index 52, at 255,249
+lamp 85,86,87     0x3            RIGHT LOOP ARROW  # lamp 56, I/O group 7 index 52, at 255,249; tie: Right orbit enter opto, Right orbit exit
 lamp 98           0              RIGHT RAMP SIGN 1  # lamp 57, I/O group 7 index 55, at 260,99
 lamp 99           0              RIGHT RAMP SIGN 2  # lamp 58, I/O group 7 index 56, at 260,99
-lamp 90,91,92     0        RIGHT HALFPIPE ARROW  # lamp 59, I/O group 7 index 57, at 247,363
+lamp 90,91,92     0x100          RIGHT HALFPIPE ARROW  # lamp 59, I/O group 7 index 57, at 247,363; tie: Right half pipe
 lamp 93           0              CHAO(S)  # lamp 60, I/O group 7 index 60, at 238,379
 lamp 94           0              RIGHT HALFPIPE RESCUE  # lamp 61, I/O group 7 index 61, at 228,397
-lamp 95           0         LITE 2X  # lamp 62, I/O group 7 index 62, at 233,423
+lamp 95           0x200          LITE 2X  # lamp 62, I/O group 7 index 62, at 233,423; tie: Target-bottom right
 lamp 111          0     LITE 2X TARGET FLASH  # lamp 63, I/O group 7 index 63, at 265,425
 lamp 107          0              TOP GI-RIGHT (X7)  # lamp 64, I/O group 8 index 0, at 0,0
 lamp 108          0              TOP GI-LEFT (X9)  # lamp 65, I/O group 8 index 1, at 0,0
 lamp 97           0              LEFT RAMP SIGN 2  # lamp 66, I/O group 8 index 3, at 165,95
 lamp 96           0              LEFT RAMP SIGN 1  # lamp 67, I/O group 8 index 4, at 165,95
-lamp 69           0          4X4 LEFT TARGET  # lamp 68, I/O group 8 index 8, at 152,171
+lamp 69           0x200000       4X4 LEFT TARGET  # lamp 68, I/O group 8 index 8, at 152,171; tie: 4X4 target left
 lamp 70           0              4X4 LEFT TARGET ARROW  # lamp 69, I/O group 8 index 9, at 152,189
 lamp 62           0              SPINNER 50K  # lamp 70, I/O group 8 index 10, at 133,172
 lamp 63           0              SPINNER 30K  # lamp 71, I/O group 8 index 11, at 134,186
@@ -457,24 +461,24 @@ lamp 65           0              SPINNER RESCUE  # lamp 73, I/O group 8 index 13
 lamp 72           0              4X4 TURN  # lamp 74, I/O group 8 index 14, at 161,277
 lamp 71           0      4X4 LEFT DIRECTION  # lamp 75, I/O group 8 index 15, at 154,254
 lamp 60           0              LEFT RAMP RESCUE  # lamp 76, I/O group 8 index 16, at 114,245
-lamp 56,57,58     0        LEFT RAMP ARROW  # lamp 77, I/O group 8 index 17, at 106,207
-lamp 53,54,55     0       LEFT LOOP ARROW  # lamp 78, I/O group 8 index 20, at 85,207
+lamp 56,57,58     0x1800000      LEFT RAMP ARROW  # lamp 77, I/O group 8 index 17, at 106,207; tie: Left ramp enter opto, Left ramp exit opto
+lamp 53,54,55     0x18000        LEFT LOOP ARROW  # lamp 78, I/O group 8 index 20, at 85,207; tie: Left orbit enter, Left orbit exit opto
 lamp 59           0              C(H)AOS  # lamp 79, I/O group 8 index 23, at 110,225
-lamp 118          0         LEFT POP BUMPER  # lamp 80, I/O group 8 index 24, at 179,162
-lamp 119          0              RIGHT POP BUMPER  # lamp 81, I/O group 8 index 25, at 246,139
-lamp 117          0              TOP POP BUMPER  # lamp 82, I/O group 8 index 26, at 201,101
+lamp 118          0x400000000    LEFT POP BUMPER  # lamp 80, I/O group 8 index 24, at 179,162; tie: Left pop bumper
+lamp 119          0x800000000    RIGHT POP BUMPER  # lamp 81, I/O group 8 index 25, at 246,139; tie: Right pop bumper
+lamp 117          0x1000000000   TOP POP BUMPER  # lamp 82, I/O group 8 index 26, at 201,101; tie: Top pop bumper
 lamp 116          0              LEFT RAMP FLASH  # lamp 84, I/O group 8 index 29, at 93,137
 lamp 115          0         SPINNER JACKPOT FLASH  # lamp 85, I/O group 8 index 30, at 132,143
 lamp 61           0         SPINNER 100K  # lamp 86, I/O group 8 index 31, at 132,159
-lamp 52           0          LEFT HALFPIPE TARGET  # lamp 87, I/O group 8 index 32, at 90,226
-lamp 48,49,50     0        LEFT HALFPIPE ARROW  # lamp 92, I/O group 8 index 37, at 103,265
-lamp 66,67,68     0       SPINNER ARROW  # lamp 93, I/O group 8 index 40, at 134,247
+lamp 52           0x4000         LEFT HALFPIPE TARGET  # lamp 87, I/O group 8 index 32, at 90,226; tie: Target top left
+lamp 48,49,50     0x2000         LEFT HALFPIPE ARROW  # lamp 92, I/O group 8 index 37, at 103,265; tie: Left halfpipe opto
+lamp 66,67,68     0x400000       SPINNER ARROW  # lamp 93, I/O group 8 index 40, at 134,247; tie: Spinner
 lamp 51           0              LEFT HALFPIPE RESCUE  # lamp 94, I/O group 8 index 43, at 123,274
-lamp 38,39,40     0           RAPTOR PIT ARROW  # lamp 95, I/O group 8 index 44, at 62,316
-lamp 41           0           RAPTOR PIT UPPER LEFT TARGET  # lamp 96, I/O group 8 index 47, at 47,326
-lamp 42           0            RAPTOR PIT LOWER LEFT TARGET  # lamp 97, I/O group 8 index 48, at 48,343
-lamp 43           0           RAPTOR PIT RIGHT TARGET  # lamp 98, I/O group 8 index 49, at 80,311
-lamp 30           0            CONTROL ROOM  # lamp 99, I/O group 8 index 50, at 29,313
+lamp 38,39,40     0x40000        RAPTOR PIT ARROW  # lamp 95, I/O group 8 index 44, at 62,316; tie: Raptor lock opto
+lamp 41           0x4000000      RAPTOR PIT UPPER LEFT TARGET  # lamp 96, I/O group 8 index 47, at 47,326; tie: Target raptor pit-up l
+lamp 42           0x8000000      RAPTOR PIT LOWER LEFT TARGET  # lamp 97, I/O group 8 index 48, at 48,343; tie: Target raptor pit-low l
+lamp 43           0x10000000     RAPTOR PIT RIGHT TARGET  # lamp 98, I/O group 8 index 49, at 80,311; tie: Target raptor pit-right
+lamp 30           0x100000000    CONTROL ROOM  # lamp 99, I/O group 8 index 50, at 29,313; tie: Target control room
 lamp 112          0              RAPTOR PIT FLASH  # lamp 100, I/O group 8 index 51, at 38,302
 lamp 113          0      LEFT HALFPIPE SPOTLIGHT  # lamp 101, I/O group 8 index 52, at 34,190
 lamp 47           0           SUPPLY DROP  # lamp 102, I/O group 8 index 53, at 111,297
@@ -572,3 +576,121 @@ text block_name_22      Escape Nublar
 site block_start_23     0x00118fbc 0xe92d4038 0xe1a04000
 data block_obj_23       0x007393b0
 text block_name_23      Escape Nublar Hurry Up
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+site proc_exists          0x002993e0 0xe30e2a58 0xe3402073
+site proc_create          0x00298d90 0xe30eca58 0xe340c073
+site proc_sleep           0x00298ee0 0xe30e3a58 0xe3403073
+site adjustment           0x0047e590 0xe92d40f0 0xe2504000
+site coil_fire             0x00460e18 0xe3500000 0xe52de004
+data coil_count            0x007715d0
+data coil_table            0x007b51a4
+value magnet_proc          13185
+site coil_take            0x0007da04 0xe92d40f8 0xe30e7a5c
+site coil_give            0x0007dac8 0xe3510000 0xe92d4038
+text trex_magnet_label    T-Rex magnet
+value trex_magnet_dev     17
+value trex_magnet_ctl     40
+value trex_magnet_devoff  4
+value trex_magnet_off_slot 31
+site trex_magnet_get      0x001d0a28 0xe92d4010 0xe30c4174
+text raptor_post_label    Raptor up post
+value raptor_post_dev     15
+value raptor_post_ctl     40
+value raptor_post_devoff  4
+value raptor_post_off_slot 31
+site raptor_post_get      0x001cd174 0xe92d4010 0xe30c4010
+text orbit_post_label     Orbit up post
+value orbit_post_dev      13
+value orbit_post_ctl      40
+value orbit_post_devoff   4
+value orbit_post_off_slot 31
+site orbit_post_get       0x0007f0a8 0xe92d4030 0xe3064374
+text room_post_label      Control room up post
+value room_post_dev       14
+value room_post_ctl       40
+value room_post_devoff    4
+value room_post_off_slot  31
+site room_post_get        0x0007e42c 0xe92d4010 0xe30640f8
+text trex_magnet_drive    9 7 255 300 128
+text raptor_post_drive    9 5 255 128 64
+text orbit_post_drive     9 8 255 64 64
+text room_post_drive      9 6 255 64 64
+text held_coils            trex_magnet raptor_post orbit_post room_post
+# PAD-420: Mode > Magnet holds the ball with the held coil trex_magnet, on a hit of the shot nearest it on the
+# playfield picture (Left ramp enter opto, 12 px from the T-Rex mouth magnet)
+text magnet_coil           trex_magnet
+value magnet_shot          0x800000
+
+# PAD-420: no line says "time's up" in so many words; this one ends a mode the same way (picked from the
+# build's own transcribed voice lines, tu_wide.py)
+callout time_up           915   # You wasted too much time!
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x001ea178 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x0011f490 0xe92d43f0 0xe24dd034   # 125 lights in its lamp groups, 0 light-runner commands, red, 7.8 s
+text show_name_1          Wide red chase
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x0011e2c0 0xe92d43f0 0xed2d8b02   # 95 lights in its lamp groups, 0 light-runner commands, red, 3.3 s
+text show_name_2          Red strobe
+text show_kind_2          flashy
+value show_secs_2         3
+site show_3               0x001c633c 0xe92d4ff0 0xe24dd01c   # 69 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_3          Glow
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x001c6440 0xe92d4ff0 0xe24dd024   # 69 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_4          Strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x001620b4 0xe92d4ff0 0xe24dd014   # 36 lights in its lamp groups, 0 light-runner commands, green, cyan, 7.2 s
+text show_name_5          Green and cyan strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x001a6564 0xe92d4010 0xeb03d64b   # 27 lights in its lamp groups, 0 light-runner commands, no colour given, 7.7 s
+text show_name_6          Small glow
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x0006df78 0xe92d4070 0xe24dd008   # 18 lights in its lamp groups, 0 light-runner commands, white, 7.5 s
+text show_name_7          Small white glow
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x0017a908 0xe92d4038 0xeb048562   # 115 lights in its lamp groups, 0 light-runner commands, white, 8.0 s
+text show_name_8          Wide slow white fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x001c6578 0xe92d4070 0xe24dd088   # 46 lights in its lamp groups, 0 light-runner commands, no colour given, 7.7 s
+text show_name_9          Slow fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x001a5b10 0xe92d4ff0 0xe24dd044   # 17 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_10         Small slow fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x0010ccdc 0xe92d4010 0xeb063c6d   # 116 lights in its lamp groups, 0 light-runner commands, white, 0.9 s
+text show_name_11         Wide white strobe
+text show_kind_11         accent
+value show_secs_11        1
+site show_12              0x0017a6a0 0xe92d4010 0xeb0485fc   # 116 lights in its lamp groups, 0 light-runner commands, white, 1.0 s
+text show_name_12         Wide white fade
+text show_kind_12         accent
+value show_secs_12        1

@@ -1,0 +1,90 @@
+{
+ "key": "aerosmith_le-1.16",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Super Scoring",
+   "start": "0xfa4d0",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000f3"
+   ],
+   "how": "counts AUD_SUPER_SCORING_STARTED (id 194) at 0xfa5f8; creates record(s) 243 (body 0xfa96c),183 (body 0xfa1c4),244 (body 0xfa28c); reached by bl 0xae904 (fn 0xae71c); bl 0xd0428 (fn 0xd0424); tail b 0xfa640 (fn 0xfa62c); a caller uses the result (0xfa640: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Double Scoring",
+   "start": "0x3b724",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000f1"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 233) at 0x3b79c; creates record(s) 241 (body 0x3b618),153 (body 0x3b5f0); reached by bl 0xce7f8 (fn 0xce7f4); bl 0x130b50 (fn 0x130a7c)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Upper Playfield Orbit Rule",
+   "start": "0x1308e0",
+   "words": [
+    "0xe92d4070",
+    "0xe3a000f6"
+   ],
+   "how": "counts AUD_UPPER_PLAYFIELD_ORBIT_RULE_STARTED (id 234) at 0x1309bc; creates record(s) 246 (body 0x130780); reached by bl 0x1333f0 (fn 0x1331cc)",
+   "confidence": "high",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Toys in the Attic Multiball",
+   "start": "0x111b88",
+   "words": [
+    "0xe92d4030",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_TOYS_IN_THE_ATTIC_MULTIBALL_STARTED; serves balls via 0x111b88 -> 0x383210 (count None)"
+  },
+  {
+   "name": "Medley Multiball",
+   "start": "0x8c054",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_MEDLEY_MULTIBALL_STARTED; serves balls via 0x8c054 -> 0x383210 (count 3)"
+  },
+  {
+   "name": "Headphone Hurryup",
+   "start": "0x61e6c",
+   "words": [
+    "0xe92d4010",
+    "0xe3400001"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Love in an Elevator Multiball",
+   "start": "0x7eae0",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_LOVE_IN_AN_ELEVATOR_MULTIBALL_STARTED; serves balls via 0x7eae0 -> 0x383210 (count 3)"
+  },
+  {
+   "name": "Wizard Mode Multiball",
+   "start": "0x125e94",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_WIZARD_MODE_MULTIBALL_STARTED; serves balls via 0x125e94 -> 0x383210 (count 3)"
+  }
+ ],
+ "notes": "engine: audit_add 0x369c68, create-process 0x34ba68, live_records 0x34bdd0, multiball_serve 0x383210. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). "
+}

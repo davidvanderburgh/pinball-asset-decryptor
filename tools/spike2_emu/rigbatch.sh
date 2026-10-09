@@ -129,7 +129,7 @@ finish() {
         bash "$RIG/riglock.sh" release "$s" "$WHO" --force > /dev/null 2>&1 < /dev/null
     done
     if [ -n "$STAGE" ]; then
-        rm -rf "$STAGE/.partial"
+        rm -rf "$STAGE/.inflight/$(printf %s "$OUT" | md5sum | cut -c1-12)"   # its own copies in flight only (cardstage.sh)
         bash "$RIG/cardstage.sh" --trim "$STAGE" "$KEEP" >> "$OUT/stage.log" 2>&1 < /dev/null
     fi
 }
@@ -171,7 +171,17 @@ worker() {
         say "rig $slot  start  $key  ($((i + 1))/$TOTAL)"
         t0=$(date +%s)
         # shellcheck disable=SC2086
-        env $envs PAD_SLOT="$slot" PAD_LABEL="$WHO" "${CMD[@]}" "$key" "$card" > "$log" 2>&1 < /dev/null
+        env $envs PAD_SLOT="$slot" PAD_LABEL="$WHO" "${CMD[@]}" "$key" "$card" > "$log" 2>&1 < /dev/null &
+        jp=$!
+        # THE LEASE IS KEPT WHILE THE JOB RUNS (PAD-420): it lapses PAD_LOCK_IDLE after its holder's last touch, and a
+        # job that waits minutes (a media proof, a coil hold, a game check) looked free - the next batch took its slot
+        # and that batch's first killgame killed this job's game.
+        n=0
+        while kill -0 "$jp" 2>/dev/null; do
+            sleep 2; n=$((n + 1))
+            [ $((n % 15)) = 0 ] && bash "$RIG/riglock.sh" use "$slot" "$WHO" > /dev/null 2>&1 < /dev/null
+        done
+        wait "$jp"
         rc=$?
         [ -n "$STAGE" ] && touch "$OUT/stage/$i.done"
         v=$(grep -a '^VERDICT ' "$log" | tail -1)

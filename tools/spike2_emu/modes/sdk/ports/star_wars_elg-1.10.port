@@ -349,16 +349,20 @@ value lamp_group_prio      4
 value lamp_group_next      20
 value lamp_fade            3
 # ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
 # 68 inserts on the TestMode/Playfield_AK_SW_PIN_DIAG_GRAPHIC_cropped picture; light table 0x572a74, device table 0x573e14, lamp table 0x55a2ec (82 lamps)
 # shot masks: no class cshot in this program
-lamp 66           0              DEATH STAR (X2)  # lamp 3, I/O group 5 index 51, at 49,60
+lamp 66           0x2            DEATH STAR (X2)  # lamp 3, I/O group 5 index 51, at 49,60; tie: Death star target
 lamp 67           0              PLAYFIELD GI 1  # lamp 4, I/O group 5 index 0, at 0,0
 lamp 68           0              PLAYFIELD GI 2  # lamp 5, I/O group 5 index 1, at 0,0
 lamp 69           0              PLAYFIELD GI 3  # lamp 6, I/O group 5 index 2, at 0,0
-lamp 3            0              LEFT OUTLANE  # lamp 7, I/O group 5 index 3, at 21,353
-lamp 4            0              LEFT RETURN LANE  # lamp 8, I/O group 5 index 4, at 39,342
-lamp 5            0              RIGHT RETURN LANE  # lamp 9, I/O group 5 index 5, at 181,342
-lamp 6            0              RIGHT OUTLANE  # lamp 10, I/O group 5 index 6, at 199,353
+lamp 3            0x10000        LEFT OUTLANE  # lamp 7, I/O group 5 index 3, at 21,353; tie: Left outlane
+lamp 4            0x20000        LEFT RETURN LANE  # lamp 8, I/O group 5 index 4, at 39,342; tie: Left return lane
+lamp 5            0x40000        RIGHT RETURN LANE  # lamp 9, I/O group 5 index 5, at 181,342; tie: Right return lane
+lamp 6            0x80000        RIGHT OUTLANE  # lamp 10, I/O group 5 index 6, at 199,353; tie: Right outlane
 lamp 7            0              SHOOT AGAIN  # lamp 11, I/O group 5 index 7, at 110,448
 lamp 13           0              BONUS 1  # lamp 12, I/O group 5 index 8, at 72,353
 lamp 14           0              BONUS 2  # lamp 13, I/O group 5 index 9, at 80,353
@@ -379,40 +383,40 @@ lamp 24           0              3X  # lamp 27, I/O group 5 index 23, at 110,371
 lamp 25           0              DOUBLE SCORING  # lamp 28, I/O group 5 index 24, at 124,371
 lamp 26           0              JEDI MULTIBALL  # lamp 29, I/O group 5 index 25, at 110,388
 lamp 29           0              FO(R)CE  # lamp 30, I/O group 5 index 26, at 39,289
-lamp 30           0              FOR(C)E  # lamp 31, I/O group 5 index 27, at 39,275
+lamp 30           0x10000000     FOR(C)E  # lamp 31, I/O group 5 index 27, at 39,275; tie: Force target top
 lamp 31           0              FORC(E)  # lamp 32, I/O group 5 index 28, at 39,261
 lamp 33           0              LEFT LUKE 10K  # lamp 33, I/O group 5 index 29, at 29,195
 lamp 34           0              LEFT LUKE 25K  # lamp 34, I/O group 5 index 30, at 24,179
-lamp 35           0              LEFT LUKE ARROW  # lamp 35, I/O group 5 index 31, at 22,161
+lamp 35           0x8            LEFT LUKE ARROW  # lamp 35, I/O group 5 index 31, at 22,161; tie: Left luke orbit
 lamp 36           0              LEFT HAN 10K  # lamp 36, I/O group 5 index 32, at 43,172
 lamp 37           0              LEFT HAN 25K  # lamp 37, I/O group 5 index 33, at 41,155
-lamp 38           0              LEFT HAN ARROW  # lamp 38, I/O group 5 index 34, at 40,138
-lamp 43           0              TOP LANE LEFT  # lamp 39, I/O group 5 index 35, at 87,34
-lamp 44           0              TOP LANE CENTER  # lamp 40, I/O group 5 index 36, at 107,34
-lamp 45           0              TOP LANE RIGHT  # lamp 41, I/O group 5 index 37, at 126,34
+lamp 38           0x1800000      LEFT HAN ARROW  # lamp 38, I/O group 5 index 34, at 40,138; tie: Han ramp enter, Han ramp exit opto
+lamp 43           0x20           TOP LANE LEFT  # lamp 39, I/O group 5 index 35, at 87,34; tie: Top lane left
+lamp 44           0x40           TOP LANE CENTER  # lamp 40, I/O group 5 index 36, at 107,34; tie: Top lane center
+lamp 45           0x80           TOP LANE RIGHT  # lamp 41, I/O group 5 index 37, at 126,34; tie: Top lane right
 lamp 47           0              EXTRA BALL  # lamp 42, I/O group 5 index 38, at 122,171
-lamp 46           0              R2-D2 ARROW  # lamp 43, I/O group 5 index 39, at 122,152
+lamp 46           0x4200         R2-D2 ARROW  # lamp 43, I/O group 5 index 39, at 122,152; tie: R2-d2 lock 1, R2-d2 lock 2
 lamp 70           0              MILLENNIUM FALCON (OPTIONAL)  # lamp 44, I/O group 5 index 40, at 69,165
 lamp 42           0              R2-D2 MULTIBALL  # lamp 45, I/O group 5 index 41, at 112,227
-lamp 41           0              DROP TARGET RIGHT  # lamp 46, I/O group 5 index 42, at 102,212
-lamp 40           0              DROP TARGET CENTER  # lamp 47, I/O group 5 index 43, at 91,220
-lamp 39           0              DROP TARGET LEFT  # lamp 48, I/O group 5 index 44, at 80,228
+lamp 41           0x400000       DROP TARGET RIGHT  # lamp 46, I/O group 5 index 42, at 102,212; tie: Drop target right
+lamp 40           0x200000       DROP TARGET CENTER  # lamp 47, I/O group 5 index 43, at 91,220; tie: Drop target center
+lamp 39           0x100000       DROP TARGET LEFT  # lamp 48, I/O group 5 index 44, at 80,228; tie: Drop target left
 lamp 48           0              LEIA SPINNER 10K  # lamp 49, I/O group 5 index 45, at 142,141
 lamp 49           0              LEIA SPINNER 25K  # lamp 50, I/O group 5 index 46, at 142,125
-lamp 50           0              LEIA SPINNER ARROW  # lamp 51, I/O group 5 index 47, at 142,108
-lamp 51           0              RIGHT RAMP ARROW  # lamp 52, I/O group 5 index 48, at 163,179
+lamp 50           0x400          LEIA SPINNER ARROW  # lamp 51, I/O group 5 index 47, at 142,108; tie: Leia spinner opto
+lamp 51           0x2000         RIGHT RAMP ARROW  # lamp 52, I/O group 5 index 48, at 163,179; tie: Right ramp target
 lamp 52           0              TIE FIGHTER MULTIBALL  # lamp 53, I/O group 5 index 49, at 161,199
 lamp 53           0              TIE FIGHTER HURRY UP  # lamp 54, I/O group 5 index 50, at 160,215
-lamp 66           0              DEATH STAR (X2)  # lamp 55, I/O group 5 index 51, at 49,60
+lamp 66           0x2            DEATH STAR (X2)  # lamp 55, I/O group 5 index 51, at 49,60; tie: Death star target
 lamp 54           0              LEIA 10K  # lamp 59, I/O group 5 index 55, at 189,150
 lamp 55           0              LEIA 25K  # lamp 60, I/O group 5 index 56, at 193,134
-lamp 56           0              LEIA ARROW  # lamp 61, I/O group 5 index 57, at 197,117
-lamp 57           0              RIGHT LUKE ARROW  # lamp 62, I/O group 5 index 58, at 206,169
+lamp 56           0x800          LEIA ARROW  # lamp 61, I/O group 5 index 57, at 197,117; tie: Leia orbit
+lamp 57           0x1000         RIGHT LUKE ARROW  # lamp 62, I/O group 5 index 58, at 206,169; tie: Right luke orbit
 lamp 58           0              RIGHT LUKE 25K  # lamp 63, I/O group 5 index 59, at 201,185
 lamp 59           0              RIGHT LUKE 10K  # lamp 64, I/O group 5 index 60, at 196,201
-lamp 32           0              YODA MYSTERY  # lamp 65, I/O group 5 index 61, at 181,264
+lamp 32           0x20000000     YODA MYSTERY  # lamp 65, I/O group 5 index 61, at 181,264; tie: Yoda mystery target
 lamp 27           0              (F)ORCE  # lamp 66, I/O group 5 index 62, at 39,316
-lamp 28           0              F(O)RCE  # lamp 67, I/O group 5 index 63, at 39,302
+lamp 28           0x8000000      F(O)RCE  # lamp 67, I/O group 5 index 63, at 39,302; tie: Force target bottom
 lamp 60           0              RAMP 1  # lamp 68, I/O group 5 index 64, at 69,165
 lamp 61           0              RAMP 2  # lamp 69, I/O group 5 index 65, at 66,150
 lamp 62           0              RAMP 3  # lamp 70, I/O group 5 index 66, at 63,136
@@ -467,3 +471,72 @@ site block_start_1      0x0006ad3c 0xe92d4038 0xebfffbaf
 text block_name_1       Orbits
 site block_start_2      0x0005eff0 0xe92d4010 0xeb002b02
 text block_name_2       Ramps
+
+# ---- PAD-420: held coils by their board address (generation B, the object taken while held)
+# (coils/coil_job.sh: each held 2000 ms as a mode started, ONE command at its own powers, the game's OFF ~2 s on; a mode stop let it go early)
+site proc_exists          0x0015c5b4 0xe30d24d8 0xe3402058
+site proc_create          0x0015bf64 0xe30dc4d8 0xe340c058
+site proc_sleep           0x0015c0b4 0xe30d34d8 0xe3403058
+site adjustment           0x00311778 0xe92d40f0 0xe2504000
+site coil_fire             0x00300f80 0xe3500000 0xe52de004
+data coil_count            0x00603d1c
+data coil_table            0x005ffbf0
+value magnet_proc          13185
+site coil_take            0x0007aa14 0xe92d40f8 0xe30d74dc
+site coil_give            0x0007aad8 0xe3510000 0xe92d4038
+text right_gate_label     Right control gate
+value right_gate_dev      9
+value right_gate_ctl      32
+value right_gate_devoff   4
+value right_gate_off_slot 30
+data right_gate_obj      0x00586858
+text right_gate_drive     8 2 255 64 128
+text held_coils            right_gate
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x001b2434 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x0007c6d8 0xe92d4ff0 0xe24dd014   # 74 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_1          Wide fast strobe
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x000409f8 0xe92d40f0 0xe24dd00c   # 72 lights in its lamp groups, 0 light-runner commands, no colour given, 6.4 s
+text show_name_2          Wide strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x0002f78c 0xe92d4070 0xe24dd008   # 70 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_3          Wide chase
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x0002f880 0xe92d41f0 0xe3a06000   # 16 lights in its lamp groups, 0 light-runner commands, no colour given, 7.7 s
+text show_name_4          Small fast strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x00066330 0xe92d4ff0 0xe24dd014   # 7 lights in its lamp groups, 0 light-runner commands, no colour given, 7.3 s
+text show_name_5          Small strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x00066630 0xe92d4070 0xe24dd008   # 7 lights in its lamp groups, 0 light-runner commands, no colour given, 7.7 s
+text show_name_6          Small glow
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x0002fb00 0xe92d4ff0 0xe24dd00c   # 57 lights in its lamp groups, 0 light-runner commands, no colour given, 1.7 s
+text show_name_7          Fast strobe
+text show_kind_7          accent
+value show_secs_7         2

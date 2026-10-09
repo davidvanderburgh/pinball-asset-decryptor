@@ -1879,14 +1879,17 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                      "film_still", "film_sound", "own_extra", "lit_shots",
                                      "show_order", "multiball", "ball_save", "give_way", "block",
                                      "magnet", "scoop", "coils", "shield", "shaker", "shows", "wizard")}
-            self.set(reasons={}, dis=dis, editor_on=False, dup_ok=False,
+            self.set(reasons={}, dis=dis, hide={}, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
         reasons, dis = {}, {}
+        # PAD-420: a part the machine has no hardware for is left out of the page, not explained
+        absent = set(getattr(p, "absent", ()) or ())
+        hide = {part: True for part in absent}
         for part in self._PART_SECTIONS:
             why = p.why_not(part)
-            dis[part] = bool(why)
-            if why:
+            dis[part] = bool(why) or part in absent
+            if why and part not in absent:
                 reasons[part] = "Not on this game: " + why
         sound = []
         dis["countdown"] = bool(p.why_not("countdown"))
@@ -1959,7 +1962,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if why:
             reasons["events"] = "Not on this game: " + why
         editor_on = on and not self._no_port
-        self.set(reasons=reasons, dis=dis, editor_on=editor_on,
+        self.set(reasons=reasons, dis=dis, hide=hide, editor_on=editor_on,
                  dup_ok=bool(editor_on or (self._code_slug and not self._no_port)),
                  del_ok=bool(on or self._code_slug))
 
@@ -2701,6 +2704,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "shield_off": ("Not on this game: " + p.why_not("shield")) if p is not None and not p.can("shield")
                               else "" if p is not None else "No card picked yet.",
                 "shield_feature": getattr(p, "shield_rule", "") if p is not None else "",
+                # PAD-420: the mechanisms this machine does not have: their blocks are left out of the palette
+                "absent": list(getattr(p, "absent", ()) or ()) if p is not None else [],
                 # PAD-414: the shaker - the game's own shakes a block can play, and why the blocks are greyed if not
                 "shaker_off": ("Not on this game: " + p.why_not("shaker")) if p is not None and not p.can("shaker")
                               else "" if p is not None else "No card picked yet.",

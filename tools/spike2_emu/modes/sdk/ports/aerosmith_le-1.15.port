@@ -370,3 +370,10 @@ site block_start_1      0x0003b3d4 0xe92d4038 0xe3a000ed
 text block_name_1       Double Scoring
 site block_start_2      0x001310f0 0xe92d40f8 0xe3a000f2
 text block_name_2       Upper Playfield Orbit Rule
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x001e9514 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4

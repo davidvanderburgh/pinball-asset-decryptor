@@ -559,3 +559,10 @@ text block_name_16      Topper Frenzy
 site block_start_35     0x000f5254 0xe92d4ff0 0xe1a04000
 data block_obj_35       0x0b616108
 text block_name_35      2112 Wizard
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x002c4be8 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4

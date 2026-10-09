@@ -1,0 +1,78 @@
+{
+ "key": "aerosmith-1.16",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Super Scoring",
+   "start": "0xfa5d0",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000f3"
+   ],
+   "how": "counts AUD_SUPER_SCORING_STARTED (id 189) at 0xfa6f8; creates record(s) 243 (body 0xfaa6c),183 (body 0xfa2c4),244 (body 0xfa38c); reached by bl 0xaea0c (fn 0xae824); bl 0xd0530 (fn 0xd052c); tail b 0xfa740 (fn 0xfa72c); a caller uses the result (0xfa740: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Double Scoring",
+   "start": "0x3b6d4",
+   "words": [
+    "0xe92d4038",
+    "0xe3a000f1"
+   ],
+   "how": "counts AUD_DOUBLE_SCORING_STARTED (id 227) at 0x3b74c; sets game flag 101; creates record(s) 241 (body 0x3b5c8),153 (body 0x3b5a0); reached by bl 0xce900 (fn 0xce8fc)",
+   "confidence": "high",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Toys in the Attic Multiball",
+   "start": "0x111910",
+   "words": [
+    "0xe92d4030",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_TOYS_IN_THE_ATTIC_MULTIBALL_STARTED; serves balls via 0x111910 -> 0x3373e8 (count None)"
+  },
+  {
+   "name": "Medley Multiball",
+   "start": "0x8c15c",
+   "words": [
+    "0xe92d43f0",
+    "0xe24dd00c"
+   ],
+   "why": "multiball: named AUD_MEDLEY_MULTIBALL_STARTED; serves balls via 0x8c15c -> 0x3373e8 (count 3)"
+  },
+  {
+   "name": "Headphone Hurryup",
+   "start": "0x61e58",
+   "words": [
+    "0xe92d4010",
+    "0xe3400001"
+   ],
+   "why": "nothing refers to its entry (not reachable in this build)"
+  },
+  {
+   "name": "Love in an Elevator Multiball",
+   "start": "0x7eacc",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_LOVE_IN_AN_ELEVATOR_MULTIBALL_STARTED; serves balls via 0x7eacc -> 0x3373e8 (count 3)"
+  },
+  {
+   "name": "Wizard Mode Multiball",
+   "start": "0x125c1c",
+   "words": [
+    "0xe92d4070",
+    "0xe24dd008"
+   ],
+   "why": "multiball: named AUD_WIZARD_MODE_MULTIBALL_STARTED; serves balls via 0x125c1c -> 0x3373e8 (count 3)"
+  }
+ ],
+ "notes": "engine: audit_add 0x3be380, flag set 0x20c4c4, create-process 0x270230, live_records 0x270598, multiball_serve 0x3373e8. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). "
+}

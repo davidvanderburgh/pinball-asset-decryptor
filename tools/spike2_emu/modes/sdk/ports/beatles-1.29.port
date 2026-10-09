@@ -260,6 +260,8 @@ switch 48          0x1000000000    Left outlane
 switch 49          0x2000000000    Left return lane
 switch 50          0x4000000000    Right return lane
 switch 51          0x8000000000    Right outlane
+# PAD-420 run 21: switch 71, flags 0x1400 as 73-76 (broadcast through 0x96f08); the shot Mode > Magnet grabs on
+switch 71          0x10000000000   Top magnet opto
 
 # ---- callouts by role, scenes by role -------------------------------------------------------------
 # countdown: the challenge mode's song clock (0x40f70, AD_CHALLENGE_MODE_SONG_SECONDS) plays
@@ -497,3 +499,93 @@ value block_ret_1           0
 value block_ret_2           0
 value block_ret_3           0
 value block_ret_4           0
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c3.sh: held 2000 ms as a mode started, ONE command at the game's own powers - its TopMagnet's
+# hold, 190 for 1000 ms then 22 - ended on the board by itself; let go early by a mode stop, the game's OFF)
+site proc_exists          0x001ac098 0xe3052d00 0xe340205b
+site proc_create          0x001aba68 0xe305cd00 0xe340c05b
+site proc_sleep           0x001abb98 0xe3053d00 0xe340305b
+site adjustment           0x001a7f28 0xe92d40f0 0xe2504000
+site coil_fire             0x000c81e0 0xe3500000 0xe52de004
+data coil_count            0x005c1670
+data coil_table            0x00587120
+value magnet_proc          13185
+text magnet_top_label     Magnet top
+text magnet_top_drive     9 6 190 1000 22
+text held_coils            magnet_top
+# PAD-420: Mode > Magnet holds the ball with the held coil magnet_top, on a hit of the Top magnet opto (25 px from the
+# magnet on the playfield picture; its own switch line above)
+text magnet_coil           magnet_top
+value magnet_shot          0x10000000000
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x002e1254 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xf0
+value proc_exit_slots      4
+# PAD-420: the game's kill by id (id, 0xffff), which stops a show of the runtime's - the same code as the
+# event_cancel of the 45 other ports that name it (shows/findcancel.py)
+site event_cancel     0x001abce8 0xe92d40f8 0xe3056d00
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1               0x0003c500 0xe92d4030 0xe24dd014   # 100 lights in its lamp groups, 0 light-runner commands, yellow, white, 7.3 s
+text show_name_1          Wide yellow and white strobe
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x00037050 0xe92d41f0 0xed2d8b02   # 99 lights in its lamp groups, 0 light-runner commands, yellow, white, 4.0 s
+text show_name_2          Wide fast yellow and white strobe
+text show_kind_2          flashy
+value show_secs_2         4
+site show_3               0x0002cbcc 0xe92d47f0 0xe24dd008   # 98 lights in its lamp groups, 0 light-runner commands, white, 5.3 s
+text show_name_3          Wide white strobe
+text show_kind_3          flashy
+value show_secs_3         5
+site show_4               0x0001bc70 0xe92d4ff0 0xe24dd01c   # 92 lights in its lamp groups, 0 light-runner commands, blue, pink, 7.7 s
+text show_name_4          Wide blue and pink strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x0007ecd0 0xe92d4010 0xeb027f03   # 31 lights in its lamp groups, 0 light-runner commands, yellow, 7.5 s
+text show_name_5          Yellow strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x0007ed58 0xe92d4ff0 0xe24dd014   # 30 lights in its lamp groups, 0 light-runner commands, yellow, 7.8 s
+text show_name_6          Yellow glow
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x0004eb68 0xe92d41f0 0xe24dd010   # 22 lights in its lamp groups, 0 light-runner commands, yellow, 7.2 s
+text show_name_7          Small yellow glow
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x0007d98c 0xe92d4ff0 0xe24dd01c   # 24 lights in its lamp groups, 0 light-runner commands, yellow, 7.5 s
+text show_name_8          Small slow yellow fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x0001ba6c 0xe92d47f0 0xe24dd018   # 20 lights in its lamp groups, 0 light-runner commands, blue, pink, 7.8 s
+text show_name_9          Small slow blue and pink fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x00059790 0xe92d4ff0 0xe24dd024   # 18 lights in its lamp groups, 0 light-runner commands, yellow, green, 7.8 s
+text show_name_10         Small slow yellow and green fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x00036ddc 0xe92d4ff0 0xed2d8b02   # 86 lights in its lamp groups, 0 light-runner commands, blue, 2.1 s
+text show_name_11         Wide fast blue strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12              0x0007e714 0xe92d41f0 0xe24dd038   # 35 lights in its lamp groups, 0 light-runner commands, yellow, 1.5 s
+text show_name_12         Fast yellow strobe
+text show_kind_12         accent
+value show_secs_12        2

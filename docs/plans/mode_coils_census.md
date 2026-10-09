@@ -136,3 +136,54 @@ same code), a hit mid-hold on King Kong / Jaws (refused by the same `pm_coil_hol
    the device process); the slot then drafts itself. Only Godzilla, King Kong, Avengers, Venom and D&D name their
    handlers as strings.
 4. **C and D**: a different coil object entirely; a census of their Device/Diverter calls first.
+
+## PAD-420: held by the board address (the newest builds)
+
+PAD-420 built the mechanisms helper's route: a coil held by its BOARD ADDRESS (`text <name>_drive <node> <coil>
+<pulse power> <pulse ms> <hold power>`) through the framework's own `coil_fire` and coil table, with the coil's object
+taken while it holds where the game would otherwise switch it off (`value <name>_ctl`, the title's take/give, and
+`site <name>_get` or `data <name>_obj`), and the operator's "disabled" asked of the object (`value <name>_off_slot`).
+The powers are always the GAME's own for that coil, read off the program:
+
+| generation | class | its "on" | control | disabled | object |
+|---|---|---|---|---|---|
+| B, Iron Maiden 1.18 | `spike::ControlCoil` subclasses `LeftUpPost`, `RightUpPost` | v[42]: 200 for 64 ms, then 64 (up to 20 s) | +0x1c | v[30] | guarded singleton getters |
+| B, Deadpool 1.16, Led Zeppelin 1.22, Sword of Rage 1.19, Star Wars ELG 1.10 | `OrbitControlGates`, `RightControlGate` | v[42]: 255 for 64 ms, then 96 for 6 s (Star Wars ELG: 128) | +0x20 | v[30] | built by a STATIC INITIALIZER, no getter (`data <name>_obj`); calling the initializer builds them again and the game dies (Deadpool Pro, exit 4) |
+| A', Avengers 1.10, Jurassic Park 1.16 | `ControlCoil` (47 virtuals) subclasses: tower magnet and post, T-Rex magnet, raptor / orbit / control room / left inlane posts | v[44] fires the object's own fields: pulse power +0xa, pulse ms +0xc, hold power +0xe (the getter's constants: T-Rex magnet 255 for 300 ms then 128; tower magnet 255 / 300 then 100; posts 255 / 64 or 128 then 64) | +0x28 | v[31] | guarded singleton getters |
+
+Left out on purpose: Iron Maiden's tomb lock gate (holds locked balls), Deadpool LE's up/down ramp (pulse only), Jurassic
+Park LE's T-Rex jaw (its own mechanism). Scratch tools in `C:/tmp/PAD-420/coils` (bderived.py, aderived.py, offslot.py,
+bobj.py, takegive.py, mkstage_b.py, coil_job.sh, coil_verdict.py, coil_land.py).
+
+**C (the Device framework)**: each class has its own take/give at its own offset (Aerosmith LE: +0x18 for its gate and
+diverter classes, +0x14 for its toy box magnet), but the gates are driven through another service (ControlGate v[28]:
+a byte at +4, a time and a callback - run 9: that is a 40-slot TIMER service at 0x332c7c, not a coil driver; the gate's own commands go through a DRIVER object it holds at +0xc, by that object's v[4] (ControlGate v[27] at 0x238b6c), so the powers are that driver class's), not `coil_fire`. Do not hold a C gate by
+`coil_fire` until that service's powers are read. **C, the route to its powers (next):** the gate's +4 byte is its slot in a 40-entry driver table (0x332c7c sets the slot's time, callback and flags; ControlGate v[26] stops it). Rather than read that table's powers statically, a probe in a game can call the gate's own activation once (its v[27]) and read the ONE command the board receives ([coildrive], PAD_COIL_PROBE=1): that is the game's own command for that coil, which the board-address route then repeats. The same for a C title's magnets.
+
+Its magnets do call `coil_fire` (Aerosmith LE's toy box magnet: 255
+for 1 s, then 16).
+
+**C, run 12 (2026-10-08): what each kind of Device-framework coil needs on the board-address route.**
+- Posts, diverters and magnets whose `coil_fire` call names a CONSTANT device (mechs/holds: Mandalorian's posts 255
+  for 64 ms then 128 for 1.5 s, Munsters' magnet 255 for 1.2 s then 18, Venom LE's post 255/32 then 48 for 1 s, Foo
+  Fighters LE's van up post 255/32 then 128): the drive is that command, its pulse + hold the line's last word when
+  under 5 s; no object. The coil is found by its NAME in the rig's tables (coilmap), never by the inventory's node
+  numbers (a derived ladder, wrong on some builds), and its device from the runtime's coil list: a flipper's device
+  also has a hold command (Foo Fighters LE device 3, 128/40 then 48), so a device is never picked by its command.
+- **ControlGate, 30 virtuals** (Aerosmith LE `UpperOrbitControlGate`, Guardians/LE `OrbitControlGates`, JP the Pin
+  `LeftControlGate`, Star Wars LE/Pro `TopLaneControlGates`): ONE static object per build (`gatecalls.py`: Aerosmith
+  LE 0x61eb38, Guardians LE 0x5f391c, Guardians 0x5f19b0, JP 0x59300c, Star Wars LE 0x68f014, Pro 0x68dedc). The game
+  raises it with v[0](ticks), capped at 0xbb ticks of 16 ms, through a 40-slot DRIVER (0x332c7c on Aerosmith LE) that
+  sends the board 255 for 250 ms + 255 for 250 ms every 250 ms ([coildrive], Aerosmith LE node 10 coil 0, Guardians
+  LE node 9 coil 0) and never touches the coil records. Every constant activation the game makes is 93 ticks (1488
+  ms; Guardians also 77). So: drive `255 250 255 1488`, `data <name>_obj`, `value <name>_ctl 12` (its active flag:
+  the "game wants it" word, as the records cannot say so), `value <name>_off_slot 5` (v[5]: the operator's
+  adjustment at +6 == 1). The runtime sends no OFF of its own when the game takes such a coil (commit 51cf2624).
+- **ControlGate, 24 virtuals** (James Bond LE/Pro `TopControlGate`, Elvira `LeftControlGate`): v[21] raises it with
+  the game's own `coil_fire(device at +0x12, 255, 64 ms, 96, 20000 ms)` - through the coil records; v[7] sets a
+  countdown at +0x1c (0xbb cap), v[3] the operator's "disabled" (adjustment at +4). So: drive `255 64 96`, the
+  object, `_ctl 28`, `_off_slot 3`, `_devoff 18`. Objects: JB Pro 0x821318, JB LE 0x81fad8, Elvira 0x87ed84.
+- Not yet: the toy box magnet and the Guardians magnets (their commands come from object fields, no constant
+  device), Star Wars LE's `ExitDiverter`, Elvira (no game starts on the direct harness), Beatles (no constant hold).
+Scratch: `C:/tmp/PAD-420/coils` cgen.py (stages, GATES), fill_c.py (rig side), coil_job_c.sh, c_verdict.py,
+gatecalls.py; chain30 runs 25 builds.

@@ -1,0 +1,572 @@
+# star_wars_pro 1.31 - PAD-420: one port per newest build, from this build's framework-generation draft and the same
+# title's proven port, with other titles' feature lines taken out (docs/plans/pad420_mode_sweep.md).
+# Emulator-proven 2026-10-07 by a full build check (modes/gamecheck.sh play full, the stock card, hidden, muted):
+# the runtime hooked the game, 34 of its 36 shots came from their switches, a drain ended a ball,
+# a tilted ball and three balls to the game's end; events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end, tilt_warning, tilt, game_over.
+# Shots no press made: Left outlane, Right outlane.
+
+game           star_wars_pro
+version        1.31
+
+# ---- functions ----
+site tick             0x002bd27c 0xe92d4038 0xe3a00037
+site sound_lookup     0x0024ac68 0xe92d4038 0xe1a05000
+site score_add        0x00150e10 0xe3001c82 0xe3401070
+site callout          0x001b2060 0xe92d4010 0xe309e358
+site callout_nth      0x001b2214 0xe92d4010 0xe309e358
+site lamp_group       0x001a3928 0xe92d4038 0xe1a04000
+site award_screen     0x0031f620 0xe92d4070 0xe24dd008
+site string_new       0x00016870 0xe28fc605 0xe28ccaec
+site dynamic_cast     0x0001627c 0xe28fc605 0xe28ccaec
+site resource_get     0x00420ea4 0xe92d43f0 0xe1a04000
+site find_node        0x004b95c4 0xe92d4070 0xe24dd008
+site set_text         0x0049cd8c 0xe92d47f0 0xe1a06000
+site surface_state    0x004ac2f0 0xe5900550 0xe2800008
+site player_advance   0x0031fa18 0xe2501000 0x012fff1e
+site display_draw     0x004262a4 0xe3520001 0x812fff1e
+site sound_play       0x001b2060 0xe92d4010 0xe309e358
+site sound_nth        0x001b2214 0xe92d4010 0xe309e358
+site sound_active     0x001b27d4 0xe59f3034 0xe2831e62
+site sound_stop       0x001b292c 0xe92d40f8 0xe1a06000
+site sound_worker     0x001b164c 0xe92d4ff0 0xe2507000
+site stock_any_running 0x0009ef40 0xe92d4070 0xe309616c
+site stock_battle_running 0x0009ef40 0xe92d4070 0xe309616c
+site hook_dispatch    0x002e8980 0xe35000cf 0xe92d4038
+site display_effect_start 0x0043c3f8 0xe92d47f0 0xe2516000
+site display_priority_now 0x0043cca0 0xe5d0000e 0xe12fff1e
+site stock_rule_get   0x0009e5c8 0xe3510024 0xe92d4008
+site event_post_replacing 0x002d807c 0xe92d4070 0xe1a05001
+site event_cancel     0x002d7fec 0xe92d40f8 0xe30d61b0
+site switch_hit       0x00288828 0xe2503000 0x012fff1e
+site switch_hit2      0x002888c8 0xe92d4010 0xe2504000
+site switch_edge      0x0011cfb0 0xe30c3128 0xe3403069
+site switch_drain     0x0011dc90 0xe92d4ff0 0xe301996c
+site surface_find     0x004b98b8 0xe92d4070 0xe24dd008
+site surface_set_video 0x004b0f9c 0xe5d030d4 0xe92d4ff0
+site surface_play     0x004aeda8 0xe5d030d4 0xe92d43f0
+site surface_stop     0x004ae558 0xe5d030d4 0xe92d40f0
+site find_text        0x004b9060 0xe92d4070 0xe24dd008
+site agent_header     0x00506aa0 0xe92d40f8 0xe2505000
+site agent_begin      0x0051140c 0xe590c004 0xe1a00001
+site balls_in_play    0x003a9a74 0xe92d4010 0xe3004870
+site multiball_serve  0x003a9bf0 0xe92d41f0 0xe300ec82
+site ball_end         0x003c9e74 0xe92d4070 0xe1a06000
+site game_event       0x0011b338 0xe92d47f0 0xe1a09000
+site scene_show       0x0031fa44 0xe92d4070 0xe30d41b4
+site frame_end        0x0031fc4c 0xe3500000 0xe92d40f8
+site frame_kick       0x00425b58 0xe92d4070 0xe2906008
+site coil_fire        0x003523ac 0xe3500000 0xe52de004
+site adjustment       0x001631e8 0xe92d40f0 0xe2504000
+site proc_exists      0x002d839c 0xe30d21b0 0xe3402069
+site proc_create      0x002d7d4c 0xe30dc1b0 0xe340c069
+site proc_sleep       0x002d7e9c 0xe30d31b0 0xe3403069
+site live_records     0x002d83e4 0xe30d21b0 0xe3402069
+site layer_add        0x0008b36c 0xe30dc1b4 0xe1a03002
+site layer_remove     0x0008b384 0xe92d40f8 0xe5913004
+
+# ---- globals ----
+data cur_player             0x006110fc
+data scores                 0x006911d0
+data mode_mask              0x00700c82
+data event_head             0x0069d1b0
+data event_current          0x0069d1b4
+data resource_manager       0x006fd1a0
+data typeinfo_resource      0x0054bbf8
+data typeinfo_scene_player  0x005a9e4c
+data display_holder         0x006fd120
+data award_screen_arg       0x0060484c
+data sound_channels         0x00699464
+data sound_queue            0x00699cd8
+data sound_requests         0x0065aab0
+data sound_request_count    0x00549c28
+data lamp_layers            0x0069a628
+data light_count            0x0069be78
+data score_mult             0x0060cdf0
+data switch_records         0x0068f974
+data switch_count           0x0069c128
+data stock_mode_table       0x0060702c
+data typeinfo_cmode         0x00555bec
+data typeinfo_cmode_mball   0x00555d50
+data message_count          0x00528a24
+data message_remap          0x00700404
+data message_table          0x00629450
+data game_flags             0x006973b4
+data game_flag_count        0x00527eb0
+data typeinfo_vmi           0x005a7b4c
+
+# ---- values ----
+value mode_mask_busy        0x210
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value stock_slot_shot   42
+value stock_slot_active     15
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      8
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_desc_via       0x8
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+value countdown_first 1
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      37
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+# value countdown_step NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+value game_flags_at         4
+# value clip_surface_hide NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value clip_layer_priority NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value layer_video_at NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+# value countdown_stride NOT PLACED: left off - another title's value (portgen.TITLE_VALUES)
+
+# ---- shots from the switch drain ----
+switch 47   0x1                Left outlane
+switch 48   0x2                Left return lane
+switch 49   0x4                Right return lane
+switch 50   0x8                Right outlane
+switch 51   0x10               Left orbit
+switch 52   0x20               Left ramp opto
+switch 53   0x40               Right eject
+switch 56   0x80               Spinner
+switch 57   0x100              Mini target 1
+switch 59   0x200              Right slingshot
+switch 60   0x400              Left slingshot
+switch 69   0x800              (F)orce drop target
+switch 70   0x1000             F(o)rce drop target
+switch 71   0x2000             Fo(r)ce drop target
+switch 72   0x4000             For(c)e drop target
+switch 73   0x8000             Forc(e) drop target
+switch 74   0x10000            Mini target 2
+switch 75   0x20000            Mini target 3
+switch 76   0x40000            Mini target 4
+switch 77   0x80000            Mini target 5
+switch 78   0x100000           Mini target 6
+switch 80   0x200000           Left loop enter
+switch 81   0x400000           Right orbit
+switch 82   0x800000           3 Bank target left
+switch 83   0x1000000          3 Bank target center
+switch 84   0x2000000          3 Bank target right
+switch 85   0x4000000          10 Pt
+switch 86   0x8000000          Inner loop left
+switch 87   0x10000000         Inner loop right
+switch 88   0x20000000         Top lane left
+switch 89   0x40000000         Top lane center
+switch 90   0x80000000         Top lane right
+switch 91   0x100000000        Left pop bumper
+switch 92   0x200000000        Right pop bumper
+switch 93   0x400000000        Top sling
+switch 94   0x800000000        Right ramp
+
+# ---- scenes ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene hud                  9db420cfd5ec648153ce2e0f17dfcbc3a6b43df6
+
+# ---- callouts and text ----
+text example_start_shot     Mini target 1
+
+# ---- events ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_start    0x27
+event bonus_end      0x28
+event tilt_warning   0xc7
+event tilt           0xc5
+event game_over      0x47
+
+# ---- lamps ----
+# shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's
+# own names (a shot's switch name against the insert's: its arrow, its target's own light, its lane's light, the
+# letter a target spells) and, where the device table places both, their playfield positions. A shot with no
+# insert of its own stays untied; the inserts no shot owns (progress lights, modes, GI, flashers) stay 0.
+lamp 390          0              DEATH STAR LASER 1  # lamp 95, I/O group 8 index 40, at 105,146
+lamp 391          0              DEATH STAR LASER 2  # lamp 96, I/O group 8 index 41, at 105,146
+lamp 392          0              DEATH STAR LASER 3  # lamp 97, I/O group 8 index 42, at 105,146
+lamp 393          0              DEATH STAR LASER 4  # lamp 98, I/O group 8 index 43, at 105,146
+lamp 394          0              DEATH STAR LASER CENTER  # lamp 99, I/O group 8 index 44, at 105,146
+lamp 361,362,363  0x40           RIGHT EJECT ARROW  # lamp 101, I/O group 8 index 9, at 272,326; tie: Right eject
+lamp 364,365,366  0              RIGHT EJECT X  # lamp 102, I/O group 8 index 13, at 263,358
+lamp 355,356,357  0x400000       RIGHT ORBIT ARROW  # lamp 103, I/O group 8 index 25, at 251,290; tie: Right orbit
+lamp 349,350,351  0x800000000    RIGHT RAMP ARROW  # lamp 104, I/O group 8 index 29, at 224,272; tie: Right ramp
+lamp 358,359,360  0              RIGHT ORBIT X  # lamp 105, I/O group 8 index 34, at 240,318
+lamp 352,353,354  0              RIGHT RAMP X  # lamp 106, I/O group 8 index 37, at 214,301
+lamp 328,329,330  0              INNER LOOP LEFT X  # lamp 107, I/O group 9 index 1, at 98,255
+lamp 319,320,321  0x10           LEFT ORBIT ARROW  # lamp 108, I/O group 9 index 8, at 52,216; tie: Left orbit
+lamp 322,323,324  0              LEFT ORBIT X  # lamp 109, I/O group 9 index 11, at 58,245
+lamp 325,326,327  0x8000000      INNER LOOP LEFT ARROW  # lamp 110, I/O group 9 index 19, at 92,226; tie: Inner loop left
+lamp 335,336,337  0              LEFT RAMP X  # lamp 111, I/O group 9 index 22, at 130,257
+lamp 341,342,343  0x10000000     INNER LOOP RIGHT ARROW  # lamp 112, I/O group 9 index 26, at 153,167; tie: Inner loop right
+lamp 344,345,346  0              INNER LOOP RIGHT X  # lamp 113, I/O group 9 index 29, at 158,198
+lamp 373,374,375  0              XWING 3  # lamp 114, I/O group 9 index 34, at 142,219
+lamp 332,333,334  0x20           LEFT RAMP ARROW  # lamp 115, I/O group 9 index 37, at 126,227; tie: Left ramp opto
+lamp 395          0x40           RIGHT EJECT  # lamp 116, I/O group 8 index 32, at 286,261; tie: Right eject
+lamp 396          0              LEFT SIDE FL  # lamp 117, I/O group 9 index 15, at 51,312
+lamp 312          0              SHOOT AGAIN  # lamp 120, I/O group 7 index 3, at 147,594
+lamp 399          0x400          LEFT SLING FL  # lamp 121, I/O group 7 index 4, at 71,511; tie: Left slingshot
+lamp 400          0x200          RIGHT SLING FL  # lamp 122, I/O group 7 index 5, at 224,511; tie: Right slingshot
+lamp 298          0              TATOOINE MINI  # lamp 123, I/O group 7 index 16, at 215,439
+lamp 301          0              TATOOINE THREE  # lamp 124, I/O group 7 index 19, at 208,460
+lamp 300          0              TATOOINE TWO  # lamp 125, I/O group 7 index 18, at 202,446
+lamp 299          0              TATOOINE ONE  # lamp 126, I/O group 7 index 17, at 193,435
+lamp 308          0              LUKE  # lamp 127, I/O group 7 index 12, at 184,519
+lamp 309          0              R2D2  # lamp 128, I/O group 7 index 13, at 160,519
+lamp 310          0              LEIA  # lamp 129, I/O group 7 index 14, at 135,519
+lamp 311          0              HAN  # lamp 130, I/O group 7 index 15, at 111,519
+lamp 302          0              ENDOR MINI  # lamp 131, I/O group 7 index 8, at 147,556
+lamp 303          0              ENDOR ONE  # lamp 132, I/O group 7 index 11, at 133,539
+lamp 304          0              ENDOR TWO  # lamp 133, I/O group 7 index 10, at 147,541
+lamp 305          0              ENDOR THREE  # lamp 134, I/O group 7 index 9, at 162,539
+lamp 306          0              JEDI  # lamp 135, I/O group 7 index 38, at 107,410
+lamp 289          0              SKILL SHOT  # lamp 136, I/O group 7 index 21, at 254,439
+lamp 288          0x8            RIGHT OUTLANE  # lamp 137, I/O group 7 index 22, at 261,463; tie: Right outlane
+lamp 287          0x4            RIGHT RETURNLANE  # lamp 138, I/O group 7 index 23, at 237,473; tie: Right return lane
+lamp 294          0              DEATHSTAR MINI  # lamp 139, I/O group 7 index 24, at 147,399
+lamp 295          0              DEATHSTAR ONE  # lamp 140, I/O group 7 index 25, at 133,417
+lamp 296          0              DEATHSTAR TWO  # lamp 141, I/O group 7 index 26, at 147,415
+lamp 297          0              DEATHSTAR THREE  # lamp 142, I/O group 7 index 27, at 162,417
+lamp 290          0              HOTH MINI  # lamp 143, I/O group 7 index 32, at 79,438
+lamp 291          0              HOTH ONE  # lamp 144, I/O group 7 index 33, at 86,460
+lamp 292          0              HOTH TWO  # lamp 145, I/O group 7 index 34, at 93,446
+lamp 293          0              HOTH THREE  # lamp 146, I/O group 7 index 35, at 102,435
+lamp 285          0x1            LEFT OUTLANE  # lamp 147, I/O group 7 index 36, at 36,463; tie: Left outlane
+lamp 286          0x2            LEFT RETURNLANE  # lamp 148, I/O group 7 index 37, at 58,473; tie: Left return lane
+lamp 307          0              VICTORY MULTI-BALL  # lamp 149, I/O group 7 index 20, at 188,410
+lamp 339          0              SUPER JACKPOT  # lamp 150, I/O group 7 index 40, at 138,318
+lamp 340          0              ENDOR  # lamp 151, I/O group 7 index 41, at 142,347
+lamp 317          0x8000         FORC(E)  # lamp 152, I/O group 7 index 42, at 78,350; tie: Forc(e) drop target
+lamp 316          0x4000         FOR(C)E  # lamp 153, I/O group 7 index 43, at 76,367; tie: For(c)e drop target
+lamp 315          0x2000         FO(R)CE  # lamp 154, I/O group 7 index 44, at 74,384; tie: Fo(r)ce drop target
+lamp 314          0x1000         F(O)RCE  # lamp 155, I/O group 7 index 45, at 72,401; tie: F(o)rce drop target
+lamp 313          0x800          (F)ORCE  # lamp 156, I/O group 7 index 46, at 70,418; tie: (F)orce drop target
+lamp 318          0              LIGHT SABER DUEL  # lamp 157, I/O group 7 index 47, at 96,387
+lamp 382          0              XWING 8  # lamp 158, I/O group 8 index 8, at 249,349
+lamp 381          0x40000        MINI 4  # lamp 159, I/O group 8 index 12, at 254,328; tie: Mini target 4
+lamp 383          0x80000        MINI 5  # lamp 160, I/O group 8 index 16, at 264,390; tie: Mini target 5
+lamp 368          0              TATOOINE  # lamp 161, I/O group 8 index 17, at 235,409
+lamp 367          0              MYSTERY  # lamp 162, I/O group 8 index 18, at 248,385
+lamp 384          0              XWING 9  # lamp 163, I/O group 8 index 19, at 255,408
+lamp 379          0x20000        MINI 3  # lamp 164, I/O group 8 index 24, at 251,255; tie: Mini target 3
+lamp 380          0              XWING 7  # lamp 165, I/O group 8 index 28, at 243,275
+lamp 331          0              DEATH STAR  # lamp 166, I/O group 9 index 0, at 103,283
+lamp 369          0x100          MINI 1  # lamp 167, I/O group 9 index 4, at 78,267; tie: Mini target 1
+lamp 370          0              XWING 1  # lamp 168, I/O group 9 index 5, at 83,289
+lamp 401          0              MILLENNIUM FALCON FL  # lamp 169, I/O group 9 index 6, at 48,380
+lamp 397          0x80           SPINNER FL  # lamp 170, I/O group 9 index 14, at 66,284; tie: Spinner
+lamp 338          0              EXTRA BALL  # lamp 171, I/O group 9 index 16, at 134,288
+lamp 372          0              XWING 2  # lamp 172, I/O group 9 index 17, at 107,233
+lamp 371          0x10000        MINI 2  # lamp 173, I/O group 9 index 18, at 103,211; tie: Mini target 2
+lamp 347          0              VIDEO MODE  # lamp 174, I/O group 9 index 25, at 160,229
+lamp 348          0              HOTH  # lamp 175, I/O group 9 index 32, at 160,258
+lamp 376          0              XWING 4  # lamp 176, I/O group 9 index 33, at 177,242
+lamp 378          0              XWING 6  # lamp 177, I/O group 9 index 44, at 208,247
+lamp 377          0              XWING 5  # lamp 178, I/O group 9 index 45, at 193,245
+lamp 385          0x20000000     TOPLANE LEFT  # lamp 179, I/O group 9 index 46, at 190,73; tie: Top lane left
+lamp 386          0x40000000     TOPLANE CENTER  # lamp 180, I/O group 9 index 47, at 215,78; tie: Top lane center
+lamp 387          0x80000000     TOPLANE RIGHT  # lamp 181, I/O group 9 index 48, at 240,82; tie: Top lane right
+lamp 388          0x100000000    LEFT POP BUMPER  # lamp 182, I/O group 9 index 49, at 178,141; tie: Left pop bumper
+lamp 389          0x200000000    RIGHT POP BUMPER  # lamp 183, I/O group 9 index 50, at 253,146; tie: Right pop bumper
+lamp 398          0              POPS FL  # lamp 184, I/O group 9 index 51, at 204,135
+lamp 405          0              RIGHT TIE FIGHTER FL  # lamp 186, I/O group 9 index 43, at 202,196
+lamp 402          0              LEFT DEATH STAR FL  # lamp 187, I/O group 9 index 40, at 33,252
+lamp 403          0              LEFT TIE FIGHTER FL  # lamp 188, I/O group 9 index 41, at 37,277
+lamp 404          0              RIGHT DEATH STAR FL  # lamp 189, I/O group 9 index 42, at 200,185
+lamp 408          0              LEFT RED GI  # lamp 190, I/O group 7 index 0, at 0,0
+lamp 410          0              LEFT BLUE GI  # lamp 191, I/O group 7 index 2, at 0,0
+lamp 409          0              LEFT WHITE GI  # lamp 192, I/O group 7 index 1, at 0,0
+lamp 411          0              RIGHT RED GI  # lamp 193, I/O group 8 index 0, at 0,0
+lamp 413          0              RIGHT BLUE GI  # lamp 194, I/O group 8 index 2, at 0,0
+lamp 412          0              RIGHT WHITE GI  # lamp 195, I/O group 8 index 1, at 0,0
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+# #
+#  
+# P
+# A
+# D
+# -
+# 4
+# 2
+# 0
+# :
+#  
+# b
+# l
+# o
+# c
+# k
+#  
+# l
+# i
+# n
+# e
+# s
+#  
+# r
+# e
+# a
+# d
+#  
+# f
+# r
+# o
+# m
+#  
+# t
+# h
+# i
+# s
+#  
+# p
+# r
+# o
+# g
+# r
+# a
+# m
+#  
+# w
+# i
+# t
+# h
+#  
+# s
+# t
+# a
+# r
+# _
+# w
+# a
+# r
+# s
+# _
+# l
+# e
+# -
+# 1
+# .
+# 3
+# 0
+# '
+# s
+#  
+# s
+# t
+# a
+# r
+# t
+#  
+# s
+# l
+# o
+# t
+#  
+# (
+# 8
+# )
+site block_start_0      0x000b5b30 0xe92d4070 0xe1a04000
+data block_obj_0        0x006740d0
+text block_name_0       Hoth I
+site block_start_1      0x000b6620 0xe92d4038 0xe1a04000
+data block_obj_1        0x0067417c
+text block_name_1       Hoth II a
+site block_start_2      0x000999e8 0xe5902000 0xe92d4038
+data block_obj_2        0x0067425c
+text block_name_2       Hoth II B
+site block_start_3      0x000999e8 0xe5902000 0xe92d4038
+data block_obj_3        0x0067435c
+text block_name_3       Hoth III a
+site block_start_4      0x000999e8 0xe5902000 0xe92d4038
+data block_obj_4        0x00674420
+text block_name_4       Hoth III B
+site block_start_6      0x000a83ac 0xe92d4038 0xebffc58c
+data block_obj_6        0x006745bc
+text block_name_6       Deathstar I
+site block_start_7      0x000a8f58 0xe92d4010 0xe1a04000
+data block_obj_7        0x00674668
+text block_name_7       Deathstar II a
+site block_start_8      0x000999e8 0xe5902000 0xe92d4038
+data block_obj_8        0x0067474c
+text block_name_8       Deathstar II B
+site block_start_9      0x000999e8 0xe5902000 0xe92d4038
+data block_obj_9        0x00674814
+text block_name_9       Deathstar III
+site block_start_11     0x000999e8 0xe5902000 0xe92d4038
+data block_obj_11       0x006749cc
+text block_name_11      Endor I
+site block_start_12     0x000999e8 0xe5902000 0xe92d4038
+data block_obj_12       0x00674ab4
+text block_name_12      Endor II
+site block_start_13     0x000999e8 0xe5902000 0xe92d4038
+data block_obj_13       0x00674bac
+text block_name_13      Endor III
+site block_start_15     0x000999e8 0xe5902000 0xe92d4038
+data block_obj_15       0x00674d94
+text block_name_15      Tatooine I
+site block_start_16     0x000be0e0 0xe92d4010 0xe1a04000
+data block_obj_16       0x00674e58
+text block_name_16      Tatooine II
+site block_start_17     0x000999e8 0xe5902000 0xe92d4038
+data block_obj_17       0x00674f40
+text block_name_17      Tatooine III
+site block_start_21     0x0009b2cc 0xe92d4010 0xe1a04000
+data block_obj_21       0x00675140
+text block_name_21      Rescue Leia Hurry Up
+site block_start_22     0x0009b2cc 0xe92d4010 0xe1a04000
+data block_obj_22       0x00675208
+text block_name_22      Rescue Leia Hurry Up
+site block_start_23     0x0009b2cc 0xe92d4010 0xe1a04000
+data block_obj_23       0x006752d0
+text block_name_23      Rescue Leia Hurry Up
+site block_start_24     0x0009b2cc 0xe92d4010 0xe1a04000
+data block_obj_24       0x00675398
+text block_name_24      Rescue Leia Hurry Up
+site block_start_25     0x000bd2e4 0xe92d4010 0xe1a04000
+data block_obj_25       0x00675460
+text block_name_25      Rescue Luke Hurry Up
+site block_start_26     0x000b59a0 0xe92d4010 0xe1a04000
+data block_obj_26       0x00675530
+text block_name_26      Hoth Hyperspace Hurry Up
+site block_start_28     0x000c7bc8 0xe92d4010 0xe1a04000
+data block_obj_28       0x00675700
+text block_name_28      Hspace Hurry Up
+site block_start_29     0x000d7160 0xe5903000 0xe92d41f0
+data block_obj_29       0x006757d0
+text block_name_29      Shooting Gallery
+site block_start_30     0x000eb7f0 0xe92d4010 0xe1a04000
+data block_obj_30       0x00675880
+text block_name_30      Tie Hurry Up
+site block_start_32     0x00048f2c 0xe92d40f8 0xe1a04000
+data block_obj_32       0x00675a68
+text block_name_32      Escape Boba Fett
+site block_start_33     0x0008ee48 0xe92d47f0 0xe1a04000
+data block_obj_33       0x00675bc8
+text block_name_33      Lightsaber Duel
+site block_start_34     0x000999e8 0xe5902000 0xe92d4038
+data block_obj_34       0x00675d44
+text block_name_34      Lightsaber Duel Ready
+site block_start_35     0x000999e8 0xe5902000 0xe92d4038
+data block_obj_35       0x00675f54
+text block_name_35      Jedi Wizard Mball Ready
+
+# PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
+callout countdown         765   # Zero! / One!; star_wars_le-1.30's 760 says the same lines
+callout ten_seconds       766   # Hurry up! / Hurry up!
+
+# ---- PAD-420: held coils by their board address (generation C)
+# (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
+# game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)
+data coil_count            0x0069da60
+data coil_table            0x006ff198
+value magnet_proc          13185
+text gates_label          Left/right control gates
+text gates_drive          9 5 255 250 255 1488
+data gates_obj           0x0068dedc
+value gates_ctl           12
+value gates_off_slot      5
+text held_coils            gates
+
+# ---- PAD-420: the scoop (a mode holds a ball there; the kick-out stays the game's). The process
+# calls, the scoop's handler and its slot as the mechanisms helper placed them; seen holding in the
+# emulator (see SCOOP_PROVEN)
+value scoop_event          2
+site scoop_handler         0x00098dfc 0xe3003c82 0xe2400002
+data scoop_slot           0x00628f18
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+# game's "free every lamp group this process owns" (its process exit calls it for a show it started
+# itself), and where a process record keeps its exit hooks ({fn, arg} pairs). Found by shows/procexit.py.
+site lamp_free_owner      0x0026d328 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13200
+site show_1               0x000915fc 0xe92d4070 0xe24dd010   # 497 lights in its lamp groups, 0 light-runner commands, blue, 7.7 s
+text show_name_1          Wide blue strobe
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2               0x000b374c 0xe92d4070 0xeb02fb10   # 475 lights in its lamp groups, 0 light-runner commands, blue, white, 7.8 s
+text show_name_2          Wide blue and white chase
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3               0x0008ca14 0xe92d4ff0 0xe24dd044   # 455 lights in its lamp groups, 0 light-runner commands, red, white, 7.5 s
+text show_name_3          Wide red and white glow
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4               0x00091480 0xe92d4070 0xe24dd010   # 400 lights in its lamp groups, 0 light-runner commands, blue, 6.0 s
+text show_name_4          Wide fast blue strobe
+text show_kind_4          flashy
+value show_secs_4         8
+site show_5               0x000563d4 0xe92d4070 0xe24dd010   # 356 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_5          Strobe
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6               0x000912f0 0xe92d4070 0xe24dd010   # 353 lights in its lamp groups, 0 light-runner commands, red, blue, 6.0 s
+text show_name_6          Red and blue strobe
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7               0x0008b870 0xe92d4ff0 0xe24dd01c   # 349 lights in its lamp groups, 0 light-runner commands, green, 6.4 s
+text show_name_7          Green strobe
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8               0x000566e8 0xe92d4070 0xe24dd010   # 344 lights in its lamp groups, 0 light-runner commands, red, 7.8 s
+text show_name_8          Slow red fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9               0x0008c364 0xe92d47f0 0xed2d8b02   # 276 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_9          Slow fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10              0x000b09a4 0xe92d4ff0 0xe3a00031   # 6 lights in its lamp groups, 0 light-runner commands, green, 7.8 s
+text show_name_10         Small slow green fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11              0x00091050 0xe92d4070 0xe3a00005   # 146 lights in its lamp groups, 0 light-runner commands, blue, 0.8 s
+text show_name_11         Blue strobe
+text show_kind_11         accent
+value show_secs_11        1
+site show_12              0x0009112c 0xe92d4070 0xe3a00003   # 146 lights in its lamp groups, 0 light-runner commands, red, 0.8 s
+text show_name_12         Red strobe
+text show_kind_12         accent
+value show_secs_12        1

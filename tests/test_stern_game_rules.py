@@ -12,11 +12,16 @@ SDK = Path(__file__).resolve().parent.parent / "tools" / "spike2_emu" / "modes" 
 RUNTIME = SDK / "pad_mode_runtime.c"
 PORTS = sorted((SDK / "ports").glob("*.port"))
 #: the titles whose ports carry the rule lines, and how many (read_rules on each program, 2026-10-06)
-RULED = {"godzilla_le-1.16": 24, "godzilla_pro-1.15": 24, "godzilla_pro-1.16": 24,
-         "avengers_infinity_le-1.09": 23, "deadpool_le-1.14": 12, "deadpool_pro-1.16": 12,
-         "dungeons_and_dragons_le-1.00": 18, "foo_fighters_le-1.04": 17, "jaws_le-1.02": 22,
-         "john_wick_le-1.01": 20, "king_kong_le-0.97": 21, "mando_le-1.44": 12, "sword_of_rage_le-1.18": 14,
-         "venom_le-1.07": 19}
+RULED = {"avengers_infinity_le-1.09": 23, "avengers_infinity_le-1.10": 23, "avengers_infinity_pro-1.10": 23,
+         "deadpool_le-1.14": 12, "deadpool_le-1.16": 12, "deadpool_pro-1.16": 12,
+         "dungeons_and_dragons_le-1.00": 18, "dungeons_and_dragons_le-1.10": 18,
+         "dungeons_and_dragons_pro-1.10": 18, "foo_fighters_le-1.04": 17, "foo_fighters_pro-1.04": 17,
+         "godzilla_le-1.16": 24, "godzilla_pro-1.15": 24, "godzilla_pro-1.16": 24, "jaws_le-1.02": 22,
+         "jaws_pro-1.02": 23,
+         "john_wick_le-1.01": 20, "john_wick_le-1.02": 20, "john_wick_pro-1.02": 21, "king_kong_le-0.97": 21,
+         "king_kong_pro-0.97": 21, "mando_le-1.44": 12, "mando_le-1.45": 12, "mando_pro-1.45": 12,
+         "sword_of_rage_le-1.18": 14, "sword_of_rage_le-1.19": 14, "sword_of_rage_pro-1.19": 13,
+         "venom_le-1.07": 19, "venom_pro-1.07": 19}
 
 
 @pytest.mark.parametrize("cls, name", [

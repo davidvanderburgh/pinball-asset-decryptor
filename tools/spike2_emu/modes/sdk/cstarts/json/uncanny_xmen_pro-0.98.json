@@ -1,0 +1,231 @@
+{
+ "key": "uncanny_xmen_pro-0.98",
+ "family": "c",
+ "modes": [
+  {
+   "id": 0,
+   "name": "Fastball Special",
+   "start": "0xe3ac8",
+   "words": [
+    "0xe92d4038",
+    "0xe1a05000"
+   ],
+   "how": "counts AUD_FASTBALL_SPECIAL_STARTS (id 165) at 0xe3b44; creates record(s) 232 (body 0xe3718),141 (body 0xe3990),142 (body 0xe3684); reached by bl 0x99688 (fn 0x9961c); bl 0xd48bc (fn 0xd4794)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 1,
+   "name": "Sentinel Hurry Up",
+   "start": "0xa2600",
+   "words": [
+    "0xe92d47f0",
+    "0xe1a07000"
+   ],
+   "how": "counts AUD_SENTINEL_HURRY_UP_STARTS (id 167) at 0xa2714; creates record(s) 233 (body 0xa2390),139 (body 0xa2cf0); reached by bl 0xf61d4 (fn 0xf617c)",
+   "confidence": "high",
+   "risky": ""
+  },
+  {
+   "id": 2,
+   "name": "Future Hurry Up",
+   "start": "0x6c38c",
+   "words": [
+    "0xe5903000",
+    "0xe92d40f0"
+   ],
+   "how": "counts AUD_FUTURE_HURRY_UP_STARTS (id 169) at 0x6c500; creates record(s) 230 (body 0x6a91c),172 (body 0x6d990); reached by tail b 0x6c904 (fn 0x6c38c); tail b 0x111638 (fn 0x11152c); table word 0x54f588; a caller uses the result (0x6c904: tail, 0x111638: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 3,
+   "name": "A Fiery Assault",
+   "start": "0x59bcc",
+   "words": [
+    "0xe92d40f0",
+    "0xe2805008"
+   ],
+   "how": "counts AUD_A_FIERY_ASSAULT_STARTS (id 171) at 0x59da8; creates record(s) 219 (body 0x581ec); reached by tail b 0x59e50 (fn 0x59bcc); tail b 0x9927c (fn 0x9922c); table word 0x54dcc0; a caller uses the result (0x59e50: tail, 0x9927c: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 4,
+   "name": "Mayhem in Midtown",
+   "start": "0x8c438",
+   "words": [
+    "0xe92d40f0",
+    "0xe2805008"
+   ],
+   "how": "counts AUD_MAYHEM_IN_MIDTOWN_STARTS (id 174) at 0x8c5ec; creates record(s) 220 (body 0x8ae30); reached by tail b 0x8c694 (fn 0x8c438); tail b 0x99330 (fn 0x9922c); table word 0x54ffc0; a caller uses the result (0x8c694: tail, 0x99330: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 5,
+   "name": "Bitter Rivalry",
+   "start": "0x61be8",
+   "words": [
+    "0xe92d40f0",
+    "0xe2805008"
+   ],
+   "how": "counts AUD_BITTER_RIVALRY_STARTS (id 177) at 0x61dd4; creates record(s) 221 (body 0x604c0); reached by tail b 0x61e7c (fn 0x61be8); tail b 0x99378 (fn 0x9922c); table word 0x54eba8; a caller uses the result (0x61e7c: tail, 0x99378: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 6,
+   "name": "Genosha Under Siege",
+   "start": "0x7becc",
+   "words": [
+    "0xe92d40f0",
+    "0xe1a04000"
+   ],
+   "how": "counts AUD_GENOSHA_UNDER_SIEGE_STARTS (id 180) at 0x7c118; creates record(s) 222 (body 0x7a110); reached by tail b 0x7c1c0 (fn 0x7becc); tail b 0x99354 (fn 0x9922c); table word 0x54fbf8; a caller uses the result (0x7c1c0: tail, 0x99354: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 7,
+   "name": "Rescue the Innocent",
+   "start": "0x918e4",
+   "words": [
+    "0xe92d40f0",
+    "0xe1a04000"
+   ],
+   "how": "counts AUD_RESCUE_THE_INNOCENT_STARTS (id 183) at 0x91ad8; creates record(s) 223 (body 0x90328); reached by tail b 0x91b80 (fn 0x918e4); tail b 0x992a0 (fn 0x9922c); table word 0x5502b0; a caller uses the result (0x91b80: tail, 0x992a0: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 8,
+   "name": "Sentinel Facility Raid",
+   "start": "0x9e7e8",
+   "words": [
+    "0xe92d41f0",
+    "0xe2805008"
+   ],
+   "how": "counts AUD_SENTINEL_FACILITY_RAID_STARTS (id 186) at 0x9e9e8; creates record(s) 224 (body 0x9c990); reached by tail b 0x9930c (fn 0x9922c); tail b 0x9ea90 (fn 0x9e7e8); table word 0x550b60; a caller uses the result (0x9930c: tail, 0x9ea90: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 9,
+   "name": "Smuggled Cargo",
+   "start": "0xa71d0",
+   "words": [
+    "0xe92d40f0",
+    "0xe2805008"
+   ],
+   "how": "counts AUD_SMUGGLED_CARGO_STARTS (id 189) at 0xa73d4; creates record(s) 225 (body 0xa5b94); reached by tail b 0x992c4 (fn 0x9922c); tail b 0xa747c (fn 0xa71d0); table word 0x551080; a caller uses the result (0x992c4: tail, 0xa747c: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 10,
+   "name": "Stopping a Juggernaut",
+   "start": "0xabcbc",
+   "words": [
+    "0xe92d40f0",
+    "0xe2805008"
+   ],
+   "how": "counts AUD_STOPPING_A_JUGGERNAUT_STARTS (id 192) at 0xabe6c; creates record(s) 226 (body 0xaa7dc); reached by tail b 0x992e8 (fn 0x9922c); tail b 0xabf14 (fn 0xabcbc); table word 0x5512e8; a caller uses the result (0x992e8: tail, 0xabf14: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 11,
+   "name": "Future",
+   "start": "0x75b5c",
+   "words": [
+    "0xe92d4370",
+    "0xe24dd010"
+   ],
+   "how": "counts AUD_FUTURE_STARTS (id 195) at 0x75b9c; creates record(s) 201 (body 0x76288),265 (body 0x7274c); reached by tail b 0x75f90 (fn 0x75f70); a caller uses the result (0x75f90: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 12,
+   "name": "Escape Nimrod",
+   "start": "0x66398",
+   "words": [
+    "0xe92d43f0",
+    "0xe30a6228"
+   ],
+   "how": "counts AUD_ESCAPE_NIMROD_STARTS (id 198) at 0x66464; creates record(s) 227 (body 0x64e44); reached by tail b 0x666a4 (fn 0x66398); tail b 0x1115b8 (fn 0x11152c); table word 0x54ee10; a caller uses the result (0x666a4: tail, 0x1115b8: tail)",
+   "confidence": "medium",
+   "risky": ""
+  },
+  {
+   "id": 13,
+   "name": "Save Senator Kelly Wizard",
+   "start": "0x95928",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd014"
+   ],
+   "how": "counts AUD_SAVE_SENATOR_KELLY_WIZARD_STARTS (id 200) at 0x95958; creates record(s) 269 (body 0x98a88); reached by bl 0x80070 (fn 0x7ffe8); bl 0x114b04 (fn 0x1119a4); bl 0x114b2c (fn 0x1119a4); tail b 0x95b7c (fn 0x95b50); a caller uses the result (0x95b7c: tail)",
+   "confidence": "medium",
+   "risky": ""
+  }
+ ],
+ "rejected": [
+  {
+   "name": "Future",
+   "start": "0xbc2a8",
+   "words": [
+    "0xe92d4370",
+    "0xe24dd010"
+   ],
+   "why": "multiball: serves balls via 0xbc2a8 -> 0x306df0 (count None)"
+  },
+  {
+   "name": "Save the City Multiball",
+   "start": "0xc0dec",
+   "words": [
+    "0xe30a3228",
+    "0xe3403063"
+   ],
+   "why": "multiball: named AUD_SAVE_THE_CITY_MULTIBALL_STARTS; serves balls via 0xc0dec -> 0x306df0 (count 4)"
+  },
+  {
+   "name": "Sentinel Multiball",
+   "start": "0xca3a0",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd014"
+   ],
+   "why": "multiball: named AUD_SENTINEL_MULTIBALL_STARTS; serves balls via 0xca3a0 -> 0x306df0 (count 3)"
+  },
+  {
+   "name": "To Me My Xmen Multiball",
+   "start": "0xd3264",
+   "words": [
+    "0xe92d40f0",
+    "0xe24dd014"
+   ],
+   "why": "multiball: named AUD_TO_ME_MY_XMEN_MULTIBALL_STARTS; serves balls via 0xd3264 -> 0x306df0 (count 3)"
+  },
+  {
+   "name": "Berserker Multiball",
+   "start": "0xb5f3c",
+   "words": [
+    "0xe92d4030",
+    "0xe24dd014"
+   ],
+   "why": "multiball: named AUD_BERSERKER_MULTIBALL_STARTS; serves balls via 0xb5f3c -> 0x306df0 (count 3)"
+  },
+  {
+   "name": "Surrender Mutants",
+   "start": "0xaf44c",
+   "words": [
+    "0xe92d40f0",
+    "0xe30a5228"
+   ],
+   "why": "multiball: serves balls via 0xaf44c -> 0x306df0 (count 2)"
+  }
+ ],
+ "notes": "engine: audit_add 0x2b0f28, flag set 0x30fa58, create-process 0x3631f8, live_records 0x363560, multiball_serve 0x306df0. Method: the audit witness (the function that counts each mode's STARTED audit, true entry, generic rules). "
+}

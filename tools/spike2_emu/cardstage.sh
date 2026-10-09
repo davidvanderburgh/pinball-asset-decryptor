@@ -51,9 +51,13 @@ in_use() {                        # <batch-out-dir>: staged paths ready and not 
 
 # Evict least-recently-used copies not in use until `need` more bytes fit
 # under the cap AND leave the disk 30 GB free.
+mounted() {                       # <stage-dir>: its cards a running rig has mounted (any batch's, PAD-420)
+    pgrep -a fuse2fs 2>/dev/null | grep -o "$1/[^ ]*" | sort -u
+}
+
 make_room() {                     # <stage-dir> <keep-bytes> <need-bytes> [<batch-out-dir>]
     local dir=$1 keep=$2 need=$3 out=${4:-} busy f free
-    busy=$( [ -n "$out" ] && in_use "$out")
+    busy=$( [ -n "$out" ] && in_use "$out"; mounted "$dir")
     while :; do
         free=$(( $(df -B1 --output=avail "$dir" | tail -1) ))
         if [ $(( $(staged_bytes "$dir") + need )) -le "$keep" ] && \
@@ -82,7 +86,11 @@ STAGE=${2:?}
 AHEAD=${3:-2}
 KEEP=$(( ${4:-100} * GB ))
 S=$OUT/stage
-mkdir -p "$S" "$STAGE/.partial" || exit 1
+# THIS batch's own folder for copies in flight (PAD-420): several batches stage into one folder at once, and a
+# batch's end used to empty the shared .partial - a copy another batch had in flight vanished under it (.inflight:
+# a batch still running the old code empties .partial at its end)
+P=$STAGE/.inflight/$(printf %s "$OUT" | md5sum | cut -c1-12)
+mkdir -p "$S" "$P" || exit 1
 TOTAL=$(wc -l < "$OUT/queue")
 ROBO=/mnt/c/Windows/System32/robocopy.exe
 
@@ -96,11 +104,31 @@ pending() {
 }
 
 copy() {                          # <src> <dest-dir>
+    # ONE COPY AT A TIME ACROSS EVERY BATCH (PAD-420): batches staging at once each read the same spinning disk and
+    # every copy crawled; the lock makes them take turns, so the disk reads straight through
+    exec 9> /tmp/pad-cardstage-copy.lock   # on the Linux side: flock is sure there, and every batch shares it
+    flock 9
+    copy_now "$@"
+    local rc=$?
+    flock -u 9
+    exec 9>&-
+    return $rc
+}
+
+copy_now() {                      # <src> <dest-dir>
     if [ "${PAD_STAGE_COPY:-robocopy}" = robocopy ] && [ -x "$ROBO" ] \
        && command -v wslpath >/dev/null 2>&1; then
-        "$ROBO" "$(wslpath -w "$(dirname "$1")")" "$(wslpath -w "$2")" \
+        # THE WRAPPER CAN OUTLIVE ROBOCOPY (PAD-420): WSL's interop wrapper sometimes never returns once
+        # robocopy.exe has gone - it held the copy lock for 24 minutes with three rigs waiting. So the copy has a
+        # time limit, and one the limit cut short is done only if its last 4 MB are the card's (robocopy writes
+        # the file at its full size first: the size proves nothing)
+        timeout "${PAD_STAGE_COPY_S:-1500}" "$ROBO" "$(wslpath -w "$(dirname "$1")")" "$(wslpath -w "$2")" \
             "$(basename "$1")" /J /NP /NFL /NDL /NJH /NJS > /dev/null 2>&1 < /dev/null
-        [ $? -lt 8 ]              # robocopy: 0-7 is success
+        local rc=$?
+        if [ $rc = 124 ] && cmp -s <(tail -c 4194304 "$1") <(tail -c 4194304 "$2/$(basename "$1")"); then
+            rc=0
+        fi
+        [ $rc -lt 8 ]             # robocopy: 0-7 is success
     else
         cp -f "$1" "$2/"
     fi
@@ -121,7 +149,7 @@ for i in $(seq 0 $((TOTAL - 1))); do
     name=$(basename "$card")
     dest=$STAGE/$name
     stamp="$card $(stat -c '%s %Y' "$card")"
-    if [ -f "$dest" ] && [ "$(cat "$dest.src" 2>/dev/null)" = "$stamp" ]; then
+    if [ -f "$dest" ] && [ "$(cat "$dest.src" 2>/dev/null)" = "$stamp" ]        && [ "$(stat -c %s "$dest")" = "$(stat -c %s "$card")" ]; then
         touch "$dest"
         echo "$(date +%T) reuse $name"
         echo "$dest" > "$S/$i"
@@ -133,14 +161,29 @@ for i in $(seq 0 $((TOTAL - 1))); do
         continue
     fi
     t0=$(date +%s)
-    rm -f "$STAGE/.partial/$name"
-    if copy "$card" "$STAGE/.partial" && [ -f "$STAGE/.partial/$name" ]; then
-        mv -f "$STAGE/.partial/$name" "$dest"
-        echo "$stamp" > "$dest.src"
-        echo "$(date +%T) staged $name  $((size / 1048576)) MB in $(( $(date +%s) - t0 ))s"
-        echo "$dest" > "$S/$i"
+    rm -f "$P/$name"
+    if copy "$card" "$P" && [ -f "$P/$name" ]; then
+        # THE MOVE CAN BE REFUSED FOR A WHILE (PAD-420): Windows would not rename a fresh copy still held open (a scan
+        # of the new file), "Permission denied" - and the touch after it made an EMPTY card at $dest that a job then
+        # booted ("no MBR signature") and that the .src stamp offered for reuse. Tried for two minutes; staged only
+        # whole.
+        k=0
+        until mv -f "$P/$name" "$dest" 2>/dev/null; do
+            k=$((k + 1))
+            [ "$k" -ge 60 ] && break
+            sleep 2
+        done
+        if [ ! -e "$P/$name" ] && [ -f "$dest" ] && [ "$(stat -c %s "$dest")" = "$size" ]; then
+            touch "$dest"         # robocopy keeps the source's date: a fresh copy must not look the oldest (evicted first)
+            echo "$stamp" > "$dest.src"
+            echo "$(date +%T) staged $name  $((size / 1048576)) MB in $(( $(date +%s) - t0 ))s"
+            echo "$dest" > "$S/$i"
+        else
+            rm -f "$P/$name"
+            echo "copying $card to $STAGE failed: the copy could not be moved into place whole" > "$S/$i.fail"
+        fi
     else
-        rm -f "$STAGE/.partial/$name"
+        rm -f "$P/$name"
         echo "copying $card to $STAGE failed" > "$S/$i.fail"
     fi
 done

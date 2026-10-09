@@ -193,7 +193,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
 | John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, light shows |
 | John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop, light shows |
-| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms |
+| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
@@ -209,7 +209,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
 | Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
@@ -226,7 +226,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
-| Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
+| Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 
 - **Countdown no:** the game's voice never says a number on its own.

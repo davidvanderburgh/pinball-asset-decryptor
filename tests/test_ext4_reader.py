@@ -107,6 +107,29 @@ def test_holes_and_unwritten_extents_read_as_zeros(reader):
     assert [r[:3] for r in flagged] == legacy
 
 
+def test_mapped_ranges_skips_a_hole_where_disk_ranges_refuses(reader, image):
+    """PAD-491: a file with a hole still says where its blocks are.
+
+    disk_ranges of the whole file fails on the hole, and the Emulate tab's
+    override set used to drop such a file for it, with every patch in it."""
+    node = _tree(reader)["d/hole.bin"][2]
+    with pytest.raises(ext4.Ext4Error):
+        reader.disk_ranges(node, 0, node["size"])
+    got = reader.mapped_ranges(node)
+    assert [(f_off, n) for f_off, _d, n in got] == [
+        (0, len(tiny.HOLE_HEAD)), (tiny.HOLE_TAIL_AT, len(tiny.HOLE_TAIL))]
+    with open(image, "rb") as f:
+        for f_off, disk, n in got:
+            f.seek(disk)
+            assert f.read(n) == tiny.hole_bytes()[f_off:f_off + n]
+    # a file with no hole: the same stretches disk_ranges gives, cut at its size
+    a = _tree(reader)["d/a.bin"][2]
+    whole = reader.disk_ranges(a, 0, a["size"])
+    mapped = reader.mapped_ranges(a)
+    assert [(d, n) for _o, d, n in mapped] == whole
+    assert sum(n for _o, _d, n in mapped) == a["size"]
+
+
 def test_the_multi_extent_file_walks_an_index_block(reader):
     got = _tree(reader)
     runs = reader._runs(got["d/multi.bin"][2])

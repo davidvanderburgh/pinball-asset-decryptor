@@ -192,6 +192,49 @@ def test_an_untraceable_write_refuses_the_whole_set(card, tmp_path):
     assert not (tmp_path / "ovr" / engine.OVERRIDE_MANIFEST).exists()
 
 
+def test_a_file_with_a_hole_still_takes_its_patches(tmp_path, monkeypatch):
+    """PAD-491: a patch in a file with a HOLE goes into the set.
+
+    A file a Linux cp wrote onto a card can leave a block of zeros
+    unallocated.  A custom Godzilla card's grown game program had two, the
+    validation bypass patches that program, and every Emulate run with edits
+    on that card was refused as untraceable.  The real reader over the tiny
+    ext4 fixture, whose hole.bin has 1 MiB of nothing between its two blocks.
+    """
+    import gzip
+    from pinball_decryptor.plugins.stern import ext4
+    sys.path.insert(0, str(pathlib.Path(__file__).parent / "fixtures"))
+    import treesync_tiny as tiny
+
+    img = tmp_path / "tiny.img"
+    with gzip.open(pathlib.Path(__file__).parent / "fixtures"
+                   / "treesync_tiny.ext4.gz", "rb") as g:
+        img.write_bytes(g.read())
+    f = open(img, "rb")
+    try:
+        reader = ext4.Ext4Reader(f, 0, img.stat().st_size)
+        node = next(n for p, _i, n in reader.iter_regular_files(min_size=1)
+                    if p == "/d/hole.bin")
+        at = tiny.HOLE_TAIL_AT + 8
+        disk = reader.disk_ranges(node, at, 4)[0][0]
+        monkeypatch.setattr(
+            engine, "_compute_patches",
+            lambda *a, **k: ([(disk, b"MINE")], (0, 0, 0, 1), None, None,
+                             None))
+        monkeypatch.setattr(engine, "_locate", lambda f, p: (reader, None, None))
+        monkeypatch.setattr(engine, "_linux_partitions",
+                            lambda p: [(0, img.stat().st_size)])
+        out = tmp_path / "ovr"
+        _c, _m, _v, files = engine.write_overrides(
+            str(img), str(tmp_path / "assets"), str(out))
+    finally:
+        f.close()
+    assert [p for p, _n in files] == ["/d/hole.bin"]
+    want = bytearray(tiny.hole_bytes())
+    want[at:at + 4] = b"MINE"
+    assert (out / "d" / "hole.bin").read_bytes() == bytes(want)
+
+
 def test_a_second_build_patches_the_set_it_finds(card, tmp_path, monkeypatch):
     """The whole point: changing an edit must not re-extract the sound bank.
 

@@ -1102,6 +1102,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
     def text_edits_changed(self):
         """The Text tab applied / reverted an edit: re-read and redraw."""
         self._text_changes = None
+        self._filled_memo = None
         if self._alive:
             self._on_select()
 
@@ -1437,6 +1438,14 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                 # PAD-384: a Layers row's text, its words carried in the id
                 self._step_aside_for_jump()
                 return bool(self.tab.reveal_text_string(iid[5:], self._sel))
+            if iid.startswith("prog::"):
+                # PAD-485: the game-program line the game fills a box with
+                self._step_aside_for_jump()
+                return bool(self.tab.reveal_text_string(iid[6:], program=True))
+            if iid.startswith("mode::"):
+                # PAD-485: the lines of the mode that fills a box in as it plays
+                self._step_aside_for_jump()
+                return bool(self.tab.reveal_mode_lines(iid[6:]))
             if iid.startswith("img::"):
                 name, noun, what = "reveal_image_slot", "Images", "tab"
                 args, kw = (iid[5:],), {}

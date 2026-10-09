@@ -209,3 +209,71 @@ def test_a_mode_line_without_its_cards_screens_says_why(tmp_path):
         assert len(w.asked) == n + 1
         said = str(w.asked[-1])
         assert "Battle vs Gigan" in said and "isn't where it was" in said
+
+
+def test_a_box_the_game_fills_is_marked_and_its_t_goes_to_the_line(tmp_path):
+    """Round 4 (DragonRR): "some kind of alert that this item in scenes is subject to being
+    replaced by text".  A box whose words are a stand-in for a game-program line (KAIJU for the
+    game's KAIJU!) is marked in Layers, in the outlines and in the Selected panel, naming the
+    line and its modes; its T lands on that line's game-program row on the Text tab.  A box a
+    mode's code names with the screen is marked with the mode, and its T lists that mode's
+    lines (the search in:<mode>)."""
+    gigan = "cmode_battle_vs_gigan"
+    folder = _project(tmp_path, {"original": "KAIJU!", "modes": [gigan]}, two=True)
+    from pinball_decryptor.plugins.stern import engine
+    engine._program_modes_read(str(folder), {gigan: ["g/scene1"]},
+                               {gigan: {"g/scene1": ["Award_Textbox.Title"]}})
+    with web_app(tmp_path, mfr="stern") as w:
+        _show(w, folder, "KAIJU!")
+        tv = _tv(w)
+        by_path = {h["path"]: h for h in tv["hits"]}
+        assert by_path["Title"]["filled"] and by_path["Award_Textbox › Title"]["filled"]
+        assert not by_path["Art"]["filled"]
+        layers = {l["name"] + str(l["depth"]): l for l in tv["layers"]}
+        # the root's KAIJU: a stand-in for the game's KAIJU! (both titles read the same, so
+        # the words win for both; the line names its mode)
+        assert layers["Title0"]["filled"] == {"line": "KAIJU!", "modes": ["Battle vs Gigan"]}
+        assert layers["Title1"]["filled"] == {"line": "KAIJU!", "modes": ["Battle vs Gigan"]}
+        assert layers["Art0"]["filled"] is None
+        assert tv["props"]["filled"] == {"line": "KAIJU!", "modes": ["Battle vs Gigan"]}
+        # the T: the game-program row, not the scene's own KAIJU row
+        assert w.call("text_scenes.activate", "prog::KAIJU!") is True
+        st = w.state("text")
+        assert w.state("shell")["tab"] == "text"
+        assert st["rows"][st["sel"]]["o"] == "KAIJU!" and st["rows"][st["sel"]]["sc"] == "game program"
+        # a box only a mode names: marked with the mode, its T lists the mode's lines
+        from pinball_decryptor.core import text_manifest
+        rows = [r for r in text_manifest.load(str(folder)) if r["original"] != "KAIJU!"]
+        rows.append({"path": "/g/game", "original": "GIGAN AWARD", "replacement": "",
+                     "budget": 96, "grow": True, "modes": [gigan]})
+        rows.append({"path": "/g/game", "original": "TILT", "replacement": "", "budget": 4,
+                     "fixed": True})
+        text_manifest.save(str(folder), rows)
+        w.call("text.scan")
+        _wait(w, lambda: not w.state("text")["scanning"] and w.state("text").get("total", 0) > 0)
+        svc = w.window.service("text").scenes
+        w.run(svc.text_edits_changed)
+        w.call("ui.select_tab", "scenes")
+        w.call("text_scenes.select", "/g/scene1")
+        _wait(w, lambda: (w.state("text_scenes").get("frames") or []) != [])
+        layers = {l["name"] + str(l["depth"]): l for l in _tv(w)["layers"]}
+        assert layers["Title0"]["filled"] is None
+        assert layers["Title1"]["filled"] == {"line": None, "modes": ["Battle vs Gigan"]}
+        assert w.call("text_scenes.activate", "mode::Battle vs Gigan") is True
+        st = w.state("text")
+        assert w.window.text_search_var.get() == "in:Battle vs Gigan"
+        assert [st["rows"][i]["o"] for i in st["view"]] == ["GIGAN AWARD"]
+        w.call("text_scenes.close")
+
+
+def test_rules_search_in_a_mode():
+    from pinball_decryptor.webui import text_rules as R
+    line = {"path": "/g/game", "original": "GIGAN AWARD", "replacement": "",
+            "modes": ["cmode_battle_vs_gigan"]}
+    other = {"path": "/g/game", "original": "TILT", "replacement": ""}
+    assert R.row_matches(line, "in:gigan", None, None)
+    assert R.row_matches(line, "in:battle vs gigan", None, None)
+    assert not R.row_matches(other, "in:gigan", None, None)
+    assert R.row_matches(other, "in:", None, None)            # nothing typed yet: everything
+    assert not R.row_matches(line, "in:megalon", None, None)
+    assert R.row_matches(line, "gigan", None, None) and not R.row_matches(other, "gigan", None, None)

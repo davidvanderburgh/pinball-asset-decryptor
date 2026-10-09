@@ -560,6 +560,29 @@ else GAME_ELF="$ROOT/games/$GAME/game"; fi
 PROV=$(python3 "$RIG/gameinfo.py" --provenance "$GAME_ELF" 2>/dev/null)
 [ -n "$PROV" ] && echo "[watch] firmware: $PROV"
 
+# PAD-484: ANOTHER BUILD'S SWITCH LIST GOES BEFORE ANYTHING READS IT. The tables
+# are kept per TITLE, and mktables refuses a list another build made (the
+# jurassic_park_le lesson) - but only in its pass two, once this run's own dump
+# is in, ~20 s into the boot, and its pass one cannot tell either (the run has
+# not published dump/title yet). By then padglhost had latched the coin door
+# and the trough on that build's ids, and autoattract and ballfeed had read
+# them: Iron Maiden LE 1.18 after an older build is every id one off - Service
+# Back pressed Headphone Detect, the check's Start was Tournament Start, "48V
+# DISABLED", the feeder watching the wrong trough for the whole run. Without
+# it the run is the title's first run on this rig (item 49): the platform ids,
+# the playfield withheld until pass two writes this build's list. Asked with
+# the explicit binary, as nbdir.py is below. Only an answer of "another
+# build's" removes anything - a python that fails says nothing of the kind.
+if [ -f "$GAME_ELF" ] && [ -f "$PAD_TABLES/$GAME/switch_list.txt" ]; then
+    SWCUR=$(python3 "$RIG/mktables.py" --current --game "$GAME" --elf "$GAME_ELF" 2>/dev/null)
+    case "$SWCUR" in
+        "switch list: another build's"*)
+            rm -f "$PAD_TABLES/$GAME/switch_list.txt" "$PAD_TABLES/$GAME/switch_xy.txt"
+            echo "[watch] $GAME's cached switch list is ${SWCUR#switch list: } -" \
+                 "removed; this run derives its own" ;;
+    esac
+fi
+
 NBID="$PAD_TABLES/$GAME/node_ident.txt"
 mkdir -p "$PAD_TABLES/$GAME" 2>/dev/null
 NBID_FRESH=0
@@ -2250,7 +2273,22 @@ fi
 #     group kills leave it alone. It talks to the rig only through dump/padled
 #     (read) and swpoke.py (clicks), so it survives the game restarting under it.
 #   * </dev/null and &, so nothing can block here again.
-if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
+#
+# PAD-484: THE TABLES ARE BUILT ON EVERY RUN; ONLY THE WINDOW IS PAD_PLAYFIELD'S.
+# This whole block used to sit under PAD_PLAYFIELD, and a hidden run (every
+# rigbatch sweep job) sets PAD_PLAYFIELD=0 - so a sweep never ran mktables, and
+# the switch list a rig slot had cached for a TITLE stayed whichever build last
+# ran there with a window. The jurassic_park_le refusal below (another build's
+# list is re-derived from this run's own dump) never ran either. Iron Maiden LE
+# 1.18 on a slot that had last shown an older build: every id one off, so
+# autoattract's Service Back was Headphone Detect, the check's Start was
+# Tournament Start, padglhost's coin-door latch held the wrong switch ("48V
+# DISABLED / CLOSE COIN DOOR"), and "no game started after three tries". The
+# device table was another build's too (no eject coil, so no ball feeder).
+# Everything here but the window reads these files (plunge.py, swpoke.py,
+# ballfeed.py, gamecheck.sh, padglhost's binds), so they are built whatever
+# is shown.
+if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then
     # THE TABLES ARE BUILT FROM THE TITLE, HERE, RATHER THAN COMMITTED. See
     # mktables.py. Three of the four need nothing but the game binary, so the
     # window can open with artwork, inserts and coils on a title's very first
@@ -2318,8 +2356,13 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             exec python3 "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
             "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$PAD_LOGDIR/padtables.log" 2>&1 &
         TBLPG=$!
-    elif grep -q '^drawable=yes' "$TBL_OUT"; then
-        echo "[watch]   opening now; the switch table follows in the background"
+    elif [ "${PAD_PLAYFIELD:-1}" = 0 ] || grep -q '^drawable=yes' "$TBL_OUT"; then
+        # no window (a hidden run) has nothing to wait for, whatever it can draw
+        if [ "${PAD_PLAYFIELD:-1}" = 0 ]; then
+            echo "[watch]   no playfield window; the switch table follows in the background"
+        else
+            echo "[watch]   opening now; the switch table follows in the background"
+        fi
         setsid_as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
             > "$PAD_LOGDIR/padtables.log" 2>&1 &
         TBLPG=$!
@@ -2335,7 +2378,8 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             | grep -v '^drawable=' | sed 's/^/[watch]   /'
     fi
     rm -f "$TBL_OUT"
-
+fi
+if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # TWO WAYS TO OPEN ONE WINDOW, AND WHICH ONE IS RIGHT IS A PROPERTY OF THE
     # MACHINE, NOT A PREFERENCE.
     #

@@ -485,3 +485,100 @@ def test_a_cached_batch_hands_every_job_the_cache_and_the_speed():
     assert "rc=0" in lines, out.stdout + out.stderr
     assert "a T/cards/a.raw cache=1 speed=4" in lines
     assert "b T/cards/b.raw cache=1 speed=1" in lines
+
+
+# --------------------------------------------------------------------------
+# a sweep presses THIS build's switches
+# --------------------------------------------------------------------------
+
+def test_a_hidden_run_builds_the_tables_and_opens_no_window():
+    """A hidden run (every sweep job) sets PAD_PLAYFIELD=0, and the tables were built under that same gate: a slot's
+    cached switch list stayed whichever build of the title last ran there with a window. Iron Maiden LE 1.18 on such
+    a slot: every id one off - Tournament Start pressed for Start, the coin door latched on the wrong switch ("48V
+    DISABLED"), no ball feeder - and "no game started after three tries"."""
+    w = _text("watch.sh")
+    i = w.index('if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then')
+    end = w.index("\nfi\n", i)
+    tables = w[i:end]
+    assert 'python3 "$RIG/mktables.py" > "$TBL_OUT" 2>&1' in tables                 # pass one
+    assert '"$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT"' in tables           # pass two
+    assert "playfield.py" not in tables
+    # with no window, nothing waits on the switch list in the foreground
+    assert 'elif [ "${PAD_PLAYFIELD:-1}" = 0 ] || grep -q \'^drawable=yes\' "$TBL_OUT"; then' in tables
+    # the window is PAD_PLAYFIELD's alone, straight after
+    window = end + len("\nfi\n")
+    assert w.startswith('if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then', window)
+    assert "playfield.py" in w[window:w.index("\nfi\n", window)]
+    # and the hidden run still says no window
+    assert w.index("export PAD_PLAYFIELD=0") < i
+
+
+def _title(monkeypatch, tmp_path, size, recorded):
+    """A rootfs holding title `t` with a `size`-byte game, and a cached switch list naming `recorded`
+    (None: no list at all; "": a list from before the stamp)."""
+    root, tables = tmp_path / "root", tmp_path / "tables"
+    (root / "games" / "t").mkdir(parents=True)
+    (root / "games" / "t" / "game").write_bytes(b"z" * size)
+    (tables / "t").mkdir(parents=True)
+    if recorded is not None:
+        (tables / "t" / "switch_list.txt").write_text(
+            "# t switch list, from the shim's reading of the game's own table.\n"
+            + ("# binary: %s\n" % recorded if recorded else "")
+            + "36     73    1     11   START BUTTON\n")
+    monkeypatch.setenv("PAD_ROOT", str(root))
+    monkeypatch.setenv("PAD_TABLES", str(tables))
+    monkeypatch.setenv("PAD_GAME", "t")
+    monkeypatch.delenv("PAD_SLOT", raising=False)
+
+
+def test_the_switch_list_is_current_only_when_it_names_the_running_build(monkeypatch, tmp_path):
+    import mktables
+    _title(monkeypatch, tmp_path, 6349656, "game 6349656 bytes")
+    ok, why = mktables.list_current("t")
+    assert ok and "6349656" in why
+
+
+@pytest.mark.parametrize("recorded,says", [
+    ("game 5667584 bytes", "another build's (game 5667584 bytes; this run is game 6349656 bytes)"),
+    ("", "another build's (an unrecorded build"),
+    (None, "missing"),
+])
+def test_another_builds_switch_list_is_not_current(monkeypatch, tmp_path, recorded, says):
+    """Iron Maiden LE: the older builds' binary is 5667584 bytes, 1.18's 6349656, and the ids are one apart."""
+    import mktables
+    _title(monkeypatch, tmp_path, 6349656, recorded)
+    ok, why = mktables.list_current("t")
+    assert not ok and why.startswith(says)
+
+
+def test_the_check_starts_a_game_only_on_this_builds_switch_list():
+    sh = _text("modes", "gamecheck.sh")
+    cur = _sh_func(sh, "list_current")
+    assert 'python3 "$RIG/mktables.py" --current --game "$GAME"' in cur
+    play = sh[sh.index("# a title's FIRST boot on this rig"):sh.index("guided_setup 0 &&")]
+    assert "until list_current; do" in play
+    assert '[ -f "$LIST" ] || die "the rig has no switch list for $GAME ($LIST)"' in play
+
+
+def test_the_running_binary_can_be_named_outright(monkeypatch, tmp_path):
+    """watch.sh asks before the run has published dump/title, with the card's own binary."""
+    import mktables
+    _title(monkeypatch, tmp_path, 5667584, "game 6349656 bytes")      # the rootfs stub is another build
+    card = tmp_path / "card" / "game"
+    card.parent.mkdir()
+    card.write_bytes(b"z" * 6349656)
+    assert mktables.list_current("t", str(card))[0]
+    assert not mktables.list_current("t")[0]
+
+
+def test_another_builds_switch_list_goes_before_anything_reads_it():
+    """mktables' own refusal is in its pass two (this run's dump, ~20 s in): too late for padglhost's coin door and
+    trough latch, autoattract and ballfeed, all of which had read the other build's ids by then."""
+    w = _text("watch.sh")
+    i = w.index("# PAD-484: ANOTHER BUILD'S SWITCH LIST GOES BEFORE ANYTHING READS IT.")
+    blk = w[i:w.index("\nfi\n", i)]
+    assert 'python3 "$RIG/mktables.py" --current --game "$GAME" --elf "$GAME_ELF"' in blk
+    assert '"switch list: another build\'s"*)' in blk                  # only that answer removes anything
+    assert 'rm -f "$PAD_TABLES/$GAME/switch_list.txt" "$PAD_TABLES/$GAME/switch_xy.txt"' in blk
+    assert w.index('GAME_ELF="$CARD_PATH/game"') < i < w.index('echo "[watch] starting renderer')
+    assert i < w.index('"$S/autoattract.sh"') and i < w.index('"$S/ballfeed.py"')

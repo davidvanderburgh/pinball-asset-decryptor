@@ -11,9 +11,13 @@ PAD-420's sweep of the newest builds was 581 rigbatch jobs, 52 rig-hours, a mean
 - **The CPU was not the bottleneck.** A hidden rig in a game costs about half a core: the guest ~26% of one (its
   busiest thread, the node bus, ~5%), the renderer ~9%, the video host and ffmpeg ~16%. The game is WAITING - on Tech
   Alerts, a ball saver, a 30 s mode, a drain - on its own clock.
-- **The GPU already does all it can.** The renderer has drawn on the RTX 5090 since PAD-117/127 (`gpupick.py`). The
-  game's own code is ARM, run by qemu-user's CPU emulation; no GPU can run it. Video decode (ffmpeg) is the one other
-  thing a GPU could take (NVDEC), and it is ~5-15% of a core a rig: not where the time is.
+- **The GPU cannot take the work that matters.** The game's own code is ARM, run by qemu-user's CPU emulation; no GPU
+  can run it. What a GPU can do is draw the picture: a VISIBLE run's renderer is on the RTX 5090 (PAD-117/127,
+  `gpupick.py`), but a hidden run's - every sweep job's - is on Mesa's software rasteriser. Xvfb has no DRI3, so
+  d3d12's EGL fails (`DRI3 error: Could not get DRI3 device`, `eglInitialize failed`) and watch.sh falls back to
+  llvmpipe; Mesa's software loader will not take d3d12 either (`LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=d3d12`:
+  `eglInitialize failed`; tried with the rig's own renderer on a hidden display, 2026-10-09). At ~9% of a core a rig
+  that is not where the time is, and neither is video decode (ffmpeg, which NVDEC could take, ~5-15%).
 - **A boot was I/O-bound.** Godzilla Pro 1.16 took 79-130 s from start to attract with its card on C: (and the
   sweeps' staged copies are on C:). From 16 s to 88 s the game read almost nothing through `read()` while fuse2fs
   stayed busy (the validator going through the sound bank), then ~12 MB/s of scene loading to ~118 s. Every read goes
@@ -61,6 +65,23 @@ PAD-420's sweep of the newest builds was 581 rigbatch jobs, 52 rig-hours, a mean
 7. **The card copies really take turns now.** cardstage.sh's shared lock was `exec 9> /tmp/pad-cardstage-copy.lock`;
    `/tmp` is sticky with `fs.protected_regular=2`, so a root batch could not open a lock the user's batch had made
    ("Permission denied", "flock: 9: Bad file descriptor") and the two copied at once. Opened read-only now.
+8. **A sweep presses THIS build's switches.** The rig keeps a title's tables (switch list, device table) per TITLE, and
+   a hidden run - every sweep job - sets `PAD_PLAYFIELD=0`, under which watch.sh never ran mktables at all. So a slot
+   kept the switch list of whichever build of the title last ran there with a window, and mktables' own refusal of
+   another build's list (the jurassic_park_le lesson) never ran. Iron Maiden LE 1.18 on rig 4, whose list was an
+   older build's (5667584-byte binary; 1.18's is 6349656), had every id one off: autoattract's Service Back pressed
+   Headphone Detect, the check's Start was Tournament Start, padglhost's coin-door latch held the wrong switch ("48V
+   DISABLED / CLOSE COIN DOOR"), the feeder had no eject coil - and `no game started after three tries`.
+   - watch.sh builds the tables on a hidden run too (pass two in the background; only the window is
+     `PAD_PLAYFIELD`'s).
+   - Pass two re-derives another build's list ~20 s into the boot, which is too late: by then padglhost had latched
+     the coin door and trough and ballfeed had read the old ids (rig 2: a pass, but Start at 83 s, 142 s in all, the
+     feeder watching the wrong trough). So watch.sh asks `mktables.py --current --elf <the card's binary>` before the
+     renderer starts and removes a list that says another build's: the run is then the title's first run on that rig
+     (item 49 - platform ids, the playfield withheld until this build's list lands).
+   - gamecheck.sh waits for `mktables.py --current` (this build's list), not for the file to exist.
+   - Rig 3, also holding the older list: removed at the start, autoattract on Service Back (28), coins on Left Coin
+     (39), the feeder resolved 8 s in, attract at 26 s, the first Start taken; pass in 65 s.
 
 ## Measured
 

@@ -35,6 +35,11 @@ game_up() { [ -n "$(pad_pids -x game)" ]; }
 #: CPU's business. gsecs <game seconds> [<at least, real>]: whole real seconds for a window of game time
 gsecs() { awk -v s="$1" -v k="$(pad_speed)" -v f="${2:-0}" 'BEGIN { if (k + 0 <= 0) k = 1; v = s / k; if (v < f) v = f; printf "%d", v + 0.999 }'; }
 count() { grep -ac -- "$1" "$LOG" 2>/dev/null || true; }
+#: PAD-484: the switch list is THIS build's (its `# binary:` line names the game binary running), not merely
+#: there. The tables are kept per title, so a rig that last ran another build holds that build's list until
+#: mktables re-derives it from this run's dump - and the ids move between builds: on Iron Maiden LE 1.18 the
+#: older list pressed Tournament Start for Start and latched the coin door on the wrong switch
+list_current() { python3 "$RIG/mktables.py" --current --game "$GAME" > /dev/null 2>&1; }
 # wait_for <seconds> <extended regex> <file>: 0 when a line matches, 1 at the time limit or
 # when the game is gone
 wait_for() {
@@ -183,8 +188,16 @@ case "$cmd" in
             || say "(the rig never said the Tech Alerts were cleared; starting anyway)"
         game_up || die "the game stopped before a game could start"
         # a title's FIRST boot on this rig: mktables writes its switch list a minute or so in
-        # (from the shim's dump, or read out of the program by swelf.py)
-        wait_for 150 "" "$LIST" || [ -f "$LIST" ] || die "the rig has no switch list for $GAME ($LIST)"
+        # (from the shim's dump, or read out of the program by swelf.py), and another build's list is
+        # re-derived the same way (PAD-484)
+        end=$(( $(date +%s) + 150 ))
+        until list_current; do
+            [ "$(date +%s)" -lt "$end" ] && game_up || break
+            sleep 2
+        done
+        [ -f "$LIST" ] || die "the rig has no switch list for $GAME ($LIST)"
+        list_current || say "(the switch list is $(python3 "$RIG/mktables.py" --current --game "$GAME" 2>&1 \
+            | sed -n 's/^switch list: //p'); its switches may not be this build's)"
         pad_gsleep 3
         # a first boot opens Guided Setup: leave it BEFORE Start, which there opens a row's editor
         guided_setup 0 && { say "first boot: left Guided Setup by Save & Exit"; pad_gsleep 3; }

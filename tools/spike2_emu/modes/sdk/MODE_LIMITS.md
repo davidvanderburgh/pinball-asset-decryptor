@@ -172,7 +172,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
-| Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms |
+| Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms |
@@ -192,7 +192,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
 | John Wick LE 1.01 | ✓ | no | ✓ | all |  |
 | John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, light shows |
-| John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop |
+| John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop, light shows |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms |
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms |
@@ -224,7 +224,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
-| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms |
+| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, light shows |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |
 | Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms |

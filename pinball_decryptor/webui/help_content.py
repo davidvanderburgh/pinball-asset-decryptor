@@ -2869,8 +2869,8 @@ PREVIEW_HELP = {
                 "Try it is used as it is.\n"
                 "- **End mode** ends whichever of this project's modes is running. The "
                 "run is the Emulate tab's, and its Stop stops it.\n"
-                "- An edit made while the game runs reaches it within a second; a new "
-                "sound or clip reaches it at the next Try it.\n"
+                "- An edit made while the game runs reaches it within a second; a screen "
+                "turned on or off, a new sound or a new clip reaches it at the next Try it.\n"
                 "- A refusal is shown beside Try it and on the Emulate tab, with the reason.",
             ]),
             ("Several modes",

@@ -931,7 +931,8 @@ class TryItMixin:
         if not live or live.get("project") != project or slug not in live["slots"]:
             return None
         slot = live["slots"][slug]
-        waits = MT.asset_signature(spec) != live["signatures"].get(slug)
+        sig = MT.asset_signature(spec)
+        waits = sig != live["signatures"].get(slug)
         sounds = live.setdefault("sounds", {})
         if MT.sound_signature(spec) != sounds.get(slug, MT.sound_signature(spec)):
             sounds[slug] = MT.sound_signature(spec)
@@ -943,8 +944,17 @@ class TryItMixin:
                                   own_sound_ms=own.get("ms") or None)
         except MP.ModeProjectError:
             return None
+        # PAD-493: the game has the screen Try it built, and only that one, until the next Try it
+        text = MT.keep_built_screen(text, self._tryit_built(live, slot))
+        said = live.setdefault("assets_said", {})
         if text == self._tryit_game_has(live, slug, slot):
+            if waits and said.get(slug) != sig:
+                said[slug] = sig
+                self._tryit_note("%s: a change to its screen or clip reaches the game at the next "
+                                 "Try it." % spec.name)
             return None
+        if waits:
+            said[slug] = sig
         folder = os.path.join(live["stage"], "push")
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, MA.mode_file_name(slot))
@@ -961,11 +971,16 @@ class TryItMixin:
         self._in_background(cmd, pushed)
         return cmd
 
-    @staticmethod
-    def _tryit_game_has(live, slug, slot):
+    @classmethod
+    def _tryit_game_has(cls, live, slug, slot):
         text = live.get("texts", {}).get(slug)
         if text is not None:
             return text
+        return cls._tryit_built(live, slot)
+
+    @staticmethod
+    def _tryit_built(live, slot):
+        """The mode file Try it installed in ``slot``, as its build wrote it (None if gone)."""
         try:
             with open(os.path.join(live["stage"], MA.mode_file_name(slot)),
                       encoding="utf-8", newline="") as f:

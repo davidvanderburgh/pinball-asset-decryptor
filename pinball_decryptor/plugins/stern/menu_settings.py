@@ -215,14 +215,36 @@ def _row_caption_line(table, i):
 
 def help_line(names, room):
     """The help line that names the modes - "1 = Standard, 2 = Orchestral" - in at most *room*
-    characters (shorter forms first, then the names cut)."""
+    characters (shorter forms first, then the names cut: the short ones kept whole, and a word
+    several names share cut before the word that tells them apart - "2 Cust A 3 Cust B")."""
     names = [" ".join(str(n or "").split()) or "Mode %d" % (i + 1) for i, n in enumerate(names)]
     for sep, eq in ((", ", " = "), (", ", " "), (" ", " ")):
         s = sep.join("%d%s%s" % (i + 1, eq, n) for i, n in enumerate(names))
         if len(s) <= room:
             return s
-    each = max(1, (room - 3 * len(names)) // max(1, len(names)))
-    return " ".join("%d %s" % (i + 1, n[:each]) for i, n in enumerate(names))[:room]
+    budget = room - sum(len("%d " % (i + 1)) for i in range(len(names))) - (len(names) - 1)
+    each = max(1, max(len(n) for n in names))
+    while each > 1 and sum(min(len(n), each) for n in names) > budget:
+        each -= 1
+    words = [n.lower().split() for n in names]
+    shared = {w for i, ws in enumerate(words) for w in ws
+              if any(w in other for j, other in enumerate(words) if j != i)}
+    out = [_shortened(n, each, shared) for n in names]
+    return " ".join("%d %s" % (i + 1, n) for i, n in enumerate(out))[:room]
+
+
+def _shortened(name, n, shared):
+    """*name* in at most *n* characters: words in *shared* cut (then left out) first, the
+    others after."""
+    words = name.split()
+    common = [w.lower() in shared for w in words]
+    while len(" ".join(words)) > n and len(words) > 1 and any(common):
+        k = max((k for k in range(len(words)) if common[k]), key=lambda k: len(words[k]))
+        if len(words[k]) > 1:
+            words[k] = words[k][:-1]
+        else:
+            del words[k], common[k]
+    return " ".join(words)[:n].rstrip()
 
 
 def plan(table, key, values, names=()):

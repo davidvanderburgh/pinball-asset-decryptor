@@ -5,7 +5,8 @@
 Serves <repo> on a scratch Godzilla LE 1.16 project made from a stock audio extract (PAD494_EXTRACT,
 default the Desktop's gzho: a dozen of its slots copied, its names files and extract record with
 them). The Blue Oyster Cult "Godzilla" slot has a replacement (the modder's standard mix) and, in the
-sidecar's ``sound_modes``, an orchestral mix for mode 2; the 1954 main title has a mode 3 file only.
+sidecar's ``sound_modes``, an orchestral mix for modes 2 and 4 (one file in two modes); the 1954 main
+title has a mode 3 file only. Only mode 2 is named, so the others take the default names.
 Writes, under the same names before and after:
 
 - <before_|after_>audio_tab.png    the Audio tab on the Blue Oyster Cult slot
@@ -13,6 +14,8 @@ Writes, under the same names before and after:
 
 Before (main) the tab knows nothing of the modes the sidecar holds: one replacement per slot.
 After (--after, the ticket branch) the rows carry their modes, and the menu has "Music modes".
+(Round 3: before = v1.166.3, modes 2 and 3 only, unnamed modes called by number; after = four modes
+offered, "Add a music mode..." up to eight, unnamed modes Standard / Custom A / Custom B...)
 
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
@@ -68,8 +71,9 @@ def _project(scratch):
         shutil.copy2(os.path.join(EXTRACT, "audio", src), own[name])
     with open(os.path.join(dst, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump({"audio": {"audio/" + BOC: own[STANDARD[0]]},
-                   "sound_modes": {"names": ["Standard", "Orchestral", "Heisei"],
-                                   "slots": {"audio/" + BOC: {"2": own[ORCHESTRAL[0]]},
+                   "sound_modes": {"names": ["", "Orchestral"],
+                                   "slots": {"audio/" + BOC: {"2": own[ORCHESTRAL[0]],
+                                                              "4": own[ORCHESTRAL[0]]},
                                              "audio/" + MAIN_TITLE: {"3": own[HEISEI[0]]}}}},
                   f, indent=2)
     return dst

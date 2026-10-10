@@ -31,8 +31,10 @@ import sys
 import threading
 import time
 
-#: PAD-494: the most music modes a project may have (mode 1 is the sounds as they are)
-_MODES_MAX = 3
+#: PAD-494: the most music modes a project may have (mode 1 is the sounds as they are), and how
+#: many the row menu offers before "Add a music mode…" ("need at least 4", the tester)
+_MODES_MAX = 8
+_MODES_SHOWN = 4
 
 from .. import compat
 from ..find_originals import FindOriginalsMixin
@@ -2434,17 +2436,29 @@ class AudioTab(FindOriginalsMixin, TabService):
         return {"names": names, "slots": slots}
 
     def _mode_name(self, m):
+        """Mode *m*'s name: the user's, else "Standard" (mode 1) / "Custom A"... (the plugin
+        writes the same defaults into the machine's menu)."""
         n = self._mode_names[m - 1] if 0 < m <= len(self._mode_names) else ""
-        return " ".join(str(n or "").split()) or "Mode %d" % m
+        return " ".join(str(n or "").split()) or (
+            "Standard" if m <= 1 else "Custom %s" % chr(ord("A") + m - 2))
 
     def _mode_label(self, m):
-        """"Mode 2 (Orchestral)", or "Mode 2" for one not named."""
-        n = self._mode_names[m - 1] if 0 < m <= len(self._mode_names) else ""
-        n = " ".join(str(n or "").split())
-        return "Mode %d (%s)" % (m, n) if n else "Mode %d" % m
+        """"Mode 2 (Orchestral)"."""
+        return "Mode %d (%s)" % (m, self._mode_name(m))
+
+    def _mode_said(self, m):
+        """"mode 2 (Orchestral)", mid-sentence (the name as the user wrote it)."""
+        return "mode %d (%s)" % (m, self._mode_name(m))
+
+    def _modes_cap(self):
+        """The most modes this project's game takes."""
+        return max(2, min(_MODES_MAX, int((self._sm_offer or {}).get("max") or _MODES_MAX)))
 
     def _modes_max(self):
-        return max(2, min(_MODES_MAX, int((self._sm_offer or {}).get("max") or _MODES_MAX)))
+        """How many modes the project has: :data:`_MODES_SHOWN`, or more once the user named or
+        added more, or set a file for a higher one."""
+        top = max((m for v in self._modes.values() for m in v), default=0)
+        return min(self._modes_cap(), max(_MODES_SHOWN, len(self._mode_names), top))
 
     def _modes_words(self, rel):
         """What the row says of a slot's music modes, or "" for one with none."""
@@ -2453,8 +2467,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             return ""
         own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
                else "the game's own sound")
-        parts = ["%s: %s" % (self._mode_label(1).lower(), own)]
-        parts += ["%s: %s" % (self._mode_label(m).lower(), os.path.basename(f))
+        parts = ["%s: %s" % (self._mode_said(1), own)]
+        parts += ["%s: %s" % (self._mode_said(m), os.path.basename(f))
                   for m, f in sorted(md.items())]
         return ("Music modes - the machine's MUSIC MODE setting picks which "
                 "plays: " + "; ".join(parts) + ".")
@@ -2489,8 +2503,10 @@ class AudioTab(FindOriginalsMixin, TabService):
                 sub.append({"label": "Take off mode %d's sound (%s)" % (m, os.path.basename(f)),
                             "action": "mode_off:%d" % m, "icon": "x"})
         if not why:
-            sub += [{"sep": True},
-                    {"label": "Name the music modes…", "action": "mode_names", "icon": "edit"}]
+            sub.append({"sep": True})
+            if self._modes_max() < self._modes_cap():
+                sub.append({"label": "Add a music mode…", "action": "mode_add", "icon": "plus"})
+            sub.append({"label": "Name the music modes…", "action": "mode_names", "icon": "edit"})
         return {"label": "Music modes" + (" (%d)" % len(md) if md else ""),
                 "icon": "music", "submenu": sub}
 
@@ -2513,6 +2529,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             return bool(why)
         if kind == "mode_names":
             return self._name_modes()
+        if kind == "mode_add":
+            return self._add_mode()
         if not 2 <= m <= _MODES_MAX:
             return False
         if kind == "mode_pick":
@@ -2523,14 +2541,14 @@ class AudioTab(FindOriginalsMixin, TabService):
             path = self._ask_path(
                 "open", "audio_replacement",
                 "Choose the sound %s plays in music %s"
-                % (rel, self._mode_label(m).lower()), filetypes=_AUDIO_FILETYPES)
+                % (rel, self._mode_said(m)), filetypes=_AUDIO_FILETYPES)
             if isinstance(path, (list, tuple)):
                 path = path[0] if path else ""
             if not path:
                 return False
             self._modes.setdefault(rel, {})[m] = os.path.normpath(path)
             self.log("Replace Audio: %s ← %s, for music %s."
-                     % (rel, os.path.basename(path), self._mode_label(m).lower()), "info")
+                     % (rel, os.path.basename(path), self._mode_said(m)), "info")
             self._modes_changed(rel)
             return True
         f = md.get(m)
@@ -2547,24 +2565,44 @@ class AudioTab(FindOriginalsMixin, TabService):
             if not md:
                 self._modes.pop(rel, None)
             self.log("Replace Audio: %s no longer has a sound for music %s."
-                     % (rel, self._mode_label(m).lower()), "info")
+                     % (rel, self._mode_said(m)), "info")
             self._modes_changed(rel)
             return True
         return False
 
+    def _add_mode(self):
+        """One more music mode (up to the game's most), named as it is added."""
+        n = self._modes_max() + 1
+        if n > self._modes_cap():
+            return False
+        text = compat.simpledialog.askstring(
+            "Add a music mode",
+            "The name of music mode %d: the machine's MUSIC MODE setting names it in its help "
+            "line." % n, initialvalue=self._mode_name(n))
+        if text is None:
+            return False
+        self._mode_names = ([self._mode_name(m) for m in range(1, n)]
+                            + [" ".join(str(text).split())])
+        self.log("Replace Audio: music %s added." % self._mode_said(n), "info")
+        self._save_staged_changes()
+        self._refresh_list()
+        return True
+
     def _name_modes(self):
         """Ask for the music modes' names, one line: the machine shows them in
-        MUSIC MODE's help line ("1 = Standard, 2 = Orchestral")."""
+        MUSIC MODE's help line ("1 = Standard, 2 = Orchestral"). More names than
+        modes add modes, up to the game's most."""
         n = self._modes_max()
         now = ", ".join(self._mode_name(m) for m in range(1, n + 1))
         text = compat.simpledialog.askstring(
             "Name the music modes",
-            "The names of modes 1 to %d, separated by commas. Mode 1 is every sound as "
-            "it plays now; the machine's MUSIC MODE setting names them in its help "
-            "line." % n, initialvalue=now)
+            "The names of modes 1 to %d, separated by commas (up to %d names). Mode 1 is every "
+            "sound as it plays now; the machine's MUSIC MODE setting names them in its help "
+            "line." % (n, self._modes_cap()), initialvalue=now)
         if text is None:
             return False
-        names = [" ".join(t.split()) for t in str(text).split(",")][:n]
+        names = [" ".join(t.split()) for t in str(text).split(",")][:self._modes_cap()]
+        n = max(n, len(names))
         self._mode_names = names
         self.log("Replace Audio: the music modes are %s." % ", ".join(
             "%d %s" % (m, self._mode_name(m)) for m in range(1, n + 1)), "info")

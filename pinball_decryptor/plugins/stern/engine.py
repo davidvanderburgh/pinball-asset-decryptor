@@ -7382,9 +7382,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 gr_path, img_path, log, card_key=_sites_key)
                             _stage_done(log, "reading the game's play tables",
                                         t0)
+                        # a mode's file keeps its whole length on the
+                        # terms a replacement does
+                        _sm_long, _sm_why = _audio_grow_gate(dest_is_device,
+                                                             gr_path)
                         audio_edits, grows, sound_mode_used = _sound_modes_grow(
                             assets_dir, params, audio_edits, grows, sound_modes,
-                            log)
+                            log, longer_ok=_sm_long, longer_why=_sm_why)
                         _sm_grows = {int(u["host"]): grows[int(u["host"])]
                                      for u in sound_mode_used}
                     if _user_grows:
@@ -9425,17 +9429,23 @@ def _sound_mode_host(params, slot_p, want, audio_edits, taken):
     return pick[1] if pick else None
 
 
-def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log):
+def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer_ok=True,
+                      longer_why=""):
     """PAD-494: every music mode's file, made into its slot's format and put in a HOST record
     (:func:`_sound_mode_host`) as a forced grow, left un-pointed. Returns ``(audio_edits, grows,
     used)``: *used* ``[{"rel", "slot", "mode", "host", "frames", "name", "idx", "level_ref"}]``.
-    A file that cannot go on is left out and logged (that slot plays its own sound in that mode)."""
+    A file that cannot go on is left out and logged (that slot plays its own sound in that mode).
+
+    One file in several modes of a slot goes in once: those modes share its record. A file longer
+    than its slot's own sound is cut to that length unless the build may keep replacements whole
+    (*longer_ok*: "Allow replacements longer than the original"), as a replacement is."""
     from . import sound_modes as _SMo
     from .spike2.emulator import emitted_length
     byidx = {q["idx"]: q for q in params}
     audio_edits, grows = dict(audio_edits), dict(grows)
     # a slot with mode files keeps its own record (its key is what the game's descriptors name)
     used, taken = [], {i for i in (_SMo.slot_idx(r) for r in modes.slots) if i is not None}
+    hosted = {}                       # (slot, converted file) -> (host, frames)
     for rel, mode, src in modes.files():
         what = "%s's file for mode %d (%s)" % (os.path.basename(rel), mode, modes.name(mode))
         slot = _SMo.slot_idx(rel)
@@ -9453,6 +9463,30 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log):
             log("Music modes: %s is not put on this card: its converted copy cannot be read."
                 % what, "warning")
             continue
+        if (slot, wav) in hosted:
+            # the same file in another mode of this slot: the record it already has
+            host, want = hosted[(slot, wav)]
+            used.append({"rel": rel, "slot": int(slot), "mode": int(mode), "host": int(host),
+                         "frames": int(want), "name": modes.name(mode), "idx": int(host),
+                         "level_ref": int(slot)})
+            log("Music modes: %s (%s) is the same file as another mode of sound idx %d and plays "
+                "from the same new record (idx %d's copy) while MUSIC MODE is %d." % (
+                    what, os.path.basename(src), slot, host, mode), "info")
+            continue
+        key = (slot, wav)
+        room = emitted_length(int(p.get("length", 0) or 0))
+        if not longer_ok and want > room:
+            # as a replacement is with "Allow replacements longer than the original" off
+            try:
+                wav = _SMo.cut(wav, room)
+            except (OSError, EOFError) as e:
+                log("Music modes: %s is not put on this card: it could not be cut to its slot's "
+                    "length (%s)." % (what, e), "warning")
+                continue
+            log("Music modes: %s (%.2f s) is cut to its slot's %.2f s: %s." % (
+                what, want / 44100.0, room / 44100.0, longer_why or "longer replacements are off"),
+                "info")
+            want = room
         host = _sound_mode_host(params, p, want, audio_edits, taken)
         if host is None:
             log("Music modes: %s is not put on this card: no sound record is left to hold it."
@@ -9462,6 +9496,7 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log):
         audio_edits[host] = wav
         grows[host] = (emitted_length(hlen), max(int(want), hlen))
         taken.add(host)
+        hosted[key] = (host, int(want))
         used.append({"rel": rel, "slot": int(slot), "mode": int(mode), "host": int(host),
                      "frames": int(want), "name": modes.name(mode), "idx": int(host),
                      "level_ref": int(slot)})

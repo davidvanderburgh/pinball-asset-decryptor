@@ -631,6 +631,14 @@ greys, the menu showing Edition 2.  Set back to 1, boot 3 chose image 0 and the 
 Frames and logs in the ticket's artifacts (`work/artifacts/PAD-495/emulator`).  Not run on a
 machine.
 
+**Round 2, the same day, the whole user flow on both models.**  Premium/LE and Pro 1.16, each
+edition a whole Write-built card carrying MUSIC MODE (PAD-494) and EDITION in one program, put on a
+card by the Multi-boot tab's own `build_args` (Compact build + the tick): image 1 cost 2 files, and
+its music-modes runtime went to `modes/img1`.  EDITION 2 -> the next power-up chose image 1, drew it
+in greys, and image 1's runtime played mode 2 from the MUSIC MODE the other edition had set (one
+store).  Apply to card with the tick off (`--no-editions`) brought the menu back, highlighting the
+image the editions boot had remembered; on again, the card booted by EDITION.
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both

@@ -7,15 +7,21 @@ by the user"; then, once it shipped, "need at least 4" and more on demand. The A
 sound files for modes 2 to :data:`MAX_MODES` beside its own (mode 1: the sound the slot plays
 today, its replacement or the stock one; :data:`SHOWN_MODES` are offered before the user adds
 more), the project names the modes (``.staged_changes.json`` ``sound_modes``: ``{"names": [...],
-"slots": {rel: {"2": file, "3": file}}}``; unnamed ones are "Standard", "Custom A"...), and a
-Write does three things:
+"slots": {rel: {"2": file, "3": file}}, "levels": {rel: {"2": dB}}}``; unnamed ones are
+"Standard", "Custom A"...), and a Write does three things:
 
 1. each mode file is made into its slot's own format (the conversion a replacement gets,
    :func:`core.audio_slots.stage_replacement` against the slot's pristine sound) and goes into
    the sound bank as a record of its own: a grown copy of a record the project does not touch
    (a HOST), left un-pointed, so nothing the game plays names it (the engine's forced grows, the
-   path the modes' own sounds take); its loudness is matched to the SLOT's, as a replacement's is.
-   One file in several modes of a slot is one record. A file longer than its slot's sound is cut
+   path the modes' own sounds take); its loudness is matched to the SLOT's, as a replacement's is,
+   then moved by the mode file's OWN loudness offset (``levels``; the Audio tab's "Loudness for
+   this clip" while that file is in the Replacement pane). The slot's own offset is its own
+   sound's: "the individual loudness setting [should be] specific to mode files", the tester
+   asked, once a level set on a stock song for its mode files read as a level on the stock song.
+   A project saved before mode files had their own (no ``levels`` key) gives each one its slot's
+   offset, as those builds did. One file in several modes of a slot at one level is one record. A
+   file longer than its slot's sound is cut
    to that length unless the build may keep replacements whole ("Allow replacements longer than
    the original"), as a replacement is;
 2. the operator menu gets MUSIC MODE (:mod:`.menu_settings`: Audio Content, the modes' names in
@@ -39,8 +45,11 @@ import re
 import shutil
 from dataclasses import dataclass, field
 
-#: the project sidecar's key: ``{"names": [name, ...], "slots": {rel: {"2": file, "3": file}}}``
+#: the project sidecar's key: ``{"names": [name, ...], "slots": {rel: {"2": file, "3": file}},
+#: "levels": {rel: {"2": dB}}}``
 STAGED_KEY = "sound_modes"
+#: a mode file's loudness offset, as the per-clip one: whole dB, at most this far either way
+LEVEL_MAX = 12
 #: how many modes a project may have (mode 1 is the card's own sounds). The tester asked for "at
 #: least 4" and room for more; the runtime and the menu setting both take 8
 MAX_MODES = 8
@@ -75,9 +84,12 @@ def enabled():
 
 @dataclass
 class Modes:
-    """A project's music modes: the names of modes 1..n and each slot's files for modes 2..n."""
+    """A project's music modes: the names of modes 1..n, each slot's files for modes 2..n, and
+    their loudness offsets (``None``: a project saved before mode files had their own, whose mode
+    files take their slot's)."""
     names: list = field(default_factory=list)
     slots: dict = field(default_factory=dict)      # {rel: {mode: file}}
+    levels: dict = field(default_factory=dict)     # {rel: {mode: dB}}, or None
 
     @property
     def count(self):
@@ -97,6 +109,13 @@ class Modes:
         """``[(rel, mode, file)]``, in slot then mode order."""
         return [(rel, m, f) for rel in sorted(self.slots) for m, f in sorted(self.slots[rel].items())]
 
+    def level(self, rel, mode):
+        """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
+        sound), or ``None`` for a project saved before mode files had their own."""
+        if self.levels is None:
+            return None
+        return int((self.levels.get(rel) or {}).get(mode, 0) or 0)
+
 
 def default_name(mode):
     """A mode nobody named: "Standard" for mode 1 (the sounds as they are), then "Custom A",
@@ -104,9 +123,34 @@ def default_name(mode):
     return "Standard" if mode <= 1 else "Custom %s" % chr(ord("A") + mode - 2)
 
 
+def _modes_of(files, keep):
+    """``{mode: value}`` of *files*' modes 2..:data:`MAX_MODES` whose value *keep* turns into
+    something (``None`` drops it)."""
+    out = {}
+    for m, v in files.items():
+        try:
+            m = int(m)
+        except (TypeError, ValueError):
+            continue
+        if 2 <= m <= MAX_MODES:
+            v = keep(v)
+            if v is not None:
+                out[m] = v
+    return out
+
+
+def clean_level(v):
+    """A loudness offset as kept: whole dB within :data:`LEVEL_MAX`, ``None`` for 0 or junk."""
+    try:
+        v = int(round(float(v)))
+    except (TypeError, ValueError):
+        return None
+    return max(-LEVEL_MAX, min(LEVEL_MAX, v)) or None
+
+
 def clean(raw):
     """A :class:`Modes` from a sidecar's value: modes 2..:data:`MAX_MODES` only, empty paths and
-    empty slots dropped, at most :data:`MAX_MODES` names."""
+    empty slots dropped, at most :data:`MAX_MODES` names, levels of files the slot has only."""
     out = Modes()
     if not isinstance(raw, dict):
         return out
@@ -118,16 +162,18 @@ def clean(raw):
         for rel, files in slots.items():
             if not isinstance(rel, str) or not isinstance(files, dict):
                 continue
-            keep = {}
-            for m, f in files.items():
-                try:
-                    m = int(m)
-                except (TypeError, ValueError):
-                    continue
-                if 2 <= m <= MAX_MODES and isinstance(f, str) and f.strip():
-                    keep[m] = f
+            keep = _modes_of(files, lambda f: f if isinstance(f, str) and f.strip() else None)
             if keep:
                 out.slots[rel] = keep
+    levels = raw.get("levels")
+    if not isinstance(levels, dict):
+        out.levels = None
+        return out
+    for rel, files in levels.items():
+        if rel in out.slots and isinstance(files, dict):
+            keep = {m: v for m, v in _modes_of(files, clean_level).items() if m in out.slots[rel]}
+            if keep:
+                out.levels[rel] = keep
     return out
 
 
@@ -138,9 +184,13 @@ def to_json(modes):
         names.pop()
     if not modes.slots and not names:
         return None
-    return {"names": names,
-            "slots": {rel: {str(m): f for m, f in sorted(files.items())}
-                      for rel, files in sorted(modes.slots.items()) if files}}
+    out = {"names": names,
+           "slots": {rel: {str(m): f for m, f in sorted(files.items())}
+                     for rel, files in sorted(modes.slots.items()) if files}}
+    if modes.levels is not None:
+        out["levels"] = {rel: {str(m): int(db) for m, db in sorted(v.items()) if db}
+                         for rel, v in sorted(modes.levels.items()) if any(v.values())}
+    return out
 
 
 def load(project):

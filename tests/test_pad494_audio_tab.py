@@ -48,7 +48,8 @@ def test_a_sound_takes_a_file_for_another_music_mode(tmp_path, monkeypatch):
         w.answers.append(mine)
         assert w.call("audio.menu_action", "mode_pick:2", REL) is True
         assert w.asked[-1]["title"] == "Choose the sound %s plays in music mode 2 (Custom A)" % REL
-        assert _sidecar(proj)["sound_modes"] == {"names": [], "slots": {REL: {"2": os.path.normpath(mine)}}}
+        assert _sidecar(proj)["sound_modes"] == {"names": [], "slots": {REL: {"2": os.path.normpath(mine)}},
+                                                 "levels": {}}
         r = _row(w, REL)
         assert r["md"] == [2]
         assert r["md_tip"] == ("Music modes - the machine's MUSIC MODE setting picks which plays: "
@@ -68,6 +69,7 @@ def test_a_sound_takes_a_file_for_another_music_mode(tmp_path, monkeypatch):
                                   "Mode 3 (Custom B): choose a sound…",
                                   "Mode 4 (Custom C): choose a sound…",
                                   "Play mode 2's sound (Orchestral jackpot.wav)",
+                                  "Loudness of mode 2's sound (0 dB)…",
                                   "Take off mode 2's sound (Orchestral jackpot.wav)",
                                   "Add a music mode…", "Name the music modes…"]
         assert w.call("audio.menu_action", "mode_play:2", REL) is True
@@ -79,7 +81,78 @@ def test_a_sound_takes_a_file_for_another_music_mode(tmp_path, monkeypatch):
         assert _row(w, REL)["md"] == [2]
         assert w.call("audio.menu_action", "mode_off:2", REL) is True
         assert "md" not in _row(w, REL)
-        assert _sidecar(proj)["sound_modes"] == {"names": ["Standard", "Orchestral Score"], "slots": {}}
+        assert _sidecar(proj)["sound_modes"] == {"names": ["Standard", "Orchestral Score"], "slots": {},
+                                                 "levels": {}}
+
+
+def test_a_mode_file_has_a_loudness_of_its_own(tmp_path, monkeypatch):
+    """"Are we able to make the individual loudness setting specific to mode files" - a tester
+    who levelled ten songs for their mode files: the song's own box is its own replacement's,
+    and each mode file has one of its own (the menu, or the box while it is in the pane)."""
+    from pinball_decryptor.webui import compat
+    _offer(monkeypatch)
+    proj = _project(tmp_path)
+    mine = str(tmp_path / "mine" / "Orchestral jackpot.wav")
+    _wav(mine)
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        w.answers.extend([mine, mine])
+        assert w.call("audio.menu_action", "mode_pick:2", REL) is True
+        assert w.call("audio.menu_action", "mode_pick:3", REL) is True
+        w.call("audio.select", [REL])
+        st = w.state("audio")
+        assert (st["level_label"], st["level_all"]) == ("", True)   # "Loudness for this clip"
+        w.call("audio.set_level", REL, "5")
+        assert _sidecar(proj)["audio_levels"] == {REL: 5}
+        assert _sidecar(proj)["sound_modes"]["levels"] == {}       # the mode files are not moved
+        # the menu: mode 2's own
+        monkeypatch.setattr(compat.simpledialog, "askstring", lambda *a, **k: "-4")
+        assert w.call("audio.menu_action", "mode_level:2", REL) is True
+        assert _sidecar(proj)["sound_modes"]["levels"] == {REL: {"2": -4}}
+        assert "Loudness of mode 2's sound (-4 dB)…" in _labels(_modes_entry(w, REL))
+        assert "mode 2 (Custom A): Orchestral jackpot.wav at -4 dB; " \
+               "mode 3 (Custom B): Orchestral jackpot.wav." in _row(w, REL)["md_tip"]
+        # playing mode 3's sound makes the box that file's own
+        assert w.call("audio.menu_action", "mode_play:3", REL) is True
+        st = w.state("audio")
+        assert (st["level"], st["level_label"], st["level_all"]) == (
+            "0", "Mode 3's loudness:", False)
+        w.call("audio.set_level", REL, "7")
+        assert _sidecar(proj)["sound_modes"]["levels"] == {REL: {"2": -4, "3": 7}}
+        assert _sidecar(proj)["audio_levels"] == {REL: 5}           # the song's own, untouched
+        assert _row(w, REL)["lvl"] == "+5 dB"
+        # its own replacement back in the pane: the box is the song's again
+        import time
+        for rel in ("audio/idx0002.wav", REL):
+            w.call("audio.select", [rel])
+            time.sleep(0.6)                                       # the row loads 250 ms on
+            w.drain()
+        st = w.state("audio")
+        assert (st["level"], st["level_label"], st["level_all"]) == ("5", "", True)
+        # taking a file off takes its loudness with it
+        assert w.call("audio.menu_action", "mode_off:2", REL) is True
+        assert _sidecar(proj)["sound_modes"]["levels"] == {REL: {"3": 7}}
+
+
+def test_a_project_from_before_keeps_its_mode_files_loudness(tmp_path, monkeypatch):
+    """A record saved before mode files had a loudness of their own: its builds gave each one its
+    song's offset, so each starts there (the song's own offset stays the song's)."""
+    import json
+    _offer(monkeypatch)
+    proj = _project(tmp_path)
+    mine = str(tmp_path / "mine" / "Orchestral jackpot.wav")
+    _wav(mine)
+    with open(os.path.join(proj, ".staged_changes.json"), "w", encoding="utf-8") as f:
+        json.dump({"audio_levels": {REL: 3},
+                   "sound_modes": {"names": [], "slots": {REL: {"2": mine, "4": mine}}}}, f)
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        assert "Loudness of mode 2's sound (+3 dB)…" in _labels(_modes_entry(w, REL))
+        w.call("audio.select", [REL])
+        w.call("audio.set_level", REL, "1")
+        side = _sidecar(proj)
+        assert side["audio_levels"] == {REL: 1}
+        assert side["sound_modes"]["levels"] == {REL: {"2": 3, "4": 3}}
 
 
 def test_more_music_modes_can_be_added_up_to_the_games_most(tmp_path, monkeypatch):

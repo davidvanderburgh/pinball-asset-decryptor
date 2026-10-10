@@ -3180,6 +3180,12 @@ class App:
                     extra += ("\n\n%d default setting(s) came across too — see "
                               "the Defaults tab."
                               % res["extras"]["settings"])
+                if res["extras"].get("sound_modes"):
+                    # PAD-494: the files sit in the project, the modes on
+                    # the Audio tab's sounds
+                    extra += ("\n\nMusic mode files for %d sound(s) came "
+                              "across too — see Music modes on the Audio "
+                              "tab." % res["extras"]["sound_modes"])
                 if skipped:
                     extra += ("\n\n%d file(s) were skipped: this extract has "
                               "nothing they match. Each one is named in the "
@@ -3671,6 +3677,9 @@ class App:
         if res.get("video_variants"):
             tags_note += (", %d slot(s) with random clips"
                           % res["video_variants"])
+        if res.get("sound_modes"):
+            tags_note += (", %d sound(s) with music mode files"
+                          % res["sound_modes"])
         if res.get("defaults"):
             tags_note += ", %d staged default(s)" % res["defaults"]
         # An earlier transfer of the same mods onto this folder is replaced,
@@ -3760,6 +3769,13 @@ class App:
             lines.append("Random clips:  %d slot(s) matched, %d dropped"
                          % (len(vv.get("matched", ())),
                             len(vv.get("dropped", ()))))
+        sm = plan.get("sound_modes") or {}
+        if any(sm.get(k) for k in ("matched", "remapped", "flagged", "dropped")):
+            # PAD-494: a sound's music mode files go where its replacement would
+            lines.append("Music modes:  %d sound(s) matched, %d moved to a new "
+                         "index, %d flagged, %d dropped"
+                         % (len(sm.get("matched", ())), len(sm.get("remapped", ())),
+                            len(sm.get("flagged", ())), len(sm.get("dropped", ()))))
         lines.append("Image:  %d matched, %d dropped"
                      % (len(i["matched"]), len(i["dropped"])))
         lines.append("Text:   %d matched, %d dropped"
@@ -3966,12 +3982,15 @@ class App:
                        % totals["flagged"], "warning")
             res = mod_transfer.apply_transfer(project, ws, plan,
                                               include_flagged=False)
-            return ("%d audio, %d video, %d image, %d text transferred%s"
+            return ("%d audio, %d video, %d image, %d text transferred%s%s"
                     % (res["audio"], res["video"], res["image"],
                        res["text"],
                        ("; %d slot(s) with random clips"
                         % res["video_variants"])
-                       if res.get("video_variants") else ""))
+                       if res.get("video_variants") else "",
+                       ("; %d sound(s) with music mode files"
+                        % res["sound_modes"])
+                       if res.get("sound_modes") else ""))
 
         def stage(ws):
             pend_a = self._stage_pending_audio(ws)

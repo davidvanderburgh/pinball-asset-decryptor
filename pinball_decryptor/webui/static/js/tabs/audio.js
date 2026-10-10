@@ -29,7 +29,8 @@ const T = {
   profile: "Characterize every sound in the scanned extract folder — lead-in, fade-out, peak/RMS level, DC offset, spectral brightness — and flag replacements that deviate from the game's own callout style. Writes audio_profile.csv into the extract folder.",
   loop: "Loop this replacement in-game.\n\nThese music stems normally play once — there's no built-in loop — so a replacement that's shorter than the original goes silent partway through its mode. Ticking Loop bakes a forward-loop flag into the rebuilt audio (the same loop_mode flag Godot's importer would set), so the engine repeats your clip to fill the mode; the game stops or fades it on the next song change.\n\nDefaults ON for tracks with \"LOOP\" in the name (the mode music). Leave it OFF for one-shot sound effects and callouts.",
   keep: "Keep this replacement's full length.\n\nBy default every track is trimmed (or padded) to its original slot length on Write. Tick Full to skip that for this one slot, so a longer replacement plays at its full length.\n\nThe file validates and boots at any length (the game's checksums are re-forged regardless of size). Whether it actually plays to the end is up to the game: best for a cue nothing plays over — e.g. the end-of-game track before attract — since the show may still cut it short. Test on the machine.",
-  level: "How loud THIS replacement lands, in dB.\n\nEvery replacement is normally gained to the loudness of the sound it replaces, so it sits with its neighbours instead of jumping out — and that ignores the level you mixed your own file at, so exporting the same track louder changes nothing. This is the way to overrule it for one clip.\n\nIt stacks on the build-wide \"Replacement loudness\" offset in Advanced Audio Options: that one moves every replacement together, this one moves this clip relative to the rest. 0 dB = whatever the rest of the build does.\n\nHandy for music, which Stern mixes as a bed under the callouts. Boosts are soft-limited, never hard-clipped, and the build log lists every clip you levelled by hand.\n\nThe Replacement preview redraws and plays at this offset, so you can see and hear it. What the preview can't show is the automatic match to the stock sound's own level: that happens inside the encoder, against audio only the machine's own decoder can produce.",
+  level: "How loud THIS replacement lands, in dB.\n\nEvery replacement is normally gained to the loudness of the sound it replaces, so it sits with its neighbours instead of jumping out — and that ignores the level you mixed your own file at, so exporting the same track louder changes nothing. This is the way to overrule it for one clip.\n\nIt stacks on the build-wide \"Replacement loudness\" offset in Advanced Audio Options: that one moves every replacement together, this one moves this clip relative to the rest. 0 dB = whatever the rest of the build does.\n\nHandy for music, which Stern mixes as a bed under the callouts. Boosts are soft-limited, never hard-clipped, and the build log lists every clip you levelled by hand.\n\nA music mode's sound has a loudness of its own: play it from the row's Music modes menu and this box becomes \"Mode N's loudness\", for that file only. A sound's own offset never reaches its mode files, and on a sound with no replacement it leaves the stock sound as it is.\n\nThe Replacement preview redraws and plays at this offset, so you can see and hear it. What the preview can't show is the automatic match to the stock sound's own level: that happens inside the encoder, against audio only the machine's own decoder can produce.",
+  levelAllMode: "A music mode's sound is in the Replacement pane, so this box is that file's own loudness, one file at a time. Load a sound's own replacement to set the rows together.",
   levelAll: "Give every row the list is currently showing this same offset — the search box, the Type filter and Show: Changed/Unchanged all narrow what \"shown\" means.\n\nSo: set Type to Music, type this box to +4, and every song sits 4 dB above stock while the callouts stay where they are.\n\nSetting it back to 0 the same way clears them.",
 };
 const TYPES = ["All types", "Music", "Sound FX", "Callouts", "Other"];
@@ -319,7 +320,7 @@ function Loudness({ s, selRel }) {
     timer.current = setTimeout(() => { if (rel) call("audio.set_level", rel, v); }, 200);
   };
   return html`<span class="row aud-loud" style="gap:8px">
-    <label class="lbl nw" for="aud-db" ...${tip(T.level)}>Loudness for this clip:</label>
+    <label class="lbl nw" for="aud-db" ...${tip(T.level)}>${s.level_label || "Loudness for this clip:"}</label>
     <span class=${cx("field sm aud-db", !s.level_enabled && "disabled")} ...${tip(T.level)}>
       <input id="aud-db" type="number" min="-12" max="12" step="1" value=${val} disabled=${!s.level_enabled}
         aria-label="Loudness in dB"
@@ -327,7 +328,8 @@ function Loudness({ s, selRel }) {
         onInput=${(e) => { setVal(e.target.value); send(e.target.value, selRel); }} />
       <span class="muted">dB</span>
     </span>
-    <${Button} size="sm" kind="ghost" disabled=${!s.level_enabled} title=${T.levelAll}
+    <${Button} size="sm" kind="ghost" disabled=${!s.level_enabled || s.level_all === false}
+      title=${s.level_all === false ? T.levelAllMode : T.levelAll}
       onClick=${() => call("audio.level_apply_all", val)}>Apply to all shown<//>
   </span>`;
 }

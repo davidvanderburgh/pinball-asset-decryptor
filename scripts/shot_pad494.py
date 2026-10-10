@@ -11,6 +11,9 @@ Writes, under the same names before and after:
 
 - <before_|after_>audio_tab.png    the Audio tab on the Blue Oyster Cult slot
 - <before_|after_>audio_menu.png   its right-click menu, "Music modes" opened where it is
+- <before_|after_>audio_mode_level.png   mode 2's file played from that menu: the Replacement
+  pane holds it, and the loudness box beside it (round 4: that file's own, +3 dB; before, the
+  sound's own +2 dB, which also reached its mode files)
 
 Before (main) the tab knows nothing of the modes the sidecar holds: one replacement per slot.
 After (--after, the ticket branch) the rows carry their modes, and the menu has "Music modes".
@@ -71,7 +74,9 @@ def _project(scratch):
         shutil.copy2(os.path.join(EXTRACT, "audio", src), own[name])
     with open(os.path.join(dst, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump({"audio": {"audio/" + BOC: own[STANDARD[0]]},
+                   "audio_levels": {"audio/" + BOC: 2},
                    "sound_modes": {"names": ["", "Orchestral"],
+                                   "levels": {"audio/" + BOC: {"2": 3}},
                                    "slots": {"audio/" + BOC: {"2": own[ORCHESTRAL[0]],
                                                               "4": own[ORCHESTRAL[0]]},
                                              "audio/" + MAIN_TITLE: {"3": own[HEISEI[0]]}}}},
@@ -148,6 +153,18 @@ def main():
             print("menu:", page.locator(".menu .mi").all_inner_texts(), flush=True)
             page.screenshot(path=out("audio_menu.png"))
             page.keyboard.press("Escape")
+            time.sleep(0.5)
+            # mode 2's file in the Replacement pane, and the loudness box beside it
+            api("audio.menu_action", "mode_play:2", "audio/" + BOC)
+            time.sleep(2.5)
+            page.evaluate("() => document.querySelectorAll('audio').forEach((a) => { a.pause(); })")
+            api("audio.stop")
+            time.sleep(0.8)
+            st = state().get("audio") or {}
+            print("pane:", (st.get("panes") or {}).get("rep", {}).get("name"),
+                  "| box:", st.get("level_label") or "Loudness for this clip:", st.get("level"),
+                  flush=True)
+            page.screenshot(path=out("audio_mode_level.png"))
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

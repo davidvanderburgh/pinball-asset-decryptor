@@ -131,13 +131,36 @@ def test_a_host_is_the_longest_free_record_of_the_slots_channels_no_longer_than_
     assert E._sound_mode_host([slot], slot, 50, {}, set()) is None        # never the slot itself
 
 
-def test_a_hosted_file_is_levelled_as_its_slot():
-    used = [{"host": 2225, "slot": 974, "mode": 2}, {"host": 285, "slot": 974, "mode": 3}]
+def test_a_hosted_file_from_an_older_record_takes_its_slots_offset():
+    """A record from before mode files had their own loudness (``db`` None): as those builds did."""
+    used = [{"host": 2225, "slot": 974, "mode": 2, "db": None},
+            {"host": 285, "slot": 974, "mode": 3, "db": None}]
     assert E._sm_level_refs(used) == {2225: 974, 285: 974}
     assert E._sm_hosts(used) == {2225, 285}
     assert E._sm_gains({974: 3.0, 5: -2.0}, used) == {974: 3.0, 5: -2.0, 2225: 3.0, 285: 3.0}
     assert E._sm_gains({5: 1.0}, used) == {5: 1.0}
     assert E._sm_gains({5: 1.0}, []) == {5: 1.0}
+
+
+def test_a_hosted_file_takes_its_own_offset_never_its_slots_or_its_hosts(monkeypatch):
+    """"Are we able to make the individual loudness setting specific to mode files": the slot's
+    offset is its own sound's; a host's own stock offset is that stock sound's."""
+    monkeypatch.setattr(E, "_slot_gain_db", lambda db: 100.0 + db)       # the build-wide part
+    used = [{"host": 2225, "slot": 974, "mode": 2, "db": 0},
+            {"host": 285, "slot": 974, "mode": 3, "db": -4}]
+    assert E._sm_gains({974: 106.0, 2225: 102.0}, used) == {974: 106.0, 285: 96.0}
+
+
+def test_mode_file_levels_are_kept_per_slot_and_mode():
+    m = SMo.clean({"slots": {BOC: {"2": "a.wav", "3": "b.wav"}},
+                   "levels": {BOC: {"2": "4.4", "3": 0, "5": 3, "x": 2}, "audio/idx0004.wav": {"2": 1}}})
+    assert m.levels == {BOC: {2: 4}}
+    assert (m.level(BOC, 2), m.level(BOC, 3), m.level("audio/idx0004.wav", 2)) == (4, 0, 0)
+    assert SMo.to_json(m)["levels"] == {BOC: {"2": 4}}
+    assert SMo.clean({"slots": {BOC: {"2": "a.wav"}}, "levels": {BOC: {"2": 40}}}).level(BOC, 2) == 12
+    older = SMo.clean({"slots": {BOC: {"2": "a.wav"}}})
+    assert older.levels is None and older.level(BOC, 2) is None
+    assert "levels" not in SMo.to_json(older)
 
 
 def test_the_grown_cache_key_tells_a_hosted_file_by_its_slot(tmp_path):
@@ -193,14 +216,17 @@ def test_a_cut_copy_keeps_the_first_card_samples_in_the_files_own_rate(tmp_path)
         assert r.getnframes() == 96000
 
 
-def _grow(tmp_path, monkeypatch, files, longer_ok=True):
+def _grow(tmp_path, monkeypatch, files, longer_ok=True, levels=None):
     from pinball_decryptor.plugins.stern.spike2.emulator import BLOCK
     made = {src: _wav(tmp_path / ("conv_" + src), secs) for src, secs in files.items()}
     monkeypatch.setattr(SMo, "convert", lambda project, rel, mode, src, log=None: made[src])
     slot_len = 44100 + BLOCK                               # the slot's own sound: 1 s
     params = [_p(2095, slot_len), _p(10, 3 * 44100 + BLOCK), _p(11, 3 * 44100 + BLOCK),
               _p(12, 3 * 44100 + BLOCK)]
-    m = SMo.clean({"slots": {BOC: {"2": "a.wav", "3": "b.wav", "4": "a.wav"}}})
+    raw = {"slots": {BOC: {"2": "a.wav", "3": "b.wav", "4": "a.wav"}}}
+    if levels is not None:
+        raw["levels"] = {BOC: levels}
+    m = SMo.clean(raw)
     logs = []
     edits, grows, used = E._sound_modes_grow(str(tmp_path), params, {}, {}, m,
                                              lambda t, lvl="info": logs.append(t),
@@ -236,3 +262,18 @@ def test_longer_files_are_cut_to_the_slots_length_when_they_are_not(tmp_path, mo
         assert r.getnframes() == 44100
     assert edits[hosts[3]].endswith("conv_b.wav")
     assert any("cut to its slot's" in t and "off in Settings" in t for t in logs)
+
+
+def test_one_file_at_two_loudnesses_is_two_records(tmp_path, monkeypatch):
+    edits, grows, used, logs = _grow(tmp_path, monkeypatch, {"a.wav": 2.0, "b.wav": 2.5},
+                                     levels={"2": 3})
+    by_mode = {u["mode"]: u for u in used}
+    assert {m: u["db"] for m, u in by_mode.items()} == {2: 3, 3: 0, 4: 0}
+    assert len({by_mode[2]["host"], by_mode[3]["host"], by_mode[4]["host"]}) == 3
+    assert len(edits) == 3
+    assert any("its own loudness +3 dB" in t for t in logs)
+    # at one loudness the file is one record again
+    edits, grows, used, logs = _grow(tmp_path, monkeypatch, {"a.wav": 2.0, "b.wav": 2.5},
+                                     levels={"2": 3, "4": 3})
+    by_mode = {u["mode"]: u for u in used}
+    assert by_mode[2]["host"] == by_mode[4]["host"] and len(edits) == 2

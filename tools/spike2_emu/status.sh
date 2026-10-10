@@ -10,6 +10,9 @@
 #   host_cpu=<pct>     renderer CPU
 #   state=<word>       off | booting | techalerts | running
 #   fps=<n>            renderer frames per second, blank if not reported yet
+#   gl_fallback=<why>  the renderer lost the GPU and draws in SOFTWARE; why is
+#                      watch.sh's verdict (gpulost, loader, surface, unknown...)
+#                      - absent on a GPU run and on software by request
 #   pcm=<frames>       PCM frames actually played out to the speakers
 #   drop=<frames>      PCM frames dropped (should stay 0)
 #   log=<path>
@@ -116,6 +119,14 @@ fi
 # The renderer prints its rate every 2 s; take the most recent.
 f=$(grep -ao '[0-9.]* fps' "$PAD_LOGDIR/padglhost.log" 2>/dev/null | tail -1)
 [ -n "$f" ] && echo "fps=${f% fps}"
+
+# WHY THE RENDERER IS IN SOFTWARE, when it fell there (PAD-497). David saw the
+# stutter; the run log said only "eglInitialize failed" and "TRYING THE
+# RENDERER AGAIN IN SOFTWARE", and this row of the tab said "200% CPU, 30 fps"
+# with no word that it used to draw on the GPU at 7.5%. watch.sh writes the
+# file only after a GPU attempt failed.
+g=$(head -1 "$PAD_LOGDIR/padglhost.log.fallback" 2>/dev/null | tr -cd 'a-z')
+[ -n "$g" ] && echo "gl_fallback=$g"
 
 # Audio comes from the PAD_AUDIO_DUMP line, which watch.sh only emits when
 # PAD_AUDIO_DUMP is set; blank is "not being sampled", not "no audio".

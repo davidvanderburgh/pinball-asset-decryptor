@@ -344,6 +344,29 @@ def test_no_rig_means_no_probe_and_no_poll(tmp_path):
             svc._run(["true"])
 
 
+def test_the_status_poll_runs_the_root_status_command(tmp_path, monkeypatch):
+    """PAD-496: the poll asks through rig.status_cmd (root on Windows), not
+    the desktop user's rig_cmd, which read another rig's game as this one's:
+    the button said Stop over a rig that ran nothing."""
+    from pinball_decryptor.core import runtime
+    from pinball_decryptor.webui import emulate_rig as rig
+    from pinball_decryptor.webui.tabs import emulate as emod
+    monkeypatch.setenv("PAD_BOARD_WIN", str(tmp_path / "board"))
+    monkeypatch.setattr(runtime, "status", lambda *a, **k: None)
+    monkeypatch.setattr(rig, "status_cmd", lambda: ["STATUS-AS-ROOT"])
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        rec = _patch(svc, monkeypatch, answers={
+            "STATUS-AS-ROOT": _Done(b"procs=0\nrunning=0\nstate=off\n")})
+        w.run(lambda: setattr(svc, "_docker", "ok"))
+        with monkeypatch.context() as m:
+            m.setattr(emod, "no_rig", lambda: False)
+            w.run(svc._poll)
+            _wait(w, lambda: svc._polled_once and not svc._poll_busy)
+        assert rec.calls[0] == ["STATUS-AS-ROOT"]
+        assert w.state(NS)["run_btn"]["label"] == "Start emulator"
+
+
 def test_on_show_paints_the_stern_ladder(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         w.call("ui.select_tab", NS)
@@ -582,6 +605,37 @@ def test_apply_paints_the_status_grid_and_footer(tmp_path):
         assert s["run_btn"]["label"] == "Start emulator"
         assert ended == [svc._launch_serial]
         assert w.state("shell")["footer"]["status"] == "Ready"
+
+
+def test_a_renderer_that_lost_the_gpu_says_so_in_its_row(tmp_path):
+    """PAD-497: David saw King Kong's video stutter; the cause - WSL had lost
+    the graphics card and the game was drawn in software - was in the run log
+    only, and this row read "200% CPU, 30 fps" as if nothing had changed."""
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        w.call("ui.select_tab", NS)
+        run = {"running": "1", "state": "attract", "procs": "5",
+               "host_cpu": "200", "fps": "30.0"}
+        w.run(svc._apply, dict(run, gl_fallback="gpulost"))
+        s = w.state(NS)
+        assert s["vals"]["host"] == "200% CPU, 30.0 fps · no GPU"
+        assert "lost the graphics card" in s["host_tip"]
+        assert "stutter" in s["host_tip"]
+        assert "Restart WSL…" in s["host_tip"]
+        # A reason watch.sh has no words for still names the cost and a cure.
+        w.run(svc._apply, dict(run, gl_fallback="unknown"))
+        s = w.state(NS)
+        assert s["vals"]["host"].endswith("· no GPU")
+        assert "stutter" in s["host_tip"] and "Restart WSL…" in s["host_tip"]
+        # The GPU back (or software by request): no word, no badge.
+        w.run(svc._apply, run)
+        s = w.state(NS)
+        assert s["vals"]["host"] == "200% CPU, 30.0 fps"
+        assert s["host_tip"] == ""
+        w.run(svc._apply, dict(run, gl_fallback="gpulost"))
+        w.run(svc._apply, {"running": "0", "state": "off", "procs": "0"})
+        s = w.state(NS)
+        assert s["vals"]["host"] == "—" and s["host_tip"] == ""
 
 
 def test_copy_and_preparing_hold_the_state_over_the_poll(tmp_path):

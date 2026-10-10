@@ -93,13 +93,14 @@ exit 0
 """
 
 
-def _drive(tmp_path, hostlog, driver=None):
-    """Ask the real shell functions what this renderer log means."""
+def _drive(tmp_path, hostlog, driver=None, files=()):
+    """Ask the real shell functions what this renderer log means.  ``files``
+    is more (name, text) for the driver to read beside it."""
     rig = tmp_path / ("rig%d" % len(list(tmp_path.glob("rig*"))))
     rig.mkdir(parents=True)
     shutil.copy(os.path.join(RIG, "padpath.sh"), str(rig / "padpath.sh"))
     for name, text in (("hostlog", hostlog),
-                       ("driver.sh", driver or _DRIVER)):
+                       ("driver.sh", driver or _DRIVER)) + tuple(files):
         with open(str(rig / name), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
     os.chmod(str(rig / "driver.sh"), 0o755)
@@ -576,3 +577,177 @@ def test_the_second_display_still_unmaps_its_own():
     start = host.index('its feed decodes but is not presented')
     body = host[start:start + 900]
     assert "XUnmapWindow(xdpy, xwin2)" in body
+
+
+# --------------------------------------------------------------------------
+# PAD-497: WSL'S GPU DRIVER REFUSED THE RENDERER, and the game went on in
+# software with its videos stuttering.  David's log of every start that day:
+#
+#     libEGL warning: egl: failed to create dri2 screen
+#     eglInitialize failed
+#
+# and the kernel's, for each one:
+#
+#     misc dxg: dxgk: dxgvmb_send_create_process: create_process failed -75
+#
+# The renderer's two lines are also what Mesa prints for other EGL failures, so
+# the verdict rests on the kernel - and on a refusal that is NEW since watch.sh
+# took its mark, because the ring buffer keeps old ones for hours.
+# --------------------------------------------------------------------------
+
+#: The renderer's log from David's run of 2026-10-09 21:43.
+GPULOST_LOG = """\
+[padglhost] keyboard -> switches via /mnt/wsl/paddata/spike2/spike2root/dump/padsw
+[padglhost] window opened 1360x768 on DISPLAY=:0
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering
+libEGL warning: egl: failed to create dri2 screen
+eglInitialize failed
+"""
+
+REFUSAL = ("[%s] misc dxg: dxgk: dxgvmb_send_create_process: "
+           "create_process failed -75\n")
+RELAY = ("[%s] WSL (984248 - Relay) ERROR: UtilAcceptVsock:244: Waiting for "
+         "abnormally long accept(10)\n")
+
+#: Mark the kernel log, let the "attempt" write its lines, then ask.
+_KMSG_DRIVER = """#!/bin/bash
+RIG=$(pwd); export RIG
+PAD_HOME=$RIG; export PAD_HOME
+. "$RIG/padpath.sh"
+export PAD_KMSG_FILE=$RIG/kmsg
+cp before kmsg
+MARK=$(pad_gpu_refusal_mark)
+echo "MARK=$MARK"
+cp after kmsg
+echo "VERDICT=$(pad_renderer_verdict "$RIG/hostlog" "$MARK")"
+echo "NOMARK=$(pad_renderer_verdict "$RIG/hostlog")"
+echo "ADVICE<<"
+pad_renderer_advice "$(pad_renderer_verdict "$RIG/hostlog" "$MARK")"
+echo ">>"
+exit 0
+"""
+
+
+def _kmsg_verdict(tmp_path, before, after, hostlog=GPULOST_LOG):
+    """The verdict on `hostlog` for an attempt that took the kernel log from
+    `before` to `after`."""
+    return _drive(tmp_path, hostlog, driver=_KMSG_DRIVER,
+                  files=(("before", before), ("after", after)))
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_new_kernel_refusal_is_the_gpulost_verdict(tmp_path):
+    """David's machine: refusals from earlier starts already in the buffer,
+    and one more from this attempt."""
+    before = RELAY % "687038.19" + REFUSAL % "701349.05"
+    after = before + REFUSAL % "701357.45"
+    facts = _kmsg_verdict(tmp_path, before, after)
+    assert facts["VERDICT"] == "gpulost", facts
+    # Without a mark the kernel is not asked: every older caller keeps its
+    # answer.
+    assert facts["NOMARK"] == "unknown"
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_an_old_refusal_says_nothing_about_this_attempt(tmp_path):
+    """The buffer kept David's refusals for hours.  An attempt that added none
+    died of something else, and must not be told its GPU is gone."""
+    before = REFUSAL % "701349.05" + RELAY % "701350.00"
+    after = before + RELAY % "701357.00"
+    assert _kmsg_verdict(tmp_path, before, after)["VERDICT"] == "unknown"
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_refusal_counts_even_while_the_buffer_drops_old_ones(tmp_path):
+    """WSL's relay floods the ring buffer, so old refusals fall off the far end
+    while a new one lands: fewer of them than before, and still a new one."""
+    before = REFUSAL % "701300.00" + REFUSAL % "701349.05"
+    after = RELAY % "701350.00" + REFUSAL % "701357.45"
+    assert _kmsg_verdict(tmp_path, before, after)["VERDICT"] == "gpulost"
+    # ...and the far end falling off with nothing new is not a refusal.
+    after = REFUSAL % "701349.05" + RELAY % "701350.00"
+    assert _kmsg_verdict(tmp_path, before, after)["VERDICT"] == "unknown"
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_kernel_log_that_cannot_be_read_is_no_evidence(tmp_path):
+    """dmesg is root-only on Ubuntu: empty before, empty after, no verdict."""
+    facts = _kmsg_verdict(tmp_path, "", "")
+    assert facts["MARK"] == "0|"
+    assert facts["VERDICT"] == "unknown"
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_the_loader_fault_still_wins_over_a_refusal(tmp_path):
+    """A stale library aborts the loader before Mesa ever reaches the GPU;
+    that line is the more specific answer and keeps its own advice."""
+    facts = _kmsg_verdict(tmp_path, "", REFUSAL % "701357.45",
+                          hostlog=REPORTED_LOG)
+    assert facts["VERDICT"] == "loader"
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_the_gpulost_advice_names_the_cost_and_the_cure(tmp_path):
+    before = REFUSAL % "701349.05"
+    after = before + REFUSAL % "701357.45"
+    advice = _kmsg_verdict(tmp_path, before, after)["advice"]
+    assert "LOST THE GRAPHICS CARD" in advice
+    assert "create_process" in advice
+    assert "stutter" in advice
+    assert "'Restart" in advice and "WSL...' on the Emulate tab" in advice
+    assert "wsl --shutdown" in advice
+
+
+def test_the_mark_is_taken_before_the_gpu_attempt_and_handed_to_the_verdict():
+    """A mark taken after the attempt would already hold its refusal, and the
+    verdict could never see that refusal as new."""
+    text = src("watch.sh")
+    mark = line_of(text, "GPU_MARK=$(pad_gpu_refusal_mark)")
+    assert mark < line_of(text, "if ! pad_gl_try; then")
+    assert 'pad_renderer_verdict "$HOSTLOG" "$GPU_MARK"' in text
+
+
+def test_the_fallback_says_what_software_costs():
+    """PAD-497 measured it: 120-200% of a core against 7.5% on the GPU, and
+    19 new pictures a second on screen.  "That costs less than it sounds" and
+    "nothing else about the run changes" were not true on David's PC."""
+    text = src("watch.sh")
+    died = text[text.index('echo "[watch] the renderer died on startup:"'):]
+    died = died[:died.index("        pad_gl_software\n")]
+    retry = _retry_block()
+    retry = retry[retry.index("UP BUT HAS NO WINDOW"):]
+    retry = retry[:retry.index("    pad_gl_software\n")]
+    for said in (died, retry):
+        assert "costs less" not in said
+        assert "nothing else about the run" not in said.lower()
+        assert "videos stutter" in said
+
+
+def test_the_fallback_file_is_written_only_for_a_run_that_lost_the_gpu():
+    """status.sh shows the Emulate tab whatever this file says, so: cleared
+    before every launch, written after a software retry came up (from either
+    gate), never for software by request."""
+    text = src("watch.sh")
+    clear = line_of(text, 'rm -f "$HOSTLOG.fallback"')
+    assert clear < line_of(text, '"${PAD_GL_SOFTWARE:-0}" = 1')
+    assert clear < line_of(text, "if ! pad_gl_try; then")
+    up_line = 'echo "[watch] the renderer is up in SOFTWARE (llvmpipe)."'
+    died = text[text.index('echo "[watch] the renderer died on startup:"'):]
+    assert line_of(died, 'echo "$GL_VERDICT" > "$HOSTLOG.fallback"') == \
+        line_of(died, up_line) + 1
+    retry = _retry_block()
+    assert line_of(retry, 'echo surface > "$HOSTLOG.fallback"') == \
+        line_of(retry, up_line) + 1
+    by_request = text[text.index('"${PAD_GL_SOFTWARE:-0}" = 1'):]
+    by_request = by_request[:by_request.index("\nfi\n")]
+    assert ".fallback" not in by_request
+
+
+def test_status_reports_the_fallback_and_only_while_running():
+    """The tab reads gl_fallback; a stopped rig's stale file must not reach
+    it, so the read sits after status.sh's not-running exit."""
+    text = src("status.sh")
+    assert line_of(text, 'echo "running=1"') < \
+        line_of(text, "padglhost.log.fallback")
+    assert 'echo "gl_fallback=$g"' in text

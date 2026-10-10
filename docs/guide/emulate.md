@@ -462,10 +462,15 @@ started again on the software rasteriser, which asks that driver for
 nothing — the same cure a renderer that *died* on the same driver
 already had, for the same reason: the graphics libraries Windows
 injects into a running WSL go stale under a session left up for days,
-which is why a reboot has always seemed to fix this. Nothing else
-about the run changes; this game measures 59.9 fps in software, so
-what that refused surface was buying was a few percent and what it
-cost was the whole picture. A software renderer that will not start
+which is why a reboot has always seemed to fix this. The picture
+comes back, but software is not free on a visible run: the renderer
+takes one to two CPU cores instead of a few percent of one, and the
+game's videos stutter when the PC cannot spare them. So the run log
+and the Emulate tab's Renderer row (amber, *no GPU*, with an info
+badge) say why the GPU was given up — by name when WSL has lost the
+graphics card because Windows updated or reset its driver under a WSL
+that kept running — and give the cure: Restart WSL…, and restart
+Windows if the next run says it again. A software renderer that will not start
 hands the GPU one back rather than ending the run, because a run with
 no picture is still a run. The other reason — no X server to put a
 window on — is deliberately not retried, because no renderer can cure

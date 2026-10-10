@@ -344,6 +344,29 @@ def test_no_rig_means_no_probe_and_no_poll(tmp_path):
             svc._run(["true"])
 
 
+def test_the_status_poll_runs_the_root_status_command(tmp_path, monkeypatch):
+    """PAD-496: the poll asks through rig.status_cmd (root on Windows), not
+    the desktop user's rig_cmd, which read another rig's game as this one's:
+    the button said Stop over a rig that ran nothing."""
+    from pinball_decryptor.core import runtime
+    from pinball_decryptor.webui import emulate_rig as rig
+    from pinball_decryptor.webui.tabs import emulate as emod
+    monkeypatch.setenv("PAD_BOARD_WIN", str(tmp_path / "board"))
+    monkeypatch.setattr(runtime, "status", lambda *a, **k: None)
+    monkeypatch.setattr(rig, "status_cmd", lambda: ["STATUS-AS-ROOT"])
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        rec = _patch(svc, monkeypatch, answers={
+            "STATUS-AS-ROOT": _Done(b"procs=0\nrunning=0\nstate=off\n")})
+        w.run(lambda: setattr(svc, "_docker", "ok"))
+        with monkeypatch.context() as m:
+            m.setattr(emod, "no_rig", lambda: False)
+            w.run(svc._poll)
+            _wait(w, lambda: svc._polled_once and not svc._poll_busy)
+        assert rec.calls[0] == ["STATUS-AS-ROOT"]
+        assert w.state(NS)["run_btn"]["label"] == "Start emulator"
+
+
 def test_on_show_paints_the_stern_ladder(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         w.call("ui.select_tab", NS)

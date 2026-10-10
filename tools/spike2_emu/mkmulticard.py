@@ -1685,6 +1685,34 @@ def _int_range(val, key, lo, hi):
     return v
 
 
+#: EDITIONS, NO MENU (PAD-495; images.conf edition=<store>|<key>|<n>): every image is an edition
+#: of one game, in order, and the game's own EDITION setting (values 1..n, which each edition's
+#: Write put in its operator menu - plugins/stern/editions.py) picks the one that boots at the
+#: next power-up, read off the same /data/nv/<title>/NVM mirror as the machine's volume.  The
+#: menu never shows.  The first selector that reads the key:
+SELECTOR_EDITION_VERSION = (3, 2)
+
+
+def check_edition(ed, nimages=None):
+    """The edition contract for images.conf, validated: None, or {"store": str, "key": 40 hex,
+    "values": n} with n == the image count when that is given."""
+    if ed is None:
+        return None
+    if not isinstance(ed, dict):
+        raise Refused("edition must be a dict with store/key/values, not %r" % (ed,))
+    store = str(ed.get("store") or "").strip()
+    if not store or "|" in store or "\n" in store:
+        raise Refused("edition: the store %r is empty or holds '|' or a newline" % store)
+    key = str(ed.get("key") or "").strip().lower()
+    if not re.match(r"^[0-9a-f]{40}$", key):
+        raise Refused("edition: the key must be 40 hex digits (SHA1 of the caption), not %r" % key)
+    values = _int_range(ed.get("values"), "edition values", 2, MAX_IMAGES)
+    if nimages is not None and values != nimages:
+        raise Refused("edition: the game's EDITION offers %d editions and the card has %d images; "
+                      "every image is one edition, in order" % (values, nimages))
+    return dict(store=store, key=key, values=values)
+
+
 def check_machine_volume(mv):
     """The machine_volume contract for images.conf, validated: None, or {"store": str|None,
     "key": 40 hex, "default": 0-63|None} (extra keys - title, notes - are kept as given)."""
@@ -1838,7 +1866,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
                        groups=None, default_card=None, heading=None, text_size=None,
                        counter=None, countdown_word=None, footer=None, scores=None,
-                       colours=None, settings=None):
+                       colours=None, settings=None, edition=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1856,7 +1884,9 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     only).  `colours` is {image index: {"name", "gamma", "gain", "lift", "saturation"}}, the colour
     profile each image's game was BUILT with in the shape the menu can adjust (PAD-307,
     :func:`tree_colour`): one `color_profile=` line each, which is what puts the SETTINGS tile in
-    the menu; `settings` ('on' / 'off', None = no key) is the tile's own switch."""
+    the menu; `settings` ('on' / 'off', None = no key) is the tile's own switch.  `edition`
+    (PAD-495, :func:`check_edition`) makes the card one of EDITIONS: no menu, the game's EDITION
+    setting picks the image; it takes no group and no image with high scores of its own."""
     devices = list(devices)
     if not devices:
         raise Refused("images.conf: no images")
@@ -1985,6 +2015,16 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append(conf_colour_line(int(i), col))
     if settings is not None:
         out.append("settings=%s" % check_settings(settings))
+    # PAD-495: an editions card - one line, none at all on any other card
+    edition = check_edition(edition, len(devices))
+    if edition:
+        if groups:
+            raise Refused("edition: an editions card has no menu, so it has no random card either")
+        if any(name for name in (scores or {}).values()):
+            raise Refused("edition: every edition shares the game's settings store, or the "
+                          "EDITION an operator sets under one is not the one the next power-up "
+                          "reads; take the own high scores off")
+        out.append("edition=%s|%s|%d" % (edition["store"], edition["key"], edition["values"]))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -2050,7 +2090,7 @@ def parse_images_conf(text):
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {},
-            "colours": {}, "settings": None}
+            "colours": {}, "settings": None, "edition": None}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -2134,6 +2174,14 @@ def parse_images_conf(text):
             try:
                 idx, col = parse_colour_line(val)
                 conf["colours"][idx] = col
+            except (ValueError, Refused):
+                pass
+        elif key == "edition":
+            # PAD-495: a line the selector would not read is dropped here too (the menu shows)
+            store, _sep, rest = val.strip().partition("|")
+            hexkey, _sep, n = rest.partition("|")
+            try:
+                conf["edition"] = check_edition({"store": store, "key": hexkey, "values": n})
             except (ValueError, Refused):
                 pass
         elif key == "settings":
@@ -2873,6 +2921,16 @@ def check_selector_reads_conf(binary, conf_text):
     the selector or ignored by one that does not know it, which is what "unknown keys are
     ignored so the file can grow" buys.  A group is different because dropping it does not
     degrade the menu, it changes which images the card offers at all."""
+    if "\nedition=" in "\n" + conf_text:
+        # PAD-495: an older menu ignores the key and shows itself, so the card would not be the
+        # editions card that was asked for
+        ver = selector_file_version(binary)
+        if ver is None or ver < SELECTOR_EDITION_VERSION:
+            raise Refused("this card needs codeselect %s or later to boot by the game's EDITION "
+                          "setting, and %s is %s; rebuild the selector with %s"
+                          % (".".join(str(x) for x in SELECTOR_EDITION_VERSION), binary,
+                             "unversioned" if ver is None else ".".join(str(x) for x in ver),
+                             os.path.join(HERE, "buildselect.sh")))
     if "\ngroup=" not in "\n" + conf_text:
         return
     ver = selector_file_version(binary)
@@ -3291,6 +3349,72 @@ def plan_tree_source(plan, index):
         return path, None, None
 
 
+def edition_for_plan(plan):
+    """images.conf's edition contract for the card in `plan` (PAD-495), or Refused with what is
+    wrong: every image a tree of the SAME game at the same version, each one's game program
+    carrying EDITION (plugins/stern/editions.py) for exactly as many editions as the card has
+    images and naming them alike, and every setting captioned alike - one settings store serves
+    them all, and a store that meets a different table may be reset by the game."""
+    _v, _s, _e, adjustments = _stern_plugins()      # puts the app beside us on sys.path, or refuses
+    from pinball_decryptor.plugins.stern import editions
+    n = len(plan.devices())
+    if n < 2:
+        raise Refused("editions: a card of editions needs two images or more")
+    first = None
+    for k in range(n):
+        path, part, subdir = plan_tree_source(plan, k)
+        if part is None:
+            raise Refused("editions: image %d (%s): no games partition located" % (k, path))
+        try:
+            f, r = open_source(path, part)
+            with f:
+                root = tree_root_inode(r, subdir)
+                title, _gpath, _gino, gnode = tree_game(r, root)
+                elf = r.read_file_bytes(gnode)
+        except Refused:
+            raise
+        except Exception as e:
+            raise Refused("editions: image %d (%s) could not be read (%s: %s)"
+                          % (k, path, type(e).__name__, e))
+        name = os.path.basename(str(path))
+        ed = editions.in_program(elf)
+        if ed is None:
+            raise Refused("editions: image %d (%s) has no EDITION in its menu; name the editions "
+                          "in its project and Write it again" % (k, name))
+        if ed["values"] != n:
+            raise Refused("editions: image %d (%s)'s EDITION offers %d editions and the card has "
+                          "%d images; every image is one edition, in order"
+                          % (k, name, ed["values"], n))
+        try:
+            table = adjustments.AdjustmentTable(elf)
+            captions = [adjustments.menu_label(table, i) for i in range(table.count)]
+        except Exception as e:
+            raise Refused("editions: image %d (%s)'s settings could not be read (%s)" % (k, name, e))
+        ident = game_identity(elf, title)
+        mine = {"title": title, "version": ident.get("version") if ident else None,
+                "help": ed["help"], "captions": captions, "path": name}
+        if first is None:
+            first = mine
+            continue
+        if (mine["title"], mine["version"]) != (first["title"], first["version"]):
+            raise Refused("editions: image %d (%s) is %s %s and image 0 (%s) is %s %s; the editions "
+                          "of a card are one game at one version"
+                          % (k, name, mine["title"], mine["version"] or "?", first["path"],
+                             first["title"], first["version"] or "?"))
+        if mine["help"] != first["help"]:
+            raise Refused("editions: image %d (%s) names the editions \"%s\" and image 0 \"%s\"; "
+                          "give every edition's project the same names, in the same order"
+                          % (k, name, mine["help"], first["help"]))
+        diff = [(a, b) for a, b in zip(mine["captions"], first["captions"]) if a != b]
+        if diff or len(mine["captions"]) != len(first["captions"]):
+            a, b = diff[0] if diff else ("(%d settings)" % len(mine["captions"]),
+                                         "(%d settings)" % len(first["captions"]))
+            raise Refused("editions: image %d (%s) captions a setting \"%s\" where image 0 says "
+                          "\"%s\"; the editions share one settings store, so every one must "
+                          "carry the same settings" % (k, name, a, b))
+    return {"store": MACHINE_VOLUME_STORE % first["title"], "key": editions.NVM_KEY, "values": n}
+
+
 def machine_volume_for(path, part, subdir=None):
     """images.conf's machine_volume contract for the games tree at (path, part, subdir): the
     store the machine mirrors its settings to (/data/nv/<title>/NVM), the MASTER VOLUME SETTING
@@ -3482,13 +3606,22 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
     settings = getattr(args, "settings", None)
     if settings is None:
         settings = ex.get("settings")
+    # PAD-495: --editions reads every image's EDITION; without it a card of editions stays one
+    # while it keeps its image count, and --no-editions gives it its menu back
+    edition = None
+    if getattr(args, "editions", False):
+        edition = edition_for_plan(plan)
+        say("editions: no menu; the game's EDITION setting (%s) picks one of %d images at power-up"
+            % (edition["store"], edition["values"]))
+    elif not getattr(args, "no_editions", False) and ex.get("edition") and same_n:
+        edition = ex["edition"]
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
                               groups=groups, default_card=default_card, heading=heading,
                               text_size=text_size, counter=counter,
                               countdown_word=countdown_word, footer=footer, scores=scores,
-                              colours=colours, settings=settings)
+                              colours=colours, settings=settings, edition=edition)
 
 
 # ============================================================================= the JSON sidecars
@@ -3547,6 +3680,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("timeout", conf["timeout"]),
         ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
+        ("edition", conf.get("edition")),
         ("mixer_volume", conf["mixer_volume"]),
         ("sound_move", conf["sound_move"]),
         ("sound_confirm", conf["sound_confirm"]),
@@ -7519,6 +7653,7 @@ def inspect_card(card, media_out=None):
         ("default_card", conf.get("default_card")),
         ("timeout", conf["timeout"]), ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
+        ("edition", conf.get("edition")),
         ("mixer_volume", conf["mixer_volume"]),
         ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
         # The SPECS those two were rendered from (media.json's, not the conf's -
@@ -9162,6 +9297,14 @@ def _add_conf_flags(s):
                    help="images.conf counter= - whether the '<  N / M  >' line under the cards "
                         "is drawn (only a carousel of five cards or more has one); an existing "
                         "card's is kept when absent, and a card that says neither draws it")
+    s.add_argument("--editions", action="store_true",
+                   help="images.conf edition= (PAD-495): every image is an edition of one game, in "
+                        "order, and the game's own EDITION setting (Adjustments > Attract Mode, put "
+                        "there by each edition's Write) picks the one that boots at the next "
+                        "power-up; no menu is shown. Every image must carry EDITION for exactly "
+                        "this many editions")
+    s.add_argument("--no-editions", action="store_true",
+                   help="take edition= off a card of editions: its menu comes back")
     s.add_argument("--settings", choices=list(SETTINGS_WORDS),
                    help="images.conf settings= - whether the SETTINGS card (color correction on "
                         "the machine) ends the menu when an image can be adjusted (PAD-307); an "

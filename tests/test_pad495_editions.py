@@ -127,3 +127,104 @@ def test_one_setting_refused_never_stops_the_other():
     assert [s.key for s in settings] == [MS.EDITION]
     assert "2 to 8 values" in refused[MS.MUSIC_MODE]
     assert MS.table_records(cat, *settings) == 108
+
+
+# ---- the Multi-boot side: tools/spike2_emu/mkmulticard.py ------------------------------------
+RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "spike2_emu")
+STORE = "/data/nv/godzilla_le/NVM"
+
+
+@pytest.fixture()
+def mk():
+    import sys
+    if RIG not in sys.path:
+        sys.path.insert(0, RIG)
+    import mkmulticard
+    return mkmulticard
+
+
+def _ed(n=2):
+    return {"store": STORE, "key": Ed.NVM_KEY, "values": n}
+
+
+def test_an_editions_card_writes_one_line_and_reads_it_back(mk):
+    text = mk.render_images_conf(["p3", "p7:img1"], ["STANDARD", "70TH"], edition=_ed())
+    assert "edition=%s|%s|2" % (STORE, Ed.NVM_KEY) in text.splitlines()
+    assert mk.parse_images_conf(text)["edition"] == _ed()
+    # any other card is byte for byte what it was
+    assert "edition" not in mk.render_images_conf(["p3", "p7:img1"], ["A", "B"])
+    assert mk.parse_images_conf(mk.render_images_conf(["p3", "p7"]))["edition"] is None
+
+
+def test_a_line_the_menu_would_not_read_is_dropped_on_reading(mk):
+    text = mk.render_images_conf(["p3", "p7"]) + "edition=%s|nothex|2\n" % STORE
+    assert mk.parse_images_conf(text)["edition"] is None
+
+
+def test_every_image_is_one_edition_and_shares_the_settings_store(mk):
+    with pytest.raises(mk.Refused, match="offers 3 editions and the card has 2 images"):
+        mk.render_images_conf(["p3", "p7"], edition=_ed(3))
+    with pytest.raises(mk.Refused, match="no random card"):
+        mk.render_images_conf(["p3", "p7", "p8"], edition=_ed(3),
+                              groups=[{"members": [1, 2], "title": "R", "subtitle": ""}])
+    with pytest.raises(mk.Refused, match="shares the game's settings store"):
+        mk.render_images_conf(["p3", "p7"], edition=_ed(), scores={1: "own"})
+    with pytest.raises(mk.Refused, match="40 hex"):
+        mk.render_images_conf(["p3", "p7"], edition={"store": STORE, "key": "x", "values": 2})
+
+
+def test_an_older_menu_is_refused_an_editions_card(mk, tmp_path):
+    conf = mk.render_images_conf(["p3", "p7"], edition=_ed())
+    old = tmp_path / "old"
+    old.write_bytes(b"\x7fELF...codeselect 3.1 - Spike 2 boot-time code selector\x00")
+    with pytest.raises(mk.Refused, match="codeselect 3.2 or later"):
+        mk.check_selector_reads_conf(str(old), conf)
+    new = tmp_path / "new"
+    new.write_bytes(b"\x7fELF...codeselect 3.2 - Spike 2 boot-time code selector\x00")
+    mk.check_selector_reads_conf(str(new), conf)
+    mk.check_selector_reads_conf(str(old), mk.render_images_conf(["p3", "p7"]))
+
+
+def _fake_trees(mk, monkeypatch, programs, title="godzilla_le"):
+    """mkmulticard's tree readers over in-memory game programs, one per image."""
+    import contextlib
+
+    class Plan:
+        def devices(self):
+            return ["p3"] + ["p7:img%d" % k for k in range(1, len(programs))]
+
+    monkeypatch.setattr(mk, "plan_tree_source", lambda plan, k: ("ed%d.raw" % k, 3, k))
+    monkeypatch.setattr(mk, "tree_root_inode", lambda r, sub: sub)
+    monkeypatch.setattr(mk, "tree_game", lambda r, root: (title, "/%s/game" % title, 9, root))
+    monkeypatch.setattr(mk, "open_source",
+                        lambda path, part: (contextlib.nullcontext(), _Reader(programs)))
+    return Plan()
+
+
+class _Reader:
+    def __init__(self, programs):
+        self.programs = programs
+
+    def read_file_bytes(self, node):
+        return self.programs[node]
+
+
+def test_the_card_reads_every_image_s_edition(mk, monkeypatch, tmp_path):
+    raw = _program(LE116)
+    for d in "ab":
+        (tmp_path / d).mkdir()
+    two, _ = _built(raw, tmp_path / "a", [(MS.EDITION, 2, EDITIONS)])
+    plan = _fake_trees(mk, monkeypatch, [two, two])
+    assert mk.edition_for_plan(plan) == {"store": STORE, "key": Ed.NVM_KEY, "values": 2}
+    # a stock image has no EDITION
+    plan = _fake_trees(mk, monkeypatch, [two, raw])
+    with pytest.raises(mk.Refused, match="image 1 .* has no EDITION in its menu"):
+        mk.edition_for_plan(plan)
+    # an image built for another count, or with other names
+    three, _ = _built(raw, tmp_path / "b", [(MS.EDITION, 3, EDITIONS + ["Heisei"])])
+    with pytest.raises(mk.Refused, match="offers 3 editions and the card has 2 images"):
+        mk.edition_for_plan(_fake_trees(mk, monkeypatch, [two, three]))
+    (tmp_path / "c").mkdir()
+    other, _ = _built(raw, tmp_path / "c", [(MS.EDITION, 2, ["Colour", "Black and white"])])
+    with pytest.raises(mk.Refused, match="names the editions"):
+        mk.edition_for_plan(_fake_trees(mk, monkeypatch, [two, other]))

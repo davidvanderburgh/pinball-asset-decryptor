@@ -420,7 +420,7 @@ def test_an_install_with_neither_a_mode_file_nor_assets_or_a_bad_name_is_refused
 
     card = _mkcard(tmp_path)
     so, _cfg = _payload(tmp_path)
-    with pytest.raises(mk.Refused, match="no mode file, no code mode's assets and no clips.cfg"):
+    with pytest.raises(mk.Refused, match="no mode file, no code mode's assets, no clips.cfg and no sounds.cfg"):
         mi.install(card, so, None)
     bad = tmp_path / "Bad Name.assets"
     bad.write_text("name X\n")

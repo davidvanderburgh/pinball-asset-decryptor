@@ -1696,14 +1696,15 @@ rm -f "$ROOT/dump/padspeed"
 # until the feeder says something.
 rm -f "$ROOT/dump/padball"
 # The guest opens the LED block O_RDWR and will NOT create it, so make it here.
-# TWO pages, zeroed: the shim stamps the magic once it maps it. It was one page
-# until version 4 (padled.h), whose `seen` plane crossed 4096. The shim takes
-# the size from the FILE rather than trusting this number - an old watch.sh
-# against a new shim gets a version-3 block instead of a SIGBUS on the second
-# page - but the plane only exists when the file is big enough, so this line is
-# what turns it on.
+# FOUR pages, zeroed: the shim stamps the magic once it maps it. It was one page
+# until version 4 (padled.h), whose `seen` plane crossed 4096, and two until
+# version 6, whose `hi` plane (a strip board's channels past its first 96,
+# PAD-500) crossed 8192. The shim takes the size from the FILE rather than
+# trusting this number - an old watch.sh against a new shim gets the version its
+# file has room for instead of a SIGBUS on a missing page - but each plane only
+# exists when the file is big enough, so this line is what turns them on.
 rm -f "$LED_HOST"
-dd if=/dev/zero of="$LED_HOST" bs=8192 count=1 status=none
+dd if=/dev/zero of="$LED_HOST" bs=16384 count=1 status=none
 # The LCD block, same contract (item 83).
 rm -f "$LCD_HOST"
 dd if=/dev/zero of="$LCD_HOST" bs=4096 count=1 status=none

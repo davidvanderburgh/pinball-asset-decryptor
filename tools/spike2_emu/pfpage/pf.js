@@ -136,6 +136,64 @@ function pfHit(view, fx, scale, px, py) {
   return null;
 }
 
+// ------------------------------------------------------- the cabinet column
+// PAD-500: where every one of the cabinet's own lights goes in a W x H column
+// beside the artwork. The sections come from playfield.py in column order
+// (topper, speakers, blades): a topper on its own drawing keeps that drawing's
+// shape in at most a third of the column, a strip (the speakers, a topper with
+// no drawing) wraps in chain order, and the blades stand in whatever height is
+// left, one bar a side with pixel 1 at the BOTTOM - where King Kong's picture
+// puts it. PURE, so Node can test it: marks are {cid, x, y, r} (a dot) or
+// {cid, x, y, w, h} (a bar segment), centred; labels {text, sub, x, y}.
+const CAB_PAD = 6, CAB_LABEL = 26;
+function cabLayout(sections, W, H) {
+  const inner = Math.max(10, W - 2 * CAB_PAD);
+  const marks = [], labels = [];
+  let y = CAB_PAD;
+  for (const s of sections) {
+    labels.push({ text: s.label, sub: "node " + s.node + (s.board ? " · " + s.board : ""), x: CAB_PAD, y });
+    y += CAB_LABEL;
+    if (s.bars) {
+      const n = Math.max(1, ...s.bars.map((b) => b.length));
+      const avail = Math.max(20, H - CAB_PAD - y);
+      const pitch = avail / n;
+      const nb = s.bars.length;
+      const bw = Math.max(3, Math.min(14, inner / (2 * nb + 1)));
+      const gap = (inner - nb * bw) / (nb + 1);
+      s.bars.forEach((bar, j) => {
+        const x = CAB_PAD + gap + j * (bw + gap) + bw / 2;
+        bar.forEach((cid, i) => marks.push({ cid, x, y: y + avail - (i + 0.5) * pitch, w: bw, h: Math.max(1, pitch - 1) }));
+      });
+      y += avail + 8;
+    } else if (s.pos) {
+      const xs = s.pos.map((p) => p[1]), ys = s.pos.map((p) => p[2]);
+      const x0 = Math.min(...xs), y0 = Math.min(...ys);
+      const bw = Math.max(1, Math.max(...xs) - x0), bh = Math.max(1, Math.max(...ys) - y0);
+      const r = Math.max(1.5, Math.min(4, inner / 40));
+      const k = Math.min((inner - 2 * r) / bw, Math.max(10, H / 3 - 2 * r) / bh);
+      const ox = CAB_PAD + (inner - bw * k) / 2;
+      for (const [cid, px, py] of s.pos) marks.push({ cid, x: ox + (px - x0) * k, y: y + r + (py - y0) * k, r });
+      y += bh * k + 2 * r + 10;
+    } else {
+      const p = Math.max(6, Math.min(11, inner / 10));
+      const per = Math.max(1, Math.floor(inner / p));
+      s.row.forEach((cid, i) => marks.push({ cid, x: CAB_PAD + p / 2 + (i % per) * p, y: y + p / 2 + Math.floor(i / per) * p, r: p * 0.38 }));
+      y += Math.ceil(s.row.length / per) * p + 10;
+    }
+  }
+  return { marks, labels };
+}
+
+// the mark under a point, for the tooltip: a dot is hit a little past its
+// edge, a bar segment anywhere across its bar's width
+function cabHit(marks, px, py) {
+  for (const m of marks) {
+    if (m.w ? Math.abs(px - m.x) <= m.w / 2 + 2 && Math.abs(py - m.y) <= m.h / 2 + 0.5
+      : Math.hypot(px - m.x, py - m.y) <= m.r + 2) return m.cid;
+  }
+  return null;
+}
+
 // report where this window is, for the next open (the native host knows it
 // itself; a browser window only knows it from here)
 let lastGeom = "";
@@ -218,6 +276,9 @@ function startMain() {
       shaker = shakerPanel(S.view.shaker, (S.dyn || {}).shaker);
       info.el.after(shaker.el);
     }
+    // the cabinet's own lighting (PAD-500): what the column holds, and the
+    // "Expression lights" tick box on a title that has blades or speakers
+    if (info && S.view.cab_panel) (shaker || info).el.after(cabPanel(S.view.cab_panel).el);
     app.append(body, status);
     view = {
       frame(f) {
@@ -375,10 +436,14 @@ function startMain() {
     const acts = actionRow();
     if (acts) overlay.append(acts);
     stage.append(overlay);
+    // the cabinet column (PAD-500), left of the artwork at its scale
+    const cab = V.cab ? cabColumn(V.cab, D.cab) : null;
+    if (cab) wrap.append(cab.el);
     wrap.append(stage);
     main.append(wrap);
 
     const [BW, BH] = V.base;
+    const CW = cab ? V.cab.w : 0, GAP = cab ? 10 : 0;
     const fx = {}; for (const k in (D.fx || {})) fx[k] = D.fx[k];
     const coilHot = Object.assign({}, D.coil || {});
     const made = Object.assign({}, D.sw || {});
@@ -389,13 +454,14 @@ function startMain() {
 
     function fit() {
       const r = wrap.getBoundingClientRect();
-      const s = Math.max(0.2, Math.min((r.width - 16) / BW, (r.height - 16) / BH));
+      const s = Math.max(0.2, Math.min((r.width - 16 - GAP) / (BW + CW), (r.height - 16) / BH));
       scale = s;
       stage.style.width = Math.round(BW * s) + "px";
       stage.style.height = Math.round(BH * s) + "px";
       const dpr = window.devicePixelRatio || 1;
       cv.width = Math.round(BW * s * dpr);
       cv.height = Math.round(BH * s * dpr);
+      if (cab) cab.fit(Math.round(CW * s), Math.round(BH * s));
       dirty = true;
     }
     new ResizeObserver(fit).observe(wrap);
@@ -470,7 +536,7 @@ function startMain() {
         jiggled = false;
       }
     }
-    (function loop() { draw(); jiggle(); requestAnimationFrame(loop); })();
+    (function loop() { draw(); jiggle(); if (cab) cab.draw(); requestAnimationFrame(loop); })();
 
     // Tk's hit test, kept - pfHit() above says how.
     function hit(px, py) { return pfHit(V, fx, scale, px, py); }
@@ -514,12 +580,126 @@ function startMain() {
     return {
       frame(f) {
         if (f.fx) { for (const k in f.fx) fx[k] = f.fx[k]; dirty = true; }
+        if (f.cab && cab) cab.update(f.cab);
         if (f.coil) { Object.assign(coilHot, f.coil); dirty = true; }
         if (f.shaker) shakeLvl = f.shaker[0];
         if (f.sw) { Object.assign(made, f.sw); dirty = true; }
         if (f.trough && trough) trough.update(f.trough);
       },
     };
+  }
+
+  // ================================================== the cabinet column (PAD-500)
+  // The topper, the speaker lights and the expression-lighting blades, left of
+  // the artwork and at its scale - cabLayout() above says where each goes.
+  // A lit pixel is its colour at its level's alpha with a soft glow, a dark one
+  // the artwork's own dark-insert grey. Redrawn only when something changed.
+  function cabColumn(spec, dyn) {
+    const box = el("div", "pf-cab");
+    const cv = el("canvas");
+    box.append(cv);
+    const px = Object.assign({}, dyn || {});
+    let W = 0, H = 0, L = { marks: [], labels: [] }, dirty = true;
+    function fit(w, h) {
+      W = w; H = h;
+      box.style.width = w + "px";
+      box.style.height = h + "px";
+      const dpr = window.devicePixelRatio || 1;
+      cv.width = Math.round(w * dpr);
+      cv.height = Math.round(h * dpr);
+      L = cabLayout(spec.sections, w, h);
+      dirty = true;
+    }
+    // a label as big as the column has room for, down to 8 px, then cut
+    function fitText(g, text, font, size, max) {
+      let s = size;
+      g.font = font.replace("@", s);
+      while (s > 8 && g.measureText(text).width > max) { s -= 0.5; g.font = font.replace("@", s); }
+      let t = text;
+      while (t.length > 1 && g.measureText(t).width > max) t = t.slice(0, -2) + "…";
+      return t;
+    }
+    function draw() {
+      if (!dirty || !W) return;
+      dirty = false;
+      const dpr = window.devicePixelRatio || 1;
+      const g = cv.getContext("2d");
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, W, H);
+      const cs = getComputedStyle(cv);
+      g.textBaseline = "top";
+      g.textAlign = "left";
+      for (const lb of L.labels) {
+        const max = W - 2 * lb.x;
+        g.fillStyle = "#7ecbff";
+        g.fillText(fitText(g, lb.text.toUpperCase(), "600 @px " + cs.getPropertyValue("--cond"), 11, max), lb.x, lb.y + 2);
+        g.fillStyle = "#8b9196";
+        g.fillText(fitText(g, lb.sub, "@px " + cs.getPropertyValue("--mono"), 10, max), lb.x, lb.y + 14);
+      }
+      for (const m of L.marks) {
+        const v = px[m.cid];
+        g.shadowBlur = 0;
+        if (v) {
+          const [r, gg, b, a] = v;
+          g.fillStyle = `rgba(${r},${gg},${b},${a})`;
+          g.shadowColor = `rgba(${r},${gg},${b},${a * 0.7})`;
+          g.shadowBlur = m.w ? 5 : 4;
+        } else {
+          g.fillStyle = "#1a1a1a";
+        }
+        g.beginPath();
+        if (m.w) g.rect(m.x - m.w / 2, m.y - m.h / 2, m.w, m.h);
+        else g.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+        g.fill();
+        if (!v) { g.shadowBlur = 0; g.lineWidth = 1; g.strokeStyle = "#333"; g.stroke(); }
+      }
+      g.shadowBlur = 0;
+    }
+    // the pixel under the pointer says what it is, as an insert does
+    let tipFor = null, tipText = "";
+    cv.addEventListener("pointermove", (e) => {
+      const r = cv.getBoundingClientRect();
+      const cid = cabHit(L.marks, e.clientX - r.left, e.clientY - r.top);
+      if (cid == null) { tipFor = null; hideTip(); return; }
+      if (cid !== tipFor) {
+        tipFor = cid;
+        api("tip", "cab", cid).then((t) => { if (tipFor === cid) { tipText = t || ""; showTip(tipText, e.clientX, e.clientY); } });
+      }
+      showTip(tipText, e.clientX, e.clientY);
+    });
+    cv.addEventListener("pointerleave", () => { tipFor = null; hideTip(); });
+    return { el: box, fit, draw, update(c) { for (const k in c) px[k] = c[k]; dirty = true; } };
+  }
+
+  // The side panel's CABINET LIGHTS box (PAD-500): which boards the column
+  // holds, and the "Expression lights" tick box - the blades and the speaker
+  // lights in or out of this window, kept for the next run by playfield.py.
+  function cabPanel(spec) {
+    const box = el("div", "pf-cabp");
+    const head = el("div", "hd");
+    head.append(el("span", "h", "CABINET LIGHTS"));
+    box.append(head);
+    const rows = el("div", "kp-kv");
+    for (const [k, v, n] of spec.lines) {
+      const row = el("div", "r");
+      row.append(el("span", "k", k), el("span", "v", v));
+      if (n) row.append(el("span", "n", n));
+      rows.append(row);
+    }
+    if (spec.lines.length) box.append(rows);
+    if (spec.has_expression) {
+      const opt = el("label", "opt");
+      const cb = el("input");
+      cb.type = "checkbox";
+      cb.checked = !!spec.expression;
+      // never keep the keyboard: a focused box would eat the space bar
+      cb.addEventListener("change", () => { api("expression", cb.checked); cb.blur(); });
+      opt.append(cb, el("span", null, "Expression lights (blades and speakers)"));
+      opt.title = "Untick to leave the cabinet's expression lighting - the light blades and the "
+        + "speaker lights - out of this window. Only what this window shows: the game is not changed.";
+      box.append(opt);
+    }
+    return { el: box };
   }
 
   // ================================================== the schematic view
@@ -1052,4 +1232,4 @@ function startLcd() {
 }
 
 // Node (the tests) takes the pure part; a browser has no `module`.
-if (typeof module !== "undefined") module.exports = { pfHit };
+if (typeof module !== "undefined") module.exports = { pfHit, cabLayout, cabHit };

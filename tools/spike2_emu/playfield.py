@@ -137,6 +137,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ballmodel
+import cablights
 import coilact
 import coilmap
 import devicexy
@@ -420,6 +421,10 @@ PADLED_READ = WIDE_SKIPPED_OFF + 4
 #: Version 5 appends each coil's drive (coilmap.drive); read through it so the
 #: shaker panel (PAD-424) sees what the cabinet's motor is driven at.
 PADLED_DRIVE_READ = coilmap.DRIVE_READ
+#: Version 6 appends a strip board's channels past its first 96 (PAD-500): the
+#: blades' right side and most of every topper. One read takes all of it - the
+#: cost is the round trip, not the bytes (see the module header).
+PADLED_HI_READ = coilmap.HI_READ
 
 #: How long a coil marker stays lit after its fire counter moves. A coil pulse
 #: is ~30 ms and a 50 ms poll would show it for one frame or miss it; this is a
@@ -906,6 +911,36 @@ GROUP_NODE = coilmap.group_node_for(
     os.path.join(TDIR or "", "device_xy.txt"), dev_rows=DEV_ROWS)
 
 
+def load_boards():
+    """{node: {type, group, name}} - the title's node directory with each
+    board's place and name (nbdir v2, PAD-500), which is what places the
+    cabinet's own lights (cablights.py). Read when a view is built, like the
+    switch table: the run writes it at its start."""
+    return cablights.boards(os.path.join(TDIR or "", "node_ident.txt"))
+
+
+def expression_on():
+    """The window's "Expression lights" tick box (PAD-500), kept in its own
+    state file beside its position so it survives the run - the page itself
+    runs in a private WebView whose storage does not."""
+    return load_state().get("expression_lights", True) is not False
+
+
+def cabinet_names(boards=None, expression=True):
+    """{(node, channel): name} for the cabinet's own lights (cablights.py),
+    which GROUP_NODE has no node for - so the swatch grid can name a blade or a
+    speaker pixel instead of showing its wire address."""
+    secs, _left = cablights.sections(
+        DEV_ROWS, GROUP_NODE, load_boards() if boards is None else boards,
+        expression=expression)
+    out = {}
+    for S in secs:
+        for P in S["pixels"]:
+            for chan, key in P["channels"].items():
+                out[key] = P["name"] if chan == "W" else "%s-%s" % (P["name"], chan)
+    return out
+
+
 def layout_rows(kind):
     """The title's positioned devices of one class, on the layout image."""
     if not LAYOUT_IMAGE:
@@ -970,7 +1005,14 @@ def load_leds():
     on that title is a playfield board.
     """
     out = []
+    boards = load_boards()
     for r in layout_rows("led"):
+        # PAD-500: the cabinet's own lights are not inserts. John Wick, King
+        # Kong and Metallica put the expression-lighting blades on the
+        # playfield picture, down its two edges, where they were drawn as 96
+        # inserts that never lit; they are drawn in the cabinet column now.
+        if cablights.role_of(r, GROUP_NODE, boards):
+            continue
         out.append(dict(node=GROUP_NODE.get(r["group"]), index=r["index"],
                         x=r["x"], y=r["y"], name=r["name"], group=r["group"]))
     return out
@@ -998,6 +1040,11 @@ def load_led_names():
         node = GROUP_NODE.get(r["group"])
         if node is not None:
             out[(node, r["index"])] = r["name"]
+    # PAD-500: and the cabinet's own lights, which only the node directory
+    # places - Rush's node 2 block reads EXPRESSIVE LIGHTING L 1 rather than
+    # 2.0, and its node 7 SPEAKER 1
+    for key, name in cabinet_names().items():
+        out.setdefault(key, name)
     return out
 
 
@@ -1816,9 +1863,14 @@ class LedRing:
             # is drawn dark - as distinct from 0, which means the game turned
             # it off.
             if d and node is not None:
-                off = LED_HDR + node * LED_IDX + idx
-                if off < len(d):
-                    v = d[off]
+                if idx < LED_IDX:
+                    off = LED_HDR + node * LED_IDX + idx
+                    if off < len(d):
+                        v = d[off]
+                else:
+                    # a strip channel past the board's first 96 (PAD-500):
+                    # padled version 6's `hi` plane, None on an older block
+                    v = coilmap.strip_level(d, node, idx)
             if now is not None:
                 env = self.overlay.get((node, idx))
                 if env is not None:
@@ -2443,6 +2495,18 @@ class LedGrid(LedRing):
                     if v and (node, idx) not in self.seen:
                         self.seen.add((node, idx))
                         grew = True
+        # PAD-500: a strip board's channels past its first 96, which padled
+        # version 6 publishes level-only - a cell once one has been lit
+        if len(d) >= PADLED_HI_READ and struct.unpack_from("<I", d, 4)[0] >= 6:
+            for node in range(coilmap.NODES):
+                base = coilmap.HI_OFF + node * coilmap.HI_IDX
+                s = d[base:base + coilmap.HI_IDX]
+                if s.count(0) == len(s):
+                    continue
+                for i, v in enumerate(s):
+                    if v and (node, LED_IDX + i) not in self.seen:
+                        self.seen.add((node, LED_IDX + i))
+                        grew = True
         return grew
 
     def _rebuild(self):
@@ -2548,6 +2612,159 @@ class LedGrid(LedRing):
                    "named by the title's device table" if C["named"]
                    else "no name in this title's table - shown by wire address"))
 
+
+#: The cabinet column's width, as a fraction of the artwork's: wide enough for
+#: a topper drawing to read and two blades side by side, narrow enough that the
+#: playfield keeps the window. The page scales both together.
+CAB_W_FRAC = 0.34
+
+
+class CabinetLights:
+    """PAD-500: the cabinet's own lighting, in a column left of the artwork -
+    the topper, the expression-lighting blades and the speaker lights, which
+    are not inserts and which no playfield picture has room for.
+
+    cablights.py decides which rows are which and which board each is on; this
+    reads them off the wire and says what the page should draw. ONE PIXEL A
+    MARKER: an RGB pixel is one dot in the colour its channels compose to, as
+    an insert is (fixture_color).
+
+    A SECTION SHOWS ONCE ITS BOARD HAS SPOKEN, and stays: some of these boards
+    speak a strip encoding the shim does not decode (Godzilla's topper strips,
+    leddecode.py's "masked strip encoding"), and a block of dots that can never
+    light is a question, not a picture. "Spoken" is a lit channel, or one the
+    `seen` plane says the game addressed. The column itself appears with its
+    first section, the way the swatch grid grows a block.
+    """
+
+    def __init__(self, expression=True, boards=None):
+        self.expression = expression
+        bm = load_boards() if boards is None else boards
+        # PAD-498: with the Emulate tab's Topper box off, the topper's boards
+        # are not on the bus at all, so they get no section either
+        gone = topper_off_nodes()
+        every, left = cablights.sections(DEV_ROWS, GROUP_NODE, bm,
+                                         gone_nodes=gone)
+        # the boards the tick box takes out, whichever way it is set: the side
+        # panel offers the box only on a title that has them, and the swatch
+        # grid hides their blocks
+        self.expression_nodes = sorted({S["node"] for S in every if
+                                        S["role"] in cablights.EXPRESSION_ROLES})
+        self.has_expression = bool(self.expression_nodes)
+        if not expression:
+            every, left = cablights.sections(DEV_ROWS, GROUP_NODE, bm,
+                                             expression=False, gone_nodes=gone)
+        self.sections, self.left_out = every, left
+        self.pixels = []
+        for S in self.sections:
+            S["alive"] = False
+            for P in S["pixels"]:
+                P["cid"] = len(self.pixels)
+                P["state"] = ()
+                P["drawn"] = None
+                P["section"] = S
+                self.pixels.append(P)
+
+    def shown(self):
+        return [S for S in self.sections if S["alive"]]
+
+    def _spoken(self, S, d):
+        """Has this section's board said anything: a lit channel, or one the
+        game addressed (version 4's `seen` plane, channels 0..95)."""
+        seen = (len(d) >= PADLED_READ and
+                struct.unpack_from("<I", d, 4)[0] >= 4)
+        for P in S["pixels"]:
+            if P["drawn"]:
+                return True
+            if seen:
+                for node, ch in P["channels"].values():
+                    if ch < LED_IDX and d[SEEN_OFF + node * LED_IDX + ch]:
+                        return True
+        return False
+
+    def tick(self, d):
+        """(changes, grew): changes maps a pixel id to [r, g, b, alpha] or 0;
+        grew is True when a section came alive (the page lays out again)."""
+        changes, grew = {}, False
+        if not d or len(d) < LED_HDR:
+            return changes, grew
+        for P in self.pixels:
+            vals = {c: coilmap.strip_level(d, n, ch)
+                    for c, (n, ch) in P["channels"].items()}
+            rgb, level = fixture_color(vals)
+            st = (rgb, level)
+            if st == P["state"] and P["drawn"] is not None:
+                continue
+            P["state"] = st
+            if rgb:
+                _rs, alpha = level_shape(level)
+                want = [rgb[0], rgb[1], rgb[2], round(alpha, 3)]
+            else:
+                want = 0
+            if want != P["drawn"]:
+                P["drawn"] = want
+                changes[P["cid"]] = want
+        for S in self.sections:
+            if not S["alive"] and self._spoken(S, d):
+                S["alive"] = True
+                grew = True
+        return changes, grew
+
+    def spec(self):
+        """What the page lays out, top to bottom. A positioned topper sends
+        its pixels' own x, y; a strip sends them in chain order; the blades
+        send their sides, bottom first."""
+        out = []
+        for S in self.shown():
+            px = S["pixels"]
+            sec = {"key": S["key"], "label": S["label"], "node": S["node"],
+                   "board": S["board"], "role": S["role"], "n": len(px)}
+            if S["bars"]:
+                sec["bars"] = [[px[k]["cid"] for k in bar] for bar in S["bars"]]
+            elif S["positioned"]:
+                sec["pos"] = [[P["cid"], round(P["x"], 1), round(P["y"], 1)]
+                              for P in px]
+            else:
+                sec["row"] = [P["cid"] for P in px]
+            out.append(sec)
+        return out
+
+    def dyn(self):
+        return {P["cid"]: P["drawn"] or 0 for P in self.pixels
+                if P["section"]["alive"]}
+
+    def panel(self, heard=True):
+        """The side panel's CABINET LIGHTS box: what the column holds, and the
+        tick box when the title has blades or speakers. None when there is
+        nothing to say. `heard`: say which boards have not spoken yet - the
+        artwork view's column knows; the switch list's grid does not ask."""
+        lines = []
+        for S in self.sections:
+            n = len(S["pixels"])
+            lines.append([S["label"], "node %d" % S["node"], "%s%d light%s%s" % (
+                S["board"] + " · " if S["board"]
+                and S["board"].upper() != S["label"].upper() else "",
+                n, "" if n == 1 else "s",
+                "" if S["alive"] or not heard else ", nothing from it yet")])
+        for which, n, why in self.left_out:
+            lines.append([cablights.LABEL[which], "not shown",
+                          "%d channel%s: %s" % (n, "" if n == 1 else "s", why)])
+        if not lines and not self.has_expression:
+            return None
+        return {"lines": lines, "expression": self.expression,
+                "has_expression": self.has_expression}
+
+    def describe(self, cid):
+        try:
+            P = self.pixels[int(cid)]
+        except (ValueError, IndexError):
+            return ""
+        S = P["section"]
+        where = ", ".join("%s=channel %d" % (c, ch) for c, (_n, ch)
+                          in sorted(P["channels"].items()))
+        return ("LED  %s\n%s - node %d%s\n%s"
+                % (P["name"], S["label"], S["node"],
+                   " (%s)" % S["board"] if S["board"] else "", where))
 
 
 class LcdPanel:
@@ -3217,6 +3434,8 @@ class Field(LedRing):
                 self.chan_fix.setdefault(key, []).append(F)
 
         self.sw_rows = list(self.switches)
+        # PAD-500: the cabinet's own lights, in a column left of the art
+        self.cab = CabinetLights(expression_on())
         self._sw_named = None
         self._kick_map = None
         self._kick_n = 0
@@ -3254,7 +3473,19 @@ class Field(LedRing):
             "trough": self.trough.spec() if (
                 self.trough is not None and self.trough.clickable) else None,
             "shaker": self.shaker.spec() if self.shaker else None,
+            "cab": self.cab_spec(),
+            "cab_panel": self.cab.panel(),
         }
+
+    def cab_spec(self):
+        """The cabinet column (PAD-500), or None until a section has spoken.
+        `w` is its width in the artwork's own pixels, so the page scales the
+        two together."""
+        secs = self.cab.spec()
+        if not secs:
+            return None
+        bw = (self.base or (313, 710))[0]
+        return {"w": int(round(bw * CAB_W_FRAC)), "sections": secs}
 
     def dyn(self):
         fx = {}
@@ -3262,6 +3493,7 @@ class Field(LedRing):
             if F["drawn"] is not None:
                 fx[F["fid"]] = F["drawn"]
         return {"fx": fx,
+                "cab": self.cab.dyn(),
                 "coil": {"%s:%s" % k: 1 if v else 0
                          for k, v in self.coil_drawn.items()},
                 "sw": {str(s): v for s, v in self._dot_drawn.items()},
@@ -3304,6 +3536,8 @@ class Field(LedRing):
 
     # ---- tooltips -----------------------------------------------------------
     def describe(self, kind, k):
+        if kind == "cab":
+            return self.cab.describe(k)
         if kind == "switch":
             d = self.sw_rows[k]
             C = self.kicker(d["id"])
@@ -3458,7 +3692,7 @@ class Field(LedRing):
         emulator is there), d only once the shim has stamped its magic."""
         try:
             with open(LED_PATH, "rb") as f:
-                raw = f.read(PADLED_DRIVE_READ)
+                raw = f.read(max(PADLED_DRIVE_READ, PADLED_HI_READ))
         except OSError:
             return None, None
         if len(raw) < LED_HDR or struct.unpack_from("<I", raw, 0)[0] != PADLED_MAGIC:
@@ -3622,6 +3856,13 @@ class Field(LedRing):
             self.animate_fixtures(t0, fx)
             if fx:
                 frame["fx"] = fx
+            # PAD-500: the cabinet column - a section that comes alive lays
+            # the page out again, the way a new swatch-grid block does
+            cab, grew = self.cab.tick(d)
+            if cab:
+                frame["cab"] = cab
+            if grew:
+                frame["layout"] = True
             live = [["Inserts lit", "%d of %d" % (lit, len(self.fixtures)),
                      "", False],
                     ["LED rate", "%.1f Hz" % _rate(self._draw_ev, t0), "",
@@ -3736,15 +3977,28 @@ class Schematic:
                             % (sw["name"], sw["id"], sw.get("num", -1),
                                sw["node"], sw["bit"]))})
         self.leds = LedGrid(load_led_names())
+        # PAD-500: no artwork to put a cabinet column beside, but the same
+        # tick box - with "Expression lights" off the blades' and speakers'
+        # own boards leave the swatch grid
+        self.cab = CabinetLights(expression_on())
         self.led_lit, self.led_total = 0, 0
         self._grid_gen = 0
         self.status = ""
         self.live = []
 
+    def _hidden(self):
+        return set() if self.cab.expression else set(self.cab.expression_nodes)
+
     def spec(self):
+        grid = self.leds.spec()
+        hide = self._hidden()
+        if hide:
+            grid = dict(grid, blocks=[b for b in grid["blocks"]
+                                      if b["node"] not in hide])
         return {"kind": "schematic", "bar": self.bar, "info": self.info,
                 "entries": self.entries,
-                "grid": self.leds.spec(),
+                "grid": grid,
+                "cab_panel": self.cab.panel(heard=False),
                 "trough": self.trough.spec() if (
                     self.trough is not None and self.trough.clickable)
                 else None}
@@ -3770,7 +4024,7 @@ class Schematic:
     def tick(self, now_mono):
         try:
             with open(LED_PATH, "rb") as f:
-                d = f.read(PADLED_READ)
+                d = f.read(PADLED_HI_READ)
         except OSError:
             d = None
         if emu_gone(self, bool(d)):
@@ -4243,6 +4497,10 @@ class Playfield:
         panel_w = 340 if keybinds.load(BINDS_PATH) else 0
         if self.kind == "field":
             bw, bh = self.view.base
+            # PAD-500: room for the cabinet column from the start, on a title
+            # that has one, so the artwork does not shrink when it appears
+            if self.view.cab.sections:
+                bw += int(round(bw * CAB_W_FRAC))
             env = os.environ.get("PAD_PF_SCALE")
             try:
                 scale = max(1.0, float(env)) if env else None
@@ -4510,6 +4768,31 @@ class Playfield:
         if self.key_panel is not None:
             self.key_panel.door_click()
         return True
+
+    def api_expression(self, on):
+        """PAD-500: the CABINET LIGHTS box's "Expression lights" tick - the
+        blades and the speaker lights in or out of this window. Kept in the
+        window's own state file, so the next run opens the way this one was
+        left; the game is untouched either way."""
+        on = bool(on)
+        try:
+            st = load_state()
+            st["expression_lights"] = on
+            with open(STATE, "w") as f:
+                json.dump(st, f, indent=1)
+        except Exception:                                   # noqa: BLE001
+            pass
+        old = getattr(self.view, "cab", None)
+        if old is not None:
+            new = CabinetLights(on)
+            # what had already spoken stays shown: no blink while the column
+            # waits a frame to hear from boards it heard from a moment ago
+            alive = {S["key"] for S in old.sections if S["alive"]}
+            for S in new.sections:
+                S["alive"] = S["key"] in alive
+            self.view.cab = new
+            self.publish("layout")
+        return on
 
     def api_clear_alerts(self):
         label, script, arg = next(a for a in WINDOW_ACTIONS

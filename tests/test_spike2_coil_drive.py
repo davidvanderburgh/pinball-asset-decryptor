@@ -305,4 +305,5 @@ def test_padled_h_documents_those_offsets():
                           "drive_hold_t", "drive_pulse_pwr", "drive_hold_pwr",
                           "drive_fires", "drive_offs", "drive_rule_fires"], OFFSETS[1:]):
         assert re.search(r"\b%s %d\b" % (name, off), hdr), name
-    assert "#define PADLED_VERSION 5" in hdr
+    # version 5's block, or a later one that only appends to it (6, PAD-500)
+    assert int(re.search(r"#define PADLED_VERSION (\d+)", hdr).group(1)) >= 5

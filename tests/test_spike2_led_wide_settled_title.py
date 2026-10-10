@@ -49,7 +49,8 @@ def _extract(name):
 
 FUNCS = ("popcount8", "led_insert_node", "led_gz_cmd", "led_show_cmd", "led_dec_log",
          "led_wide_long", "led_wide_walk", "led_wide_strip_bank", "led_wide_dialect",
-         "led_wide_settled", "led_wide_publish", "led_node_wide_publish", "led_publish")
+         "led_wide_settled", "led_strip_levels", "led_wide_publish", "led_node_wide_publish",
+         "led_publish")
 
 HARNESS = r"""
 #include <stdio.h>
@@ -75,6 +76,9 @@ static void led_seen(unsigned node, unsigned idx) { shm.seen[node][idx] = 1; }
 static void led_val(unsigned node, unsigned idx, unsigned char v) { if (node < 16 && idx < 96) { shm.val[node][idx] = v; led_seen(node, idx); } }
 static unsigned char led_level70(unsigned lo, unsigned hi) { (void)hi; return (unsigned char)lo; }
 static void led_show_note(unsigned node, unsigned cmd, unsigned weight) { (void)node; (void)cmd; (void)weight; }
+/* a banked frame's levels (PAD-500's version-6 plane): not what this test reads */
+static void led_hi(unsigned node, int bank, const unsigned char *idx, const unsigned char *val, unsigned cnt)
+{ (void)node; (void)bank; (void)idx; (void)val; (void)cnt; }
 @FUNCS@
 int main(int argc, char **argv)
 {

@@ -333,7 +333,8 @@ def wide_bank(b):
     Returns (bank, frame): the bank and the frame rewritten for wide_decode
     (bank 0 and the frame itself when it carries no prefix), or None for a
     malformed prefix. Only bank 0 fits the [16][96] plane; the shim walks the
-    others, counts them as decoded, and publishes nothing for them.
+    others, counts them as decoded, and puts banks 1 to 4's levels in padled
+    version 6's `hi` plane (PAD-500), channel 96 * bank + index.
     """
     if len(b) < 6 or not b[0] & 0x80:
         return None

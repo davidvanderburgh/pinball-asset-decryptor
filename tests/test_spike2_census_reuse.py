@@ -238,22 +238,26 @@ def test_reuse_copies_a_current_table_and_refuses_anything_else(nbdir,
     elf.write_bytes(b"\x7fELF" + b"\0" * 64)
     src = nbdir.source_id(str(elf), str(tmp_path))
     have = tmp_path / "node_ident.txt"
-    body = ("# nbdir v1 elf=game nodes=1 src=%s\n"
-            "node=2 type=ws2812node code=5\n" % src)
+    body = ("# nbdir v2 elf=game nodes=1 src=%s\n"
+            "node=2 type=ws2812node code=5 group=1 name=Cabinet Lights\n" % src)
     have.write_text(body)
     out = tmp_path / "out.txt"
 
     assert nbdir.reuse(str(have), str(out), str(elf), str(tmp_path)) is True
     assert out.read_text() == body
 
-    # a table from a DIFFERENT binary, and one from before src= existed
+    # a table from a DIFFERENT binary, one from before src= existed, and a v1
+    # one from before group= and name= (PAD-500: derived once more, so the
+    # playfield's cabinet lights can find their boards)
     have.write_text(body.replace(src, src + " x"))
     assert nbdir.reuse(str(have), str(out), str(elf), str(tmp_path)) is False
-    have.write_text("# nbdir v1 elf=game nodes=1\nnode=2 type=ws2812node code=5\n")
+    have.write_text("# nbdir v2 elf=game nodes=1\nnode=2 type=ws2812node code=5\n")
+    assert nbdir.reuse(str(have), str(out), str(elf), str(tmp_path)) is False
+    have.write_text(body.replace("# nbdir v2 ", "# nbdir v1 "))
     assert nbdir.reuse(str(have), str(out), str(elf), str(tmp_path)) is False
 
     # a table with no rows proves nothing - derive rather than trust it
-    have.write_text("# nbdir v1 elf=game nodes=0 src=%s\n"
+    have.write_text("# nbdir v2 elf=game nodes=0 src=%s\n"
                     "# skipped node=2 code=5 reason=unknown\n" % src)
     assert nbdir.reuse(str(have), str(out), str(elf), str(tmp_path)) is False
 

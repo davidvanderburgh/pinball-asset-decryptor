@@ -186,7 +186,9 @@ wizard_slot_enable 42` makes the runtime call v[42] first - Austin then started,
   balls, +0x32 up), House Party's start while it ran returned 0 (its own rules). Proven (`p15`): House Party started (4
   balls, +0x32, the House lit up), They Came From Space waited behind it. The House manager's own bookkeeping (the
   player's selected house, its played bits) is not done for a hand-over - the game's start of the rule is.
-- The probe and proofs ran as root: slots 1-4 had ~3,300 root-owned entries given back to david afterwards.
+- The probe and proofs ran as root: slots 1-4 had ~3,300 root-owned entries given back to david afterwards; the two
+  Elvira runs (`p14`, `p15`) left slot 1's root-owned again, and PAD-494 held slot 1 by then - give them back when
+  it is free (MEMORY: rig-root-owned-nvram-fail-slot).
 
 ## Still open
 
@@ -195,8 +197,10 @@ Shots: `work/artifacts/PAD-473` (bondpro, kong, kongstart, munsters, turtles: ru
 After run 3: 52 of the 53 latest builds are done - 48 proven (Bond LE and Pro; 33 C++ builds on the mode route; 10
 plain-C builds, X-Men LE / Pro and Elvira on the function route) and 4 leave the section out - and 1 is open:
 
-- **D&D LE 1.10** starts no game on the rig at all (a known rig limit, PAD-420): its lines stay unproven unless a
-  machine run proves them.
+- **D&D LE 1.10** starts no game on the rig at all (a known rig limit, PAD-420 / PAD-474: in attract it ejects and
+  auto-plunges a ball every ~8 s and never takes Start, fresh or seeded NVRAM): its lines (Tiny's Dice Game, Tavern
+  Brawl - the Pro's, proven) stay "found, not yet seen" until a machine run proves them or a ticket of its own gets the
+  rig to start it.
 - Guardians' Immolation Initiative: no FG_ flag of its own - its start and running query not found.
 - A mini-wizard named on the rulesheet whose class was not found: John Wick's Red Circle Reckoning (run by
   `crule_wizard_modes`), The Mandalorian's I Like Those Odds.

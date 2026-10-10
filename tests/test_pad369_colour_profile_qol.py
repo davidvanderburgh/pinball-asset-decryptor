@@ -177,7 +177,8 @@ def test_save_everything_and_load_it_without_deleting_anything(tmp_path):
     data["image"] = {"images/" + PIC: str(own)}
     staged_changes.save(b, data)
     extras = scene_share.read_extras(out)
-    assert scene_share.clashes(b, extras) == {"pictures": ["images/" + PIC], "overlay": True}
+    assert scene_share.clashes(b, extras) == {"pictures": ["images/" + PIC], "overlay": True,
+                                              "colored": [], "files_profile": False}
     renamed = {}
     scene_edit.import_edits(b, out, [CARD], renamed=renamed)
     pics, gone = scene_share.import_extras(b, out, extras, renamed=renamed)
@@ -215,7 +216,8 @@ def test_a_picture_the_project_lacks_is_left_out(tmp_path):
     b = tmp_path / "empty"
     (b / "images").mkdir(parents=True)
     extras = scene_share.read_extras(out)
-    assert scene_share.clashes(str(b), extras) == {"pictures": [], "overlay": False}
+    assert scene_share.clashes(str(b), extras) == {"pictures": [], "overlay": False,
+                                                   "colored": [], "files_profile": False}
     assert scene_share.import_extras(str(b), out, extras) == ([], ["images/" + PIC])
     assert "images/" + PIC not in (staged_changes.load(str(b)).get("image") or {})
 
@@ -292,7 +294,8 @@ def test_a_save_loads_its_pictures_into_a_stock_project(tmp_path):
     assert list(scene_share.localise(b, extras, None)["pictures"]) == ["images/" + BUILT]
     extras = scene_share.localise(b, extras, here)
     assert list(extras["pictures"]) == ["images/" + STOCK]
-    assert scene_share.clashes(b, extras) == {"pictures": [], "overlay": False}
+    assert scene_share.clashes(b, extras) == {"pictures": [], "overlay": False, "colored": [],
+                                              "files_profile": False}
     got, _missing = scene_edit.import_edits(b, out, here.keys())
     assert list(got) == [PRO]
     assert scene_share.import_extras(b, out, extras) == (["images/" + STOCK], [])

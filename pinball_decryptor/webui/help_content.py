@@ -704,15 +704,19 @@ HELP_CONTENT = {
                          "words."},
                 {"icon": "save", "tone": "ok", "title": "The whole look",
                  "text": "**Every scene with pictures, text and color profiles:** scenes, "
-                         "every replaced picture, Text edits, profiles and overlay. Not "
-                         "sounds, videos or the machine screen."}]},
+                         "every replaced picture, Text edits, profiles (the game's own "
+                         "pictures and lines too) and overlay. Not sounds, videos or the "
+                         "machine screen."}]},
             "### Loading\n"
             "- Scenes match by path, so an LE file loads on the Pro. Missing scenes and "
             "unplaceable or too-long text are left out and named; clashing picture names "
             "are renamed.\n"
             "- Pictures go into **Shared pictures**. Nothing is deleted or overwritten.\n"
+            "- A file with the game's own pictures or lines colored unlocks them here, so "
+            "they show.\n"
             "- When the file would change something you edited yourself (a scene, a "
-            "picture, a line of text, the overlay), it lists each one beside the file's "
+            "picture, a line of text, the overlay, color profiles), it lists each one "
+            "beside the file's "
             "and asks: **Cancel**, **Skip conflicts** (load only the rest), **Replace "
             "all**, tick the ones to replace and **Replace ticked only**, or **Reset my "
             "scenes, then load** (every scene back as the game shipped it, then the whole "

@@ -75,10 +75,10 @@ with its color profile baked in. Start first says how many videos
 need it and about how long that takes, and asks before going on when
 it comes to a minute or more. While it runs, the State line and the
 footer bar count down "Converting videos: N of M (about X left)", and
-"Preparing your edits" shows its steps. A converted video is kept, so
-a later Start converts only what you have changed since. Cancel stops
-it at once: the game is not started, and the videos already converted
-are kept for next time.
+"Preparing your edits" shows its steps. A converted video or picture
+is kept, so a later Start converts only what you have changed since,
+and the count covers only those. Cancel stops it at once: the game is
+not started, and the videos already converted are kept for next time.
 **And a run of just your edits no longer ends on a black screen.**
 Every set of edits carries the card's SD-validation record as well
 as the files you changed, because a write refreshes that record

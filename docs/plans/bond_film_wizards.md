@@ -97,13 +97,28 @@ a pattern), and a condition, the mode is lit (`block_modes.py` "LIT AT A SHOT").
   starts, puts the light out.
 - The inserts are every `lamp` line of the port (`TitleProfile.inserts`, on the builds in `LAMPS_PROVEN`): on Bond LE
   the Right ramp's six are DR. NO-RIGHT RAMP, ROSA KLEBB, GOLDFINGER-RIGHT RAMP, LARGO, BLOFELD and MR. HENDERSON.
+  Which is which film's villain is the game's own pairing: its per-film lamp groups at `0x7cc220` (halfwords, 8 a
+  group, in film order) are the films (31 30 29 28 27 37), the Bond girls (61 62 78 79 80 81), the henchmen (59 66 60
+  67 68 69) and the villains (34 35 36 43 44 45), and its villain names run DrNo, RosaKlebb, Goldfinger, Largo,
+  Blofeld, Henderson in the same order as its henchmen (ProfDent ... Osato, KiddWint). So You Only Live Twice's is
+  BLOFELD and Diamonds Are Forever's is MR. HENDERSON.
 - The block's shot starts out at the port's `wizard_shot` (Bond: Right ramp exit opto, the ramp made).
 
 Proven on the desk harness (`tests/test_stern_block_modes.py`, run through PAD-Runtime's gcc): lit by an event, the
 shot and the insert blinking, held again after a drain, dark for player 2 and back for player 1, the shot starting it
 (and paying nothing itself, as any start shot), dark while it ran and not lit again after; with a battle running the
 shot left it lit ("still ready") and the next one after the battle started it; a new game put it out. The ARM build
-(build_mode.sh) of a Bond mode using it with a light show and a HUD is clean. Not run on the rig or a machine.
+(build_mode.sh) of a Bond mode using it with a light show and a HUD is clean.
+
+Proven in the emulator (2026-10-10, PAD-Runtime rig 1, the stock James Bond LE 1.06 card, hidden, muted; C:/tmp/PAD-503
+proof.sh): DIAMOND DEATH THREAT as blocks (film_daf -> Light the mode at Right ramp exit opto + MR. HENDERSON, magenta,
+holding the game's modes off) with PAD-457's instruments. The Right ramp (switches 46, 48) before the film started
+nothing; PAD-428's instrument put Diamonds Are Forever's four parts through the game's own collect (`f5=1111/4*`) and
+16 ms later `lit at Right ramp exit opto for player 1`, the runtime holding the arrow and MR. HENDERSON. The shim's LED
+view (node 8 = I/O group 7 + 1) had MR. HENDERSON 0 -> 255 and the RIGHT RAMP ARROW [0,0,0] -> [255,0,255]. With game
+flag 139 set (one of the game's modes in the way) the ramp gave `not started (its lit shot) ... still ready` and the
+lights stayed; with it cleared the next ramp gave `START (its lit shot): player 1`, both inserts handed back (LED view
+0 / [0,0,0] again). No abort. A drain with the mode lit was proven on the desk harness only.
 
 Not done: two modes of one's own lit at the same shot, one of them lighting that shot again while it runs, leave the
 other's shot lights dark from that one's end to the next ball (its insert stays lit and the shot still starts it).

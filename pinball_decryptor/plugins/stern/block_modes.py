@@ -65,7 +65,7 @@ the mode could start now, the mode is lit.
 
 LIT AT A SHOT (PAD-503). A Bond owner made modes of their own for the two films with no mini-wizard and
 wanted them as the game's four are: lit at the Right ramp with the film's villain, started by the ramp. Light
-the mode at (``{"op": "light_mode", "shot": ..., "insert": "BLOFELD", "color": ..., "pattern": "blink"}``) lights
+the mode at (``{"op": "light_mode", "shot": ..., "insert": "MR. HENDERSON", "color": ..., "pattern": "blink"}``) lights
 it for the player up: while the mode is not running, the shot's inserts and the one insert named (any the port
 names, "" = none) are held in its colour, ball after ball, and that shot made starts the mode as Start the mode
 does (so it waits, and stays lit, while one of the game's own modes or a multiball is in its way, as the mode is

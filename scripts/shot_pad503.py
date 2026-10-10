@@ -4,7 +4,7 @@
 
 The server runs from <repo> (default: this tree) against a scratch settings folder. The project holds DIAMOND DEATH
 THREAT, a blocks mode as the owner made it: Diamonds Are Forever done -> before: Start the mode (all there was);
-after: Light the mode at the Right ramp with the BLOFELD insert. Shot:
+after: Light the mode at the Right ramp with the MR. HENDERSON insert (the game's own villain for that film). Shot:
   <before|after>_blocks_daf_wizard.png its blocks, the pointer on the block its film event runs
 """
 
@@ -45,7 +45,7 @@ BM.save(%(project)r, slug, BM.normalize({"name": "DIAMOND DEATH THREAT", "second
 '''
 
 FILM = {"before": {"op": "start_mode"},
-        "after": {"op": "light_mode", "shot": "Right ramp exit opto", "insert": "BLOFELD", "color": "#ffd000",
+        "after": {"op": "light_mode", "shot": "Right ramp exit opto", "insert": "MR. HENDERSON", "color": "#ffd000",
                   "pattern": "blink"}}
 WORDS = {"before": "Start the mode", "after": "Light the mode at"}
 

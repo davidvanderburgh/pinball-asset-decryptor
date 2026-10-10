@@ -78,6 +78,51 @@ once that part is in all six films, and the runtime gave back what the game had 
 left open above, is now the rule for any mini-wizard a mode hands out: the modes claim theirs as they load and the
 game's lighting (`site wizard_light`, vetoed) leaves a claimed one unlit; it still lights the unclaimed ones.
 
+## PAD-503: a mini-wizard of one's own, lit at the Right ramp
+
+The same owner made blocks modes of their own for the two films with none (DIAMOND DEATH THREAT on Diamonds Are
+Forever, one on You Only Live Twice): clips, sounds, scoring, started on `film_daf` / `film_yolt`. They started the
+moment the film was done; the owner wanted them as the game's four are, lit at the Right ramp with the film's villain insert
+lit, and started by the ramp. The game's own table has four entries and no room for more, so the lighting is the
+mode's own: a blocks statement, Light the mode at (`light_mode`: a shot, one more insert of the port's, a colour and
+a pattern), and a condition, the mode is lit (`block_modes.py` "LIT AT A SHOT").
+
+- Per player, kept ball after ball (the game's own stay lit until played); a new game drops it.
+- While it is lit and the mode is not running, the shot's inserts and the insert picked are held in its colour
+  (`pm_lamp_shot` / `pm_lamp_set`), held again each ball and for each player up, given back while a light show of
+  the mode's own paints.
+- That shot made starts the mode exactly as Start the mode does (`start("its lit shot", 1)`): with the game's
+  modes set to give way or held off, or waits out a multiball, it does not start while one of the game's own modes
+  or a multiball runs (Ahoy, say, started off the same ramp) and stays lit for the next one. Starting, however it
+  starts, puts the light out.
+- The inserts are every `lamp` line of the port (`TitleProfile.inserts`, on the builds in `LAMPS_PROVEN`): on Bond LE
+  the Right ramp's six are DR. NO-RIGHT RAMP, ROSA KLEBB, GOLDFINGER-RIGHT RAMP, LARGO, BLOFELD and MR. HENDERSON.
+  Which is which film's villain is the game's own pairing: its per-film lamp groups at `0x7cc220` (halfwords, 8 a
+  group, in film order) are the films (31 30 29 28 27 37), the Bond girls (61 62 78 79 80 81), the henchmen (59 66 60
+  67 68 69) and the villains (34 35 36 43 44 45), and its villain names run DrNo, RosaKlebb, Goldfinger, Largo,
+  Blofeld, Henderson in the same order as its henchmen (ProfDent ... Osato, KiddWint). So You Only Live Twice's is
+  BLOFELD and Diamonds Are Forever's is MR. HENDERSON.
+- The block's shot starts out at the port's `wizard_shot` (Bond: Right ramp exit opto, the ramp made).
+
+Proven on the desk harness (`tests/test_stern_block_modes.py`, run through PAD-Runtime's gcc): lit by an event, the
+shot and the insert blinking, held again after a drain, dark for player 2 and back for player 1, the shot starting it
+(and paying nothing itself, as any start shot), dark while it ran and not lit again after; with a battle running the
+shot left it lit ("still ready") and the next one after the battle started it; a new game put it out. The ARM build
+(build_mode.sh) of a Bond mode using it with a light show and a HUD is clean.
+
+Proven in the emulator (2026-10-10, PAD-Runtime rig 1, the stock James Bond LE 1.06 card, hidden, muted; C:/tmp/PAD-503
+proof.sh): DIAMOND DEATH THREAT as blocks (film_daf -> Light the mode at Right ramp exit opto + MR. HENDERSON, magenta,
+holding the game's modes off) with PAD-457's instruments. The Right ramp (switches 46, 48) before the film started
+nothing; PAD-428's instrument put Diamonds Are Forever's four parts through the game's own collect (`f5=1111/4*`) and
+16 ms later `lit at Right ramp exit opto for player 1`, the runtime holding the arrow and MR. HENDERSON. The shim's LED
+view (node 8 = I/O group 7 + 1) had MR. HENDERSON 0 -> 255 and the RIGHT RAMP ARROW [0,0,0] -> [255,0,255]. With game
+flag 139 set (one of the game's modes in the way) the ramp gave `not started (its lit shot) ... still ready` and the
+lights stayed; with it cleared the next ramp gave `START (its lit shot): player 1`, both inserts handed back (LED view
+0 / [0,0,0] again). No abort. A drain with the mode lit was proven on the desk harness only.
+
+Not done: two modes of one's own lit at the same shot, one of them lighting that shot again while it runs, leave the
+other's shot lights dark from that one's end to the next ball (its insert stays lit and the shot still starts it).
+
 The plan as it was written (PAD-428):
 
 What the user asked first: the game's mini-wizard (its own mode, music and screens) lit

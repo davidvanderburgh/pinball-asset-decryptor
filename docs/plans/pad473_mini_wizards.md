@@ -96,7 +96,7 @@ wizard_slot_enable 42` makes the runtime call v[42] first - Austin then started,
 1.16: Visitor's Center from the scanner, Museum Mayhem and Secure Control Room from the block lines' objects (the Pro's
 0xfb90 lower, each checked by its references) - Visitor's Center started, two balls, Museum Mayhem waited.
 
-## Run 2 (2026-10-09)
+## Run 2: Rush (2026-10-09)
 
 - **Rush LE / Pro 1.19** proven (sweep `p6`). Book 1's START (0xfc43c on the LE) asks the game's flag 0x1d (most likely the
   ball held in the Time Machine, its own start shot): set, it works the Time Machine's device; not set, it sets the
@@ -149,6 +149,8 @@ wizard_slot_enable 42` makes the runtime call v[42] first - Austin then started,
   off); a ticket of its own.
 
 ## Still open
+
+Shots: `work/artifacts/PAD-473` (bondpro, kong, kongstart, munsters, turtles: run 1; batman: run 2).
 
 After run 2: 39 of the 53 latest builds proven (Bond LE and Pro; 31 C++ builds and Rush on the mode route; Batman,
 Metallica and Stranger Things / LE on the function route), 4 leave the section out, 10 open:

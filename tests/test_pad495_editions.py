@@ -228,3 +228,69 @@ def test_the_card_reads_every_image_s_edition(mk, monkeypatch, tmp_path):
     other, _ = _built(raw, tmp_path / "c", [(MS.EDITION, 2, ["Colour", "Black and white"])])
     with pytest.raises(mk.Refused, match="names the editions"):
         mk.edition_for_plan(_fake_trees(mk, monkeypatch, [two, other]))
+
+
+# ---- the tabs --------------------------------------------------------------------------------
+def test_the_editions_tick_reaches_every_command(tmp_path):
+    from pinball_decryptor.webui.multiboot_core import (
+        ImageRow, MultibootForm, build_args, diff_forms, editions_args, inject_args,
+        menu_summary, update_args)
+    paths = []
+    for i in range(2):
+        p = tmp_path / ("e%d.raw" % i)
+        p.write_bytes(bytes(16))
+        paths.append(str(p))
+    out = str(tmp_path / "multi" / "card.multi.raw")
+    form = MultibootForm(images=[ImageRow(path=p, title="E%d" % i) for i, p in enumerate(paths)],
+                         out=out)
+    assert form.editions is False
+    assert editions_args(form) == ["--no-editions"]
+    form.editions = True
+    for argv in (build_args(form), inject_args(form, out), update_args(form, out)):
+        assert "--editions" in argv and "--no-editions" not in argv
+    assert menu_summary(form).startswith("no menu: the game's EDITION setting")
+    off = MultibootForm(images=list(form.images), out=out)
+    menu, rebuild = diff_forms(off, form)
+    assert "editions" in menu and not rebuild
+    jjp = MultibootForm(images=list(form.images), out=out, platform="jjp", editions=True)
+    assert editions_args(jjp) == []
+
+
+def test_the_write_tab_names_the_editions_in_the_project(tmp_path, monkeypatch):
+    from pinball_decryptor.webui import compat
+    from pinball_decryptor.webui.tabs import write as W
+    from pinball_decryptor.core import staged_changes
+
+    class Mfr:
+        key = "stern"
+        current_era = "spike2"
+
+    class Win:
+        _running = False
+        cb = {}
+
+    monkeypatch.setattr(W.WriteTab, "mfr", property(lambda self: Mfr()))
+    svc = W.WriteTab.__new__(W.WriteTab)
+    svc.window = Win()
+    state = {}
+    monkeypatch.setattr(svc, "set", lambda **kw: state.update(kw), raising=False)
+    monkeypatch.setattr(svc, "cap", lambda n: True, raising=False)
+    monkeypatch.setattr(svc, "_is_direct", lambda: False, raising=False)
+    monkeypatch.setattr(svc, "_info_assets_dir", lambda: str(tmp_path), raising=False)
+    monkeypatch.setattr(svc, "log", lambda *a, **k: None, raising=False)
+    staged_changes.save(str(tmp_path), {"audio": {"x": "y"}})
+    answers = iter(["Standard,  70th Anniversary ", "Solo", ""])
+    monkeypatch.setattr(compat.simpledialog, "askstring", lambda *a, **k: next(answers))
+    monkeypatch.setattr(compat.messagebox, "showinfo", lambda *a, **k: None)
+    assert svc.edit_editions() is True
+    data = staged_changes.load(str(tmp_path))
+    assert data["editions"] == {"names": ["Standard", "70th Anniversary"]}
+    assert data["audio"] == {"x": "y"}                    # the other tabs' keys are kept
+    assert state["editions_cap"] is True
+    assert state["editions_text"] == "1 Standard, 2 70th Anniversary"
+    # one name is not editions; an empty answer takes them off
+    assert svc.edit_editions() is False
+    assert staged_changes.load(str(tmp_path))["editions"]["names"] == ["Standard", "70th Anniversary"]
+    assert svc.edit_editions() is True
+    assert "editions" not in staged_changes.load(str(tmp_path))
+    assert state["editions_text"] == W.EDITIONS_NONE

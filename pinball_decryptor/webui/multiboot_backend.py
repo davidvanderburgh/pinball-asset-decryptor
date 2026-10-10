@@ -98,6 +98,10 @@ class MultibootBackend:
     #: machine.  Only a Stern game can be adjusted (its colors are in its own
     #: drawing shaders), so only Stern offers the tick.
     settings_tile: bool = False
+    #: EDITIONS, NO MENU (PAD-495): every image an edition of one game and the
+    #: game's own EDITION setting picks at power-up.  A Stern game program is the
+    #: only one that takes the setting.
+    editions: bool = False
     #: THE MENU'S SOUND: music, move / confirm sounds and the volume.  Every
     #: platform has it.  A Barrels of Fun menu is one static binary that cannot
     #: load the machine's sound library, so it streams its mix into a pipe and
@@ -235,7 +239,7 @@ STERN = MultibootBackend(
     selector_default="~/spike2root/usr/local/codeselect",
     selector_suffix="/usr/local/codeselect", selector_binary="codeselect",
     preview_native=False, conf_font="/usr/local/codeselect/font.ttf",
-    root_steps=frozenset(("build", "update")), settings_tile=True)
+    root_steps=frozenset(("build", "update")), settings_tile=True, editions=True)
 
 #: JJP: every writing step mounts something (the ISOs, the scratch root) and
 #: the restored roots the emulator shares are root's, so the media step (it

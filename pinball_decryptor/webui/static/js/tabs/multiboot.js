@@ -576,6 +576,9 @@ function MenuDialog({ s, w }) {
       <${Check} ns=${NS} k="counter" checked=${s.counter} wrap label="Count the cards under them (the “<  3 / 7  >” line; five cards or more)" />
       ${w.settings_tile ? html`<${Check} ns=${NS} k="settings_tile" checked=${s.settings_tile} wrap
         label="End the menu with a SETTINGS card (adjust each game's color correction on the machine; shown for games built with a color profile)" />` : null}
+      ${w.editions ? html`<${Check} ns=${NS} k="editions" checked=${s.editions} wrap
+        label="No menu: boot the edition the game's EDITION setting names (every image an edition of one game, edition 1 first)"
+        title=${md.editions_tip} />` : null}
       <${Check} ns=${NS} k="footer_on" checked=${s.footer_on} wrap label="Show the instructions under the cards (the line naming the buttons)" />
       <div class="kv mb-kv2">
         <label class="k" for=${fid("footer")}>Instructions:</label>

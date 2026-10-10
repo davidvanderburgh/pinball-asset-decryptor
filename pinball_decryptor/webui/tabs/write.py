@@ -101,6 +101,19 @@ CARD_FIT_TIP = (
     "each build is made whole from the original. The machine only writes to "
     "that partition to install a code update, so a card made this small may "
     "not have the room for one.")
+#: PAD-495: EDITION in the operator menu, and the multi-boot card that boots by it
+#: (plugins/stern/editions.py)
+EDITIONS_LABEL = "Editions"
+EDITIONS_TIP = (
+    "For one card that holds several editions of this game (a Standard and a "
+    "70th Anniversary look, say) and lets the operator pick one in the game's "
+    "own menu. Name the editions here, the same names in the same order in "
+    "every edition's project, and Write each one. Each card gets EDITION in "
+    "its operator menu (Adjustments > Attract Mode). Then put the images on a "
+    "Multi-boot card, edition 1 first, with \"Boot the edition the game's "
+    "EDITION setting names\" ticked: the card shows no menu, and the edition "
+    "the setting names boots at the next power-up.")
+EDITIONS_NONE = "None. This card is not one of several editions."
 EDITABLE_HINT = (
     "Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
     "files in pck/_EDITABLE ASSETS/ inside your Modified Assets "
@@ -526,7 +539,10 @@ class WriteTab(TabService):
                  card_size_note_kind="", card_size_label=CARD_SIZE_LABEL,
                  card_size_tip=CARD_SIZE_TIP, card_fit_cap=False,
                  card_fit_note="", card_fit_note_kind="",
-                 card_fit_label=CARD_FIT_LABEL, card_fit_tip=CARD_FIT_TIP)
+                 card_fit_label=CARD_FIT_LABEL, card_fit_tip=CARD_FIT_TIP,
+                 editions_cap=False, editions_text="", editions_note="",
+                 editions_note_kind="", editions_label=EDITIONS_LABEL,
+                 editions_tip=EDITIONS_TIP)
         self._hook_mirrors()
 
     # ------------------------------------------------------------------
@@ -665,6 +681,7 @@ class WriteTab(TabService):
         self._update_write_filename()
         self._refresh_prebuild_notes()
         self._refresh_card_size()
+        self._publish_editions()
         self._sync_buttons()
 
     @staticmethod
@@ -1655,6 +1672,90 @@ class WriteTab(TabService):
                  card_fit_note_kind=kind)
 
     # ------------------------------------------------------------------
+    # PAD-495: Editions
+    # ------------------------------------------------------------------
+    def _editions_applies(self):
+        """A Stern Spike 2 image build: EDITION grows the game program."""
+        mfr = self.mfr
+        return bool(mfr is not None and mfr.key == "stern"
+                    and getattr(mfr, "current_era", "spike2") == "spike2"
+                    and self.cap("write") and not self._is_direct())
+
+    def _publish_editions(self):
+        """The Editions row: the project's edition names, or None, and in
+        red why this project's game cannot have them."""
+        if not self._editions_applies():
+            self.set(editions_cap=False)
+            return
+        from ...plugins.stern import editions as _Ed
+        assets = self._info_assets_dir()
+        names = _Ed.load(assets) if assets else []
+        text = (", ".join("%d %s" % (i + 1, n) for i, n in enumerate(names))
+                if _Ed.count(names) else EDITIONS_NONE)
+        note, kind = "", ""
+        if _Ed.count(names):
+            why = _Ed.title_refusal(_Ed.project_title(assets))
+            if why:
+                note, kind = why, "err"
+            else:
+                note = ("The card this builds gets EDITION in its operator menu "
+                        "(Adjustments > Attract Mode). Put every edition's card on "
+                        "one Multi-boot card in this order.")
+        self.set(editions_cap=True, editions_text=text, editions_note=note,
+                 editions_note_kind=kind)
+
+    @rpc
+    def edit_editions(self):
+        """Ask for the editions' names, one line, commas between; an empty
+        answer takes the editions off the project."""
+        from ...core import history_log, staged_changes
+        from ...plugins.stern import editions as _Ed
+        if self.window._running or not self._editions_applies():
+            return False
+        assets = self._info_assets_dir()
+        if not assets:
+            compat.messagebox.showinfo(
+                "Editions", "Set the project folder on the Extract tab first.")
+            return False
+        now = _Ed.load(assets)
+        text = compat.simpledialog.askstring(
+            "Editions",
+            "The names of the editions, in order, separated by commas (2 to %d), "
+            "for example: Standard, 70th Anniversary. Give every edition's "
+            "project the same names in the same order. The machine's EDITION "
+            "setting names them in its help line. Leave it empty for none."
+            % _Ed.MAX_EDITIONS, initialvalue=", ".join(now))
+        if text is None:
+            return False
+        names = _Ed.clean({"names": [t for t in str(text).split(",")]})
+        if len(names) == 1:
+            compat.messagebox.showinfo(
+                "Editions", "One name is not editions: give two or more, or "
+                "leave it empty for none.")
+            return False
+        data = staged_changes.load(assets)
+        old = data.get(_Ed.STAGED_KEY)
+        value = _Ed.to_json(names)
+        if value:
+            data[_Ed.STAGED_KEY] = value
+        else:
+            data.pop(_Ed.STAGED_KEY, None)
+        staged_changes.save(assets, data)
+        hist = history_log.diff_scalar(
+            "write  editions", ", ".join(_Ed.clean(old)) or "none",
+            ", ".join(names) or "none")
+        history_log.record(assets, [hist] if hist else [])
+        self.log("Editions: %s." % (
+            "this card is one of %d editions (%s)" % (
+                len(names), ", ".join("%d %s" % (i + 1, n) for i, n in enumerate(names)))
+            if names else "this card is no longer one of several editions"), "info")
+        cb = self.window.cb.get("on_folder_state_written")
+        if cb is not None:
+            cb(assets)
+        self._publish_editions()
+        return True
+
+    # ------------------------------------------------------------------
     # Modified Files: the scan
     # ------------------------------------------------------------------
     def _log_scan(self, text):
@@ -2500,6 +2601,7 @@ class WriteTab(TabService):
         self._refresh_prebuild_notes()
         # the original may have been replaced on disk since it was read
         self._refresh_card_size()
+        self._publish_editions()
         self.set_admin_warning_collapsed(self._shared_admin_collapsed())
 
     def on_close(self):

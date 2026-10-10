@@ -74,6 +74,15 @@ hard-linked to `craze/GDCraze.x86_64` (remove first, always) and its size writte
 has. Every failure ends on image 0, and the menu is killed after its own timeout plus a
 minute. A read-only root is remounted rw for the swap and put back.
 
+**The swap runs as `pinball`; BOF's updater runs as root** (PAD-506). A `GAMEFILESIZE` the
+updater CREATED is root's, so on some owners' Labyrinths writing the size failed and every
+choice booted stock; an image the install step rebuilt is root's too, and with protected
+hard links (systemd's default) `pinball` cannot link it, so it was copied, 4 GB per boot.
+Before the menu opens the hook gives both to its own user (`sudo -n chown`, `GAMEFILESIZE`
+mode 644) and logs what it changed in `padselect.log`. `machine_sim.sh` runs everything as
+root and could not see this; `padselect_bof_test.sh` case 11 runs the hook as a user who
+cannot write `GAMEFILESIZE`.
+
 **Buttons.** `switch_left=15`, `switch_right=22`, `switch_start=14,20` (LAUNCH is a second
 START) - the numbers in Labyrinth's own switch table. `SA:` is the switches' PHYSICAL
 level and the game applies each switch's `reversed` flag itself, so pressed = different

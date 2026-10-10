@@ -20,6 +20,9 @@
 #            9. a conf with no sound: no player at all
 #   random  10. a random card over both images is the default card: the countdown lands on
 #               it, the menu rolls one and writes ITS image index, and that image is the game
+#   perms   11. a GAMEFILESIZE the hook's user cannot write (on the machine: root's, BOF's
+#               updater created it): made the user's and writable before the menu, so the
+#               chosen image is still the game (PAD-506; as root, the hook runs as nobody)
 set -u
 BIN=$1; DELTA=$2; FONT=${3:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -157,6 +160,21 @@ case "$seen" in
     *0*1*|*1*0*) ok "10 random card: the countdown rolled $seen - each roll's image became the game" ;;
     *) bad "10 random card: six rolls all landed on one image ($seen)" ;;
 esac
+# 11
+setup
+bash "$P/pad_install.sh"
+conf 1
+chmod 444 "$H/craze/GAMEFILESIZE"
+run=(bash)
+if [ "$(id -u)" = 0 ]; then         # root writes a read-only file anyway
+    chown -R 65534:65534 "$T"; run=(setpriv --reuid=65534 --regid=65534 --clear-groups bash)
+fi
+"${run[@]}" "$P/padselect.sh"
+[ "$(inode "$H/craze/GDCraze.x86_64")" = "$(inode "$D/pad_image1.bin")" ] \
+    && [ "$(cat "$H/craze/GAMEFILESIZE")" = "$(stat -c %s "$D/pad_image1.bin")" ] \
+    && [ "$(stat -c %a "$H/craze/GAMEFILESIZE")" = 644 ] && grep -q "GAMEFILESIZE: mode 644" "$P/padselect.log" \
+    && ok "11 perms: a GAMEFILESIZE the hook could not write is made writable -> image 1 is the game" \
+    || { bad "11 perms: GAMEFILESIZE not writable"; cat "$P/padselect.log"; }
 
 # 2
 setup

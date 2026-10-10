@@ -30,6 +30,9 @@ every play used to leave another abandoned decoder thread — and its
 screen ran the 32-bit game out of address space and died with a
 `SIGSEGV` after about seven minutes, picture and sound perfect right
 up to the last second (fixed v0.119.7).
+A Stern **Spike 3** card is recognised the moment you pick it and
+refused before anything is copied: its game partition is encrypted,
+so it cannot run here, and the log says so instead of a failed mount.
 **Your own edits can run without a card being built** (v0.183.0).
 Tick *Apply my replaced assets on top, without rebuilding the card*
 in the source box and Start patches just the card files your

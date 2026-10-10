@@ -1000,6 +1000,17 @@ WIZARDS_PROVEN = frozenset({
     "metallica_spike-1.04",   # Blackened Multiball started (flag 50, 4 balls, BLACKENED on the glass); The End of the Line waited
     "stranger_things-1.13",   # Season One Wizard Mode started (flag 72, 3 balls); Season Two waited while it ran
     "stranger_things_le-1.13",   # Season One Wizard Mode started (flag 72, 3 balls); Season Two waited while it ran
+    # earned, and only between the game's own modes: Aerosmith's songs and Guardians' modes run from a ball's launch, so
+    # the file was started with the ball in the shooter lane (sweep p12); `site wizard_earned_1` answered for the player
+    "aerosmith_le-1.16",   # Medley Tour Multiball started (flag 57, 3 balls, MEDLEY TOUR MULTIBALL), no song played
+    "guardians-1.15",   # Cherry Bomb Multiball started (flag 52, 6 balls, its TIME REMAINING), no mode completed
+    "guardians_le-1.15",   # Cherry Bomb Multiball started (flag 52, 6 balls, its TIME REMAINING), no mode completed
+    "aerosmith-1.16",   # Medley Tour Multiball started (flag 57, 3 balls), on PAD-420's NVRAM past Guided Setup (sweep p13)
+    "beatles-1.29",   # Beatlemania Multiball started (flag 81, 4 balls, TAXMAN PLAYED BEFORE BEATLEMANIA) (p13)
+    "jurassic_park_the_pin-1.05",   # Escape Nublar started (its +0x4c, 4 balls, BREAKING NEWS); Restore Power waited (p13)
+    # X-Men: its own enable-and-start on the mode singleton (r0), the object's running byte (sweep p13)
+    "uncanny_xmen_le-0.98",   # The Future started (+0xdc, HELP KITTY PRYDE ESCAPE); Save Senator Kelly waited behind it
+    "uncanny_xmen_pro-0.98",   # The Future started (+0xdc); Save Senator Kelly waited behind it
 })
 #: how a mode hands one over: lit for the game's start shot, or started at once
 WIZARD_HOW = ("light", "start")

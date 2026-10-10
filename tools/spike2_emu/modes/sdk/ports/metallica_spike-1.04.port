@@ -681,9 +681,10 @@ text shake_medium           0:384:0
 text shake_long             0:1024:0
 
 # ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
-# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and its
-# ACTIVE game flag; where the start first asks whether the player has earned it, that check (hooked: yes
-# only while a mode hands this one over). The names are the game's own.
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and how
+# it says it runs (its ACTIVE game flag, or a process or byte of its own); where the start first asks whether
+# the player has earned it, that check (hooked: yes only while a mode hands this one over). The names are
+# the game's own.
 # the game's flags (its own write 0x3c6ad4: the bitmap's pointer at [0x7002ad8 + 4], its size in bits at
 # [0x56b338]), for the mini-wizard's flag below
 data  game_flags             0x07002ad8

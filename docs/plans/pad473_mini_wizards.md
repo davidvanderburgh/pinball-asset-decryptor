@@ -21,21 +21,21 @@ strings naming a wizard; `C:/tmp/PAD-473/modecensus.txt`, `wizstrings.txt`) and 
 | James Bond 60th LE 1.11 | none: 007 Mode is its only wizard | | **left out** (run 1) |
 | The Munsters LE / Pro 1.28 | none: Munster Madness is its final wizard | `cmunster_madness*` | **left out** (run 1) |
 | Star Wars Home (ELG) 1.10 | none: Jedi Multiball is its only wizard | | **left out** (run 1) |
-| Aerosmith / LE 1.16 | Medley Multiball (left scoop) | plain C: 0x8c15c / LE 0x8c054, flag 57 | lines written; its own start refuses at game start (below) |
+| Aerosmith / LE 1.16 | Medley Tour Multiball (left scoop; the glass's name) | plain C: 0x8c15c / LE 0x8c054, flag 57, earned check hooked | **proven** (run 3, before the launch) |
 | Avengers Infinity Quest LE / Pro 1.10 | Soul Gem Quest, Black Order Multiball, Battle Royale (right ramp; fixed order) | `cmode_soul_gem`, `cmode_black_order_multiball`, `cmode_battle_royale` | **proven** (run 1, mode route) |
 | Batman '66 1.14 | Batusi, Gas Attack, Holy Multiballs (the program's Minor Villain Wizard Modes 1-3) | plain C: 0x1368ec, 0x13b050, 0x141f08; flags 84, 86, 87 | **proven** (run 2, function route) |
-| The Beatles 1.29 | Hard Day's Night / Beatlemania Multiball (upper magnet) | plain C | open |
+| The Beatles 1.29 | Beatlemania Multiball (the rulesheets' Help / Beatlemania: level 3 in all five modes; Taxman is the final) | plain C: 0x39270 r0 1, flag 81 | **proven** (run 3) |
 | Deadpool LE / Pro 1.16 | Mr. Sinister: Megakrakolodonus Rex, Clone Multiball (scoop) | `cmrsinister_rex`, `cmrsinister_clones` | **proven** (run 1, mode route) |
 | Dungeons & Dragons LE / Pro 1.10 | Tiny's Dice Game, Tavern Brawl (center spinner) | `ctinys_dice_game`, `ctavern_brawl` | Pro **proven**; LE lines written, no game on the rig |
 | Elvira's House of Horrors 1.13 | House Party, They Came From Space (the House) | Rule classes | open |
 | Foo Fighters LE / Pro 1.04 | Austin, D.C. (left ramp, van map) | `cmode_austin_wizard`, `cmode_dc_wizard` | **proven** (run 1, mode route) |
 | Godzilla LE / Pro 1.16 | Monster Zero, Terror of Mechagodzilla (building), Planet X Multiball (City Select) | `cmode_monster_zero`, `cmode_terror_of_mechagodzilla`, `cmode_planet_x_multiball` | **proven** (run 1, mode route) |
-| Guardians / LE 1.15 | Cherry Bomb Multiball, Immolation Initiative (right scoop) | plain C: Cherry Bomb 0x2f704, flag 52 | Cherry Bomb lines written; its own start refuses at game start (below) |
+| Guardians / LE 1.15 | Cherry Bomb Multiball, Immolation Initiative (right scoop) | plain C: Cherry Bomb 0x2f704, flag 52, earned check hooked | Cherry Bomb **proven** (run 3, before the launch); Immolation Initiative not found |
 | Iron Maiden LE / Pro 1.18 | 2 Minutes to Midnight, Number of the Beast ("MINI-WIZARD MODE CHAMPIONS" in the program) | `cmode_two_minutes_to_midnight`, `cmode_number_of_the_beast` | **proven** (run 1, mode route) |
 | Jaws LE / Pro 1.02 | 4th of July, Super Cast 'n Catch, Say Ah! (LE; centre ramp), Rescue / Search Multiball, Great White Multiball | `cmode_fourth_of_july`, `cmode_cast_n_catch_super`, `cmode_say_ah`, `cmode_rescue_multiball`, `cmode_search_multiball`, `cmode_great_white_multiball` | **proven** (run 1, mode route) |
 | John Wick LE / Pro 1.02 | Red Circle Reckoning, The Staircase, The Duel (left eject / crate; fixed order) | `crule_wizard_modes`, `cmode_the_staircase`, `cmode_the_duel` | **proven** (run 1, mode route) |
 | Jurassic Park LE / Pro 1.16 | Visitor's Center, Museum Mayhem (left ramp), Secure Control Room | C++ (start slot 21 from the older build) | **proven** (run 1, mode route) |
-| Jurassic Park Home 1.05 | Escape Nublar, Restore Power (T-Rex) | plain C | open |
+| Jurassic Park Home 1.05 | Escape Nublar, Restore Power (T-Rex) | rule methods: 0x35270 / 0x68090, r0 the rule 0x592250 / 0x592300 | **proven** (run 3) |
 | King Kong LE / Pro 0.97 | Crash the Gate, T-Rex Battle, T-Rex Boss Battle (gong) | `cmode_crash_the_gate`, `cmode_trex_battle`, `cmode_trex_boss_battle` | **proven** (run 1, mode route) |
 | Led Zeppelin LE / Pro 1.22 | Mothership, World Tour, Top of the Charts Multiballs | `cmothership_multiball`, `cworld_tour_multiball`, `ctop_of_the_charts_multiball` | **proven** (run 1, mode route) |
 | The Mandalorian LE / Pro 1.45 | Precious Cargo, You Have What I Want, I Like Those Odds | `crazor_crest_wizard`, `cyou_have_what_i_want`, ... | **proven** (run 1, mode route) |
@@ -45,7 +45,7 @@ strings naming a wizard; `C:/tmp/PAD-473/modecensus.txt`, `wizstrings.txt`) and 
 | Stranger Things / LE 1.13 | Season One, Season Two Wizard Mode (the program's names; also Total Isolation 1 / 2 multiballs) | plain C: 0x111fa0 / 0x11d344 (LE 0x12efac / 0x13a334), r0 1; flags 72, 78 | **proven** (run 2, function route) |
 | Black Knight: Sword of Rage LE / Pro 1.19 | KNIGHT Multiball, The King's Ransom (left spinner lane; the program's "retro" and BK2K wizard multiballs) | `cmode_original_mball`, `cmode_bk2k_mball` | **proven** (run 1, mode route) |
 | TMNT LE / Pro 1.59 | Team-Up Multiball (left ramp) | `cteam_up` (lit by `cteam_up_ready`) | **proven** (run 1, mode route) |
-| Uncanny X-Men LE / Pro 0.98 | The Future, Save Senator Kelly | `Mode_Future_Mini_Wizard`, `Mode_Save_Senator_Kelly_Wizard` | open |
+| Uncanny X-Men LE / Pro 0.98 | The Future, Save Senator Kelly | singletons: enable-and-start 0x7970c / 0x9930c (Pro 0x75f70 / 0x95b50), r0 the object | **proven** (run 3) |
 | Venom LE / Pro 1.07 | Toxin Team-Up (scoop) | C++ | **proven** (run 1, mode route) |
 
 ## How a game with none shows
@@ -148,21 +148,51 @@ wizard_slot_enable 42` makes the runtime call v[42] first - Austin then started,
   stack can read one of the game's modes running when none is. Left as they are here (they did not hold the hand-overs
   off); a ticket of its own.
 
+## Run 3 (2026-10-09): the rest of the function route
+
+- **X-Men LE / Pro 0.98**: both mini-wizards are mode singletons with an enable-and-start of their own (the Future
+  0x7970c: the player's byte at +0xd7, then the start 0x792f8, which returns at once without it; Save Senator Kelly
+  0x9930c: +0xa7, then 0x990e4; the Pro's 0x75f70 / 0x95b50 found by the same code shape), called with the object in
+  r0 (`value wizard_arg_<n>`; LE 0x645b18 / 0x644e90, Pro 0x63ae90 / 0x63a368). The game builds both itself (C++ local
+  statics), so `data wizard_built_<n>` names each guard (built by a game's start on the rig: guard 1, vtable in place)
+  and the runtime does not call through one unbuilt. Running: the object's own byte (+0xdc set by the Future's start,
+  cleared by its constructor 0x7621c and 0x77e84 / 0x77f68; +0xac for Kelly, cleared by 0x98838 / 0x99380). The probe
+  (`p11`) started Kelly on top of the Future (neither a multiball, neither among the port's running bytes), so the
+  function route now holds one off while another of the port's own runs ("The Future (another of its mini-wizards) is in
+  its way"). Proven (`p13`): the Future started (its HELP KITTY PRYDE ESCAPE THE CITY RUINS), Kelly waited.
+- **The Beatles 1.29**: its mini-wizard is the rulesheets' Help / Beatlemania multiball (level 3 in all five modes;
+  Taxman Multiball is the final wizard) - the program's Main Multiball, its adjustments named Beatlemania Multiball.
+  Start 0x39270(r0): 1 starts it (its upper magnet's shot handler passes 1), 0 asks the modes' levels; flag 81
+  FG_MAIN_MULTIBALL_ACTIVE (the flag functions 0x139e8c set / 0x139f24 get, the bitmap [0x5b28d8 + 4], now in the port).
+  Proven: 4 balls, TAXMAN PLAYED BEFORE BEATLEMANIA.
+- **Jurassic Park Pin 1.05**: Escape Nublar and Restore Power are rule methods (0x35270 / 0x68090, r0 the rule:
+  0x592250 / 0x592300, their guards 0x5923a4 / 0x5923a8; the shot handlers 0x3f39c / 0x71e2c call them once lit).
+  Running: the rule's +0x4c / +0x5c, which each start sets. Proven: Escape Nublar, 4 balls, its BREAKING NEWS ALERT;
+  Restore Power waited.
+- **Aerosmith / LE and Guardians / LE**: the songs (Aerosmith, seven queries at 0x50d000) and the modes (Guardians,
+  eight at 0x4fdf40) their own starts wait out run from a ball's launch - the launch picks one (the rulesheet: "at the
+  start of any ball, if a mode is not running, you can choose to start any mode") - and on the rig, where no shot is
+  made, one ran for the five minutes watched (`p11`). On a machine a mode times out (61 s and the like) or is won, so
+  a hand-over waits for that; proven here by a file started with the ball still in the shooter lane (`NOLAUNCH=1`,
+  `p12` / `p13`): Medley Tour Multiball (the glass's name for Medley) 3 balls, Cherry Bomb 6 balls and its 60-second
+  TIME REMAINING, with no song played and no mode completed (the earned checks hooked). Aerosmith Pro started a game
+  only on PAD-420's NVRAM past Guided Setup (`/home/david/pad420_nv/aerosmith`, from slot 1; `NVSEED=1`).
+- The probe and proofs ran as root: slots 1-4 had ~3,300 root-owned entries given back to david afterwards.
+
 ## Still open
 
 Shots: `work/artifacts/PAD-473` (bondpro, kong, kongstart, munsters, turtles: run 1; batman: run 2).
 
-After run 2: 39 of the 53 latest builds proven (Bond LE and Pro; 31 C++ builds and Rush on the mode route; Batman,
-Metallica and Stranger Things / LE on the function route), 4 leave the section out, 10 open:
+After run 3: 51 of the 53 latest builds are done - 47 proven (Bond LE and Pro; 33 C++ builds on the mode route; 10
+plain-C builds and X-Men LE / Pro on the function route) and 4 leave the section out - and 2 are open:
 
-- **Uncanny X-Men LE / Pro 0.98**: the function route with r0 the Future's object (above); Save Senator Kelly
-  (0x990e4, block line 13). The Pro's addresses from its own program.
 - **D&D LE 1.10** starts no game on the rig at all (a known rig limit, PAD-420): its lines stay unproven unless a
   machine run proves them.
-- **Aerosmith / LE 1.16, Guardians / LE 1.15**: what holds their own start off at a ball's start (above), then prove;
-  Guardians' Immolation Initiative (no FG_ flag of its own: find its start and what says it runs).
-- **The Beatles 1.29** (Beatlemania Multiball / Hard Day's Night: no FG_ names for them - find the start and its
-  running query), **Jurassic Park Pin 1.05** (Escape Nublar 0x35270, Restore Power 0x68090: methods, r0 an object of
-  the game's - find it), **Elvira 1.13** (House Party, They Came From Space: the House manager's starts, C++ virtuals).
+- **Elvira 1.13** (House Party, They Came From Space): C++ rule objects (`HousePartyRule`, `TheyCameFromSpaceRule` at
+  0x885e28, House 25; their running test the port's `mode_rule_slot` 15). A House starts through the House manager
+  (0xdd12c: the player's selected house, its rule's v[22], then the manager's played bits), so a hand-over either sets
+  the player's selected house first or calls the rule's v[22] and does the manager's bookkeeping itself - neither yet
+  understood well enough to call. House Party (a multiball) not located.
+- Guardians' Immolation Initiative: no FG_ flag of its own - its start and running query not found.
 - A mini-wizard named on the rulesheet whose class was not found: John Wick's Red Circle Reckoning (run by
   `crule_wizard_modes`), The Mandalorian's I Like Those Odds.

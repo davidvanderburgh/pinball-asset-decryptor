@@ -48,7 +48,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Hold the Mechagodzilla magnet or the bridge | Godzilla Premium/LE 1.16: up to 5 s, as it starts or on a shot |
 | Turn the shield targets toward the player | Godzilla Premium/LE 1.16: while the mode runs, then back where they were. Only while the game's modes can't start. Tested in the emulator so far |
 | Play one of the game's own light shows as it starts or ends | Godzilla Premium/LE 1.16: ten shows by name (flashy, subdued, accent), a few seconds each; none as the ball drains. Every build marked *light shows* in "Which games" below: up to twelve of its own, found by playing every show process of the game's in the emulator and named from what it lit; a Pro offers its LE's by the same names where they are the same show (Godzilla Pro has eight of the Premium/LE's). Tested in the emulator so far |
-| Start the game's own mini-wizard from a film (or any start) | James Bond 007 LE / Pro 1.06: Chaos at Crab Key, Ahoy Mr. Bond, Goldfinger's Jackpot, Duel on the Disco Volante - lit for the Right ramp (the only one lit until it starts), or started at once or the moment the game would start one; the game's own lighting no longer lights one a mode hands out. The other games marked *mini-wizards* below (their own, by name: Godzilla's Monster Zero, King Kong's Crash the Gate, ...): started at once, or the moment none of the game's own modes is in the way, that ball; lit for the start shot only where the game lights it through a mode of its own (Star Wars' Lightsaber Duel, TMNT's Team-Up); Rush's Cygnus X-1 Books, when the ball is not in the Time Machine, wait for it to drain before their intro plays; the game's own rules still start them too. The Munsters, Star Wars Home and Bond 60th have none of their own. The game's own mode runs, nothing of yours |
+| Start the game's own mini-wizard from a film (or any start) | James Bond 007 LE / Pro 1.06: Chaos at Crab Key, Ahoy Mr. Bond, Goldfinger's Jackpot, Duel on the Disco Volante - lit for the Right ramp (the only one lit until it starts), or started at once or the moment the game would start one; the game's own lighting no longer lights one a mode hands out. The other games marked *mini-wizards* below (their own, by name: Godzilla's Monster Zero, King Kong's Crash the Gate, ...): started at once, or the moment none of the game's own modes is in the way, that ball; lit for the start shot only where the game lights it through a mode of its own (Star Wars' Lightsaber Duel, TMNT's Team-Up); Rush's Cygnus X-1 Books, when the ball is not in the Time Machine, wait for it to drain before their intro plays; Aerosmith's Medley Tour and Guardians' Cherry Bomb Multiball start only while none of the game's own songs or modes runs (the game's rule), so they wait for one to end or the next ball's launch; the game's own rules still start them too. One handed over never starts while another of the game's own mini-wizards runs. The Munsters, Star Wars Home and Bond 60th have none of their own. The game's own mode runs, nothing of yours |
 | Move the building | Not yet |
 | Shake the cabinet | Every build marked *shaker* in "Which games" below, with a shaker fitted (an optional kit on most models, fitted on many LEs): as the mode starts, on a shot or as it ends - a shake of its own, at a strength the game itself uses and never longer than its own longest (Godzilla: up to 1 s hard, 5 s soft; most others one strength, 1 to 2 s), or one of the game's (Godzilla's jackpot shake, its multiball start; another game's short, medium or long shake). Tested in the emulator so far |
 | Fire a flipper, slingshot, pop bumper, kickback, lock, the trough or any other coil | No |
@@ -163,9 +163,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
-| Aerosmith 1.16 | ✓ | no | ✓ | shots | scoop, shaker, light shows |
+| Aerosmith 1.16 | ✓ | no | ✓ | shots | scoop, shaker, light shows, mini-wizards |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
-| Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
@@ -183,9 +183,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, shaker, light shows, mini-wizards |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards |
-| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
-| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
 | Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
@@ -198,7 +198,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop, shaker, light shows, mini-wizards |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards |
-| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
+| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms, light shows, mini-wizards |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
@@ -222,14 +222,14 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
 | TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, waits for multiballs only |
+| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards, waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards |
 | The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
 | The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
-| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows |
-| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows |
+| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards |
+| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 

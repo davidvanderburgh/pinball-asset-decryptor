@@ -2343,6 +2343,7 @@ site  wizard_earned_1    0x...   # optional: the start's own "has the player ear
 value wizard_arg_1       1       # optional: the r0 the game's own call passes (else 0)
 value wizard_proc_1      223     # instead of a flag: a process of its own (site proc_exists)
 data  wizard_running_1   0x...   # ... or a byte of its own, non-zero while it runs
+data  wizard_built_1     0x...   # optional: the construction guard of the object wizard_arg_1 is (bit 0 once built)
 ```
 
 - START waits as the mode route does (nothing of the game's in its way: the stack's multiball and modes query; no
@@ -2352,7 +2353,14 @@ data  wizard_running_1   0x...   # ... or a byte of its own, non-zero while it r
   started is never called again, flag up or not. There is nothing to light: LIGHT starts it.
 - The in-the-way check is the runtime's, not only the game's: Batman's Gas Attack Multiball's own start starts it on
   top of the Batusi Multiball (it asks only that it is not running itself), and Metallica's The End of the Line on top
-  of Blackened.
+  of Blackened. Another of the port's own mini-wizards running is in the way as well, whether the stack sees it or not
+  (X-Men's Save Senator Kelly started on top of the Future: neither is a multiball, nor among its running bytes):
+  `[pad] game wizard 2 (...): The Future (another of its mini-wizards) is in its way`.
+- Starts that are methods take their object in r0 (`value wizard_arg_<n>`: X-Men 0.98's mode singletons, Jurassic Park
+  The Pin's rules): the game builds those itself, so `data wizard_built_<n>` names the object's construction guard and
+  the start is not called while it reads unbuilt ("the game has not built its object yet - started the moment it has").
+  X-Men's own enable-and-start is the call (`0x7970c`: the player's enabled byte, then the start, which returns at once
+  without it), the way Foo Fighters' START needs its enable on the mode route.
 - `site wizard_earned_<n>`: most of these starts ask first whether the player has earned it (Aerosmith 1.16's Medley
   Multiball: every song played; Guardians' Cherry Bomb: four of its eight). A mode hands one over instead of the player
   earning it, as on Bond, so that check is hooked as the port arms and answers 1 only while the runtime calls that

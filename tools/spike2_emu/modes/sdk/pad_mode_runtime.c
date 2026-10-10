@@ -5874,7 +5874,8 @@ static int wizm_obj_ok(const unsigned *o)
  * 0 when they say not now (another multiball running, ...), and its ACTIVE flag says it runs. The port names the
  * start (`site wizard_go_<n>`, its words checked like every site), the r0 it is called with where the game's own
  * call passes one (`value wizard_arg_<n>`, else 0: Stranger Things' Season One takes 1, as its challenge start
- * does) and how it says it runs (`value wizard_flag_<n>`: a game flag in the item-164 bitmap; `value
+ * does; X-Men's takes its mode object, then `data wizard_built_<n>` is that object's construction guard) and how
+ * it says it runs (`value wizard_flag_<n>`: a game flag in the item-164 bitmap; `value
  * wizard_proc_<n>`: a process of its own, `site proc_exists`; or `data wizard_running_<n>`: a byte of its own). START waits as the mode route does - nothing of the game's in its way
  * (the stack's multiball and modes query), no mode of ours holding the game's modes off - and then calls it; a 0
  * back with nothing running is the game's own rules saying not now, so it is called again every 250 ms while that
@@ -5918,6 +5919,18 @@ static int wizf_earned(unsigned *regs, unsigned n)
     return wizf_starting && (unsigned)wizf_starting == n;
 }
 
+/* the object its start is called on is built: `data wizard_built_<n>` names the game's construction guard of that
+ * object (a C++ local static's guard word, bit 0 set once built - X-Men's mode singletons, Jurassic Park The Pin's
+ * rules); one with no guard named is taken as built */
+static int wizf_built(int n)
+{
+    char key[28];
+    unsigned g;
+    pm_snprintf(key, sizeof key, "wizard_built_%d", n);
+    g = data(key);
+    return !g || (*(volatile const unsigned *)(unsigned long)g & 1u) != 0;
+}
+
 /* its start, as the game's rules call it: what it returns (0 = the game's rules said not now) */
 static unsigned wizf_start(int n)
 {
@@ -5934,6 +5947,21 @@ static unsigned wizf_start(int n)
 static int wizm_runs(int n)
 {
     return wiz_route == 3 ? wizf_runs(n) == 1 : wizm_active(wizm_obj(n, 0));
+}
+
+/* the function route: another of the port's mini-wizards running, in words ("" = none). The stack's query does not
+ * always see them (X-Men's Future and Save Senator Kelly are no multiball, and not among its running bytes), and
+ * their own starts do not ask (X-Men's Save Senator Kelly started on top of the Future) */
+static const char *wizf_other(int n)
+{
+    static char what[64];
+    int k;
+    for (k = 1; wiz_route == 3 && k <= wizards_n; k++)
+        if (k != n && wizm_runs(k)) {
+            pm_snprintf(what, sizeof what, "%s (another of its mini-wizards)", wizard_name(k));
+            return what;
+        }
+    return "";
 }
 
 /* what of the game's is in the way of starting one now, in words ("" = nothing): a mode of ours holding the game's
@@ -5997,7 +6025,8 @@ static int wizm_try(unsigned p)
         wizm_next(p);
         return 1;
     }
-    way = wizm_way();
+    way = wizf_other(n);
+    if (!*way) way = wizm_way();
     if (*way) {
         if (!str_eq(way, wizm_due[p - 1].way)) {
             pm_snprintf(wizm_due[p - 1].way, sizeof wizm_due[p - 1].way, "%s", way);
@@ -6007,6 +6036,14 @@ static int wizm_try(unsigned p)
         return 0;
     }
     if (wiz_route == 3) {                           /* the function route: the game's own rules may still say not now */
+        if (!wizf_built(n)) {
+            if (!str_eq(wizm_due[p - 1].way, "(not built)")) {
+                pm_snprintf(wizm_due[p - 1].way, sizeof wizm_due[p - 1].way, "(not built)");
+                say("game wizard %d (%s): the game has not built its object yet - started the moment it has, this ball",
+                    n, wizard_name(n));
+            }
+            return 0;
+        }
         if (!wizf_start(n) && !wizm_runs(n)) {
             if (!str_eq(wizm_due[p - 1].way, "(its own rules)")) {
                 pm_snprintf(wizm_due[p - 1].way, sizeof wizm_due[p - 1].way, "(its own rules)");
@@ -6169,6 +6206,12 @@ static void wizf_arm(void)
         }
         if (!wizf_can_tell(n)) {
             say("game wizards: off - nothing of this build's says %s runs", wizard_name(n));
+            wizards_n = 0;
+            return;
+        }
+        pm_snprintf(key, sizeof key, "wizard_built_%d", n);
+        if (data(key) && !maps_has(data(key), 4, MAP_R)) {
+            say("game wizards: off - %s's object guard (0x%08x) is not in this build's memory", wizard_name(n), data(key));
             wizards_n = 0;
             return;
         }

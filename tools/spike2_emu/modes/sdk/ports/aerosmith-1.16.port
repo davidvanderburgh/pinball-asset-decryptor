@@ -404,11 +404,12 @@ text shake_medium           0:384:0
 text shake_long             0:1024:0
 
 # ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
-# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and its
-# ACTIVE game flag; where the start first asks whether the player has earned it, that check (hooked: yes
-# only while a mode hands this one over). The names are the game's own.
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and how
+# it says it runs (its ACTIVE game flag, or a process or byte of its own); where the start first asks whether
+# the player has earned it, that check (hooked: yes only while a mode hands this one over). The names are
+# the game's own.
 site  wizard_go_1        0x0008c15c 0xe92d43f0 0xe24dd00c   # AUD_MEDLEY_MULTIBALL_STARTED
 site  wizard_earned_1    0x00123e80 0xe92d4038 0xe3a04000   # earned: every song played
 value wizard_flag_1      57    # FG_MEDLEY_MULTIBALL_ACTIVE
-text  wizard_name_1      Medley Multiball
+text  wizard_name_1      Medley Tour Multiball
 text  wizard_film_1      every song played

@@ -830,6 +830,7 @@ class WebMultibootPanel(_Base):
             "groups": bool(be.groups),
             "machine_volume": bool(be.machine_volume),
             "settings_tile": bool(be.settings_tile),
+            "editions": bool(be.editions),
             "volume_max": int(be.volume_max),
             "max_cards": min(mt.MAX_IMAGES, be.max_cards),
             "about": self.about_tip(),
@@ -1229,6 +1230,7 @@ class WebMultibootPanel(_Base):
                 mt._int(self._timeout_var, 15)),
             "footer_example": mt.footer_example(
                 self._footer_var.get(), self._footer_text_var.get()),
+            "editions_tip": mt.EDITIONS_TIP,
             "own_note": own,
             "sounds_note": (
                 "auto = a click and a stinger pulled from the primary "

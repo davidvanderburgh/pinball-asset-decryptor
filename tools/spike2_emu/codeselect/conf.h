@@ -80,6 +80,15 @@
  *   machine_volume=<dir>|<sha1 hex>|<0-63>  with volume=machine: the store
  *                            (/data/nv/<title>/NVM), the record's key, and the
  *                            title's factory level for a machine with no store yet
+ *   edition=<dir>|<sha1 hex>|<n>  EDITIONS, NO MENU (PAD-495): every image is an
+ *                            edition of one game, in order, and the game's own
+ *                            EDITION setting (values 1..n, set in its operator
+ *                            menu) says which boots - read off the same
+ *                            /data/nv/<title>/NVM mirror as machine_volume=,
+ *                            before anything is drawn.  Edition k boots image
+ *                            k-1; no setting read, or one outside 1..n or past
+ *                            the image lines, boots image 0.  The menu never
+ *                            shows on such a card.
  *   mixer_volume=<0-63>      optional: apply the game's codec curve to the
  *                            ALSA 'PCM' selem (hardware only; untouched when absent)
  *   theme=<name>             the menu's colours: a built-in theme (themes.json;
@@ -294,6 +303,10 @@ struct conf {
     unsigned char mv_key[20];      /* ...the record's SHA1 key... */
     int mv_key_set;                /* ...(1 when a valid one was given)... */
     int mv_default;                /* ...and the title's factory level (-1 when absent) */
+    char ed_store[CONF_STR];       /* edition= the store dir ("" when absent)... */
+    unsigned char ed_key[20];      /* ...EDITION's SHA1 key... */
+    int ed_key_set;                /* ...(1 when a valid one was given)... */
+    int ed_values;                 /* ...and how many editions (0 = not an editions card) */
     int mixer_volume;  /* mixer_volume= 0..63 (-1 when absent = leave the mixer alone) */
     int volume_max;    /* volume_max= 0..100 (-1 when absent = the build's ceiling) */
     char theme[CONF_STR];          /* theme= ("" when absent = the default) */

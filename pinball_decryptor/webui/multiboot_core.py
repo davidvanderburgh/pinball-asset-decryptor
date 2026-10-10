@@ -923,6 +923,12 @@ class MultibootForm:
     #: menu").  On, the card ends the menu whenever an image's game can be
     #: adjusted (built with a color profile); off, the menu never shows it.
     settings_tile: bool = True
+    #: EDITIONS, NO MENU (PAD-495; a tester: "user could switch between standard
+    #: color and 70th Anniversary settings" in the service menu).  On, every
+    #: image is an edition of one game, in order, and the game's own EDITION
+    #: setting picks the one that boots at the next power-up: the card shows no
+    #: menu.  Each edition's Write put EDITION in its operator menu.
+    editions: bool = False
     #: THE FIRST WORD OF THE COUNTDOWN LINE (same report: "have the option to
     #: change this text in case you want something like 'Launching' or
     #: 'Booting'").  '' is a real answer - the countdown is then "<title> in
@@ -1115,6 +1121,28 @@ def settings_args(form):
     if not backend_for(form).settings_tile:
         return []
     return ["--settings", "on" if form.settings_tile else "off"]
+
+
+#: PAD-495: the tick's hover text in Menu settings
+EDITIONS_TIP = (
+    "For a card whose images are all editions of one game (a Standard and a "
+    "70th Anniversary look, say): the card shows no menu, and the edition "
+    "the game's own EDITION setting names boots at the next power-up "
+    "(Adjustments > Machine Settings > Attract Mode on the machine). Each edition's project "
+    "names the editions on its Write tab, the same names in the same order, "
+    "and its Write puts EDITION in the operator menu. Add the images here in "
+    "that order, edition 1 first. The build refuses an image without the "
+    "setting, another game or version, other names, or settings captioned "
+    "differently (the editions share one settings store).")
+
+
+def editions_args(form):
+    """``--editions`` / ``--no-editions`` (PAD-495) - always passed on a
+    platform that has it, on heading_args' rule: a tick taken off here has to
+    give the card its menu back."""
+    if not backend_for(form).editions:
+        return []
+    return ["--editions" if form.editions else "--no-editions"]
 
 
 def menu_text_args(form):
@@ -2605,6 +2633,7 @@ def build_args(form):
         args += ["--subtitles", ";".join(subtitles)]
     args += own_scores_args(form)
     args += settings_args(form)
+    args += editions_args(form)
     # ALWAYS: the validator bypass on every image (David, after the TMNT
     # proved it: "we don't need to make it optional. it should always be on").
     # Since item 98 it also ignores the saved grades at boot, so a GAME
@@ -2702,6 +2731,7 @@ def inject_args(form, card):
              + menu_text_args(form) + theme_args(form))
     args += own_scores_args(form)
     args += settings_args(form)
+    args += editions_args(form)
     if form.machine_volume:
         args.append("--machine-volume")
     if form.media_dir:
@@ -2731,6 +2761,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
              + menu_text_args(form) + theme_args(form))
     args += own_scores_args(form)
     args += settings_args(form)
+    args += editions_args(form)
     if form.machine_volume:
         args.append("--machine-volume")
     args.append("--bypass-validation")      # always (see build_args)
@@ -4400,6 +4431,8 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
         show_counter=(info.get("counter") != COUNTER_OFF),
         # ...and the SETTINGS card: null = the card never said, which is "on"
         settings_tile=(info.get("settings") != "off"),
+        # PAD-495: a card of editions boots by the game's EDITION setting
+        editions=bool(info.get("edition")),
         countdown_word=(DEF_COUNTDOWN_WORD if info.get("countdown_word") is None
                         else str(info["countdown_word"])),
         # THE INSTRUCTIONS LINE'S THREE ANSWERS, read back as the two fields
@@ -4426,7 +4459,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
 MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "move sound", "confirm sound", "volume", "countdown",
                     "heading", "text size", "card counter", "settings card",
-                    "countdown word", "instructions", "default", "bypass", "theme",
+                    "editions", "countdown word", "instructions", "default", "bypass", "theme",
                     "high scores")
 
 #: Of those, the ones the media has to be rendered again for.
@@ -4487,6 +4520,8 @@ def _menu_fields(before, after):
         changed.add("card counter")
     if bool(before.settings_tile) != bool(after.settings_tile):
         changed.add("settings card")
+    if bool(before.editions) != bool(after.editions):
+        changed.add("editions")
     if ((before.countdown_word or "").strip()
             != (after.countdown_word or "").strip()):
         changed.add("countdown word")
@@ -5110,6 +5145,8 @@ def menu_from_state(menu):
             "show_counter": bool(menu.get("show_counter", True)),
             # ...and a state from before the SETTINGS card offers it (PAD-307)
             "settings_tile": bool(menu.get("settings_tile", True)),
+            # ...and one from before editions describes a card with its menu
+            "editions": bool(menu.get("editions", False)),
             "countdown_word": str(menu.get("countdown_word",
                                            DEF_COUNTDOWN_WORD))[:COUNTDOWN_WORD_MAX],
             # ...and a state from before the instructions field describes a
@@ -6010,6 +6047,10 @@ def menu_summary(form):
     head = (form.heading or "").strip()
     word = (form.countdown_word or "").strip()
     foot = (form.footer or "").strip()
+    # PAD-495: a card of editions has no menu to describe, only how it picks
+    if form.editions and backend_for(form).editions:
+        return ("no menu: the game's EDITION setting picks the edition at power-up "
+                "(edition 1 = the first image)")
     # THE TEXT SIZE ONLY WHEN IT IS NOT THE USUAL ONE: this line is already
     # eight clauses long, and "every card the same" is what every menu does
     # unless somebody turned it off (PAD-183).
@@ -6792,6 +6833,8 @@ class MultibootPanel:
         self._counter_var = tk.BooleanVar(value=True)
         #: The SETTINGS card (PAD-307): on, as the selector has it.
         self._settings_var = tk.BooleanVar(value=True)
+        #: PAD-495: editions, no menu - off, as every card before it was
+        self._editions_var = tk.BooleanVar(value=False)
         self._countdown_word_var = tk.StringVar(value=DEF_COUNTDOWN_WORD)
         #: ...and the instructions line as its two fields: drawn at all, and
         #: the words (empty = the selector's own, which is what every card
@@ -6863,7 +6906,7 @@ class MultibootPanel:
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
                     self._heading_var, self._same_text_var, self._counter_var,
-                    self._settings_var,
+                    self._settings_var, self._editions_var,
                     self._countdown_word_var, self._footer_var,
                     self._footer_text_var, self._default_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
@@ -7059,7 +7102,8 @@ class MultibootPanel:
                     self._ed_roll_norepeat) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._heading_var, self._same_text_var,
-                    self._counter_var, self._settings_var, self._countdown_word_var,
+                    self._counter_var, self._settings_var, self._editions_var,
+                    self._countdown_word_var,
                     self._footer_var, self._footer_text_var,
                     self._default_var, self._out_var, self._selector_var,
                     self._theme_var) + tuple(self._color_vars.values()):
@@ -8955,6 +8999,7 @@ class MultibootPanel:
             self._same_text_var.set(True)
             self._counter_var.set(True)
             self._settings_var.set(True)
+            self._editions_var.set(False)
             self._countdown_word_var.set(DEF_COUNTDOWN_WORD)
             self._footer_var.set(True)
             self._footer_text_var.set("")
@@ -9401,6 +9446,7 @@ class MultibootPanel:
                              self._same_text_var.get(),
                              self._counter_var.get(),
                              self._settings_var.get(),
+                             self._editions_var.get(),
                              self._countdown_word_var.get(),
                              self._footer_var.get(),
                              self._footer_text_var.get(),
@@ -9420,8 +9466,8 @@ class MultibootPanel:
         self._forget_menu_dialog()
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, heading, same_text,
-             counter, settings, word, foot_on, foot_text, default, selector, theme,
-             colors) = self._menu_backup
+             counter, settings, editions, word, foot_on, foot_text, default, selector,
+             theme, colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
@@ -9432,6 +9478,7 @@ class MultibootPanel:
             self._same_text_var.set(same_text)
             self._counter_var.set(counter)
             self._settings_var.set(settings)
+            self._editions_var.set(editions)
             self._countdown_word_var.set(word)
             self._footer_var.set(foot_on)
             self._footer_text_var.set(foot_text)
@@ -9605,6 +9652,7 @@ class MultibootPanel:
             same_text_size=bool(self._same_text_var.get()),
             show_counter=bool(self._counter_var.get()),
             settings_tile=bool(self._settings_var.get()),
+            editions=bool(self._editions_var.get()),
             show_footer=bool(self._footer_var.get()),
             # NOT `or` anything: an empty box with the tick on is the
             # selector's own instructions line, which is a real answer
@@ -9737,6 +9785,7 @@ class MultibootPanel:
                      "same_text_size": bool(self._same_text_var.get()),
                      "show_counter": bool(self._counter_var.get()),
                      "settings_tile": bool(self._settings_var.get()),
+                     "editions": bool(self._editions_var.get()),
                      "show_footer": bool(self._footer_var.get()),
                      "footer": self._footer_text_var.get().strip(),
                      "countdown_word":
@@ -9865,6 +9914,7 @@ class MultibootPanel:
             # countdown word existed: both come back as the selector's own
             self._counter_var.set(bool(menu.get("show_counter", True)))
             self._settings_var.set(bool(menu.get("settings_tile", True)))
+            self._editions_var.set(bool(menu.get("editions", False)))
             self._countdown_word_var.set(menu.get("countdown_word",
                                                   DEF_COUNTDOWN_WORD))
             self._footer_var.set(bool(menu.get("show_footer", True)))
@@ -10515,6 +10565,7 @@ class MultibootPanel:
             self._same_text_var.set(bool(form.same_text_size))
             self._counter_var.set(bool(form.show_counter))
             self._settings_var.set(bool(form.settings_tile))
+            self._editions_var.set(bool(form.editions))
             self._countdown_word_var.set(form.countdown_word)
             self._footer_var.set(bool(form.show_footer))
             self._footer_text_var.set(form.footer)
@@ -10669,6 +10720,7 @@ class MultibootPanel:
             self._same_text_var.set(bool(menu.get("same_text_size", True)))
             self._counter_var.set(bool(menu.get("show_counter", True)))
             self._settings_var.set(bool(menu.get("settings_tile", True)))
+            self._editions_var.set(bool(menu.get("editions", False)))
             self._countdown_word_var.set(menu["countdown_word"])
             self._footer_var.set(bool(menu.get("show_footer", True)))
             self._footer_text_var.set(menu.get("footer", ""))

@@ -277,6 +277,9 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     c->mv_store[0] = 0;
     c->mv_key_set = 0;
     c->mv_default = -1;
+    c->ed_store[0] = 0;
+    c->ed_key_set = 0;
+    c->ed_values = 0;
     c->mixer_volume = -1;
     c->volume_max = -1;
     /* ONE TEXT SIZE FOR THE WHOLE MENU unless the file asks for the other
@@ -450,6 +453,31 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 if (q) *q++ = 0;
                 c->mv_key_set = nvm_parse_key(p, c->mv_key) == 0;
                 if (q && *q) c->mv_default = clamp_int(q, 0, 63);
+            }
+        } else if (!strcmp(key, "edition")) {
+            /* PAD-495: <store>|<sha1 hex>|<n>.  All three or it is not an
+             * editions card: a menu is a safer thing to come up than a
+             * machine that boots image 0 for ever without saying why */
+            char tmp[CONF_STR * 3], *p = tmp, *q, *r;
+            int n;
+            snprintf(tmp, sizeof tmp, "%s", val);
+            q = strchr(p, '|');
+            r = q ? strchr(q + 1, '|') : NULL;
+            if (!q || !r) {
+                conf_warn(c, "%s:%d: edition=%s is not <store>|<key>|<n>: the menu is shown",
+                          path, lineno, val);
+            } else {
+                *q++ = 0;
+                *r++ = 0;
+                n = (*r && strspn(r, "0123456789") == strlen(r)) ? atoi(r) : 0;
+                if (!*p || nvm_parse_key(q, c->ed_key) != 0 || n < 2 || n > CONF_MAX_IMAGES) {
+                    conf_warn(c, "%s:%d: edition=%s names no store, no key or no 2..%d editions: "
+                              "the menu is shown", path, lineno, val, CONF_MAX_IMAGES);
+                } else {
+                    copy_field(c->ed_store, p);
+                    c->ed_key_set = 1;
+                    c->ed_values = n;
+                }
             }
         } else if (!strcmp(key, "mixer_volume")) {
             if (*val) c->mixer_volume = clamp_int(val, 0, 63);

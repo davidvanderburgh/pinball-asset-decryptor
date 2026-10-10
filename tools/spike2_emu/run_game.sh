@@ -294,10 +294,12 @@ if [ -n "${PAD_CARD:-}" ]; then
             # in the menu. They name IMAGE INDEXES, so they ride on the group lines' gate: only
             # when the card's image lines and what resolved here are the same count, or a line
             # would name another build.
+            # ★ PAD-495: edition= (no menu; the game's EDITION setting picks an
+            # image by its index) rides on the same gate, for the same reason.
             if [ "$(printf '%s\n' "$SEL_CARDCONF" | grep -cE '^[[:space:]]*image[[:space:]]*=')" = "$SEL_N" ]; then
-                printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*color_profile[[:space:]]*=' || true
-            elif printf '%s\n' "$SEL_CARDCONF" | grep -qE '^[[:space:]]*color_profile[[:space:]]*='; then
-                echo "[select] the card's color_profile line(s) are DROPPED: its image indexes do not line up with what resolved here" >&2
+                printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(color_profile|edition)[[:space:]]*=' || true
+            elif printf '%s\n' "$SEL_CARDCONF" | grep -qE '^[[:space:]]*(color_profile|edition)[[:space:]]*='; then
+                echo "[select] the card's color_profile / edition line(s) are DROPPED: its image indexes do not line up with what resolved here" >&2
             fi
         } > "$R/dump/codeselect.conf"
         # ★ PAD-226: THE CARD'S OWN INDEX FOR EACH DEVICE, and the store name its

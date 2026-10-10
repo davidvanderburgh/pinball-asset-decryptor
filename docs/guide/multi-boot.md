@@ -93,6 +93,23 @@ boots the game the menu opened on, and two idle minutes leave
 Settings without saving. Builds now write the color profile in one
 fixed shape so it can be adjusted; a card built with v1.60.x has no
 slot to adjust and shows no SETTINGS card until it is rebuilt.
+**Editions picked in the game's own menu** (Godzilla Pro and
+Premium/LE 1.16): for a card whose images are all editions of one game,
+say a Standard look and a 70th Anniversary look. Each edition is its
+own project from the same card; on the Write tab, **Name the
+editions...** gives every one the same names in the same order, and its
+Write puts **EDITION** in the operator menu (Adjustments > Machine
+Settings > Attract Mode), its help line naming the editions. Add the
+images here edition 1 first and tick **No menu: boot the edition the
+game's EDITION setting names** in Menu settings: the card shows no
+menu, and the edition the setting names boots at the next power-up,
+read off the machine's own settings store the way the menu reads its
+volume. A machine that never set it boots edition 1. Every edition
+shares the game's settings and scores, so the build refuses an image
+without EDITION, another game or version, other edition names, or
+settings captioned differently, and such a card has no random card and
+no image with its own high scores. An edition built as a base card plus
+an edits folder costs only the files it changes.
 **Every sound in the tab can be heard without leaving it.** A ▶ Play
 button sits beside the Browse… for the move click, the confirm
 stinger and an image's music, in Menu settings and in Edit image

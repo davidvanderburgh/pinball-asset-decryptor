@@ -218,7 +218,23 @@ function Destination({ s }) {
         label=${s.text_grow_label} title=${s.text_grow_tip} disabled=${s.running} />` : null}
     ${s.card_size_cap && !direct ? html`<${CardSize} s=${s} />` : null}
     ${s.card_fit_cap && !direct ? html`<${CardFit} s=${s} />` : null}
+    ${s.editions_cap && !direct ? html`<${Editions} s=${s} />` : null}
   <//>`;
+}
+
+// PAD-495: the editions this card is one of (EDITION in the operator menu,
+// the setting a Multi-boot card of the editions boots by).  The names, a
+// button to change them, and a note: where the setting lands, or in red why
+// this game cannot have it.
+function Editions({ s }) {
+  return html`<div class="stack wr-build">
+    <span class="lbl" ...${tip(s.editions_tip)}>${s.editions_label}</span>
+    <div class="row">
+      <span class="small grow wr-editions">${s.editions_text}</span>
+      <${Button} onClick=${() => call("write.edit_editions")} disabled=${s.running}>Name the editions...<//>
+    </div>
+    ${s.editions_note ? html`<span class=${cx("small", s.editions_note_kind === "err" ? "err-ink" : "muted")}>${s.editions_note}</span>` : null}
+  </div>`;
 }
 
 // Stern Spike 2: the SD card class the build is for (the games partition

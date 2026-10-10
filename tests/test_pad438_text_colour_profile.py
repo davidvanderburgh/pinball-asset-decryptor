@@ -375,15 +375,16 @@ def test_a_saved_file_carries_the_lines_switches_and_profiles(tmp_path):
     assert doc["lines"] == {CARD: {
         str(TITLE): {"color": True, "profile": cp._profile_dict(DARK)},
         str(X.FIRST_ADDED_ID): {"color": True, "profile": cp._profile_dict(BW)}}}
-    # loaded into another project: the game line's switch waits for the unlock box there,
-    # the added line's rides in its edit, and each keeps the profile the file gave it
+    # loaded into another project: the game line's switch ticks the unlock box there (PAD-502:
+    # before, it waited for it and nothing showed), the added line's rides in its edit, and
+    # each keeps the profile the file gave it
     b = _project(tmp_path / "b", prof=None, unlocked=False, slots=())
     extras = scene_share.read_extras(out)
     assert scene_share.has_extras(extras)
     X.import_edits(b, out, [CARD])
     assert scene_share.import_extras(b, out, extras, cards_here=[CARD]) == ([], [])
     assert cp.asset_settings(b)["text"] == {cp.text_rel(CARD, TITLE): True}
-    assert cp.text_lines_on(b) == set()
+    assert cp.text_lines_on(b) == {cp.text_rel(CARD, TITLE)}
     assert cp.own_profile(b, "text", cp.text_rel(CARD, TITLE)) == DARK
     assert cp.own_profile(b, "text", mine) == BW
     assert X.ops_for(b, CARD)[0]["color"] is True

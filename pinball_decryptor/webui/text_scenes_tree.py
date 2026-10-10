@@ -2740,15 +2740,19 @@ class TreeEditMixin:
             defaultextension=".zip")
         if not path:
             return None
+        counts = {}
         try:
-            n, pics, texts = scene_share.export_all(self.assets_dir, path, cards, trees)
+            n, pics, texts = scene_share.export_all(self.assets_dir, path, cards, trees,
+                                                    counts=counts)
         except (scene_edit.SceneEditError, OSError) as e:
             compat.messagebox.showerror("Save scenes", str(e))
             return None
+        colour = _colour_words(counts)
         self._set_caption("Saved the edits of %d scene%s, %d replaced picture%s with their "
-                          "color profiles and %d text edit%s to %s"
+                          "color profiles%s and %d text edit%s to %s"
                           % (n, "" if n == 1 else "s", pics, "" if pics == 1 else "s",
-                             texts, "" if texts == 1 else "s", os.path.basename(path)))
+                             ", " + colour if colour else "", texts,
+                             "" if texts == 1 else "s", os.path.basename(path)))
         return path
 
     def _text_rows_here(self):
@@ -2783,6 +2787,7 @@ class TreeEditMixin:
         pics, gone, more = [], [], False
         tfits, tmissing, tlong, thave = [], [], 0, []
         kept, saved_to, reset_n, shown = 0, None, 0, 0
+        colours = {}
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -2817,7 +2822,7 @@ class TreeEditMixin:
             clash = scene_share.clashes(self.assets_dir, extras)
             items = scene_share.conflict_items(self.assets_dir, over, extras, clash, tclash,
                                                self._scene_label)
-            skip_scenes, overlay = set(), True
+            skip_scenes, overlay, files_profile = set(), True, True
             if items:
                 n = len(items)
                 answer = self.window.ask_conflicts(
@@ -2862,12 +2867,18 @@ class TreeEditMixin:
                                                 if r not in drop},
                               added={r: a for r, a in extras["added"].items() if r not in adds})
                 overlay = not clash["overlay"] or "overlay" in take
+                # PAD-502: the individual files profile, and the game pictures whose other
+                # look here (one row for them all) stays mine unless ticked
+                files_profile = not clash["files_profile"] or "files_profile" in take
+                if "colored" not in take:
+                    extras = dict(extras, colored={r: p for r, p in extras["colored"].items()
+                                                   if r not in set(clash["colored"])})
                 gone_text = {id(r) for i, (r, _new) in enumerate(tclash)
                              if "text:%d" % i not in take}
                 tfits = [(r, new) for r, new in tfits if id(r) not in gone_text]
                 more = scene_share.has_extras(extras) and (
-                    bool(extras["pictures"] or extras["added"] or extras.get("lines"))
-                    or overlay)
+                    bool(extras["pictures"] or extras["added"] or extras.get("lines")
+                         or extras["colored"]) or overlay)
             renamed = {}
             if got:
                 got, missing = scene_edit.import_edits(self.assets_dir, path,
@@ -2885,7 +2896,9 @@ class TreeEditMixin:
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
                                                        renamed=renamed, overlay=overlay,
-                                                       cards_here=self._load_trees().keys())
+                                                       cards_here=self._load_trees().keys(),
+                                                       files_profile=files_profile,
+                                                       counts=colours)
             if tfits:
                 if text_tab is not None:
                     text_tab._set_replacements(
@@ -2908,6 +2921,8 @@ class TreeEditMixin:
             words = words[:-1] + " and %d replaced picture%s with %s color profile%s." % (
                 len(pics), "" if len(pics) == 1 else "s",
                 "its" if len(pics) == 1 else "their", "" if len(pics) == 1 else "s")
+        if _colour_words(colours):
+            words = words[:-1] + " and %s." % _colour_words(colours)
         if tfits:
             words = words[:-1] + " and %d text edit%s." % (len(tfits),
                                                            "" if len(tfits) == 1 else "s")
@@ -2944,13 +2959,18 @@ class TreeEditMixin:
                       % (len(gone), "" if len(gone) == 1 else "s",
                          "is" if len(gone) == 1 else "are",
                          "was" if len(gone) == 1 else "were"))
+        lost = colours.get("colored_missing") or 0
+        if lost:
+            words += (" The color profile%s of %d game picture%s not in this project %s left "
+                      "out." % ("" if lost == 1 else "s", lost, "" if lost == 1 else "s",
+                                "was" if lost == 1 else "were"))
         if missing:
             words += (" %d scene%s in the file %s not on this card and %s left out."
                       % (len(missing), "" if len(missing) == 1 else "s",
                          "is" if len(missing) == 1 else "are",
                          "was" if len(missing) == 1 else "were"))
         self._set_caption(words)
-        if missing or gone or tmissing or tlong:
+        if missing or gone or tmissing or tlong or lost:
             compat.messagebox.showinfo("Load scene edits", words)
         return sorted(got)
 
@@ -3100,6 +3120,19 @@ def _built_state(built, ops):
     if built is None:
         return "none"
     return "same" if built == ops else "changed"
+
+
+def _colour_words(counts):
+    """``the color profiles of 3 game pictures and 2 lines of text`` (PAD-502), or ``""``
+    when *counts* (``{"colored", "lines"}``) has neither."""
+    parts = []
+    n = counts.get("colored") or 0
+    if n:
+        parts.append("%d game picture%s" % (n, "" if n == 1 else "s"))
+    n = counts.get("lines") or 0
+    if n:
+        parts.append("%d line%s of text" % (n, "" if n == 1 else "s"))
+    return "the color profiles of " + " and ".join(parts) if parts else ""
 
 
 def _file_size(path):

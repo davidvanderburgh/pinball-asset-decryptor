@@ -8,6 +8,9 @@ also carries, for the pictures those scenes draw:
   color switch and the color profile baked into it (its own, else the project's individual
   files profile, so it looks the same in a project with another one);
 * the color switch and profile of each picture added in Scenes;
+* each of the game's own pictures switched on behind the unlock box (PAD-502, DragonRR: a
+  project colored without replacing a picture saved none of it): its own profile, or none when
+  it follows the individual files profile, which the file then carries too;
 * the project's whole screen overlay;
 * the Text tab's edits of those scenes' words (PAD-387).
 
@@ -20,7 +23,9 @@ The machine screen is not carried: it describes the screen of the PC or machine 
 Loading never deletes or overwrites a file: the pictures are copied into
 ``<project>/Shared pictures/<file name>/`` (a name already there with other bytes gets a new
 one), and each replaced picture's pick points at its copy.  What it changes in the project
-(a pick made here, the overlay) is listed by :func:`clashes` so the page can ask first.
+(a pick made here, the overlay, a game picture's other profile here, another individual files
+profile) is listed by :func:`clashes` so the page can ask first.  A file bringing the game's own
+pictures or lines switched on ticks the unlock box, without which they would not count.
 
 The extras sit beside ``scenes`` in the same manifest, so a PAD from before reads the edits
 of such a file as it always did and leaves the rest.
@@ -155,6 +160,8 @@ def gather(assets_dir, cards, trees):
                          "color": on, "profile": _profile_raw(data, rel) if on else None}
         if drawn.get(rel[len("images/"):]):
             pictures[rel]["drawn"] = drawn[rel[len("images/"):]]
+    colored, files_profile = _game_pictures_on(data, settings, built, drawn,
+                                               None if cards is None else rels)
     added = {}
     for ops in edits.values():
         for op in ops:
@@ -185,20 +192,52 @@ def gather(assets_dir, cards, trees):
             lines[c] = per
     overlay = data.get(cp.KEY)
     extras = {"pictures": pictures, "added": added, "lines": lines,
+              "colored": colored, "files_profile": files_profile,
               "overlay": dict(overlay) if isinstance(overlay, dict) else None,
               "text": text_to_save(assets_dir, cards, trees)}
     return edits, extras
 
 
-def export_all(assets_dir, zip_path, cards, trees):
+def _game_pictures_on(data, settings, built, drawn, scope=None):
+    """``({rel: {"profile", "drawn"?}}, files profile or None)``: the game's own pictures (no
+    pick, not built) switched on while the unlock box is ticked, the only time their switch
+    counts, among *scope* (None: every one).  *profile* is the picture's own, or None when it
+    follows the project's individual files profile, which is then returned as stored (the
+    Recommended one when none is)."""
+    from ...core import colour_profile as cp
+    if not data.get(cp.STOCK_IMAGES_KEY):
+        return {}, None
+    picks = data.get("image") or {}
+    owns = cp._own_dicts(data, "images")
+    out = {}
+    for rel, on in sorted(settings["images"].items()):
+        if (not on or picks.get(rel) or rel in built or not rel.startswith("images/")
+                or not scene_edit._safe_rel(rel) or (scope is not None and rel not in scope)):
+            continue
+        own = owns.get(rel)
+        out[rel] = {"profile": dict(own) if isinstance(own, dict) else None}
+        if drawn.get(rel[len("images/"):]):
+            out[rel]["drawn"] = drawn[rel[len("images/"):]]
+    if not any(p["profile"] is None for p in out.values()):
+        return out, None
+    shared = data.get(cp.ASSET_KEY)
+    return out, dict(shared) if isinstance(shared, dict) else {"recommended": True}
+
+
+def export_all(assets_dir, zip_path, cards, trees, counts=None):
     """Save *cards* (None: every scene, and the whole project's look) with their pictures,
     color profiles and text to *zip_path*.  Returns ``(scenes with edits, pictures, text
-    edits)`` written; raises :class:`scene_edit.SceneEditError` when there is nothing to
-    save."""
+    edits)`` written (*counts*, a dict, is filled with the ``"colored"`` game pictures and the
+    ``"lines"`` of text whose color profiles it holds); raises
+    :class:`scene_edit.SceneEditError` when there is nothing to save."""
     edits, extras = gather(assets_dir, cards, trees)
-    if not edits and not extras["pictures"] and not extras["text"]:
+    if counts is not None:
+        counts.update(colored=len(extras["colored"]),
+                      lines=sum(len(per) for per in extras["lines"].values()))
+    if not (edits or extras["pictures"] or extras["text"] or extras["colored"]
+            or extras["lines"]):
         raise scene_edit.SceneEditError(
-            "there are no scene edits, replaced pictures or text edits to save")
+            "there are no scene edits, replaced pictures, color profiles or text edits to save")
     added_files = sorted({op["image"] for ops in edits.values() for op in ops
                           if op["op"] == "add_picture" and scene_edit._safe_rel(op.get("image"))})
     pictures = {}
@@ -220,6 +259,10 @@ def export_all(assets_dir, zip_path, cards, trees):
             doc["text"] = extras["text"]
         if extras.get("lines"):
             doc["lines"] = extras["lines"]       # PAD-438
+        if extras["colored"]:
+            doc["colored"] = extras["colored"]       # PAD-502
+            if extras["files_profile"] is not None:
+                doc["files_profile"] = extras["files_profile"]
         states = scene_edit.states_to_save(assets_dir, edits, trees)
         if states:
             doc["states"] = states                   # PAD-403
@@ -273,13 +316,36 @@ def read_extras(zip_path):
                 for n, a in per.items() if isinstance(a, dict) and str(n).isdigit()}
         if good:
             lines[card] = good
+    # PAD-502: the game's own pictures switched on, ``{rel: {"profile", "drawn"?}}``, and the
+    # individual files profile the ones with no profile of their own follow
+    colored = {}
+    for rel, p in (doc.get("colored") or {}).items() if isinstance(
+            doc.get("colored"), dict) else ():
+        if (isinstance(rel, str) and rel.startswith("images/") and scene_edit._safe_rel(rel)
+                and isinstance(p, dict)):
+            colored[rel] = {"profile": dict(p["profile"]) if isinstance(p.get("profile"), dict)
+                            else None}
+            if isinstance(p.get("drawn"), list):
+                colored[rel]["drawn"] = p["drawn"]
+    files_profile = (dict(doc["files_profile"]) if isinstance(doc.get("files_profile"), dict)
+                     else None)
     return {"pictures": pictures, "added": added, "overlay": overlay, "text": text,
-            "lines": lines}
+            "lines": lines, "colored": colored, "files_profile": files_profile}
 
 
 def has_extras(extras):
     return bool(extras["pictures"] or extras["added"] or extras["overlay"]
-                or extras.get("lines"))
+                or extras.get("lines") or extras.get("colored"))
+
+
+def _followers(extras):
+    """The file's game pictures that follow its individual files profile (PAD-502)."""
+    return [r for r, p in (extras.get("colored") or {}).items() if p.get("profile") is None]
+
+
+def _files_profile(extras):
+    """The individual files profile the file's game pictures with none of their own follow."""
+    return dict(extras.get("files_profile") or {"recommended": True})
 
 
 def _here(assets_dir, rel):
@@ -312,11 +378,17 @@ def localise(assets_dir, extras, trees):
     that the file names itself, goes to neither by lookup.  A picture with nothing found (a
     file saved before PAD-385, a scene this card does not have) keeps the file's name and is
     left out at load, as before.  A picture no scene draws (a boot screen, a backglass logo) is
-    found in the other game folder here (le/pro folders matched, PAD-401)."""
-    pics = extras.get("pictures") or {}
-    if not pics:
+    found in the other game folder here (le/pro folders matched, PAD-401).  The game's own
+    pictures with a color profile (``colored``, PAD-502) are named the same way."""
+    if not (extras.get("pictures") or extras.get("colored")):
         return extras
     find = scene_edit.card_finder((trees or {}).keys())
+    return dict(extras, pictures=_localised(assets_dir, extras.get("pictures") or {}, find, trees),
+                colored=_localised(assets_dir, extras.get("colored") or {}, find, trees))
+
+
+def _localised(assets_dir, pics, find, trees):
+    """:func:`localise` of one ``{rel: {"drawn"?, ...}}`` of the file."""
     found = {}
     for rel, p in pics.items():
         if _here(assets_dir, rel):
@@ -345,12 +417,15 @@ def localise(assets_dir, extras, trees):
         mine = [h for h in sorted(found.get(rel, ())) if claims[h] == [rel] and h not in pics]
         for here in mine or [rel]:
             out[here] = p
-    return dict(extras, pictures=out)
+    return out
 
 
 def clashes(assets_dir, extras):
     """What loading *extras* would change of the user's own here: ``{"pictures": [rel, ...]
-    with another replacement here], "overlay": True when the overlay here differs}``."""
+    with another replacement here], "overlay": True when the overlay here differs,
+    "colored": [game picture switched on here with another profile], "files_profile": True
+    when the file's game pictures follow another individual files profile than this project's,
+    one the user set or that something here is attached to}`` (PAD-502)."""
     from ...core import colour_profile as cp, staged_changes
     data = staged_changes.load(assets_dir) or {}
     picks = data.get("image") or {}
@@ -364,7 +439,48 @@ def clashes(assets_dir, extras):
             pics.append(rel)
     mine = data.get(cp.KEY)
     overlay = bool(extras["overlay"] is not None and extras["overlay"] != mine)
-    return {"pictures": pics, "overlay": overlay}
+    # a game picture switched on here with another look; one following the individual files
+    # profile both here and in the file goes with that profile's own question
+    colored = []
+    owns = cp._own_dicts(data, "images")
+    for rel, p in sorted((extras.get("colored") or {}).items()):
+        if (_game_on_here(data, picks, built, rel) and _here(assets_dir, rel)
+                and (p.get("profile") is not None or isinstance(owns.get(rel), dict))
+                and _profile_raw(data, rel) != (p.get("profile") or _files_profile(extras))):
+            colored.append(rel)
+    shared = data.get(cp.ASSET_KEY)
+    files = bool(_followers(extras) and (shared if isinstance(shared, dict) else {
+        "recommended": True}) != _files_profile(extras) and (
+            isinstance(shared, dict) or _any_attached(data, built)))
+    return {"pictures": pics, "overlay": overlay, "colored": colored, "files_profile": files}
+
+
+def _game_on_here(data, picks, built, rel):
+    """Is *rel* a game picture of the project's sidecar *data* switched on (unlock box ticked,
+    no pick, not built)?"""
+    from ...core import colour_profile as cp
+    slots = data.get(cp.IMAGE_SLOTS_KEY)
+    return bool(data.get(cp.STOCK_IMAGES_KEY) and isinstance(slots, dict) and slots.get(rel)
+                and not picks.get(rel) and rel not in built)
+
+
+def _any_attached(data, built):
+    """Is anything of the project's sidecar *data* attached to a color profile: a box ticked,
+    or a switch on that counts (a game picture's, clip's or line's only with its unlock box)?"""
+    from ...core import colour_profile as cp
+    if data.get(cp.ALL_IMAGES_KEY) or data.get(cp.ALL_VIDEOS_KEY):
+        return True
+
+    def on(key):
+        m = data.get(key)
+        return [r for r, v in m.items() if v] if isinstance(m, dict) else []
+    picks, clips = data.get("image") or {}, data.get("video") or {}
+    if any(picks.get(r) or r in built or not str(r).startswith("images/")
+           or data.get(cp.STOCK_IMAGES_KEY) for r in on(cp.IMAGE_SLOTS_KEY)):
+        return True
+    if any(clips.get(r) or data.get(cp.STOCK_VIDEOS_KEY) for r in on(cp.VIDEO_SLOTS_KEY)):
+        return True
+    return bool(data.get(cp.STOCK_IMAGES_KEY) and on(cp.TEXT_SLOTS_KEY))
 
 
 def _ops_words(ops):
@@ -401,10 +517,38 @@ def conflict_items(assets_dir, over, extras, clash, tclash, label_of=None):
         items.append({"id": "overlay", "what": "Whole screen overlay",
                       "mine": ((mine or {}).get("name") or "your own") if mine else "none",
                       "theirs": (extras["overlay"] or {}).get("name") or "the file's own"})
+    # PAD-502: the game's own pictures' color profiles, one row for them all
+    if clash.get("files_profile"):
+        items.append({"id": "files_profile", "what": "Individual files color profile",
+                      "mine": _profile_name(data.get(cp.ASSET_KEY)),
+                      "theirs": _profile_name(_files_profile(extras))})
+    if clash.get("colored"):
+        n = len(clash["colored"])
+        theirs = extras["colored"]
+        items.append({"id": "colored", "what": "Color profile of %d game picture%s" % (
+            n, "" if n == 1 else "s"),
+            "mine": _names([_profile_raw(data, r) for r in clash["colored"]]),
+            "theirs": _names([theirs[r].get("profile") or _files_profile(extras)
+                              for r in clash["colored"]])})
     for i, (r, new) in enumerate(tclash):
         items.append({"id": "text:%d" % i, "what": 'Text "%s"' % r["original"],
                       "mine": '"%s"' % r["replacement"], "theirs": '"%s"' % new})
     return items
+
+
+def _profile_name(stored):
+    """A stored profile's name (none stored, or the Recommended one: "Recommended")."""
+    from ...core import colour_profile as cp
+    if not isinstance(stored, dict) or stored.get("recommended"):
+        return cp.RECOMMENDED
+    return stored.get("name") or "your own"
+
+
+def _names(stored):
+    """The names of the stored profiles *stored*, each once: ``A, B and 2 more``."""
+    names = sorted({_profile_name(s) for s in stored})
+    more = len(names) - 3
+    return ", ".join(names[:3]) + (" and %d more" % more if more > 0 else "")
 
 
 def backup(assets_dir, loading, trees):
@@ -429,14 +573,22 @@ def _digest(data):
     return hashlib.sha1(data).hexdigest()
 
 
-def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, cards_here=None):
+def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, cards_here=None,
+                  files_profile=True, counts=None):
     """Put *extras* (:func:`read_extras` of *zip_path*) into the project: each replaced
     picture copied into :data:`SHARED_DIR` and picked, with its Keep size tick, color switch
     and profile; each added picture's switch and profile (*renamed*: ``{its rel in the file:
     its rel here}`` from :func:`scene_edit.import_edits`); the overlay when *overlay*; each
     line of text's switch and profile (PAD-438), on the scenes here (*cards_here*, matched as
-    :func:`scene_edit.match_cards` matches them; None: by path alone).
-    A picture this project does not have is left out.  Nothing is deleted or overwritten.  Returns ``(pictures loaded, [picture of the file not here])``."""
+    :func:`scene_edit.match_cards` matches them; None: by path alone); each game picture's
+    switch and profile (PAD-502), those following the file's individual files profile
+    following it here when *files_profile* (it becomes this project's), else each given a copy
+    of it (a picture following this project's own here keeps it).  Game pictures or lines
+    switched on tick the unlock box, a game switch left from before it was ticked dropped.
+    A picture this project does not have, or has replaced, is left out.  Nothing is deleted or
+    overwritten.  Returns ``(pictures loaded, [picture of the file not here])``; *counts*, a
+    dict, is filled with the ``"colored"`` game pictures and ``"lines"`` loaded and the
+    game pictures not here (``"colored_missing"``)."""
     from ...core import colour_profile as cp, staged_changes
     renamed = renamed or {}
     stem = os.path.splitext(os.path.basename(zip_path))[0]
@@ -486,6 +638,34 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
             loaded.append(rel)
     for rel, a in extras["added"].items():
         _own(renamed.get(rel, rel), a)
+    # PAD-502: the game's own pictures switched on, each with the file's look
+    unlocked = bool(data.get(cp.STOCK_IMAGES_KEY))
+    built = cp.built_image_rels(assets_dir, data)
+    theirs = _files_profile(extras)
+    colored, colored_missing = set(), []
+    for rel, p in sorted((extras.get("colored") or {}).items()):
+        if picks.get(rel) or rel in built:
+            continue                        # replaced here: the file's color was for the game's
+        if not _here(assets_dir, rel):
+            colored_missing.append(rel)
+            continue
+        own = p.get("profile")
+        if (own is None and not files_profile and unlocked and slots_on.get(rel)
+                and not isinstance(owns.get(rel), dict)):
+            continue                        # it follows this project's own, which is kept
+        slots_on[rel] = True
+        if own is not None:
+            owns[rel] = dict(own)
+        elif files_profile:
+            owns.pop(rel, None)
+        else:
+            owns[rel] = dict(theirs)
+        colored.add(rel)
+    if files_profile and any(extras["colored"][r].get("profile") is None for r in colored):
+        if theirs.get("recommended"):
+            data.pop(cp.ASSET_KEY, None)
+        else:
+            data[cp.ASSET_KEY] = dict(theirs)
     # PAD-438: the lines of text: a game line's switch (it counts once the unlock box is
     # ticked here, as a game picture's does) and each line's own profile; an added line's
     # switch rides in its edit, so only its profile is put here
@@ -494,6 +674,7 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
     towns = dict(cp._own_dicts(data, "text"))
     find = (scene_edit.card_finder(cards_here) if cards_here is not None
             else (lambda card: card))
+    lines_on, lines_n = set(), 0
     for card, per in (extras.get("lines") or {}).items():
         here = find(card)
         if here is None:
@@ -502,8 +683,10 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
             rel = cp.text_rel(here, int(node))
             stock = int(node) < scene_edit.FIRST_ADDED_ID
             if a.get("color"):
+                lines_n += 1
                 if stock:
                     tslots[rel] = True
+                    lines_on.add(rel)
                 if isinstance(a.get("profile"), dict):
                     towns[rel] = dict(a["profile"])
                 else:
@@ -511,6 +694,18 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
             else:
                 tslots.pop(rel, None)
                 towns.pop(rel, None)
+    if (colored or lines_on) and not unlocked:
+        # PAD-502: without the unlock box ticked the game's own pictures and lines the file
+        # switched on would not count, and nothing of it would show.  Ticked here, it wakes no
+        # switch left from before (as ticking it on the Images tab does not)
+        for r in list(slots_on):
+            if r.startswith("images/") and not picks.get(r) and r not in built \
+                    and r not in colored:
+                del slots_on[r]
+        tslots = {r: v for r, v in tslots.items() if r in lines_on}
+        data[cp.STOCK_IMAGES_KEY] = True
+    if counts is not None:
+        counts.update(colored=len(colored), lines=lines_n, colored_missing=len(colored_missing))
     data["image"] = picks
     data["image_keep_size"] = sorted(r for r in keep if r in picks)
     for key, val in ((cp.IMAGE_SLOTS_KEY, slots_on), (cp.FILE_PROFILES_KEY["images"], owns),

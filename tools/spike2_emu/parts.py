@@ -491,6 +491,98 @@ def multiboot(path):
             % SELECTOR_CONF, 1)
 
 
+#: The on-disk magic a LUKS header starts with - the 6 bytes "LUKS" + 0xBA 0xBE,
+#: then a 2-byte big-endian version (1 or 2). This is the public LUKS format
+#: signature, read ONLY to recognise that a partition is an encrypted container
+#: this rig cannot mount - the same kind of magic-byte check that tells ext4
+#: from FAT. Nothing here reads a key or a keyslot.
+LUKS_MAGIC = b"LUKS\xba\xbe"
+#: The FAT boot partition of a Stern Spike 3 card is labelled SPIKE3 (a Spike 2
+#: card's is not). BS_VolLab sits at offset 43 of a FAT12/16 boot sector and 71
+#: of a FAT32 one; both are checked.
+SPIKE3_FAT_LABEL = b"SPIKE3"
+
+
+def _luks_version(path, start_lba):
+    """The LUKS version at partition `start_lba` (1 or 2), or 0 if it is not a
+    LUKS header. Reads only the 8-byte magic+version at the partition start."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(start_lba * SECTOR)
+            head = f.read(8)
+    except OSError:
+        return 0
+    if head[:6] != LUKS_MAGIC:
+        return 0
+    return struct.unpack_from(">H", head, 6)[0]
+
+
+def _fat_label(path, start_lba):
+    """The volume label in the FAT boot sector at `start_lba`, stripped, or ""."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(start_lba * SECTOR)
+            boot = f.read(512)
+    except OSError:
+        return b""
+    if len(boot) < 512:
+        return b""
+    # FAT32 carries a 0x29 extended boot signature at 66 with the label at 71;
+    # FAT12/16 carry it at 38 with the label at 43. Try whichever signature is
+    # present rather than guessing the FAT width from the BPB.
+    for sig_off, lab_off in ((66, 71), (38, 43)):
+        if boot[sig_off] == 0x29:
+            return boot[lab_off:lab_off + 11].rstrip(b" \x00")
+    return b""
+
+
+def spike3(path):
+    """Is this a Stern **Spike 3** card image? ``(is_spike3, why)``.
+
+    Spike 3 (Raspberry Pi CM4 generation: Star Wars 2025, Pokemon, Walking Dead
+    Remastered) encrypts every data partition as a LUKS2 / AES-XTS volume whose
+    key lives in the machine's CM4 OTP fuses, not on the card - so these images
+    cannot be mounted or extracted from the image alone, and fuse2fs refuses
+    the "games" partition as not-ext4. This recognises one up front, before a
+    60 GB copy, from two independent signals read off the original image:
+
+      * a data (type 0x83) partition, primary or logical, that begins with the
+        LUKS magic - the signal that actually matters, since it is what stops
+        the mount; and
+      * the FAT boot partition labelled SPIKE3, which a Spike 2 card's is not.
+
+    Either alone is enough. A Spike 2 card has plain-ext4 data partitions (no
+    LUKS magic) and no SPIKE3 label, so it is never mistaken for one.
+    """
+    try:
+        parts = table(path) + [(i, t, s, c)
+                               for i, t, s, c, _e in logical(path)]
+    except SystemExit:                        # no MBR: not a card we know
+        return (False, "")
+    except OSError as exc:
+        return (False, "cannot read %s: %s" % (path, exc))
+
+    luks = [idx for idx, ptype, start, _c in parts
+            if ptype in LINUX_TYPES and _luks_version(path, start) >= 1]
+    label = ""
+    for _idx, ptype, start, _c in parts:
+        if ptype in FAT_TYPES:
+            label = _fat_label(path, start)
+            break
+
+    if luks:
+        why = "partition%s %s %s LUKS-encrypted" % (
+            "s" if len(luks) > 1 else "",
+            ", ".join("p%d" % i for i in luks),
+            "are" if len(luks) > 1 else "is")
+        if label == SPIKE3_FAT_LABEL:
+            why += " and the boot partition is labelled SPIKE3"
+        return (True, why)
+    if label == SPIKE3_FAT_LABEL:
+        return (True, "the boot partition is labelled SPIKE3")
+    return (False, "")
+
+
 def _ordinal(n):
     if 10 <= n % 100 <= 20:
         return "%dth" % n
@@ -500,7 +592,7 @@ def _ordinal(n):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("image")
-    for flag in ("rootfs", "games", "fat", "list-games", "multiboot"):
+    for flag in ("rootfs", "games", "fat", "list-games", "multiboot", "spike3"):
         ap.add_argument("--" + flag, action="store_true")
     ap.add_argument("--part", type=int, metavar="N",
                     help="byte offset of partition N (kernel numbering)")
@@ -520,6 +612,20 @@ def main():
         state, why, _n = multiboot(a.image)
         print("multiboot: %s - %s" % (state, why))
         return {"yes": 0, "no": 1}.get(state, 2)
+
+    # ★ "IS THIS A SPIKE 3 CARD" - asked above the existence check for the same
+    # reason as --multiboot: a missing file is an answer (no, exit 1), not a
+    # crash. One line on stdout; exit 0 = yes (a card PAD cannot mount),
+    # 1 = no / cannot tell. Reads only the MBR and a few partition magics, so it
+    # is cheap enough to run on every card pick, BEFORE the 60 GB cache copy.
+    if a.spike3:
+        if not os.path.exists(a.image):
+            print("spike3: no - no such image: %s" % a.image)
+            return 1
+        is3, why = spike3(a.image)
+        print("spike3: %s%s" % ("yes" if is3 else "no",
+                                " - " + why if why else ""))
+        return 0 if is3 else 1
 
     if not os.path.exists(a.image):
         raise SystemExit("no such image: %s" % a.image)

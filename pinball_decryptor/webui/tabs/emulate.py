@@ -237,6 +237,13 @@ class EmulateTab(TabService):
         self._which_token = 0
         self._which = None
         self._browsed = None
+        #: PAD-367: is the picked card a Stern Spike 3 (LUKS-encrypted) card,
+        #: which cannot be emulated? None until the pick-time probe answers;
+        #: ``start()`` refuses when it is True, so a Spike 3 card never reaches
+        #: the 60 GB cache copy or the fuse2fs refusal the rig would hit.
+        self._spike3 = None
+        self._spike3_why = ""
+        self._spike3_probed = None
         self._mains_note = ""       # PAD-173: what this game does about 50 Hz
         self._mains_key = None
         self._slots_rows = None
@@ -404,6 +411,7 @@ class EmulateTab(TabService):
         self.emulate_savestates_var.set(True)
         self._bind_assets()
         self._select_probe_kick()
+        self._spike3_kick()
         if no_rig() or self._stopped:
             return
         if sys.platform == "darwin":
@@ -468,6 +476,7 @@ class EmulateTab(TabService):
     def _on_card_changed(self, *_a):
         self.set(game=self._card_game())
         self._slots_paint()
+        self._spike3_kick()
         self._precache_kick()
         self._select_probe_kick()
         self._which_kick()
@@ -522,6 +531,55 @@ class EmulateTab(TabService):
                         os.path.abspath(rel[key])) == same:
                     rel = dict(rel, **{key: ""})
         self.set(which=rel)
+
+    # -- is the picked card a Spike 3 (encrypted) card? (PAD-367) ---------
+    def _spike3_kick(self):
+        """Ask the rig, off the loop, whether the picked card is a Stern Spike 3
+        card - which cannot be emulated, its partitions being LUKS-encrypted
+        with a key kept in the machine.  Answered the moment a card is picked,
+        so the user is told up front and ``start()`` can refuse without the
+        rig's 60 GB cache copy and fuse2fs refusal.
+        """
+        path = self._card()
+        if path == self._spike3_probed:
+            return
+        self._spike3_probed = path
+        self._spike3 = None
+        self._spike3_why = ""
+        if not (path and not no_rig() and rig.rig_available()
+                and os.path.isfile(os.path.join(rig.rig_dir(), "parts.py"))):
+            return
+
+        def run():
+            try:
+                cmd = rig.spike3_cmd(path)
+            except Exception:                            # noqa: BLE001
+                cmd = None
+            if cmd is None:
+                return
+            try:
+                r = self._run(cmd, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL,
+                              timeout=rig._MULTIBOOT_PROBE_S)
+                out = (r.stdout or b"").decode("utf-8", "replace")
+            except Exception:                            # noqa: BLE001
+                return
+            is3, why = rig.parse_spike3(out)
+            self._post(self._spike3_apply, path, is3, why)
+
+        self._thread(run)
+
+    def _spike3_apply(self, path, is3, why):
+        if path != self._spike3_probed:
+            return
+        self._spike3 = is3
+        self._spike3_why = why or ""
+        if is3:
+            self._log("[emulate] %s is a Stern Spike 3 card and cannot be "
+                      "emulated: its partitions are encrypted with a key kept "
+                      "in the machine, not on the card%s."
+                      % (os.path.basename(path),
+                         " (%s)" % why if why else ""))
 
     @rpc
     def use_card(self, key):
@@ -2423,6 +2481,20 @@ class EmulateTab(TabService):
         if not rig.rig_available():
             self._refuse_start("the emulator is not set up on this PC; use "
                                "Check setup on the Emulate tab")
+            return
+        # PAD-367: a Spike 3 card cannot be emulated - refuse it here, before
+        # the rig is claimed and a 60 GB cache copy is made, with the reason
+        # rather than the fuse2fs refusal the run would otherwise hit. Only a
+        # card the pick-time probe has CONFIRMED is one; None (not yet asked,
+        # or could not be asked) falls through and the run's own guard
+        # (watch.sh) catches it without the copy.
+        if self._spike3 is True:
+            self._refuse_start(
+                "%s is a Stern Spike 3 card and cannot be emulated. Its "
+                "partitions are encrypted with a key kept in the machine, not "
+                "on the card%s." % (
+                    os.path.basename(self._card()) or "this card",
+                    " (%s)" % self._spike3_why if self._spike3_why else ""))
             return
         # A TICKET'S RIG IS TAKEN NOW, for this run, and given back at Stop
         # (core/rigslot.py claim_for_run). Nothing changes without a ticket.

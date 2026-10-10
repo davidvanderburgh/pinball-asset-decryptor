@@ -587,6 +587,23 @@ fi
 IMG=${1:-}
 [ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache|--cache-now] | --cache-list | --cache-drop <label>"
 [ -f "$IMG" ] || die "no image at $IMG"
+
+# ★ A STERN SPIKE 3 CARD CANNOT BE MOUNTED - REFUSE IT BEFORE THE COPY (PAD-367).
+# Spike 3 (CM4 generation: Walking Dead Remastered, Star Wars 2025, Pokemon)
+# encrypts every data partition as LUKS2/AES-XTS with a key fused into the
+# machine's SoC, not written to the card - so fuse2fs refuses its "games"
+# partition as not-ext4, and there is nothing on the card to decrypt it with.
+# Checked here, before cache_pick, so a 60 GB copy is not made only to fail the
+# mount: this one guard covers the pick-time --precache, the sweep's
+# --cache-now and the Start-time mount alike. parts.py reads only the MBR and a
+# few partition magics; if it or python3 is missing the check is skipped and
+# the mount fails as before.
+if command -v python3 >/dev/null 2>&1 \
+   && S3=$(python3 "$SELF/parts.py" --spike3 "$IMG" 2>/dev/null) \
+   && [ "${S3#spike3: yes}" != "$S3" ]; then
+    die "$(basename "$IMG") is a Stern Spike 3 card (${S3#spike3: yes - }). Its partitions are encrypted (LUKS2) with a key kept in the machine, not on the card, so PAD cannot mount or emulate it."
+fi
+
 LABEL=$(basename "$IMG"); LABEL=${LABEL%%.Release*}; LABEL=${LABEL%%.raw}
 MNT="$CARDS/$LABEL"
 # ITEM 90: `--part N` mounts partition N (kernel numbering: p3 is the first

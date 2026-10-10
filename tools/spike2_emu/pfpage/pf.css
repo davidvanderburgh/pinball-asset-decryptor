@@ -224,3 +224,16 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .pf-shaker .note { font-size: 11px; color: #8a93a2; }
 .pf-shaker .opt { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-2); cursor: pointer; }
 .pf-shaker .opt input { accent-color: var(--accent); margin: 0; }
+
+/* ---------------------------------------------------------------- cabinet lights */
+/* PAD-500: the cabinet's own lighting - the topper, the speaker lights, the
+   expression-lighting blades - in a column left of the artwork, at its scale,
+   and the side panel's box with the "Expression lights" tick */
+.pf-cab { position: relative; flex: 0 0 auto; margin-right: 10px; background: var(--field); border-radius: 4px; box-shadow: 0 0 0 1px var(--line), 0 10px 30px rgba(0,0,0,.4); }
+.pf-cab canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.pf-cabp { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 6px 8px 8px; }
+.pf-cabp .hd { display: flex; align-items: center; justify-content: space-between; }
+.pf-cabp .h { font: 600 11px var(--mono); color: var(--key); letter-spacing: .06em; }
+.pf-cabp .kp-kv { padding: 0; }
+.pf-cabp .opt { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-2); cursor: pointer; }
+.pf-cabp .opt input { accent-color: var(--accent); margin: 0; }

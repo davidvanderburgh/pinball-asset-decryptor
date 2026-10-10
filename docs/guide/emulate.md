@@ -154,6 +154,16 @@ carries the Start, Plunge and Reset balls buttons too — they had only
 ever been drawn on the artwork, beside the plunger, so on a title with
 no drawing there was nothing in the window that could put a ball into
 play.
+**The cabinet's own lights get a column of their own.** Left of the
+artwork the window draws the topper (on the topper's own drawing
+where the title ships one), the backbox speaker lights and the
+expression-lighting blades as two bars, all lit live; each section
+appears once its board has sent anything, and a topper switched off
+the bus gets none. The side panel's **CABINET LIGHTS** box lists the
+boards and carries an **Expression lights (blades and speakers)** tick
+box: untick it to hide them (on a title with no artwork their blocks
+leave the LED grid too). The window remembers the choice; it changes
+the display only, never the game.
 **The window can start a game, and it says what each press did.**
 From v0.208.0 the row begins with **Insert coin**: pressing Start on a machine with
 no credits does nothing, and does it silently, so a mouse-only session

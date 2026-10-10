@@ -714,6 +714,30 @@ DRIVE_HOLD_PWR_OFF = 7088
 DRIVE_FIRES_OFF = 7344
 DRIVE_READ = 7356
 
+#: padled VERSION 6 (PAD-500): a strip board's channels past its first 96 -
+#: hi[node][channel - 96] for channels 96..479, the levels of the banked frames
+#: the shim used to walk and throw away. padled.h carries the meaning;
+#: tests/test_spike2_led_strip_hi.py pins the offset to both C structs.
+HI_OFF = DRIVE_READ
+HI_IDX = 4 * 96
+HI_READ = HI_OFF + NODES * HI_IDX
+
+
+def strip_level(data, node, channel):
+    """One strip channel's level from a padled block, or None when the block
+    cannot say: channels 0..95 are val[], 96..479 version 6's `hi` plane. None
+    rather than 0 for a channel the block has no room for, because 0 means the
+    game turned it off."""
+    if data is None or node is None or not 0 <= node < NODES or channel < 0:
+        return None
+    if channel < 96:
+        off = 20 + node * 96 + channel
+        return data[off] if off < len(data) else None
+    if (channel >= 96 + HI_IDX or len(data) < HI_READ
+            or struct.unpack_from("<I", data, 4)[0] < 6):
+        return None
+    return data[HI_OFF + node * HI_IDX + channel - 96]
+
 
 def drive(data, node, index):
     """The last command one coil was sent, from a version-5 padled block, or None.

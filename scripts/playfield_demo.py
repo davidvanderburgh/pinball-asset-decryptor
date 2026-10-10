@@ -1,12 +1,17 @@
 """The virtual playfield with NO emulator: a demo title, a live fake LED show.
 
     python scripts/playfield_demo.py [field|schematic|waiting] [--lcd]
-        [--art PNG] [--window webview|gtk|app|browser|none] [--seconds N]
+        [--cabinet] [--art PNG] [--window webview|gtk|app|browser|none]
+        [--seconds N]
 
 It builds a title "demo_pf" in a temp dir - device table, switch list, key
 binds, a ball-feeder status - and animates dump/padled (an attract-style show,
 a2 pulses, coil fires), dump/padsw (five balls home, the coin door closed) and,
-with --lcd, a villain-vision block with three synthetic clips. Every WSL helper
+with --lcd, a villain-vision block with three synthetic clips. --cabinet adds
+the cabinet's own lighting (PAD-500) the way the real tables carry it: blades
+on the playfield picture's edges, speakers on no picture, a topper on one of
+its own, the strip boards in a node directory, and a show on them that runs
+past each board's first 96 channels. Every WSL helper
 is stubbed: a click writes the fake switch block, so the page shows the switch
 made, and nothing reaches wsl.exe, a rig, or the user's real state file.
 
@@ -36,6 +41,7 @@ def main(argv=None):
     ap.add_argument("mode", nargs="?", default="field",
                     choices=("field", "schematic", "waiting"))
     ap.add_argument("--lcd", action="store_true")
+    ap.add_argument("--cabinet", action="store_true")
     ap.add_argument("--art")
     ap.add_argument("--window", default="webview")
     ap.add_argument("--seconds", type=float, default=0.0,
@@ -102,6 +108,9 @@ def main(argv=None):
             for r in rows:
                 f.write("%d %d %d %d %s\n" % r)
     dev, img = [], "Test/scaled_playfield"
+    # --cabinet lays the title out the way Rush is: group 6 is its speaker
+    # lights, so the playfield's two boards are groups 7 and 8 (PAD-500)
+    pg = 1 if a.cabinet else 0
     for k, (sid, num, node, bit, name) in enumerate(rows):
         if name in ("START BUTTON", "ACTION BUTTON", "COIN DOOR CLOSED",
                     "ANGLE SENSOR THRESHOLD"):
@@ -110,24 +119,70 @@ def main(argv=None):
             x, y = 190 + int(name.split()[1]) * 12, H - 40
         else:
             x, y = rnd.randint(30, W - 30), rnd.randint(60, H - 110)
-        dev.append("switch %s %d %d 10 10 6 %d - %s" % (name, x, y, k, img))
+        dev.append("switch %s %d %d 10 10 %d %d - %s"
+                   % (name, x, y, 6 + pg, k, img))
     for k in range(56):
         x, y = rnd.randint(25, W - 25), rnd.randint(40, H - 110)
         if k % 7 == 0:
             for c, idx in zip("RGB", (k, k + 60, k + 120)):
-                dev.append("led SHIELD %d-%s %d %d 8 8 6 %d - %s"
-                           % (k, c, x + rnd.randint(-2, 2), y, idx % 96, img))
+                dev.append("led SHIELD %d-%s %d %d 8 8 %d %d - %s"
+                           % (k, c, x + rnd.randint(-2, 2), y, 6 + pg,
+                              idx % 96, img))
         else:
             dev.append("led INSERT %d %d %d 8 8 %d %d - %s"
-                       % (k, x, y, 7 if k % 2 else 6, k, img))
+                       % (k, x, y, (7 if k % 2 else 6) + pg, k, img))
     for k, name in enumerate(("LEFT SLINGSHOT", "RIGHT SLINGSHOT",
                               "POP BUMPER 1", "POP BUMPER 2", "TROUGH",
                               "AUTO PLUNGER", "RIGHT SCOOP", "LEFT FLIPPER",
                               "RIGHT FLIPPER")):
         x, y = rnd.randint(40, W - 40), rnd.randint(120, H - 130)
-        dev.append("coil %s %d %d 10 10 6 %d - %s" % (name, x, y, k, img))
+        # with a node directory (--cabinet) the coil groups are what map the
+        # playfield groups onto its boards, so both have to carry one
+        grp = (7 if a.cabinet and k % 2 else 6) + pg
+        dev.append("coil %s %d %d 10 10 %d %d - %s" % (name, x, y, grp, k, img))
     # the cabinet's shaker, off the artwork, where the real tables put it
     dev.append("coil SHAKER MOTOR 0 0 0 0 5 0 - -")
+    if a.cabinet:
+        # PAD-500: the blades on the playfield picture's edges (John Wick, King
+        # Kong and Metallica draw them there), the speakers on no picture
+        # (Rush, Venom), a topper on a picture of its own (Bond) - one RGB pixel
+        # a name, its channels in the strips' G, R, B wire order. The blades
+        # are 48 pixels a side, 1-48 up the left and 49-96 up the right, the
+        # way King Kong's picture places them; the right side and the topper's
+        # 40 pixels run past index 95, into the board's next banks.
+        for side, x, first in (("L", 9, 0), ("R", W - 9, 48)):
+            for n in range(48):
+                y = (H - 170) - n * (H - 262) / 47.0
+                for c, o in (("G", 0), ("R", 1), ("B", 2)):
+                    dev.append("led EXPRESSIVE LIGHTING %s %d-%s %d %d 4 4 1 %d - %s"
+                               % (side, first + n + 1, c, x, y,
+                                  (first + n) * 3 + o, img))
+        for n in range(23):
+            for c, o in (("G", 0), ("R", 1), ("B", 2)):
+                dev.append("led SPEAKER %d-%s 0 0 0 0 6 %d - -"
+                           % (n + 1, c, n * 3 + o))
+        for n in range(40):
+            row, k = divmod(n, 20)
+            x = 20 + k * 14
+            y = 30 + row * 26 + int(10 * math.sin(k / 19.0 * math.pi))
+            for c, o in (("G", 0), ("R", 1), ("B", 2)):
+                dev.append("led TOPPER %d-%s %d %d 4 4 9 %d - Test/scaled_topper"
+                           % (n + 1, c, x, y, n * 3 + o))
+        # the node directory in the order a real title's runs, each board
+        # with its place (= its device-table group) and its own name
+        with open(os.path.join(tdir, "node_ident.txt"), "w") as f:
+            f.write("# nbdir v2 elf=game nodes=8 src=demo\n")
+            for nid, typ, grp, name in (
+                    (2, "ws2812node", 1, "Cabinet Lights"),
+                    (4, "node4", 2, "QR Scanner"),
+                    (14, "ws2812node", 3, "Topper Lights"),
+                    (1, "pinnode", 5, "Cabinet"),
+                    (7, "ws2812node", 6, "Backbox Speaker Lights"),
+                    (8, "pinnode", 7, "Lower Playfield"),
+                    (9, "pinnode", 8, "Upper Playfield"),
+                    (12, "ws2812node", 9, "Topper")):
+                f.write("node=%d type=%s group=%d name=%s\n"
+                        % (nid, typ, grp, name))
     with open(os.path.join(tdir, "device_xy.txt"), "w") as f:
         f.write("# demo\n" + ("\n".join(dev) + "\n"
                               if a.mode == "field" else ""))
@@ -177,6 +232,12 @@ def main(argv=None):
     fade_ent = fade_head + 4
     seen = fade_ent + 96 * 12
     size = 8192                     # padled version 5: the drive table too
+    version = 5
+    # version 6 (PAD-500): a strip board's channels past its first 96
+    hi_off = getattr(coilmap, "HI_OFF", coilmap.DRIVE_READ)
+    hi_idx = getattr(coilmap, "HI_IDX", 384)
+    if a.cabinet:
+        size, version = 16384, 6
     stop = threading.Event()
     #: the shaker's commands over a 7 s cycle: (at s, ms, power) - a long soft
     #: shake, then the jackpot-sized hard ones (PAD-424)
@@ -190,7 +251,7 @@ def main(argv=None):
             t = time.time() - t0
             b = bytearray(size)
             struct.pack_into("<I", b, 0, coilmap.PADLED_MAGIC)
-            struct.pack_into("<I", b, 4, 5)
+            struct.pack_into("<I", b, 4, version)
             c, ph = int(t // 7), t % 7
             for k, (at, ms, pwr) in enumerate(shakes):
                 if ph >= at and (c, k) > (cyc, cmd if cmd is not None else -1):
@@ -212,6 +273,35 @@ def main(argv=None):
                         v = 255 if int(t * 2 + idx) % 3 == 0 else 0
                     b[20 + node * 96 + idx] = v
                     b[seen + node * 96 + idx] = 1
+            if a.cabinet:
+                def strip(node, idx, rgb):
+                    # G, R, B on the wire, like the real strips
+                    for o, v in enumerate((rgb[1], rgb[0], rgb[2])):
+                        i = idx + o
+                        if i < 96:
+                            b[20 + node * 96 + i] = v
+                            b[seen + node * 96 + i] = 1
+                        else:
+                            b[hi_off + node * hi_idx + i - 96] = v
+
+                def hue(h, k=1.0):
+                    h = (h % 1.0) * 6
+                    i, f = int(h), h - int(h)
+                    q = [(1, f, 0), (1 - f, 1, 0), (0, 1, f), (0, 1 - f, 1),
+                         (f, 0, 1), (1, 0, 1 - f)][i % 6]
+                    return [int(c * 255 * k) for c in q]
+                # the blades: a rainbow running up both sides
+                for side in (0, 1):
+                    for n in range(48):
+                        strip(2, (side * 48 + n) * 3, hue(n / 24.0 - t * 0.4))
+                # the speakers: a soft amber breath
+                k = 0.25 + 0.75 * (0.5 + 0.5 * math.sin(t * 2.4))
+                for n in range(23):
+                    strip(7, n * 3, [int(255 * k), int(120 * k), 0])
+                # the topper: a white sweep over blue
+                for n in range(40):
+                    lit = abs((n % 20) - (t * 8) % 20) < 2
+                    strip(12, n * 3, [255, 255, 255] if lit else [0, 40, 200])
             dec += 7
             struct.pack_into("<I", b, 12, dec)
             if int(t * 3) % 4 == 0:

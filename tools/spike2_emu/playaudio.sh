@@ -209,20 +209,11 @@ if [ "$SINK" = win ]; then
     # It matches on OUR PORT, not on the image name. Killing every python.exe
     # would take out whatever else the user is running, and the old version of
     # this that matched ffplay.exe would have killed PAD's own audio preview.
+    # The query is padpath.sh's pad_win_stop_player, because watch.sh's
+    # teardown needs it too: that SIGKILLs this script, so this trap never
+    # runs on a closed window (PAD-510).
     WINPID=""
-    # `$_.Name -like 'py*'` is LOAD-BEARING: the PowerShell process running
-    # this query has '*padplay.py*' and the port in its OWN command line, so
-    # without the name filter it matches ITSELF and Stop-Process kills the
-    # query mid-pipeline — observed killing the invoking WSL session outright.
-    win_kill() {
-        /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile \
-            -Command "Get-CimInstance Win32_Process |
-                      Where-Object { \$_.Name -like 'py*' -and
-                                     \$_.CommandLine -like '*padplay.py*' -and
-                                     \$_.CommandLine -like '* $PORT *' } |
-                      ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
-            >/dev/null 2>&1 || true
-    }
+    win_kill() { pad_win_stop_player "$PORT"; }
     trap 'kill $HOLD $SRV 2>/dev/null; [ -n "$WINPID" ] && kill $WINPID 2>/dev/null;
           win_kill; rm -f "$FIFO"' EXIT
 

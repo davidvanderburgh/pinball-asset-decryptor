@@ -698,7 +698,10 @@ HELP_CONTENT = {
             "- Zoom: Ctrl (or Shift, or Cmd) + wheel, or the zoom buttons; middle-drag "
             "to pan.\n"
             "- Rows of W's or AAA are placeholders the game fills in, like high score "
-            "initials.",
+            "initials.\n"
+            "- Godzilla's score panel: select a score line for four color swatches, picked "
+            "as the machine shows them (**Reset** puts the game's back). The game program "
+            "paints them, so Write adds a program step.",
         ]),
         ("Save and load scene edits", [
             "**Save / load edits**, at the head of the Scenes page, saves edits and the "

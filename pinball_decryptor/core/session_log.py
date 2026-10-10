@@ -17,8 +17,10 @@ profile must never take the GUI's own log down with it, so every public
 function swallows OSError.
 """
 
+import contextlib
 import os
 import re
+import threading
 import time
 
 from .config import SETTINGS_FILE
@@ -128,6 +130,8 @@ def set_project(folder, version="", label=""):
             folder = None
     if folder == _project_dir:
         return False
+    # lines held for a batch were the old project's
+    _flush_batch()
     _project_dir = folder
     if folder is None:
         return True
@@ -203,8 +207,53 @@ def append(text, level="info"):
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     prefix = "" if level in ("info", "ts") else "[%s] " % level.upper()
     line = "[%s] %s%s\n" % (stamp, prefix, clean_line(text))
+    held = getattr(_batch, "lines", None)
+    if held is not None:
+        held.append(line)
+        return
     _append_raw(line)
     _append_project_raw(line)
+
+
+# ---------------------------------------------------------------------------
+# Many lines at once.
+#
+# Each line opens both files, twice the checks and two opens a line, and a
+# busy PC's virus scanner looks at every open.  That was most of the time a
+# log line took when Emulate's Start converted a whole game's pictures, two
+# lines apiece, 11,622 for Godzilla (PAD-505), and the log fell minutes behind
+# the work.  The app's loop writes the lines one turn hands on as one piece.
+# ---------------------------------------------------------------------------
+
+_batch = threading.local()
+
+
+@contextlib.contextmanager
+def batched():
+    """The lines THIS thread appends inside the block are written when it
+    ends, each file opened once for all of them.  Another thread's lines are
+    written as they come.  A nested block writes everything held when IT
+    ends, so a question that keeps the loop turning under it (a nested turn
+    in a block) never holds the lines back until it is answered."""
+    outer = getattr(_batch, "lines", None) is None
+    if outer:
+        _batch.lines = []
+    try:
+        yield
+    finally:
+        _flush_batch()
+        if outer:
+            _batch.lines = None
+
+
+def _flush_batch():
+    held = getattr(_batch, "lines", None)
+    if not held:
+        return
+    text = "".join(held)
+    del held[:]
+    _append_raw(text)
+    _append_project_raw(text)
 
 
 def _append_raw(line):

@@ -456,6 +456,42 @@ _SKIP_SCENE_EDITS = threading.local()
 # so write_overrides can put it in the set's manifest and Try it can say it, rather than
 # "the log says why" over a nine-minute log.
 _MODES_LEFT_OUT = threading.local()
+# PAD-505: while write_overrides computes a set, the edits that land in a card file's HOLE
+# with something other than zeros (``.writes``, ``[(node, file_off, bytes)]``: see
+# :func:`_place`).  A set's files are plain files, so they go in there; a card can't take
+# them in place.  Unset outside write_overrides.
+_HOLE_WRITES = threading.local()
+
+
+def _place(reader, node, file_off, data):
+    """``[(disk_offset, bytes), ...]`` writing *data* at ``file_off`` of the card file
+    *node*: where :meth:`Ext4Reader.disk_ranges` puts it, except where the file has NO
+    BLOCK (a hole; PAD-505, :meth:`Ext4Reader.place`).  Zeros there need no write, the
+    file already reads as them; anything else goes to the override set being built
+    (:data:`_HOLE_WRITES`), and a card Write refuses it, because a card can't take it in
+    place."""
+    from .ext4 import Ext4Error
+    try:
+        ranges = reader.disk_ranges(node, file_off, len(data))
+    except Ext4Error:
+        writes, held = reader.place(node, file_off, data)
+    else:
+        writes, rest = [], data
+        for disk, n in ranges:
+            writes.append((disk, rest[:n]))
+            rest = rest[n:]
+        return writes
+    if held:
+        sink = getattr(_HOLE_WRITES, "writes", None)
+        if sink is None:
+            raise RuntimeError(
+                "An edit lands where a card file has no space on the card (file offset "
+                "0x%x): the card was copied with a tool that leaves blocks of zeros out of "
+                "its files, and a Write can't fill one in. Emulate can still run the "
+                "edit; to Write it, start from a copy of the card that has those blocks."
+                % held[0][0])
+        sink.extend((node, off, piece) for off, piece in held)
+    return writes
 
 
 def _override_needs_no_mount():
@@ -3852,10 +3888,7 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
     ov = {}
     ib = bytes(node["i_block"])
     for off, b in file_writes:
-        payload = b
-        for disk, cnt in reader.disk_ranges(node, off, len(b)):
-            writes.append((disk, payload[:cnt]))
-            payload = payload[cnt:]
+        writes.extend(_place(reader, node, off, b))
         ov.setdefault(ib, (node, {}))[1][off] = b
     return writes, n, ov, None
 
@@ -4522,10 +4555,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
             for e in occs:
                 if e["length"] != orig_len:
                     continue                       # paranoia: length must match
-                payload = full
-                for disk, n in reader.disk_ranges(node, e["offset"], orig_len):
-                    writes.append((disk, payload[:n]))
-                    payload = payload[n:]
+                writes.extend(_place(reader, node, e["offset"], full[:orig_len]))
                 overlays.setdefault(ib, (node, {}))[1][e["offset"]] = full
             n_strings += 1
             log("Display text in %s: \"%s\" -> \"%s\" (%d occurrence(s))."
@@ -4746,10 +4776,7 @@ def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_ove
                 else:
                     i += 1
             for off, payload in patch.items():
-                rest = payload
-                for disk, cnt in reader.disk_ranges(node, off, len(payload)):
-                    writes.append((disk, rest[:cnt]))
-                    rest = rest[cnt:]
+                writes.extend(_place(reader, node, off, payload))
             radium_overlays.setdefault(ib, (node, {}))[1].update(patch)
             log("Scene %s: %d edit(s) from the Scenes window, %d byte run(s) rewritten in "
                 "place." % (card_path, n, len(patch)), "info")
@@ -4790,11 +4817,19 @@ def _drop_writes_in(writes, reader, node):
     """*writes* (``[(disk_off, bytes)]``) without those landing inside
     *node*'s extents — a file that is written whole must not also be patched
     in place (the copy would undo it, and an override set would list the
-    file twice)."""
+    file twice).  Its writes held for a hole (PAD-505) go the same way."""
+    held = getattr(_HOLE_WRITES, "writes", None)
+    if held:
+        ib = bytes(node["i_block"])
+        held[:] = [w for w in held if bytes(w[0]["i_block"]) != ib]
     try:
         runs = reader.disk_ranges(node, 0, node["size"])
     except Exception:
-        return writes
+        try:
+            # a HOLE (PAD-505): the stretches that have blocks
+            runs = [(d, n) for _o, d, n in reader.mapped_ranges(node)]
+        except Exception:
+            return writes
     return [(d, b) for d, b in writes
             if not any(lo <= d < lo + n for lo, n in runs)]
 
@@ -4854,10 +4889,7 @@ def _radium_color_writes(reader, assets_dir, log, cancel):
                 if any(abs(rgba[i] * 255.0 - src[i]) > 0.6 for i in range(3)):
                     continue
                 n_hit += 1
-                buf = payload
-                for disk, n in reader.disk_ranges(node, off, len(payload)):
-                    writes.append((disk, buf[:n]))
-                    buf = buf[n:]
+                writes.extend(_place(reader, node, off, payload))
                 overlays.setdefault(ib, (node, {}))[1][off] = payload
             if not n_hit:
                 log("Text colour in %s: \"%s\" is no longer drawn in %s on the "
@@ -4934,10 +4966,7 @@ def _radium_layout_writes(reader, assets_dir, log, cancel):
                    else "warning")
             log("Text layout in %s: %s" % (card_path, note), lvl)
         for off, payload in patches:
-            buf = payload
-            for disk, n in reader.disk_ranges(node, off, len(payload)):
-                writes.append((disk, buf[:n]))
-                buf = buf[n:]
+            writes.extend(_place(reader, node, off, payload))
             overlays.setdefault(ib, (node, {}))[1][off] = payload
         if not n_hit:
             if not notes:
@@ -5076,10 +5105,7 @@ def _prepare_boot_screen_patches(disk_f, parts, games_base, boot_edits,
         payload = _fit_image_payload(staged, node["size"], work_dir, log)
         if payload is None:
             continue
-        off = 0
-        for disk, cnt in reader.disk_ranges(node, 0, len(payload)):
-            writes.append((disk, payload[off:off + cnt]))
-            off += cnt
+        writes.extend(_place(reader, node, 0, payload))
         n += 1
         log("Boot screen %s: ready to patch (%d bytes)."
             % (output, node["size"]), "info")
@@ -5740,10 +5766,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
             log("Radium image %s: re-encoded to %d bytes but the slot is %d; "
                 "skipped." % (output, len(payload), length), "warning")
             continue
-        rest = payload
-        for disk, cnt in reader.disk_ranges(node, data_off, length):
-            writes.append((disk, rest[:cnt]))
-            rest = rest[cnt:]
+        writes.extend(_place(reader, node, data_off, payload))
         overlays.setdefault(bytes(node["i_block"]), (node, {}))[1][data_off] = payload
         patched_outputs.add(output)
     for radium_path, outs in sorted(moved.items()):
@@ -5776,23 +5799,39 @@ def _overlay_digests(reader, disk, node, overlays):
     m = hashlib.md5()
     ov = sorted(overlays.items())
     pos = 0
-    for d, n in reader.disk_ranges(node, 0, node["size"]):
+    for piece in _file_pieces(reader, disk, node):
+        chunk = bytearray(piece)
+        take = len(chunk)
+        for off, b in ov:
+            if off + len(b) <= pos or off >= pos + take:
+                continue
+            lo = max(off, pos)
+            hi = min(off + len(b), pos + take)
+            chunk[lo - pos:hi - pos] = b[lo - off:hi - off]
+        h.update(chunk)
+        m.update(chunk)
+        pos += take
+    return h.digest(), m.digest()
+
+
+def _file_pieces(reader, disk, node):
+    """*node*'s bytes in file order, up to 1 MiB at a time, read off *disk* through its
+    extent map.  A file with a HOLE (PAD-505) comes as the game reads it, zeros there: the
+    map of the whole of it fails, and its digest is what the card's check compares."""
+    from .ext4 import Ext4Error
+    try:
+        runs = reader.disk_ranges(node, 0, node["size"])
+    except Ext4Error:
+        for _off, data in reader.read_file_chunks(node):
+            yield data
+        return
+    for d, n in runs:
         disk.seek(d)
         rem = n
         while rem:
             take = min(rem, 1 << 20)
-            chunk = bytearray(disk.read(take))
-            for off, b in ov:
-                if off + len(b) <= pos or off >= pos + take:
-                    continue
-                lo = max(off, pos)
-                hi = min(off + len(b), pos + take)
-                chunk[lo - pos:hi - pos] = b[lo - off:hi - off]
-            h.update(chunk)
-            m.update(chunk)
-            pos += take
+            yield disk.read(take)
             rem -= take
-    return h.digest(), m.digest()
 
 
 def _merge_radium_overlays(dst, src):
@@ -8303,19 +8342,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                    os.path.getsize(_lp(img_path)) / 1e6), "info")
             audio_inplace = {}
         for body_off, body in audio_inplace.items():
-            for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
-                writes.append((disk, body[:n]))
-                body = body[n:]
+            writes.extend(_place(reader, img_node, body_off, body))
         # Music songs patch their OWN bank inode (image-scNN.bin), not image.bin.
         for sc_node, body_off, body in music_patches:
-            for disk, n in reader.disk_ranges(sc_node, body_off, len(body)):
-                writes.append((disk, body[:n]))
-                body = body[n:]
+            writes.extend(_place(reader, sc_node, body_off, body))
         for node, payload in video_patches + image_patches + texture_patches:
-            off = 0
-            for disk, n in reader.disk_ranges(node, 0, len(payload)):
-                writes.append((disk, payload[off:off + n]))
-                off += n
+            writes.extend(_place(reader, node, 0, payload))
         # The boot screen's writes are flat already, and on the OS partition,
         # so the games tree's .sidx refresh below has no record of them.
         writes += boot_writes
@@ -10294,11 +10326,14 @@ OVERRIDE_DELTA = "overrides.delta"
 OVERRIDE_VERSION = 2
 
 
-def _writes_by_file(reader, writes):
+def _writes_by_file(reader, writes, held=()):
     """Group absolute-disk *writes* by the CARD FILE each one lands in.
 
     Returns ``({card_path: (node, [(file_off, bytes), ...])}, unmapped)`` —
-    *unmapped* being the writes no file's extents cover.
+    *unmapped* being the writes no file's extents cover.  *held* are the
+    writes into a file's hole (PAD-505, :data:`_HOLE_WRITES`), ``[(node,
+    file_off, bytes), ...]``: the file is found by its inode's extent root,
+    and they go after its disk writes (a hole and a block never overlap).
 
     THE WHOLE POINT IS THAT THE WRITE LIST IS ALREADY THE ANSWER.  Every patch
     :func:`_compute_patches` produces was resolved from a file offset through
@@ -10312,7 +10347,9 @@ def _writes_by_file(reader, writes):
     large extents.
     """
     index = []                       # (disk_start, disk_end, path, node, f_off)
+    by_root = {}                     # i_block -> (path, node), for *held*
     for path, _ino, node in reader.iter_regular_files(min_size=1):
+        by_root[bytes(node["i_block"])] = (path, node)
         try:
             runs, f_off = [], 0
             for disk, n in reader.disk_ranges(node, 0, node["size"]):
@@ -10355,6 +10392,13 @@ def _writes_by_file(reader, writes):
             ent = by_file.setdefault(path, (node, []))
             ent[1].append((f_off + (here - d_start), buf[pos:pos + take]))
             pos += take
+    for hnode, f_off, buf in held:
+        found = by_root.get(bytes(hnode["i_block"]))
+        if found is None:
+            unmapped.append(f_off)
+            continue
+        path, node = found
+        by_file.setdefault(path, (node, []))[1].append((f_off, buf))
     return by_file, unmapped
 
 
@@ -10479,6 +10523,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         _SCENE_BASES.store = scene_bases = {}
         _SKIP_SCENE_EDITS.on = not scene_edits
         _MODES_LEFT_OUT.why = ""
+        # PAD-505: a set's files are plain files, so an edit may fill a hole
+        _HOLE_WRITES.writes = held = []
         try:
             writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
                 disk_f, parts, assets_dir, log, progress, cancel, label=label,
@@ -10493,6 +10539,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             _SKIP_SCENE_EDITS.on = False
             modes_left_out = getattr(_MODES_LEFT_OUT, "why", "") or ""
             _MODES_LEFT_OUT.why = ""
+            _HOLE_WRITES.writes = None
         if writes is None:                  # cancelled mid-compute
             _rmtree_grow_plan(grow_plan)
             return None, None, None, None
@@ -10503,7 +10550,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             # is worth more here than the milliseconds.
             reader, _fw_node, _img_node = _locate(disk_f, parts)
             t0 = time.monotonic()
-            by_file, unmapped = _writes_by_file(reader, writes)
+            by_file, unmapped = _writes_by_file(reader, writes, held)
             if unmapped:
                 # Never write a PARTIAL override set: the run would look like
                 # it was testing the edits while silently dropping some of
@@ -11229,10 +11276,18 @@ def _restore_stock(disk_f, reader, node, dest, ranges):
     """
     if not ranges:
         return
+    from .ext4 import Ext4Error
     with open(_lp(dest), "r+b") as f:
         for off, length in ranges:
             pos = off
-            for disk, n in reader.disk_ranges(node, off, length):
+            try:
+                runs = reader.disk_ranges(node, off, length)
+            except Ext4Error:
+                # a HOLE in it (PAD-505): the card's own bytes there are zeros
+                f.seek(off)
+                f.write(reader.read_range(node, off, length))
+                continue
+            for disk, n in runs:
                 disk_f.seek(disk)
                 buf = disk_f.read(n)
                 if len(buf) != n:

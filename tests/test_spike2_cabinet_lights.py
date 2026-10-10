@@ -473,6 +473,130 @@ def _extract(src, name):
     raise AssertionError("unbalanced braces reading %s" % name)
 
 
+#: John Wick LE 1.02, a traced game (PAD-420 lights run): LONG bitmap frames,
+#: the form a strip is repainted in bulk. node 2 is the expressive-lighting
+#: blades; node 9 a playfield insert board, left as it was.
+JW_LONG = {
+    "blades_bank0": "824eb6c008e000ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff"
+                    "00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff010100",
+    "blades_bank1": "821db2348309f0ff01fc07ff003fff003fff003fff003fff003fff003f018700",
+    "blades_bank2": "8267b254c00b0000ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ff"
+                    "ff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ff"
+                    "ff00ffff00ffff00ffff00ffff018500",
+    "insert_node9": "8913b68919f83820023cffffffffffff00ffff018500",
+}
+#: batman's b5, lamps 39 and 44 on: a SHORT frame, what the title's vote is drawn from
+SHORT = "8905b527ac02e800"
+
+PUBLISH_HARNESS = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+static void logmsg(const char *s) { fputs(s, stderr); }
+@STRUCT@
+static struct padled_shm shm;
+static struct padled_shm *led_shm = &shm;
+static unsigned led_shm_len = 16384;
+static unsigned char led_known[16][96], led_wide_owns[16][96];
+static int led_wide_verdict = -1;
+static unsigned moves, notes;
+static void led_map(void) {}
+static void led_val(unsigned node, unsigned idx, unsigned char v) { moves++; if (node < 16 && idx < 96) shm.val[node][idx] = v; }
+static void led_show_note(unsigned node, unsigned cmd, unsigned weight) { (void)node; (void)cmd; notes += weight; }
+static int led_dec_log(void) { return 0; }
+@FUNCS@
+int main(int argc, char **argv)
+{
+    int k, i;
+    for (k = 1; k < argc; k++) {
+        if (!strcmp(argv[k], "send")) {                 /* send <node> <times> <frame hex> */
+            unsigned char b[512];
+            unsigned node = (unsigned)atoi(argv[k + 1]);
+            int times = atoi(argv[k + 2]), n = 0, pub = 0;
+            const char *h = argv[k + 3];
+            while (h[0] && h[1]) { char t[3] = { h[0], h[1], 0 }; b[n++] = (unsigned char)strtoul(t, 0, 16); h += 2; }
+            for (i = 0; i < times; i++) pub += led_wide_publish(node, b[2], b + 3, (unsigned)n - 5);
+            printf("PUB %d\n", pub);
+            k += 3;
+        } else if (!strcmp(argv[k], "q")) {            /* q <node> <channel> */
+            unsigned node = (unsigned)atoi(argv[k + 1]), c = (unsigned)atoi(argv[k + 2]);
+            printf("LVL %u\n", c < 96 ? shm.val[node][c] : shm.hi[node][c - 96]);
+            k += 2;
+        } else if (!strcmp(argv[k], "stats")) {
+            printf("STATS moves=%u notes=%u settled=%d decoded=%u skipped=%u\n", moves, notes,
+                   led_wide_settled(), shm.wide_decoded, shm.wide_skipped);
+        }
+    }
+    return 0;
+}
+"""
+
+
+@pytest.fixture(scope="module")
+def publish_bin(tmp_path_factory):
+    if CC is None:
+        pytest.skip("no C compiler on this host")
+    src = open(os.path.join(RIG, "hwshim.c"), encoding="utf-8", errors="replace").read()
+    struct_src = re.search(r"^struct padled_shm \{.*?^\};", src, re.M | re.S).group(0)
+    funcs = "\n".join(_extract(src, n) for n in (
+        "popcount8", "led_insert_node", "led_show_cmd", "led_wide_long", "led_wide_walk",
+        "led_wide_strip_bank", "led_wide_dialect", "led_wide_settled", "led_hi", "led_seen",
+        "led_strip_levels", "led_wide_publish"))
+    d = tmp_path_factory.mktemp("ledlong")
+    (d / "h.c").write_text(PUBLISH_HARNESS.replace("@STRUCT@", struct_src).replace("@FUNCS@", funcs),
+                           encoding="utf-8")
+    exe = d / ("h.exe" if os.name == "nt" else "h")
+    r = subprocess.run([CC, "-O1", "-o", str(exe), str(d / "h.c")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return str(exe)
+
+
+def _run(exe, *args):
+    env = dict(os.environ)
+    env.pop("PAD_LED_WIDE", None)
+    r = subprocess.run([exe] + list(args), capture_output=True, text=True, env=env, timeout=60)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.split("\n")
+
+
+def test_a_strip_s_long_frames_are_read_once_the_title_has_settled(publish_bin):
+    import leddecode
+    want = {}
+    for name in ("blades_bank0", "blades_bank1", "blades_bank2"):
+        bank, idxs, vals = leddecode.wide_decode_any(bytes.fromhex(JW_LONG[name]))
+        for i, v in zip(idxs, vals):
+            want[96 * bank + i] = v
+    probe = [0, 1, 2, 96, 98, 192, 193, 287]
+    assert {want[c] for c in probe} == {0, 63, 255}       # a probe that can tell
+    out = _run(publish_bin,
+               # before the vote: a long frame votes no and is not published
+               "send", "2", "1", JW_LONG["blades_bank0"], "q", "2", "1", "stats",
+               # the title proves the dialect on short frames
+               "send", "9", "220", SHORT, "stats",
+               # now the strip's long frames land, bank 0 in val[], 1 and 2 in hi
+               "send", "2", "1", JW_LONG["blades_bank0"],
+               "send", "2", "1", JW_LONG["blades_bank1"],
+               "send", "2", "1", JW_LONG["blades_bank2"],
+               *sum((["q", "2", str(c)] for c in probe), []),
+               # an insert board's long frame is left to the older shapes, as before
+               "send", "9", "1", JW_LONG["insert_node9"], "q", "9", "11", "stats")
+    assert out[0] == "PUB 0" and out[1] == "LVL 0"
+    assert "settled=0" in out[2] and "moves=0" in out[2]
+    # the first 199 calls only vote (the sample is 200, the long frame was one)
+    assert out[3] == "PUB 22"
+    before = out[4]
+    assert "settled=1" in before
+    assert out[5:8] == ["PUB 1", "PUB 1", "PUB 1"]
+    assert out[8:8 + len(probe)] == ["LVL %d" % want[c] for c in probe]
+    rest = out[8 + len(probe):]
+    assert rest[0] == "PUB 0" and rest[1] == "LVL 0"
+    # levels only: the announcer's moves and notes did not move for any of it
+    m = lambda s, k: re.search(r"%s=(\d+)" % k, s).group(1)   # noqa: E731
+    assert m(rest[2], "moves") == m(before, "moves")
+    assert m(rest[2], "notes") == m(before, "notes")
+    assert int(m(rest[2], "decoded")) == int(m(before, "decoded")) + 3
+
+
 @pytest.mark.skipif(CC is None, reason="no C compiler on this host")
 def test_the_shim_puts_banks_1_to_4_in_hi(tmp_path):
     src = open(os.path.join(RIG, "hwshim.c"), encoding="utf-8", errors="replace").read()

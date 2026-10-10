@@ -11733,6 +11733,28 @@ static void led_seen(unsigned node, unsigned idx)
     if (node < 16 && idx < 96) led_shm->seen[node][idx] = 1;
 }
 
+/* ★ A STRIP BOARD'S BULK FRAME, AS LEVELS ONLY (PAD-500) - bank 0 into val[]
+ * (and `seen`), banks 1 to 4 into `hi` (led_hi). led_wide_publish's long-body
+ * branch is the one caller; see it for why. Deliberately NOT led_val(): these
+ * frames were dropped whole before, so the light-show announcer never counted
+ * them, and a cabinet strip's own show must not start counting now - it is
+ * the "past Tech Alerts" signal (led_show_gate). */
+static void led_strip_levels(unsigned node, int bank, const unsigned char *idx,
+                             const unsigned char *val, unsigned cnt)
+{
+    unsigned i;
+    if (bank > 0) {
+        led_hi(node, bank, idx, val, cnt);
+        return;
+    }
+    if (!led_shm || node >= 16) return;
+    for (i = 0; i < cnt; i++) {
+        if (idx[i] >= 96) continue;
+        led_shm->val[node][idx[i]] = val[i];
+        led_seen(node, idx[i]);
+    }
+}
+
 /* ★ WHEN THE PICTURE LAST MOVED - one timestamp, written by every path that
  * publishes a level and read only by the light-show announcer below.
  *
@@ -12467,6 +12489,27 @@ static int led_wide_publish(unsigned node, unsigned cmd,
     if (bank < 0 || led_wide_long(cmd, body, blen) || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
         led_wide_dialect(0);
         led_map();
+        /* ★ EXCEPT A STRIP BOARD'S, ONCE THE TITLE'S VERDICT IS IN (PAD-500).
+         * That refusal is how a strip lost most of its picture: the long body
+         * is the form a strip is repainted in bulk, and on a title that speaks
+         * this dialect the per-node path never runs (it stands down once the
+         * title has settled). A live John Wick LE 1.02 run sat with five blade
+         * pixels lit for a minute while its traced game had sent 4361 long
+         * frames to node 2 (of 7283; 557 of the speakers' 2385 on node 7, 1779
+         * of the topper's 5036 on node 12), every one of which this walk
+         * closes exactly. Read as LEVELS ONLY (led_strip_levels) and only after
+         * the vote: the frame still votes no above, exactly as it always did,
+         * so the verdict is drawn from the same frames; nothing that counts
+         * toward the light-show announcer sees it; and an insert board (1, 8,
+         * 9) is left exactly as before - its long frames still fall through to
+         * the godzilla shapes in led_publish. */
+        if (bank >= 0 && !led_insert_node(node) && led_wide_settled() && led_shm
+                && led_wide_long(cmd, body, blen)
+                && led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+            led_strip_levels(node, bank, idx, val, cnt);
+            if (led_shm_len >= 8192) led_shm->wide_decoded++;
+            return 1;
+        }
         if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
         return 0;
     }

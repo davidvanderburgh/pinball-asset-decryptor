@@ -111,6 +111,9 @@ static void led_map(void) {}
 static void led_val(unsigned node, unsigned idx, unsigned char v) { shm.val[node][idx] = v; }
 static signed char led_node_verdict[16];
 static void led_show_note(unsigned node, unsigned cmd, unsigned weight) { (void)node; (void)cmd; (void)weight; }
+/* a banked frame's levels (PAD-500's version-6 plane): not what this test reads */
+static void led_hi(unsigned node, int bank, const unsigned char *idx, const unsigned char *val, unsigned cnt)
+{ (void)node; (void)bank; (void)idx; (void)val; (void)cnt; }
 static unsigned short led_node_votes[16], led_node_yes[16];
 @FUNCS@
 static int frame(unsigned node, const char *h)

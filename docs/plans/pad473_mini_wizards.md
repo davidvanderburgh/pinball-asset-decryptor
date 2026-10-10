@@ -40,7 +40,7 @@ strings naming a wizard; `C:/tmp/PAD-473/modecensus.txt`, `wizstrings.txt`) and 
 | Led Zeppelin LE / Pro 1.22 | Mothership, World Tour, Top of the Charts Multiballs | `cmothership_multiball`, `cworld_tour_multiball`, `ctop_of_the_charts_multiball` | **proven** (run 1, mode route) |
 | The Mandalorian LE / Pro 1.45 | Precious Cargo, You Have What I Want, I Like Those Odds | `crazor_crest_wizard`, `cyou_have_what_i_want`, ... | **proven** (run 1, mode route) |
 | Metallica Remastered 1.04 | Blackened, End of the Line (scoop) | plain C | open |
-| Rush LE / Pro 1.19 | Cygnus X-1 Book 1, Book 2 (Time Machine) | `cmode_cygnus_book_1_multiball`, `_book_2_` | lines written; Book 1 starts but its intro waits (below) |
+| Rush LE / Pro 1.19 | Cygnus X-1 Book 1, Book 2 (Time Machine) | `cmode_cygnus_book_1_multiball`, `_book_2_` | **proven** (run 2: waits for the ball to drain first) |
 | Star Wars LE / Pro 1.31 | Lightsaber Duel (left ramp); the four planet Finals | C++ (start slot 8 from the older build) | **proven** (run 1, mode route) |
 | Stranger Things / LE 1.13 | Total Isolation 1 / 2, Send it Back, Light the Fire (left ramp) | plain C | open |
 | Black Knight: Sword of Rage LE / Pro 1.19 | KNIGHT Multiball, The King's Ransom (left spinner lane; the program's "retro" and BK2K wizard multiballs) | `cmode_original_mball`, `cmode_bk2k_mball` | **proven** (run 1, mode route) |
@@ -96,14 +96,21 @@ wizard_slot_enable 42` makes the runtime call v[42] first - Austin then started,
 1.16: Visitor's Center from the scanner, Museum Mayhem and Secure Control Room from the block lines' objects (the Pro's
 0xfb90 lower, each checked by its references) - Visitor's Center started, two balls, Museum Mayhem waited.
 
-## Still open
+## Run 2 (2026-10-09)
 
-- **Rush LE / Pro 1.19**: Book 1's START works (ACTIVE 1, its own CYGNUS X-1 BOOK 1 intro and FLIGHT CONDITIONS on the
-  glass), but the runtime's in-game check (`mode_mask` & 0x210) reads busy from that instant and stayed so for over a
-  minute on the intro (`out/p5`): it most likely waits for the ball in the Time Machine, its own start shot (the rules:
-  "lock a ball in the Time Machine ..."). Find what the intro waits on (the Time Machine's ball-held state, or a
-  display-done event) and hand it over with that in place - or hand it over only while a ball sits in the Time
-  Machine - before it is offered.
+- **Rush LE / Pro 1.19** proven (sweep `p6`). Book 1's START (0xfc43c on the LE) asks the game's flag 0x1d (most likely the
+  ball held in the Time Machine, its own start shot): set, it works the Time Machine's device; not set, it sets the
+  mode mask's 0x202 (0x200 is one of the runtime's busy bits, so in-game reads 0), calls what looks like the flippers'
+  off, and leaves a process (0xfdd80) waiting before the intro goes on and the mask is cleared (0xfdd30). On
+  the rig nothing drains a ball, so in `p5` the intro stood on CYGNUS X-1 BOOK 1 for over a minute; with the rig's
+  drain (`plunge.py drain`, a new `drain` step in `wizexp_job.sh`) 9 s after the start the game was in play again
+  14 s after it, Book 1 ACTIVE 1, FLIGHT CONDITIONS then CYGNUS - BOOK 1 / CHOOSE A PLANET on the glass and the Book I
+  jackpot on the HUD; Book 2 waited while it ran ("a multiball (cmode_cygnus_book_1_multiball) is in its way"). So a
+  hand-over away from the Time Machine waits for the ball to drain before the intro - the game's own path, said in
+  MODE_LIMITS.md (whether the game also turns the flippers off meanwhile - 0x238fd8 walks three device kinds with 0,
+  then hook 0xb1 - is not proven).
+
+## Still open
 
 - **Uncanny X-Men LE / Pro 0.98** (its own C++ framework, `Mode_` classes with a Singleton): `Mode_Future_Mini_Wizard`,
   `Mode_Save_Senator_Kelly_Wizard` (block lines 11 and 13 on the LE). On the LE the Future's object is the singleton

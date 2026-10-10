@@ -989,6 +989,10 @@ WIZARDS_PROVEN = frozenset({
     "foo_fighters_pro-1.04",   # Austin started (ACTIVE 1, 4 balls); D.C. waited while it ran
     "jurassic_park_le-1.16",   # Visitor's Center started (ACTIVE 1, 2 balls); Museum Mayhem waited while it ran
     "jurassic_park_pro-1.16",   # Visitor's Center started (ACTIVE 1, 2 balls); Museum Mayhem waited while it ran
+    # Rush: with the ball not in the Time Machine, Book 1's own start waits for it to drain (the game's mode mask
+    # 0x202 meanwhile) before its intro plays; the rig's drain (plunge.py) let it run on (sweep p6)
+    "rush_le-1.19",   # Cygnus X-1 Book 1 started (ACTIVE 1, CHOOSE A PLANET on the glass); Book 2 waited while it ran
+    "rush_pro-1.19",   # Cygnus X-1 Book 1 started (ACTIVE 1, CHOOSE A PLANET on the glass); Book 2 waited while it ran
 })
 #: how a mode hands one over: lit for the game's start shot, or started at once
 WIZARD_HOW = ("light", "start")

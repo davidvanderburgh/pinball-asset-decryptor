@@ -679,3 +679,19 @@ text shake_tap              0:128:0
 text shake_short            0:256:0
 text shake_medium           0:384:0
 text shake_long             0:1024:0
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and its
+# ACTIVE game flag; where the start first asks whether the player has earned it, that check (hooked: yes
+# only while a mode hands this one over). The names are the game's own.
+# the game's flags (its own write 0x3c6ad4: the bitmap's pointer at [0x7002ad8 + 4], its size in bits at
+# [0x56b338]), for the mini-wizard's flag below
+data  game_flags             0x07002ad8
+data  game_flag_count        0x0056b338
+value game_flags_at          4
+site  wizard_go_1        0x000a2010 0xe92d43f0 0xe30b4498   # AUD_BLACKENED_MULTIBALL_STARTED
+value wizard_flag_1      50    # FG_BLACKENED_MULTIBALL_ACTIVE
+text  wizard_name_1      Blackened Multiball
+site  wizard_go_2        0x00140fe4 0xe30c1d84 0xe3a000df   # AUD_THE_END_OF_THE_LINE_MODE_STARTED
+value wizard_proc_2      223   # its own process, which the start creates
+text  wizard_name_2      The End of the Line

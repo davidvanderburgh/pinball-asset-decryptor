@@ -3009,20 +3009,28 @@ static int stock_flags_route(void)
     return data("game_flags") && pm_port_value("mode_flag_1", 0) > 0;
 }
 
-static int stock_flags(void)
+/* one of the game's flags, set (1) or not (0); -1 = the port names no bitmap or it is not there yet */
+static int game_flag(unsigned id)
 {
     const unsigned char *bits;
-    unsigned count, i, id;
-    char name[20];
+    unsigned count;
+    if (!data("game_flags")) return -1;
     bits = *(const unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
-    if (!bits) return 0;
+    if (!bits) return -1;
     count = data("game_flag_count") ? *(const unsigned *)(unsigned long)data("game_flag_count") : 0;
+    if (count && id >= count) return -1;
+    return bits[id >> 3] >> (id & 7) & 1;
+}
+
+static int stock_flags(void)
+{
+    unsigned i, id;
+    char name[20];
     for (i = 1; i <= 32; i++) {
         pm_snprintf(name, sizeof name, "mode_flag_%u", i);
         id = (unsigned)pm_port_value(name, 0);
         if (!id) break;
-        if (count && id >= count) continue;
-        if (bits[id >> 3] >> (id & 7) & 1) {
+        if (game_flag(id) == 1) {
             pm_snprintf(stock_flags_what, sizeof stock_flags_what, "one of the game's modes (flag %u)", id);
             return 1;
         }
@@ -5433,11 +5441,13 @@ static void shake_arm(void)
 #define WIZARDS_MAX 8
 #define WIZ_DUE_MAX 4
 static int wizards_n;
-static int wiz_route;                 /* PAD-473: 1 Bond's table (here), 2 the C++ titles' mode objects (below) */
+static int wiz_route;                 /* PAD-473: 1 Bond's table (here), 2 the C++ titles' mode objects, 3 the plain-C
+                                       * titles' start functions (below) */
 static int wizm_hand(int n, int how);
 static void wizm_tick(void);
 static int wizm_claim(int n);
 static void wizm_arm(void);
+static void wizf_arm(void);
 static struct { int n; unsigned p, sel, lit, played; } wiz_hold;   /* a refused start, put back on the next tick */
 static struct {
     unsigned char n[WIZ_DUE_MAX];     /* handed over and not started yet, in order: n[0] is the one lit */
@@ -5561,7 +5571,7 @@ static void wizards_tick(void)
     unsigned *st, p = wiz_hold.p, game;
     int ev, n;
     if (!(can & PM_CAN_GAME_WIZARDS)) return;
-    if (wiz_route == 2) {
+    if (wiz_route >= 2) {                         /* the mode and function routes, below */
         wizm_tick();
         return;
     }
@@ -5618,7 +5628,7 @@ int pm_game_wizard(int n, int how)
         say("game wizard %d (%s): not handed over - no game", n, name);
         return 0;
     }
-    if (wiz_route == 2) return wizm_hand(n, how);
+    if (wiz_route >= 2) return wizm_hand(n, how);
     st = (unsigned *)(unsigned long)data("wizard_state");
     bit = wizard_entry(n)[1];
     say("game wizard %d (%s): player %u had selected %u, lit 0x%x, played 0x%x%s", n, name, p, st[p - 1],
@@ -5713,7 +5723,7 @@ int pm_game_wizard_claim(int n)
 {
     unsigned bit;
     if (!(can & PM_CAN_GAME_WIZARDS) || n < 1 || n > wizards_n) return 0;
-    if (wiz_route == 2) return wizm_claim(n);
+    if (wiz_route >= 2) return wizm_claim(n);
     if (!wiz_light_hooked) {
         say("game wizard %d (%s): this game's port names no wizard_light - the game's own lighting lights it too", n,
             wizard_name(n));
@@ -5745,6 +5755,7 @@ static void wizards_arm(void)
     int n;
     if (!site("wizard_start")) {
         if (data("wizard_obj_1")) wizm_arm();           /* PAD-473: the C++ titles' route */
+        else if (site("wizard_go_1")) wizf_arm();       /* ... and the plain-C titles' */
         return;                                         /* a port without mini-wizard lines: silent */
     }
     for (n = 1; n <= WIZARDS_MAX; n++) {
@@ -5857,6 +5868,74 @@ static int wizm_obj_ok(const unsigned *o)
            (e < 0 || maps_has(((const unsigned *)(unsigned long)vt)[e], 8, MAP_R | MAP_X | MAP_GAME));
 }
 
+/* ---- the plain-C titles (PAD-473): the FUNCTION route -------------------------------------------------------------
+ * The plain-C titles have no mode objects: a rule of the game's starts a mini-wizard by calling its start function
+ * (Aerosmith 1.16's Medley Multiball, Guardians' Cherry Bomb ...), which asks the game's own rules first and returns
+ * 0 when they say not now (another multiball running, ...), and its ACTIVE flag says it runs. The port names the
+ * start (`site wizard_go_<n>`, its words checked like every site), the r0 it is called with where the game's own
+ * call passes one (`value wizard_arg_<n>`, else 0: Stranger Things' Season One takes 1, as its challenge start
+ * does) and how it says it runs (`value wizard_flag_<n>`: a game flag in the item-164 bitmap; `value
+ * wizard_proc_<n>`: a process of its own, `site proc_exists`; or `data wizard_running_<n>`: a byte of its own). START waits as the mode route does - nothing of the game's in its way
+ * (the stack's multiball and modes query), no mode of ours holding the game's modes off - and then calls it; a 0
+ * back with nothing running is the game's own rules saying not now, so it is called again every 250 ms while that
+ * ball lasts. There is nothing to light: LIGHT starts it.
+ *   Most of these starts first ask whether the player has EARNED it (Aerosmith's Medley: every song played;
+ * Guardians' Cherry Bomb: four of its eight missions), and a mode hands one over instead of the player earning it,
+ * as on Bond. The port names that check (`site wizard_earned_<n>`, a function of no arguments answering 1 when it
+ * is earned); it is hooked as the port arms and answers 1 only while the runtime calls that one's start, so the rest
+ * of the start's own check - not while another of its modes runs, not twice a game - still holds, and the game's
+ * own calls of it are answered as they always were. */
+static unsigned wizf_go(int n)
+{
+    char key[24];
+    pm_snprintf(key, sizeof key, "wizard_go_%d", n);
+    return fn(key);
+}
+
+/* 1 running, 0 not, -1 the port names no running query for it (or the flag bitmap is not there yet) */
+static int wizf_runs(int n)
+{
+    char key[28];
+    long id;
+    unsigned a;
+    pm_snprintf(key, sizeof key, "wizard_flag_%d", n);
+    if ((id = pm_port_value(key, -1)) >= 0) return game_flag((unsigned)id);
+    pm_snprintf(key, sizeof key, "wizard_proc_%d", n);
+    if ((id = pm_port_value(key, -1)) >= 0) return fn("proc_exists") ? proc_alive((unsigned)id) : -1;
+    pm_snprintf(key, sizeof key, "wizard_running_%d", n);
+    if ((a = data(key)) != 0) return *(volatile const unsigned char *)(unsigned long)a != 0;
+    return -1;
+}
+
+/* the one being started by the runtime right now (its number; 0 = none): its `site wizard_earned_<n>` says yes */
+static int wizf_starting;
+
+/* the game's own "has the player earned it" check, hooked (wizf_arm): yes while the runtime starts that one, the
+ * game's own answer otherwise */
+static int wizf_earned(unsigned *regs, unsigned n)
+{
+    (void)regs;
+    return wizf_starting && (unsigned)wizf_starting == n;
+}
+
+/* its start, as the game's rules call it: what it returns (0 = the game's rules said not now) */
+static unsigned wizf_start(int n)
+{
+    char key[24];
+    unsigned r;
+    pm_snprintf(key, sizeof key, "wizard_arg_%d", n);
+    wizf_starting = n;
+    r = ((unsigned (*)(unsigned))(unsigned long)wizf_go(n))((unsigned)pm_port_value(key, 0));
+    wizf_starting = 0;
+    return r;
+}
+
+/* one of the port's mini-wizards running, on either route */
+static int wizm_runs(int n)
+{
+    return wiz_route == 3 ? wizf_runs(n) == 1 : wizm_active(wizm_obj(n, 0));
+}
+
 /* what of the game's is in the way of starting one now, in words ("" = nothing): a mode of ours holding the game's
  * modes off, or one of the game's own modes running - not its base play, not a mini-wizard's own ready mode (lit is
  * not in the way) */
@@ -5913,7 +5992,7 @@ static int wizm_try(unsigned p)
     const unsigned *o = wizm_obj(n, 0);
     const char *way;
     wizm_due[p - 1].tried = pm_ms();
-    if (wizm_active(o)) {
+    if (wizm_runs(n)) {
         say("game wizard %d (%s): running for player %u (the game started it)", n, wizard_name(n), p);
         wizm_next(p);
         return 1;
@@ -5927,6 +6006,20 @@ static int wizm_try(unsigned p)
         }
         return 0;
     }
+    if (wiz_route == 3) {                           /* the function route: the game's own rules may still say not now */
+        if (!wizf_start(n) && !wizm_runs(n)) {
+            if (!str_eq(wizm_due[p - 1].way, "(its own rules)")) {
+                pm_snprintf(wizm_due[p - 1].way, sizeof wizm_due[p - 1].way, "(its own rules)");
+                say("game wizard %d (%s): the game's own start would not start it now - started the moment it would, "
+                    "this ball", n, wizard_name(n));
+            }
+            return 0;
+        }
+        say("game wizard %d (%s): %s for player %u (its own start, as the game's rules call it)", n, wizard_name(n),
+            wizm_runs(n) ? "started" : "its start says it started, its flag not yet", p);
+        wizm_next(p);
+        return 1;
+    }
     wizm_start(o);
     say("game wizard %d (%s): %s for player %u (the mode's own start, as the game's rules call it)", n, wizard_name(n),
         wizm_active(o) ? "started" : "its start was called but it does not say it runs", p);
@@ -5939,12 +6032,16 @@ static int wizm_hand(int n, int how)
     const unsigned *o = wizm_obj(n, 0), *ready = wizm_obj(n, 1);
     unsigned p = pm_player();
     int k;
-    if (!wizm_obj_ok(o) || (ready && !wizm_obj_ok(ready))) {
+    if (wiz_route == 2 && (!wizm_obj_ok(o) || (ready && !wizm_obj_ok(ready)))) {
         say("game wizard %d (%s): not handed over - its mode object (0x%08x) is not one of this build's", n,
             wizard_name(n), (unsigned)(unsigned long)(wizm_obj_ok(o) ? ready : o));
         return 0;
     }
-    if (wizm_active(o)) {
+    if (wiz_route == 3 && wizf_runs(n) < 0) {       /* the flag bitmap is not there (yet): it could not tell */
+        say("game wizard %d (%s): not handed over - the game's flags cannot be read here", n, wizard_name(n));
+        return 0;
+    }
+    if (wizm_runs(n)) {
         say("game wizard %d (%s): already running", n, wizard_name(n));
         return PM_WIZARD_STARTED;
     }
@@ -6033,6 +6130,60 @@ static void wizm_arm(void)
     wiz_route = 2;
     say("game wizards: %d of the game's mini-wizards a mode may start (%d of them lit by a mode of the game's own), by "
         "each mode's own start (slot %ld)", wizards_n, lit, pm_port_value("stock_slot_start", -1));
+}
+
+/* the port names a running query for one that this build can answer: its flag with the flag bitmap, its process
+ * with proc_exists, or a byte of its own in the game's memory */
+static int wizf_can_tell(int n)
+{
+    char key[28];
+    unsigned run;
+    pm_snprintf(key, sizeof key, "wizard_flag_%d", n);
+    if (pm_port_value(key, -1) >= 0) return data("game_flags") != 0;
+    pm_snprintf(key, sizeof key, "wizard_proc_%d", n);
+    if (pm_port_value(key, -1) >= 0) return fn("proc_exists") != 0;
+    pm_snprintf(key, sizeof key, "wizard_running_%d", n);
+    run = data(key);
+    return run && maps_has(run, 1, MAP_R);
+}
+
+/* the function route's lines: every one named has its start in this build (the site's words checked as it loaded)
+ * and a running query - a flag where the port names the game's flag bitmap, a process where it names proc_exists,
+ * or a byte in the game's memory - and its earned check, where the port names one, hooked */
+static void wizf_arm(void)
+{
+    char key[28];
+    int n;
+    for (n = 1; n <= WIZARDS_MAX; n++) {
+        pm_snprintf(key, sizeof key, "wizard_name_%d", n);
+        if (!pm_port_text(key)) break;
+    }
+    wizards_n = n - 1;
+    for (n = 1; n <= wizards_n; n++) {
+        pm_snprintf(key, sizeof key, "wizard_go_%d", n);
+        if (!fn(key)) {
+            say("game wizards: off - %s's start (0x%08x) is not this build's", wizard_name(n),
+                site(key) ? site(key)->addr : 0u);
+            wizards_n = 0;
+            return;
+        }
+        if (!wizf_can_tell(n)) {
+            say("game wizards: off - nothing of this build's says %s runs", wizard_name(n));
+            wizards_n = 0;
+            return;
+        }
+        pm_snprintf(key, sizeof key, "wizard_earned_%d", n);
+        if (site(key) && (!fn(key) || !hook_veto_n(fn(key), wizf_earned, (unsigned)n, 1))) {
+            say("game wizards: off - %s's earned check (0x%08x) is not this build's or could not be hooked",
+                wizard_name(n), site(key)->addr);
+            wizards_n = 0;
+            return;
+        }
+    }
+    if (!wizards_n) return;
+    can |= PM_CAN_GAME_WIZARDS;
+    wiz_route = 3;
+    say("game wizards: %d of the game's mini-wizards a mode may start, by each one's own start function", wizards_n);
 }
 
 /* ---- the game's own rules: a shot that COUNTS AS one of theirs (item 160) ------------ STOCK BEGIN

@@ -431,3 +431,12 @@ text shake_setting_ms      0 1024 1024 1024
 text shake_short            0:200:0
 text shake_medium           0:384:0
 text shake_long             0:1024:0
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and its
+# ACTIVE game flag; where the start first asks whether the player has earned it, that check (hooked: yes
+# only while a mode hands this one over). The names are the game's own.
+site  wizard_go_1        0x0002f704 0xe92d4ff0 0xe24dd014   # AUD_CHERRY_BOMB_MULTIBALL_STARTED
+site  wizard_earned_1    0x0010ead0 0xe92d4070 0xe3a04000   # earned: its own check
+value wizard_flag_1      52    # FG_CHERRY_BOMB_MULTIBALL_ACTIVE
+text  wizard_name_1      Cherry Bomb Multiball

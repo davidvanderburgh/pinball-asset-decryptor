@@ -2329,6 +2329,41 @@ The lines are written from each build's own mode objects (`stock_scan_cpp`, the 
 and the names and what earns each from the game's rulesheet. Which builds are proven, and how: the plan, and
 `mode_project.WIZARDS_PROVEN`.
 
+**The plain-C titles: the function route.** Batman '66, Aerosmith, Guardians, Metallica, Stranger Things and the other
+plain-C titles have no mode objects: a rule of the game's starts a mini-wizard by calling its start function, which
+asks the game's own rules first and returns 0 when they say not now, and the mini-wizard keeps a game flag of its own
+while it runs (`FG_..._ACTIVE` in the game's flag names: the item-164 bitmap). So the port names the start and how it
+says it runs:
+
+```
+site  wizard_go_1        0x001368ec 0xe92d4f70 0xe24dd008   # its start (Batman '66 1.14's Batusi Multiball)
+value wizard_flag_1      84    # FG_MINOR_VILLAIN_WIZARD_MODE_1_ACTIVE (the port's game_flags lines name the bitmap)
+text  wizard_name_1      Batusi Multiball
+site  wizard_earned_1    0x...   # optional: the start's own "has the player earned it" check
+value wizard_arg_1       1       # optional: the r0 the game's own call passes (else 0)
+value wizard_proc_1      223     # instead of a flag: a process of its own (site proc_exists)
+data  wizard_running_1   0x...   # ... or a byte of its own, non-zero while it runs
+```
+
+- START waits as the mode route does (nothing of the game's in its way: the stack's multiball and modes query; no
+  mode of yours holding the game's modes off) and then calls the start as the game's rules do. Its own check may still
+  say not now (0 back, and its flag not up): `[pad] game wizard 1 (...): the game's own start would not start it now -
+  started the moment it would, this ball`, tried again every 250 ms while that ball lasts. A start that says it
+  started is never called again, flag up or not. There is nothing to light: LIGHT starts it.
+- The in-the-way check is the runtime's, not only the game's: Batman's Gas Attack Multiball's own start starts it on
+  top of the Batusi Multiball (it asks only that it is not running itself), and Metallica's The End of the Line on top
+  of Blackened.
+- `site wizard_earned_<n>`: most of these starts ask first whether the player has earned it (Aerosmith 1.16's Medley
+  Multiball: every song played; Guardians' Cherry Bomb: four of its eight). A mode hands one over instead of the player
+  earning it, as on Bond, so that check is hooked as the port arms and answers 1 only while the runtime calls that
+  one's start; the rest of the start's own check (not while another of its modes runs, not twice a game) holds, and
+  the game's own calls of it are answered as they always were. It must open with two plain instructions, or `push
+  {.., lr}; bl` (the hook's two shapes); the arm turns the route off otherwise.
+- `value wizard_arg_<n>`: Stranger Things 1.13's Season One and Two Wizard Modes take one argument, 1 to start without
+  asking whether it is earned (its Send It Back challenge starts Season One that way), 0 to ask.
+- A start that returns nothing (Metallica's Blackened Multiball) leaves whatever was in r0: not 0 reads as started,
+  and a 0 is judged by its flag.
+
 ## Ports: why your mode runs on any game
 
 A mode calls the game's own compiled functions, and they sit at different addresses in

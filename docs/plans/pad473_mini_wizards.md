@@ -21,16 +21,16 @@ strings naming a wizard; `C:/tmp/PAD-473/modecensus.txt`, `wizstrings.txt`) and 
 | James Bond 60th LE 1.11 | none: 007 Mode is its only wizard | | **left out** (run 1) |
 | The Munsters LE / Pro 1.28 | none: Munster Madness is its final wizard | `cmunster_madness*` | **left out** (run 1) |
 | Star Wars Home (ELG) 1.10 | none: Jedi Multiball is its only wizard | | **left out** (run 1) |
-| Aerosmith / LE 1.16 | Medley Multiball (left scoop) | plain C | open |
+| Aerosmith / LE 1.16 | Medley Multiball (left scoop) | plain C: 0x8c15c / LE 0x8c054, flag 57 | lines written; its own start refuses at game start (below) |
 | Avengers Infinity Quest LE / Pro 1.10 | Soul Gem Quest, Black Order Multiball, Battle Royale (right ramp; fixed order) | `cmode_soul_gem`, `cmode_black_order_multiball`, `cmode_battle_royale` | **proven** (run 1, mode route) |
-| Batman '66 1.14 | Batusi, Robin's Holy, Gas Attack Multiballs (left orbit, chosen) | plain C | open |
+| Batman '66 1.14 | Batusi, Gas Attack, Holy Multiballs (the program's Minor Villain Wizard Modes 1-3) | plain C: 0x1368ec, 0x13b050, 0x141f08; flags 84, 86, 87 | **proven** (run 2, function route) |
 | The Beatles 1.29 | Hard Day's Night / Beatlemania Multiball (upper magnet) | plain C | open |
 | Deadpool LE / Pro 1.16 | Mr. Sinister: Megakrakolodonus Rex, Clone Multiball (scoop) | `cmrsinister_rex`, `cmrsinister_clones` | **proven** (run 1, mode route) |
 | Dungeons & Dragons LE / Pro 1.10 | Tiny's Dice Game, Tavern Brawl (center spinner) | `ctinys_dice_game`, `ctavern_brawl` | Pro **proven**; LE lines written, no game on the rig |
 | Elvira's House of Horrors 1.13 | House Party, They Came From Space (the House) | Rule classes | open |
 | Foo Fighters LE / Pro 1.04 | Austin, D.C. (left ramp, van map) | `cmode_austin_wizard`, `cmode_dc_wizard` | **proven** (run 1, mode route) |
 | Godzilla LE / Pro 1.16 | Monster Zero, Terror of Mechagodzilla (building), Planet X Multiball (City Select) | `cmode_monster_zero`, `cmode_terror_of_mechagodzilla`, `cmode_planet_x_multiball` | **proven** (run 1, mode route) |
-| Guardians / LE 1.15 | Cherry Bomb Multiball, Immolation Initiative (right scoop) | plain C | open |
+| Guardians / LE 1.15 | Cherry Bomb Multiball, Immolation Initiative (right scoop) | plain C: Cherry Bomb 0x2f704, flag 52 | Cherry Bomb lines written; its own start refuses at game start (below) |
 | Iron Maiden LE / Pro 1.18 | 2 Minutes to Midnight, Number of the Beast ("MINI-WIZARD MODE CHAMPIONS" in the program) | `cmode_two_minutes_to_midnight`, `cmode_number_of_the_beast` | **proven** (run 1, mode route) |
 | Jaws LE / Pro 1.02 | 4th of July, Super Cast 'n Catch, Say Ah! (LE; centre ramp), Rescue / Search Multiball, Great White Multiball | `cmode_fourth_of_july`, `cmode_cast_n_catch_super`, `cmode_say_ah`, `cmode_rescue_multiball`, `cmode_search_multiball`, `cmode_great_white_multiball` | **proven** (run 1, mode route) |
 | John Wick LE / Pro 1.02 | Red Circle Reckoning, The Staircase, The Duel (left eject / crate; fixed order) | `crule_wizard_modes`, `cmode_the_staircase`, `cmode_the_duel` | **proven** (run 1, mode route) |
@@ -39,10 +39,10 @@ strings naming a wizard; `C:/tmp/PAD-473/modecensus.txt`, `wizstrings.txt`) and 
 | King Kong LE / Pro 0.97 | Crash the Gate, T-Rex Battle, T-Rex Boss Battle (gong) | `cmode_crash_the_gate`, `cmode_trex_battle`, `cmode_trex_boss_battle` | **proven** (run 1, mode route) |
 | Led Zeppelin LE / Pro 1.22 | Mothership, World Tour, Top of the Charts Multiballs | `cmothership_multiball`, `cworld_tour_multiball`, `ctop_of_the_charts_multiball` | **proven** (run 1, mode route) |
 | The Mandalorian LE / Pro 1.45 | Precious Cargo, You Have What I Want, I Like Those Odds | `crazor_crest_wizard`, `cyou_have_what_i_want`, ... | **proven** (run 1, mode route) |
-| Metallica Remastered 1.04 | Blackened, End of the Line (scoop) | plain C | open |
+| Metallica Remastered 1.04 | Blackened Multiball, The End of the Line (scoop) | plain C: 0xa2010 (flag 50), 0x140fe4 (process 0xdf) | **proven** (run 2, function route) |
 | Rush LE / Pro 1.19 | Cygnus X-1 Book 1, Book 2 (Time Machine) | `cmode_cygnus_book_1_multiball`, `_book_2_` | **proven** (run 2: waits for the ball to drain first) |
 | Star Wars LE / Pro 1.31 | Lightsaber Duel (left ramp); the four planet Finals | C++ (start slot 8 from the older build) | **proven** (run 1, mode route) |
-| Stranger Things / LE 1.13 | Total Isolation 1 / 2, Send it Back, Light the Fire (left ramp) | plain C | open |
+| Stranger Things / LE 1.13 | Season One, Season Two Wizard Mode (the program's names; also Total Isolation 1 / 2 multiballs) | plain C: 0x111fa0 / 0x11d344 (LE 0x12efac / 0x13a334), r0 1; flags 72, 78 | **proven** (run 2, function route) |
 | Black Knight: Sword of Rage LE / Pro 1.19 | KNIGHT Multiball, The King's Ransom (left spinner lane; the program's "retro" and BK2K wizard multiballs) | `cmode_original_mball`, `cmode_bk2k_mball` | **proven** (run 1, mode route) |
 | TMNT LE / Pro 1.59 | Team-Up Multiball (left ramp) | `cteam_up` (lit by `cteam_up_ready`) | **proven** (run 1, mode route) |
 | Uncanny X-Men LE / Pro 0.98 | The Future, Save Senator Kelly | `Mode_Future_Mini_Wizard`, `Mode_Save_Senator_Kelly_Wizard` | open |
@@ -110,27 +110,57 @@ wizard_slot_enable 42` makes the runtime call v[42] first - Austin then started,
   MODE_LIMITS.md (whether the game also turns the flippers off meanwhile - 0x238fd8 walks three device kinds with 0,
   then hook 0xb1 - is not proven).
 
+## Run 2: the plain-C titles' function route (2026-10-09)
+
+- **The route** (`pad_mode_runtime.c` "the FUNCTION route", `wizf_*`; MODE_SDK.md "The plain-C titles"): `site
+  wizard_go_<n>` (the start, its words checked as the port loads), `value wizard_flag_<n>` (its ACTIVE game flag in the
+  item-164 bitmap; the flag ids from the game's own FG_ name table, FG_INVALID = 0, each checked against a start that
+  sets it - `C:/tmp/PAD-473/flagid.py`, `flagsetters.py`), or `value wizard_proc_<n>` / `data wizard_running_<n>`;
+  optional `value wizard_arg_<n>` (r0) and `site wizard_earned_<n>` (the start's own earned check, hooked to answer 1
+  only during the runtime's call). START waits for nothing of the game's in its way (the stack's query) and then calls
+  it; a 0 back with the flag down is the game's own rules saying not now: called again every 250 ms that ball.
+- **The probe** (`gen/wizfn.c`: call a function, peek, watch; sweep `p7`): Batman's Minor Villain Wizard Mode 1 start
+  returned 1 and served its balls, and Mode 2's started ON TOP of it (its own check asks only its own flag 86):
+  the runtime's in-the-way check is what keeps two apart. Metallica's End of the Line started on top of Blackened
+  the same way. Aerosmith LE's Medley returned 0 (its check 0x89724 wants every song played - 0x1240f8 - and none of
+  seven of its things running, 0xa0c94, no multiball, 0x4a388, not played, flag 58); Guardians' Cherry Bomb the same
+  (0x2eb94: four of eight - 0x10ead0 - then 0xb88f8, 0x42280, flag 53).
+- **Proven** (sweep `p8`): Batman 1.14 (Batusi started, flag 84 up, 6 balls, its 5 MORE SHOTS screen; Gas Attack
+  waited), Metallica 1.04 (Blackened started, 4 balls, BLACKENED / PLAYFIELD MULTIPLIED BY BALLS IN PLAY; The End of
+  the Line waited), Stranger Things 1.13 and LE 1.13 (Season One Wizard Mode started, flag 72, 3 balls, 3,000,000 and
+  its Demogorgon scene; Season Two waited). The Batman names: the adjustments' descriptors are id-indexed 44-byte
+  records, AD_MINOR_VILLAIN_WIZARD_MODE_2_* at the GAS ATK. ones and _3_ at the HOLY ones.
+- **Not yet** (sweeps `p8`, `p10`): Aerosmith LE's Medley and Guardians' Cherry Bomb, earned check hooked, still
+  refused by the rest of their own check at game start (the runtime says "the game's own start would not start it
+  now" and tries again): something of theirs runs from the ball's start (Aerosmith: one of the seven at 0x50d000 + 0x4c
+  each, its +0x1c a running query). The `p10` probe called each at game start: the fourth, 0xae390 (= 0xcb79c(0x50e4d8),
+  a mode's running query), answered 1, the rest 0, the multiballs' 0x4a388 0, the earned check 0x1240f8 0 (no song
+  played) - so a mode of its own runs from the ball's start. Until it is known what that is and when it ends in play,
+  they stay "found, not yet seen". Aerosmith Pro 1.16 started no game in this job at all (`p7`, `p9`: Guided Setup
+  never seen, six tries), though PAD-420's jobs played it: its fresh NVRAM is the difference to look at.
+- **X-Men LE 0.98**: the Future's singleton (0x645b18, its guard 0x645c10) is built by a game's start (guard 1,
+  vtable 0x558b80 at the probe). The probe called 0x79738 - mid-function: the function opens at 0x79730 (movw/movt r0
+  = its guard), so r0 was 0 and the game died (state off). `0x7970c(0x645b18)` (enable + start) is the call to try,
+  with r0 the object (`value wizard_arg_1 0x645b18`); its running query is still to be found (the start sets +0xdc).
+- **A finding outside this ticket**: Stranger Things 1.13 / LE 1.13's `value mode_flag_3..5` (37, 136, 116, PAD-420's
+  "LE 1.12's moved up 5") are not those modes' running flags - the game's names are FG_CENTER_DROP_TARGET_BANK_REQUEST_UP,
+  FG_FORCE_MUSIC_TO_START_AT_BEGINNING and FG_BULLSHIT_SCORING_PLAYED, flags the starts set as a side effect - so the
+  stack can read one of the game's modes running when none is. Left as they are here (they did not hold the hand-overs
+  off); a ticket of its own.
+
 ## Still open
 
-- **Uncanny X-Men LE / Pro 0.98** (its own C++ framework, `Mode_` classes with a Singleton): `Mode_Future_Mini_Wizard`,
-  `Mode_Save_Senator_Kelly_Wizard` (block lines 11 and 13 on the LE). On the LE the Future's object is the singleton
-  0x645b18; `0x79738()` (no arguments) builds it if need be and calls `0x7970c(obj)`, which sets the player's enabled
-  byte (obj + player + 0xd7) and tail-calls the start 0x792f8, which returns at once without that byte - the same
-  shape as Foo Fighters' enable + START, as plain functions. A "function route" (a no-argument start per mini-wizard,
-  `site wizard_go_<n>`, and a running query) fits it and the plain-C titles.
+After run 2: 39 of the 53 latest builds proven (Bond LE and Pro; 31 C++ builds and Rush on the mode route; Batman,
+Metallica and Stranger Things / LE on the function route), 4 leave the section out, 10 open:
+
+- **Uncanny X-Men LE / Pro 0.98**: the function route with r0 the Future's object (above); Save Senator Kelly
+  (0x990e4, block line 13). The Pro's addresses from its own program.
 - **D&D LE 1.10** starts no game on the rig at all (a known rig limit, PAD-420): its lines stay unproven unless a
   machine run proves them.
-- **The plain-C titles** (Aerosmith, Batman '66, The Beatles, Guardians, Stranger Things, Metallica, Jurassic Park
-  Home, Elvira): no mode objects. Their modes start through plain functions (PAD-363's `cstarts`) and set a game flag
-  each (`mode_flag_<n>`); a third route would call the mini-wizard's start function and read its flag. Their
-  mini-wizards are multiballs, not among the block lines (multiballs are never blocked), but PAD-363's start finder
-  kept them as rejected candidates (`tools/spike2_emu/modes/sdk/cstarts/json/<key>.json`, "rejected"): Aerosmith
-  1.16 Medley Multiball 0x8c15c (and "Wizard Mode Multiball" 0x125c1c, Final Tour), Batman 1.14 Minor Villain Wizard
-  Modes 1-3 0x1368ec / 0x13b050 / 0x141f08, Guardians 1.15 Cherry Bomb 0x2f704 (and "Wizard Mode Multiball"
-  0x115074), Metallica 1.04 Blackened Multiball 0xa2010 (End of the Line not located: counted from data), Stranger
-  Things 1.13 "Wizard Mode Multiball" 0x1772d8, JP Home 1.05 Restore Power 0x68090, X-Men LE 0.98 Future (mini
-  wizard) 0x792f8 and Save Senator Kelly 0x990e4. Bond's own start calls its table's starts with r0 = 0. But a start
-  may check its own qualification first: Aerosmith's Medley start calls 0x8983c and returns 0 when it is not earned,
-  so a plain-C hand-over has to set what qualifies it (per title), not only call the start.
+- **Aerosmith / LE 1.16, Guardians / LE 1.15**: what holds their own start off at a ball's start (above), then prove;
+  Guardians' Immolation Initiative (no FG_ flag of its own: find its start and what says it runs).
+- **The Beatles 1.29** (Beatlemania Multiball / Hard Day's Night: no FG_ names for them - find the start and its
+  running query), **Jurassic Park Pin 1.05** (Escape Nublar 0x35270, Restore Power 0x68090: methods, r0 an object of
+  the game's - find it), **Elvira 1.13** (House Party, They Came From Space: the House manager's starts, C++ virtuals).
 - A mini-wizard named on the rulesheet whose class was not found: John Wick's Red Circle Reckoning (run by
   `crule_wizard_modes`), The Mandalorian's I Like Those Odds.

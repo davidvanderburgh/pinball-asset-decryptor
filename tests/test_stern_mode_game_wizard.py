@@ -709,16 +709,44 @@ int pm_event(const char *n) { return !strcmp(n, "game_start") ? 7 : -1; }
 static unsigned event_count(int id) { return id == 7 ? games : 0; }
 static void say(const char *fmt, ...) { va_list a; va_start(a, fmt); printf("SAY "); vprintf(fmt, a); printf("\n"); va_end(a); }
 static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
+/* the function route (the plain-C titles): each mini-wizard's start function; its ACTIVE game flag is the object's
+ * `on` (flag 100 + the object) */
+static int fn_route, refuse[4], no_flag, arg1, wizf_starting;
+static int go_k(int k, unsigned arg)
+{
+    struct obj *o = &objs[k == 3 ? 3 : k - 1];
+    printf("GO %d arg %u\n", k, arg);
+    if (refuse[k]) return 0;                        /* the game's own rules: not now */
+    if (!no_flag) o->on = 1;
+    return 1;
+}
+static int go1(unsigned a) { return go_k(1, a); }
+static int go2(unsigned a) { return go_k(2, a); }
+static int go3(unsigned a) { return go_k(3, a); }
+static int game_flag(unsigned id) { return id >= 100 && id < 104 ? objs[id - 100].on : -1; }
+static int proc_route;                          /* "proc": mini-wizard 2 says it runs by a process of its own, 223 */
+static int proc_alive(unsigned id) { return id == 223 && objs[1].on; }
 static unsigned data(const char *n)
 {
+    if (fn_route) return !strcmp(n, "game_flags") ? 1u : 0u;
     if (!strncmp(n, "wizard_obj_", 11) && atoi(n + 11) >= 1 && atoi(n + 11) <= 3)
         return atoi(n + 11) == 3 ? (unsigned)(unsigned long)&objs[3] : (unsigned)(unsigned long)&objs[atoi(n + 11) - 1];
     if (!strcmp(n, "wizard_ready_1")) return (unsigned)(unsigned long)&objs[2];
     return 0;
 }
-static unsigned fn(const char *n) { return 0; }
+static unsigned fn(const char *n)
+{
+    if (!fn_route) return 0;
+    if (!strcmp(n, "proc_exists")) return proc_route;
+    return !strcmp(n, "wizard_go_1") ? (unsigned)(unsigned long)go1 : !strcmp(n, "wizard_go_2")
+        ? (unsigned)(unsigned long)go2 : !strcmp(n, "wizard_go_3") ? (unsigned)(unsigned long)go3 : 0;
+}
 long pm_port_value(const char *n, long f)
 {
+    if (fn_route && proc_route && !strcmp(n, "wizard_proc_2")) return 223;
+    if (fn_route && proc_route && !strcmp(n, "wizard_flag_2")) return f;
+    if (fn_route && !strncmp(n, "wizard_flag_", 12)) return atoi(n + 12) == 3 ? 103 : 99 + atoi(n + 12);
+    if (fn_route && !strcmp(n, "wizard_arg_1")) return arg1;
     return !strcmp(n, "stock_slot_start") ? SLOT_START : !strcmp(n, "stock_slot_active") ? SLOT_ACTIVE
         : !strcmp(n, "wizard_slot_enable") ? enable_slot : f;
 }
@@ -779,6 +807,12 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "off")) objs[atoi(argv[++i])].on = 0;       /* ... and it ends */
         else if (!strcmp(c, "base")) stock_base[atoi(argv[++i])] = 1;
         else if (!strcmp(c, "bad")) bad = atoi(argv[++i]);
+        else if (!strcmp(c, "fnroute")) fn_route = 1, wiz_route = 3, table_route = 0;
+        else if (!strcmp(c, "refuse")) refuse[atoi(argv[++i])] = 1;
+        else if (!strcmp(c, "allow")) refuse[atoi(argv[++i])] = 0;
+        else if (!strcmp(c, "noflag")) no_flag = 1;
+        else if (!strcmp(c, "proc")) proc_route = 1;
+        else if (!strcmp(c, "arg")) arg1 = atoi(argv[++i]);
         else if (!strcmp(c, "needen")) need_enable = 1;
         else if (!strcmp(c, "enable")) enable_slot = SLOT_ENABLE;
         else if (!strcmp(c, "notable")) table_route = 0;
@@ -804,7 +838,8 @@ def _wizm(tmp_path, *args):
         "static unsigned wizm_vfn(const unsigned *o, const char *slot)", "static int wizm_active(const unsigned *o)",
         "static void wizm_start(const unsigned *o)", "static int wizm_obj_here(const unsigned *o)",
         "static int wizm_owns(const unsigned *o)\n{",
-        "static int wizm_obj_ok(const unsigned *o)", "static const char *wizm_way(void)",
+        "static int wizm_obj_ok(const unsigned *o)", "static unsigned wizf_go(int n)", "static int wizf_runs(int n)",
+        "static unsigned wizf_start(int n)", "static int wizm_runs(int n)", "static const char *wizm_way(void)",
         "static void wizm_next(unsigned p)", "static int wizm_try(unsigned p)", "static int wizm_hand(int n, int how)\n{",
         "static void wizm_tick(void)\n{", "int pm_game_wizard(int n, int how)", "static int wizard_by_name(const char *name)",
         "int pm_game_wizard_named(const char *name, int how)"))
@@ -906,7 +941,7 @@ def test_the_mode_route_checks_each_object_against_the_build():
     assert arm.index("wizm_obj_here") < arm.index("can |= PM_CAN_GAME_WIZARDS") and "wizm_obj_ok" not in arm
     hand = src[src.index("static int wizm_hand(int n, int how)\n{"):]
     hand = hand[:hand.index("\n}\n")]
-    assert hand.index("wizm_obj_ok(o)") < hand.index("wizm_active(o)") < hand.index("wizm_start(")
+    assert hand.index("wizm_obj_ok(o)") < hand.index("wizm_runs(n)") < hand.index("wizm_start(")
     wa = src[src.index("static void wizards_arm(void)"):]
     assert 'if (data("wizard_obj_1")) wizm_arm();' in wa[:wa.index("\n}\n")]
 
@@ -925,6 +960,89 @@ def test_the_mode_route_refuses_an_object_that_is_not_the_builds(tmp_path):
     out = _wizm(tmp_path, "bad", "0", "start", "Monster Zero", "start", "Terror of Mechagodzilla")
     assert "START 0" not in out and "START 1" in out and out.count("R 0") == 1
     assert any("game wizard 1 (Monster Zero): not handed over - its mode object" in ln for ln in out)
+
+
+# ---- PAD-473: the plain-C titles' function route (the same harness: each one's start function, its ACTIVE flag) ----
+def test_the_function_route_starts_one_by_its_own_start_function(tmp_path):
+    out = _wizm(tmp_path, "fnroute", "start", "Monster Zero")
+    assert "GO 1 arg 0" in out and "R 2" in out and out[-1] == "S on 10000"
+    assert any("game wizard 1 (Monster Zero): started for player 1 (its own start, as the game's rules call it)" in ln
+               for ln in out)
+    out = _wizm(tmp_path, "fnroute", "arg", "1", "start", "Monster Zero")        # Stranger Things' Season One: r0 = 1
+    assert "GO 1 arg 1" in out
+    # Metallica's The End of the Line has no flag: its own process (223 here) says it runs
+    out = _wizm(tmp_path, "fnroute", "proc", "start", "Terror of Mechagodzilla", "start", "Terror of Mechagodzilla")
+    assert out.count("GO 2 arg 0") == 1 and any("already running" in ln for ln in out)
+
+
+def test_the_function_route_waits_for_a_multiball_of_the_games(tmp_path):
+    """Batman 1.14 on the rig: the Gas Attack Multiball's own start started it on top of the Batusi Multiball (both
+    returned 1) - its rules ask only that it is not running itself - so the stack's query holds it back."""
+    out = _wizm(tmp_path, "fnroute", "start", "Monster Zero", "start", "Terror of Mechagodzilla", "wait", "tick")
+    assert out.count("GO 1 arg 0") == 1 and "GO 2 arg 0" not in out and "R 3" in out
+    assert any("one of the game's modes is in its way" in ln for ln in out)
+    out = _wizm(tmp_path, "fnroute", "on", "3", "start", "Monster Zero", "wait", "tick", "off", "3", "wait", "tick")
+    assert out.count("GO 1 arg 0") == 1 and out[-1] == "S on 10000"
+    assert out.index("GO 1 arg 0") > out.index("S on 00000")
+    assert sum("a multiball is in its way" in ln for ln in out) == 1
+
+
+def test_the_function_route_tries_again_while_the_games_own_rules_say_not_now(tmp_path):
+    out = _wizm(tmp_path, "fnroute", "refuse", "1", "start", "Monster Zero", "wait", "tick", "wait", "tick", "allow", "1",
+                "wait", "tick", "wait", "tick")
+    assert "R 3" in out and out.count("GO 1 arg 0") == 4 and out[-1] == "S on 10000"
+    assert sum("the game's own start would not start it now - started the moment it would, this ball" in ln
+               for ln in out) == 1
+    out = _wizm(tmp_path, "fnroute", "refuse", "1", "start", "Monster Zero", "ball_end", "wait", "tick", "allow", "1",
+                "wait", "tick")
+    assert out.count("GO 1 arg 0") == 1
+    assert any("the ball ended before nothing of the game's was in its way - not started" in ln for ln in out)
+
+
+def test_the_function_route_never_starts_one_twice(tmp_path):
+    """A start that says it started (1) with its flag not up yet is done with: called again it would start it twice."""
+    out = _wizm(tmp_path, "fnroute", "noflag", "start", "Monster Zero", "wait", "tick", "wait", "tick")
+    assert out.count("GO 1 arg 0") == 1 and "R 2" in out
+    assert any("its start says it started, its flag not yet" in ln for ln in out)
+    out = _wizm(tmp_path, "fnroute", "on", "0", "start", "Monster Zero", "light", "Terror of Mechagodzilla")
+    assert "GO 1 arg 0" not in out and any("already running" in ln for ln in out)
+    assert any("lights it for no start shot of its own - started instead" in ln for ln in out)
+
+
+def test_the_function_route_arms_only_on_a_whole_port():
+    """Every one named needs its start (a site, so its words were checked against the build as the port loaded) and a
+    running query: its game flag where the port names the bitmap, or a readable byte of its own."""
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    arm = src[src.index("static void wizf_arm(void)\n{"):]
+    arm = arm[:arm.index("\n}\n")]
+    assert 'pm_snprintf(key, sizeof key, "wizard_go_%d", n);\n        if (!fn(key))' in arm
+    assert "if (!wizf_can_tell(n))" in arm and "hook_veto_n(fn(key), wizf_earned, (unsigned)n, 1)" in arm
+    assert arm.index("wizards_n = 0;") < arm.index("can |= PM_CAN_GAME_WIZARDS") and "wiz_route = 3;" in arm
+    tell = src[src.index("static int wizf_can_tell(int n)"):]
+    tell = tell[:tell.index("\n}\n")]
+    assert 'return data("game_flags") != 0;' in tell and 'return fn("proc_exists") != 0;' in tell
+    assert "maps_has(run, 1, MAP_R)" in tell
+    wa = src[src.index("static void wizards_arm(void)"):]
+    assert 'else if (site("wizard_go_1")) wizf_arm();' in wa[:wa.index("\n}\n")]
+
+
+def test_a_function_route_port_names_its_wizards_and_lights_none():
+    port = {"site": {"wizard_go_1": 1, "wizard_go_2": 1}, "data": {"game_flags": 1}, "value": {"wizard_flag_1": 84,
+            "wizard_flag_2": 86}, "text": {"wizard_name_1": "Batusi Multiball", "wizard_film_1": "f1",
+            "wizard_name_2": "Gas Attack Multiball", "wizard_name_3": "Holy Multiball"}}
+    assert MP._wizard_route(port) == 3
+    assert MP._game_wizards(port) == (("Batusi Multiball", "f1"), ("Gas Attack Multiball", ""))   # 3 has no start
+    assert MP._wizard_lights(port) == ()
+    del port["data"]["game_flags"]                       # a flag with no bitmap says nothing
+    assert MP._game_wizards(port) == ()
+    del port["value"]["wizard_flag_1"]
+    port["data"]["wizard_running_1"] = 0x645b18          # a byte of its own
+    assert MP._game_wizards(port) == (("Batusi Multiball", "f1"),)
+    del port["data"]["wizard_running_1"]
+    port["value"]["wizard_proc_1"] = 223                 # its process: only with the game's proc_exists
+    assert MP._game_wizards(port) == ()
+    port["site"]["proc_exists"] = 1
+    assert MP._game_wizards(port) == (("Batusi Multiball", "f1"),)
 
 
 # ---- the blocks --------------------------------------------------------------------------------

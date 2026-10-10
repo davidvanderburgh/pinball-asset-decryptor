@@ -993,6 +993,13 @@ WIZARDS_PROVEN = frozenset({
     # 0x202 meanwhile) before its intro plays; the rig's drain (plunge.py) let it run on (sweep p6)
     "rush_le-1.19",   # Cygnus X-1 Book 1 started (ACTIVE 1, CHOOSE A PLANET on the glass); Book 2 waited while it ran
     "rush_pro-1.19",   # Cygnus X-1 Book 1 started (ACTIVE 1, CHOOSE A PLANET on the glass); Book 2 waited while it ran
+    # the plain-C titles' function route (rigbatch p8, stock cards, hidden, muted): a `game_wizard start` file called
+    # the mini-wizard's own start, its ACTIVE game flag rose and its balls were served; a second one waited ("a
+    # multiball is in its way") - the game's own starts would have started it on top (the probe, p7)
+    "batman-1.14",   # Batusi Multiball started (flag 84, 6 balls, 5 MORE SHOTS); Gas Attack Multiball waited
+    "metallica_spike-1.04",   # Blackened Multiball started (flag 50, 4 balls, BLACKENED on the glass); The End of the Line waited
+    "stranger_things-1.13",   # Season One Wizard Mode started (flag 72, 3 balls); Season Two waited while it ran
+    "stranger_things_le-1.13",   # Season One Wizard Mode started (flag 72, 3 balls); Season Two waited while it ran
 })
 #: how a mode hands one over: lit for the game's start shot, or started at once
 WIZARD_HOW = ("light", "start")
@@ -1007,20 +1014,40 @@ WIZARD_MODE_NEEDS = ("stock_slot_start", "stock_slot_active")
 
 
 def _wizard_route(port):
-    """PAD-473: 1 James Bond's wizard table (WIZARD_NEEDS), 2 the C++ titles' mode objects, 0 neither complete."""
+    """PAD-473: 1 James Bond's wizard table (WIZARD_NEEDS), 2 the C++ titles' mode objects, 3 the plain-C titles'
+    start functions (`site wizard_go_<n>`), 0 none complete."""
     sites, data = WIZARD_NEEDS
     if all(n in port["site"] for n in sites) and all(n in port["data"] for n in data):
         return 1
     if "wizard_obj_1" in port["data"] and all(n in port["value"] for n in WIZARD_MODE_NEEDS):
         return 2
+    if "wizard_go_1" in port["site"]:
+        return 3
     return 0
+
+
+def _wizard_whole(port, route, n):
+    """PAD-473: the lines mini-wizard ``n`` needs on its route: its mode object (2); its start and how it says it runs
+    - a game flag where the port names the flag bitmap, a process of its own where it names proc_exists, or a byte of
+    its own (3)."""
+    if route == 2:
+        return "wizard_obj_%d" % n in port["data"]
+    if route == 3:
+        if "wizard_go_%d" % n not in port["site"]:
+            return False
+        if "wizard_flag_%d" % n in port["value"]:
+            return "game_flags" in port["data"]
+        if "wizard_proc_%d" % n in port["value"]:
+            return "proc_exists" in port["site"]
+        return "wizard_running_%d" % n in port["data"]
+    return True
 
 
 def _game_wizards(port):
     """PAD-436: ``((name, film), ...)`` in number order: the port's mini-wizards as the runtime arms them -
     `text wizard_name_<n>` numbered from 1 with no gaps, each with its film (`text wizard_film_<n>`, "" when not
-    named; PAD-473: on the mode route, what earns it), and its mode object there. () when the port lacks the lines
-    the runtime needs."""
+    named; PAD-473: on the mode and function routes, what earns it), each with the lines its route needs
+    (_wizard_whole). () when the port lacks the lines the runtime needs."""
     if not port:
         return ()
     route = _wizard_route(port)
@@ -1028,7 +1055,7 @@ def _game_wizards(port):
         return ()
     out, n = [], 1
     while port["text"].get("wizard_name_%d" % n, "").strip():
-        if route == 2 and "wizard_obj_%d" % n not in port["data"]:
+        if not _wizard_whole(port, route, n):
             break
         name = port["text"]["wizard_name_%d" % n].strip()
         if len(name) < WIZARD_NAME_MAX:
@@ -1039,7 +1066,8 @@ def _game_wizards(port):
 
 def _wizard_lights(port):
     """PAD-473: the names of the mini-wizards a mode can LIGHT for the game's start shot: all of Bond's table; on the
-    mode route, the ones the game lights through a mode of its own (`data wizard_ready_<n>`). The rest are started."""
+    mode route, the ones the game lights through a mode of its own (`data wizard_ready_<n>`); none on the function
+    route. The rest are started."""
     names = _game_wizards(port)
     if not names or _wizard_route(port) == 1:
         return tuple(n for n, _f in names)

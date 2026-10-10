@@ -421,3 +421,16 @@ text shake_short            0:200:0
 text shake_medium           0:384:0
 text shake_long             0:1024:0
 text shake_rumble           0:2816:0
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and its
+# ACTIVE game flag; where the start first asks whether the player has earned it, that check (hooked: yes
+# only while a mode hands this one over). The names are the game's own.
+site  wizard_go_1        0x00111fa0 0xe92d41f0 0xe24dd008   # its Send It Back challenge's start passes 1
+value wizard_arg_1       1
+value wizard_flag_1      72    # FG_SEASON_ONE_WIZARD_MODE_MULTIBALL_ACTIVE
+text  wizard_name_1      Season One Wizard Mode
+site  wizard_go_2        0x0011d344 0xe92d41f0 0xe24dd008   # the same shape, 1 the same
+value wizard_arg_2       1
+value wizard_flag_2      78    # FG_SEASON_TWO_WIZARD_MODE_MULTIBALL_ACTIVE
+text  wizard_name_2      Season Two Wizard Mode

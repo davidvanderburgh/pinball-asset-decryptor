@@ -700,3 +700,17 @@ text shake_setting_ms      0 1024 1024 1024
 text shake_short            0:200:0
 text shake_medium           0:384:0
 text shake_long             0:1024:0
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and how
+# it says it runs (its ACTIVE game flag, or a process or byte of its own); where the start first asks whether
+# the player has earned it, that check (hooked: yes only while a mode hands this one over). The names are
+# the game's own.
+site  wizard_go_1        0x000d57d8 0xe5903000 0xe92d40f0   # HousePartyRule's start (v[22]; it asks its v[20] first: no House or other rule running)
+value wizard_arg_1       0x0087e06c   # its mode object
+data  wizard_running_1   0x0087e09e   # the rule's +0x32: its own running test (v[15]) reads it
+text  wizard_name_1      House Party
+site  wizard_go_2        0x00181dd8 0xe5903000 0xe92d40f0   # TheyCameFromSpaceRule's start (v[22], the same shape)
+value wizard_arg_2       0x00885e28   # its mode object
+data  wizard_running_2   0x00885e5a   # the rule's +0x32: its own running test (v[15]) reads it
+text  wizard_name_2      They Came From Space

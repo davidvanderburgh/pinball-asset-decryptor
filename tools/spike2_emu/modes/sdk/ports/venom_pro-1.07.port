@@ -683,3 +683,10 @@ text shake_tap              0:80:0
 text shake_short            0:200:0
 text shake_medium           0:484:0
 text shake_long             0:1024:0
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[47]) as the game's rules start it and asked its ACTIVE (v[54]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x00730918   # ctoxin_teamup, a multiball
+text  wizard_name_1   Toxin Team-Up
+text  wizard_film_1   Mayhem or Carnage Multiball, or a Doppelganger

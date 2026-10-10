@@ -861,3 +861,14 @@ text shake_short            0:200:3
 text shake_medium           0:334:3
 text shake_long             0:1334:3
 text shake_rumble           0:1666:3
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[41]) as the game's rules start it and asked its ACTIVE (v[49]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x03bb7360   # cmode_austin_wizard, a multiball
+text  wizard_name_1   Austin
+text  wizard_film_1   three van cities
+data  wizard_obj_2    0x03bb7438   # cmode_dc_wizard, a multiball
+text  wizard_name_2   D.C.
+text  wizard_film_2   three van cities
+value wizard_slot_enable 42   # its base class's enable: sets the player's byte at +0x83 that START's check (v[46]) reads

@@ -585,3 +585,24 @@ text shake_short            0:200:0
 text shake_medium           0:334:0
 text shake_long             0:1024:0
 text shake_rumble           0:2048:0
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[8]) as the game's rules start it and asked its ACTIVE (v[15]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x00675bc8   # clightsaber_duel
+data  wizard_ready_1  0x00675d44   # clightsaber_duel_ready: lights it for the start shot
+text  wizard_name_1   Lightsaber Duel
+text  wizard_film_1   FORCE five times
+data  wizard_obj_2    0x006744d0   # choth_mini, a multiball
+text  wizard_name_2   Escape from Hoth
+text  wizard_film_2   every Hoth mode
+data  wizard_obj_3    0x006748e0   # cdeathstar_mini, a multiball
+text  wizard_name_3   Destroy the Death Star
+text  wizard_film_3   every Death Star mode
+data  wizard_obj_4    0x00674ca4   # cendor_mini, a multiball
+text  wizard_name_4   Battle Above Endor
+text  wizard_film_4   every Endor mode
+data  wizard_obj_5    0x00675048   # ctatooine_mini, a multiball
+text  wizard_name_5   Escape from Tatooine
+text  wizard_film_5   every Tatooine mode
+text  wizard_shot      Left ramp

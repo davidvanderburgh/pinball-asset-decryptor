@@ -764,3 +764,16 @@ text shake_tap              0:100:0
 text shake_short            0:200:0
 text shake_medium           0:334:0
 text shake_long             0:1500:1
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[33]) as the game's rules start it and asked its ACTIVE (v[39]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x0424ae54   # cmothership_multiball, a multiball
+text  wizard_name_1   Mothership Multiball
+text  wizard_film_1   five songs
+data  wizard_obj_2    0x0424bc78   # cworld_tour_multiball, a multiball
+text  wizard_name_2   World Tour Multiball
+text  wizard_film_2   all four tour multiballs
+data  wizard_obj_3    0x0424c4f4   # ctop_of_the_charts_multiball, a multiball
+text  wizard_name_3   Top of the Charts Multiball
+text  wizard_film_3   all ten songs

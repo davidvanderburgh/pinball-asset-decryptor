@@ -2272,9 +2272,105 @@ the same call); a machine. Bond LE 1.06's own boot crashed at times on the rig t
 0xaa470, then its dispatch watchdog) with no mode object at all, while other rigs loaded the disk: a boot that got to
 attract ran clean.
 
-**Not done.** Bond Pro 1.06 has no port yet; the 60th Anniversary edition (its own rules) was not looked at. The game's
-own lighting by parts was left as it is: stopping it ("instead of", PAD-428's first ask) would hold off `0x110cac`'s two
-calls in the collect, a separate choice.
+**James Bond Pro 1.06 (PAD-473).** The Pro's program carries the LE's mini-wizard code, 0xfcc lower: the same table
+(`0x621d38`, the same four entries, inserts and Ahoy's start `0x20530`), the start `0x10fdcc` (called from the Right
+ramp's handler `0x1ad998`), the lighting `0x10fce0` (from the collect, twice), the player's words `0x81dc34` and the
+refresh byte `0x869ab8`, each read off the same instructions as the LE's. Proven in the emulator (2026-10-09, rig 1,
+the stock Pro card, hidden, muted): `game_wizard light Goldfinger's Jackpot` lit it (selected 2, lit 0x4, the game's
+ready check 1), the Right ramp's switches started it (played 0x4, its running query 1, GOLDFINGER'S JACKPOT on the
+glass), and `game_wizard start Ahoy Mr. Bond` while it ran left Ahoy lit for the ramp (the game's own check: one is
+running). No abort.
+
+**Not done.** The game's own lighting by parts was left as it is: stopping it ("instead of", PAD-428's first ask)
+would hold off `0x110cac`'s two calls in the collect, a separate choice.
+
+## The game's own mini-wizards on the other titles (PAD-473)
+
+Every latest build but James Bond's was greyed "The app has not found X's own mini-wizards". PAD-473 read each game's
+own modes and its rulesheet (`docs/plans/pad473_mini_wizards.md`): three games have none of their own - The Munsters
+(Munster Madness is its final wizard), the Star Wars Home Edition (Jedi Multiball) and James Bond 60th (007 Mode) - and
+the Modes tab leaves the section out on them (`mode_project.NO_GAME_WIZARDS`), as it does a machine part a machine
+lacks. Every other game has some.
+
+**The C++ titles: the mode route.** Bond keeps its mini-wizards in a table of its own; the C++ titles (`cmode` /
+`crule` classes: Godzilla, King Kong, Iron Maiden, Jaws, Star Wars, TMNT, ...) do not, but they all start one of their
+modes the same way: a rule of the game's calls the mode object's START virtual with only the object (TMNT 1.59:
+`getter(0x18)->v[39]()`, `value stock_slot_start`), and the mode's ACTIVE virtual (`value stock_slot_active`, the one
+`stack no` asks) says it runs. So the port names each mini-wizard's object, and the runtime starts it the game's way:
+
+```
+data  wizard_obj_1    0x007b5e78   # cmode_monster_zero (Godzilla Premium/LE 1.16)
+text  wizard_name_1   Monster Zero
+text  wizard_film_1   Godzilla Multiball's Super Jackpot      # what earns it, shown beside the name
+data  wizard_ready_1  0x...        # optional: the game's own mode that lights it for a start shot
+text  wizard_shot     Left ramp    # with a ready mode: the shot that starts a lit one
+```
+
+- `pm_game_wizard(n, PM_WIZARD_START)` calls the object's START once nothing of the game's is in its way: none of its
+  own modes running but its base play (the walk `stack no` uses; a mini-wizard's own ready mode is not in its way),
+  and no mode of yours holding the game's modes off. Until then it waits, tried every 250 ms while that ball lasts:
+  `[pad] game wizard 2 (Terror of Mechagodzilla): a multiball (cmode_planet_x_multiball) is in its way - started the
+  moment nothing is, this ball`. Several handed over start in order, never on top of each other. If the ball ends
+  first, it is lit (its ready mode) where the game has one, and dropped where it has none.
+- `PM_WIZARD_LIGHT` starts its ready mode (Star Wars' `clightsaber_duel_ready`, TMNT's `cteam_up_ready`): lit, and the
+  game's own start shot starts it. One the game lights for no start shot of its own is started instead (the Modes tab
+  offers only Start for it, and the file says `start`).
+- The game's own way to them is left as it is: its rules still light and start them too (no claim: Bond's lighting
+  veto has no counterpart here).
+- `value wizard_slot_enable <slot>`: where a mode's START returns at once unless the game's rules enabled it for the
+  player first (Foo Fighters 1.04: START asks v[46], which reads the player's byte at the object's +0x83; v[42] sets
+  it, v[43] clears it), the runtime calls that ENABLE virtual just before the START.
+- The objects are the game's static ones: their vtables are written by the game's own constructors, which have not
+  run when the runtime arms, so the arm checks the port's two slot values and that each object is in the game's
+  memory, and every hand-over checks the object's vtable and both slots' functions in the game's code before it calls
+  anything (`[pad] game wizard 1 (...): not handed over - its mode object (0x...) is not one of this build's`).
+
+The lines are written from each build's own mode objects (`stock_scan_cpp`, the scanner the block lines come from)
+and the names and what earns each from the game's rulesheet. Which builds are proven, and how: the plan, and
+`mode_project.WIZARDS_PROVEN`.
+
+**The plain-C titles: the function route.** Batman '66, Aerosmith, Guardians, Metallica, Stranger Things and the other
+plain-C titles have no mode objects: a rule of the game's starts a mini-wizard by calling its start function, which
+asks the game's own rules first and returns 0 when they say not now, and the mini-wizard keeps a game flag of its own
+while it runs (`FG_..._ACTIVE` in the game's flag names: the item-164 bitmap). So the port names the start and how it
+says it runs:
+
+```
+site  wizard_go_1        0x001368ec 0xe92d4f70 0xe24dd008   # its start (Batman '66 1.14's Batusi Multiball)
+value wizard_flag_1      84    # FG_MINOR_VILLAIN_WIZARD_MODE_1_ACTIVE (the port's game_flags lines name the bitmap)
+text  wizard_name_1      Batusi Multiball
+site  wizard_earned_1    0x...   # optional: the start's own "has the player earned it" check
+value wizard_arg_1       1       # optional: the r0 the game's own call passes (else 0)
+value wizard_proc_1      223     # instead of a flag: a process of its own (site proc_exists)
+data  wizard_running_1   0x...   # ... or a byte of its own, non-zero while it runs
+data  wizard_built_1     0x...   # optional: the construction guard of the object wizard_arg_1 is (bit 0 once built)
+```
+
+- START waits as the mode route does (nothing of the game's in its way: the stack's multiball and modes query; no
+  mode of yours holding the game's modes off) and then calls the start as the game's rules do. Its own check may still
+  say not now (0 back, and its flag not up): `[pad] game wizard 1 (...): the game's own start would not start it now -
+  started the moment it would, this ball`, tried again every 250 ms while that ball lasts. A start that says it
+  started is never called again, flag up or not. There is nothing to light: LIGHT starts it.
+- The in-the-way check is the runtime's, not only the game's: Batman's Gas Attack Multiball's own start starts it on
+  top of the Batusi Multiball (it asks only that it is not running itself), and Metallica's The End of the Line on top
+  of Blackened. Another of the port's own mini-wizards running is in the way as well, whether the stack sees it or not
+  (X-Men's Save Senator Kelly started on top of the Future: neither is a multiball, nor among its running bytes):
+  `[pad] game wizard 2 (...): The Future (another of its mini-wizards) is in its way`.
+- Starts that are methods take their object in r0 (`value wizard_arg_<n>`: X-Men 0.98's mode singletons, Jurassic Park
+  The Pin's rules): the game builds those itself, so `data wizard_built_<n>` names the object's construction guard and
+  the start is not called while it reads unbuilt ("the game has not built its object yet - started the moment it has").
+  X-Men's own enable-and-start is the call (`0x7970c`: the player's enabled byte, then the start, which returns at once
+  without it), the way Foo Fighters' START needs its enable on the mode route.
+- `site wizard_earned_<n>`: most of these starts ask first whether the player has earned it (Aerosmith 1.16's Medley
+  Multiball: every song played; Guardians' Cherry Bomb: four of its eight). A mode hands one over instead of the player
+  earning it, as on Bond, so that check is hooked as the port arms and answers 1 only while the runtime calls that
+  one's start; the rest of the start's own check (not while another of its modes runs, not twice a game) holds, and
+  the game's own calls of it are answered as they always were. It must open with two plain instructions, or `push
+  {.., lr}; bl` (the hook's two shapes); the arm turns the route off otherwise.
+- `value wizard_arg_<n>`: Stranger Things 1.13's Season One and Two Wizard Modes take one argument, 1 to start without
+  asking whether it is earned (its Send It Back challenge starts Season One that way), 0 to ask.
+- A start that returns nothing (Metallica's Blackened Multiball) leaves whatever was in r0: not 0 reads as started,
+  and a 0 is judged by its flag.
 
 ## Ports: why your mode runs on any game
 

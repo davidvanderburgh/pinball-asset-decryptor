@@ -603,3 +603,19 @@ text shake_setting_ms      0 1024 1024 1024
 text shake_short            0:200:0
 text shake_medium           0:384:0
 text shake_long             0:1024:0
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and how
+# it says it runs (its ACTIVE game flag, or a process or byte of its own); where the start first asks whether
+# the player has earned it, that check (hooked: yes only while a mode hands this one over). The names are
+# the game's own.
+# the game's flags (its own get 0x139f24: the bitmap's pointer at [0x5b28d8 + 4], its size in bits at
+# [0x49ab70]), for the mini-wizard's flag below
+data  game_flags             0x005b28d8
+data  game_flag_count        0x0049ab70
+value game_flags_at          4
+site  wizard_go_1        0x00039270 0xe92d40f0 0xe24dd00c   # its upper magnet's start passes 1 (0 asks the modes' levels first)
+value wizard_arg_1       1
+value wizard_flag_1      81    # FG_MAIN_MULTIBALL_ACTIVE
+text  wizard_name_1      Beatlemania Multiball
+text  wizard_film_1      level 3 in all five modes

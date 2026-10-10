@@ -439,3 +439,19 @@ text shake_short            0:200:3
 text shake_medium           0:334:2
 text shake_long             0:1000:3
 text shake_rumble           0:5000:3
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and how
+# it says it runs (its ACTIVE game flag, or a process or byte of its own); where the start first asks whether
+# the player has earned it, that check (hooked: yes only while a mode hands this one over). The names are
+# the game's own.
+site  wizard_go_1        0x00075f70 0xe92d4010 0xe1a04000   # its enable (+0xd7) and the start 0x75b5c (the LE's 0x792f8)
+value wizard_arg_1       0x0063ae90   # its mode object
+data  wizard_built_1     0x0063af88   # that object's construction guard
+data  wizard_running_1   0x0063af6c   # the object's +0xdc: its start sets it, its stop and end clear it
+text  wizard_name_1      The Future
+site  wizard_go_2        0x00095b50 0xe92d4010 0xe1a04000   # its enable (+0xa7) and the start 0x95928 (the LE's 0x990e4)
+value wizard_arg_2       0x0063a368   # its mode object
+data  wizard_built_2     0x0063a7d8   # that object's construction guard
+data  wizard_running_2   0x0063a414   # the object's +0xac: its start sets it, its end clears it
+text  wizard_name_2      Save Senator Kelly

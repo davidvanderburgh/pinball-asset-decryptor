@@ -587,3 +587,25 @@ text shake_setting_ms      0 100 334 500 5000
 text shake_tap              0:100:2
 text shake_short            0:200:0
 text shake_medium           0:500:0
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[12]) as the game's rules start it and asked its ACTIVE (v[18]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x0086c090   # cmode_fourth_of_july
+text  wizard_name_1   4th of July
+text  wizard_film_1   all five shark encounters
+data  wizard_obj_2    0x0086a6e0   # cmode_cast_n_catch_super, a multiball
+text  wizard_name_2   Super Cast 'n Catch
+text  wizard_film_2   all five Fish Finder awards
+data  wizard_obj_3    0x0086b780   # cmode_say_ah
+text  wizard_name_3   Say Ah!
+text  wizard_film_3   all five wheel awards
+data  wizard_obj_4    0x0086abe0   # cmode_rescue_multiball, a multiball
+text  wizard_name_4   Rescue Multiball
+text  wizard_film_4   all five beaches closed
+data  wizard_obj_5    0x0086ad08   # cmode_search_multiball, a multiball
+text  wizard_name_5   Search Multiball
+text  wizard_film_5   all five beaches closed
+data  wizard_obj_6    0x0086add8   # cmode_great_white_multiball, a multiball
+text  wizard_name_6   Great White Multiball
+text  wizard_film_6   Quint's gear or the bounty sharks

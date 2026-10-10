@@ -703,3 +703,13 @@ text shake_setting_ms      0 100 334 500 4000
 text shake_tap              0:100:2
 text shake_short            0:200:1
 text shake_medium           0:500:0
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[40]) as the game's rules start it and asked its ACTIVE (v[46]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x0b652e88   # cmode_cygnus_book_1_multiball, a multiball
+text  wizard_name_1   Cygnus X-1 Book 1
+text  wizard_film_1   all six multiballs started
+data  wizard_obj_2    0x0b652ff8   # cmode_cygnus_book_2_multiball, a multiball
+text  wizard_name_2   Cygnus X-1 Book 2
+text  wizard_film_2   all six planet modes

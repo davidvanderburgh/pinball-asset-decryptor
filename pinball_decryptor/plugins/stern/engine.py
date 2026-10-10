@@ -6791,6 +6791,109 @@ def space_floor(original_path, grow_to=None, output_path=None,
 def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                      phase=None, label=None, dest_is_device=False,
                      boot_screen=True, sound_ok=None):
+    """:func:`_compute_patches_inner`, and for a card IMAGE the files an edit
+    puts data into where they have no block (PAD-505, :func:`_place`) go onto
+    the card whole, through the ext4 driver like a grown file
+    (:func:`_hole_files_whole`).  An override set takes them itself
+    (write_overrides), and a card written in place (*dest_is_device*) can't
+    grow a file, so there :func:`_place` refuses them."""
+    own = (getattr(_HOLE_WRITES, "writes", None) is None
+           and not dest_is_device)
+    if own:
+        _HOLE_WRITES.writes = held = []
+    try:
+        got = _compute_patches_inner(
+            disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
+            label=label, dest_is_device=dest_is_device,
+            boot_screen=boot_screen, sound_ok=sound_ok)
+    finally:
+        if own:
+            _HOLE_WRITES.writes = None
+    if own and held and got[0] is not None:
+        try:
+            got = _hole_files_whole(disk_f, parts, got, held, log, label)
+        except Exception:
+            _rmtree_grow_plan(got[2])
+            raise
+    return got
+
+
+def _hole_files_whole(disk_f, parts, got, held, log, label=None):
+    """*got* (what :func:`_compute_patches_inner` returns) with every card file
+    in *held* (``[(node, file_off, bytes)]``, the data :func:`_place` could not
+    write in place) staged whole - the card's own bytes, this build's writes
+    in it, the held ones - and queued as a grow job, its writes in place
+    dropped.  The card's file has a HOLE where the data goes: a card written
+    by PAD's own ``debugfs`` (the Write's grow step on macOS and Linux) or
+    ``mke2fs -d`` (Multi-boot) keeps no block for a block of zeros, and a
+    block only the ext4 driver can add.  Its ``.sidx`` digest already covers
+    the edits (the overlays), and its size does not change."""
+    writes, counts, grow_plan, audio_mode, valpatch_mode = got
+    reader, _fw, _img = _locate(disk_f, parts)
+    roots = {bytes(node["i_block"]) for node, _o, _b in held}
+    files = {}
+    for path, _ino, node in reader.iter_regular_files(min_size=1, max_depth=20):
+        ib = bytes(node["i_block"])
+        if ib in roots:
+            files[ib] = (path.lstrip("/"), node)
+    lost = roots - set(files)
+    if lost:
+        node, off, _b = next(h for h in held if bytes(h[0]["i_block"]) in lost)
+        raise RuntimeError(
+            "An edit lands where a card file has no space on the card (file "
+            "offset 0x%x), outside the games partition, and only that partition's "
+            "files can be written whole." % off)
+    if grow_plan is not None and any(
+            rel.lstrip("/") in {p for p, _n in files.values()}
+            for rel, _s in grow_plan.get("jobs") or ()):
+        # already written whole, with its edits in: the grow job wins
+        files = {ib: f for ib, f in files.items()
+                 if f[0] not in {r.lstrip("/") for r, _s in grow_plan["jobs"]}}
+    if not files:
+        return got
+    work = (grow_plan or {}).get("cleanup") or _work_dir(label, base="spike2_grow_")
+    jobs = []
+    for i, (ib, (rel, node)) in enumerate(sorted(files.items(),
+                                                 key=lambda kv: kv[1][0])):
+        data = bytearray(reader.read_file_bytes(node))
+        runs = reader.mapped_ranges(node)
+        kept = []
+        for disk, b in writes:
+            hit = False
+            for f_off, d0, n in runs:
+                lo, hi = max(disk, d0), min(disk + len(b), d0 + n)
+                if lo < hi:
+                    data[f_off + lo - d0:f_off + hi - d0] = b[lo - disk:hi - disk]
+                    hit = True
+            if not hit:
+                kept.append((disk, b))
+        writes = kept
+        for hnode, off, b in held:
+            if bytes(hnode["i_block"]) == ib:
+                data[off:off + len(b)] = b
+        src = os.path.join(work, "whole_%d_%s" % (i, os.path.basename(rel)))
+        with open(_lp(src), "wb") as f:
+            f.write(bytes(data))
+        jobs.append((rel, src))
+        log("%s has gaps on this card where blocks of zeros were left out, and "
+            "this build puts data in one, so it is written whole." % rel, "info")
+    if grow_plan is None:
+        grow_plan = {"offset": reader.base, "jobs": [], "n_video": 0,
+                     "audio_job": None, "cleanup": work, "boot": None,
+                     "modes": None, "own_clips": None, "epoch": None}
+    elif not grow_plan.get("cleanup"):
+        grow_plan["cleanup"] = work
+    # after the videos, ahead of the sound bank and the game program
+    at = grow_plan.get("n_video", 0) or 0
+    grow_plan["jobs"][at:at] = jobs
+    if grow_plan.get("audio_job") is not None and grow_plan["audio_job"] >= at:
+        grow_plan["audio_job"] += len(jobs)
+    return writes, counts, grow_plan, audio_mode, valpatch_mode
+
+
+def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
+                           phase=None, label=None, dest_is_device=False,
+                           boot_screen=True, sound_ok=None):
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
     edits, and resolve them to a flat list of absolute on-disk writes
     ``[(disk_offset, bytes), ...]`` (offsets relative to the start of

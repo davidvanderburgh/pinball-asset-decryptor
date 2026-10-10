@@ -87,6 +87,42 @@ function emitLog() {
 }
 
 let logMaxId = 0;
+
+// A BURST OF LOG LINES IS ONE REDRAW (PAD-505, DragonRR: "when I run emulate
+// it is still hanging staging files with no way to know it is doing
+// anything").  Each line used to copy the whole log and redraw the pane, and
+// Emulate's Start converting Godzilla's 5,811 pictures sends 11,622 lines as
+// fast as it converts them: on a busy PC the page fell minutes behind, with
+// the State line and every click queued behind log redraws (a page throttled
+// to a sixth of this PC's speed took 65 s to answer).  Lines now wait here and
+// go into the log together, once a frame - or every 100 ms when the page is
+// hidden and gets no frames.
+let logPending = [];
+let logFlushDue = false;
+
+function queueLog(line) {
+  logPending.push(line);
+  if (logFlushDue) return;
+  logFlushDue = true;
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(flushLog);
+  setTimeout(flushLog, 100);
+}
+
+function flushLog() {
+  logFlushDue = false;
+  if (!logPending.length) return;
+  const add = logPending;
+  logPending = [];
+  const all = logLines.concat(add);
+  logLines = all.length > 5000 ? all.slice(-4000) : all;
+  emitLog();
+}
+
+// lines still waiting that a fresh copy of the log already holds
+function dropPendingUpTo(maxId) {
+  logPending = logPending.filter((l) => l.id > maxId);
+}
+
 function currentMfr() {
   return (state.shell && state.shell.mfr && state.shell.mfr.key) || "";
 }
@@ -114,13 +150,16 @@ function apply(e) {
       if (e.mfr !== currentMfr()) break;
       if (e.line.id <= logMaxId) break;
       logMaxId = e.line.id;
-      logLines = logLines.length > 5000 ? logLines.slice(-4000) : logLines.slice();
-      logLines.push(e.line);
-      emitLog();
+      queueLog(e.line);
       break;
     }
     case "log_update": {
       if (e.mfr !== currentMfr()) break;
+      const p = logPending.findIndex((l) => l.id === e.id);
+      if (p >= 0) {
+        logPending[p] = { ...logPending[p], text: e.text, level: e.level };
+        break;
+      }
       const i = logLines.findIndex((l) => l.id === e.id);
       if (i >= 0) {
         logLines = logLines.slice();
@@ -153,6 +192,8 @@ async function reloadLog() {
     if (j.ok) {
       logLines = j.r || [];
       logMaxId = logLines.reduce((m, l) => Math.max(m, l.id || 0), 0);
+      dropPendingUpTo(logMaxId);
+      logMaxId = logPending.reduce((m, l) => Math.max(m, l.id || 0), logMaxId);
       emitLog();
     }
   } catch (err) { console.error(err); }
@@ -167,6 +208,8 @@ export async function loadAll() {
   seq = j.seq || 0;
   logLines = j.log || [];
   logMaxId = logLines.reduce((m, l) => Math.max(m, l.id || 0), 0);
+  dropPendingUpTo(logMaxId);
+  logMaxId = logPending.reduce((m, l) => Math.max(m, l.id || 0), logMaxId);
   for (const ns of Object.keys(state)) emitNs(ns);
   emitNs("*");
   emitLog();

@@ -32,6 +32,13 @@
 # around its own saves); when it is, it is made writable for the swap and put
 # back read-only after.
 #
+# THE SWAP RUNS AS pinball, BUT BOF'S UPDATER RUNS AS ROOT (PAD-506).  A
+# craze/GAMEFILESIZE the updater created is root's, so writing the size failed
+# and every choice ended on image 0; an image the install step rebuilt is
+# root's too, and a Linux that protects hard links will not let pinball link
+# it, so it was copied (4 GB, every boot).  Before the menu opens, both are
+# given to the user this runs as, with pinball's passwordless sudo.
+#
 # SOUND.  The menu mixes its own sounds (44100 Hz stereo, 16 bit), but it is
 # one static program and cannot load the machine's sound library, so it
 # streams the mix into a pipe (--audio fifo:) and the machine's own aplay
@@ -111,6 +118,26 @@ put_back() {
     sync
     if [ "$was_ro" = 1 ]; then $SUDO mount -o remount,ro / 2>/dev/null && say "root back to read-only"; fi
 }
+
+# ---- the swap's files, this user's (the header's THE SWAP RUNS AS pinball) --
+# GAMEFILESIZE ours and writable, every image's program ours; root needs neither
+if [ "$(id -u)" != 0 ]; then
+    me="$(id -un):$(id -gn)"
+    if [ -e "$SIZEF" ] && { [ ! -O "$SIZEF" ] || [ ! -w "$SIZEF" ]; }; then
+        say "$SIZEF: $(stat -c '%U:%G mode %a' "$SIZEF"), the swap could not write it"
+        $SUDO chown "$(id -u):$(id -g)" "$SIZEF" && say "$SIZEF: owner $me" \
+            || say "$SIZEF: could not chown it to $me"
+        $SUDO chmod 644 "$SIZEF" && say "$SIZEF: mode 644" \
+            || say "$SIZEF: could not chmod it to 644"
+    fi
+    for f in "${progs[@]}"; do
+        case "$f" in ""|*/*|.*) continue ;; esac
+        [ -f "$D/$f" ] && [ ! -O "$D/$f" ] || continue
+        was=$(stat -c %U:%G "$D/$f")
+        if $SUDO chown "$(id -u):$(id -g)" "$D/$f"; then say "$f: owner $me (was $was), so it can be linked"
+        else say "$f: $was's, could not chown it to $me: it is copied, not linked"; fi
+    done
+fi
 
 # ---- the menu --------------------------------------------------------------
 timeout_s=$(sed -n 's/^timeout=\([0-9][0-9]*\).*/\1/p' "$CONF" | tail -1)
@@ -196,7 +223,7 @@ swap_in() {
     else
         rm -f "$GAME" || return 1
         if ! ln "$src" "$GAME" 2>/dev/null; then
-            say "cannot link ${progs[$1]} (another filesystem?): copying"
+            say "cannot link ${progs[$1]} (another filesystem, or another user's?): copying"
             cp -f "$src" "$GAME" || { rm -f "$GAME"; return 1; }
         fi
         say "image $1 (${progs[$1]}, $size bytes) is the game"

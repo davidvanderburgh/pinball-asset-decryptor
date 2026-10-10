@@ -94,6 +94,8 @@ class TitleProfile:
     game_wizards: tuple = ()         # PAD-436: ((name, film), ...) the game's own mini-wizards a mode can hand over
     #                                  (the port's wizard_name_<n> / wizard_film_<n> lines, in number order)
     wizard_shot: str = ""            # PAD-436: the game's shot that starts a lit mini-wizard (`text wizard_shot`)
+    wizard_lights: tuple = ()        # PAD-473: the names of those a mode can light for it (the rest are started)
+    wizard_claims: bool = False      # PAD-457: one a mode hands out is its mode's: the game's own lighting leaves it
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -945,6 +947,73 @@ WIZARDS_PROVEN = frozenset({
     # running query 1, flags 85 86, its intro on the glass); Goldfinger then `light`ed Goldfinger's Jackpot (selected 2,
     # lit 0x4) while Ahoy ran
     "james_bond_le-1.06",
+    # PAD-473 2026-10-09 rig 1, the stock James Bond Pro 1.06 card (hidden, muted): a `game_wizard light Goldfinger's
+    # Jackpot` file lit it (selected 2, lit 0x4, the game's ready check 1), the Right ramp's switches started it
+    # (played 0x4, its running query 1, GOLDFINGER'S JACKPOT on the glass), and a `game_wizard start Ahoy Mr. Bond`
+    # file while it ran left Ahoy lit for the ramp (selected 1, lit 0x2: the game's own check said one was running)
+    "james_bond_pro-1.06",
+    # PAD-473 2026-10-09, the C++ titles' mode route (rigbatch, stock cards, hidden, muted; C:/tmp/PAD-473/gen): a
+    # `game_wizard start` file started the game's mini-wizard by its own START (ACTIVE 1, its intro on the glass),
+    # and a second file while it ran waited ("... is in its way"); no abort
+    "avengers_infinity_le-1.10",   # Soul Gem Quest started (ACTIVE 1); Black Order Multiball waited while it ran
+    "avengers_infinity_pro-1.10",   # Soul Gem Quest started (ACTIVE 1); Black Order Multiball waited while it ran
+    "deadpool_le-1.16",   # Megakrakolodonus Rex started (ACTIVE 1); Clone Multiball waited while it ran
+    "deadpool_pro-1.16",   # Megakrakolodonus Rex started (ACTIVE 1); Clone Multiball waited while it ran
+    "dungeons_and_dragons_pro-1.10",   # Tiny's Dice Game started (ACTIVE 1); Tavern Brawl waited while it ran
+    "godzilla_le-1.16",   # Monster Zero started (ACTIVE 1); Terror of Mechagodzilla waited while it ran
+    "godzilla_pro-1.16",   # Monster Zero started (ACTIVE 1); Terror of Mechagodzilla waited while it ran
+    "iron_maiden_le-1.18",   # 2 Minutes to Midnight started (ACTIVE 1); Number of the Beast waited while it ran
+    "iron_maiden_pro-1.18",   # 2 Minutes to Midnight started (ACTIVE 1); Number of the Beast waited while it ran
+    "jaws_le-1.02",   # 4th of July started (ACTIVE 1); Super Cast 'n Catch waited while it ran
+    "jaws_pro-1.02",   # 4th of July started (ACTIVE 1); Super Cast 'n Catch waited while it ran
+    "john_wick_le-1.02",   # The Staircase started (ACTIVE 1); The Duel waited while it ran
+    "john_wick_pro-1.02",   # The Staircase started (ACTIVE 1); The Duel waited while it ran
+    "king_kong_le-0.97",   # Crash the Gate started (ACTIVE 1); T-Rex Battle waited while it ran
+    "king_kong_pro-0.97",   # Crash the Gate started (ACTIVE 1); T-Rex Battle waited while it ran
+    "led_zeppelin_le-1.22",   # Mothership Multiball started (ACTIVE 1, 4 balls); World Tour waited while it ran
+    "led_zeppelin_pro-1.22",   # Mothership Multiball started (ACTIVE 1, 4 balls); World Tour waited while it ran
+    "mando_le-1.45",   # Precious Cargo started (ACTIVE 1, 4 balls); You Have What I Want waited while it ran
+    "mando_pro-1.45",   # Precious Cargo started (ACTIVE 1, 4 balls); You Have What I Want waited while it ran
+    # Star Wars, Light as well: `game_wizard light Lightsaber Duel` started the game's own clightsaber_duel_ready
+    # (ACTIVE 1), and the Left ramp opto then started Lightsaber Duel (ready 0, duel ACTIVE 1), LE and Pro
+    "star_wars_le-1.31",   # Lightsaber Duel started (ACTIVE 1); Escape from Hoth waited while it ran
+    "star_wars_pro-1.31",   # Lightsaber Duel started (ACTIVE 1); Escape from Hoth waited while it ran
+    "sword_of_rage_le-1.19",   # KNIGHT Multiball started (ACTIVE 1, 3 balls); The King's Ransom waited while it ran
+    "sword_of_rage_pro-1.19",   # KNIGHT Multiball started (ACTIVE 1, 3 balls); The King's Ransom waited while it ran
+    "turtles_le-1.59",   # Team-Up Multiball started (ACTIVE 1, 2 balls)
+    "turtles_pro-1.59",   # Team-Up Multiball started (ACTIVE 1, 2 balls)
+    "venom_le-1.07",   # Toxin Team-Up started (ACTIVE 1)
+    "venom_pro-1.07",   # Toxin Team-Up started (ACTIVE 1)
+    # Foo Fighters: its START needs the mode enabled first (`value wizard_slot_enable 42`, run 1b)
+    "foo_fighters_le-1.04",   # Austin started (ACTIVE 1, 4 balls); D.C. waited while it ran
+    "foo_fighters_pro-1.04",   # Austin started (ACTIVE 1, 4 balls); D.C. waited while it ran
+    "jurassic_park_le-1.16",   # Visitor's Center started (ACTIVE 1, 2 balls); Museum Mayhem waited while it ran
+    "jurassic_park_pro-1.16",   # Visitor's Center started (ACTIVE 1, 2 balls); Museum Mayhem waited while it ran
+    # Rush: with the ball not in the Time Machine, Book 1's own start waits for it to drain (the game's mode mask
+    # 0x202 meanwhile) before its intro plays; the rig's drain (plunge.py) let it run on (sweep p6)
+    "rush_le-1.19",   # Cygnus X-1 Book 1 started (ACTIVE 1, CHOOSE A PLANET on the glass); Book 2 waited while it ran
+    "rush_pro-1.19",   # Cygnus X-1 Book 1 started (ACTIVE 1, CHOOSE A PLANET on the glass); Book 2 waited while it ran
+    # the plain-C titles' function route (rigbatch p8, stock cards, hidden, muted): a `game_wizard start` file called
+    # the mini-wizard's own start, its ACTIVE game flag rose and its balls were served; a second one waited ("a
+    # multiball is in its way") - the game's own starts would have started it on top (the probe, p7)
+    "batman-1.14",   # Batusi Multiball started (flag 84, 6 balls, 5 MORE SHOTS); Gas Attack Multiball waited
+    "metallica_spike-1.04",   # Blackened Multiball started (flag 50, 4 balls, BLACKENED on the glass); The End of the Line waited
+    "stranger_things-1.13",   # Season One Wizard Mode started (flag 72, 3 balls); Season Two waited while it ran
+    "stranger_things_le-1.13",   # Season One Wizard Mode started (flag 72, 3 balls); Season Two waited while it ran
+    # earned, and only between the game's own modes: Aerosmith's songs and Guardians' modes run from a ball's launch, so
+    # the file was started with the ball in the shooter lane (sweep p12); `site wizard_earned_1` answered for the player
+    "aerosmith_le-1.16",   # Medley Tour Multiball started (flag 57, 3 balls, MEDLEY TOUR MULTIBALL), no song played
+    "guardians-1.15",   # Cherry Bomb Multiball started (flag 52, 6 balls, its TIME REMAINING), no mode completed
+    "guardians_le-1.15",   # Cherry Bomb Multiball started (flag 52, 6 balls, its TIME REMAINING), no mode completed
+    "aerosmith-1.16",   # Medley Tour Multiball started (flag 57, 3 balls), on PAD-420's NVRAM past Guided Setup (sweep p13)
+    "beatles-1.29",   # Beatlemania Multiball started (flag 81, 4 balls, TAXMAN PLAYED BEFORE BEATLEMANIA) (p13)
+    "jurassic_park_the_pin-1.05",   # Escape Nublar started (its +0x4c, 4 balls, BREAKING NEWS); Restore Power waited (p13)
+    # X-Men: its own enable-and-start on the mode singleton (r0), the object's running byte (sweep p13)
+    "uncanny_xmen_le-0.98",   # The Future started (+0xdc, HELP KITTY PRYDE ESCAPE); Save Senator Kelly waited behind it
+    "uncanny_xmen_pro-0.98",   # The Future started (+0xdc); Save Senator Kelly waited behind it
+    # Elvira: its rules' own start (v[22]) on the rule object, the rule's +0x32 its own running test reads (sweep p15,
+    # PAD-420's NVRAM past Guided Setup); the probe p14 started They Came From Space the same way, 6 balls
+    "elvira3-1.13",   # House Party started (+0x32, 4 balls, the House lit up); They Came From Space waited
 })
 #: how a mode hands one over: lit for the game's start shot, or started at once
 WIZARD_HOW = ("light", "start")
@@ -952,17 +1021,56 @@ WIZARD_HOW = ("light", "start")
 WIZARD_NAME_MAX = 40
 
 
+#: PAD-473: the C++ titles' route (pad_mode_runtime.c wizm_arm): each mini-wizard's mode object (`data
+#: wizard_obj_<n>`), started by the title's START virtual and asked its ACTIVE one - these values; a `data
+#: wizard_ready_<n>` is the game's own mode that lights it for a start shot
+WIZARD_MODE_NEEDS = ("stock_slot_start", "stock_slot_active")
+
+
+def _wizard_route(port):
+    """PAD-473: 1 James Bond's wizard table (WIZARD_NEEDS), 2 the C++ titles' mode objects, 3 the plain-C titles'
+    start functions (`site wizard_go_<n>`), 0 none complete."""
+    sites, data = WIZARD_NEEDS
+    if all(n in port["site"] for n in sites) and all(n in port["data"] for n in data):
+        return 1
+    if "wizard_obj_1" in port["data"] and all(n in port["value"] for n in WIZARD_MODE_NEEDS):
+        return 2
+    if "wizard_go_1" in port["site"]:
+        return 3
+    return 0
+
+
+def _wizard_whole(port, route, n):
+    """PAD-473: the lines mini-wizard ``n`` needs on its route: its mode object (2); its start and how it says it runs
+    - a game flag where the port names the flag bitmap, a process of its own where it names proc_exists, or a byte of
+    its own (3)."""
+    if route == 2:
+        return "wizard_obj_%d" % n in port["data"]
+    if route == 3:
+        if "wizard_go_%d" % n not in port["site"]:
+            return False
+        if "wizard_flag_%d" % n in port["value"]:
+            return "game_flags" in port["data"]
+        if "wizard_proc_%d" % n in port["value"]:
+            return "proc_exists" in port["site"]
+        return "wizard_running_%d" % n in port["data"]
+    return True
+
+
 def _game_wizards(port):
     """PAD-436: ``((name, film), ...)`` in number order: the port's mini-wizards as the runtime arms them -
     `text wizard_name_<n>` numbered from 1 with no gaps, each with its film (`text wizard_film_<n>`, "" when not
-    named). () when the port lacks the lines the runtime needs."""
+    named; PAD-473: on the mode and function routes, what earns it), each with the lines its route needs
+    (_wizard_whole). () when the port lacks the lines the runtime needs."""
     if not port:
         return ()
-    sites, data = WIZARD_NEEDS
-    if not (all(n in port["site"] for n in sites) and all(n in port["data"] for n in data)):
+    route = _wizard_route(port)
+    if not route:
         return ()
     out, n = [], 1
     while port["text"].get("wizard_name_%d" % n, "").strip():
+        if not _wizard_whole(port, route, n):
+            break
         name = port["text"]["wizard_name_%d" % n].strip()
         if len(name) < WIZARD_NAME_MAX:
             out.append((name, port["text"].get("wizard_film_%d" % n, "").strip()))
@@ -970,8 +1078,37 @@ def _game_wizards(port):
     return tuple(out)
 
 
+def _wizard_lights(port):
+    """PAD-473: the names of the mini-wizards a mode can LIGHT for the game's start shot: all of Bond's table; on the
+    mode route, the ones the game lights through a mode of its own (`data wizard_ready_<n>`); none on the function
+    route. The rest are started."""
+    names = _game_wizards(port)
+    if not names or _wizard_route(port) == 1:
+        return tuple(n for n, _f in names)
+    return tuple(n for k, (n, _f) in enumerate(names, 1) if "wizard_ready_%d" % k in port["data"])
+
+
+#: PAD-473: the games with no mini-wizard of their own, by game directory (the same game on every version), and
+#: what they have instead: read from each newest build's own modes and its rules (docs/plans/pad473_mini_wizards.md).
+#: The Modes tab leaves the section out on them, as it does a machine part a machine does not have
+#: (MACHINE_HARDWARE).
+NO_GAME_WIZARDS = {
+    # its one wizard, Munster Madness (cmunster_madness, _ii, _ready), is the final one: every family member a level
+    "munsters_le": "Munster Madness is its final wizard mode",
+    "munsters_pro": "Munster Madness is its final wizard mode",
+    # the Home Edition's own rules (not the 2017 game's): Jedi Multiball, all four characters done, is its only one
+    "star_wars_elg": "Jedi Multiball is its only wizard mode",
+    # a game of its own (not the 2022 Bond's films): 007 Mode, its three multiballs started, is its only one
+    "james_bond_60th_le": "007 Mode is its only wizard mode",
+}
+
+
 def _wizards_cannot(key, label, port=None):
     """The ``cannot`` entry for the game's own mini-wizards on build ``key``, or () when a mode can hand one over."""
+    game = key.rsplit("-", 1)[0]
+    if game in NO_GAME_WIZARDS and not _game_wizards(port):
+        return (("wizard", "%s has no mini-wizards of its own (%s), so there is none for a mode of yours to hand to "
+                           "the player." % (label, NO_GAME_WIZARDS[game])),)
     if not _game_wizards(port):
         return (("wizard", "The app has not found %s's own mini-wizards, so a mode of yours cannot hand one to the "
                            "player." % label),)
@@ -1858,9 +1995,12 @@ def profile_from_port(path):
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
         # PAD-420: a machine part this build can do is never hidden, whatever MACHINE_HARDWARE read off its coils
-        absent=tuple(a for a in machine_absent(game) if a in dict(cannot)),
+        absent=tuple(a for a in machine_absent(game) if a in dict(cannot))
+        + (("wizard",) if game in NO_GAME_WIZARDS and not _game_wizards(port) else ()),    # PAD-473: a port's win
         game_wizards=_game_wizards(port),                    # PAD-436
         wizard_shot=port["text"].get("wizard_shot", "").strip(),
+        wizard_lights=_wizard_lights(port),                  # PAD-473
+        wizard_claims=_wizard_route(port) == 1 and "wizard_light" in port["site"],
     )
 
 
@@ -4110,7 +4250,9 @@ def wizard_cfg(spec, slug, p):
     ]
     lines += starts_cfg_lines(spec)
     lines += more_to_start_lines(spec, p)
-    lines.append("%-14s %s %s" % ("game_wizard", spec.wizard_how, hands_over(spec, p)))
+    name = hands_over(spec, p)
+    # PAD-473: one the game lights for no start shot of its own is started
+    lines.append("%-14s %s %s" % ("game_wizard", spec.wizard_how if name in p.wizard_lights else "start", name))
     return "\n".join(_starts_ends_lines(spec, lines, p, ends=False)) + "\n"
 
 

@@ -2148,7 +2148,8 @@ static void hand_off(struct slot *M, const char *why)
     also_clear(M, p);
     seq_clear(M, p);
     pm_log("%s START (%s): the game's %s, %s for player %u", cfg.name, why, cfg.wizard,
-           r == PM_WIZARD_STARTED ? "started" : "lit for its start shot", p);
+           r == PM_WIZARD_STARTED ? "started" : r == PM_WIZARD_WAITING ? "to start the moment nothing of the game's is in "
+           "its way" : "lit for its start shot", p);
 }
 
 static void mode_start(struct slot *M, const char *why)

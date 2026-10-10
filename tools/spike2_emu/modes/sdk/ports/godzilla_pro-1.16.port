@@ -756,3 +756,16 @@ text shake_big_hit         0:334:0
 text shake_jackpot         0:500:0
 text shake_rumble          0:3000:3
 text shake_multiball_start 266:334:2 633:100:2 1600:500:2 2560:1000:2 4000:5000:2
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[8]) as the game's rules start it and asked its ACTIVE (v[14]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x007a97c0   # cmode_monster_zero
+text  wizard_name_1   Monster Zero
+text  wizard_film_1   Godzilla Multiball's Super Jackpot
+data  wizard_obj_2    0x007a8be0   # cmode_terror_of_mechagodzilla, a multiball
+text  wizard_name_2   Terror of Mechagodzilla
+text  wizard_film_2   Mechagodzilla Multiball's Super Jackpot
+data  wizard_obj_3    0x007a8af0   # cmode_planet_x_multiball, a multiball
+text  wizard_name_3   Planet X Multiball
+text  wizard_film_3   a battle, Tesla Strike and two attack multiballs

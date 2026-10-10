@@ -423,3 +423,18 @@ text shake_setting_ms      0 1024 1024 1024
 text shake_short            0:200:0
 text shake_medium           0:384:0
 text shake_long             0:1024:0
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and how
+# it says it runs (its ACTIVE game flag, or a process or byte of its own); where the start first asks whether
+# the player has earned it, that check (hooked: yes only while a mode hands this one over). The names are
+# the game's own.
+site  wizard_go_1        0x001368ec 0xe92d4f70 0xe24dd008   # Minor Villain Wizard Mode 1
+value wizard_flag_1      84    # FG_MINOR_VILLAIN_WIZARD_MODE_1_ACTIVE
+text  wizard_name_1      Batusi Multiball
+site  wizard_go_2        0x0013b050 0xe92d4ff0 0xe3a00056   # Minor Villain Wizard Mode 2
+value wizard_flag_2      86    # FG_MINOR_VILLAIN_WIZARD_MODE_2_ACTIVE
+text  wizard_name_2      Gas Attack Multiball
+site  wizard_go_3        0x00141f08 0xe92d4ff0 0xe3a00057   # Minor Villain Wizard Mode 3
+value wizard_flag_3      87    # FG_MINOR_VILLAIN_WIZARD_MODE_3_ACTIVE
+text  wizard_name_3      Holy Multiball

@@ -519,3 +519,19 @@ site show_5               0x00077960 0xe92d4010 0xeb0c19dd   # 10 lights in its 
 text show_name_5          Small fast strobe
 text show_kind_5          flashy
 value show_secs_5         8
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+# mini-wizards on the plain-C titles"): each one's own start, called as the game's rules call it, and how
+# it says it runs (its ACTIVE game flag, or a process or byte of its own); where the start first asks whether
+# the player has earned it, that check (hooked: yes only while a mode hands this one over). The names are
+# the game's own.
+site  wizard_go_1        0x00035270 0xe92d4070 0xe1a04000   # the rule's start (its shot handler 0x3f39c calls it once lit)
+value wizard_arg_1       0x00592250   # its mode object
+data  wizard_built_1     0x005923a4   # that object's construction guard
+data  wizard_running_1   0x0059229c   # the object's +0x4c: its start sets it
+text  wizard_name_1      Escape Nublar
+site  wizard_go_2        0x00068090 0xe92d4010 0xe1a04000   # the rule's start (its shot handler 0x71e2c calls it once lit)
+value wizard_arg_2       0x00592300   # its mode object
+data  wizard_built_2     0x005923a8   # that object's construction guard
+data  wizard_running_2   0x0059235c   # the object's +0x5c: its start sets it
+text  wizard_name_2      Restore Power

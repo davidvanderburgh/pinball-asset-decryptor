@@ -1552,7 +1552,8 @@ def test_modes_tab_premium_1_16_project_offers_godzillas_names(tmp_path):
             assert "not yet seen a mode of yours give a ball save" in st["reasons"].pop("ball_save")
         if "godzilla_le-1.16" not in MP.MAGNET_PROVEN:      # PAD-381: the same
             assert "not yet seen a mode of yours hold the ball on it" in st["reasons"].pop("magnet")
-        assert "own mini-wizards" in st["reasons"].pop("wizard")      # PAD-436: Bond LE 1.06 only
+        if "godzilla_le-1.16" not in MP.WIZARDS_PROVEN:     # PAD-436 / PAD-473: greyed until emulator-proven
+            assert "own mini-wizards" in st["reasons"].pop("wizard")
         assert st["reasons"] == {}, st["reasons"]
         assert not st["dis"]["lights"]
         spec = MP.load(str(project / "modes" / "kaiju_rush" / "mode.json"))

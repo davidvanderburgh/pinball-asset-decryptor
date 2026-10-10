@@ -967,6 +967,17 @@ else
     echo "[watch] node census: silencing nothing on $GAME -" \
          "${NB_WHY:-reason unavailable}"
 fi
+# PAD-498: AND THE VIRTUAL PLAYFIELD IS TOLD WHICH BOARDS WENT WITH THE TOPPER,
+# so it stops listing them - Foo Fighters' TOPPER HOME 1/2 switches sit on its
+# node 12, and a switch on a board the cabinet does not have cannot be pressed.
+# Written every start, removed when the topper is on, so a window never reads
+# the previous run's answer.
+NB_TOPPER_NODES=$(printf '%s\n' "$NB_VALUES" | sed -n 's/^topper=//p')
+if [ -n "$NB_TOPPER_ARG" ] && [ -n "$NB_TOPPER_NODES" ]; then
+    printf '%s\n' "$NB_TOPPER_NODES" > "$ROOT/dump/topper_off" 2>/dev/null
+else
+    rm -f "$ROOT/dump/topper_off" 2>/dev/null
+fi
 
 # ---- A CHECKPOINTABLE BOOT IS AN EXTRA, NOT A CONDITION OF STARTING -------
 #

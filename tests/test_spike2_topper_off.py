@@ -131,6 +131,8 @@ def test_topper_off_silences_the_topper_boards(nodecensus, monkeypatch,
     assert got["silent-ff"] == "4"
     assert "node 12 (TOPPER)" in got["because"]
     assert "node 14 (Topper Lights)" in got["because"]
+    # and which of them went with the topper, for the playfield
+    assert got["topper"] == "12,14"
 
 
 def test_topper_on_is_exactly_what_it_was(nodecensus, monkeypatch, capsys,
@@ -139,6 +141,39 @@ def test_topper_on_is_exactly_what_it_was(nodecensus, monkeypatch, capsys,
     assert got["silent"] == "2,4"
     assert got["silent-ff"] == "4"
     assert "opper" not in got["because"]
+    assert got["topper"] == ""
+
+
+def test_the_topper_list_is_cached_with_the_verdict(nodecensus, monkeypatch,
+                                                    capsys, tmp_path):
+    """A second topper-off start is served from the cache, and must hand the
+    playfield the same boards the scan named."""
+    dest = tmp_path / "node_census.notopper.txt"
+    first = _run(nodecensus, monkeypatch, capsys, tmp_path, "--no-topper",
+                 "--cache", str(dest))
+    assert dest.exists()
+
+    def never(*a, **k):
+        raise AssertionError("the binary was read again")
+    monkeypatch.setattr(nodecensus, "census", never)
+    monkeypatch.setattr(nodecensus, "node_directory", never)
+    monkeypatch.setattr(sys, "argv",
+                        ["nodecensus.py", "--elf", str(tmp_path / "game"),
+                         "--values", "--no-topper", "--cache", str(dest)])
+    nodecensus.main()
+    again = dict(ln.split("=", 1)
+                 for ln in capsys.readouterr().out.splitlines())
+    assert again == first
+
+
+def test_a_verdict_cached_before_pad498_still_serves(nodecensus, tmp_path):
+    """Those caches have no `topper=` line, and they were all topper-on."""
+    elf = tmp_path / "game"
+    elf.write_bytes(b"\x7fELF" + b"\0" * 200)
+    key = nodecensus.cache_key(_Args(elf))
+    dest = tmp_path / "node_census.txt"
+    dest.write_text("inputs=%s\nsilent=2\nsilent-ff=\nbecause=why\n" % key)
+    assert nodecensus.cache_read(str(dest), key) == ([2], [], "why", [])
 
 
 def test_watch_sh_asks_for_it_only_when_the_box_is_off():
@@ -156,3 +191,63 @@ def test_watch_sh_asks_for_it_only_when_the_box_is_off():
     call = watch[census:watch.index("2>/dev/null)", census)]
     assert "--values $NB_TOPPER_ARG" in call
     assert "node_census${NB_TOPPER_ARG:+.notopper}.txt" in call
+    # and the playfield is told, through the file it reads
+    tell = watch.index("s/^topper=//p", census)
+    block = watch[tell:tell + 400]
+    assert '> "$ROOT/dump/topper_off"' in block
+    assert 'rm -f "$ROOT/dump/topper_off"' in block
+
+
+# ------------------------------------------------- the virtual playfield ----
+
+@pytest.fixture
+def pf(monkeypatch, tmp_path):
+    """playfield.py reading a run's dump folder in tmp_path."""
+    pf = pytest.importorskip("playfield")
+    monkeypatch.setattr(pf.padpath, "dump", lambda: str(tmp_path))
+    monkeypatch.setattr(pf, "TOPPER_OFF_PATH", str(tmp_path / "topper_off"))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    # id num node bit NAME - Foo Fighters' two topper switches on node 12
+    (tdir / "switch_list.txt").write_text(
+        "36 11 1 2 START BUTTON\n"
+        "60 31 9 0 LEFT ORBIT\n"
+        "70 90 12 0 TOPPER HOME 1\n"
+        "71 91 12 1 TOPPER HOME 2\n")
+    monkeypatch.setattr(pf, "TDIR", str(tdir))
+    return pf
+
+
+def test_with_the_topper_on_nothing_is_hidden(pf):
+    assert pf.topper_off_nodes() == set()
+    assert [r["node"] for r in pf.load_switch_list()] == [1, 9, 12, 12]
+
+
+def test_topper_off_takes_its_switches_out_of_the_list(pf, tmp_path):
+    (tmp_path / "topper_off").write_text("12,13,14\n")
+    assert pf.topper_off_nodes() == {12, 13, 14}
+    assert [r["name"] for r in pf.load_switch_list()] == ["START BUTTON",
+                                                          "LEFT ORBIT"]
+
+
+def _block(pf, lit):
+    """A padled block with one written channel per (node, index) in `lit`."""
+    d = bytearray(pf.PADLED_READ)
+    for node, idx in lit:
+        d[pf.LED_HDR + node * pf.LED_IDX + idx] = 0xff
+    return bytes(d)
+
+
+def test_topper_off_earns_its_lights_no_block_in_the_grid(pf, tmp_path):
+    """The report itself: Venom's grid showed `node 12 (75)` with the box
+    unticked. Whatever the wire carries for a board the cabinet does not
+    have, the grid gives it no block."""
+    d = _block(pf, [(7, 0), (7, 1), (12, 0), (12, 74), (14, 3)])
+    on = pf.LedGrid({})
+    assert on._discover(d)
+    assert {n for n, _i in on.seen} == {7, 12, 14}
+
+    (tmp_path / "topper_off").write_text("12,14\n")
+    off = pf.LedGrid({})
+    assert off._discover(d)
+    assert {n for n, _i in off.seen} == {7}

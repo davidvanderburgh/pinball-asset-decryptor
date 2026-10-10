@@ -464,7 +464,9 @@ def cache_key(a):
 
 
 def cache_read(path, key):
-    """(nodes, ff, why) from a cache written for exactly `key`, or None."""
+    """(nodes, ff, why, topper) from a cache written for exactly `key`, or
+    None. A verdict cached before PAD-498 has no `topper=` line; it was a
+    topper-on start, whose answer is "no topper boards left off"."""
     if not path or not key:
         return None
     try:
@@ -478,12 +480,13 @@ def cache_read(path, key):
     try:
         nodes = [int(n) for n in got["silent"].split(",") if n]
         ff = [int(n) for n in got["silent-ff"].split(",") if n]
-        return nodes, ff, got["because"]
+        topper = [int(n) for n in got.get("topper", "").split(",") if n]
+        return nodes, ff, got["because"], topper
     except (KeyError, ValueError):
         return None
 
 
-def cache_write(path, key, nodes, ff, why):
+def cache_write(path, key, nodes, ff, why, topper=()):
     """Record the verdict beside its inputs. Failure is silent on purpose: a
     cache that cannot be written costs seconds on the next start, and there is
     nothing a run can usefully do about a read-only tables directory."""
@@ -501,19 +504,23 @@ def cache_write(path, key, nodes, ff, why):
             f.write("silent=%s\n" % ",".join(str(n) for n in nodes))
             f.write("silent-ff=%s\n" % ",".join(str(n) for n in ff))
             f.write("because=%s\n" % why.replace("\n", " "))
+            f.write("topper=%s\n" % ",".join(str(n) for n in topper))
         os.replace(tmp, path)
     except OSError:
         pass
 
 
-def emit_values(a, nodes, ff, why):
+def emit_values(a, nodes, ff, why, topper=()):
     """The machine-readable answer, in whichever of the three shapes was asked
     for. `--values` prints all three because they are ONE reading of the
-    binary - see THE COST OF ASKING THREE TIMES in the header."""
+    binary - see THE COST OF ASKING THREE TIMES in the header. And `topper=`
+    (PAD-498): the boards left off because the cabinet has no topper, which
+    watch.sh hands the virtual playfield so it stops listing them."""
     if a.values:
         print("silent=%s" % ",".join(str(n) for n in nodes))
         print("silent-ff=%s" % ",".join(str(n) for n in ff))
         print("because=%s" % why.replace("\n", " "))
+        print("topper=%s" % ",".join(str(n) for n in topper))
     elif a.silent:
         print(",".join(str(n) for n in nodes))
     else:
@@ -582,8 +589,8 @@ def main():
     quiet = a.values or a.silent or a.silent_ff
     hit = cache_read(a.cache, key) if quiet else None
     if hit:
-        nodes, ff, why = hit
-        return emit_values(a, nodes, ff, why)
+        nodes, ff, why, topper = hit
+        return emit_values(a, nodes, ff, why, topper)
 
     read_the_binary = True
     try:
@@ -636,14 +643,16 @@ def main():
     # PAD-498: NO TOPPER, NO TOPPER BOARDS - and silent the whole way, never
     # in `ff`: a status answer reads as alive-but-unidentified (the godzilla_le
     # measurement above), and a missing accessory is simply not there.
+    tops = []
     if a.no_topper:
-        tops = topper_nodes(ndir)
+        named = topper_nodes(ndir)
+        tops = sorted(named)
         if tops:
             nodes = sorted(set(nodes) | set(tops))
             ttxt = ("the Topper box is off, so %s - the boards this title "
                     "names its topper - are left off the bus, as on a "
                     "cabinet without one" % ", ".join(
-                        "node %d (%s)" % (n, tops[n]) for n in sorted(tops)))
+                        "node %d (%s)" % (n, named[n]) for n in tops))
         else:
             ttxt = ("the Topper box is off, but this title's node directory "
                     "names no optional topper board to leave off")
@@ -660,8 +669,8 @@ def main():
         # zero records is an answer (rush_le, and it is the whole reason any
         # of this is cached), and census() returns it rather than raising.
         if read_the_binary:
-            cache_write(a.cache, key, nodes, ff, why)
-        return emit_values(a, nodes, ff, why)
+            cache_write(a.cache, key, nodes, ff, why, tops)
+        return emit_values(a, nodes, ff, why, tops)
 
     print("%d device records" % total)
     print("%-8s %-7s %-6s %-6s %-6s %s"

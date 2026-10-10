@@ -1065,6 +1065,47 @@ def parse_multiboot(text):
     return "unknown", ""
 
 
+def spike3_cmd(path):
+    """The argv that asks the rig whether *path* is a Stern **Spike 3** card,
+    or None when this machine cannot be asked.
+
+    Same shape as :func:`multiboot_cmd`: ``parts.py --spike3`` is the one place
+    the question is answered (its docstring has the how), and the tab shells it
+    rather than re-reading the MBR itself, so the Emulate tab and the rig's own
+    cardmount.sh / watch.sh can never disagree about a card.  macOS answers None
+    for the same reason - the card's host path is not one the probe, inside a
+    container, could open - so there the rig's own refusal speaks for itself.
+    """
+    if sys.platform == "darwin":
+        return None
+    if sys.platform == "win32":
+        return _wsl_head() + ["python3",
+                "%s/parts.py" % _wsl_path(rig_dir()), "--spike3",
+                _wsl_path(path)]
+    return ["python3", os.path.join(rig_dir(), "parts.py"), "--spike3", path]
+
+
+def parse_spike3(text):
+    """``(True|False|None, why)`` out of ``parts.py --spike3``'s line.
+
+    Scanned line by line, like :func:`parse_multiboot`, so a warning wsl.exe
+    prepends cannot be mistaken for the verdict.  None is "could not tell"
+    (no line, no probe) - never treated as "not a Spike 3 card", because a card
+    the tab could not ask is one the run will ask again.
+    """
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line.startswith("spike3:"):
+            continue
+        state, _sep, why = line[len("spike3:"):].strip().partition(" - ")
+        state = state.strip().lower()
+        if state == "yes":
+            return True, why.strip()
+        if state == "no":
+            return False, why.strip()
+    return None, ""
+
+
 def slot_up_cmd():
     """``slot.sh up N`` as root for the rig this app's run is on, or ``None``
     when there is nothing to mount: rig 0 (the ordinary rig, no layer), or a

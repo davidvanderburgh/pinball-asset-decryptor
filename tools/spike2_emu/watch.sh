@@ -404,6 +404,20 @@ CARD_MNT=""
 # CARD_MNT, one entry per mount, unmounted in teardown the same way.
 CARD_MNTS=()
 if [ -n "${PAD_CARD:-}" ]; then
+    # ★ A SPIKE 3 CARD CANNOT BE EMULATED - SAY SO PLAINLY, NOT "could not mount"
+    # (PAD-367). Its data partitions are LUKS2-encrypted with a key kept in the
+    # machine; cardmount.sh refuses it too (before any copy), but catching it
+    # here gives the run log one clear line instead of a fuse2fs refusal
+    # followed by the generic mount failure below. Reads only the MBR; a missing
+    # python3/parts.py just falls through to cardmount's own guard.
+    if command -v python3 >/dev/null 2>&1 \
+       && S3=$(python3 "$S/parts.py" --spike3 "$PAD_CARD" 2>/dev/null) \
+       && [ "${S3#spike3: yes}" != "$S3" ]; then
+        echo "[watch] $PAD_CARD is a Stern Spike 3 card (${S3#spike3: yes - })." \
+             "Its partitions are encrypted with a key kept in the machine, not" \
+             "on the card, so it cannot be emulated." >&2
+        exit 1
+    fi
     # Keep the WHOLE output, not just the path: it is the only place that says
     # whether this run created the mount or joined one that already existed,
     # and teardown must not unmount a card someone else is using. The [card]

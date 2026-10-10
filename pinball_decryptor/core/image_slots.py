@@ -21,6 +21,7 @@ from .audio_slots import replace_with_retry
 from .checksums import NON_ASSET_DIRS, is_other_extract
 from .image import (IMAGE_EXTS, ImageInfo, detect_image_info, pil_available,
                     transcode_image_to)
+from .video_slots import StagedCache as _StagedCache
 
 
 @dataclass
@@ -154,24 +155,91 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
         return False, str(e)
 
 
+#: Where :func:`stage_replacements` remembers what it last staged into each
+#: picture slot (see :class:`PictureCache`).
+PICTURE_CACHE = os.path.join(".write_cache", "image_staged.json")
+
+
+class PictureCache(_StagedCache):
+    """What each picture slot was last staged from, so a Start (or a Write)
+    that changes nothing about a picture does not convert it again - the
+    pictures' half of :class:`core.video_slots.StagedCache`.
+
+    PAD-505 (DragonRR, after the conversion stopped locking the app up:
+    "when I run emulate it is still hanging staging files"): every Emulate
+    Start converted all of Godzilla's 5,811 pictures again, the same way, for
+    minutes on a busy PC.  A recipe is the source (its path, size and
+    modification time; for the game's own picture that is its ``.orig/``
+    snapshot), the pristine snapshot the size is fitted to, Keep size, the
+    color profile and this app's version (a new version converts once more,
+    in case it converts differently); the slot's file afterwards has to be
+    the one that staging left."""
+
+    FILE = PICTURE_CACHE
+
+    @staticmethod
+    def recipe(rep, orig=None, keep_size=False, colour=None):
+        import hashlib
+        import json
+        from .. import __version__
+        try:
+            st = os.stat(rep)
+        except (OSError, TypeError):
+            return None
+        shape = None
+        if orig:
+            try:
+                ost = os.stat(orig)
+                shape = [ost.st_size, ost.st_mtime_ns]
+            except OSError:
+                shape = None
+        blob = json.dumps([__version__, os.path.normcase(os.path.abspath(rep)),
+                           st.st_size, st.st_mtime_ns, shape, bool(keep_size),
+                           colour.key() if colour is not None else None])
+        return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+    def kept(self, assets_dir, slot, rep, keep_size, colour):
+        """Is *slot* already what staging *rep* into it would make?  Only a
+        slot with its ``.orig/`` snapshot (staged before) can be."""
+        from . import staged_originals
+        snap = staged_originals.snapshot_path(assets_dir, slot.rel_path)
+        if not snap:
+            return False
+        return self.fresh(slot, self.recipe(rep or snap, snap, keep_size,
+                                            colour))
+
+
 def pictures_due(slots_by_rel: Dict[str, ImageSlot],
                  assignments: Dict[str, str], assets_dir=None,
                  keep_size=frozenset()):
     """How many pictures :func:`stage_replacements` would stage if it ran
     now with the same arguments (PAD-489): the picks, the game's own
     pictures switched on behind the unlock, and the built pictures switched
-    on.  Counted without touching a file (the staging itself sets aside a
-    built picture's uncorrected copy)."""
+    on, less the ones an earlier staging left as this one would make them
+    (:class:`PictureCache`).  Counted without touching a file (the staging
+    itself sets aside a built picture's uncorrected copy)."""
     from . import colour_profile
     colour = colour_profile.active(assets_dir) if assets_dir else None
     picked = {rel for rel, rep in assignments.items()
               if rep and rel in slots_by_rel}
-    n = len(picked)
+    cache = PictureCache(assets_dir) if assets_dir else None
+    chosen = ({} if colour is not None or not assets_dir
+              else colour_profile.asset_map(assets_dir, "images",
+                                            sorted(picked)))
+
+    def kept(rel, rep):
+        return cache is not None and cache.kept(
+            assets_dir, slots_by_rel[rel], rep, rel in keep_size,
+            colour or chosen.get(rel))
+
+    n = sum(1 for rel in picked if not kept(rel, assignments[rel]))
     if colour is None and assets_dir and colour_profile.any_asset_active(
             assets_dir):
         stock = {rel for rel in colour_profile.stock_image_rels(
             assets_dir, picked) if rel in slots_by_rel}
-        n += len(stock)
+        chosen.update(colour_profile.asset_map(assets_dir, "images",
+                                               sorted(stock)))
+        n += sum(1 for rel in stock if not kept(rel, None))
         resolve = colour_profile.asset_resolver(assets_dir)
         for rel in colour_profile.built_image_on(assets_dir):
             if (rel in slots_by_rel and rel not in picked
@@ -201,7 +269,6 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
     whole game's pictures under a colour profile are thousands (PAD-489).
     """
     from .checksums import read_baseline_any
-    from . import staged_originals
 
     from . import colour_profile
     # the project's colour profile (PAD-305), read once for the whole pass
@@ -246,11 +313,46 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
                 items.append((rel, kept))
                 # already the size the build made it: never fitted again
                 keep_size = frozenset(keep_size) | {rel}
+    # PAD-505: what an earlier staging left just as this one would make it
+    cache = PictureCache(assets_dir) if assets_dir else None
+    n_kept = 0
+    if cache is not None:
+        todo = []
+        for rel, rep in items:
+            if cache.kept(assets_dir, slots_by_rel[rel], rep, rel in keep_size,
+                          colour or chosen.get(rel)):
+                n_kept += 1
+            else:
+                todo.append((rel, rep))
+        items = todo
+        if n_kept and log_cb:
+            log_cb("{:,} picture(s) left as they are: an earlier build "
+                   "converted them just as this one would.".format(n_kept),
+                   "info")
     total = len(items)
-    staged = 0
+    staged = n_kept
     failures: List = []
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
+    try:
+        staged += _stage_items(items, slots_by_rel, baseline, failures, cache,
+                               colour, chosen, log_cb, progress_cb,
+                               assets_dir, keep_size, cancel_cb)
+    finally:
+        if cache is not None:
+            cache.save()
+    if progress_cb:
+        progress_cb(total, total, "")
+    return staged, failures
 
+
+def _stage_items(items, slots_by_rel, baseline, failures, cache, colour,
+                 chosen, log_cb, progress_cb, assets_dir, keep_size,
+                 cancel_cb):
+    """:func:`stage_replacements`' loop over the pictures it converts;
+    returns how many it staged, *failures* gets the rest."""
+    from . import staged_originals
+    total = len(items)
+    staged = 0
     for i, (rel, rep) in enumerate(items):
         if cancel_cb is not None and cancel_cb():
             if log_cb:
@@ -265,7 +367,7 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
                    + (os.path.basename(rep) if rep else
                       "its own picture, colors corrected for the machine"),
                    "info")
-        original = None
+        original = snap = None
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
             # Fitted to the PRISTINE picture's size, which slot.info is only
@@ -284,14 +386,16 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
                                        colour=colour or chosen.get(rel))
         if ok:
             staged += 1
+            if cache is not None:
+                cache.record(slot, cache.recipe(rep, snap, rel in keep_size,
+                                                colour or chosen.get(rel)))
             if log_cb:
                 msg = f"  ✓ {rel}" + (f"  ({detail})" if detail else "")
                 log_cb(msg, "success")
         else:
             failures.append((rel, detail))
+            if cache is not None:
+                cache.forget(rel)
             if log_cb:
                 log_cb(f"  ✗ {rel}: {detail}", "error")
-
-    if progress_cb:
-        progress_cb(total, total, "")
-    return staged, failures
+    return staged

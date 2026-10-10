@@ -192,6 +192,149 @@ def test_a_second_build_puts_the_hole_back(card, tmp_path):
     assert dest.read_bytes() == tiny.hole_bytes()
 
 
+# -- a card Write from such a card: the file goes on whole --------------------
+# DragonRR: "We are using PAD to create these files".  PAD's own debugfs write
+# (the Write's grow step on macOS and Linux) and mke2fs -d (Multi-boot) keep no
+# block for a block of zeros, so the next Write may start from such a card.
+
+def _locate_tiny(monkeypatch, reader):
+    monkeypatch.setattr(engine, "_locate", lambda f, parts: (reader, None, None))
+
+
+def test_a_write_puts_a_file_with_data_in_its_hole_on_whole(card, monkeypatch,
+                                                              tmp_path):
+    f, reader = card
+    _locate_tiny(monkeypatch, reader)
+    node = _node(reader, "d/hole.bin")
+    a = _node(reader, "d/a.bin")
+    head = reader.disk_ranges(node, 0, 10)[0][0]
+    other = reader.disk_ranges(a, 0, 4)[0][0]
+    writes = [(head, b"I" * 10), (other, b"zzzz")]
+    held = [(node, 4096, b"J" * 8)]
+    plan = {"offset": 0, "jobs": [("v.mp4", "x"), ("bank", "y"), ("game", "z")],
+            "n_video": 1, "audio_job": 1, "cleanup": str(tmp_path)}
+    got = engine._hole_files_whole(f, [], (writes, "counts", plan, None, None),
+                                   held, lambda *a, **k: None)
+    w, counts, plan, _a, _v = got
+    assert w == [(other, b"zzzz")] and counts == "counts"   # its own write left
+    rel, src = plan["jobs"][1]
+    assert rel == "d/hole.bin"
+    assert [j[0] for j in plan["jobs"]] == ["v.mp4", "d/hole.bin", "bank", "game"]
+    assert plan["audio_job"] == 2                      # the bank moved one on
+    want = bytearray(tiny.hole_bytes())
+    want[:10] = b"I" * 10
+    want[4096:4104] = b"J" * 8
+    with open(src, "rb") as staged:
+        assert staged.read() == bytes(want)
+
+
+def test_compute_patches_hands_held_writes_to_the_whole_file_step(card,
+                                                                  monkeypatch):
+    f, reader = card
+    _locate_tiny(monkeypatch, reader)
+    node = _node(reader, "d/hole.bin")
+
+    def inner(*a, **k):
+        return (engine._place(reader, node, 0, b"K" * 4096 + b"L" * 4),
+                (1, 0, 0, 0), None, None, None)
+
+    monkeypatch.setattr(engine, "_compute_patches_inner", inner)
+    writes, _c, plan, _a, _v = engine._compute_patches(
+        f, [], "assets", lambda *a, **k: None, None, lambda: False)
+    try:
+        assert writes == [] and [r for r, _s in plan["jobs"]] == ["d/hole.bin"]
+        assert getattr(engine._HOLE_WRITES, "writes", None) is None
+    finally:
+        engine._rmtree_grow_plan(plan)
+    # straight onto an SD card a file can't grow, so it is refused
+    with pytest.raises(RuntimeError, match="no space on the card"):
+        engine._compute_patches(f, [], "assets", lambda *a, **k: None, None,
+                                lambda: False, dest_is_device=True)
+
+
+# -- a Start converts only the pictures that need it -------------------------
+# DragonRR, after the release that kept the app live: "when I run emulate it is
+# still hanging staging files".  Every Start converted all 5,811 pictures again.
+
+def _pictures(tmp_path, names=("a", "b", "c")):
+    from PIL import Image
+    from pinball_decryptor.core import colour_profile as cp
+    from pinball_decryptor.core import image_slots, staged_changes
+    assets = tmp_path / "proj"
+    (assets / "images").mkdir(parents=True)
+    slots = {}
+    for i, n in enumerate(names):
+        p = assets / "images" / ("%s.png" % n)
+        Image.new("RGB", (8, 8), (40 * i, 120, 200)).save(p)
+        rel = "images/%s.png" % n
+        slots[rel] = image_slots.ImageSlot(rel_path=rel, abs_path=str(p), ext=".png",
+                                           info=None, size=p.stat().st_size)
+    staged_changes.save(str(assets), {"image_color_unlocked": True,
+                                      "image_color_slots": {r: True for r in slots}})
+    cp.store_asset_profile(str(assets), dict(cp.PRESETS)["bw"])
+    return str(assets), slots
+
+
+def _count_stagings(monkeypatch):
+    from pinball_decryptor.core import image_slots
+    real, seen = image_slots.stage_replacement, []
+
+    def counted(slot, rep, **kw):
+        seen.append(slot.rel_path)
+        return real(slot, rep, **kw)
+
+    monkeypatch.setattr(image_slots, "stage_replacement", counted)
+    return seen
+
+
+def test_a_second_start_converts_no_picture_again(tmp_path, monkeypatch):
+    from pinball_decryptor.core import image_slots
+    assets, slots = _pictures(tmp_path)
+    seen = _count_stagings(monkeypatch)
+    assert image_slots.pictures_due(slots, {}, assets_dir=assets) == 3
+    assert image_slots.stage_replacements(slots, {}, assets_dir=assets) == (3, [])
+    assert len(seen) == 3
+    # the next Start: nothing due, nothing converted, all three still applied
+    said = []
+    assert image_slots.pictures_due(slots, {}, assets_dir=assets) == 0
+    assert image_slots.stage_replacements(
+        slots, {}, assets_dir=assets, log_cb=lambda t, l="info": said.append(t)) == (3, [])
+    assert len(seen) == 3
+    assert said == ["3 picture(s) left as they are: an earlier build converted them "
+                    "just as this one would."]
+
+
+def test_a_changed_profile_or_a_touched_file_converts_again(tmp_path, monkeypatch):
+    from pinball_decryptor.core import colour_profile as cp
+    from pinball_decryptor.core import image_slots
+    assets, slots = _pictures(tmp_path)
+    seen = _count_stagings(monkeypatch)
+    image_slots.stage_replacements(slots, {}, assets_dir=assets)
+    # a picture written over since (a revert, an edit): that one again
+    with open(slots["images/b.png"].abs_path, "ab") as f:
+        f.write(b"\0")
+    assert image_slots.pictures_due(slots, {}, assets_dir=assets) == 1
+    image_slots.stage_replacements(slots, {}, assets_dir=assets)
+    assert seen[3:] == ["images/b.png"]
+    # another profile: every one again
+    import dataclasses
+    cp.store_asset_profile(assets, dataclasses.replace(dict(cp.PRESETS)["bw"],
+                                                       brightness=1.2))
+    assert image_slots.pictures_due(slots, {}, assets_dir=assets) == 3
+    image_slots.stage_replacements(slots, {}, assets_dir=assets)
+    assert len(seen) == 7
+
+
+def test_a_cancelled_start_keeps_what_it_converted(tmp_path, monkeypatch):
+    from pinball_decryptor.core import image_slots
+    assets, slots = _pictures(tmp_path)
+    seen = _count_stagings(monkeypatch)
+    image_slots.stage_replacements(slots, {}, assets_dir=assets,
+                                   cancel_cb=lambda: len(seen) >= 2)
+    assert len(seen) == 2
+    assert image_slots.pictures_due(slots, {}, assets_dir=assets) == 1
+
+
 # -- the app's loop while a staging floods it --------------------------------
 
 def _stub(window_append, turn_s):

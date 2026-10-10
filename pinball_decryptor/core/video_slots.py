@@ -507,9 +507,12 @@ class StagedCache:
     """
 
     VERSION = 1
+    #: the cache's file in the project folder (the pictures keep their own:
+    #: :class:`core.image_slots.PictureCache`)
+    FILE = STAGED_CACHE
 
     def __init__(self, assets_dir: Optional[str]):
-        self.path = (os.path.join(assets_dir, STAGED_CACHE)
+        self.path = (os.path.join(assets_dir, self.FILE)
                      if assets_dir else None)
         self.entries: Dict[str, dict] = {}
         if self.path:

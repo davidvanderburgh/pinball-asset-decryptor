@@ -1128,7 +1128,7 @@ EDITIONS_TIP = (
     "For a card whose images are all editions of one game (a Standard and a "
     "70th Anniversary look, say): the card shows no menu, and the edition "
     "the game's own EDITION setting names boots at the next power-up "
-    "(Adjustments > Attract Mode on the machine). Each edition's project "
+    "(Adjustments > Machine Settings > Attract Mode on the machine). Each edition's project "
     "names the editions on its Write tab, the same names in the same order, "
     "and its Write puts EDITION in the operator menu. Add the images here in "
     "that order, edition 1 first. The build refuses an image without the "

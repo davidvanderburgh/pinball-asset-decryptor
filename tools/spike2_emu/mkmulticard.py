@@ -9299,7 +9299,7 @@ def _add_conf_flags(s):
                         "card's is kept when absent, and a card that says neither draws it")
     s.add_argument("--editions", action="store_true",
                    help="images.conf edition= (PAD-495): every image is an edition of one game, in "
-                        "order, and the game's own EDITION setting (Adjustments > Attract Mode, put "
+                        "order, and the game's own EDITION setting (Adjustments > Machine Settings > Attract Mode, put "
                         "there by each edition's Write) picks the one that boots at the next "
                         "power-up; no menu is shown. Every image must carry EDITION for exactly "
                         "this many editions")

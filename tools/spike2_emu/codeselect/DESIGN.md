@@ -591,6 +591,46 @@ As built and SAVE removed the line; image 1 booted with `nothing set on this mac
 no copy, no bind, attract in colour.  Teardown `alive.sh` 0 after each.  The emulator proof is the
 verification: David is not running it on the machine.
 
+## Editions, no menu: the game's EDITION setting picks (PAD-495)
+
+A tester keeps a Standard and a 70th Anniversary look of one Godzilla card and asked for "a
+feature that allows mass change of color profiles, scene settings and small assets ... selected
+in the service menu", then for "a separate bank of videos/images/scene assets" the setting pulls
+from.  The bank is this card: every image is an edition of one game, in order.
+
+**The setting.**  Each edition's Write takes over the game's DEPRECATED INSERT LED MAX BRIGHTNESS
+(id 33 on Godzilla 1.16, read by nothing) as **EDITION**, values 1..n, on the Attract Mode page
+beside the game's own BOOT SCREEN, with the editions' names in its help line
+(`plugins/stern/menu_settings.py`, `editions.py`; PAD-494's MUSIC MODE is the same mechanism on id
+31, and both share one category table).  The machine keeps the value in its settings store under
+SHA1("EDITION"), as it keeps every setting, and writes a new `/data/nv/<title>/NVM` generation the
+moment it is accepted.
+
+**The boot.**  `edition=<store>|<sha1>|<n>` in images.conf (conf.c) sends `edition_boot` before
+anything is drawn: the live value off the newest generation (nvm.c, the reader `volume=machine`
+uses), and edition k boots image k-1.  No record (a machine that never set it), a value outside
+1..n or past the image lines boots image 0, which is the game's own default too.  Nothing reads a
+button and nothing is drawn; the choice and last files are written as a confirm writes them, so
+select.sh and run_game.sh need nothing new.  `--snapshot` still draws the cards (the tab's
+preview).  A line this cannot read is warned about and the menu comes up.
+
+**What the card builder refuses** (`mkmulticard.py --editions`, `edition_for_plan`): an image whose
+game program does not carry EDITION, carries it for another count, names the editions otherwise,
+is another title or version, or captions any setting differently - every edition shares one
+settings store, and a store meeting a different table is what PAD-148 suspects of resetting a
+machine.  For the same reason no group and no `scores=` line on such a card.  The selector must be
+3.2 or later (`SELECTOR_EDITION_VERSION`): an older one ignores the key and shows its menu.
+
+**Proven in the emulator, 2026-10-10** (rig slot 1, hidden and muted; card built by `mkmulticard
+build --editions` from a Write-built Standard card and the stock card plus a 70th Anniversary
+edits folder carrying the Black and white profile).  Boot 1, a store with no EDITION record:
+`edition: no EDITION setting read (...); edition 1 boots`, attract in colour.  EDITION set to 2 in
+Adjustments > Machine Settings > Attract Mode: generation 00000012 holds 2.  Boot 2: `the
+machine's EDITION is 2 of 2`, `[select] chose 1 70TH ANNIVERSARY`, attract and the service menu in
+greys, the menu showing Edition 2.  Set back to 1, boot 3 chose image 0 and the colours came back.
+Frames and logs in the ticket's artifacts (`work/artifacts/PAD-495/emulator`).  Not run on a
+machine.
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both

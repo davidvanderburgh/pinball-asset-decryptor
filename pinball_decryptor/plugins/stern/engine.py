@@ -9304,8 +9304,8 @@ class _EditionMenu(_MusicModeMenu):
 
     def done(self):
         self.ok = True
-        self.log("Editions: EDITION is in the operator menu (Adjustments > Attract "
-                 "Mode), values 1 to %d, its help line \"%s\". Put this card on a "
+        self.log("Editions: EDITION is in the operator menu (Adjustments > Machine "
+                 "Settings > Attract Mode), values 1 to %d, its help line \"%s\". Put this card on a "
                  "Multi-boot card with the other editions, in that order, and the "
                  "setting picks the one that boots." % (self.count, self.setting.help),
                  "info")

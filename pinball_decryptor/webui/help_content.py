@@ -169,6 +169,21 @@ HELP_CONTENT = {
             "- Boosts are soft-limited, never clipped. The build log says which "
             "setting built the card.",
         ]),
+        ("Music modes",
+         "Spike 2, Godzilla Pro and Premium/LE 1.16. One card can carry more than one "
+         "set of sounds, and the machine's service menu picks the set: **Music Mode** "
+         "under Adjustments > Machine Settings > Audio Content.\n\n"
+         "- Right-click a sound > **Music modes** > **Mode 2: choose a sound…** (or "
+         "mode 3). Mode 1 is the sound as it plays now: its replacement, or the "
+         "stock one.\n"
+         "- In a mode a sound has no file for, it plays its mode 1 sound.\n"
+         "- **Name the music modes…** names them on the machine: the Music Mode "
+         "setting's help line reads like \"1 = Standard, 2 = Orchestral\".\n"
+         "- A mode's file plays at its own length and is matched to the loudness of "
+         "the sound it stands in for, like a replacement.\n"
+         "- Needs an image build, not a direct SD write. Every file takes room in the "
+         "sound bank, the 2 GB limit included; one that does not fit is left out, "
+         "and the log says so."),
         ("Replace from folder",
          "**Replace from folder…**, beside the project folder, picks a whole folder "
          "of your files at once: each file goes to the slot with its name.\n\n"

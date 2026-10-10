@@ -7146,6 +7146,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         both.update(music_gains)
         log("Per-clip loudness set on %d sound(s) (build-wide offset already "
             "included): %s." % (len(both), _fmt_gain_map(both)), "info")
+        # PAD-494: a level on a sound the build does not replace moves nothing of
+        # it ("it should not apply [to] standard stock music" - a tester who read
+        # this line as his stock songs being turned up)
+        _stock = sorted(i for i in slot_gains if i not in audio_edits)
+        if _stock:
+            log("Per-clip loudness on a sound with no replacement leaves its stock "
+                "sound as it is: %s." % _fmt_idx_list(_stock), "info")
     if video_edits:
         log("Found %d replaced video(s) to write." % len(video_edits), "info")
     if image_edits:
@@ -9429,13 +9436,24 @@ def _sm_level_refs(used):
 
 
 def _sm_gains(gains, used):
-    """*gains* (the per-clip loudness map) with each host taking its slot's offset."""
+    """*gains* (the per-clip loudness map) with each host taking its mode file's own offset
+    (``u["db"]``), or - a project saved before mode files had their own (``db`` None) - its
+    slot's, as those builds did. Never the host record's own: a level set on the stock sound a
+    host copies is that sound's, not the mode file's."""
     if not used:
         return gains
-    out = dict(gains or {})
+    slots = dict(gains or {})
+    out = dict(slots)
     for u in used:
-        if int(u["slot"]) in out:
-            out[int(u["host"])] = out[int(u["slot"])]
+        host, db = int(u["host"]), u.get("db")
+        if db is None:
+            total = slots.get(int(u["slot"]))
+        else:
+            total = _slot_gain_db(db) if db else None
+        if total is None:
+            out.pop(host, None)
+        else:
+            out[host] = total
     return out
 
 
@@ -9465,10 +9483,12 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                       longer_why=""):
     """PAD-494: every music mode's file, made into its slot's format and put in a HOST record
     (:func:`_sound_mode_host`) as a forced grow, left un-pointed. Returns ``(audio_edits, grows,
-    used)``: *used* ``[{"rel", "slot", "mode", "host", "frames", "name", "idx", "level_ref"}]``.
-    A file that cannot go on is left out and logged (that slot plays its own sound in that mode).
+    used)``: *used* ``[{"rel", "slot", "mode", "host", "frames", "name", "idx", "level_ref",
+    "db"}]`` (*db* the file's own loudness offset, :meth:`.sound_modes.Modes.level`). A file that
+    cannot go on is left out and logged (that slot plays its own sound in that mode).
 
-    One file in several modes of a slot goes in once: those modes share its record. A file longer
+    One file in several modes of a slot at one loudness goes in once: those modes share its
+    record (at two loudnesses it is two records, each levelled its own way). A file longer
     than its slot's own sound is cut to that length unless the build may keep replacements whole
     (*longer_ok*: "Allow replacements longer than the original"), as a replacement is."""
     from . import sound_modes as _SMo
@@ -9477,9 +9497,10 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
     audio_edits, grows = dict(audio_edits), dict(grows)
     # a slot with mode files keeps its own record (its key is what the game's descriptors name)
     used, taken = [], {i for i in (_SMo.slot_idx(r) for r in modes.slots) if i is not None}
-    hosted = {}                       # (slot, converted file) -> (host, frames)
+    hosted = {}                       # (slot, converted file, dB) -> (host, frames)
     for rel, mode, src in modes.files():
         what = "%s's file for mode %d (%s)" % (os.path.basename(rel), mode, modes.name(mode))
+        db = modes.level(rel, mode)
         slot = _SMo.slot_idx(rel)
         p = byidx.get(slot) if slot is not None else None
         if p is None:
@@ -9495,17 +9516,17 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
             log("Music modes: %s is not put on this card: its converted copy cannot be read."
                 % what, "warning")
             continue
-        if (slot, wav) in hosted:
-            # the same file in another mode of this slot: the record it already has
-            host, want = hosted[(slot, wav)]
+        key = (slot, wav, db)
+        if key in hosted:
+            # the same file at the same loudness in another mode of this slot: its record
+            host, want = hosted[key]
             used.append({"rel": rel, "slot": int(slot), "mode": int(mode), "host": int(host),
                          "frames": int(want), "name": modes.name(mode), "idx": int(host),
-                         "level_ref": int(slot)})
+                         "level_ref": int(slot), "db": db})
             log("Music modes: %s (%s) is the same file as another mode of sound idx %d and plays "
                 "from the same new record (idx %d's copy) while MUSIC MODE is %d." % (
                     what, os.path.basename(src), slot, host, mode), "info")
             continue
-        key = (slot, wav)
         room = emitted_length(int(p.get("length", 0) or 0))
         if not longer_ok and want > room:
             # as a replacement is with "Allow replacements longer than the original" off
@@ -9531,10 +9552,11 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         hosted[key] = (host, int(want))
         used.append({"rel": rel, "slot": int(slot), "mode": int(mode), "host": int(host),
                      "frames": int(want), "name": modes.name(mode), "idx": int(host),
-                     "level_ref": int(slot)})
-        log("Music modes: %s (%s, %.2f s) goes on the card as a new record (a copy of sound idx "
+                     "level_ref": int(slot), "db": db})
+        log("Music modes: %s (%s, %.2f s%s) goes on the card as a new record (a copy of sound idx "
             "%d) that the game plays for sound idx %d while MUSIC MODE is %d." % (
-                what, os.path.basename(src), want / 44100.0, host, slot, mode), "info")
+                what, os.path.basename(src), want / 44100.0,
+                ", its own loudness %+d dB" % db if db else "", host, slot, mode), "info")
     return audio_edits, grows, used
 
 

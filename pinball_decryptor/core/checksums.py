@@ -37,8 +37,13 @@ TRACKING_SIDECARS = frozenset({"callouts.csv", "music_titles.csv"})
 # card's slots, so listing them as slots of their own flagged them "not on
 # this card" (PAD-417).
 SHARED_PICTURES_DIR = "Shared pictures"
+# "Music mode files" holds the files a mod pack carried for a project's music
+# modes (core.modpack, PAD-494): the user's own sounds for the card's slots,
+# never slots of their own.
+MUSIC_MODE_FILES_DIR = "Music mode files"
 NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
-                            ".write_cache", SHARED_PICTURES_DIR})
+                            ".write_cache", SHARED_PICTURES_DIR,
+                            MUSIC_MODE_FILES_DIR})
 
 
 def is_other_extract(path):

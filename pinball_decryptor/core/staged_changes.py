@@ -288,3 +288,84 @@ def same_stem_sibling(path):
                 and os.path.isfile(os.path.join(folder, name))):
             return name
     return None
+
+
+#: PAD-494: a Stern project's music modes (``plugins.stern.sound_modes``):
+#: ``{"names": [...], "slots": {rel: {"2": file}}, "levels": {rel: {"2": dB}}}``
+SOUND_MODES_KEY = "sound_modes"
+
+
+def sound_modes_of(data):
+    """The music modes record in sidecar *data* as the mod routes carry it:
+    ``{"names", "slots", "levels"}`` with every slot's files, or ``None`` when
+    there are none.  A record saved before mode files had a loudness of their
+    own (no ``"levels"``) gave each one its slot's ``audio_levels`` offset, so
+    those come out as the files' own levels: carried anywhere, they build the
+    same."""
+    raw = (data or {}).get(SOUND_MODES_KEY)
+    if not isinstance(raw, dict):
+        return None
+    slots = {}
+    for rel, files in (raw.get("slots") or {}).items():
+        if isinstance(rel, str) and isinstance(files, dict):
+            keep = {str(m): f for m, f in files.items()
+                    if isinstance(f, str) and f.strip()}
+            if keep:
+                slots[rel] = keep
+    names = raw.get("names")
+    names = ([n if isinstance(n, str) else "" for n in names]
+             if isinstance(names, list) else [])
+    if not slots and not any(names):
+        return None
+    levels = raw.get("levels")
+    if isinstance(levels, dict):
+        levels = {rel: {str(m): db for m, db in v.items() if str(m) in slots[rel]}
+                  for rel, v in levels.items()
+                  if rel in slots and isinstance(v, dict)}
+    else:
+        own = (data or {}).get("audio_levels") or {}
+        levels = {rel: {m: own[rel] for m in files}
+                  for rel, files in slots.items() if own.get(rel)}
+    return {"names": names, "slots": slots,
+            "levels": {rel: v for rel, v in levels.items() if v}}
+
+
+def merge_sound_modes(data, rec):
+    """Merge a carried music modes record *rec* (``{"names", "slots",
+    "levels"}``, files as local paths) into *data*, a project's staged changes.
+    A slot's file for a mode the record names wins, with its level; the
+    project's own names win where it has them (the user named its modes);
+    everything else here is left alone.  Returns how many slots it gave files.
+    The record here becomes the kind with levels of their own, its older
+    files' levels carried from their slots first (see
+    :func:`sound_modes_of`)."""
+    here = sound_modes_of(data) or {
+        "names": [], "slots": {}, "levels": {}}
+    slots = {rel: dict(v) for rel, v in here["slots"].items()}
+    levels = {rel: dict(v) for rel, v in here["levels"].items()}
+    n = 0
+    for rel, by_mode in (rec.get("slots") or {}).items():
+        if not isinstance(by_mode, dict) or not by_mode:
+            continue
+        got = slots.setdefault(rel, {})
+        lv = levels.setdefault(rel, {})
+        for m, path in by_mode.items():
+            got[str(m)] = path
+            db = (rec.get("levels") or {}).get(rel, {}).get(str(m))
+            if db:
+                lv[str(m)] = db
+            else:
+                lv.pop(str(m), None)
+        n += 1
+    names = list(here["names"])
+    for i, name in enumerate(rec.get("names") or []):
+        if i >= len(names):
+            names.append(name)
+        elif not str(names[i] or "").strip():
+            names[i] = name
+    if not n and names == here["names"]:
+        return 0
+    data[SOUND_MODES_KEY] = {
+        "names": names, "slots": slots,
+        "levels": {rel: v for rel, v in levels.items() if v}}
+    return n

@@ -170,6 +170,12 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._modes = {}
         self._mode_names = []
         self._sm_offer = None
+        # each mode file's own loudness ({rel: {mode: dB}}), whether the folder's
+        # record is from before they had one, and the mode file the Replacement
+        # pane is playing ((rel, mode), or None: the slot's own replacement)
+        self._mode_levels = {}
+        self._modes_legacy = False
+        self._rep_mode = None
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -211,7 +217,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                  ffmpeg_missing=False, ffmpeg_text=_FFMPEG_WARN,
                  col=None, level_cap=False, dups_cap=False, adv_cap=False,
                  trim_visible=True, trim_tip="", type_useful=False,
-                 level="0", level_enabled=False, can_clear=False,
+                 level="0", level_enabled=False, level_label="", level_all=True,
+                 can_clear=False,
                  running=False, profile_busy=False, adv_marker=False,
                  prefix="", sort={"key": "#0", "desc": False},
                  panes=dict(self._panes), dup_scanning=False,
@@ -290,6 +297,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._loop = {}
         self._keep = {}
         self._level = {}
+        self._rep_mode = None
         self._scan_dir = ""
         self._dup_groups = None
         self._dup_scan_dir = ""
@@ -619,6 +627,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                             if rel in self._by_rel}
             self._modes = {rel: v for rel, v in self._modes.items()
                            if rel in self._by_rel}
+            self._mode_levels = {rel: v for rel, v in self._mode_levels.items()
+                                 if rel in self._modes}
         self._loop = {
             s.rel_path: (bool(saved_loops[s.rel_path])
                          if s.rel_path in saved_loops
@@ -642,6 +652,13 @@ class AudioTab(FindOriginalsMixin, TabService):
                 continue
             if db:
                 self._level[rel] = max(min(db, 12), -12)
+        if self._modes_legacy:
+            # PAD-494: before mode files had a loudness of their own, a slot's
+            # offset reached them too; they start where those builds put them
+            self._modes_legacy = False
+            for rel, md in self._modes.items():
+                if self._level.get(rel):
+                    self._mode_levels[rel] = {m: self._level[rel] for m in md}
         keep_whole = (self._keep_whole if saved_keep_whole is None
                       else saved_keep_whole)
         self._keep_whole = [r for r in keep_whole if r in self._by_rel]
@@ -1575,6 +1592,10 @@ class AudioTab(FindOriginalsMixin, TabService):
 
     def _load_rep_pane(self, rel, autoplay=False):
         from ...core import staged_originals
+        if self._rep_mode is not None:
+            # the slot's own replacement again: the loudness box is its own
+            self._rep_mode = None
+            self._level_sync()
         rpath = self._assign.get(rel) if rel else None
         if rpath and os.path.isfile(rpath):
             self._pane_load(
@@ -1797,11 +1818,26 @@ class AudioTab(FindOriginalsMixin, TabService):
         except ValueError:
             return None
 
+    def _pane_mode(self, rel):
+        """The music mode whose file the Replacement pane is playing for *rel*
+        (PAD-494), or None: the box is then the slot's own replacement's."""
+        if rel is not None and self._rep_mode and self._rep_mode[0] == rel:
+            return self._rep_mode[1]
+        return None
+
+    def _rep_gain(self, rel):
+        """The loudness offset of what the Replacement pane holds for *rel*."""
+        m = self._pane_mode(rel)
+        return self._mode_level(rel, m) if m else self._level.get(rel, 0)
+
     def _level_sync(self, reset=False):
         rel = self._selected_rel()
+        m = self._pane_mode(rel)
         if rel is not None or reset:
-            self.set(level=str(self._level.get(rel, 0) if rel else 0))
-        self.set(level_enabled=bool(self._slots))
+            self.set(level=str(self._rep_gain(rel) if rel else 0))
+        self.set(level_enabled=bool(self._slots),
+                 level_label=("Mode %d's loudness:" % m) if m else "",
+                 level_all=not m)
 
     @rpc
     def set_level(self, rel, value):
@@ -1810,6 +1846,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         db = self._level_value(value)
         if db is None or rel is None or rel not in self._by_rel:
             return False
+        m = self._pane_mode(rel)
+        if m:
+            # a music mode's file is in the pane: the box is that file's own
+            return self._set_mode_level(rel, m, db, typed=value)
         if db:
             self._level[rel] = db
         else:
@@ -1829,7 +1869,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         def _go():
             self._level_job = None
             if self._current_rel == rel:
-                self._pane_set_gain("rep", self._level.get(rel, 0))
+                self._pane_set_gain("rep", self._rep_gain(rel))
         self._level_job = self._after(350, _go)
 
     @rpc
@@ -2424,6 +2464,24 @@ class AudioTab(FindOriginalsMixin, TabService):
                     keep[m] = f
             if keep:
                 self._modes[rel] = keep
+        # each mode file's own loudness; a record without any is from before
+        # they had one (its slots' offsets are carried over once levels load)
+        self._mode_levels = {}
+        levels = raw.get("levels")
+        self._modes_legacy = bool(self._modes) and not isinstance(levels, dict)
+        for rel, v in (levels.items() if isinstance(levels, dict) else ()):
+            if rel not in self._modes or not isinstance(v, dict):
+                continue
+            keep = {}
+            for m, db in v.items():
+                try:
+                    m, db = int(m), int(round(float(db)))
+                except (TypeError, ValueError):
+                    continue
+                if m in self._modes[rel] and db:
+                    keep[m] = max(min(db, 12), -12)
+            if keep:
+                self._mode_levels[rel] = keep
 
     def _modes_json(self):
         names = list(self._mode_names)
@@ -2433,7 +2491,43 @@ class AudioTab(FindOriginalsMixin, TabService):
                  for rel, v in sorted(self._modes.items()) if v}
         if not slots and not names:
             return None
-        return {"names": names, "slots": slots}
+        levels = {}
+        for rel, v in sorted(self._mode_levels.items()):
+            keep = {str(m): int(db) for m, db in sorted(v.items())
+                    if db and m in (self._modes.get(rel) or {})}
+            if keep:
+                levels[rel] = keep
+        return {"names": names, "slots": slots, "levels": levels}
+
+    def _mode_level(self, rel, m):
+        """Mode *m*'s file's own loudness offset for slot *rel*, in dB."""
+        return int((self._mode_levels.get(rel) or {}).get(m, 0) or 0)
+
+    def _set_mode_level(self, rel, m, db, typed=None):
+        """Mode *m*'s file's loudness for slot *rel*: its own, never the
+        slot's (the slot's offset is its own replacement's)."""
+        if m not in (self._modes.get(rel) or {}):
+            return False
+        lv = self._mode_levels.setdefault(rel, {})
+        if db:
+            lv[m] = db
+        else:
+            lv.pop(m, None)
+            if not lv:
+                self._mode_levels.pop(rel, None)
+        if rel == self._selected_rel() and self._pane_mode(rel) == m:
+            self.set(level=(str(typed).strip() if typed is not None else "") or str(db))
+        i = self._row_index.get(rel)
+        if i is not None:
+            self.patch_item("rows", i, md_tip=self._modes_words(rel))
+        if self._pane_mode(rel) == m:
+            self._level_preview_soon(rel)
+        self._save_staged_changes()
+        return True
+
+    @staticmethod
+    def _db_words(db):
+        return "%+d dB" % db if db else "0 dB"
 
     def _mode_name(self, m):
         """Mode *m*'s name: the user's, else "Standard" (mode 1) / "Custom A"... (the plugin
@@ -2468,7 +2562,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
                else "the game's own sound")
         parts = ["%s: %s" % (self._mode_said(1), own)]
-        parts += ["%s: %s" % (self._mode_said(m), os.path.basename(f))
+        parts += ["%s: %s%s" % (self._mode_said(m), os.path.basename(f),
+                                (" at %s" % self._db_words(self._mode_level(rel, m))
+                                 if self._mode_level(rel, m) else ""))
                   for m, f in sorted(md.items())]
         return ("Music modes - the machine's MUSIC MODE setting picks which "
                 "plays: " + "; ".join(parts) + ".")
@@ -2500,6 +2596,9 @@ class AudioTab(FindOriginalsMixin, TabService):
                 if not why:
                     sub.append({"label": "Play mode %d's sound (%s)" % (m, os.path.basename(f)),
                                 "action": "mode_play:%d" % m, "icon": "play"})
+                    sub.append({"label": "Loudness of mode %d's sound (%s)…" % (
+                        m, self._db_words(self._mode_level(rel, m))),
+                                "action": "mode_level:%d" % m, "icon": "wave"})
                 sub.append({"label": "Take off mode %d's sound (%s)" % (m, os.path.basename(f)),
                             "action": "mode_off:%d" % m, "icon": "x"})
         if not why:
@@ -2557,13 +2656,36 @@ class AudioTab(FindOriginalsMixin, TabService):
         if kind == "mode_play":
             if rel != self._current_rel:
                 self._load_track(rel)
-            self._pane_load("rep", f, autoplay=True,
+            self._pane_load("rep", f, autoplay=True, gain_db=self._mode_level(rel, m),
                             label="%s: %s" % (self._mode_label(m), os.path.basename(f)))
+            # the loudness box is this file's own while it is in the pane
+            self._rep_mode = (rel, m)
+            self._level_sync()
             return True
+        if kind == "mode_level":
+            text = compat.simpledialog.askstring(
+                "Loudness of mode %d's sound" % m,
+                "How loud mode %d's sound (%s) plays, in dB from -12 to +12. 0 matches the "
+                "sound it stands in for. It is this file's own: the loudness set on %s itself "
+                "is that sound's, not this one's." % (m, os.path.basename(f), os.path.basename(rel)),
+                initialvalue=str(self._mode_level(rel, m)))
+            if text is None:
+                return False
+            db = self._level_value(text)
+            if db is None:
+                return False
+            self.log("Replace Audio: %s's sound for music %s plays at %s." % (
+                rel, self._mode_said(m), self._db_words(db)), "info")
+            return self._set_mode_level(rel, m, db)
         if kind == "mode_off":
             md.pop(m, None)
             if not md:
                 self._modes.pop(rel, None)
+            (self._mode_levels.get(rel) or {}).pop(m, None)
+            if not self._mode_levels.get(rel, True):
+                self._mode_levels.pop(rel, None)
+            if self._pane_mode(rel) == m:
+                self._load_rep_pane(rel)
             self.log("Replace Audio: %s no longer has a sound for music %s."
                      % (rel, self._mode_said(m)), "info")
             self._modes_changed(rel)

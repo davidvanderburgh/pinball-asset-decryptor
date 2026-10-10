@@ -162,8 +162,13 @@ many modes or long names); the machine offers modes up to the highest
 one any sound has a file for. A mode's file follows **Allow
 replacements longer than the original** like a replacement: on, it plays
 at its full length; off, a file longer than the sound it stands in for
-is cut to that length. Music modes need an image build, not a direct SD
-write, and every mode file takes room in the sound bank.
+is cut to that length. Each music mode's file has its own loudness: **Music
+modes** > **Loudness of mode 2's sound…**, or play it from there and use
+the box beside the Replacement preview. A sound's own **Loudness for
+this clip** is for its own replacement only; it never reaches its mode
+files, and a sound with no replacement keeps its stock sound as it is.
+Music modes need an image build, not a direct SD write, and every mode
+file takes room in the sound bank.
 
 ### Editions
 
@@ -455,7 +460,13 @@ folder under the same on-card path, ready for one right-click
 are named at export *and* again at import as the short list to redo.
 Those copies are deliberately invisible to the Replace tabs and to the
 extract baseline, so they can never list as slots this card doesn't
-have. Pipeline working files
+have. A Stern project's **music modes** travel too: the pack holds the
+files you gave each sound for its other modes (wherever they sat on the
+exporting PC), with the modes' names and each file's own loudness, and
+Import puts the files in the project's `Music mode files/` folder (as
+invisible to the Replace tabs as `card_files/`) and points the sounds
+at them. *Transfer Mods to New Version* moves a sound's music modes
+with it, by the same content match its replacement uses. Pipeline working files
 (decrypted blobs, raw
 `.img`s) are left out, so a pack weighs what its assets weigh. For Stern
 Spike 2 (where new game code re-lays-out the card), a **Transfer Mods

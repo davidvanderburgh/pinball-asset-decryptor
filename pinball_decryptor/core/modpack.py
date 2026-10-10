@@ -9,8 +9,10 @@ import os
 import zipfile
 
 from . import hashcache
+from . import staged_changes
 from . import staged_originals
-from .checksums import CHECKSUMS_FILE, TRACKING_SIDECARS, read_baseline_any
+from .checksums import (CHECKSUMS_FILE, MUSIC_MODE_FILES_DIR, TRACKING_SIDECARS,
+                        read_baseline_any)
 from . import lineage as lineage_mod
 from .extract_source import read_extract_source, version_hint_from_name
 
@@ -59,6 +61,17 @@ CARD_DIR = ".modpack_card"
 # write into the .raw, through the ext4 driver, with no undo), just placed
 # where a right-click → Replace on the Partitions tab can reach them.
 IMPORTED_CARD_DIR = "card_files"
+
+# PAD-494: a Stern project's MUSIC MODES (``staged_changes.sound_modes_of``):
+# the modes' names, each slot's files for the other modes and their loudness.
+# The files are the user's own, anywhere on their PC, so the pack carries
+# their BYTES under this reserved zip folder (kept out of the members the
+# baseline judges, as CARD_DIR is) and the record names them by member; an
+# import puts them in the project's MUSIC_MODE_FILES_DIR (never a slot) and
+# points the record there.  "Can music modes be included in modpack transfer
+# to other project?" - the tester who asked for them.
+MODES_DIR = ".modpack_modes"
+_EXTRA_SOUND_MODES = "sound_modes"
 
 
 def _is_packable(rel):
@@ -145,7 +158,49 @@ def project_extras(assets_folder):
             "build": str(rec["build"]),
             "values": {str(k): v for k, v in (rec.get("values") or {}).items()},
             "touched": sorted({str(k) for k in (rec.get("touched") or [])})}
+    sm = staged_changes.sound_modes_of(data)
+    if sm:
+        extras[_EXTRA_SOUND_MODES] = sm
     return extras
+
+
+def pack_sound_modes(rec):
+    """Split a music modes record (:func:`project_extras`) into what a pack
+    carries: ``(record, [(file, member)], [(rel, mode, file)] gone)``.  The
+    record's files become zip members under :data:`MODES_DIR` (one per file,
+    however many modes use it); a file no longer on disk is left out of it and
+    listed as gone."""
+    if not isinstance(rec, dict):
+        return None, [], []
+    members, files, gone = {}, [], []
+    slots = {}
+    for rel, by_mode in sorted((rec.get("slots") or {}).items()):
+        keep = {}
+        for m, path in sorted(by_mode.items()):
+            if not os.path.isfile(path):
+                gone.append((rel, m, path))
+                continue
+            key = os.path.normcase(os.path.abspath(path))
+            if key not in members:
+                members[key] = "%s/%d/%s" % (MODES_DIR, len(members),
+                                             os.path.basename(path) or "sound")
+                files.append((path, members[key]))
+            keep[m] = members[key]
+        if keep:
+            slots[rel] = keep
+    levels = {rel: {m: db for m, db in v.items() if m in slots.get(rel, {})}
+              for rel, v in (rec.get("levels") or {}).items()}
+    out = {"names": list(rec.get("names") or []), "slots": slots,
+           "levels": {rel: v for rel, v in levels.items() if v}}
+    if not slots and not any(out["names"]):
+        return None, [], gone
+    return out, files, gone
+
+
+def _sound_modes_words(rec):
+    files = {f for v in (rec.get("slots") or {}).values() for f in v.values()}
+    return "music modes (%d file(s) on %d sound(s))" % (
+        len(files), len(rec.get("slots") or {}))
 
 
 def _stock_modes_words():
@@ -314,7 +369,10 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                 skipped_scratch += 1
     hashcache.save(assets_folder, hcache)
 
-    if not changed:
+    if not changed and not staged_changes.sound_modes_of(
+            staged_changes.load(assets_folder)):
+        # a project of music modes alone changes no file of the extract, and
+        # is still something to pack (PAD-494)
         raise ValueError("No modified files found. Modify some files first.")
 
     total_bytes = 0
@@ -353,6 +411,21 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
 
     src = read_extract_source(assets_folder) or {}
     extras = project_extras(assets_folder)
+    mode_files = []
+    if extras.get(_EXTRA_SOUND_MODES):
+        rec, mode_files, gone = pack_sound_modes(extras[_EXTRA_SOUND_MODES])
+        if rec:
+            extras[_EXTRA_SOUND_MODES] = rec
+        else:
+            extras.pop(_EXTRA_SOUND_MODES)
+        if gone and log_cb:
+            log_cb("NOT in the pack: %d file(s) for music modes, no longer at the "
+                   "path they were picked from (%s). Pick them again on the "
+                   "Audio tab before packing to carry them."
+                   % (len(gone), ", ".join(
+                       "%s for mode %s of %s" % (os.path.basename(f), m,
+                                                  os.path.basename(r))
+                       for r, m, f in gone[:4])), "warning")
     carried_card, named_card = pack_card_files(
         card_replacements(assets_folder))
     manifest = {
@@ -385,6 +458,8 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         n_sm = len((extras.get(_EXTRA_STOCK_MODES) or {}).get("values") or {})
         if n_sm:
             rode.append("%d %s" % (n_sm, _stock_modes_words()))
+        if extras.get(_EXTRA_SOUND_MODES):
+            rode.append(_sound_modes_words(extras[_EXTRA_SOUND_MODES]))
         if rode:
             log_cb("Also packing " + ", ".join(rode)
                    + " — they are project settings, not files.", "info")
@@ -423,6 +498,13 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                 if log_cb:
                     log_cb("Could not pack the card file %s — %s."
                            % (e.get("path"), err), "warning")
+        for path, member in mode_files:
+            try:
+                zf.write(path, member)
+            except OSError as err:
+                if log_cb:
+                    log_cb("Could not pack %s (a file for a music mode) — %s."
+                           % (path, err), "warning")
 
     return len(changed), zip_path
 
@@ -459,7 +541,7 @@ def inspect_mod_pack(zip_path, assets_folder):
         # them would report every one as a file "this card doesn't have".
         names = [n for n in zf.namelist()
                  if n != MANIFEST_NAME and not n.endswith(("/", "\\"))
-                 and not n.startswith(CARD_DIR + "/")]
+                 and not n.startswith((CARD_DIR + "/", MODES_DIR + "/"))]
         try:
             manifest = json.loads(zf.read(MANIFEST_NAME).decode("utf-8"))
         except (KeyError, ValueError, UnicodeDecodeError):
@@ -646,6 +728,10 @@ def apply_extras(assets_folder, extras, log_cb=None):
         n_sm = _merge_stock_modes(data, extras[_EXTRA_STOCK_MODES], log_cb=log_cb)
         if n_sm or json.dumps(data.get(_EXTRA_STOCK_MODES), sort_keys=True) != before:
             applied[_EXTRA_STOCK_MODES] = n_sm
+    if isinstance(extras.get(_EXTRA_SOUND_MODES), dict):
+        n = staged_changes.merge_sound_modes(data, extras[_EXTRA_SOUND_MODES])
+        if n:
+            applied[_EXTRA_SOUND_MODES] = n
     if not applied:
         return {}
     staged_changes.save(assets_folder, data)
@@ -665,7 +751,8 @@ def apply_extras(assets_folder, extras, log_cb=None):
                  "image_group_tags": "%d image/scene name(s)",
                  "replacement_names": "the name(s) of %d replacement file(s)",
                  "menu_expose_through": "the Adjustments-menu reveal",
-                 _EXTRA_STOCK_MODES: "%d " + _stock_modes_words()}
+                 _EXTRA_STOCK_MODES: "%d " + _stock_modes_words(),
+                 _EXTRA_SOUND_MODES: "music mode files for %d sound(s)"}
         parts = []
         for key, n in applied.items():
             if key == _EXTRA_STOCK_MODES and not n:
@@ -694,6 +781,9 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
     plan = plan or inspect_mod_pack(zip_path, assets_folder)
     manifest = plan.get("manifest") or {}
     applicable = plan["applicable"]
+    modes_only = (not plan["names"]
+                  and isinstance((manifest.get("extras") or {}).get(
+                      _EXTRA_SOUND_MODES), dict))
     if log_cb:
         for level, text in mismatch_lines(plan):
             log_cb(text, level)
@@ -703,7 +793,7 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
         for name, why in skipped_rows(plan):
             log_cb("  skipped %s — %s" % (name, why), "warning")
         log_cb("Importing %d file(s)..." % len(applicable), "info")
-    if not applicable:
+    if not applicable and not modes_only:
         raise ValueError(
             "None of this pack's %d file(s) belong to this extract, so there "
             "is nothing to import.\n\nThe pack was built from %s and this "
@@ -745,7 +835,15 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
                    "here that this card has no slot for." % len(removed),
                    "info")
 
-    extras = apply_extras(assets_folder, manifest.get("extras"), log_cb=log_cb)
+    extras_in = dict(manifest.get("extras") or {})
+    if isinstance(extras_in.get(_EXTRA_SOUND_MODES), dict):
+        rec = _unpack_sound_modes(zip_path, assets_folder,
+                                  extras_in[_EXTRA_SOUND_MODES], log_cb=log_cb)
+        if rec:
+            extras_in[_EXTRA_SOUND_MODES] = rec
+        else:
+            extras_in.pop(_EXTRA_SOUND_MODES)
+    extras = apply_extras(assets_folder, extras_in, log_cb=log_cb)
     _note_imported(assets_folder, plan.get("pack_lineage"), zip_path)
     card_files = manifest.get("card_files") or []
     card_saved = _unpack_card_files(zip_path, assets_folder, card_files,
@@ -818,3 +916,59 @@ def _prune_empty(assets_folder, removed):
             except OSError:
                 break
             cur = os.path.dirname(cur)
+
+
+def _unpack_sound_modes(zip_path, assets_folder, rec, log_cb=None):
+    """Write a pack's music mode files into the project's
+    :data:`checksums.MUSIC_MODE_FILES_DIR` and return its record pointing at
+    them (``None`` when nothing could be unpacked).  A file of the same name
+    already there with other bytes is kept, and this one is given a free
+    name."""
+    slots, written = {}, {}
+    base = os.path.join(assets_folder, MUSIC_MODE_FILES_DIR)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for rel, by_mode in (rec.get("slots") or {}).items():
+            if not isinstance(rel, str) or not isinstance(by_mode, dict):
+                continue
+            keep = {}
+            for m, member in by_mode.items():
+                if not (isinstance(member, str)
+                        and member.startswith(MODES_DIR + "/")):
+                    continue
+                if member not in written:
+                    try:
+                        data = zf.read(member)
+                    except KeyError:
+                        if log_cb:
+                            log_cb("The pack names a file for a music mode it does "
+                                   "not hold (%s); left out." % member,
+                                   "warning")
+                        continue
+                    name = os.path.basename(member) or "sound.wav"
+                    if name in ("", ".", "..") or ":" in name:
+                        continue
+                    os.makedirs(base, exist_ok=True)
+                    stem, ext = os.path.splitext(name)
+                    dest, k = os.path.join(base, name), 2
+                    while os.path.isfile(dest):
+                        with open(dest, "rb") as f:
+                            if f.read() == data:
+                                break
+                        dest = os.path.join(base, "%s (%d)%s" % (stem, k, ext))
+                        k += 1
+                    else:
+                        with open(dest, "wb") as f:
+                            f.write(data)
+                    written[member] = dest
+                keep[str(m)] = written[member]
+            if keep:
+                slots[rel] = keep
+    if not slots:
+        return None
+    if log_cb:
+        log_cb("The pack's music mode files (%d) are in this project's "
+               "\"%s\" folder." % (len(written), MUSIC_MODE_FILES_DIR), "info")
+    levels = {rel: {str(m): db for m, db in v.items() if str(m) in slots.get(rel, {})}
+              for rel, v in (rec.get("levels") or {}).items()}
+    return {"names": list(rec.get("names") or []), "slots": slots,
+            "levels": {rel: v for rel, v in levels.items() if v}}

@@ -179,6 +179,17 @@ class TreeEditMixin:
             lines = []
         if lines:
             edited, _n = scene_edit.apply_manifest(edited, lines)
+        # PAD-507: the score panel's lines as the machine shows them (their scene colour times
+        # the one the game program paints, or the colour the project picks for them)
+        try:
+            from ..plugins.stern import score_colours
+            game = score_colours.preview_ops(self.assets_dir, edited,
+                                             bake=self._look_sw()["files"])
+        except Exception:                            # noqa: BLE001
+            log.exception("score panel colours")
+            game = []
+        if game:
+            edited, _n = scene_edit.apply_manifest(edited, game)
         return edited, notes
 
     def _tree_default(self, card):
@@ -964,7 +975,49 @@ class TreeEditMixin:
                 "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n),
                 "font": self._tree_font_of(man, n, ops),
                 "filled": self._tree_filled(card, man).get(nid),
-                "words": self._tree_words_of(card, man, n, ops)}
+                "words": self._tree_words_of(card, man, n, ops),
+                "game_colors": self._tree_game_colors(man, nid)}
+
+    def _tree_game_colors(self, man, nid):
+        """PAD-507 (DragonRR): a line of Godzilla's score panel, which the game program
+        paints itself: each colour the machine shows the panel in, the game's own, picked by
+        hand, or through the profile of a switched-on line of the panel.  ``None`` for any
+        other line."""
+        from ..plugins.stern import score_colours as sc
+        try:
+            group = sc.panel_lines(man).get(nid)
+            if group is None:
+                return None
+            picks = sc.picks(self.assets_dir)
+            profiled = sc.profiled(self.assets_dir)
+            want = sc.wanted(self.assets_dir)
+        except Exception:                            # noqa: BLE001
+            log.exception("score panel colours")
+            return None
+        return {"group": group, "roles": [
+            {"role": r, "label": label, "hex": sc._hex(want[r]), "game": sc._hex(sc.SHOWN[r]),
+             "picked": r in picks, "profiled": r not in picks and r in profiled,
+             "mine": r in sc.GROUPS[group]}
+            for r, label, _rgb in sc.ROLES]}
+
+    @rpc
+    def tree_game_color(self, role, hex_color=None):
+        """PAD-507: pick the colour the machine shows one kind of score panel line in
+        (*hex_color* ``None``: the game's own, or the profile's when a line of the panel has
+        it switched on).  The Write puts it in the game program, the lines white."""
+        from ..plugins.stern import score_colours as sc
+        rgb = sc._parse(hex_color) if hex_color else None
+        if hex_color and rgb is None:
+            return False
+        try:
+            sc.set_pick(self.assets_dir, role, rgb)
+        except (OSError, ValueError) as e:
+            log.warning("score colour: %s", e)
+            return False
+        log.info("Scenes: the score panel's %s %s", sc.LABELS[role],
+                 "is %s" % sc._hex(rgb) if rgb else "has the game's own color")
+        self._tree_refresh()
+        return True
 
     def _tree_filled(self, card, man):
         """The text boxes of scene *card* the game fills in as it plays (PAD-485, DragonRR:

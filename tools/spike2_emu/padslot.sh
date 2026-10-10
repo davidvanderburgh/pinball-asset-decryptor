@@ -19,11 +19,13 @@
 # the process's owner, so a check run as the desktop user cannot read the
 # environment of a run started as root (the app's runs, every PAD_PIVOT run).
 # Such a process is reported as "?" and belongs to SLOT 0 - which keeps a
-# machine that never uses slots exactly as it was: the app's status poll runs
-# as the user and must go on seeing the root run it started. A slot >= 1 check
-# never counts one; run the check as root (`wsl -u root`) for an exact answer
-# when slots are in use. It could never kill one anyway: a user cannot signal
-# root's processes, which was already true before slots.
+# machine that never uses slots exactly as it was: a status check run as the
+# user must go on seeing the root run it started. A slot >= 1 check never
+# counts one; run the check as root (`wsl -u root`) for an exact answer when
+# slots are in use - the Windows app's status poll does (PAD-496: run as the
+# user, it read a session's game on rig 1 as rig 0's and offered David only
+# Stop). It could never kill one anyway: a user cannot signal root's
+# processes, which was already true before slots.
 #
 # GONE IS NOT UNREADABLE, and the difference was measured the first time two
 # slots ran: watch.sh forks a short-lived subshell several times a second, its

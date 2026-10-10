@@ -883,6 +883,26 @@ def test_stop_kills_as_root_on_windows(monkeypatch, tmp_path):
     assert cmd[:2] == ["wsl.exe", "-e"], cmd
 
 
+def test_status_polls_as_root_on_windows(monkeypatch, tmp_path):
+    """PAD-496: a rig tells its processes from another rig's by their
+    /proc/<pid>/environ, which only root can read for a root run - and every
+    run is root's.  Polled as the desktop user, rig 0 counted a session's
+    game on rig 1 as its own and the app offered only Stop."""
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    monkeypatch.setenv("PAD_SLOT", "2")
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_core.status_cmd()
+    assert cmd[:3] == ["wsl.exe", "-u", "root"]
+    assert "HOME=/home/somebody" in cmd
+    assert "PAD_SLOT=2" in cmd
+    assert cmd[-1].endswith("/status.sh")
+    _home(monkeypatch, None)
+    cmd = emulate_core.status_cmd()
+    assert cmd[:2] == ["wsl.exe", "-e"], cmd
+    assert cmd[-1].endswith("/status.sh")
+
+
 def test_the_container_entry_point_ships_with_the_rig():
     """rig_cmd names it on macOS, so its absence would be a macOS-only failure
     that nobody developing on Windows or Linux would ever see."""

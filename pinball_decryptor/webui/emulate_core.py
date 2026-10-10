@@ -1224,6 +1224,26 @@ def kill_cmd():
     return rig_cmd("killgame.sh")
 
 
+def status_cmd():
+    """status.sh, as ROOT on Windows, so each rig's poll sees ITS OWN run.
+
+    Which rig a process belongs to is read from its /proc/<pid>/environ
+    (padslot.sh), and only the process's owner and root can read that.  Every
+    run here is root's - this tab's checkpointable launch, a session's rig -
+    so the desktop user's poll could not tell them apart: rig 0 counted every
+    other rig's game as its own, and with a session's game up on rig 1 the
+    app on rig 0 offered only "Stop emulator", whose root kill rightly left
+    that game alone (PAD-496).  Root reads every environment.  The desktop
+    HOME rides along for kill_cmd's reason, and so does its fallback.
+    """
+    if sys.platform == "win32":
+        home = wsl_home()
+        if home:
+            return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
+                    "bash", "%s/status.sh" % _wsl_path(rig_dir())]
+    return rig_cmd("status.sh")
+
+
 def load_cmd(slot):
     """loadgame.sh as ROOT with the desktop HOME — the same shape as
     kill_cmd, for the same reasons: a save-state load is a criu restore of

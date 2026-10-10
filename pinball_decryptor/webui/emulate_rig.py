@@ -35,7 +35,8 @@ from .emulate_core import (  # noqa: F401  (re-exported)
     playfield_launch, preview_modes_reason, rig_available, rig_cmd,
     rig_cmd_root, rig_dir, setup_fix_steps, setup_fixable, setup_notice,
     setup_ok, setup_report, setup_report_darwin, setup_settled, setup_state,
-    slot_up_cmd, state_text, watch_cmd, which_tool, windows_python, wsl_home,
+    slot_up_cmd, state_text, status_cmd, watch_cmd, which_tool,
+    windows_python, wsl_home,
 )
 from .emulate_core import _wsl_path as wsl_path  # noqa: F401
 

@@ -2978,7 +2978,9 @@ class EmulateTab(TabService):
 
         def run():
             try:
-                out = self._run(self._cmd("status.sh"),
+                # as root: the rig is told apart from the others by a read
+                # only root can make (rig.status_cmd, PAD-496)
+                out = self._run(rig.status_cmd(),
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, timeout=20)
                 text = out.stdout.decode("utf-8", "replace")

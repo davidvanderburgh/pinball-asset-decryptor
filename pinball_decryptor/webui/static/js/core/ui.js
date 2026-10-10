@@ -482,13 +482,18 @@ export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect,
     if (y < el.scrollTop) el.scrollTop = y;
     else if (y + rowHeight > el.scrollTop + el.clientHeight - rowHeight) el.scrollTop = y - el.clientHeight + rowHeight * 2;
   }, [selKey]);
+  // the row last clicked or stepped to: with several rows selected the arrows go on from it
+  // (PAD-508: they went back to the top row)
+  const atRef = useRef(null);
   const onKey = (e) => {
     if (!rows || !n || !onSelect) return;
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
     e.preventDefault();
-    let idx = rows.findIndex((r, i) => rowKey(r, i) === selKey);
+    const from = selected instanceof Set && selected.has(atRef.current) ? atRef.current : selKey;
+    let idx = rows.findIndex((r, i) => rowKey(r, i) === from);
     if (e.key === "Enter") { if (idx >= 0 && onActivate) onActivate(rows[idx], idx); return; }
     idx = e.key === "ArrowDown" ? Math.min(n - 1, idx + 1) : Math.max(0, idx - 1);
+    atRef.current = rowKey(rows[idx], idx);
     onSelect(rows[idx], idx, e);
   };
   return html`<div class=${cx("tbl", cls)} style=${style}>
@@ -504,7 +509,7 @@ export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect,
           const id = rowKey(r, i);
           return html`<div key=${id} class=${cx("tr", (onSelect || onActivate) && "click", isSel(id) && "sel", rowClass && rowClass(r, i))}
             style=${`grid-template-columns:${template};position:absolute;left:0;right:0;top:${i * rowHeight}px;height:${rowHeight}px`}
-            onClick=${(e) => onSelect && onSelect(r, i, e)}
+            onClick=${(e) => { atRef.current = id; if (onSelect) onSelect(r, i, e); }}
             onDblClick=${() => onActivate && onActivate(r, i)}
             onContextMenu=${onContext ? (e) => { e.preventDefault(); onContext(r, i, e); } : undefined}>
             ${columns.map((c) => html`<span class=${cx("c", c.num && "num", c.cls)} title=${c.titleOf ? c.titleOf(r) : undefined}>${c.render ? c.render(r, i) : r[c.key]}</span>`)}

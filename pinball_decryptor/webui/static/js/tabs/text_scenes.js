@@ -480,23 +480,40 @@ function Contents({ s, onMenu }) {
   const c = s.contents;
   const [open, setOpen] = useState({});
   const listRef = useRef(null);
+  const stepped = useRef(null);
+  const step = useStepper((id) => call("text_scenes.select_item", id), s.item);
   useEffect(() => { setOpen({}); }, [c && c.path]);
   useEffect(() => {
     // land on a focused line (Show in Scenes…)
     if (!s.item || !listRef.current) return;
     const el = listRef.current.querySelector(`[data-id="${CSS.escape(s.item)}"]`);
-    // centred: the list can still shrink a little once the preview lands
-    if (el) el.scrollIntoView({ block: "center" });
+    // centred: the list can still shrink a little once the preview lands; an arrow's step
+    // only brings the row into view
+    if (el) el.scrollIntoView({ block: stepped.current === s.item ? "nearest" : "center" });
   }, [s.item, c && c.path]);
   if (!c) return html`<div class="scenes-contents"><div class="sc-head"><span class="eyebrow">Contents</span></div></div>`;
-  return html`<div class="scenes-contents" ref=${listRef} role="tree" aria-label="Contents">
+  const isOpen = (g) => open[g.key] ?? (g.open || (s.item && g.items.some((it) => it.id === s.item)));
+  const onKey = (e) => {
+    if (!listArrow(e)) return;
+    e.preventDefault();
+    const ids = c.groups.flatMap((g) => (isOpen(g) ? g.items.filter((it) => it.id).map((it) => it.id) : []));
+    const at = step.from(ids);
+    const next = stepRow(ids, at, e.key);
+    if (next == null || next === at) return;
+    // a group open only for the row in it stays open as the arrows leave it
+    const g = c.groups.find((x) => open[x.key] == null && x.items.some((it) => it.id === at));
+    if (g) setOpen({ ...open, [g.key]: true });
+    stepped.current = next;
+    step.go(next);
+  };
+  return html`<div class="scenes-contents" ref=${listRef} role="tree" aria-label="Contents" tabindex="0" onKeyDown=${onKey}>
     <div class="sc-head"><span class="eyebrow">Contents</span></div>
     ${c.groups.map((g) => {
-      const isOpen = open[g.key] ?? (g.open || (s.item && g.items.some((it) => it.id === s.item)));
+      const opened = isOpen(g);
       return html`<div class="sc-group" key=${g.key}>
-        <button type="button" class="sc-gh" onClick=${() => setOpen({ ...open, [g.key]: !isOpen })}>
-          <${Icon} name=${isOpen ? "down" : "right"} />${g.title}</button>
-        ${isOpen ? g.items.map((it, n) => html`<div key=${it.id || g.key + n} data-id=${it.id || ""}
+        <button type="button" class="sc-gh" onClick=${() => setOpen({ ...open, [g.key]: !opened })}>
+          <${Icon} name=${opened ? "down" : "right"} />${g.title}</button>
+        ${opened ? g.items.map((it, n) => html`<div key=${it.id || g.key + n} data-id=${it.id || ""}
             class=${cx("sc-item", it.id && s.item === it.id && "sel", !it.id && "note")}
             onClick=${() => it.id && call("text_scenes.select_item", it.id)}
             onDblClick=${() => it.id && call("text_scenes.activate", it.id)}
@@ -623,6 +640,42 @@ function TreeTop({ s, onMenu }) {
 // Ctrl (Cmd on a Mac) adds a layer to the selection or takes it out; Shift selects a run of
 // them in the Layers list (PAD-279).
 const pickHow = (e, range) => (range && e.shiftKey ? "range" : e.ctrlKey || e.metaKey || e.shiftKey ? "add" : "");
+
+// PAD-508 (DragonRR): Up and Down in the Layers and Contents lists pick the row above or below,
+// as they do in every other list; they only scrolled the list, like the mouse wheel.  ids: the
+// rows in list order; at: the row the arrows are on.  -> the row to pick, or null (not an
+// arrow, nothing above the top or below the bottom).  With no row picked yet, the first.
+export function stepRow(ids, at, key) {
+  if ((key !== "ArrowDown" && key !== "ArrowUp") || !ids.length) return null;
+  const i = at == null ? -1 : ids.indexOf(at);
+  if (i < 0) return ids[0];
+  const j = key === "ArrowDown" ? i + 1 : i - 1;
+  return j >= 0 && j < ids.length ? ids[j] : null;
+}
+// One pick on its way to Python at a time: an arrow held down sends the row it has got to
+// once the pick before is answered, not a redraw of the preview per key repeat.  from(ids,
+// sel) is the row the arrows are on: the last one asked for until Python's selection moves.
+export function useStepper(send, sel) {
+  const st = useRef({ busy: false, at: null, next: null });
+  useEffect(() => { if (!st.current.busy) st.current.at = null; }, [sel]);
+  const go = (...args) => {
+    const s = st.current;
+    s.at = args[0];
+    if (s.busy) { s.next = args; return; }
+    s.busy = true;
+    const run = (a) => Promise.resolve(send(...a)).finally(() => {
+      const q = s.next;
+      s.next = null;
+      if (q) run(q); else s.busy = false;
+    });
+    run(args);
+  };
+  const from = (ids) => (st.current.at != null && ids.includes(st.current.at) ? st.current.at : sel);
+  return { go, from };
+}
+// the list's own arrow keys; a modifier other than Shift, or a box being typed in, is left alone
+const listArrow = (e) => (e.key === "ArrowDown" || e.key === "ArrowUp") && !e.altKey && !e.ctrlKey && !e.metaKey
+  && !(e.target && e.target.closest && e.target.closest("input, textarea, select"));
 
 // PAD-294 (DragonRR): a plain click on the empty room around the picture, or below the rows
 // in Layers, drops the selection (a selected layer is drawn on top until then).  A click on
@@ -877,6 +930,17 @@ function TreeLayers({ t }) {
     const el = listRef.current.querySelector(`[data-node="${t.sel}"]`);
     if (el) el.scrollIntoView({ block: "nearest" });
   }, [t.sel]);
+  // PAD-508: Up / Down pick the layer above or below; Shift+Up / Down take in a run of them,
+  // as Shift-click does
+  const step = useStepper((id, how) => call("text_scenes.tree_select", id, how), t.sel);
+  const onKey = (e) => {
+    if (!listArrow(e)) return;
+    e.preventDefault();
+    const ids = (t.layers || []).map((l) => l.id);
+    const at = step.from(ids);
+    const next = stepRow(ids, at, e.key);
+    if (next != null && next !== at) step.go(next, e.shiftKey && at != null ? "range" : "");
+  };
   // H hides or shows the selected layers in the preview, wherever the focus is on the tab
   const tRef = useRef(t);
   tRef.current = t;
@@ -901,7 +965,7 @@ function TreeLayers({ t }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   return html`<div class="scenes-contents tree-layers" ref=${listRef} role="tree" aria-label="Layers"
-      onPointerDown=${(e) => deselectOnBlank(t, e)}>
+      tabindex="0" onKeyDown=${onKey} onPointerDown=${(e) => deselectOnBlank(t, e)}>
     <div class="sc-head"><span class="eyebrow">Layers — last drawn on top</span>
       ${t.solo != null ? html`<button type="button" class="ly-solo small"
         ...${tip({ head: "One layer is shown alone", lines: [["Click", "bring the other layers back"], ["Alt+click", "its eye does the same"]] })}
@@ -915,7 +979,7 @@ function TreeLayers({ t }) {
         onDragEnd=${endDrag}
         onDragOver=${(e) => onRowOver(l, e)}
         onDrop=${(e) => onRowDrop(l, e)}
-        onMouseDown=${(e) => { if (e.shiftKey) e.preventDefault(); }}
+        onMouseDown=${(e) => { if (e.shiftKey) { e.preventDefault(); listRef.current.focus({ preventScroll: true }); } }}
         onContextMenu=${(e) => layerMenu(t, l, e)}
         onClick=${(e) => call("text_scenes.tree_select", l.id, pickHow(e, true))}>
       <button type="button" class=${cx("ly-eye", (l.view_off || l.state_off) && "shut", t.solo === l.id && "solo")}

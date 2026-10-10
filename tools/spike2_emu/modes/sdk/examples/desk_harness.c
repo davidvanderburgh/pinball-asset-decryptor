@@ -81,6 +81,7 @@ static const struct { const char *name; int id; } EVENTS[] = {
 static unsigned long now_ms, ticks;
 static unsigned player = 1;
 static int in_game = 1, battle, multiball, timed;
+static int wizard_way = -1;               /* PAD-503: the game's own mini-wizard check (`way`); -1 = no such check */
 static uint64_t score[5];
 static const struct pm_mode *current, *running;
 static char trigger_file[64], trigger_text[128];
@@ -584,6 +585,11 @@ int pm_aside(void)
 {
     return in_game ? pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY) : 0;
 }
+/* PAD-503: the game's own check before one of its mini-wizards (Bond: a henchman, villain or Q Branch mode in its way) */
+int pm_game_wizard_way(void)
+{
+    return in_game && player ? wizard_way : -1;
+}
 /* PAD-347: "BLOCK 1 <mode>" when a mode keeps the game's modes from starting, "BLOCK 0 <mode>" when it lets go */
 int pm_block_game_modes(int on)
 {
@@ -914,6 +920,7 @@ int main(int argc, char **argv)
         } else if (!strcmp(c, "battle")) { battle = atoi(argv[++k]); printf("%6lu >> battle %d\n", now_ms, battle); }
         else if (!strcmp(c, "multiball")) { multiball = atoi(argv[++k]); printf("%6lu >> multiball %d\n", now_ms, multiball); }
         else if (!strcmp(c, "timed")) { timed = atoi(argv[++k]); printf("%6lu >> timed %d\n", now_ms, timed); }
+        else if (!strcmp(c, "way")) { wizard_way = atoi(argv[++k]); printf("%6lu >> way %d\n", now_ms, wizard_way); }
         else if (!strcmp(c, "shield")) {             /* the game turns the platform itself (its ball search) */
             shield_to = shield_at = !strcmp(argv[++k], "toward") ? PM_SHIELD_TOWARD : PM_SHIELD_AWAY;
             printf("%6lu >> shield %s\n", now_ms, argv[k]);
@@ -926,6 +933,18 @@ int main(int argc, char **argv)
         } else if (!strcmp(c, "scoop")) {          /* PAD-395: a ball settles in the scoop */
             printf("%6lu >> scoop\n", now_ms);
             scoop_settle();
+        } else if (!strcmp(c, "points")) {         /* PAD-503: the game scores for the player up */
+            unsigned long long v = strtoull(argv[++k], 0, 0);
+            if (player >= 1 && player <= 4) score[player] += v;
+            printf("%6lu >> points %llu\n", now_ms, v);
+        } else if (!strcmp(c, "hold")) {           /* PAD-503: the game holds play for a moment and carries on (James
+                                                    * Bond's end of a mode or multiball: pm_in_game() is 0 meanwhile) */
+            unsigned long ms = (unsigned long)(atof(argv[++k]) * 1000.0);
+            printf("%6lu >> hold %lu ms\n", now_ms, ms);
+            in_game = 0;
+            ticks_for_ms(ms);
+            in_game = 1;
+            printf("%6lu >> hold over\n", now_ms);
         } else if (!strcmp(c, "player")) player = (unsigned)atoi(argv[++k]);
         else if (!strcmp(c, "game_over")) in_game = 0;
         else if (!strcmp(c, "new_game")) {

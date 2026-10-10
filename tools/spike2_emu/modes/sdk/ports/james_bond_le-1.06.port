@@ -481,6 +481,10 @@ site  wizard_start   0x00110d98 0xe92d4070 0xeb055daa
 # for every more of that part): every one not played lit, one selected, the refresh byte set. Hooked with a veto so a
 # mini-wizard a mode of the card hands out (claimed as the modes load) stays unlit by it.
 site  wizard_light   0x00110cac 0xe30a09ac 0xe3a01004
+# PAD-503: the game's own check before its start of one (0x110b90, called by 0x110c10 and the start itself): 1 when none
+# of the four runs and no henchman, villain or Q Branch mode (0x15f410, 0x1360d4, 0x19ea7c), nothing at 0x9f4e0 or
+# 0xdbf70 and no Victory Laps (0x1cbb88); 0 otherwise. pm_game_wizard_way: a mode lit at the Right ramp waits on it.
+site  wizard_way     0x00110b90 0xe92d4038 0xebfe3a51
 data  wizard_state   0x0081c3f4
 data  wizard_table   0x00625da0
 data  lamps_dirty    0x008268bc

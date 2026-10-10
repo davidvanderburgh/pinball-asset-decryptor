@@ -123,6 +123,41 @@ lights stayed; with it cleared the next ramp gave `START (its lit shot): player 
 Not done: two modes of one's own lit at the same shot, one of them lighting that shot again while it runs, leave the
 other's shot lights dark from that one's end to the next ball (its insert stays lit and the shot still starts it).
 
+### Round 2 (v1.169.0 in the owner's games): the light went out with the game's mode that lit it
+
+The owner, in the emulator: Diamonds Are Forever lit MR. HENDERSON while the mode that won its last part still ran, and
+once that mode was over the Right ramp was dark; then Mr Osato (You Only Live Twice's henchman) completed the film as it
+started, BLOFELD lit green, and when Mr Osato was over BLOFELD was off and the ramp started nothing. Two causes, both
+reproduced on the rig (PAD-Runtime rig 1, stock card, hidden, muted; C:/tmp/PAD-503 proof.sh / proof2.sh, the
+instrument rig/inwatch.c; the shipped blocks C against the fixed one, same steps):
+
+- **The game ends play at the end of its big modes, and the blocks read the next ball as a new game.** Every one of
+  Bond's multiballs and wizard modes ends with `0x3f79bc` (Dr. No, Disco Volante, Aston Martin, Little Nellie,
+  Powerpack, Helicopter, James Bond and Wizard mode multiballs, Ahoy Mr. Bond, Goldfinger's wizard): mode-mask bits
+  0x202, the same shutdown as its tilt, cleared only by its end of ball. `pm_in_game()` is 0 until the ball drains and
+  rises for the next ball, and the blocks C took any rise for a new game: the light, its "each game" values and its
+  timers were wiped. Rig, the game's own `0x3f79bc(0, 1)` with player 1 scored: shipped, the lights went at the end of
+  play, the mode said "still lit at the drain", and the next ball's rise wiped it (LED view dark, the ramp started
+  nothing); fixed, the lights came back with the next ball (arrow magenta, MR. HENDERSON 255) and the ramp gave
+  `START (its lit shot)`. A new game is now the SDK's witness (`new_game`: player 1's score back to 0, or
+  `pm_in_game()` rising while it is 0), as mode_file.c and the kit's `kit_new_game` have it.
+- **The ramp started the owner's mode in the middle of the game's own mode.** The game starts a mini-wizard only when
+  its check `0x110b90` says nothing of its own is in the way (its henchman, villain and Q Branch modes among them), and
+  the port's flags show none of those, so a Right ramp during Mr Osato started the lit mode (rig: runs 6 and 10,
+  shipped) - starting puts the light out, and the owner's mode ran under Mr Osato's screens. The ports now name the
+  check (`site wizard_way`, LE 0x110b90, Pro 0x10fbc4) and `pm_game_wizard_way()` answers it; the lit shot waits on it
+  whatever the mode's choice about the game's modes, and a start that waits for the game's modes waits on it too.
+  Rig, fixed: the game's Mr Osato (`0x123f84`) started (way check in the way), its film done lit the mode, a Right
+  ramp then gave `not started (its lit shot): one of the game's own modes is in its way - still lit`, Mr Osato ran out
+  its own clock (way check clear, play kept going with slingshots) and the arrow and BLOFELD stayed lit through it.
+
+The Right ramp's own handler (`0x1aee8c`) runs the game's modules before its mini-wizard start (`0x110d98`, last), and
+the Right ramp is where the game starts its henchman and villain modes: on the rig the first Right ramp of a fresh game
+started one (the check's `0x1360d4` 1 for some 88 s), and so did every later one there - the instrument collects a
+film's parts without playing their modes, so the rig's ramp never runs out of them. So a mode of the game's that the
+ramp starts goes first and the lit mode waits, lit, for the next ramp shot: the game's own precedence for its own
+mini-wizards. In a real game the film's own henchman and villain are played by the time it is done.
+
 The plan as it was written (PAD-428):
 
 What the user asked first: the game's mini-wizard (its own mode, music and screens) lit

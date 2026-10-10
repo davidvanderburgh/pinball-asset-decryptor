@@ -70,6 +70,13 @@ it for the player up: while the mode is not running, the shot's inserts and the 
 names, "" = none) are held in its colour, ball after ball, and that shot made starts the mode as Start the mode
 does (so it waits, and stays lit, while one of the game's own modes or a multiball is in its way, as the mode is
 set). Starting, however it starts, puts the light out; a new game too. Each player's is their own.
+The same owner's next games (PAD-503, v1.169.0): the light went out when the game's mode that won the film's last
+part ended, and a Right ramp in the middle of the game's Mr Osato started the mode. So (1) a NEW GAME is the SDK's
+witness (player 1's score back to 0, or pm_in_game() rising while it is 0: ``new_game``), not pm_in_game() rising:
+James Bond ends play at the end of each of its multiballs and wizard modes (mode-mask busy bits until the ball ends),
+and the next ball's pm_in_game() rising wiped the light, the "each game" values and the timers; (2) the lit shot,
+and any start that waits for the game's modes, also waits on the game's own check before one of its mini-wizards
+(pm_game_wizard_way: its henchman, villain and Q Branch modes, which the port's flags do not show).
 
 What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 gives the blocks:
 
@@ -1674,7 +1681,7 @@ def to_c(program, slug):
     L.append("    unsigned player, ticks_left, seconds_shown, elapsed, shots;")
     L.append("    uint64_t total;")
     L.append("} run;")
-    L.append("static int sec_changed, was_in_game, ending;")
+    L.append("static int sec_changed, ending;")
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
     L.append("static unsigned ended_begun;          /* PAD-413: pm_begun() at its end, while its total shows */")
@@ -1705,6 +1712,7 @@ def to_c(program, slug):
     L.append("    return p <= 4 ? p : 0;")
     L.append("}")
     L.append("")
+    L.extend(_NEW_GAME_C.split("\n"))
     L.append("UNUSED static long long div0(long long a, long long b)")
     L.append("{")
     L.append("    return b ? a / b : 0;")
@@ -1873,12 +1881,14 @@ def to_c(program, slug):
                              "release": "".join("    pm_coil_release(%s);\n" % _c_str(n) for n in g.holds)}
                   ).split("\n"))
     L.append("/* What of the game's own is running (a battle, a multiball, one of its timed modes), or 0. A port that")
-    L.append(" * cannot tell answers none. */")
+    L.append(" * cannot tell answers none. PAD-503: and the game's own check before it starts one of its mini-wizards,")
+    L.append(" * where the port names one (James Bond: its henchman, villain and Q Branch modes, which its flags do not show) */")
     L.append("UNUSED static const char *game_busy(void)")
     L.append("{")
     L.append("    int k = pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY);")
     L.append("    if (k > 0) return pm_stock_mode_what((unsigned)k);")
     L.append("    if (pm_can(PM_CAN_MULTIBALL) && pm_balls_in_play() >= 2) return \"a multiball\";")
+    L.append("    if (pm_game_wizard_way() == 0) return \"one of the game's own modes\";")
     L.append("    return 0;")
     L.append("}")
     L.append("")
@@ -2098,21 +2108,18 @@ def to_c(program, slug):
         L.append("    own_tick();                       /* every tick: an end call outlives the mode */")
     if g.shows:
         L.append("    show_tick();                      /* every tick: an end show outlives the mode */")
-    L.append("    if (in_game && !was_in_game) {    /* a new game: every player's \"each game\" values */")
+    L.append("    if (new_game()) {                 /* every player's \"each game\" values, and no timer runs on */")
     L.append("        unsigned p, v;")
     L.append("        for (p = 0; p < 5; p++) {")
     L.append("            for (v = 0; v < %d; v++) H[v][p] = 0;" % nhits)
     for i, (_n, reset) in enumerate(g.var_names):
         L.append("            %s = 0;" % g.var(i, "p"))
     if g.lit:
+        L.append("            if (lit_as[p]) pm_log(\"a new game: player %u's light is out\", p);")
         L.append("            lit_as[p] = 0;            /* PAD-503: no one is lit at the start of a game */")
     L.append("        }")
+    L.append("        for (v = 0; v < %d; v++) T[v] = 0;" % ntimers)
     L.append("    }")
-    L.append("    if (!in_game && was_in_game) {    /* the game is over: no timer runs on */")
-    L.append("        unsigned t;")
-    L.append("        for (t = 0; t < %d; t++) T[t] = 0;" % ntimers)
-    L.append("    }")
-    L.append("    was_in_game = in_game;")
     if g.lit:
         L.append("    lit_tick();                       /* PAD-503: the player up's light while it is not running */")
     L.append("    if (++poll % 30 == 0) {            /* the tab's Start mode now / End mode */")
@@ -2203,6 +2210,34 @@ def to_c(program, slug):
     L.append("PM_REGISTER(%s_mode);" % ident)
     return "\n".join(L) + "\n"
 
+
+#: PAD-503: a new game as the SDK tells one (MODE_SDK.md "What marks a new game"; mode_file.c and the kit's
+#: kit_new_game). pm_in_game() rising alone was the blocks' test, and James Bond LE 1.06 ends play at the end of each
+#: of its multiballs and wizard modes (0x3f79bc: the mode mask's busy bits 0x202, until the ball ends), so the next
+#: ball read as a new game: the mode's light, its "each game" values and its timers were wiped
+_NEW_GAME_C = """/* A new game: player 1's score falling to 0, or pm_in_game() rising while it is 0; seen once, then not again until
+ * player 1 scores or pm_in_game() falls (MODE_SDK.md "What marks a new game"). pm_in_game() rising alone is not one: a
+ * game can end play on a ball and carry on (James Bond, at the end of each of its multiballs and wizard modes). */
+static int new_game(void)
+{
+    static int seen, was_in, was_zero, armed;
+    int in = pm_in_game(), zero = pm_score(1) == 0, fresh = 0;
+    if (!seen) {
+        seen = armed = 1;
+        was_in = in;
+        was_zero = zero;
+        return 0;
+    }
+    if (!zero || (was_in && !in)) armed = 1;  /* player 1 scored, or the game ended */
+    if (zero && armed && (!was_zero || (in && !was_in))) {
+        armed = 0;
+        fresh = 1;
+    }
+    was_in = in;
+    was_zero = zero;
+    return fresh;
+}
+"""
 
 #: the C that holds the shots' lights (PAD-376); %(n)d shots named, LIT sized %(size)d
 _LAMPS_C = """/* ---- the shots' lights the blocks hold (PAD-376): kept, so a light show gives them back when
@@ -2588,12 +2623,22 @@ static void lit_tick(void)
     lit_player = p;
 }
 
-/* a shot: the one the player up's light is at starts the mode */
+/* a shot: the one the player up's light is at starts the mode - not while the game would not start one of its own
+ * mini-wizards there (its own check: a henchman, villain or Q Branch mode of its own running), whatever the mode's
+ * choice about the game's modes; it stays lit for the next */
 static void lit_shot(uint64_t shot)
 {
+    static unsigned long said_at;
     unsigned p = pm_player();
     if (run.on || p < 1 || p > 4 || !lit_as[p]) return;
-    if (S[LIT_AT[lit_as[p] - 1].shot] & shot) start("its lit shot", 1);
+    if (!(S[LIT_AT[lit_as[p] - 1].shot] & shot)) return;
+    if (pm_game_wizard_way() == 0) {
+        if (!said_at || pm_ms() - said_at >= 10000)
+            pm_log("not started (its lit shot): one of the game's own modes is in its way - still lit");
+        said_at = pm_ms() ? pm_ms() : 1;
+        return;
+    }
+    start("its lit shot", 1);
 }
 
 /* the mode began for player p: that player's light is out */

@@ -337,6 +337,9 @@ text block_name_15      Double Scoring
 # 0x869ab8 read off the same instructions.
 site  wizard_start   0x0010fdcc 0xe92d4070 0xeb033961
 site  wizard_light   0x0010fce0 0xe303013c 0xe3a01004
+# PAD-503: the game's own check before its start of one, the LE's 0x110b90 0xfcc lower (the same calls, its own
+# table 0x621d38): 1 = nothing of the game's in the way. pm_game_wizard_way: a mode lit at the Right ramp waits on it.
+site  wizard_way     0x0010fbc4 0xe92d4038 0xebfe3dce
 data  wizard_state   0x0081dc34
 data  wizard_table   0x00621d38
 data  lamps_dirty    0x00869ab8

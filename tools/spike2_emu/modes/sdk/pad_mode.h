@@ -659,5 +659,10 @@ int pm_game_wizards(void);
  * on this game, no such wizard, or the port names no `site wizard_light` (then the game lights it too). */
 int pm_game_wizard_claim(int n);
 int pm_game_wizard_claim_named(const char *name);
+/* PAD-503: the game's own check before it starts one of its mini-wizards (Bond: none of them running, no henchman,
+ * villain or Q Branch mode, no Victory Laps - the port's `site wizard_way`). 1 = nothing of the game's is in the way,
+ * 0 = something is, -1 = no game, or this game's port names no such check. From a tick, shot or event callback (the
+ * game's own thread). A blocks mode lit at a shot (Light the mode at) waits on it, as the game's own mini-wizards do. */
+int pm_game_wizard_way(void);
 
 #endif

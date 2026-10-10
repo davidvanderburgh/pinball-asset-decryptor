@@ -15,6 +15,9 @@ site tick             0x003b5420 0xe92d4038 0xe3a00037
 site shot_dispatch    0x000d3e2c 0xe92d41f0 0xe24dd008
 site ball_end         0x000d615c 0xe92d40f8 0xe3036fa0
 site sound_lookup     0x004d6460 0xe92d4038 0xe1a05000
+# PAD-494 music modes: get_asset_descriptor(asset id, out) - WRAPPED (sounds.cfg); the resolver the
+# app's own desk emulator drives (spike2/sfx_names._find_resolver finds it here too)
+site sound_resolve    0x0043c104 0xe92d41f0 0xe1a05820
 # called
 site score_add        0x002b25b8 0xe301116a 0xe340107d
 site callout          0x0018bafc 0xe3003f60 0xe340307b

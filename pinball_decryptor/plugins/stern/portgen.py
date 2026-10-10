@@ -1602,7 +1602,8 @@ def draft(ref_elf, port_text, target, game=None, version=None, port_name=None, t
 # ---- checking a port against its program (port_words.py) ----------------------------------------
 #: sites the runtime hooks (it moves their first two instructions into a trampoline)
 HOOKED_SITES = frozenset(HOOKED) | {"roster_start", "clip_play", "display_effect_start", "display_priority_now",
-                                     "layered_priority", "layered_waiter"}
+                                     "layered_priority", "layered_waiter",
+                                     "sound_resolve"}      # PAD-494: wrapped (music modes)
 
 
 def is_hooked_site(name):

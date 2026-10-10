@@ -982,12 +982,13 @@ def load_leds():
     on that title is a playfield board.
     """
     out = []
+    boards = load_boards()
     for r in layout_rows("led"):
         # PAD-500: the cabinet's own lights are not inserts. John Wick, King
         # Kong and Metallica put the expression-lighting blades on the
         # playfield picture, down its two edges, where they were drawn as 96
         # inserts that never lit; they are drawn in the cabinet column now.
-        if cablights.role(r):
+        if cablights.role_of(r, GROUP_NODE, boards):
             continue
         out.append(dict(node=GROUP_NODE.get(r["group"]), index=r["index"],
                         x=r["x"], y=r["y"], name=r["name"], group=r["group"]))

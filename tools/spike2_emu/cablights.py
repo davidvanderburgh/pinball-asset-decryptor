@@ -71,6 +71,24 @@ def role(row):
     return None
 
 
+def role_of(row, group_node, board_map):
+    """role(), or TOPPER for an LED on a board the title itself names a topper.
+
+    King Kong's topper says nothing of itself in its names - "MARQUEE GI1-G" to
+    "MARQUEE RIGHT BACK4-R", 76 pixels on no picture - but its group's board is
+    node 12, "Topper", and a traced game drove all 228 of its channels. The
+    board is found the way resolve() finds one: the measured map, else the
+    group's place in the directory."""
+    which = role(row)
+    if which is not None or row.get("kind") != "led":
+        return which
+    node = (group_node or {}).get(row.get("group"))
+    if node is None:
+        node = board_for_group(row.get("group"), board_map or {})
+    b = (board_map or {}).get(node) if node is not None else None
+    return TOPPER if b and "TOPPER" in b["name"].upper() else None
+
+
 def split_channel(name):
     """('TOPPER BIKE', 'R') for 'TOPPER BIKE - R'; (name, 'W') otherwise."""
     m = _CHANNEL.match(name or "")
@@ -194,7 +212,7 @@ def sections(dev_rows, group_node, board_map, expression=True,
     """
     by_key, left = {}, {}
     for r in dev_rows or []:
-        which = role(r)
+        which = role_of(r, group_node, board_map)
         if which is None or (not expression and which in EXPRESSION_ROLES):
             continue
         node, how = resolve(which, r["group"], group_node, board_map)

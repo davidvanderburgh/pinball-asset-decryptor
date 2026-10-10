@@ -218,6 +218,36 @@ def test_godzilla_s_two_toppers_go_by_their_boards_names(tmp_path):
     assert all(S["positioned"] for S in secs) and left == []
 
 
+#: King Kong Pro 0.97's directory, in its order: the topper is node 12 at
+#: place 9, and its rows never say "topper"
+KK_IDENT = """# nbdir v2 elf=king_kong_pro-0.97.elf nodes=10 src=x
+node=2 type=ws2812node hex=w.hex group=1 name=Cabinet Lights
+node=4 type=node4 hex=n.hex group=2 name=QR Scanner
+node=14 type=ws2812node hex=w.hex group=3 name=Topper Lights
+node=1 type=pinnode hex=p.hex group=5 name=Cabinet
+node=7 type=ws2812node hex=w.hex group=6 name=Backbox Speaker Lights
+node=8 type=pinnode hex=p.hex group=7 name=Lower Playfield
+node=9 type=pinnode hex=p.hex group=8 name=Upper Playfield
+node=12 type=ws2812node hex=w.hex group=9 name=Topper
+node=13 type=pinnode hex=p.hex group=10 name=Topper Kong SPI Board
+"""
+
+
+def test_a_lamp_on_the_topper_s_board_is_the_topper_whatever_its_name(tmp_path):
+    # "MARQUEE GI1-G" .. "MARQUEE RIGHT BACK4-R": a traced King Kong Pro game
+    # drove all 228 channels of node 12
+    rows = [_row("led", "MARQUEE GI%d-%s" % (n // 3 + 1, "GRB"[n % 3]), 9, n)
+            for n in range(9)]
+    rows.append(_row("led", "GONG LEFT", 8, 4, 100, 200, "TestMode/Rodeo_PRO_Playfield"))
+    bm = _ident(tmp_path, KK_IDENT)
+    kk = {2: 4, 4: 0, 5: 1, 7: 8, 8: 9}
+    assert cablights.role_of(rows[0], kk, bm) == "topper"
+    assert cablights.role_of(rows[-1], kk, bm) is None
+    secs, _ = cablights.sections(rows, kk, bm)
+    assert [(S["key"], len(S["pixels"]), S["positioned"]) for S in secs] == [
+        ("topper:12", 3, False)]
+
+
 def test_what_no_board_places_is_counted_not_drawn(tmp_path):
     secs, left = cablights.sections(_rush_rows(), RUSH_MEASURED, {})
     assert secs == []

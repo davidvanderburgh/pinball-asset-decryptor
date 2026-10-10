@@ -624,6 +624,8 @@ HELP_CONTENT = {
             "### Select and move\n"
             "- Click it in the preview or under **Layers**. Ctrl-click (Cmd on a Mac) "
             "adds or removes; Shift-click in Layers takes a range.\n"
+            "- After a click in **Layers** or **Contents**, Up and Down pick the row "
+            "above or below (Shift+Up/Down in Layers takes a range).\n"
             "- Drag to move, drag a corner to resize, arrows to nudge (Shift: 10 px).\n"
             "- Drag a row in **Layers** above or below another to re-order it; drop an "
             "added layer on a group's row to move it into that group. The game's own "

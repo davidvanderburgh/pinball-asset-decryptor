@@ -32,6 +32,20 @@ def test_a_help_line_with_no_room_drops_the_equals_signs_then_cuts_the_names():
     assert len(short) <= 20 and short.startswith("1 ") and " 2 " in short
 
 
+def test_a_cut_help_line_keeps_what_tells_the_names_apart():
+    """Eight modes in the 71 characters Godzilla 1.16's help line has: a word several names share
+    is cut first, so "Custom A" and "Custom B" stay told apart; short names stay whole."""
+    custom = ["Standard"] + ["Custom %s" % c for c in "ABCDEFG"]
+    assert MS.help_line(custom, 71) == \
+        "1 Standa 2 Cust A 3 Cust B 4 Cust C 5 Cust D 6 Cust E 7 Cust F 8 Cust G"
+    assert MS.help_line(custom[:5], 71) == \
+        "1 = Standard, 2 = Custom A, 3 = Custom B, 4 = Custom C, 5 = Custom D"
+    eras = ["Standard", "Orchestral", "Heisei", "Showa", "Millennium", "Monsterverse", "Reiwa", "Shin"]
+    assert MS.help_line(eras, 71) == \
+        "1 Standar 2 Orchest 3 Heisei 4 Showa 5 Millenn 6 Monster 7 Reiwa 8 Shin"
+    assert MS.help_line(["Standard Edition", "Orchestral Edition"], 20) == "1 Standar 2 Orchest"
+
+
 def test_a_mode_without_a_name_is_called_by_its_number():
     assert MS.help_line(["", "  Orchestral  "], 79) == "1 = Mode 1, 2 = Orchestral"
 

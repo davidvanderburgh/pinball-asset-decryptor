@@ -3,16 +3,21 @@
 A tester rebuilding Godzilla kept an "Orchestral Edition" and a "Standard Edition" of every card
 and asked instead for "multiple audio files slotted into the same replacement" - Slot A, B, C - and
 "a service menu setting [that] allows the user to select a MUSIC MODE", the modes "custom titled
-by the user". The Audio tab gives a sound files for modes 2 and 3 beside its own (mode 1: the
-sound the slot plays today, its replacement or the stock one), the project names the modes
-(``.staged_changes.json`` ``sound_modes``: ``{"names": [...], "slots": {rel: {"2": file, "3":
-file}}}``), and a Write does three things:
+by the user"; then, once it shipped, "need at least 4" and more on demand. The Audio tab gives a
+sound files for modes 2 to :data:`MAX_MODES` beside its own (mode 1: the sound the slot plays
+today, its replacement or the stock one; :data:`SHOWN_MODES` are offered before the user adds
+more), the project names the modes (``.staged_changes.json`` ``sound_modes``: ``{"names": [...],
+"slots": {rel: {"2": file, "3": file}}}``; unnamed ones are "Standard", "Custom A"...), and a
+Write does three things:
 
 1. each mode file is made into its slot's own format (the conversion a replacement gets,
    :func:`core.audio_slots.stage_replacement` against the slot's pristine sound) and goes into
    the sound bank as a record of its own: a grown copy of a record the project does not touch
    (a HOST), left un-pointed, so nothing the game plays names it (the engine's forced grows, the
-   path the modes' own sounds take); its loudness is matched to the SLOT's, as a replacement's is;
+   path the modes' own sounds take); its loudness is matched to the SLOT's, as a replacement's is.
+   One file in several modes of a slot is one record. A file longer than its slot's sound is cut
+   to that length unless the build may keep replacements whole ("Allow replacements longer than
+   the original"), as a replacement is;
 2. the operator menu gets MUSIC MODE (:mod:`.menu_settings`: Audio Content, the modes' names in
    its help line, values 1..n);
 3. ``sounds.cfg`` beside the mode runtime names, for every sound id of the game that plays a slot
@@ -36,8 +41,11 @@ from dataclasses import dataclass, field
 
 #: the project sidecar's key: ``{"names": [name, ...], "slots": {rel: {"2": file, "3": file}}}``
 STAGED_KEY = "sound_modes"
-#: how many modes a project may have (mode 1 is the card's own sounds)
-MAX_MODES = 3
+#: how many modes a project may have (mode 1 is the card's own sounds). The tester asked for "at
+#: least 4" and room for more; the runtime and the menu setting both take 8
+MAX_MODES = 8
+#: how many the Audio tab offers before the user adds more
+SHOWN_MODES = 4
 #: the runtime's table, beside mode.so on p2 (pad_mode_runtime.c SNDM_FILES)
 CFG_NAME = "sounds.cfg"
 #: ``PAD_STERN_SOUND_MODES=0`` leaves every mode file out of a build
@@ -79,7 +87,7 @@ class Modes:
 
     def name(self, mode):
         n = self.names[mode - 1] if 0 < mode <= len(self.names) else ""
-        return " ".join(str(n or "").split()) or "Mode %d" % mode
+        return " ".join(str(n or "").split()) or default_name(mode)
 
     def menu_names(self):
         """The names the menu's help line gives modes 1..count."""
@@ -88,6 +96,12 @@ class Modes:
     def files(self):
         """``[(rel, mode, file)]``, in slot then mode order."""
         return [(rel, m, f) for rel in sorted(self.slots) for m, f in sorted(self.slots[rel].items())]
+
+
+def default_name(mode):
+    """A mode nobody named: "Standard" for mode 1 (the sounds as they are), then "Custom A",
+    "Custom B"... (the tester's own words for them)."""
+    return "Standard" if mode <= 1 else "Custom %s" % chr(ord("A") + mode - 2)
 
 
 def clean(raw):
@@ -207,8 +221,9 @@ def convert(project, rel, mode, src, log=None):
         raise SoundModeError("%s is not there any more" % src)
     pristine = _pristine(project, rel)
     st, sp = os.stat(src), os.stat(pristine)
+    # not keyed on the mode: one file in several modes of a slot is one conversion (and one record)
     key = hashlib.md5(json.dumps([os.path.abspath(src), st.st_size, st.st_mtime_ns,
-                                  os.path.abspath(pristine), sp.st_size, sp.st_mtime_ns, rel, mode]
+                                  os.path.abspath(pristine), sp.st_size, sp.st_mtime_ns, rel]
                                  ).encode()).hexdigest()[:16]
     cache = os.path.join(project, CACHE_DIR)
     out = os.path.join(cache, "%s.wav" % key)
@@ -233,6 +248,25 @@ def convert(project, rel, mode, src, log=None):
     if log:
         log("Music modes: %s for mode %d of %s made into the slot's format%s." % (
             os.path.basename(src), mode, os.path.basename(rel), " (%s)" % why if why else ""), "info")
+    return out
+
+
+def cut(wav, frames):
+    """*wav* (a converted PCM WAV) cut to its first *frames* card samples (44.1 kHz), as a copy
+    beside it, kept while it is there. Returns the copy's path."""
+    import wave
+    out = "%s.cut%d.wav" % (os.path.splitext(wav)[0], int(frames))
+    if os.path.isfile(out) and os.path.getsize(out) > 44:
+        return out
+    with wave.open(wav, "rb") as r:
+        params = r.getparams()
+        n = int(round(int(frames) * r.getframerate() / 44100.0))
+        data = r.readframes(min(n, r.getnframes()))
+    tmp = out + ".part"
+    with wave.open(tmp, "wb") as w:
+        w.setparams(params)
+        w.writeframes(data)
+    os.replace(tmp, out)
     return out
 
 

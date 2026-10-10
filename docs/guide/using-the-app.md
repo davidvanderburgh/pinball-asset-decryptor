@@ -151,12 +151,19 @@ note to build onto a card that was never grown, such as the stock card.
 On Spike 2 Godzilla (Pro and Premium/LE 1.16) one card can carry more
 than one set of sounds, and the machine's service menu picks which set
 plays: **Music Mode** under Adjustments > Machine Settings > Audio
-Content. Right-click a sound and pick **Music modes** > **Mode 2: choose
-a sound…** (or mode 3) to give it a file for that mode; mode 1 is the
+Content. Right-click a sound and pick **Music modes** > **Mode 2 (Custom
+A): choose a sound…** to give it a file for that mode; modes 2 to 4 are
+offered and **Add a music mode…** adds more, up to 8. Mode 1 is the
 sound as it plays now, and a sound with no file for the chosen mode
-plays its mode 1 sound. **Name the music modes…** puts the names on the
-machine, in the setting's help line. Music modes need an image build,
-not a direct SD write, and every mode file takes room in the sound bank.
+plays its mode 1 sound. One file can go in several modes and takes the
+sound bank's room once. **Name the music modes…** puts the names on the
+machine, in the setting's help line (shortened to fit when there are
+many modes or long names); the machine offers modes up to the highest
+one any sound has a file for. A mode's file follows **Allow
+replacements longer than the original** like a replacement: on, it plays
+at its full length; off, a file longer than the sound it stands in for
+is cut to that length. Music modes need an image build, not a direct SD
+write, and every mode file takes room in the sound bank.
 
 ### Editions
 

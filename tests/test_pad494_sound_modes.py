@@ -17,23 +17,28 @@ MASK = 0xE0001FFF                     # Godzilla LE 1.16's key mask
 
 
 # ---- the project's record ------------------------------------------------------------------------
-def test_the_record_keeps_modes_two_to_three_and_their_names():
-    m = SMo.clean({"names": ["Standard", "Orchestral", "Heisei", "Extra"],
-                   "slots": {BOC: {"2": "C:/o.wav", "1": "C:/x.wav", "4": "C:/y.wav", "3": ""},
+def test_the_record_keeps_modes_two_to_eight_and_their_names():
+    m = SMo.clean({"names": ["Standard", "Orchestral", "Heisei", "Extra"] + ["n%d" % i for i in range(5, 11)],
+                   "slots": {BOC: {"2": "C:/o.wav", "1": "C:/x.wav", "9": "C:/y.wav", "3": "",
+                                   "8": "C:/o.wav"},
                              "audio/idx0004 - music.wav": {}, 7: {"2": "z"}}})
-    assert m.names == ["Standard", "Orchestral", "Heisei"]
-    assert m.slots == {BOC: {2: "C:/o.wav"}}
-    assert m.count == 2
-    assert m.menu_names() == ["Standard", "Orchestral"]
-    assert m.files() == [(BOC, 2, "C:/o.wav")]
-    assert SMo.to_json(m) == {"names": ["Standard", "Orchestral", "Heisei"],
-                              "slots": {BOC: {"2": "C:/o.wav"}}}
+    assert SMo.MAX_MODES == 8 and SMo.SHOWN_MODES == 4
+    assert m.names == ["Standard", "Orchestral", "Heisei", "Extra", "n5", "n6", "n7", "n8"]
+    assert m.slots == {BOC: {2: "C:/o.wav", 8: "C:/o.wav"}}       # one file in two modes
+    assert m.count == 8
+    assert m.menu_names()[:2] == ["Standard", "Orchestral"]
+    assert m.files() == [(BOC, 2, "C:/o.wav"), (BOC, 8, "C:/o.wav")]
+    assert SMo.to_json(m) == {"names": ["Standard", "Orchestral", "Heisei", "Extra", "n5", "n6", "n7", "n8"],
+                              "slots": {BOC: {"2": "C:/o.wav", "8": "C:/o.wav"}}}
 
 
-def test_a_mode_without_a_name_is_called_by_its_number_and_no_files_is_no_modes():
+def test_a_mode_without_a_name_is_standard_then_custom_a_b_and_no_files_is_no_modes():
+    """The tester's own words: "Standard, Custom A, Custom B, etc"."""
     m = SMo.clean({"names": ["", "  Orchestral  "], "slots": {BOC: {"3": "a.wav"}}})
     assert m.count == 3
-    assert m.menu_names() == ["Mode 1", "Orchestral", "Mode 3"]
+    assert m.menu_names() == ["Standard", "Orchestral", "Custom B"]
+    assert [SMo.default_name(i) for i in range(1, 9)] == [
+        "Standard", "Custom A", "Custom B", "Custom C", "Custom D", "Custom E", "Custom F", "Custom G"]
     assert SMo.clean({"names": ["A", "B"]}).count == 0
     assert SMo.clean(None).count == 0
     assert SMo.to_json(SMo.Modes()) is None
@@ -163,3 +168,71 @@ def test_a_payload_past_a_descriptors_end_is_the_next_ones():
     assert E._mode_descriptor(D2536, 2536, MASK, slot, host, 1000, 400) is not None
     assert E._descriptor_extents([1649592159, 1649592187, 1649593595], 0x50) == {
         1649592159: 28, 1649592187: 0x50, 1649593595: 0x50}
+
+
+# ---- one file in several modes, and how long a file may play --------------------------------------
+def _wav(path, seconds, rate=44100, chans=2):
+    import wave
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(chans)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x01\x00" * chans * int(seconds * rate))
+    return str(path)
+
+
+def test_a_cut_copy_keeps_the_first_card_samples_in_the_files_own_rate(tmp_path):
+    import wave
+    src = _wav(tmp_path / "long.wav", 2.0, rate=48000)
+    out = SMo.cut(src, 44100)                             # one second of card samples
+    assert out != src and out.endswith(".cut44100.wav")
+    with wave.open(out, "rb") as r:
+        assert (r.getframerate(), r.getnchannels(), r.getnframes()) == (48000, 2, 48000)
+    assert SMo.cut(src, 44100) == out                      # kept while it is there
+    with wave.open(SMo.cut(src, 10 * 44100), "rb") as r:  # never longer than the file
+        assert r.getnframes() == 96000
+
+
+def _grow(tmp_path, monkeypatch, files, longer_ok=True):
+    from pinball_decryptor.plugins.stern.spike2.emulator import BLOCK
+    made = {src: _wav(tmp_path / ("conv_" + src), secs) for src, secs in files.items()}
+    monkeypatch.setattr(SMo, "convert", lambda project, rel, mode, src, log=None: made[src])
+    slot_len = 44100 + BLOCK                               # the slot's own sound: 1 s
+    params = [_p(2095, slot_len), _p(10, 3 * 44100 + BLOCK), _p(11, 3 * 44100 + BLOCK),
+              _p(12, 3 * 44100 + BLOCK)]
+    m = SMo.clean({"slots": {BOC: {"2": "a.wav", "3": "b.wav", "4": "a.wav"}}})
+    logs = []
+    edits, grows, used = E._sound_modes_grow(str(tmp_path), params, {}, {}, m,
+                                             lambda t, lvl="info": logs.append(t),
+                                             longer_ok=longer_ok, longer_why="off in Settings")
+    return edits, grows, used, logs
+
+
+def test_one_file_in_several_modes_goes_on_the_card_once(tmp_path, monkeypatch):
+    edits, grows, used, logs = _grow(tmp_path, monkeypatch, {"a.wav": 2.0, "b.wav": 2.5})
+    by_mode = {u["mode"]: u for u in used}
+    assert sorted(by_mode) == [2, 3, 4]
+    assert by_mode[2]["host"] == by_mode[4]["host"] != by_mode[3]["host"]
+    assert by_mode[4]["frames"] == by_mode[2]["frames"] == 88200
+    assert len(edits) == len(grows) == 2                   # two records, not three
+    assert any("same file as another mode" in t for t in logs)
+
+
+def test_longer_files_play_whole_when_longer_replacements_are_allowed(tmp_path, monkeypatch):
+    edits, grows, used, logs = _grow(tmp_path, monkeypatch, {"a.wav": 2.0, "b.wav": 2.5})
+    assert {u["mode"]: u["frames"] for u in used} == {2: 88200, 3: 110250, 4: 88200}
+    assert not any(".cut" in w for w in edits.values())
+
+
+def test_longer_files_are_cut_to_the_slots_length_when_they_are_not(tmp_path, monkeypatch):
+    import wave
+    edits, grows, used, logs = _grow(tmp_path, monkeypatch, {"a.wav": 2.0, "b.wav": 0.5},
+                                     longer_ok=False)
+    frames = {u["mode"]: u["frames"] for u in used}
+    assert frames == {2: 44100, 3: 22050, 4: 44100}       # a.wav cut to 1 s; b.wav already shorter
+    hosts = {u["mode"]: u["host"] for u in used}
+    assert hosts[2] == hosts[4]
+    with wave.open(edits[hosts[2]], "rb") as r:
+        assert r.getnframes() == 44100
+    assert edits[hosts[3]].endswith("conv_b.wav")
+    assert any("cut to its slot's" in t and "off in Settings" in t for t in logs)

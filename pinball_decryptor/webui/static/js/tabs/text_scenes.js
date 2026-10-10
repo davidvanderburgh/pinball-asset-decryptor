@@ -1329,6 +1329,31 @@ function TreeCanvas({ s }) {
   </div>`;
 }
 
+// PAD-507 (DragonRR: "in game the score is yellow and PRESS START is green"): Godzilla's
+// score panel is painted by the game program itself (a box shows its line's scene color
+// times the game's), so its colors are picked here and Write puts them in the game program
+const GAME_COLORS_TIP = { head: "Painted by the game", lines: [
+  "The game paints the score boxes itself as it plays: a box shows its line's color times the color the game paints, so a color set on the line alone never reaches the machine. These are the colors the machine shows.",
+  "Pick one and Write makes the machine show it, in every player's box: the game program paints it, and that kind of line goes white in the scene. The preview draws the boxes the same way.",
+  "A score line with the color profile switched on puts the profile on these too, unless a color is picked here." ] };
+const gameColorSrc = (r) => r.picked ? "picked" : r.profiled ? "color profile" : "the game's own";
+function GameColors({ g }) {
+  return html`<div class="tree-game-colors">
+    <div class="small tree-filled-note" ...${tip(GAME_COLORS_TIP)}><${Icon} name="gear" /><span>Painted by the game as it plays</span></div>
+    ${g.roles.map((r) => html`<div key=${r.role} class="tree-row tgc-row" ...${tip({ head: r.label, lines: [
+        `On the machine: ${r.hex} (${gameColorSrc(r)}). As the game ships: ${r.game}.`,
+        r.mine ? "This line is drawn in it." : "Another line of the score panel is drawn in it.",
+        ["Click the swatch", "pick a color"],
+        r.picked ? ["Reset", "back to the game's own (or the color profile's)"] : null ] })}>
+      <input type="color" class="tree-color" value=${r.hex} aria-label=${r.label}
+        onChange=${(e) => call("text_scenes.tree_game_color", r.role, e.target.value)} />
+      <span class=${cx("small ellip tgc-label", r.mine ? "" : "muted")}>${r.label}</span>
+      <span class="small muted tgc-src">${gameColorSrc(r)}</span>
+      ${r.picked ? html`<${Button} size="xs" kind="ghost" onClick=${() => call("text_scenes.tree_game_color", r.role, null)}>Reset<//>` : null}
+    </div>`)}
+  </div>`;
+}
+
 // PAD-468 (DragonRR): a line's words, fixed where it sits, and Previous / Next through every
 // line of text of every scene (the lines the search finds, while it has words in it), so
 // spelling and placement are checked here instead of in the game
@@ -1435,6 +1460,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
           : html`Filled in by the game during <b>${(p.filled.modes || []).join(", ")}</b>`}</span>
         <${Button} size="xs" kind="ghost" icon="text" title=${p.filled.line ? "Find the game's line on the Replace Text tab" : "List that mode's lines on the Replace Text tab"}
           onClick=${() => call("text_scenes.activate", filledJump(p.filled))}>${p.filled.line ? "Its line" : "Its lines"}<//></div>` : null}
+      ${p.game_colors ? html`<${GameColors} g=${p.game_colors} />` : null}
       ${p.words ? html`<${Words} p=${p} find=${find} searching=${searching} />` : null}
       ${p.pic ? html`<div class="tree-row">
         <span class="small muted" ...${tip("The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1.")}>

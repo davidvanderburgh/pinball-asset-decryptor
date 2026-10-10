@@ -281,7 +281,28 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     rows.extend(own_clip_rows(mfr, assets_path, direct=direct))
     rows.extend(colour_rows(mfr, assets_path))
     rows.extend(chosen_files_rows(mfr, assets_path))
+    rows.extend(score_colour_rows(mfr, assets_path))
     return rows
+
+
+#: PAD-507: Godzilla's score panel colours, words of the game program
+PENDING_SCORE_COLOURS = "Pending (score colors)"
+
+
+def score_colour_rows(mfr, assets_path):
+    """PAD-507: the score panel colours the project changes (made in the game program's
+    code, so a scene's colour never reaches them), as one pending row."""
+    if not assets_path or mfr is None or getattr(mfr, "key", "") != "stern":
+        return []
+    try:
+        from ..plugins.stern import score_colours
+        if not score_colours.pending(assets_path):
+            return []
+        colours = score_colours.wanted(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return []
+    return [("score panel colors  —  %s" % score_colours.describe(colours),
+             "program", PENDING_SCORE_COLOURS, "pending")]
 
 
 def variant_rows(mfr, assets_path):
@@ -556,6 +577,12 @@ def fingerprint(window, assets_path, epoch, grow_on):
     try:
         from ..plugins.stern import stock_modes
         parts.append(stock_modes.fingerprint(assets_path))
+    except Exception:                                   # noqa: BLE001
+        parts.append(None)
+    try:
+        # PAD-507: the score panel colours
+        from ..plugins.stern import score_colours
+        parts.append(sorted(score_colours.picks(assets_path).items()))
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     return repr(parts)

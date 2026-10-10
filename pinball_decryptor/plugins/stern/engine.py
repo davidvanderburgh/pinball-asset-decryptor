@@ -3603,6 +3603,16 @@ def _stock_mode_pending(assets_dir):
         return 0
 
 
+def _score_colours_pending(assets_dir):
+    """PAD-507: does the project change Godzilla's score panel colours (or put the game's
+    back), which the game program paints in code (:mod:`.score_colours`)?  Never raises."""
+    try:
+        from . import score_colours
+        return score_colours.pending(assets_dir)
+    except Exception:
+        return False
+
+
 def _stock_mode_managed(assets_dir):
     """True when the project manages the game's own modes (item 145), even
     with every number back at stock; False with the preview switch off.
@@ -4668,6 +4678,9 @@ def _apply_tree_ops(data, card_path, ops, names, assets_dir, log):
     # PAD-438: the colour profile on its lines of text (absolute values, so a card built
     # with them already is set to the same numbers again)
     lines = _scene_line_colours(assets_dir, card_path, ops, log)
+    # PAD-507: Godzilla's score panel lines of a kind the project recolours go white (the
+    # game program paints their whole colour), after the profile's, which they replace
+    lines = lines + _score_panel_lines(assets_dir, card_path, log)
     todo = list(todo) + lines
     if not todo:
         return data, 0
@@ -4720,6 +4733,36 @@ def _scene_line_colours(assets_dir, card_path, ops, log):
 _LINES_SAID = threading.local()
 
 
+def _score_panel_lines(assets_dir, card_path, log):
+    """PAD-507: the ``line_colour`` edits :func:`.score_colours.scene_ops` gives the score
+    panel's lines in the scene at *card_path* (none in another scene)."""
+    if not assets_dir:
+        return []
+    man = _load_scene_trees(assets_dir).get(card_path)
+    if man is None:
+        return []
+    try:
+        from . import score_colours
+        return score_colours.scene_ops(assets_dir, man)
+    except Exception as e:                             # noqa: BLE001
+        log("Scene %s: the score panel's colors could not be worked out (%s); its lines keep "
+            "their colors." % (card_path, e), "warning")
+        return []
+
+
+def _score_panel_cards(assets_dir):
+    """PAD-507: the scenes holding Godzilla's score panel, when the project recolours it (or
+    put a recolouring back): the Write looks at them even with no other edit."""
+    try:
+        from . import score_colours
+        if not score_colours.pending(assets_dir):
+            return set()
+        return {c for c, man in _load_scene_trees(assets_dir).items()
+                if score_colours.panel_lines(man)}
+    except Exception:                                  # noqa: BLE001
+        return set()
+
+
 def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_overlays):
     """PAD-251: the Scenes window's edits (``scene_edits.json``) per scene, split by how they
     reach the card.  Returns ``(writes, n_edits, whole)``:
@@ -4734,6 +4777,9 @@ def _scene_tree_plan(reader, assets_dir, log, cancel, dest_is_device, radium_ove
     edits = _scene_edit.load(assets_dir)
     # PAD-438: a scene whose only change is the colour profile on a line of text
     for card in _text_line_cards(assets_dir):
+        edits.setdefault(card, [])
+    # PAD-507: the score panel, its lines white where the game program paints them whole
+    for card in _score_panel_cards(assets_dir):
         edits.setdefault(card, [])
     if not edits:
         return [], 0, {}
@@ -6993,14 +7039,20 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # PAD-438: a line of text with the colour profile on is a scene edit too
         for card in _text_line_cards(assets_dir):
             tree_edits.setdefault(card, [])
+        # PAD-507: the score panel's lines go white when the game program paints them whole
+        for card in _score_panel_cards(assets_dir):
+            tree_edits.setdefault(card, [])
     # The game's own modes (item 145): staged timers / awards of the modes the
     # game shipped with - word patches in the game ELF, and the table's
     # operator-setting defaults (a battle timer) in the same ELF.
     stock_mode_edits = _stock_mode_pending(assets_dir)
+    # PAD-507: Godzilla's score panel colours - words of the game program's code
+    score_edits = _score_colours_pending(assets_dir)
     if (not stock_mode_edits and not audio_edits and not music_edits
             and not video_edits and not image_edits and not texture_edits
             and not radimg_edits and not text_edits and not color_edits
-            and not layout_edits and not boot_edits and not tree_edits):
+            and not layout_edits and not boot_edits and not tree_edits
+            and not score_edits):
         # nothing staged, but the card this is built from may hold our words
         stock_mode_edits = _stock_mode_words_to_restore(disk_f, parts,
                                                         assets_dir)
@@ -7158,7 +7210,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
             and not stock_mode_edits and shader_prof is None
-            and not own_clips):
+            and not own_clips and not score_edits):
         raise NothingToWrite(
             "Nothing to write: " + _modes_left_out_clause(_modes_left_out)
             + "every sound (idxNNNN.wav / music_catNN_*.wav) "
@@ -8136,6 +8188,22 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 stock_mode_edits = 0
             n_stock_mode_numbers = n_stock_modes
 
+        # PAD-507: Godzilla's score panel colours are made in the game program's code
+        # (a scene's colour never reaches those lines): same-size words, after the text
+        # and the modes so a staged firmware takes them, else in place with the bypass
+        # refreshing the record over them, exactly as the modes above.
+        score_writes, n_score = [], 0
+        if score_edits:
+            from . import score_colours as _score_colours
+            score_writes, _sc_ov, n_score = _score_colours.compute_writes(
+                reader, fw_node, assets_dir, log, patched_fw=patched_gr)
+            if _sc_ov and fw_node is not None:
+                fw_text_overlay = dict(fw_text_overlay)
+                fw_text_overlay.update(_sc_ov)
+                _merge_radium_overlays(
+                    radium_overlays,
+                    {bytes(fw_node["i_block"]): (fw_node, dict(_sc_ov))})
+
         # Recoloured display text -> the same kind of in-place radium patch,
         # on different bytes of the same scenes, so the two compose.
         color_writes = []
@@ -8416,7 +8484,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 and not boot_writes and boot_grow is None
                 and patched_gr is None and mode_plan is None
                 and not clip_files
-                and not stock_mode_edits):
+                and not stock_mode_edits and not n_score):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
                 "video or image could be fit to its original slot, and no "
@@ -8432,6 +8500,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         writes = (list(text_writes) + list(color_writes) + list(layout_writes)
                   + list(radimg_writes) + list(tree_writes))
         writes += stock_mode_writes          # the game's own modes (item 145)
+        writes += score_writes               # the score panel's colours (PAD-507)
         # A grown sound bank is longer than the file on the card, so it can't be
         # patched in place: every re-encoded body is composed into the staged
         # file and the whole thing is copied on by the ext4 driver.  Emitting

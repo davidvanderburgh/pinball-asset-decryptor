@@ -7005,13 +7005,16 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # records of their own in the bank and MUSIC MODE in the operator menu
     sound_modes, sound_modes_prof = _sound_modes_for_build(
         assets_dir, dest_is_device, log, **_mode_gate_kw)
+    # PAD-495: EDITION in the operator menu, the setting a multi-boot card of
+    # this game's editions boots by
+    editions = _editions_for_build(assets_dir, log)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
             and not text_edits and not color_edits and not layout_edits
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
-            and not variant_slots and not sound_modes
+            and not variant_slots and not sound_modes and not editions
             and not stock_mode_edits and shader_prof is None
             and not own_clips):
         raise NothingToWrite(
@@ -7890,8 +7893,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     if own_clips else None)
         # PAD-494: MUSIC MODE in the operator menu, once the bank carries the
         # music modes' files (sound_modes_cfg); without it they are not played
-        menu_job = (_MusicModeMenu(sound_modes.count, sound_modes.menu_names(),
-                                   log) if sound_modes_cfg else None)
+        music_menu = (_MusicModeMenu(sound_modes.count, sound_modes.menu_names(),
+                                     log) if sound_modes_cfg else None)
+        # PAD-495: EDITION beside it, one category table for both
+        edition_menu = _EditionMenu(len(editions), editions, log) if editions else None
+        menu_job = (_MenuJobs(music_menu, edition_menu)
+                    if music_menu is not None or edition_menu is not None else None)
         if (text_edits or shader_prof is not None or clip_job is not None
                 or menu_job is not None):
             if progress:
@@ -7905,8 +7912,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 **({"menu": menu_job} if menu_job is not None else {}))
             _merge_radium_overlays(radium_overlays, _t_ov)
             if menu_job is not None and not menu_job.ok:
-                # PAD-494: no MUSIC MODE, no other mode's sounds
                 menu_job.fail("the game program was not changed")
+            if music_menu is not None and not music_menu.ok:
+                # PAD-494: no MUSIC MODE, no other mode's sounds
                 sound_modes_cfg = ""
             if cancel():
                 return None, None, None, None, None
@@ -9258,6 +9266,8 @@ class _MusicModeMenu:
     (:mod:`.menu_settings`), with what became of it: ``ok`` once its writes and
     table are in the program's edits, else ``why`` (said once)."""
 
+    KEY = "music_mode"
+
     def __init__(self, count, names, log):
         self.count, self.names, self.log = int(count), list(names), log
         self.ok, self.why, self.setting = False, "", None
@@ -9266,18 +9276,10 @@ class _MusicModeMenu:
         """``([(file offset, bytes)], table bytes)`` for program bytes *raw*,
         the category table placed at *va* (``b""`` when it already lists the
         setting). Raises ValueError (:class:`.menu_settings.MenuSettingError`)."""
-        from . import menu_settings as _MSet
-        from .adjustments import AdjustmentTable
-        t = AdjustmentTable(raw)
-        setting, writes, cat = _MSet.plan(t, _MSet.MUSIC_MODE, self.count,
-                                          self.names)
-        out, blob = list(writes.items()), b""
-        if cat is not None:
-            blob = _MSet.table_blob(cat, setting)
-            out += list(_MSet.table_writes(t, cat, va,
-                                           len(cat.records) + 1).items())
-        self.setting = setting
-        return out, blob
+        return _MenuJobs(self).plan(raw, va)
+
+    def wanted(self):
+        return self.KEY, self.count, self.names
 
     def done(self):
         self.ok = True
@@ -9292,6 +9294,92 @@ class _MusicModeMenu:
         self.log("Music modes: MUSIC MODE could not be added to the operator "
                  "menu (%s), so this card plays every sound's own and carries no "
                  "other music mode." % self.why, "warning")
+
+
+class _EditionMenu(_MusicModeMenu):
+    """PAD-495: the EDITION setting (:mod:`.editions`): the number a multi-boot
+    card of this game's editions boots by at the next power-up."""
+
+    KEY = "edition"
+
+    def done(self):
+        self.ok = True
+        self.log("Editions: EDITION is in the operator menu (Adjustments > Attract "
+                 "Mode), values 1 to %d, its help line \"%s\". Put this card on a "
+                 "Multi-boot card with the other editions, in that order, and the "
+                 "setting picks the one that boots." % (self.count, self.setting.help),
+                 "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Editions: EDITION could not be added to the operator menu (%s), "
+                 "so a Multi-boot card cannot pick this card by it." % self.why,
+                 "warning")
+
+
+class _MenuJobs:
+    """Settings of ours that go into one game program together (PAD-494's
+    MUSIC MODE, PAD-495's EDITION): their same-size writes, and ONE category
+    table that lists every one of them. A setting the program cannot take is
+    failed on its own; the others still go."""
+
+    def __init__(self, *jobs):
+        self.jobs = [j for j in jobs if j is not None]
+
+    @property
+    def ok(self):
+        return all(j.ok for j in self.jobs)
+
+    def plan(self, raw, va):
+        """``([(file offset, bytes)], table bytes)`` - see
+        :meth:`_MusicModeMenu.plan`. Raises ValueError when none can go."""
+        from . import menu_settings as _MSet
+        from .adjustments import AdjustmentTable
+        t = AdjustmentTable(raw)
+        settings, writes, cat, refused = _MSet.plan_many(
+            t, [j.wanted() for j in self.jobs])
+        by_key = {s.key: s for s in settings}
+        for j in self.jobs:
+            j.setting = by_key.get(j.KEY)
+            if j.setting is None:
+                j.fail(refused.get(j.KEY) or "unknown")
+        if not settings:
+            raise _MSet.MenuSettingError(next(iter(refused.values()), "nothing to add"))
+        out, blob = list(writes.items()), b""
+        if cat is not None:
+            blob = _MSet.table_blob(cat, *settings)
+            out += list(_MSet.table_writes(
+                t, cat, va, _MSet.table_records(cat, *settings)).items())
+        return out, blob
+
+    def done(self):
+        for j in self.jobs:
+            if j.setting is not None:
+                j.done()
+
+    def fail(self, why):
+        for j in self.jobs:
+            j.fail(why)
+
+
+def _editions_for_build(assets_dir, log):
+    """PAD-495: the project's edition names when this build gives the game
+    EDITION (:mod:`.editions`), else ``[]`` (a warning says why when the project
+    has editions that cannot go). Whether the game program can grow is the text
+    step's to say, as for a color profile."""
+    from . import editions as _Ed
+    names = _Ed.load(assets_dir)
+    if not _Ed.count(names):
+        return []
+    why = _Ed.title_refusal(_Ed.project_title(assets_dir, probe=True))
+    if why:
+        log("Editions: EDITION is not added to this card: %s" % why, "warning")
+        return []
+    log("Editions: this card is one of %d editions (%s)." % (
+        len(names), ", ".join("%d %s" % (i + 1, n) for i, n in enumerate(names))), "info")
+    return names
 
 
 def _sm_hosts(used):

@@ -518,6 +518,46 @@ grep -q "audio: --volume 70 overrides volume=machine" "$T/machine.log" \
     || { echo "headless: FAIL --volume did not override volume=machine"; grep audio "$T/machine.log"; exit 1; }
 expect "$T/choice" 0
 
+# 13b. edition= (PAD-495): every image an edition of one game, NO MENU - the
+#      game's EDITION setting (SHA1 of the caption "EDITION") off the same
+#      mirror picks; what cannot be read, or is out of range, boots image 0;
+#      a line this cannot read is warned about and the menu comes up as before
+EDKEY=8f5d41acb4b51429c82e3d1668953fa2f4f528d3
+python3 "$HERE/mkmedia.py" nvm "$T/nved/NVM" 2 "$EDKEY"
+cat > "$T/edition.conf" <<EOF
+image=p3|STANDARD|Godzilla 1.16
+image=p7|70TH ANNIVERSARY|Godzilla 1.16
+edition=$T/nved/NVM|$EDKEY|2
+default=0
+timeout=10
+EOF
+rm -f "$T/edition.ppm" "$T/choice"
+run "$T/edition.ppm" "$T/edition.conf" --log "$T/edition.log"
+expect "$T/choice" 1
+expect "$T/last" 1
+grep -q "edition: the machine's EDITION is 2 of 2 ($T/nved/NVM/00000002)" "$T/edition.log" \
+    || { echo "headless: FAIL edition= did not read 2 from the newest generation"; grep edition "$T/edition.log"; exit 1; }
+[ ! -e "$T/edition.ppm" ] || { echo "headless: FAIL an editions card drew a menu"; exit 1; }
+python3 "$HERE/mkmedia.py" nvm "$T/nved/NVM" 5 "$EDKEY"
+run "$T/edition.ppm" "$T/edition.conf" --log "$T/edition.log"
+expect "$T/choice" 0
+grep -q "edition: the machine's EDITION reads 5, not one of 1-2 on this card" "$T/edition.log" \
+    || { echo "headless: FAIL an EDITION past the images did not boot image 0"; grep edition "$T/edition.log"; exit 1; }
+rm -rf "$T/nved"
+echo 1 > "$T/last"
+run "$T/edition.ppm" "$T/edition.conf" --log "$T/edition.log"
+expect "$T/choice" 0
+grep -q "edition: no EDITION setting read (no store in $T/nved/NVM); edition 1 boots" "$T/edition.log" \
+    || { echo "headless: FAIL an editions card with no store did not boot edition 1"; grep edition "$T/edition.log"; exit 1; }
+sed "s/|$EDKEY|2/|not-a-key|2/" "$T/edition.conf" > "$T/edition_bad.conf"
+run "$T/edition.ppm" "$T/edition_bad.conf" --log "$T/edition.log"
+grep -q "edition=.* names no store, no key or no 2..64 editions: the menu is shown" "$T/edition.log" \
+    || { echo "headless: FAIL a broken edition= line was not warned about"; grep conf: "$T/edition.log"; exit 1; }
+[ -e "$T/edition.ppm" ] || { echo "headless: FAIL a broken edition= line did not bring the menu up"; exit 1; }
+# the preview still draws the cards
+snap "$T/edition_snap.ppm" "$T/edition.conf"
+[ -e "$T/edition_snap.ppm" ] || { echo "headless: FAIL --snapshot of an editions card drew nothing"; exit 1; }
+
 # THE LOG IS BOUNDED: one run, one file (the previous run's kept as .1), and a
 # run writes at most PAD_LOG_CAP bytes (1 MiB without the override) - a card
 # cannot fill up with menu logs however many boots it sees

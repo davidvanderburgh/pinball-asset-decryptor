@@ -295,23 +295,68 @@ def optional_node4_nodes(elf_path):
     Empty set on any parse failure - same safe direction as everything
     else here: silence only what the evidence names.
     """
+    return optional_node4_in(node_directory(elf_path))
+
+
+def node_directory(elf_path):
+    """[{node, type, flags, name}] - the title's own node directory, with the
+    English name of each board, or [] on any parse failure. ONE reading serves
+    both optional_node4_in() and topper_nodes(), because on rush_le a reading
+    is the 184.6 MB walk the header's THE COST OF ASKING THREE TIMES is about.
+    """
     if not elf_path:
-        return set()
+        return []
     try:
         elf = io.open(elf_path, "rb").read()
         rx, rw = nbdir.load_segments(elf)
         _base, cat = nbdir.find_catalog(elf, rx, rw)
         full = []
         nbdir.find_node_directory(elf, rx, rw, full=full)
+        out = []
+        for nid, code, fl, _hand, cell, _w3, _off in full:
+            idx = code - 2
+            out.append(dict(node=nid, flags=fl,
+                            type=cat[idx] if 0 <= idx < len(cat) else None,
+                            name=nbdir.node_name(elf, rx, rw, cell) or ""))
     except (OSError, SystemExit, ValueError):
-        return set()
-    out = set()
-    for nid, code, fl, _hand, _cell, _w3, _off in full:
-        idx = code - 2
-        typ = cat[idx] if 0 <= idx < len(cat) else None
-        if typ == "node4" and (fl & 4):
-            out.add(nid)
+        return []
     return out
+
+
+def optional_node4_in(recs):
+    """optional_node4_nodes() over a directory node_directory() already read."""
+    return {r["node"] for r in recs if r["type"] == "node4" and r["flags"] & 4}
+
+
+def topper_nodes(recs):
+    """{node: name} for the boards a cabinet WITHOUT ITS TOPPER does not have
+    (PAD-498) - every directory record the title itself names a topper AND
+    marks optional (flags bit 2).
+
+    "Venom: node 12 present with Topper toggle off" (peanuts, 2026-10-10).
+    PAD_TOPPER=0 had only ever shut the second display's window; the shim kept
+    answering for the topper's boards, so the game drove a topper the cabinet
+    was not meant to have and the virtual playfield showed its 75 lights as
+    node 12. A topper is an accessory with its own boards, and leaving it off
+    a real machine leaves its boards off the bus - which is what silencing is.
+
+    THE TITLE NAMES THEM, so nothing here is a node number. Read off every
+    Stern card on this disk (90 images, latest build of each, 2026-10-10):
+    every title names node 12 a topper ("TOPPER", "Topper 1", "R2-D2 Topper",
+    "Accessory Topper (Optional)", John Wick's "Topper Lights") and node 14
+    "Topper Lights"; some add 13 (Foo Fighters' "TOPPER WS2812 (OPTIONAL)",
+    Iron Maiden's "Topper 2", King Kong's "Topper Kong SPI Board", John
+    Wick's "Topper Stepper Motor Board") and Star Wars 15 ("Topper 2
+    Lights"). Every one of them carries flags bit 2, the bit an ABSENT board
+    passes the readiness gate on (optional_node4_nodes() above measured it).
+
+    OPTIONALITY IS STILL THE GUARD: a required board would wedge the locate
+    step if it went missing, so a "topper" the title does not mark optional is
+    left answering. None exists today; the guard is what keeps a future one
+    from stalling a boot over a tick box.
+    """
+    return {r["node"]: r["name"] for r in recs
+            if r["flags"] & 4 and "TOPPER" in (r["name"] or "").upper()}
 
 
 def silent_nodes(counts, swnodes=None, dirnodes=None):
@@ -410,12 +455,18 @@ def cache_key(a):
     binid = devicexy.binary_id(a.elf)
     if not binid:
         return None            # no binary named: --game mode, or an unreadable
-    return "elf[%s] switches[%s] nodedir[%s] fresh[%s]" % (
-        binid, _file_id(a.switches), _file_id(a.nodedir), a.nodedir_fresh)
+    # PAD-498: a cabinet without its topper is a fifth input. Named only when
+    # it is off, so every verdict cached before it existed (all topper-on) is
+    # still served for the start it was reached for.
+    return "elf[%s] switches[%s] nodedir[%s] fresh[%s]%s" % (
+        binid, _file_id(a.switches), _file_id(a.nodedir), a.nodedir_fresh,
+        " topper[off]" if getattr(a, "no_topper", False) else "")
 
 
 def cache_read(path, key):
-    """(nodes, ff, why) from a cache written for exactly `key`, or None."""
+    """(nodes, ff, why, topper) from a cache written for exactly `key`, or
+    None. A verdict cached before PAD-498 has no `topper=` line; it was a
+    topper-on start, whose answer is "no topper boards left off"."""
     if not path or not key:
         return None
     try:
@@ -429,12 +480,13 @@ def cache_read(path, key):
     try:
         nodes = [int(n) for n in got["silent"].split(",") if n]
         ff = [int(n) for n in got["silent-ff"].split(",") if n]
-        return nodes, ff, got["because"]
+        topper = [int(n) for n in got.get("topper", "").split(",") if n]
+        return nodes, ff, got["because"], topper
     except (KeyError, ValueError):
         return None
 
 
-def cache_write(path, key, nodes, ff, why):
+def cache_write(path, key, nodes, ff, why, topper=()):
     """Record the verdict beside its inputs. Failure is silent on purpose: a
     cache that cannot be written costs seconds on the next start, and there is
     nothing a run can usefully do about a read-only tables directory."""
@@ -452,19 +504,23 @@ def cache_write(path, key, nodes, ff, why):
             f.write("silent=%s\n" % ",".join(str(n) for n in nodes))
             f.write("silent-ff=%s\n" % ",".join(str(n) for n in ff))
             f.write("because=%s\n" % why.replace("\n", " "))
+            f.write("topper=%s\n" % ",".join(str(n) for n in topper))
         os.replace(tmp, path)
     except OSError:
         pass
 
 
-def emit_values(a, nodes, ff, why):
+def emit_values(a, nodes, ff, why, topper=()):
     """The machine-readable answer, in whichever of the three shapes was asked
     for. `--values` prints all three because they are ONE reading of the
-    binary - see THE COST OF ASKING THREE TIMES in the header."""
+    binary - see THE COST OF ASKING THREE TIMES in the header. And `topper=`
+    (PAD-498): the boards left off because the cabinet has no topper, which
+    watch.sh hands the virtual playfield so it stops listing them."""
     if a.values:
         print("silent=%s" % ",".join(str(n) for n in nodes))
         print("silent-ff=%s" % ",".join(str(n) for n in ff))
         print("because=%s" % why.replace("\n", " "))
+        print("topper=%s" % ",".join(str(n) for n in topper))
     elif a.silent:
         print(",".join(str(n) for n in nodes))
     else:
@@ -516,6 +572,12 @@ def main():
                          "silenced node stays totally silent: answering ff on "
                          "godzilla_le's node 2 kept bring-up re-probing its "
                          "identity until t=100 s (measured 2026-08-22)")
+    ap.add_argument("--no-topper", action="store_true",
+                    help="the cabinet has no topper (the Emulate tab's Topper "
+                         "box unticked, PAD_TOPPER=0): silence the boards the "
+                         "title's own node directory names as its topper, as "
+                         "a machine without the accessory has none of them "
+                         "(PAD-498). See topper_nodes().")
     a = ap.parse_args()
 
     # THE MACHINE MODES CAN BE SERVED FROM THE CACHE; THE REPORT NEVER IS.
@@ -527,8 +589,8 @@ def main():
     quiet = a.values or a.silent or a.silent_ff
     hit = cache_read(a.cache, key) if quiet else None
     if hit:
-        nodes, ff, why = hit
-        return emit_values(a, nodes, ff, why)
+        nodes, ff, why, topper = hit
+        return emit_values(a, nodes, ff, why, topper)
 
     read_the_binary = True
     try:
@@ -545,7 +607,8 @@ def main():
     sw = switch_nodes(a.game, a.switches)
     dnodes = dir_nodes(a.nodedir)
     nodes, why = silent_nodes(counts, sw, dnodes)
-    opt4 = optional_node4_nodes(a.elf)
+    ndir = node_directory(a.elf)
+    opt4 = optional_node4_in(ndir)
     # item 82: an optional node4 the rig can ANSWER is not silenced. The
     # evidence is a FRESH nodedir row - derived this run from this title's
     # own hexes, so the shim's identity claim will match what the game
@@ -577,6 +640,23 @@ def main():
     # and keeps bring-up re-probing its identity - godzilla_le's node 2 was
     # re-probed in 90-probe bursts every ~15 s until t=100 s (2026-08-22).
     ff = sorted(opt4 & set(nodes))
+    # PAD-498: NO TOPPER, NO TOPPER BOARDS - and silent the whole way, never
+    # in `ff`: a status answer reads as alive-but-unidentified (the godzilla_le
+    # measurement above), and a missing accessory is simply not there.
+    tops = []
+    if a.no_topper:
+        named = topper_nodes(ndir)
+        tops = sorted(named)
+        if tops:
+            nodes = sorted(set(nodes) | set(tops))
+            ttxt = ("the Topper box is off, so %s - the boards this title "
+                    "names its topper - are left off the bus, as on a "
+                    "cabinet without one" % ", ".join(
+                        "node %d (%s)" % (n, named[n]) for n in tops))
+        else:
+            ttxt = ("the Topper box is off, but this title's node directory "
+                    "names no optional topper board to leave off")
+        why = ("%s; and %s" % (why, ttxt)) if why else ttxt
 
     if quiet:
         # ONLY A VERDICT THE BINARY WAS ACTUALLY READ FOR IS KEPT. A census
@@ -589,8 +669,8 @@ def main():
         # zero records is an answer (rush_le, and it is the whole reason any
         # of this is cached), and census() returns it rather than raising.
         if read_the_binary:
-            cache_write(a.cache, key, nodes, ff, why)
-        return emit_values(a, nodes, ff, why)
+            cache_write(a.cache, key, nodes, ff, why, tops)
+        return emit_values(a, nodes, ff, why, tops)
 
     print("%d device records" % total)
     print("%-8s %-7s %-6s %-6s %-6s %s"

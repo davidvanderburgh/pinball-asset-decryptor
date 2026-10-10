@@ -785,11 +785,16 @@ fi
 # have a toggle to enable/disable the topper"). A machine without the topper
 # accessory is a real configuration - it is an extra on most of these titles -
 # and on some of them it also takes the topper-exclusive modes out of the game.
-# PAD_TOPPER=0 stops the second display's window ever opening; the guest is
-# untouched, so the game still composes it and simply nobody looks.
+# PAD_TOPPER=0 stops the second display's window ever opening, and (PAD-498)
+# the node census below leaves the topper's own boards off the bus - until then
+# the shim kept answering for them, so the game drove a topper the cabinet did
+# not have and the virtual playfield listed Venom's node 12 with its 75 lights.
+NB_TOPPER_ARG=
 if [ "${PAD_TOPPER:-1}" = 0 ]; then
     export PAD_GL2_OFF=1
-    echo "[watch] topper: OFF (PAD_TOPPER=0) - no second-display window"
+    NB_TOPPER_ARG=--no-topper
+    echo "[watch] topper: OFF (PAD_TOPPER=0) - no second-display window," \
+         "and no topper boards on the bus"
 fi
 # WHICH NODE IS THE lcdnode (item 83, batman's VILLAIN VISION = node 24).
 # From the derived table so it is per-title and empty on titles without one -
@@ -923,10 +928,15 @@ fi
 # read at all, and whose answer came from the switch list. A log line that
 # names the wrong source is worse than one that names none, because the whole
 # point of printing it is that a silenced board is otherwise invisible.
+#
+# PAD-498: with the Topper box off the cabinet has no topper boards either
+# (nodecensus.topper_nodes), and that verdict is kept in its own file, so
+# flipping the box back and forth does not re-read rush_le's 190 MB each time.
 NB_VALUES=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
     --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" \
-    --cache "$PAD_TABLES/$GAME/node_census.txt" --values 2>/dev/null)
+    --cache "$PAD_TABLES/$GAME/node_census${NB_TOPPER_ARG:+.notopper}.txt" \
+    --values $NB_TOPPER_ARG 2>/dev/null)
 NB_SILENT_DEFAULT=$(printf '%s\n' "$NB_VALUES" | sed -n 's/^silent=//p')
 NB_WHY=$(printf '%s\n' "$NB_VALUES" | sed -n 's/^because=//p')
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
@@ -956,6 +966,17 @@ if [ -n "${PAD_NB_SILENT:-}" ]; then
 else
     echo "[watch] node census: silencing nothing on $GAME -" \
          "${NB_WHY:-reason unavailable}"
+fi
+# PAD-498: AND THE VIRTUAL PLAYFIELD IS TOLD WHICH BOARDS WENT WITH THE TOPPER,
+# so it stops listing them - Foo Fighters' TOPPER HOME 1/2 switches sit on its
+# node 12, and a switch on a board the cabinet does not have cannot be pressed.
+# Written every start, removed when the topper is on, so a window never reads
+# the previous run's answer.
+NB_TOPPER_NODES=$(printf '%s\n' "$NB_VALUES" | sed -n 's/^topper=//p')
+if [ -n "$NB_TOPPER_ARG" ] && [ -n "$NB_TOPPER_NODES" ]; then
+    printf '%s\n' "$NB_TOPPER_NODES" > "$ROOT/dump/topper_off" 2>/dev/null
+else
+    rm -f "$ROOT/dump/topper_off" 2>/dev/null
 fi
 
 # ---- A CHECKPOINTABLE BOOT IS AN EXTRA, NOT A CONDITION OF STARTING -------

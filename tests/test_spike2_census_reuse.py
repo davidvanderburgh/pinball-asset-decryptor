@@ -120,11 +120,12 @@ def test_verdict_round_trips_and_only_for_its_own_inputs(nodecensus, inputs,
     why = "node 4 is an OPTIONAL node4-type board; and node 2 is absent"
     nodecensus.cache_write(str(dest), key, [2, 4], [4], why)
 
-    assert nodecensus.cache_read(str(dest), key) == ([2, 4], [4], why)
+    assert nodecensus.cache_read(str(dest), key) == ([2, 4], [4], why, [])
     assert nodecensus.cache_read(str(dest), key + " x") is None
     # the empty verdict - "silence nothing" - is a real answer, not a miss
     nodecensus.cache_write(str(dest), key, [], [], "nothing is silenced")
-    assert nodecensus.cache_read(str(dest), key) == ([], [], "nothing is silenced")
+    assert nodecensus.cache_read(str(dest), key) == (
+        [], [], "nothing is silenced", [])
 
 
 def test_an_unreadable_or_damaged_cache_reads_the_binary(nodecensus, inputs,
@@ -150,7 +151,7 @@ def test_because_stays_one_line(nodecensus, inputs, tmp_path):
     key = nodecensus.cache_key(_Args(elf, sw, nd))
     dest = tmp_path / "node_census.txt"
     nodecensus.cache_write(str(dest), key, [2], [], "first\nsecond")
-    assert nodecensus.cache_read(str(dest), key) == ([2], [], "first second")
+    assert nodecensus.cache_read(str(dest), key) == ([2], [], "first second", [])
 
 
 def _run_values(nodecensus, elf, sw, nd, dest, monkeypatch):

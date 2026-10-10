@@ -1319,3 +1319,90 @@ def test_its_screens_total_gives_way_when_another_mode_begins(tmp_path):
     assert _at_any(out, r"END \(time ran out\)") < began
     assert "[TEST MODE] its total gives way - another mode began" in out
     assert hides(out, began) and hides(out, began)[0] - began <= 40              # the next tick
+
+
+# ---- PAD-503: the mode lit at a shot, as the game lights one of its mini-wizards ------------------------------------
+LIT = {"op": "light_mode", "shot": "Right ramp", "insert": "MASER READY", "color": "#ffd000", "pattern": "blink"}
+
+
+def _lit_prog(**kw):
+    """Lit by the skill shot (a film done, on Bond); its Right ramp pays while it runs."""
+    return prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [dict(LIT)]},
+                 {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"},
+                  "do": [{"op": "score", "points": num(1000)}]},
+                 {"hat": {"kind": "ball_end"}, "do": [
+                     {"op": "if", "cond": {"k": "lit"}, "then": [{"op": "log", "text": "still lit"}], "else": None}]}],
+                **dict({"seconds": 5}, **kw))
+
+
+def test_light_the_mode_at_a_shot_is_checked():
+    """A Bond owner's own mini-wizards for the two films without one (PAD-503): lit at the Right ramp with the film's
+    villain, as the game's four are. The shot, the insert (any the card's game names), the colour and the pattern."""
+    p = _lit_prog()
+    assert BM.problems(p, SHOTS, GZ.events, inserts=["MASER READY", "RIGHT RAMP"]) == []
+    assert not any("No block starts the mode" in n for n in BM.notes(p))       # the lit shot starts it
+    assert BM.problems(p, SHOTS, GZ.events, inserts=[]) == []      # no insert a mode can light here: lit without it
+    bad = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [
+        dict(LIT, shot="Moon ramp", insert="BLOFELD", color="gold", pattern="hurry"),
+        dict(LIT, insert="A, B")]}])
+    assert BM.problems(bad, SHOTS, GZ.events, inserts=["MASER READY"]) == [
+        "Script 1's Light the mode at names Moon ramp, a shot this card does not have.",
+        "Script 1 lights the mode in no colour.",
+        "Script 1 lights the mode in no pattern.",
+        "Script 1 lights the insert BLOFELD, which this card's game does not have.",
+        "Script 1 lights an insert that is not one."]
+    # a mode with no such block makes the C it always made: no lit-at code in it
+    assert "lit_" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+
+
+def test_the_lit_c_only_calls_what_the_header_declares():
+    src = BM.to_c(_lit_prog(), "lit")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    assert '{ 0, "MASER READY", 0xffd000u, PM_LAMP_BLINK, 500u },   /* Right ramp */' in src
+    # the same block twice is one row; "the mode is lit" with no such block is never lit
+    two = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [dict(LIT), dict(LIT)]}])
+    assert BM.to_c(two, "lit").count("PM_LAMP_BLINK, 500u }") == 1
+    asked = prog([{"hat": {"kind": "ball_end"}, "do": [
+        {"op": "if", "cond": {"k": "lit"}, "then": [{"op": "log", "text": "x"}], "else": None}]}])
+    assert "static int lit_now(void) { return 0; }" in BM.to_c(asked, "asked")
+
+
+def test_the_bond_le_offers_its_villains_inserts():
+    p = MP.profile("james_bond_le_1_06")
+    assert {"BLOFELD", "MR. HENDERSON", "LARGO", "ROSA KLEBB", "RIGHT RAMP ARROW"} <= set(p.inserts)
+    assert "Right ramp exit opto" in [n for n, _m in p.shots] and p.wizard_shot == "Right ramp"
+
+
+def test_a_mode_lit_at_a_shot_starts_from_it_ball_after_ball_and_per_player(tmp_path):
+    out = play(tmp_path, _lit_prog(),
+               "shot", "Right ramp",                                # not lit yet: nothing
+               "event", "skill_shot", "secs", 0.2, "lamps",          # lit for player 1
+               "ball_end", "secs", 0.2, "lamps",                     # still lit the next ball
+               "player", 2, "secs", 0.2, "lamps", "shot", "Right ramp",   # player 2 is not lit
+               "player", 1, "secs", 0.2, "lamps",
+               "shot", "Right ramp", "lamps",                        # starts it, and the light goes out
+               "shot", "Right ramp", "secs", 6,                      # pays while it runs; its clock ends it
+               "secs", 0.2, "lamps", "shot", "Right ramp")           # not lit again: nothing
+    assert out.count("[TEST MODE] lit at Right ramp for player 1") == 1
+    held = re.findall(r"HELD (RIGHT RAMP|MASER READY|none)", out)
+    assert held == ["RIGHT RAMP", "MASER READY", "RIGHT RAMP", "MASER READY", "none", "RIGHT RAMP", "MASER READY",
+                    "none", "none"]
+    assert "LAMP RIGHT RAMP ffd000 blink 500 TEST MODE" in out and "LAMP MASER READY ffd000 blink 500 TEST MODE" in out
+    assert out.count("START (") == 1 and "START (its lit shot): player 1" in out
+    assert out.index("START (its lit shot)") > out.index("HELD none")       # player 2's shot started nothing
+    assert scores(out) == [1000]                                     # the shot that starts it pays nothing
+    assert "END (time ran out)" in out and "still lit" in out
+    assert "lamps held 0" in out
+
+
+def test_a_lit_mode_waits_lit_while_the_game_is_busy_and_a_new_game_puts_it_out(tmp_path):
+    out = play(tmp_path, _lit_prog(game_modes="give_way"),
+               "event", "skill_shot", "battle", 1, "shot", "Right ramp", "secs", 0.2, "lamps",   # in the way: stays lit
+               "battle", 0, "shot", "Right ramp")                                                # now it starts
+    assert re.search(r"not started \(its lit shot\): .+ is running - still ready", out)
+    assert re.findall(r"HELD (RIGHT RAMP|MASER READY)", out) == ["RIGHT RAMP", "MASER READY"]
+    assert out.count("START (its lit shot)") == 1 and out.index("START (its lit shot)") > out.index(">> battle 0")
+    out = play(tmp_path, _lit_prog(), "event", "skill_shot", "secs", 0.2, "game_over", "secs", 0.2, "lamps",
+               "new_game", "secs", 0.2, "shot", "Right ramp")
+    assert "HELD none" in out and "START (" not in out

@@ -96,6 +96,8 @@ class TitleProfile:
     wizard_shot: str = ""            # PAD-436: the game's shot that starts a lit mini-wizard (`text wizard_shot`)
     wizard_lights: tuple = ()        # PAD-473: the names of those a mode can light for it (the rest are started)
     wizard_claims: bool = False      # PAD-457: one a mode hands out is its mode's: the game's own lighting leaves it
+    inserts: tuple = ()              # PAD-503: the names of every insert the port names a mode can light (a villain's
+    #                                  on Bond's Right ramp, shot or not); () = none it can light on this title
 
     def lcd(self, which):
         """``assets/lcd/<tree>/<scene id>`` of the title's ``"bank"`` or ``"hud"`` scene."""
@@ -1984,6 +1986,7 @@ def profile_from_port(path):
         game_modes=_game_modes(port),
         game_rules=_game_rules(port),                        # PAD-398
         lamps=_lit_inserts(port) if key in LAMPS_PROVEN else 0,
+        inserts=_named_inserts(port) if key in LAMPS_PROVEN else (),       # PAD-503
         light_route=light_route,
         bank_tree=measured.get("bank_tree", "auto_loaded"),
         hud_tree=measured.get("hud_tree", "auto_loaded"),
@@ -2143,6 +2146,20 @@ def _lit_inserts(port):
             and all(n in port["value"] for n in values)):
         return 0
     return sum(1 for _name, _ids, mask in port.get("lamp", ()) if mask)
+
+
+def _named_inserts(port):
+    """PAD-503: the names of the port's `lamp` lines, shot or not, in the port's order, when the port has the lamp
+    layer (LAMP_NEEDS); else (). A name with a comma could not be named alone (pm_lamp_set takes a list)."""
+    sites, data, values = LAMP_NEEDS
+    if not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+            and all(n in port["value"] for n in values)):
+        return ()
+    out = []
+    for name, _ids, _mask in port.get("lamp", ()):
+        if name and "," not in name and name not in out:
+            out.append(name)
+    return tuple(out)
 
 
 def _game_modes(port):

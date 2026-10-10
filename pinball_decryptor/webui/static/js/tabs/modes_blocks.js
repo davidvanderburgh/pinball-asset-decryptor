@@ -30,6 +30,7 @@ const DISPLAY_PRIORITIES = [[0, "none"], [180, "a mode's (180)"], [190, "a wizar
 const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"],
   ["hurry", "blinking faster"]];
 const PACED = ["blink", "pulse", "chase"];
+const LIT_PATTERNS = PATTERNS.filter(([p]) => p !== "hurry");   // PAD-503: no clock runs while a mode is lit
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
 const SCOOP_WHICH = [["next", "the next ball"], ["every", "every ball"]];   // PAD-395
@@ -73,6 +74,7 @@ const TIP = {
   timerStart: "Starts the timer (again, if it runs) at this many milliseconds: 1000 = one second. Any value: a variable makes a window that shrinks.",
   timerLeft: "The milliseconds the timer has left; 0 when it is not running.",
   wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
+  lit: "A Light the mode at block has lit it for the player up, and it has not started since.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
   displayPriority: "Kept for the total on its own screen. It no longer makes the game's displays wait: a mode always gives way to them (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off).",
   gameModes: "Cannot start (the usual): while this mode runs it is the only thing going - the modes ticked below cannot start, and none of the game's features lights, locks, counts or awards unless you tick it under Keep counting. May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Its own Multiball block does not end it.",
@@ -97,6 +99,7 @@ const TIP = {
   shake: "Shakes the cabinet's shaker motor for this long, the way the game shakes it: the operator's Shaker Motor setting still applies (switched off, or no shaker fitted: nothing). A strength the game itself shakes at (some games have one only), never longer than the game's own longest at that strength. One at a time, never over one of the game's own, 20 shakes and 15 seconds of shaking a minute at most; the mode, the ball or the game ending stops it, except a shake in When the mode ends, which runs out.",
   shakeGame: "Plays one of the game's own shakes, as the game does: on Godzilla its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble or its multiball start (five shakes over 4 seconds); on the other games the one it plays most of each length (a tap, a short, medium or long shake, a rumble). The same limits as Shake the cabinet.",
   gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds; a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
+  lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the insert picked (a villain's) shine in this colour while the mode is not running, ball after ball, and that shot made starts the mode. It starts as Start the mode does: while one of the game's own modes or a multiball is in its way (as this mode is set), it stays lit for the next one. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
   gameWizard: "Hands the player one of the game's own mini-wizards, the game's mode itself with its own shots, lights, screens, sounds and award. Light it (where the game lights that one for a start shot): it waits for the game's own start shot, as when the game lights one. Start it: it begins at once, or the moment none of the game's own modes is in its way (nor this mode holding the game's modes off), that ball. On James Bond 007, until it starts it is the only one lit, so the game's own choosing cannot swap it for another, and the game no longer lights one named here by itself; on the other games the game's own rules still light and start their mini-wizards too. Works whether this mode runs or not: in When the game does an event it is a mini-wizard for that event. One the player has played this game plays again.",
   shield: "Turns the platform the shield targets sit on (about a second) and keeps it there while the mode runs: the game's ball search swings it, and it is turned back after. Where they are: stop keeping them. Only while the mode runs, never while one of the game's own modes runs, 1.5 s between moves, 12 a minute at most; the mode ending, the ball draining or a tilt turns them back where they were. They stay turned only while the game's modes cannot start and its own shield feature does not keep counting.",
 };
@@ -116,6 +119,15 @@ function hatTemplates(ch, timers) {
   ];
 }
 
+// PAD-503: where a mode is lit at first - the shot the game starts its own mini-wizards from (Bond's Right ramp: the
+// ramp's exit, the ramp made), else the card's first shot
+function litShot(ch) {
+  const shots = ch.shots || [];
+  const ws = ch.wizard_shot || "";
+  return shots.find((n) => n === ws) || (ws && (shots.find((n) => n.startsWith(ws) && /exit/i.test(n))
+    || shots.find((n) => n.startsWith(ws)))) || shots[0] || "";
+}
+
 function stmtTemplates(ch, vars, prog = {}) {
   const shot = (ch.shots || [])[0] || "";
   const v = (vars[0] || {}).name || "";
@@ -123,7 +135,8 @@ function stmtTemplates(ch, vars, prog = {}) {
   const clip = ((prog.clips || [])[0] || {}).name || "";
   const sound = ((prog.sounds || [])[0] || {}).name || "";
   return [
-    ["Mode", [{ op: "start_mode" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
+    ["Mode", [{ op: "start_mode" }, { op: "light_mode", shot: litShot(ch), insert: "", color: "#ffd000", pattern: "blink" },
+      { op: "end_mode" }, { op: "add_time", seconds: num(5) },
       { op: "set_time", seconds: num(10) },
       { op: "multiball", balls: 2, save: 10 },
       { op: "game_wizard", name: ((ch.game_wizards || [])[0] || {}).name || "", how: "light" }]],
@@ -154,14 +167,14 @@ function valueTemplates(ch, vars, timers) {
 }
 
 const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and", a: null, b: null },
-  { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }, { k: "can_start" }, { k: "stock" }];
+  { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }, { k: "can_start" }, { k: "lit" }, { k: "stock" }];
 
 const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", scored: "times it has scored",
   total: "points so far", secs_left: "seconds left", timer_left: "ms left on a timer", balls: "balls in play",
   player: "the player up", op: "a sum" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
-  can_start: "the mode could start now", stock: "a game mode of its own runs" };
-const STMT_CLASS = { start_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
+  can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs" };
+const STMT_CLASS = { start_mode: "mode", light_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech",
@@ -283,6 +296,17 @@ function StmtBody({ b, path, ed }) {
   switch (b.op) {
     case "start_mode": return html`<span class="bk-w">Start the mode</span>`;
     case "end_mode": return html`<span class="bk-w">End the mode</span>`;
+    case "light_mode": {
+      // PAD-503: lit at a shot, with one more insert of the card's (a villain's), as the game's mini-wizards are
+      const ins = ed.ch.inserts || [];
+      const cur = b.insert ? b.insert : "-";
+      return html`<span class="bk-w" ...${tip(TIP.lightMode)}>Light the mode at</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
+        <span class="bk-w">and the insert</span><${Pick} value=${cur} options=${[["-", "none"], ...ins.map((n) => [n, n])]} missing="(not on this game)"
+          width=${200} title=${ins.length ? undefined : "This card's game has no inserts a mode can light: only the mode is lit."}
+          onChange=${(v) => set("insert", v === "-" ? "" : v)} />
+        <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The lights' colour")} />
+        <${Pick} value=${b.pattern} options=${LIT_PATTERNS} onChange=${(v) => set("pattern", v)} />`;
+    }
     case "score": return html`<span class="bk-w">Score</span><${Slot} kind="num" value=${b.points} path=${[...path, "points"]} ed=${ed} /><span class="bk-w">points</span>`;
     case "set": return html`<span class="bk-w">Set</span><${Pick} value=${b.var} options=${ed.vars.map((v) => v.name)} missing="(no such variable)" onChange=${(v) => set("var", v)} />
       <span class="bk-w">to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />`;
@@ -507,7 +531,7 @@ function hatLabel(h) {
 }
 
 function stmtLabel(b) {
-  return { start_mode: "Start the mode", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
+  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound",

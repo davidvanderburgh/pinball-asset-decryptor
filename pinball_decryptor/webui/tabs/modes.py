@@ -2744,6 +2744,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "wizard_shot": getattr(p, "wizard_shot", "") if p is not None else "",
                 "wizard_lights": list(getattr(p, "wizard_lights", ()) or ()) if p is not None else [],   # PAD-473
                 "wizard_claims": bool(getattr(p, "wizard_claims", False)) if p is not None else False,
+                # PAD-503: the inserts a Light the mode at block may light beside its shot's (a villain's)
+                "inserts": list(getattr(p, "inserts", ()) or ()) if p is not None else [],
                 "game_wizards_off": ("Not on this game: " + p.why_not("wizard")) if p is not None and not p.can("wizard")
                                     else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else
@@ -2786,8 +2788,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             if p is not None else None                                                                          # PAD-414
         shows = [n for n, _k, _s in getattr(p, "game_shows", ())] if p is not None else None   # PAD-418
         wizards = ([n for n, _f in getattr(p, "game_wizards", ())] if p.can("wizard") else []) if p is not None else None
-        return (BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards),   # PAD-436
-                BM.notes(program))
+        inserts = list(getattr(p, "inserts", ()) or ()) if p is not None else None                     # PAD-503
+        return (BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards,   # PAD-436
+                            inserts), BM.notes(program))
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

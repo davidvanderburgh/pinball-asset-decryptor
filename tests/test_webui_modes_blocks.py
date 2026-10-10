@@ -241,3 +241,23 @@ def test_the_mechanism_blocks_are_offered_where_the_game_can_hold_them(tmp_path,
         with open(tmp_path / "le" / "modes" / "coils" / "coils.c", encoding="utf-8") as f:
             c = f.read()
         assert 'hold("bridge", (3000LL));' in c and "scoop_hold((5000LL), 1);" in c
+
+
+def test_light_the_mode_at_a_shot_offers_the_cards_inserts(tmp_path, preview_on):  # noqa: F811
+    """PAD-503: a mode of the owner's own lit at a shot with one more insert of the card's game (a villain's on Bond's
+    Right ramp). The page is handed the inserts; one the game does not have is named; the C holds the light's row."""
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, tmp_path / "le", card="godzilla_le-1_16_0.raw")
+        w.call("modes.new_blocks_mode", "Lit")
+        b = w.state("modes")["code"]["blocks"]
+        assert "MASER READY" in b["choices"]["inserts"] and "SHOOT AGAIN (X2)" in b["choices"]["inserts"]
+        prog = b["program"]
+        lit = {"op": "light_mode", "shot": "Right ramp", "insert": "BLOFELD", "color": "#ffd000", "pattern": "blink"}
+        prog["scripts"].append({"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [lit]})
+        got = w.call("modes.blocks_save", "lit", prog)
+        assert got["problems"] == ["Script %d lights the insert BLOFELD, which this card's game does not have."
+                                   % len(prog["scripts"])]
+        lit["insert"] = "MASER READY"
+        assert w.call("modes.blocks_save", "lit", prog)["problems"] == []
+        with open(tmp_path / "le" / "modes" / "lit" / "lit.c", encoding="utf-8") as f:
+            assert '"MASER READY", 0xffd000u, PM_LAMP_BLINK, 500u },   /* Right ramp */' in f.read()

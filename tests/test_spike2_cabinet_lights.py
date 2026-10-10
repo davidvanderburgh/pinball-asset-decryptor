@@ -372,6 +372,18 @@ def test_a_section_shows_once_its_board_has_spoken(pf):
     assert "R=channel 286" in cab.describe(top) and "Cabinet Lights" in cab.describe(top)
 
 
+def test_a_topper_left_off_the_bus_gets_no_section(pf, monkeypatch):
+    # PAD-498: the Emulate tab's Topper box off leaves the topper's boards off
+    # the bus and names them in dump/topper_off
+    rows = _rush_rows() + [_row("led", "ALBUM %d" % n, 10, n) for n in range(1, 4)]
+    monkeypatch.setattr(pf, "DEV_ROWS", rows)
+    assert [S["key"] for S in pf.CabinetLights(True).sections] == [
+        "topper:12", "speaker:7", "expression:2"]
+    monkeypatch.setattr(pf, "topper_off_nodes", lambda: {12, 14})
+    assert [S["key"] for S in pf.CabinetLights(True).sections] == [
+        "speaker:7", "expression:2"]
+
+
 def test_the_tick_box_in_the_window(pf):
     assert pf.expression_on() is True
     with open(pf.STATE, "w") as f:

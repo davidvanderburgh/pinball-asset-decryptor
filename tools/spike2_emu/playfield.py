@@ -2640,7 +2640,11 @@ class CabinetLights:
     def __init__(self, expression=True, boards=None):
         self.expression = expression
         bm = load_boards() if boards is None else boards
-        every, left = cablights.sections(DEV_ROWS, GROUP_NODE, bm)
+        # PAD-498: with the Emulate tab's Topper box off, the topper's boards
+        # are not on the bus at all, so they get no section either
+        gone = topper_off_nodes()
+        every, left = cablights.sections(DEV_ROWS, GROUP_NODE, bm,
+                                         gone_nodes=gone)
         # the boards the tick box takes out, whichever way it is set: the side
         # panel offers the box only on a title that has them, and the swatch
         # grid hides their blocks
@@ -2649,7 +2653,7 @@ class CabinetLights:
         self.has_expression = bool(self.expression_nodes)
         if not expression:
             every, left = cablights.sections(DEV_ROWS, GROUP_NODE, bm,
-                                             expression=False)
+                                             expression=False, gone_nodes=gone)
         self.sections, self.left_out = every, left
         self.pixels = []
         for S in self.sections:

@@ -610,41 +610,64 @@ class App:
     # Queue polling — bridge background threads to the UI loop.
     # ------------------------------------------------------------------
 
+    #: The longest one turn of :meth:`_poll_queue` hands messages on before
+    #: the loop's other work gets its turn (seconds).
+    POLL_TURN_S = 0.05
+
     def _poll_queue(self):
-        try:
-            while True:
-                msg = self.msg_queue.get_nowait()
-                if isinstance(msg, LogMsg):
-                    self.window.append_log(msg.text, msg.level)
-                elif isinstance(msg, LinkMsg):
-                    self.window.append_log_link(msg.text, msg.url)
-                elif isinstance(msg, PhaseMsg):
-                    self.window.set_phase(msg.index, mode=self._active_mode)
-                elif isinstance(msg, ProgressMsg):
-                    self.window.set_progress(
-                        msg.current, msg.total, msg.desc, mode=self._active_mode)
-                elif isinstance(msg, LogLineMsg):
-                    self.window.update_log_line(msg.key, msg.text, msg.level)
-                elif isinstance(msg, DoneMsg):
-                    self._on_done(msg.success, msg.summary)
-                elif isinstance(msg, UiCallMsg):
-                    # A UI call whose target went away while it was queued
-                    # must not stop the polling.
-                    try:
-                        msg.fn()
-                    except Exception:
-                        log.exception("a queued UI call failed")
-                elif isinstance(msg, PrereqMsg):
-                    # Drop stale results if the user switched mfrs while
-                    # the worker was still running.
-                    if (self._current_mfr is not None and
-                            self._current_mfr.key == msg.mfr_key):
-                        self.window.set_prereq_result(
-                            msg.result.name, msg.result.ok,
-                            msg.result.message, msg.result.install_hint)
-        except queue.Empty:
-            pass
-        self.root.after(100, self._poll_queue)
+        # A TURN ENDS, EMPTY QUEUE OR NOT (PAD-505, DragonRR: "PAD locked up
+        # ... Needs visual sign that it is working").  Emulate's Start staging
+        # a whole game's pictures under a color profile logs two lines a
+        # picture, 11,622 for Godzilla's 5,811, and on a busy PC the worker
+        # put them here faster than this loop wrote them out.  The turn ran
+        # until the queue was empty, so it did not end: 89 s on end in a
+        # stand-in of his PC, and every other job on this one loop waited
+        # behind it - the State line's paint (it sat at "Converting
+        # pictures: 5 of 5,811" while the log scrolled on), every button,
+        # Send log.  Now a turn stops after POLL_TURN_S and the next comes
+        # straight after whatever else is waiting, and the turn's log lines
+        # reach the log files in one write, not two file opens a line.
+        from .core import session_log
+        deadline = time.monotonic() + self.POLL_TURN_S
+        more = False
+        with session_log.batched():
+            try:
+                while True:
+                    if time.monotonic() >= deadline:
+                        more = True
+                        break
+                    msg = self.msg_queue.get_nowait()
+                    if isinstance(msg, LogMsg):
+                        self.window.append_log(msg.text, msg.level)
+                    elif isinstance(msg, LinkMsg):
+                        self.window.append_log_link(msg.text, msg.url)
+                    elif isinstance(msg, PhaseMsg):
+                        self.window.set_phase(msg.index, mode=self._active_mode)
+                    elif isinstance(msg, ProgressMsg):
+                        self.window.set_progress(
+                            msg.current, msg.total, msg.desc, mode=self._active_mode)
+                    elif isinstance(msg, LogLineMsg):
+                        self.window.update_log_line(msg.key, msg.text, msg.level)
+                    elif isinstance(msg, DoneMsg):
+                        self._on_done(msg.success, msg.summary)
+                    elif isinstance(msg, UiCallMsg):
+                        # A UI call whose target went away while it was queued
+                        # must not stop the polling.
+                        try:
+                            msg.fn()
+                        except Exception:
+                            log.exception("a queued UI call failed")
+                    elif isinstance(msg, PrereqMsg):
+                        # Drop stale results if the user switched mfrs while
+                        # the worker was still running.
+                        if (self._current_mfr is not None and
+                                self._current_mfr.key == msg.mfr_key):
+                            self.window.set_prereq_result(
+                                msg.result.name, msg.result.ok,
+                                msg.result.message, msg.result.install_hint)
+            except queue.Empty:
+                pass
+        self.root.after(0 if more else 100, self._poll_queue)
 
     # ------------------------------------------------------------------
     # Manufacturer switching

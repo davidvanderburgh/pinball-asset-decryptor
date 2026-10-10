@@ -1403,8 +1403,12 @@ pad_headless_reason() {
 # NOTHING INSIDE LINUX CAN REPAIR IT: only a VM restart re-lays that overlay.
 # So the verdict is a WORD, computed here where a test can drive it, and
 # watch.sh both says what it means and carries on in software.
+#
+# THE SECOND ARGUMENT IS pad_gpu_refusal_mark's answer from BEFORE the attempt
+# (PAD-497, below). Given, a kernel refusal that arrived since is the verdict
+# gpulost; left out, the kernel is not asked.
 pad_renderer_verdict() {
-    local log=${1:-}
+    local log=${1:-} mark=${2-}
     [ -n "$log" ] && [ -r "$log" ] || { echo unknown; return 0; }
     # The loader aborts before main() of anything it was asked to load, so its
     # own name is the only reliable marker; the assertion text has changed
@@ -1421,7 +1425,70 @@ pad_renderer_verdict() {
     if grep -aq 'open ring:' "$log" 2>/dev/null; then
         echo ring; return 0
     fi
+    if [ -n "${2+x}" ] && pad_gpu_refused_since "$mark"; then
+        echo gpulost; return 0
+    fi
     echo unknown
+}
+
+# ★ WSL'S OWN GPU DRIVER SAID NO (PAD-497).
+#
+# THE FAULT, reported 2026-10-09 by David with a screen recording of the King
+# Kong mode: "Emulator video playback is very stuttery here". The renderer had
+# drawn every run on the RTX 5090 up to Oct 7; that evening every start died on
+#
+#     libEGL warning: egl: failed to create dri2 screen
+#     eglInitialize failed
+#
+# and went on in software, and the kernel said why each time:
+#
+#     misc dxg: dxgk: dxgvmb_send_create_process: create_process failed -75
+#
+# /dev/dxg is how a WSL process reaches the Windows GPU, and the dxg driver
+# asks Windows to register every new GPU process. Windows said no. That
+# morning it had reinstalled the NVIDIA driver (System log, UserPnp 20003 for
+# nvlddmkm, 09:36) under a VM that had been up 186 hours, and a VM keeps the
+# GPU connection it started with (microsoft/WSL#41701 has the same kernel line,
+# same card, while the GPU is reset under a running VM). As with the stale
+# library above, nothing inside Linux repairs it; a VM restart does.
+#
+# THE RENDERER'S OWN LOG CANNOT TELL THIS FROM OTHER EGL FAILURES - Mesa prints
+# the same two lines for an X server it cannot share memory with - so the
+# evidence is the kernel's, and it has to be NEW: a refusal stays in the ring
+# buffer for hours and says nothing about this attempt. watch.sh takes the
+# mark below before it starts the renderer and the verdict compares.
+#
+# THE MARK IS "<count>|<last line>": the last line carries the kernel's
+# timestamp, so a new refusal changes it even when the ring buffer is full and
+# old ones are falling off the far end (WSL's relay floods it - David's held
+# only four hours). The count is for a kernel that prints no timestamps.
+#
+# Root only on Ubuntu, which restricts dmesg: unreadable is an empty mark
+# before and after, which is no evidence, never a verdict. PAD_KMSG_FILE
+# stands in for the kernel log in the tests.
+pad_kmsg() {
+    if [ -n "${PAD_KMSG_FILE:-}" ]; then
+        cat "$PAD_KMSG_FILE" 2>/dev/null
+    else
+        dmesg 2>/dev/null
+    fi
+}
+
+pad_gpu_refusal_mark() {
+    local k
+    k=$(pad_kmsg | grep -a 'dxgk:.*create_process failed')
+    [ -n "$k" ] || { echo "0|"; return 0; }
+    printf '%s|%s\n' "$(printf '%s\n' "$k" | wc -l | tr -d ' ')" \
+        "$(printf '%s\n' "$k" | tail -1)"
+}
+
+# 0 when the kernel has refused a GPU process since <mark> was taken.
+pad_gpu_refused_since() {   # <mark>
+    local was=${1:-0|} now
+    now=$(pad_gpu_refusal_mark)
+    [ "${now#*|}" != "" ] || return 1
+    [ "${now#*|}" != "${was#*|}" ] && return 0
+    [ "${now%%|*}" -gt "${was%%|*}" ] 2>/dev/null
 }
 
 # WHAT TO DO ABOUT IT, in the user's words rather than the loader's. Kept
@@ -1453,6 +1520,20 @@ pad_renderer_advice() {
             echo "[watch]   guest filesystem is not there rather than anything"
             echo "[watch]   about graphics. Pick a card image and start again"
             echo "[watch]   and it is built for you." ;;
+        gpulost)
+            echo "[watch]   WSL HAS LOST THE GRAPHICS CARD: its kernel refused"
+            echo "[watch]   the renderer just now ('dxgk: ... create_process"
+            echo "[watch]   failed' in dmesg). Windows does that to a WSL that"
+            echo "[watch]   keeps running while its graphics driver is updated"
+            echo "[watch]   or reset; a session that has been up for days is"
+            echo "[watch]   the one that gets caught (its age is printed"
+            echo "[watch]   further up this log)."
+            echo "[watch]   The game is drawn in software until then, and its"
+            echo "[watch]   videos stutter."
+            echo "[watch]   THE CURE IS A VM RESTART: Stop, then 'Restart"
+            echo "[watch]   WSL...' on the Emulate tab - or 'wsl --shutdown' in"
+            echo "[watch]   a Windows terminal - and start again. If the"
+            echo "[watch]   next run says this too, restart Windows." ;;
     esac
 }
 

@@ -275,7 +275,8 @@ function Status({ s }) {
       <span class="row emu-state">${v.state || "—"}${s.state_tip ? html`<${InfoBadge} text=${s.state_tip} />` : null}</span>
       <span class="k">Processes</span><span>${v.procs || "—"}</span>
       <span class="k">Game CPU / memory</span><span class="mono">${v.cpu || "—"}</span>
-      <span class="k">Renderer</span><span class="mono">${v.host || "—"}</span>
+      <span class="k">Renderer</span>
+      <span class=${cx("row mono", s.host_tip && "warn-ink")}>${v.host || "—"}${s.host_tip ? html`<${InfoBadge} text=${s.host_tip} />` : null}</span>
       <span class="k">Audio</span><span class=${cx("mono", dropping && "warn-ink")}>${v.audio || "—"}</span>
     </div>
   <//>`;

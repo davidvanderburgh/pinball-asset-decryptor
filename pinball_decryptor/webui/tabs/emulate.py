@@ -277,7 +277,8 @@ class EmulateTab(TabService):
             country_tip=rig.COUNTRY_TIP, power_tip=rig.POWER_TIP,
             topper_tip=rig.TOPPER_TIP, states_tip=rig.STATES_TIP,
             launch_tip=rig.LAUNCH_TIP, select_tip=rig.SELECT_TIP_IDLE,
-            vals=dict(self._vals), state_kind="", state_tip="", hint="",
+            vals=dict(self._vals), state_kind="", state_tip="", host_tip="",
+            hint="",
             docker_msg="", docker_btn=None, docker_enabled=True,
             setup_msg="", setup_btn=False,
             setup_label="Set up emulator…", setup_enabled=True,
@@ -3074,8 +3075,9 @@ class EmulateTab(TabService):
         if info.get("running") == "1":
             self._set("cpu", "%s%% of one core, %s MB"
                       % (info.get("cpu", "?"), info.get("rss", "?")))
-            self._set("host", "%s%% CPU, %s fps"
-                      % (info.get("host_cpu", "?"), info.get("fps", "—")))
+            host, host_tip = rig.renderer_text(info)
+            self.set(host_tip=host_tip)
+            self._set("host", host)
             pcm = info.get("pcm")
             if pcm is None:
                 self._set("audio", "not sampled")
@@ -3084,6 +3086,7 @@ class EmulateTab(TabService):
                 self._set("audio", "%s frames played, %s dropped%s" % (
                     pcm, drop, "" if drop == "0" else "   <-- dropping"))
         else:
+            self.set(host_tip="")
             for k in ("cpu", "host", "audio"):
                 self._set(k, "—")
 

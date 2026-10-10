@@ -5824,8 +5824,13 @@ static int wizm_active(const unsigned *o)
     return o && (((int (*)(const void *))(unsigned long)wizm_vfn(o, "stock_slot_active"))(o) & 0xff) != 0;
 }
 
+/* its START, as the game's rules call it - after its ENABLE where the port names one (`value wizard_slot_enable`):
+ * on Foo Fighters a mode's START returns at once unless the player's enabled byte, which the game's rules set when
+ * they qualify it (the base class's enable, slot 42), is set */
 static void wizm_start(const unsigned *o)
 {
+    if (pm_port_value("wizard_slot_enable", -1) >= 0)
+        ((void (*)(const void *))(unsigned long)wizm_vfn(o, "wizard_slot_enable"))(o);
     ((void (*)(const void *))(unsigned long)wizm_vfn(o, "stock_slot_start"))(o);
 }
 
@@ -5841,12 +5846,15 @@ static int wizm_obj_here(const unsigned *o)
 static int wizm_obj_ok(const unsigned *o)
 {
     long a = pm_port_value("stock_slot_active", -1), s = pm_port_value("stock_slot_start", -1);
+    long e = pm_port_value("wizard_slot_enable", -1), top = a > s ? a : s;
     unsigned vt;
-    if (!wizm_obj_here(o) || a < 0 || s < 0 || a > 255 || s > 255) return 0;
+    if (!wizm_obj_here(o) || a < 0 || s < 0 || a > 255 || s > 255 || e > 255) return 0;
+    if (e > top) top = e;
     vt = o[0];
-    if (!vt || (vt & 3) || !maps_has(vt, 4 * (unsigned long)((a > s ? a : s) + 1), MAP_R)) return 0;
+    if (!vt || (vt & 3) || !maps_has(vt, 4 * (unsigned long)(top + 1), MAP_R)) return 0;
     return maps_has(((const unsigned *)(unsigned long)vt)[s], 8, MAP_R | MAP_X | MAP_GAME) &&
-           maps_has(((const unsigned *)(unsigned long)vt)[a], 8, MAP_R | MAP_X | MAP_GAME);
+           maps_has(((const unsigned *)(unsigned long)vt)[a], 8, MAP_R | MAP_X | MAP_GAME) &&
+           (e < 0 || maps_has(((const unsigned *)(unsigned long)vt)[e], 8, MAP_R | MAP_X | MAP_GAME));
 }
 
 /* what of the game's is in the way of starting one now, in words ("" = nothing): a mode of ours holding the game's

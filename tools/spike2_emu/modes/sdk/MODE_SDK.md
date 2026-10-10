@@ -2317,6 +2317,9 @@ text  wizard_shot     Left ramp    # with a ready mode: the shot that starts a l
   offers only Start for it, and the file says `start`).
 - The game's own way to them is left as it is: its rules still light and start them too (no claim: Bond's lighting
   veto has no counterpart here).
+- `value wizard_slot_enable <slot>`: where a mode's START returns at once unless the game's rules enabled it for the
+  player first (Foo Fighters 1.04: START asks v[46], which reads the player's byte at the object's +0x83; v[42] sets
+  it, v[43] clears it), the runtime calls that ENABLE virtual just before the START.
 - The objects are the game's static ones: their vtables are written by the game's own constructors, which have not
   run when the runtime arms, so the arm checks the port's two slot values and that each object is in the game's
   memory, and every hand-over checks the object's vtable and both slots' functions in the game's code before it calls

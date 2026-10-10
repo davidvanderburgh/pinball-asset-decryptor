@@ -516,3 +516,4 @@ text  wizard_film_1   three van cities
 data  wizard_obj_2    0x03ba94d8   # cmode_dc_wizard, a multiball
 text  wizard_name_2   D.C.
 text  wizard_film_2   three van cities
+value wizard_slot_enable 42   # its base class's enable: sets the player's byte at +0x83 that START's check (v[46]) reads

@@ -690,14 +690,17 @@ static unsigned player = 1, stock_ball_ends, games;
 static unsigned long now = 10000;
 static const struct pm_mode ours = { 1 }, *block_owner, *running;
 static char block_who[40] = "RUSH";
-struct obj { unsigned vt; int on, k; };
+struct obj { unsigned vt; int on, k, en; };
+static int need_enable, enable_slot = -1;       /* Foo Fighters: START does nothing unless the mode was enabled */
+#define SLOT_ENABLE 9
 static struct obj objs[5];
 static unsigned vtab[5][1 + 10], ti[5][2];
 static const char *const CLS[5] = { "18cmode_monster_zero", "29cmode_terror_of_mechagodzilla", "17cmode_mz_ready",
                                     "15cmode_other_mb", "10cmode_base" };
 static const int MB[5] = { 0, 1, 0, 1, 0 };
 static unsigned char stock_base[5];
-static int start_fn(struct obj *o) { o->on = 1; printf("START %d\n", o->k); return 0; }
+static int start_fn(struct obj *o) { printf("START %d\n", o->k); if (!need_enable || o->en) o->on = 1; return 0; }
+static int enable_fn(struct obj *o) { o->en = 1; printf("ENABLE %d\n", o->k); return 0; }
 static int active_fn(struct obj *o) { return o->on; }
 static int bad = -1;                              /* an object the build does not vouch for */
 static int maps_has(unsigned long a, unsigned long len, unsigned how) { return bad < 0 || a != (unsigned long)&objs[bad]; }
@@ -716,7 +719,8 @@ static unsigned data(const char *n)
 static unsigned fn(const char *n) { return 0; }
 long pm_port_value(const char *n, long f)
 {
-    return !strcmp(n, "stock_slot_start") ? SLOT_START : !strcmp(n, "stock_slot_active") ? SLOT_ACTIVE : f;
+    return !strcmp(n, "stock_slot_start") ? SLOT_START : !strcmp(n, "stock_slot_active") ? SLOT_ACTIVE
+        : !strcmp(n, "wizard_slot_enable") ? enable_slot : f;
 }
 static const char *const NAMES[] = { "Monster Zero", "Terror of Mechagodzilla", "Other Multiball" };
 const char *pm_port_text(const char *n)
@@ -762,6 +766,7 @@ int main(int argc, char **argv)
         vtab[k][0] = (unsigned)(unsigned long)ti[k];
         vtab[k][1 + SLOT_START] = (unsigned)(unsigned long)start_fn;
         vtab[k][1 + SLOT_ACTIVE] = (unsigned)(unsigned long)active_fn;
+        vtab[k][1 + SLOT_ENABLE] = (unsigned)(unsigned long)enable_fn;
         objs[k].vt = (unsigned)(unsigned long)&vtab[k][1];
         objs[k].k = k;
     }
@@ -774,6 +779,8 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "off")) objs[atoi(argv[++i])].on = 0;       /* ... and it ends */
         else if (!strcmp(c, "base")) stock_base[atoi(argv[++i])] = 1;
         else if (!strcmp(c, "bad")) bad = atoi(argv[++i]);
+        else if (!strcmp(c, "needen")) need_enable = 1;
+        else if (!strcmp(c, "enable")) enable_slot = SLOT_ENABLE;
         else if (!strcmp(c, "notable")) table_route = 0;
         else if (!strcmp(c, "nogame")) in_game = 0;
         else if (!strcmp(c, "block")) block_owner = running = &ours;
@@ -889,7 +896,8 @@ def test_the_mode_route_checks_each_object_against_the_build():
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
     ok = src[src.index("static int wizm_obj_ok(const unsigned *o)"):]
     ok = ok[:ok.index("\n}\n")]
-    assert ok.count("MAP_R | MAP_X | MAP_GAME") == 2 and "wizm_obj_here(o)" in ok
+    assert ok.count("MAP_R | MAP_X | MAP_GAME") == 3 and "wizm_obj_here(o)" in ok   # START, ACTIVE, ENABLE if named
+    assert "(e < 0 || maps_has(((const unsigned *)(unsigned long)vt)[e]" in ok
     here = src[src.index("static int wizm_obj_here(const unsigned *o)"):]
     assert "maps_has((unsigned long)o, 4, MAP_R)" in here[:here.index("\n}\n")]
     arm = src[src.index("static void wizm_arm(void)\n{"):]
@@ -901,6 +909,16 @@ def test_the_mode_route_checks_each_object_against_the_build():
     assert hand.index("wizm_obj_ok(o)") < hand.index("wizm_active(o)") < hand.index("wizm_start(")
     wa = src[src.index("static void wizards_arm(void)"):]
     assert 'if (data("wizard_obj_1")) wizm_arm();' in wa[:wa.index("\n}\n")]
+
+
+def test_a_start_that_needs_the_mode_enabled_is_enabled_first(tmp_path):
+    """Foo Fighters 1.04: a mode's START returns at once unless the player's enabled byte (its rules' qualify) is set,
+    so `value wizard_slot_enable` makes the runtime call the mode's own ENABLE first; without it nothing runs."""
+    out = _wizm(tmp_path, "needen", "start", "Monster Zero")
+    assert "START 0" in out and out[-1] == "S on 00000"
+    assert any("its start was called but it does not say it runs" in ln for ln in out)
+    out = _wizm(tmp_path, "needen", "enable", "start", "Monster Zero")
+    assert out.index("ENABLE 0") < out.index("START 0") and out[-1] == "S on 10000" and "R 2" in out
 
 
 def test_the_mode_route_refuses_an_object_that_is_not_the_builds(tmp_path):

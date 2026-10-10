@@ -952,6 +952,43 @@ WIZARDS_PROVEN = frozenset({
     # (played 0x4, its running query 1, GOLDFINGER'S JACKPOT on the glass), and a `game_wizard start Ahoy Mr. Bond`
     # file while it ran left Ahoy lit for the ramp (selected 1, lit 0x2: the game's own check said one was running)
     "james_bond_pro-1.06",
+    # PAD-473 2026-10-09, the C++ titles' mode route (rigbatch, stock cards, hidden, muted; C:/tmp/PAD-473/gen): a
+    # `game_wizard start` file started the game's mini-wizard by its own START (ACTIVE 1, its intro on the glass),
+    # and a second file while it ran waited ("... is in its way"); no abort
+    "avengers_infinity_le-1.10",   # Soul Gem Quest started (ACTIVE 1); Black Order Multiball waited while it ran
+    "avengers_infinity_pro-1.10",   # Soul Gem Quest started (ACTIVE 1); Black Order Multiball waited while it ran
+    "deadpool_le-1.16",   # Megakrakolodonus Rex started (ACTIVE 1); Clone Multiball waited while it ran
+    "deadpool_pro-1.16",   # Megakrakolodonus Rex started (ACTIVE 1); Clone Multiball waited while it ran
+    "dungeons_and_dragons_pro-1.10",   # Tiny's Dice Game started (ACTIVE 1); Tavern Brawl waited while it ran
+    "godzilla_le-1.16",   # Monster Zero started (ACTIVE 1); Terror of Mechagodzilla waited while it ran
+    "godzilla_pro-1.16",   # Monster Zero started (ACTIVE 1); Terror of Mechagodzilla waited while it ran
+    "iron_maiden_le-1.18",   # 2 Minutes to Midnight started (ACTIVE 1); Number of the Beast waited while it ran
+    "iron_maiden_pro-1.18",   # 2 Minutes to Midnight started (ACTIVE 1); Number of the Beast waited while it ran
+    "jaws_le-1.02",   # 4th of July started (ACTIVE 1); Super Cast 'n Catch waited while it ran
+    "jaws_pro-1.02",   # 4th of July started (ACTIVE 1); Super Cast 'n Catch waited while it ran
+    "john_wick_le-1.02",   # The Staircase started (ACTIVE 1); The Duel waited while it ran
+    "john_wick_pro-1.02",   # The Staircase started (ACTIVE 1); The Duel waited while it ran
+    "king_kong_le-0.97",   # Crash the Gate started (ACTIVE 1); T-Rex Battle waited while it ran
+    "king_kong_pro-0.97",   # Crash the Gate started (ACTIVE 1); T-Rex Battle waited while it ran
+    "led_zeppelin_le-1.22",   # Mothership Multiball started (ACTIVE 1, 4 balls); World Tour waited while it ran
+    "led_zeppelin_pro-1.22",   # Mothership Multiball started (ACTIVE 1, 4 balls); World Tour waited while it ran
+    "mando_le-1.45",   # Precious Cargo started (ACTIVE 1, 4 balls); You Have What I Want waited while it ran
+    "mando_pro-1.45",   # Precious Cargo started (ACTIVE 1, 4 balls); You Have What I Want waited while it ran
+    # Star Wars, Light as well: `game_wizard light Lightsaber Duel` started the game's own clightsaber_duel_ready
+    # (ACTIVE 1), and the Left ramp opto then started Lightsaber Duel (ready 0, duel ACTIVE 1), LE and Pro
+    "star_wars_le-1.31",   # Lightsaber Duel started (ACTIVE 1); Escape from Hoth waited while it ran
+    "star_wars_pro-1.31",   # Lightsaber Duel started (ACTIVE 1); Escape from Hoth waited while it ran
+    "sword_of_rage_le-1.19",   # KNIGHT Multiball started (ACTIVE 1, 3 balls); The King's Ransom waited while it ran
+    "sword_of_rage_pro-1.19",   # KNIGHT Multiball started (ACTIVE 1, 3 balls); The King's Ransom waited while it ran
+    "turtles_le-1.59",   # Team-Up Multiball started (ACTIVE 1, 2 balls)
+    "turtles_pro-1.59",   # Team-Up Multiball started (ACTIVE 1, 2 balls)
+    "venom_le-1.07",   # Toxin Team-Up started (ACTIVE 1)
+    "venom_pro-1.07",   # Toxin Team-Up started (ACTIVE 1)
+    # Foo Fighters: its START needs the mode enabled first (`value wizard_slot_enable 42`, run 1b)
+    "foo_fighters_le-1.04",   # Austin started (ACTIVE 1, 4 balls); D.C. waited while it ran
+    "foo_fighters_pro-1.04",   # Austin started (ACTIVE 1, 4 balls); D.C. waited while it ran
+    "jurassic_park_le-1.16",   # Visitor's Center started (ACTIVE 1, 2 balls); Museum Mayhem waited while it ran
+    "jurassic_park_pro-1.16",   # Visitor's Center started (ACTIVE 1, 2 balls); Museum Mayhem waited while it ran
 })
 #: how a mode hands one over: lit for the game's start shot, or started at once
 WIZARD_HOW = ("light", "start")

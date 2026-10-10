@@ -7,6 +7,9 @@ the title's card holding one mode of its own. Each shot is that mode's Mode page
 mini-wizard list opened out where it can be used. E.g.
 
     python scripts/shot_pad473.py C:/tmp/shots after bondpro=james_bond_pro_1_06 kong=king_kong_le_0_97
+
+<title key>@<mini-wizard name> saves the mode handing that one over (the list then stays closed, the page shows how
+it is handed over).
 """
 
 import json
@@ -41,6 +44,8 @@ from pinball_decryptor.plugins.stern import mode_project as MP
 p = MP.profile(%(title)r)
 spec = MP.blank_spec(p, "MY MODE")
 spec.seconds, spec.award = 45, 2000000
+if %(wizard)r:
+    spec.game_wizard, spec.wizard_how = %(wizard)r, "light"
 MP.save(%(project)r, "1_my_mode", spec)
 '''
 
@@ -58,7 +63,8 @@ def shoot(outdir, which, screen, title, repo):
     os.makedirs(project)
     seed = os.path.join(scratch, "seed.py")
     with open(seed, "w", encoding="utf-8") as f:
-        f.write(SEED % {"repo": repo, "project": project, "title": title})
+        title, _, wizard = title.partition("@")
+        f.write(SEED % {"repo": repo, "project": project, "title": title, "wizard": wizard})
     subprocess.run([sys.executable, seed], check=True)
     card, game, version = _card(title)
     hostpy = os.path.join(scratch, "host.py")
@@ -97,7 +103,7 @@ def shoot(outdir, which, screen, title, repo):
                 for (const s of document.querySelectorAll('select')) {
                     const labels = [...s.options].map(o => o.textContent);
                     if (labels.includes('(nothing: this mode runs)')) {
-                        if (!s.disabled) {
+                        if (!s.disabled && s.value === '(none)') {
                             s.size = s.options.length;
                             s.style.height = 'auto';
                             s.closest('.field').style.height = 'auto';

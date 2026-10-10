@@ -136,8 +136,14 @@ def main():
                   len(side.get("image_color_slots") or {}), "files profile",
                   (side.get("asset_color_profile") or {}).get("name"), "line switches",
                   len(side.get("text_color_slots") or {}), flush=True)
-            page.mouse.move(5, 990)
-            time.sleep(1)
+            # the load's whole caption: the tooltip of the badge beside the edit buttons
+            badge = page.query_selector('.scenes-stagebar button.badge-i[aria-label^="Loaded"]')
+            if badge:
+                badge.hover()
+            else:
+                print("no caption badge", flush=True)
+                page.mouse.move(5, 990)
+            time.sleep(1.5)
             page.screenshot(path=out("scenes_loaded.png"))
             api("ui.select_tab", "images")
             time.sleep(4)

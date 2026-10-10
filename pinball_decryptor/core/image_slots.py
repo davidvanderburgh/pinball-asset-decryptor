@@ -326,8 +326,9 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
                 todo.append((rel, rep))
         items = todo
         if n_kept and log_cb:
-            log_cb("%d picture(s) left as they are: an earlier build "
-                   "converted them just as this one would." % n_kept, "info")
+            log_cb("{:,} picture(s) left as they are: an earlier build "
+                   "converted them just as this one would.".format(n_kept),
+                   "info")
     total = len(items)
     staged = n_kept
     failures: List = []

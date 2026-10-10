@@ -146,6 +146,18 @@ an earlier build already grew is not grown again: its
 grown sounds keep their longer slot, and anything longer is trimmed with a
 note to build onto a card that was never grown, such as the stock card.
 
+### Music modes
+
+On Spike 2 Godzilla (Pro and Premium/LE 1.16) one card can carry more
+than one set of sounds, and the machine's service menu picks which set
+plays: **Music Mode** under Adjustments > Machine Settings > Audio
+Content. Right-click a sound and pick **Music modes** > **Mode 2: choose
+a sound…** (or mode 3) to give it a file for that mode; mode 1 is the
+sound as it plays now, and a sound with no file for the chosen mode
+plays its mode 1 sound. **Name the music modes…** puts the names on the
+machine, in the setting's help line. Music modes need an image build,
+not a direct SD write, and every mode file takes room in the sound bank.
+
 ### What the replace tabs look like
 
 <p>

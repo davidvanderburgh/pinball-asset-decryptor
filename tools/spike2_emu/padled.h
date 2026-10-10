@@ -45,17 +45,18 @@
 #define PADLED_H
 
 #define PADLED_MAGIC   0x44454c50u      /* 'PLED' */
-#define PADLED_VERSION 5
+#define PADLED_VERSION 6
 
 /* Node ids run to 14 and index to 95, so a flat [16][96] covers every board
  * with room to spare and needs no per-node base to get wrong. */
 #define PADLED_NODES 16
 #define PADLED_IDX   96
 #define PADLED_COILS 16
-/* VERSION 4's `seen` plane pushed the struct past one page. Two, now - it is
- * still a rounding error beside the 3 KB this has always published, and the
- * mapping is created by watch.sh from this constant. */
-#define PADLED_BYTES 8192
+/* VERSION 4's `seen` plane pushed the struct past one page, and VERSION 6's
+ * `hi` plane past two. Four, now - the mapping is created by watch.sh from
+ * this constant, and the shim takes its size from the file, so an older
+ * watch.sh simply gets the version its file has room for. */
+#define PADLED_BYTES 16384
 
 /* APPEND ONLY. A reader compiled against version 1 maps the same page and finds
  * every field it knows at the same offset, which is what lets the playfield
@@ -147,6 +148,18 @@ struct padled_shm {
     unsigned drive_fires;         /* 14-byte cmd 40 commands, ever          */
     unsigned drive_offs;          /* cmd 4d, ever                           */
     unsigned drive_rule_fires;    /* the short cmd 40 (fire by rule), ever  */
+    /* VERSION 6 (PAD-500): A STRIP BOARD'S CHANNELS PAST ITS FIRST 96. A board
+     * with more lamps than val[] has room for takes them in banks of 96 (the
+     * bank form, item 165), and until this plane every bank past the first was
+     * walked, counted and published nowhere - the back three quarters of a
+     * topper, and of the cabinet's expressive-lighting blades (288 channels on
+     * node 2), never lit in any reader. hi[node][(bank - 1) * 96 + index] is
+     * channel 96 * bank + index of that board, banks 1 to 4, so channels 96 to
+     * 479. Levels only, as the frame carried them: no `seen` twin, and the
+     * counters above are untouched, so nothing that judges a run (the light
+     * show announcer, `decoded`) reads these frames any differently than it
+     * did. Offset for a Python reader: hi 7356. */
+    unsigned char hi[PADLED_NODES][4 * PADLED_IDX];
 };
 
 #endif

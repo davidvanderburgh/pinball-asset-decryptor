@@ -11599,11 +11599,14 @@ struct padled_shm {
     unsigned short drive_pulse_t[16][16], drive_hold_t[16][16];
     unsigned char drive_pulse_pwr[16][16], drive_hold_pwr[16][16];
     unsigned drive_fires, drive_offs, drive_rule_fires;
+    /* Version 6 (PAD-500), a strip board's channels past its first 96 - the
+     * twin of padled.h, which carries the meaning; keep the two in step. */
+    unsigned char hi[16][4 * 96];
 };
 #define PADLED_MAGIC 0x44454c50u
 
 static struct padled_shm *led_shm;
-static unsigned led_shm_len;                 /* 4096 (v3 file) or 8192 (v4)  */
+static unsigned led_shm_len;                 /* 4096 (v3), 8192 (v5), 16384 (v6) */
 static unsigned char led_known[16][96];      /* seen in the boot enumeration */
 /* The same enumeration IN ORDER, which is what a bitmap frame indexes into:
  * led_order[node][k] is the LED index the board announced k-th. */
@@ -11675,17 +11678,42 @@ static void led_map(void)
      * published when the mapping is too small (see led_seen). */
     {
         long sz = lseek(fd, 0, 2 /*SEEK_END*/);
-        led_shm_len = (sz >= 8192) ? 8192u : 4096u;
+        led_shm_len = (sz >= 16384) ? 16384u : (sz >= 8192) ? 8192u : 4096u;
     }
     m = mmap(0, led_shm_len, 3, 1, fd, 0);
     close(fd);
     if (!m || m == (void *)-1) return;
     led_shm = (struct padled_shm *)m;
     led_shm->magic = PADLED_MAGIC;
-    /* 4 adds the addressed plane, 5 the coil drive block (PAD-381); see
-     * padled.h. A reader tells them apart by this number, so it must not claim
-     * either over a one-page mapping. Both fit in the second page. */
-    led_shm->version = (led_shm_len >= 8192) ? 5 : 3;
+    /* 4 adds the addressed plane, 5 the coil drive block (PAD-381), 6 the
+     * strip boards' banks past the first (PAD-500); see padled.h. A reader
+     * tells them apart by this number, so it must not claim one over a
+     * mapping too small to hold it: 4 and 5 fit in two pages, 6 needs four. */
+    led_shm->version = (led_shm_len >= 16384) ? 6 : (led_shm_len >= 8192) ? 5 : 3;
+}
+
+/* ★ A BANKED STRIP FRAME'S LEVELS, INTO VERSION 6's `hi` PLANE (PAD-500).
+ *
+ * Both swelf paths below walk a bank > 0 frame exactly and, until this, threw
+ * the levels away: "walked and counted; no plane to put it in". That is where
+ * the cabinet's expressive-lighting blades live past their first 32 pixels
+ * (Rush 1.18's proof: "its expressive-lighting strip past bank 0 is not in the
+ * plane"), and most of every topper. Channel 96 * bank + index lands at
+ * hi[node][(bank - 1) * 96 + index], banks 1 to 4.
+ *
+ * LEVELS ONLY, ON PURPOSE. No led_val(), so the light-show announcer's move
+ * count, `seen` and `decoded` see exactly the frames they saw before - a
+ * cabinet strip running its own show must not be what decides a run reached
+ * attract. A silent no-op on a mapping too small for the plane (an older
+ * watch.sh), like led_seen. */
+static void led_hi(unsigned node, int bank, const unsigned char *idx,
+                   const unsigned char *val, unsigned cnt)
+{
+    unsigned i;
+    if (!led_shm || led_shm_len < 16384 || node >= 16 || bank < 1 || bank > 4) return;
+    for (i = 0; i < cnt; i++)
+        if (idx[i] < 96)
+            led_shm->hi[node][(unsigned)(bank - 1) * 96u + idx[i]] = val[i];
 }
 
 /* One bit of the version-4 roster. Silently a no-op on a short mapping, which
@@ -12328,8 +12356,9 @@ static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
  * and until this was read every one of them was refused - which is what put a
  * whole board in wide_skipped. Returns the bank (0 for a frame with no prefix),
  * rewriting cmd, body and blen for the walk; -1 for a malformed prefix. Only
- * bank 0 fits the [16][96] plane: the others are walked (they vote, and count
- * as decoded) and published nowhere. leddecode.wide_bank is the twin. */
+ * bank 0 fits the [16][96] plane: banks 1 to 4 are walked (they vote, and
+ * count as decoded) and their levels go to version 6's `hi` plane (PAD-500,
+ * led_hi). leddecode.wide_bank is the twin. */
 static int led_wide_strip_bank(unsigned *cmd, const unsigned char **body, unsigned *blen)
 {
     unsigned pre;
@@ -12476,7 +12505,8 @@ static int led_wide_publish(unsigned node, unsigned cmd,
      * board that never publishes. */
     led_map();
     if (!led_shm) return 0;
-    if (bank > 0) {                          /* walked and counted; no plane to put it in */
+    if (bank > 0) {                          /* walked and counted; levels to `hi` (v6) */
+        led_hi(node, bank, idx, val, cnt);
         if (led_shm_len >= 8192) led_shm->wide_decoded++;
         return 1;
     }
@@ -12565,7 +12595,8 @@ static int led_node_wide_publish(unsigned node, unsigned cmd,
      * note in led_wide_publish (item 165) */
     led_map();
     if (!led_shm) return 0;
-    if (bank > 0) {                              /* walked and counted; no plane to put it in */
+    if (bank > 0) {                              /* walked and counted; levels to `hi` (v6) */
+        led_hi(node, bank, idx, val, cnt);
         if (led_shm_len >= 8192) led_shm->wide_decoded++;
         return 1;
     }

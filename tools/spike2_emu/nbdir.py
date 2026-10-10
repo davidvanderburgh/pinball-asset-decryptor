@@ -79,10 +79,14 @@ this file chooses, per node:
 Output (default $PAD_TABLES-style tables dir is the caller's business; this
 writes wherever --out points):
 
-    # nbdir v1 elf=<basename> nodes=<n>
-    node=1 type=pinnode code=2 part=0x00020023 class=1 variant=0x01 fw=0x011d00 hexver=1.29.0 name=CABINET
+    # nbdir v2 elf=<basename> nodes=<n> src=<what it was built from>
+    node=1 type=pinnode code=2 part=0x00020023 class=1 variant=0x01 fw=0x011d00 hexver=1.29.0 hex=... group=5 name=CABINET
     ...
     # skipped node=5 type=magsensornode reason=no-usable-class
+
+`group=` and `name=` (v2, PAD-500) are the board's place in the directory and
+its English name - see board_groups() for what the place means. `name=` is
+LAST because it carries spaces; a reader takes it as the rest of the line.
 
 The shim (hwshim.c) reads this through /dump/tables/<PAD_GAME>/node_ident.txt
 inside the guest and falls back to the built-in godzilla table when absent -
@@ -94,6 +98,9 @@ import os
 import re
 import struct
 import sys
+
+#: The table's first line, and its version: v2 added group= and name= (PAD-500).
+HEADER = "# nbdir v2"
 
 # Known type-name strings (the game's own 43-entry type table carries these;
 # search anchors, not an exhaustive claim about what exists).
@@ -441,11 +448,46 @@ def hex_inventory(hexdir):
     return inv
 
 
-def derive(elf_path, hexdir):
+def board_groups(elf, rx, rw, full):
+    """{node: (group, name)} - each board's DEVICE-TABLE GROUP and its English
+    name, from one find_node_directory(full=) walk (PAD-500).
+
+    ★ A DEVICE ROW'S `group` IS ITS BOARD'S PLACE IN THIS DIRECTORY, counted
+    from 1 in the order the records sit in the binary (not by node id). Read off
+    the 58 binaries on this disk against every map coilmap.group_node() could
+    derive for them: 212 of 223 measured groups agree, and the rest are Foo
+    Fighters' 0x40 | node groups (65, 72, 73, 76 - another encoding, which
+    agrees too read that way) and one group on each of sword_of_rage (8: the
+    measured map says node 13, the place node 12, both TOPPER boards) and
+    guardians_le 1.15 (9: 10 against 11, where the measured side is the
+    ascending inference). So it is a strong fallback and not the authority:
+    a reader takes a measured map first and asks this only where that has no
+    answer. What it settles is the cabinet's own lighting, which no other
+    source could place - on every title the directory runs Cabinet Lights
+    (node 2, the expressive-lighting blades, group 1), QR Scanner (4, group 2),
+    Topper Lights (14, group 3 - the universal topper), the CPU (0, group 4),
+    the Cabinet (1, group 5), and then the title's own boards: Rush's speaker
+    lights are group 6 at node 7, "Backbox Speaker Lights".
+    """
+    out = {}
+    for k, (nid, _code, _fl, _hand, cell, _w3, _off) in enumerate(
+            sorted(full, key=lambda r: r[6])):
+        name = node_name(elf, rx, rw, cell) or ""
+        name = "".join(c if " " <= c <= "~" else "?" for c in name).strip()
+        out[nid] = (k + 1, name)
+    return out
+
+
+def derive(elf_path, hexdir, boards=None):
+    """(rows, skipped) for this title's node directory. Pass a dict as
+    `boards` to have it filled with board_groups() from the same walk."""
     elf = io.open(elf_path, "rb").read()
     rx, rw = load_segments(elf)
     cat_base, cat = find_catalog(elf, rx, rw)
-    nodes = find_node_directory(elf, rx, rw)
+    full = []
+    nodes = find_node_directory(elf, rx, rw, full=full)
+    if boards is not None:
+        boards.update(board_groups(elf, rx, rw, full))
     inv = hex_inventory(hexdir)
 
     rows, skipped = [], []
@@ -560,6 +602,10 @@ def reuse(existing, out, elf_path, hexdir):
     try:
         with io.open(existing, "r", encoding="ascii", errors="replace") as f:
             head = f.readline()
+            # a v1 table has no group=/name= (PAD-500): derive once, so the
+            # playfield's cabinet lights can find their boards
+            if not head.startswith(HEADER + " "):
+                return False
             if head.partition(" src=")[2].rstrip("\n") != want:
                 return False
             body = head + f.read()
@@ -583,23 +629,33 @@ def reuse(existing, out, elf_path, hexdir):
     return True
 
 
-def emit(rows, skipped, elf_path, out, src=None):
+def emit(rows, skipped, elf_path, out, src=None, boards=None):
     w = io.open(out, "w", encoding="ascii", newline="\n") if out else sys.stdout
     # `src=` is LAST because it contains spaces - reuse() reads it as the rest
     # of the line, so nothing here may be appended after it.
-    w.write("# nbdir v1 elf=%s nodes=%d src=%s\n"
-            % (os.path.basename(elf_path), len(rows), src or "unknown"))
+    w.write("%s elf=%s nodes=%d src=%s\n"
+            % (HEADER, os.path.basename(elf_path), len(rows), src or "unknown"))
     for (nid, typ, code, part, cls, var, fw, fw_str, fname, guess,
          partno) in rows:
         # `part=0x` is the MCU part id (an LPC chip id, the class key);
         # `partno=` is the Stern board part number x100. hwshim's parser
         # finds each by its own key, so the order here is for the reader.
+        # `group=` and `name=` (PAD-500) go last, `name=` very last for its
+        # spaces; the line stays well inside hwshim's 256-byte buffer.
+        grp = (boards or {}).get(nid)
         w.write("node=%d type=%s code=%d part=0x%08x partno=%u class=%d "
-                "variant=0x%02x%s fw=0x%06x hexver=%s hex=%s\n"
+                "variant=0x%02x%s fw=0x%06x hexver=%s hex=%s%s\n"
                 % (nid, typ, code, part, partno, cls, var,
-                   " variant_guess=1" if guess else "", fw, fw_str, fname))
+                   " variant_guess=1" if guess else "", fw, fw_str, fname,
+                   " group=%d name=%s" % (grp[0], grp[1][:60]) if grp else ""))
     for nid, code, why in skipped:
-        w.write("# skipped node=%d code=%d reason=%s\n" % (nid, code, why))
+        # a skipped board keeps its place too: the CPU is group 4 on every
+        # title, and a board with no usable firmware class is still where
+        # the device table's rows point
+        grp = (boards or {}).get(nid)
+        w.write("# skipped node=%d code=%d reason=%s%s\n"
+                % (nid, code, why,
+                   " group=%d name=%s" % (grp[0], grp[1][:60]) if grp else ""))
     if out:
         w.close()
 
@@ -710,10 +766,11 @@ def main(argv):
     # that can be answered out of a cache is not one.
     if existing and not check and reuse(existing, out, elf_path, hexdir):
         return
-    rows, skipped = derive(elf_path, hexdir)
+    boards = {}
+    rows, skipped = derive(elf_path, hexdir, boards=boards)
     if check:
         check_godzilla(rows)
-    emit(rows, skipped, elf_path, out, source_id(elf_path, hexdir))
+    emit(rows, skipped, elf_path, out, source_id(elf_path, hexdir), boards)
 
 
 if __name__ == "__main__":

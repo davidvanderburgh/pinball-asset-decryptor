@@ -1406,3 +1406,49 @@ def test_a_lit_mode_waits_lit_while_the_game_is_busy_and_a_new_game_puts_it_out(
     out = play(tmp_path, _lit_prog(), "event", "skill_shot", "secs", 0.2, "game_over", "secs", 0.2, "lamps",
                "new_game", "secs", 0.2, "shot", "Right ramp")
     assert "HELD none" in out and "START (" not in out
+
+
+def test_a_hold_in_play_is_not_a_new_game(tmp_path):
+    """The Bond owner, on v1.169.0: Diamonds Are Forever lit their mode while the mode that won its last part still ran,
+    and once that mode was over the Right ramp was dark. James Bond holds play at the end of each of its modes and
+    multiballs (mode mask busy bits 0x202: pm_in_game() is 0 for a moment), and the blocks took pm_in_game() rising
+    for a new game - the light, the "each game" values and the timers were wiped. A new game is the SDK's witness
+    now (player 1's score back to 0, or pm_in_game() rising while it is 0)."""
+    p = _lit_prog(vars=[{"name": "films", "reset": "game"}], timers=[{"name": "window"}])
+    p["scripts"][0]["do"] += [{"op": "change", "var": "films", "by": num(1)},
+                              {"op": "timer_start", "timer": "window", "ms": num(4000)}]
+    p["scripts"] += [{"hat": {"kind": "mode_start"}, "do": [
+                         {"op": "score", "points": {"k": "op", "op": "*", "a": {"k": "var", "name": "films"},
+                                                    "b": num(7)}}]},
+                     {"hat": {"kind": "timer_done", "timer": "window"}, "do": [{"op": "log", "text": "window over"}]}]
+    out = play(tmp_path, p, "points", 250000, "event", "skill_shot", "secs", 0.2,
+               "hold", 2.5, "secs", 0.2, "lamps",           # the game's mode is won: play held, then on
+               "secs", 2, "shot", "Right ramp")
+    assert re.findall(r"HELD (RIGHT RAMP|MASER READY|none)", out) == ["RIGHT RAMP", "MASER READY"]
+    assert "START (its lit shot): player 1" in out
+    assert 7 in scores(out)                                         # films was still 1
+    assert "[TEST MODE] window over" in out                         # the timer ran on
+    # a real new game still puts the light out (player 1's score back to 0)
+    out = play(tmp_path, p, "points", 250000, "event", "skill_shot", "secs", 0.2, "game_over", "secs", 0.2,
+               "new_game", "secs", 0.2, "lamps", "shot", "Right ramp")
+    assert "HELD none" in out and "START (" not in out
+
+
+def test_a_lit_mode_waits_out_the_games_own_modes_as_its_mini_wizards_do(tmp_path):
+    """The Bond owner's next game (PAD-503): Mr Osato, a henchman mode of the game's, completed You Only Live Twice and
+    lit their mode; the game's own mini-wizards do not start while such a mode runs (its check 0x110b90), and the port's
+    flags do not show it, so a Right ramp in the middle of Mr Osato started theirs. The lit shot waits on the game's own
+    check (pm_game_wizard_way), whatever the mode says about the game's modes ("may start" here)."""
+    out = play(tmp_path, _lit_prog(), "event", "skill_shot", "way", 0, "shot", "Right ramp", "secs", 0.2, "lamps",
+               "way", 1, "shot", "Right ramp")
+    assert "not started (its lit shot): one of the game's own modes is in its way - still lit" in out
+    assert re.findall(r"HELD (RIGHT RAMP|MASER READY)", out) == ["RIGHT RAMP", "MASER READY"]
+    assert out.count("START (its lit shot)") == 1 and out.index("START (its lit shot)") > out.index(">> way 1")
+    # a Start the mode that gives way waits on it too; one that runs beside the game's modes does not
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
+             seconds=5, game_modes="give_way")
+    out = play(tmp_path, p, "way", 0, "shot", "Left ramp", "way", 1, "shot", "Left ramp")
+    assert "one of the game's own modes is running - still ready" in out
+    assert out.count("START (a block)") == 1 and out.index("START (a block)") > out.index(">> way 1")
+    out = play(tmp_path, dict(p, game_modes="stack"), "way", 0, "shot", "Left ramp")
+    assert "START (a block)" in out

@@ -5505,6 +5505,18 @@ int pm_game_wizards(void)
     return (can & PM_CAN_GAME_WIZARDS) ? wizards_n : 0;
 }
 
+/* PAD-503: the game's own check before it starts one of its mini-wizards (`site wizard_way`; Bond LE 1.06 0x110b90:
+ * none of the four running, no henchman, villain or Q Branch mode, no Victory Laps). 1 = the way is clear, 0 = something
+ * of the game's is in it, -1 = no game, or the port names no such check. The Right ramp's handler calls it on the
+ * game's thread, as a mode's tick, shot and event callbacks run. A mode the Bond owner lit at the Right ramp started
+ * there in the middle of a henchman mode, which the game's own mini-wizards wait out: its start waits on this now. */
+int pm_game_wizard_way(void)
+{
+    unsigned f = fn("wizard_way");
+    if (!f || !pm_in_game()) return -1;
+    return ((int (*)(void))(unsigned long)f)() ? 1 : 0;
+}
+
 static unsigned *wizard_entry(int n)
 {
     return (unsigned *)(unsigned long)(data("wizard_table") + (unsigned)(n - 1) * (unsigned)pm_port_value("wizard_entry", 0x20));
@@ -5824,8 +5836,9 @@ static void wizards_arm(void)
     if (site("wizard_light") && !(wiz_light_hooked = hook_veto(fn("wizard_light"), wizard_light_veto)))
         say("game wizards: the game's own lighting (0x%08x) could not be hooked - it lights a mode's mini-wizards too",
             fn("wizard_light"));
-    say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08x, start 0x%08x%s)", wizards_n,
-        data("wizard_state"), fn("wizard_start"), wiz_light_hooked ? ", its own lighting hooked" : "");
+    say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08x, start 0x%08x%s%s)", wizards_n,
+        data("wizard_state"), fn("wizard_start"), wiz_light_hooked ? ", its own lighting hooked" : "",
+        fn("wizard_way") ? ", its own way check" : "");
 }
 
 /* ---- the game's own mini-wizards on the C++ titles (PAD-473): the MODE route ----------------------------------

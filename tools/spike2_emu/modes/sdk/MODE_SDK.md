@@ -884,6 +884,17 @@ these lines from "How often it can start"; a mode written in C keeps its own cou
   scores or `pm_in_game()` falls. `pm_in_game()` rising alone would miss the held-Start
   restart. The last game's scores survive a reboot of the card (measured once), so the
   first game after that boot is also seen by the score falling to 0.
+- **`pm_in_game()` also falls in the middle of a game** (James Bond LE 1.06, PAD-503). At the end of
+  each of its multiballs and wizard modes (Dr. No, Disco Volante, Aston Martin, Little Nellie, Powerpack,
+  Helicopter, James Bond and Wizard mode multiballs, Ahoy Mr. Bond, Goldfinger's wizard) the game calls
+  `0x3f79bc`, which sets mode-mask bits `0x202` and shuts play down as its tilt does; only its end of
+  ball (`0x1e2624`) clears them. So `pm_in_game()` is 0 from that moment until the ball drains, and rises
+  again for the next ball of the same game. The game's own rules test `mask & 0x310` and ignore play
+  meanwhile. A mode that took `pm_in_game()` rising for a new game wiped what it kept per game there:
+  blocks modes did (their lit mode, their "each game" values and their timers) until PAD-503 gave them
+  this witness. Measured in the emulator (stock card, the game's own `0x3f79bc(0, 1)` as its Wizard mode
+  multiball's end calls it, player 1 scored): `in_game 1 -> 0` with mask `0x0202`, the drain's
+  `ball_end`, then `in_game 0 -> 1` with mask `0x0005` at the next ball.
 - **Trigger files bypass it.** `/dump/mode.start`, `/dump/modeK.start` are a test path: they
   start the mode whatever `starts` and `cooldown` say, and that run is neither counted nor
   starts a cooldown (`ONCE GAME: a trigger file starts it whatever starts/cooldown say, and
@@ -2283,6 +2294,17 @@ running). No abort.
 
 **Not done.** The game's own lighting by parts was left as it is: stopping it ("instead of", PAD-428's first ask)
 would hold off `0x110cac`'s two calls in the collect, a separate choice.
+
+**The game's own check, for a mode of yours lit at the Right ramp (PAD-503).** A Bond owner lit modes of their own at
+the Right ramp for the two films with none (a blocks mode's Light the mode at). The game's start of one of its own
+(`0x110d98`) first asks `0x110b90`: none of the four running, no henchman, villain or Q Branch mode (`0x15f410`,
+`0x1360d4`, `0x19ea7c`), nothing at `0x9f4e0` or `0xdbf70`, no Victory Laps; 1 = clear. The port's flags show none of
+the henchman and villain modes, so the owner's Right ramp in the middle of Mr Osato started their mode. The port names
+the check (`site wizard_way 0x00110b90 0xe92d4038 0xebfe3a51`; the Pro's `0x0010fbc4`, the same code 0xfcc lower) and
+`pm_game_wizard_way()` answers it: 1 clear, 0 in the way, -1 no game or no check. A blocks mode's lit shot waits on it
+whatever the mode says about the game's modes, and a Start the mode that gives way or holds the game's modes off waits
+on it as on the game's flagged modes. Measured in the emulator (stock card): 1 through plain play, 0 from the game's own
+start of Mr Osato (`0x123f84`) on, and with game flag 139 set.
 
 ## The game's own mini-wizards on the other titles (PAD-473)
 

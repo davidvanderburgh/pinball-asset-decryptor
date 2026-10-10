@@ -1,11 +1,14 @@
 """PAD-503 proof shots: a James Bond LE 1.06 blocks mode of the owner's own, for a film with no mini-wizard.
 
-    python scripts/shot_pad503.py <out dir> <before|after> [<repo>]
+    python scripts/shot_pad503.py <out dir> <before|after> [<repo> [<screen> [<seed>]]]
 
 The server runs from <repo> (default: this tree) against a scratch settings folder. The project holds DIAMOND DEATH
 THREAT, a blocks mode as the owner made it: Diamonds Are Forever done -> before: Start the mode (all there was);
 after: Light the mode at the Right ramp with the MR. HENDERSON insert (the game's own villain for that film). Shot:
   <before|after>_blocks_daf_wizard.png its blocks, the pointer on the block its film event runs
+Round 2 (the light kept through the game's own end of play, and its start waiting for the game's own modes): the
+same screen under another <screen> name with <seed> "after" for both shots, so the pair is the block's tooltip before
+and after, e.g. `... before <main export> lit_tooltip after`.
 """
 
 import json
@@ -54,6 +57,8 @@ def main():
     outdir = os.path.abspath(sys.argv[1])
     which = sys.argv[2]
     repo = os.path.abspath(sys.argv[3]) if len(sys.argv) > 3 else HERE
+    screen = sys.argv[4] if len(sys.argv) > 4 else "blocks_daf_wizard"
+    kind = sys.argv[5] if len(sys.argv) > 5 else which
     os.makedirs(outdir, exist_ok=True)
     webui_shot.REPO = repo
     scratch = tempfile.mkdtemp(prefix="pad503-")
@@ -61,7 +66,7 @@ def main():
     os.makedirs(project)
     seed = os.path.join(scratch, "seed.py")
     with open(seed, "w", encoding="utf-8") as f:
-        f.write(SEED % {"repo": repo, "project": project, "film": FILM[which]})
+        f.write(SEED % {"repo": repo, "project": project, "film": FILM[kind]})
     import subprocess
     subprocess.run([sys.executable, seed], check=True)
     hostpy = os.path.join(scratch, "host.py")
@@ -103,12 +108,12 @@ def main():
             if scripts.count():
                 scripts.last.evaluate("(el) => el.scrollIntoView({block: 'center'})")
                 time.sleep(0.5)
-            block = page.locator(".bk-script .bk-w", has_text=WORDS[which])
+            block = page.locator(".bk-script .bk-w", has_text=WORDS[kind])
             print("blocks", block.count(), flush=True)
             if block.count():
                 block.last.hover()
                 time.sleep(1.5)
-            page.screenshot(path=os.path.join(outdir, "%s_blocks_daf_wizard.png" % which))
+            page.screenshot(path=os.path.join(outdir, "%s_%s.png" % (which, screen)))
             browser.close()
         print("shots in", outdir, flush=True)
     finally:

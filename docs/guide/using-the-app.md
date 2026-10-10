@@ -158,6 +158,23 @@ plays its mode 1 sound. **Name the music modes…** puts the names on the
 machine, in the setting's help line. Music modes need an image build,
 not a direct SD write, and every mode file takes room in the sound bank.
 
+### Editions
+
+On the same games, one card can also hold several editions of the game
+(a Standard look and a 70th Anniversary look, say: other colour
+profiles, scenes, pictures, clips or sounds), and the service menu picks
+which one boots: **Edition** under Adjustments > Machine Settings >
+Attract Mode. Each edition is its own project from the same card. On the
+Write tab, **Name the editions...** gives every project the same names
+in the same order, and its Write puts the setting in the game's menu.
+On the Multi-boot tab add the images edition 1 first, tick **Compact
+build** so an edition only takes the room of what it changes, and tick
+**No menu: boot the edition the game's EDITION setting names** in Menu
+settings. The card then shows no menu; a change to the setting takes
+effect at the next power-up. The editions share the machine's settings,
+so they must all carry the same ones: give every edition music modes, or
+none.
+
 ### What the replace tabs look like
 
 <p>

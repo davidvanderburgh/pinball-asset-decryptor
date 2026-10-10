@@ -20,8 +20,9 @@ WORDS = re.compile(r"\b(modes?|mode maker|mode editor|try it|code modes?|film cu
                    r"stock modes?)\b", re.I)
 
 #: the game's OWN modes as any pinball player says it, on tabs that have nothing to do with
-#: the preview feature (on main before it): these phrases are allowed
-ALLOWED = ("topper-only modes", "how a mode looks")
+#: the preview feature (on main before it): these phrases are allowed. "Attract Mode" is the
+#: operator menu page EDITION sits on (PAD-495), named as the machine names it
+ALLOWED = ("topper-only modes", "how a mode looks", "Attract Mode")
 
 #: store keys whose VALUES are data, not words a page shows (paths, ids, option values)
 _DATA_KEYS = {"mode", "modes", "kind", "key", "ns", "id", "icon", "path", "value"}

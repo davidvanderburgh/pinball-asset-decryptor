@@ -721,8 +721,11 @@ def test_the_cards_color_profile_lines_ride_on_the_image_count_gate():
     gate = outer[outer.index("| grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true"):]
     gate = gate[:gate.index('> "$R/dump/codeselect.conf"')]
     assert """grep -cE '^[[:space:]]*image[[:space:]]*=')" = "$SEL_N" ]""" in gate
-    assert "grep -E '^[[:space:]]*color_profile[[:space:]]*='" in gate
+    # PAD-495: edition= (the game's EDITION picks an image by its index) on the same gate
+    assert "grep -E '^[[:space:]]*(color_profile|edition)[[:space:]]*='" in gate
     assert "DROPPED" in gate
+    verbatim = outer[:outer.index("| grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true")]
+    assert "|edition|" not in verbatim[verbatim.rindex("grep -E '^[[:space:]]*(sound_move"):]
 
 
 def test_the_rig_applies_the_color_correction_the_way_select_sh_does():

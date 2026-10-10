@@ -53,11 +53,15 @@ from .adjustments import (OFF_DEFAULT, OFF_MAX, OFF_MENU_HELP, OFF_MENU_LABEL, O
                           menu_label)
 
 MUSIC_MODE = "music_mode"
+#: PAD-495: which of a multi-boot card's editions of the game boots at the next power-up
+#: (tools/spike2_emu/codeselect reads it off the NVM mirror before the game starts)
+EDITION = "edition"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
-#: the menu category whose page lists it. (AD_LED_MAX_BRIGHTNESS, id 33 on Godzilla 1.16, is the
-#: next spare; PAD-495 proposes an EDITION setting on it.)
+#: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
+#: BOOT SCREEN and 70TH BOOT SCREEN, which is where an operator already picks how the game looks.
 SETTINGS = {
     MUSIC_MODE: ("AD_GI_MAX_BRIGHTNESS", "MUSIC MODE", "Music Mode", 13),
+    EDITION: ("AD_LED_MAX_BRIGHTNESS", "EDITION", "Edition", 16),
 }
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
@@ -284,10 +288,38 @@ def plan(table, key, values, names=()):
     return setting, writes, (None if cat.has(category, i) else cat)
 
 
-def table_blob(cat, setting):
-    """The category table with the setting's record added: the bytes to place (4-byte aligned)."""
-    recs = list(cat.records) + [(setting.category, KIND_ADJUSTMENT, setting.id)]
+def plan_many(table, wanted):
+    """Several settings of ours at once (PAD-495: MUSIC MODE and EDITION on one card).
+
+    *wanted* is ``[(key, values, names), ...]``. Returns ``(settings, writes, cat, refused)``:
+    the :class:`MenuSetting` of each that this program can take, their same-size writes merged,
+    the category table to grow (``None`` when every one of them is already listed) and
+    ``{key: reason}`` for the ones it cannot. One setting refused never stops another."""
+    settings, writes, refused, cat = [], {}, {}, None
+    for key, values, names in wanted:
+        try:
+            setting, w, c = plan(table, key, values, names)
+        except MenuSettingError as e:
+            refused[key] = str(e)
+            continue
+        settings.append(setting)
+        writes.update(w)
+        if c is not None:
+            cat = c
+    return settings, writes, cat, refused
+
+
+def table_blob(cat, *settings):
+    """The category table with the settings' records added (those it does not list yet): the
+    bytes to place (4-byte aligned)."""
+    recs = list(cat.records) + [(s.category, KIND_ADJUSTMENT, s.id) for s in settings
+                                if not cat.has(s.category, s.id)]
     return b"".join(struct.pack("<3I", *r) for r in recs)
+
+
+def table_records(cat, *settings):
+    """How many records :func:`table_blob` makes."""
+    return len(cat.records) + sum(1 for s in settings if not cat.has(s.category, s.id))
 
 
 def table_writes(table, cat, new_va, n_records):

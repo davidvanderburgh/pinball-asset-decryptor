@@ -52,7 +52,7 @@
 #include "colour.h"
 #include "settings.h"
 
-#define VERSION "3.1"
+#define VERSION "3.2"
 
 /* the card's paths.  Stern's unless the build says otherwise: the JJP build
  * (make PLATFORM=jjp) puts the selector under /jjpe/gen1/padselect and its
@@ -1548,6 +1548,41 @@ static int home_card(const struct conf *c, int opened)
     return k >= 0 ? k : 0;
 }
 
+/* EDITIONS, NO MENU (PAD-495, images.conf edition=): every image is an edition
+ * of one game and the game's own EDITION setting picks, off the NVM mirror the
+ * machine wrote when the operator last accepted it.  Nothing is drawn and no
+ * button is read: the operator chose in the game's menu, and this boot is the
+ * next power-up.  Whatever cannot be read boots edition 1, which is what the
+ * game's own default says too.  Exit 0 with the choice written, as a confirm. */
+static int edition_boot(const struct opts *o, const struct conf *c)
+{
+    char why[400] = "", from[600] = "";
+    struct conf_bags bags;
+    int v = -1, boot = 0;
+    memset(&bags, 0, sizeof bags);
+    if (nvm_read_value(c->ed_store, c->ed_key, &v, from, sizeof from, why, sizeof why) == 0) {
+        if (v >= 1 && v <= c->ed_values && v <= c->n) {
+            boot = v - 1;
+            sel_log("edition: the machine's EDITION is %d of %d (%s)", v, c->ed_values, from);
+        } else {
+            sel_log("edition: the machine's EDITION reads %d, not one of 1-%d on this card (%s); "
+                    "edition 1 boots", v, c->ed_values < c->n ? c->ed_values : c->n, from);
+        }
+    } else {
+        sel_log("edition: no EDITION setting read (%s); edition 1 boots", why[0] ? why : "no store");
+    }
+    if (c->ed_values != c->n)
+        sel_log("edition: the conf names %d editions and %d image line(s)", c->ed_values, c->n);
+    if (conf_write_last(o->last, boot, -1, &bags) < 0)
+        sel_log("cannot write %s: %s (continuing)", o->last, strerror(errno));
+    if (conf_write_choice(o->out, boot) < 0) {
+        sel_say("error: cannot write %s: %s", o->out, strerror(errno));
+        return 2;
+    }
+    sel_say("chose %d %s (edition %d, by the machine's EDITION setting)", boot, c->img[boot].title, boot + 1);
+    return 0;
+}
+
 /* --apply-color (PAD-307): the boot hook's step, once image N is mounted.
  * 0 = a copy of the program with the operator's numbers was written to --to
  * (bind it), 1 = nothing to do (the image is not adjustable, or nothing is
@@ -1846,6 +1881,15 @@ int main(int argc, char **argv)
     }
     if (c.ngroups)
         sel_log("conf: %d image line(s) in %d card(s), %d group(s)", nimg, n, c.ngroups);
+    /* PAD-495: an editions card has no menu - the game's EDITION setting
+     * picks.  The preview (--snapshot) still draws the cards, so the tab can
+     * show what is on the card. */
+    if (c.ed_values > 0 && !o.snapshot) {
+        rc = edition_boot(&o, &c);
+        sel_log("exit %d", rc);
+        sel_log_close();
+        return rc;
+    }
     timeout = o.timeout >= 0 ? o.timeout : c.timeout >= 0 ? c.timeout : DEF_TIMEOUT;
     /* THE MENU'S VOLUME, most specific first: --volume, then the level the
      * machine's own Volume+/- buttons last set (jjpio is the only backend with

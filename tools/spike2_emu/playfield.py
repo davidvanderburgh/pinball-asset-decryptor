@@ -230,6 +230,29 @@ LED_PATH = os.path.join(padpath.dump() or "", "padled")
 #: \\wsl.localhost.
 LCD_PATH = os.path.join(padpath.dump() or "", "padlcd")
 
+#: PAD-498: the boards this run does not have because the Emulate tab's Topper
+#: box is off - watch.sh writes the title's own topper nodes here ("12,14" on
+#: Venom) and removes the file when the topper is on.
+TOPPER_OFF_PATH = os.path.join(padpath.dump() or "", "topper_off")
+
+
+def topper_off_nodes():
+    """{node} of the topper boards the run left off the bus, else empty.
+
+    "Venom: node 12 present with Topper toggle off" (peanuts, 2026-10-10):
+    a cabinet without its topper has no topper boards, so this window lists
+    neither their lights nor their switches (Foo Fighters' TOPPER HOME 1/2
+    are on its node 12). Read fresh each time: the file is a few bytes, and
+    it belongs to whichever run is up."""
+    if not padpath.dump():
+        return set()
+    try:
+        with open(TOPPER_OFF_PATH) as f:
+            return {int(n) for n in re.split(r"[,\s]+", f.read())
+                    if n.isdigit()}
+    except OSError:
+        return set()
+
 #: The LCD clip decoder. PIL, not Tk, for two measured reasons: Tk's
 #: "gif -index N" has no frame cursor, so every call re-parsed the clip from
 #: byte 0 (~139 ms per frame at a 150-frame tail - the documented UI-freeze
@@ -1158,7 +1181,9 @@ def load_switch_list():
         # already silent about a MISSING file; only the join minded, and
         # item 73 made this call unconditional, so it minded on import.
         return []
-    return trough.load_list(os.path.join(TDIR, "switch_list.txt"))
+    rows = trough.load_list(os.path.join(TDIR, "switch_list.txt"))
+    gone = topper_off_nodes()                       # PAD-498
+    return [r for r in rows if r["node"] not in gone] if gone else rows
 
 
 #: PAD-259: a spinning disc (james_bond_60th_le's Oddjob disc) is read by an
@@ -2448,6 +2473,9 @@ class LedGrid(LedRing):
         self.cells = []
         self.by_node = {}
         self.seen = set()
+        # PAD-498: a board the cabinet does not have earns no block, whatever
+        # the wire shows for it - Topper off is no topper lights.
+        self.gone = topper_off_nodes()
         self.gen = 0                    # bumps when the roster is rebuilt
         self._decoded = None
         self._init_ring()
@@ -2457,6 +2485,8 @@ class LedGrid(LedRing):
         Per node, with a C-level all-zero test first. True when it grew."""
         grew = False
         for node in range(coilmap.NODES):
+            if node in self.gone:
+                continue
             for base in (LED_HDR + node * LED_IDX, SEEN_OFF + node * LED_IDX):
                 s = d[base:base + LED_IDX]
                 if len(s) < LED_IDX or s.count(0) == LED_IDX:
@@ -2532,7 +2562,7 @@ class LedGrid(LedRing):
         # only the ring, never val[]).
         grew = False
         for key in self.overlay:
-            if key not in self.seen:
+            if key not in self.seen and key[0] not in self.gone:
                 self.seen.add(key)
                 grew = True
         # Discovery gated on BOTH write counters (a swelf frame can grow

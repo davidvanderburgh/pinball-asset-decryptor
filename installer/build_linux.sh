@@ -176,6 +176,9 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.clip_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_sounds" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_variants" \
+    --hidden-import "pinball_decryptor.plugins.stern.sound_modes" \
+    --hidden-import "pinball_decryptor.plugins.stern.menu_settings" \
+    --hidden-import "pinball_decryptor.plugins.stern.editions" \
     --hidden-import "pinball_decryptor.plugins.stern.text_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_from_card" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_modes" \

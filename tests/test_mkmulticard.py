@@ -1003,9 +1003,9 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
-                      "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm",
-                      "heading", "text_size", "counter", "settings", "countdown_word", "footer",
-                      "theme", "colors", "groups"}
+                      "volume", "machine_volume", "edition", "mixer_volume", "sound_move",
+                      "sound_confirm", "heading", "text_size", "counter", "settings",
+                      "countdown_word", "footer", "theme", "colors", "groups"}
     # a card that never set one records null, not the selector's own line
     assert d["heading"] is None
     # a card with no media at all: the fields are null, not absent

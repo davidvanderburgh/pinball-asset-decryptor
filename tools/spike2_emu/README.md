@@ -1371,6 +1371,11 @@ headless Xvfb with `GALLIUM_DRIVER=llvmpipe`, which is what a container with no
 GPU gets: guest **57.1 fps**, renderer **59.9 fps**. The 1 fps figure this
 project remembers is `glraster.c` running *inside* the emulated ARM guest, which
 the GL bridge replaced and which none of this uses.
+It is not free on a visible WSL run, though (PAD-497): there the renderer
+took 120-200% of a core in software against 7.5% on the GPU, and with the
+guest and the video decode beside it the window showed 19 of the game's 30
+pictures a second. `watch.sh` falls back to software when the GPU will not
+start, says why, and the Emulate tab's Renderer row says so too.
 
 Three container details are load-bearing, all in `padbox.sh`:
 

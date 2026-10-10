@@ -1842,13 +1842,21 @@ echo "[watch] with the guest's first frame, ~15 s later)"
 # bare `exit 1` with the guest never launched. That is the wrong trade twice
 # over.
 #
-# THE GPU IS BARELY AN OPTIMISATION HERE, and this rig has the measurement:
-# README's "Software rendering is not the bottleneck and never was" - a
-# headless Xvfb with GALLIUM_DRIVER=llvmpipe gave guest 57.1 fps, renderer
-# 59.9 fps, which is the frame rate. runbridge.sh has had a software mode
-# since it was written for exactly that reason. So the thing being protected
-# by that `exit 1` was worth a few percent, and what it cost was the whole
-# run.
+# A RUN IN SOFTWARE BEATS NO RUN: a headless Xvfb with GALLIUM_DRIVER=llvmpipe
+# gave guest 57.1 fps, renderer 59.9 fps (README), and runbridge.sh has had a
+# software mode since it was written. So the `exit 1` cost the whole run to
+# protect something the run can do without.
+#
+# BUT IT IS NOT FREE, and this comment used to say it was "barely an
+# optimisation" (PAD-497). David's own Godzilla runs, same card, same
+# machine: on the RTX 5090 (Oct 7) the renderer used 7.5% of one core and the
+# VM's load average was 2.6; in software (Oct 9) it used 120-200%, the game
+# went from 25% to 43%, and the load average reached 10 on the VM's 10 cores.
+# The renderer still counted 30 fps, but a screen recording of the King Kong
+# mode showed 19 new pictures a second, with holds up to 200 ms: the window
+# gets what is left of the CPU after llvmpipe, the guest and the video decode.
+# So the retry stays, and every word it prints says what it costs, and
+# $HOSTLOG.fallback tells status.sh - and so the Emulate tab - why.
 #
 # And the thing that kills the GPU path is usually not the emulator at all -
 # pad_renderer_verdict's comment in padpath.sh has the measured case, a
@@ -1975,27 +1983,37 @@ pad_gl_try() {
 # PAD_GL_SOFTWARE=1 skips the GPU attempt altogether: for a machine known to
 # fail it, and so the software path can be exercised deliberately rather than
 # only by breaking a GPU.
+#
+# $HOSTLOG.fallback IS WRITTEN ONLY WHEN THE GPU WAS TRIED AND LOST (PAD-497):
+# one word, the verdict, which status.sh hands the Emulate tab. A software run
+# by request is not a fault and leaves none; a previous run's is removed here.
+rm -f "$HOSTLOG.fallback"
 if [ "${PAD_GL_SOFTWARE:-0}" = 1 ]; then
     echo "[watch] renderer: software by request (PAD_GL_SOFTWARE=1)"
     pad_gl_software
 fi
 
+# The kernel's GPU refusals so far, so the verdict can tell one THIS attempt
+# caused from one hours old (pad_gpu_refusal_mark in padpath.sh).
+GPU_MARK=$(pad_gpu_refusal_mark)
 if ! pad_gl_try; then
     echo "[watch] the renderer died on startup:" >&2
     tail -20 "$HOSTLOG" >&2
-    pad_renderer_advice "$(pad_renderer_verdict "$HOSTLOG")" >&2
+    GL_VERDICT=$(pad_renderer_verdict "$HOSTLOG" "$GPU_MARK")
+    pad_renderer_advice "$GL_VERDICT" >&2
     if [ "$PAD_GL_MODE" = gpu ]; then
         # KEEP THE GPU ATTEMPT'S LOG: the retry truncates $HOSTLOG, and those
         # lines are the only record of what the GPU path did.
         cp -f "$HOSTLOG" "$HOSTLOG.gpu" 2>/dev/null
-        echo "[watch] TRYING THE RENDERER AGAIN IN SOFTWARE. That costs less" >&2
-        echo "[watch]   than it sounds - this game measures 59.9 fps on the" >&2
-        echo "[watch]   software rasteriser - and nothing else about the run" >&2
-        echo "[watch]   changes. The failed GPU attempt's log is kept at" >&2
-        echo "[watch]   $HOSTLOG.gpu." >&2
+        echo "[watch] TRYING THE RENDERER AGAIN IN SOFTWARE. The game runs the" >&2
+        echo "[watch]   same, but drawing it without the GPU takes one to two" >&2
+        echo "[watch]   CPU cores, and the game's videos stutter when the PC" >&2
+        echo "[watch]   cannot spare them. The failed GPU attempt's log is" >&2
+        echo "[watch]   kept at $HOSTLOG.gpu." >&2
         pad_gl_software
         if pad_gl_try; then
             echo "[watch] the renderer is up in SOFTWARE (llvmpipe)."
+            echo "$GL_VERDICT" > "$HOSTLOG.fallback" 2>/dev/null
         else
             echo "[watch] the software renderer died too, so this is not the" >&2
             echo "[watch]   GPU: see $HOSTLOG and $HOSTLOG.gpu." >&2
@@ -2027,10 +2045,10 @@ fi
 # padpath.sh has the measured account of how those go stale underneath a VM
 # that keeps running.
 #
-# IT IS THE SAME FAULT AND IT TAKES THE SAME CURE, and the measurement that
-# justified the first retry justifies this one: llvmpipe measured 59.9 fps on
-# this game, which is the frame rate. What that failed surface was buying was
-# a few percent, and what it cost was the whole picture.
+# IT IS THE SAME FAULT AND IT TAKES THE SAME CURE, and the trade that
+# justified the first retry justifies this one: llvmpipe keeps the frame rate
+# (59.9 fps headless), at one to two cores (PAD-497, above), and what that
+# failed surface cost was the whole picture.
 #
 # ONLY FOR THE SURFACE CASE, which is what pad_headless_reason is for. A driver
 # that would not give a surface for a window that EXISTS is worth asking a
@@ -2058,13 +2076,14 @@ if [ "$PAD_GL_MODE" = gpu ] && \
     echo "[watch] TRYING THE RENDERER AGAIN IN SOFTWARE. The window surface" >&2
     echo "[watch]   is the graphics driver's to give and this one would not" >&2
     echo "[watch]   give it; the software rasteriser is not asking that driver" >&2
-    echo "[watch]   for anything. Nothing else about the run changes - this" >&2
-    echo "[watch]   game measures 59.9 fps in software - and the failed GPU" >&2
-    echo "[watch]   attempt's log is kept at $HOSTLOG.gpu." >&2
+    echo "[watch]   for anything. It takes one to two CPU cores, and the" >&2
+    echo "[watch]   game's videos stutter when the PC cannot spare them. The" >&2
+    echo "[watch]   failed GPU attempt's log is kept at $HOSTLOG.gpu." >&2
     pad_gl_stop
     pad_gl_software
     if pad_gl_try; then
         echo "[watch] the renderer is up in SOFTWARE (llvmpipe)."
+        echo surface > "$HOSTLOG.fallback" 2>/dev/null
     else
         # GOING BACK IS THE RIGHT TRADE HERE, and it is the opposite of the
         # one the death path makes, because what is at stake is different.

@@ -877,6 +877,44 @@ def state_text(info):
     return label, hint
 
 
+#: WHY THE GAME IS DRAWN IN SOFTWARE, for the Renderer row (PAD-497).
+#: David's report was a screen recording of a stuttering King Kong video; the
+#: reason - Windows had reinstalled the graphics driver under a WSL that kept
+#: running, and every renderer since had fallen back to software - was in the
+#: run log only, and this row said "200% CPU, 30 fps" as if nothing had
+#: changed.  Keyed on status.sh's ``gl_fallback`` (watch.sh's verdict word).
+_GL_RESTART = ("Stop the game, press Restart WSL… and start it again; if "
+               "the next run still says this, restart Windows.")
+_GL_COST = ("The game is drawn in software. That takes one to two CPU cores "
+            "instead of a few percent of one, and the game's videos stutter "
+            "when the PC cannot spare them.")
+_GL_FALLBACK_TIP = {
+    "gpulost": ("WSL has lost the graphics card: Windows updated or reset "
+                "the graphics driver while WSL was running, and WSL keeps "
+                "the old connection until it restarts. " + _GL_COST + " "
+                + _GL_RESTART),
+    "loader": ("The GPU renderer would not start: Windows replaced the "
+               "graphics libraries WSL had loaded. " + _GL_COST + " "
+               + _GL_RESTART),
+}
+_GL_FALLBACK_OTHER = ("The GPU renderer would not start (the run log says "
+                      "why). " + _GL_COST + " Restart WSL… often brings the "
+                      "GPU back.")
+
+
+def renderer_text(info):
+    """(text, tip) for the Renderer row: CPU and fps, plus - only when the run
+    fell back from the GPU - the word software and why.  ``tip`` is "" on a
+    GPU run and on software by request, which are not faults."""
+    text = "%s%% CPU, %s fps" % (info.get("host_cpu", "?"),
+                                 info.get("fps", "—"))
+    why = info.get("gl_fallback", "")
+    if not why:
+        return text, ""
+    return (text + " · no GPU",
+            _GL_FALLBACK_TIP.get(why, _GL_FALLBACK_OTHER))
+
+
 def _wsl_path(win_path):
     """``c:\\repo\\tools\\spike2_emu`` -> ``/mnt/c/repo/tools/spike2_emu``.
 

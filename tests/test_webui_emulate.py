@@ -607,6 +607,37 @@ def test_apply_paints_the_status_grid_and_footer(tmp_path):
         assert w.state("shell")["footer"]["status"] == "Ready"
 
 
+def test_a_renderer_that_lost_the_gpu_says_so_in_its_row(tmp_path):
+    """PAD-497: David saw King Kong's video stutter; the cause - WSL had lost
+    the graphics card and the game was drawn in software - was in the run log
+    only, and this row read "200% CPU, 30 fps" as if nothing had changed."""
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        w.call("ui.select_tab", NS)
+        run = {"running": "1", "state": "attract", "procs": "5",
+               "host_cpu": "200", "fps": "30.0"}
+        w.run(svc._apply, dict(run, gl_fallback="gpulost"))
+        s = w.state(NS)
+        assert s["vals"]["host"] == "200% CPU, 30.0 fps · no GPU"
+        assert "lost the graphics card" in s["host_tip"]
+        assert "stutter" in s["host_tip"]
+        assert "Restart WSL…" in s["host_tip"]
+        # A reason watch.sh has no words for still names the cost and a cure.
+        w.run(svc._apply, dict(run, gl_fallback="unknown"))
+        s = w.state(NS)
+        assert s["vals"]["host"].endswith("· no GPU")
+        assert "stutter" in s["host_tip"] and "Restart WSL…" in s["host_tip"]
+        # The GPU back (or software by request): no word, no badge.
+        w.run(svc._apply, run)
+        s = w.state(NS)
+        assert s["vals"]["host"] == "200% CPU, 30.0 fps"
+        assert s["host_tip"] == ""
+        w.run(svc._apply, dict(run, gl_fallback="gpulost"))
+        w.run(svc._apply, {"running": "0", "state": "off", "procs": "0"})
+        s = w.state(NS)
+        assert s["vals"]["host"] == "—" and s["host_tip"] == ""
+
+
 def test_copy_and_preparing_hold_the_state_over_the_poll(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)

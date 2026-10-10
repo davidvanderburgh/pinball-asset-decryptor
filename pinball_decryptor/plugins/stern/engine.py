@@ -3662,7 +3662,8 @@ def _compute_patches_or_restore(restore_ok, log, *args, **kwargs):
 
 
 def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
-                         grow=None, shader=None, clips=None, parts=None):
+                         grow=None, shader=None, clips=None, parts=None,
+                         menu=None):
     """Resolve game-program (ELF) display-text edits for one firmware file.
 
     Three composition modes, mirroring how the firmware itself reaches the
@@ -3689,6 +3690,10 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
     *parts* (PAD-470) are the modes' own text for lines several modes show,
     ``{(original, mode class): replacement}``: a copy for that mode's lines
     goes in the same extension segment (:func:`.progtext.plan_writes`).
+
+    *menu* (PAD-494, a :class:`_MusicModeMenu`) is the MUSIC MODE setting:
+    its captions, help and range in place, and the menu's category table, one
+    record longer, in the same extension segment.
 
     Returns ``(writes, n_strings, overlays, grown)`` — *grown* is ``None``
     unless the firmware was grown, else ``{"node", "path", "valpatch_mode",
@@ -3720,6 +3725,13 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
                    "write")
         clips = None
     if clips is not None and not over:
+        over = [None]
+    if menu is not None and grow is not None and not grow.get("ok"):
+        # PAD-494: the menu's category table grows the game program
+        menu.fail(grow.get("why") or "the game program can't grow on this "
+                  "write")
+        menu = None
+    if menu is not None and not over:
         over = [None]
     if parts and not over and grow is not None and grow.get("ok"):
         # a mode's own copy of a line needs the extension segment, however
@@ -3789,6 +3801,26 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
         blob = _own_clip_program(raw, clips, reloc, file_writes, blob, log)
         if clips.program is not None:
             file_writes = list(file_writes) + clips.program.writes
+    if menu is not None:
+        # PAD-494: MUSIC MODE, after the rest (its table word-aligned)
+        if reloc is None:
+            menu.fail(no_grow_why or "the game program can't grow on this "
+                      "write")
+        else:
+            blob = bytes(blob) + bytes(-len(blob) % 4)
+            try:
+                m_writes, m_blob = menu.plan(
+                    raw, reloc["base_va"] + reloc["used"] + len(blob))
+            except ValueError as e:
+                menu.fail(str(e))
+            else:
+                if reloc["used"] + len(blob) + len(m_blob) <= reloc["capacity"]:
+                    file_writes = list(file_writes) + m_writes
+                    blob += m_blob
+                    menu.done()
+                else:
+                    menu.fail("the game program has no room left for the "
+                              "menu's table")
     if blob:
         try:
             grown = _grow_program_text(raw, file_writes, blob, reloc,
@@ -4310,7 +4342,7 @@ def _padded_text(new_bytes, orig_len, looks=()):
 
 def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
                         grow_dir=None, dest_is_device=False, shader=None,
-                        clips=None):
+                        clips=None, menu=None):
     """Resolve the user's display-text edits to a flat list of in-place writes
     ``[(disk_offset, bytes), ...]`` (same form ``_compute_patches`` collects).
 
@@ -4362,9 +4394,12 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     # PAD-305: *shader* (a color profile) is a game-program edit of its own;
     # the program joins the edits even when no line of its text changed.
     fw_path = None
-    if shader is not None or clips is not None:
+    if shader is not None or clips is not None or menu is not None:
         fw_path, _fw_node = _game_program_path(reader, cancel)
         if fw_path is None:
+            if menu is not None:
+                menu.fail("the game program wasn't found on the card")
+                menu = None
             if shader is not None:
                 log("Color profile: the game program wasn't found on the card; "
                     "the colors are left as they are.", "warning")
@@ -4382,7 +4417,8 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
     # its original (the ext4 probe reaches for WSL; a write of same-length
     # edits never pays for it).  The color profile always needs it: the
     # corrected shaders are longer than the game's own.
-    over_any = (shader is not None) or (clips is not None) or bool(parts) or any(
+    over_any = (shader is not None) or (clips is not None) or bool(parts) or (
+        menu is not None) or any(
         len(n) > len(o) for prs in edits.values() for o, n in prs)
     if over_any and grow_dir:
         g_ok, g_why = _text_grow_gate(dest_is_device)
@@ -4412,7 +4448,8 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
                 reader, node, card_path, pairs, patched_fw, log, grow=grow,
                 shader=shader if card_path == fw_path else None,
                 clips=clips if card_path == fw_path else None,
-                parts=parts.get(card_path))
+                parts=parts.get(card_path),
+                **({"menu": menu} if menu is not None and card_path == fw_path else {}))
             writes += pw
             n_strings += pn
             _merge_radium_overlays(overlays, pov)
@@ -6964,13 +7001,17 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # maker's preview switch: a card of random clips carries no mode.
     variant_slots, variant_prof = _variants_for_build(
         assets_dir, dest_is_device, log, **_mode_gate_kw)
+    # PAD-494: a slot's files for the other music modes ride the same delivery, as
+    # records of their own in the bank and MUSIC MODE in the operator menu
+    sound_modes, sound_modes_prof = _sound_modes_for_build(
+        assets_dir, dest_is_device, log, **_mode_gate_kw)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
             and not text_edits and not color_edits and not layout_edits
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
-            and not variant_slots
+            and not variant_slots and not sound_modes
             and not stock_mode_edits and shader_prof is None
             and not own_clips):
         raise NothingToWrite(
@@ -7188,7 +7229,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # Which request a mode's own end sound rode in on, once it has.
         mode_sound_used = None
         mode_own_used = []
-        if audio_edits or music_edits or mode_sound or mode_own:
+        # PAD-494: the music modes' files that went into the bank, and the runtime's table
+        sound_mode_used = []
+        sound_modes_cfg = ""
+        if audio_edits or music_edits or mode_sound or mode_own or sound_modes:
             phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
             if cancel():                # before the sound bank is read (PAD-489)
                 return None, None, None, None, None
@@ -7221,12 +7265,17 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     log("Modes: the start sounds, shot sounds and music of the "
                         "modes are not put on this card (its sounds can't be "
                         "re-encoded).", "warning")
+                if sound_modes:
+                    log("Music modes: the files for the other music modes are "
+                        "not put on this card (its sounds can't be re-encoded).",
+                        "warning")
+                    sound_modes = None
                 audio_edits = {}
                 music_edits = []
                 mode_sound = None
                 mode_own = []
             else:
-                if audio_edits or mode_sound or mode_own:
+                if audio_edits or mode_sound or mode_own or sound_modes:
                     # Re-encode every edited cat-0 sound to its body bytes — fans
                     # across worker processes (each boots its own emulator), with
                     # a single-process fallback.  Params come from the
@@ -7315,6 +7364,26 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites, audio_edits,
                             grows, mode_own, os.path.join(grow_work, "own_sounds"),
                             log)
+                    _sm_grows = {}
+                    if sound_modes:
+                        # PAD-494: each file for another music mode, a grown copy
+                        # of a record nothing else uses, left un-pointed; the
+                        # play tables are read for the descriptors that name
+                        # each slot (the runtime's table, below)
+                        if not desc_sites:
+                            t0 = time.monotonic()
+                            if progress:
+                                progress(10, 100,
+                                         "Reading the game's play tables...")
+                            desc_sites = _card_descriptor_sites(
+                                gr_path, img_path, log, card_key=_sites_key)
+                            _stage_done(log, "reading the game's play tables",
+                                        t0)
+                        audio_edits, grows, sound_mode_used = _sound_modes_grow(
+                            assets_dir, params, audio_edits, grows, sound_modes,
+                            log)
+                        _sm_grows = {int(u["host"]): grows[int(u["host"])]
+                                     for u in sound_mode_used}
                     if _user_grows:
                         # The bank's budget: the game's 2 GB, and the room on
                         # the games partition beside the full-size videos,
@@ -7324,7 +7393,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         # being refused or the copy failing after the encode.
                         _byidx = {p["idx"]: p for p in params}
                         _forced = {i: g for i, g in grows.items()
-                                   if i not in _user_grows}
+                                   if i not in _user_grows
+                                   and i not in _sm_grows}
                         _room = None
                         _prio = _grow_priority_idxs(assets_dir)
                         if space_chk is not None:
@@ -7344,6 +7414,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             _user_grows, _byidx, img_path, log,
                             priority=_prio, room=_room, reserved=_forced))
                         grows.update(_forced)
+                        grows.update(_sm_grows)
+                    if _sm_grows:
+                        # PAD-494: the music modes' files take what the bank has
+                        # left after the sounds the game plays in every mode
+                        grows, audio_edits, sound_mode_used = _sound_modes_fit(
+                            grows, _sm_grows, audio_edits, sound_mode_used,
+                            {p["idx"]: p for p in params}, img_path, log)
                     # PAD-176: every grow is settled (the modes' own sounds
                     # included), so the bank's exact length is known: the
                     # whole budget is checked HERE, before the bank is staged,
@@ -7381,8 +7458,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             grown_key = grown_cache.key_for(
                                 _family, _grown_cache_sounds(
                                     assets_dir, audio_edits, grows,
-                                    slot_gains, _loop_idx,
+                                    _sm_gains(slot_gains, sound_mode_used),
+                                    _loop_idx,
                                     list(mode_own_used or ())
+                                    + list(sound_mode_used)
                                     + ([mode_sound_used] if mode_sound_used
                                        else [])))
                         except Exception as e:
@@ -7454,7 +7533,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 gr_path, img_path, params, desc_sites, log,
                                 templates=_mode_bed_templates(
                                     gr_path, img_path, mode_own_used, log),
-                                keep=_mode_swap_idx(mode_own_used))
+                                keep=_mode_swap_idx(mode_own_used) | _sm_hosts(sound_mode_used))
                             _mode_swap_keys(mode_own_used, params, log)
                             if cancel():
                                 return None, None, None, None, None
@@ -7478,7 +7557,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                          "play tables at the longer sounds...")
                             _repoint_descriptors(gr_path, img_path, params,
                                                  desc_sites, log,
-                                                 keep=_mode_swap_idx(mode_own_used))
+                                                 keep=_mode_swap_idx(mode_own_used) | _sm_hosts(sound_mode_used))
                             if cancel():
                                 return None, None, None, None, None
                             # The derive above walked the firmware's whole
@@ -7524,16 +7603,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             (_rescale(progress, 10, 75, 31, 45) if grows
                              else progress),
                             cancel, assets_dir=assets_dir,
-                            gains=slot_gains, cache_img_ident=stock_ident)
+                            gains=_sm_gains(slot_gains, sound_mode_used),
+                            cache_img_ident=stock_ident,
+                            level_refs=_sm_level_refs(sound_mode_used))
                     if audio_patches is None:
                         return None, None, None, None, None
                     if _chain_edits:
                         _cp, params = _chain_encode_appended(
                             gr_path, img_path, params, _chain_edits, np, log,
-                            loops=_loop_idx, gains=slot_gains,
-                            level_refs=_mode_music_level_refs(
+                            loops=_loop_idx,
+                            gains=_sm_gains(slot_gains, sound_mode_used),
+                            level_refs=dict(_mode_music_level_refs(
                                 gr_path, img_path, params, desc_sites,
                                 _loop_idx, log, used=mode_own_used),
+                                **_sm_level_refs(sound_mode_used)),
                             progress=_span(progress, 45, 75),
                             cancel=cancel)
                         audio_patches.update(_cp)
@@ -7544,7 +7627,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites, log,
                             templates=_mode_bed_templates(gr_path, img_path,
                                                           mode_own_used, log),
-                            keep=_mode_swap_idx(mode_own_used))
+                            keep=_mode_swap_idx(mode_own_used) | _sm_hosts(sound_mode_used))
                         _mode_swap_keys(mode_own_used, params, log)
                         # The re-point may move a key inside the region the
                         # fingerprint covers: file the map under the bank as
@@ -7552,6 +7635,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         _save_grown_consumed(gr_path, img_path, _greads, log)
                     _stage_done(log, "re-encoding %d replaced sound(s)"
                                 % len(audio_edits), t0)
+                    if sound_mode_used:
+                        # PAD-494: every sound id that plays a slot with a
+                        # mode file, that mode's descriptor, off the bank as
+                        # it now stands
+                        t0 = time.monotonic()
+                        grow_work = grow_work or _work_dir(
+                            label, base="spike2_grow_")
+                        sound_modes_cfg = _sound_modes_cfg(
+                            gr_path, img_path, params, desc_sites,
+                            sound_mode_used, sound_modes,
+                            not (mode_list or code_list),
+                            os.path.join(grow_work, "sound_modes"), log)
+                        _stage_done(log, "reading the music modes' sound ids", t0)
                     # Keep the firmware's master-directory forward-chain intact.
                     # Blip-free (default): patch game_real so the boot-derive reads
                     # STOCK window bytes for the replaced sounds -- fully-stock
@@ -7792,7 +7888,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # that needs their names (a card without the banks: none are made)
         clip_job = (_own_clip_job(reader, assets_dir, own_clips, log)
                     if own_clips else None)
-        if text_edits or shader_prof is not None or clip_job is not None:
+        # PAD-494: MUSIC MODE in the operator menu, once the bank carries the
+        # music modes' files (sound_modes_cfg); without it they are not played
+        menu_job = (_MusicModeMenu(sound_modes.count, sound_modes.menu_names(),
+                                   log) if sound_modes_cfg else None)
+        if (text_edits or shader_prof is not None or clip_job is not None
+                or menu_job is not None):
             if progress:
                 progress(90, 100, "Preparing display text...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
@@ -7800,8 +7901,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
              grown_text) = _radium_text_writes(
                 reader, assets_dir, log, cancel, patched_fw=patched_gr,
                 grow_dir=grow_work, dest_is_device=dest_is_device,
-                shader=shader_prof, clips=clip_job)
+                shader=shader_prof, clips=clip_job,
+                **({"menu": menu_job} if menu_job is not None else {}))
             _merge_radium_overlays(radium_overlays, _t_ov)
+            if menu_job is not None and not menu_job.ok:
+                # PAD-494: no MUSIC MODE, no other mode's sounds
+                menu_job.fail("the game program was not changed")
+                sound_modes_cfg = ""
             if cancel():
                 return None, None, None, None, None
             gfw = grown_text.get("fw")
@@ -7973,12 +8079,14 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         mode_plan = mode_payload = None
         _modes_on = bool(mode_list or code_list)
         # PAD-446: a build of random clips and no mode says so in its own words
-        _who = "Modes" if _modes_on else "Random clips"
-        if _modes_on or variant_slots:
+        _who = ("Modes" if _modes_on else "Random clips" if variant_slots
+                else "Music modes")
+        if _modes_on or variant_slots or sound_modes_cfg:
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
-                         else "Adding the random clips to the video bank...")
+                         else "Adding the random clips to the video bank..."
+                         if variant_slots else "Adding the music modes...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -7989,10 +8097,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     if _mprof is None:
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
-                    _mprof = variant_prof
+                    _mprof = variant_prof or sound_modes_prof
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
-                    if not _rel or (not _modes_on and _rel != _MW.scene_rels(_mprof)[1]):
+                    if not _rel or (not _modes_on and (
+                            not variant_slots or _rel != _MW.scene_rels(_mprof)[1])):
                         continue        # a part this title cannot do (item 148)
                     _mnodes[_rel] = _MW.lookup(reader, _rel)
                     if _mnodes[_rel] is None:
@@ -8005,6 +8114,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 _hud_rel, _bank_rel = _MW.scene_rels(_mprof)
                 if not _modes_on:
                     _hud_rel = ""        # PAD-446: random clips change the bank only
+                    if not variant_slots:
+                        _bank_rel = ""   # PAD-494: music modes change neither
                 # item 164: the system scene whose full font a HUD with too few glyphs
                 # takes for its screens' words (absent: the words keep the HUD's font)
                 from . import scene_write as _SWF
@@ -8028,7 +8139,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     hud_font=(bytes(reader.read_file_bytes(_hudfont_node))
                               if _hudfont_node is not None else b""),
                     modes_on=_modes_on, variants=bool(variant_slots),
-                    variants_prof=variant_prof, cancel=cancel)
+                    variants_prof=variant_prof, cancel=cancel,
+                    sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof)
                 if mode_plan is None:
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")
@@ -8057,7 +8169,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                  else _line), "info")
             _stage_done(log, ("building %d mode(s)" % (len(mode_list) + len(code_list))
                               if _modes_on else "adding %d random clip(s)"
-                              % len(mode_plan.variants.new)), t0)
+                              % len(mode_plan.variants.new)
+                              if mode_plan.variants is not None
+                              else "adding the music modes"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
         # modes just rewrote when they did.  The program part already landed
@@ -8301,6 +8415,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 # PAD-446: the slots that play one of several clips at random
                 "variants": ([v.rel for v in mode_plan.variants.slots]
                              if mode_plan.variants is not None else []),
+                # PAD-494: the slots with files for other music modes
+                "music_modes": ([("%s (mode %d)" % (os.path.basename(u["rel"]), u["mode"]))
+                                 for u in sound_mode_used]
+                                if getattr(mode_plan, "sounds_file", "") else []),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -9093,6 +9211,333 @@ def _variants_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     return slots, prof
 
 
+# --------------------------------------------------------------------------
+# PAD-494: music modes - a slot's files for modes 2..n, each an appended record
+# --------------------------------------------------------------------------
+def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """``(modes, profile)`` - the project's music modes (:mod:`.sound_modes`) this build carries
+    and the title of the card they are for; ``(None, None)`` when it has none or they are left
+    out (one warning says why). The modes' gate without the mode maker's preview switch, as the
+    random clips': an image file, a host that can add files to it, a title they were proven on."""
+    from . import mode_write as _MW
+    from . import sound_modes as _SMo
+    modes = _SMo.load(assets_dir)
+    if not modes.count:
+        return None, None
+    n = len(modes.files())
+    if not _SMo.enabled():
+        why = "%s=0 leaves them out" % _SMo.GATE_ENV
+    elif dest_is_device:
+        why = ("a direct-SD write cannot add files to the card or grow its game program; build "
+               "an image file to carry them")
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _SMo.project_title(assets_dir, probe=True)
+        why = _SMo.title_refusal(prof)
+    if why:
+        log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
+            % (n, why.rstrip(".")), "warning")
+        return None, None
+    log("Found %d file(s) for %d music modes (%s)." % (
+        n, modes.count, ", ".join("%d %s" % (m, modes.name(m)) for m in range(1, modes.count + 1))),
+        "info")
+    return modes, prof
+
+
+class _MusicModeMenu:
+    """PAD-494: the MUSIC MODE setting as one of the game program's edits
+    (:mod:`.menu_settings`), with what became of it: ``ok`` once its writes and
+    table are in the program's edits, else ``why`` (said once)."""
+
+    def __init__(self, count, names, log):
+        self.count, self.names, self.log = int(count), list(names), log
+        self.ok, self.why, self.setting = False, "", None
+
+    def plan(self, raw, va):
+        """``([(file offset, bytes)], table bytes)`` for program bytes *raw*,
+        the category table placed at *va* (``b""`` when it already lists the
+        setting). Raises ValueError (:class:`.menu_settings.MenuSettingError`)."""
+        from . import menu_settings as _MSet
+        from .adjustments import AdjustmentTable
+        t = AdjustmentTable(raw)
+        setting, writes, cat = _MSet.plan(t, _MSet.MUSIC_MODE, self.count,
+                                          self.names)
+        out, blob = list(writes.items()), b""
+        if cat is not None:
+            blob = _MSet.table_blob(cat, setting)
+            out += list(_MSet.table_writes(t, cat, va,
+                                           len(cat.records) + 1).items())
+        self.setting = setting
+        return out, blob
+
+    def done(self):
+        self.ok = True
+        self.log("Music modes: MUSIC MODE is in the operator menu (Adjustments > "
+                 "Machine Settings > Audio Content), values 1 to %d, its help "
+                 "line \"%s\"." % (self.count, self.setting.help), "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Music modes: MUSIC MODE could not be added to the operator "
+                 "menu (%s), so this card plays every sound's own and carries no "
+                 "other music mode." % self.why, "warning")
+
+
+def _sm_hosts(used):
+    """The host records of the music modes' files (grown, left un-pointed)."""
+    return {int(u["host"]) for u in used or ()}
+
+
+def _sm_level_refs(used):
+    """``{host: slot}``: each music mode's file matches the loudness of the slot it plays for."""
+    return {int(u["host"]): int(u["slot"]) for u in used or ()}
+
+
+def _sm_gains(gains, used):
+    """*gains* (the per-clip loudness map) with each host taking its slot's offset."""
+    if not used:
+        return gains
+    out = dict(gains or {})
+    for u in used:
+        if int(u["slot"]) in out:
+            out[int(u["host"])] = out[int(u["slot"])]
+    return out
+
+
+def _sound_mode_host(params, slot_p, want, audio_edits, taken):
+    """A stock record to hold one music mode's file: the slot's channels, not replaced, grown or
+    holding another; the longest no longer than the file (so the copy grows to the file's own
+    length), else the shortest longer one. ``None`` when there is none."""
+    chan = slot_p.get("chan")
+    shorter = longer = None
+    for q in params:
+        i, n = q["idx"], int(q.get("length", 0) or 0)
+        if (i == slot_p.get("idx") or i in taken or i in audio_edits or q.get("grown")
+                or not q.get("findkey")):
+            continue
+        if q.get("chan") != chan or n <= 0:
+            continue
+        if n <= want:
+            if shorter is None or n > shorter[0] or (n == shorter[0] and i < shorter[1]):
+                shorter = (n, i)
+        elif longer is None or n < longer[0] or (n == longer[0] and i < longer[1]):
+            longer = (n, i)
+    pick = shorter or longer
+    return pick[1] if pick else None
+
+
+def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log):
+    """PAD-494: every music mode's file, made into its slot's format and put in a HOST record
+    (:func:`_sound_mode_host`) as a forced grow, left un-pointed. Returns ``(audio_edits, grows,
+    used)``: *used* ``[{"rel", "slot", "mode", "host", "frames", "name", "idx", "level_ref"}]``.
+    A file that cannot go on is left out and logged (that slot plays its own sound in that mode)."""
+    from . import sound_modes as _SMo
+    from .spike2.emulator import emitted_length
+    byidx = {q["idx"]: q for q in params}
+    audio_edits, grows = dict(audio_edits), dict(grows)
+    # a slot with mode files keeps its own record (its key is what the game's descriptors name)
+    used, taken = [], {i for i in (_SMo.slot_idx(r) for r in modes.slots) if i is not None}
+    for rel, mode, src in modes.files():
+        what = "%s's file for mode %d (%s)" % (os.path.basename(rel), mode, modes.name(mode))
+        slot = _SMo.slot_idx(rel)
+        p = byidx.get(slot) if slot is not None else None
+        if p is None:
+            log("Music modes: %s is not put on this card: %s" % (what, _SMo.NOT_SOUND), "warning")
+            continue
+        try:
+            wav = _SMo.convert(assets_dir, rel, mode, src, log)
+        except (_SMo.SoundModeError, OSError) as e:
+            log("Music modes: %s is not put on this card: %s." % (what, e), "warning")
+            continue
+        want = _wav_frames_44k(wav)
+        if not want:
+            log("Music modes: %s is not put on this card: its converted copy cannot be read."
+                % what, "warning")
+            continue
+        host = _sound_mode_host(params, p, want, audio_edits, taken)
+        if host is None:
+            log("Music modes: %s is not put on this card: no sound record is left to hold it."
+                % what, "warning")
+            continue
+        hlen = int(byidx[host].get("length", 0) or 0)
+        audio_edits[host] = wav
+        grows[host] = (emitted_length(hlen), max(int(want), hlen))
+        taken.add(host)
+        used.append({"rel": rel, "slot": int(slot), "mode": int(mode), "host": int(host),
+                     "frames": int(want), "name": modes.name(mode), "idx": int(host),
+                     "level_ref": int(slot)})
+        log("Music modes: %s (%s, %.2f s) goes on the card as a new record (a copy of sound idx "
+            "%d) that the game plays for sound idx %d while MUSIC MODE is %d." % (
+                what, os.path.basename(src), want / 44100.0, host, slot, mode), "info")
+    return audio_edits, grows, used
+
+
+def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
+    """PAD-494: the music modes' files take what the sound bank has left (the game's 2 GB) after
+    every sound the game plays in each mode; one that does not fit is left out, and that slot
+    plays its own sound in that mode. Returns ``(grows, audio_edits, used)``."""
+    from .spike2 import masterdir as MD
+    from .spike2.emulator import MAX_IMAGE_BYTES
+    with open(_lp(img_path), "rb") as f:
+        md_off, count = MD.header_geometry(f.read(0x100))
+    start = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(grows.items()) if i not in sm_grows]
+    kept, cut, _bodies = _fit_grows(sorted(sm_grows), sm_grows, byidx, md_off, count,
+                                    MAX_IMAGE_BYTES, start)
+    if not cut:
+        return grows, audio_edits, used
+    grows = {i: g for i, g in grows.items() if i not in cut}
+    audio_edits = {i: w for i, w in audio_edits.items() if i not in cut}
+    out = []
+    for u in used:
+        if int(u["host"]) in cut:
+            log("Music modes: %s's file for mode %d (%s) is left out: the sound bank would pass "
+                "the %d MB the game can open. That slot plays its own sound in mode %d." % (
+                    os.path.basename(u["rel"]), u["mode"], u["name"], MAX_IMAGE_BYTES // 10**6,
+                    u["mode"]), "warning")
+            continue
+        out.append(u)
+    return grows, audio_edits, out
+
+
+def _mode_descriptor(desc, sid, mask, slot_key, host_key, mode_units, slot_units, extent=None):
+    """PAD-494: descriptor *desc* (sound id *sid*, as the resolver reads it) with every payload
+    that plays the record keyed *slot_key* naming *host_key* instead (its bits outside *mask* kept,
+    as :func:`_plan_descriptor_repoint` does), and its declared length moved to *mode_units*
+    (1/4000 s): a one-sound descriptor declares it outright, a sequence moves by the difference
+    from *slot_units*. Only the payloads in its first *extent* bytes are its own (the resolver's
+    window runs on into the next descriptor). ``None`` when *host_key* has bits the descriptor
+    cannot carry, or none of its own payloads plays *slot_key*."""
+    if _play_key(host_key, sid, mask) != bytes(host_key):
+        return None
+    d = bytearray(desc)
+    payloads = _own_payloads(bytes(desc), extent)
+    if not any(_play_key(pl, sid, mask) == bytes(slot_key) for _o, pl in payloads):
+        return None
+    for off, payload in payloads:
+        if _play_key(payload, sid, mask) != bytes(slot_key):
+            continue
+        w1, w2 = struct.unpack("<II", bytes(host_key))
+        _o1, o2 = struct.unpack("<II", payload)
+        d[off:off + 8] = struct.pack("<II", w1, (o2 & ~mask & 0xFFFFFFFF) | (w2 & mask))
+    dur = struct.unpack_from("<I", d, _DESC_DUR_OFF)[0]
+    new = mode_units if len(payloads) == 1 else max(1, dur + mode_units - slot_units)
+    # (a one-payload descriptor is one sound: its whole declared length is the mode file's)
+    struct.pack_into("<I", d, _DESC_DUR_OFF, int(new) & 0xFFFFFF)
+    return bytes(d)
+
+
+def _own_payloads(desc, extent=None):
+    """The op11 payloads of descriptor window *desc* that lie in its first *extent* bytes (all of
+    them without one)."""
+    return [(o, pl) for o, pl in _op11_payloads(desc) if extent is None or o + 8 <= extent]
+
+
+def _descriptor_extents(offsets, window):
+    """``{offset: bytes}`` - how far each descriptor (by its offset in the bank) runs before the
+    next one starts, at most *window*."""
+    order = sorted(set(offsets))
+    out = {}
+    for a, b in zip(order, order[1:] + [None]):
+        out[a] = window if b is None else max(0, min(window, b - a))
+    return out
+
+
+def _sound_mode_descriptors(gr_path, staged, params, sites, used, log):
+    """PAD-494: ``[(mode, sid, descriptor bytes)]`` - for every sound id whose descriptor names a
+    slot with a music mode's file, that descriptor (read through the game's own resolver off the
+    finished bank) with the slot's record swapped for the mode's (its key, under the build's key
+    mask) and its declared length moved to the mode file's (bytes 3..6, 1/4000 s; a one-sound
+    descriptor declares the file's own length, a sequence moves by the difference)."""
+    from .spike2 import sfx_names as SN
+    from .spike2.emulator import Spike2Emu, emitted_length
+    mask = _desc_key_mask(params, sites)
+    byidx = {p["idx"]: p for p in params}
+    by_key, found = {}, []
+    emu = Spike2Emu(gr_path, staged)
+    try:
+        emu.boot()
+        resolver, buf = SN._find_resolver(emu)
+        if resolver is None:
+            raise RuntimeError("the game's descriptor resolver could not be located")
+        for sid in range(SN.sid_ceiling(staged) + 1):
+            r = SN.resolve_descriptor(emu, resolver, buf, sid)
+            if r is not None:
+                found.append((sid, r[0], r[2]))
+    finally:
+        emu.close()
+    # each descriptor's own bytes end where the next one starts (the window runs on into it)
+    extents = _descriptor_extents([o for _s, o, _d in found], SN.DESC_WINDOW)
+    for sid, off, desc in found:
+        for _o, payload in _own_payloads(desc, extents[off]):
+            by_key.setdefault(_play_key(payload, sid, mask), {})[sid] = (desc, extents[off])
+    out = []
+    for u in used:
+        sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
+        what = "%s's file for mode %d (%s)" % (os.path.basename(u["rel"]), u["mode"], u["name"])
+        if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
+            log("Music modes: %s is left out: its record did not come out of the grown bank."
+                % what, "warning")
+            continue
+        slot_key, host_key = bytes(sp["findkey"]), bytes(hp["findkey"])
+        named = by_key.get(slot_key) or {}
+        if not named:
+            log("Music modes: %s is left out: no sound id of the game plays that slot." % what,
+                "warning")
+            continue
+        slot_units = _duration_units_emitted(sp["length"])
+        mode_units = min(int(u["frames"]), emitted_length(hp["length"])) * _DESC_DUR_RATE // 44100
+        n = 0
+        for sid, (desc, extent) in sorted(named.items()):
+            d = _mode_descriptor(desc, sid, mask, slot_key, host_key, mode_units, slot_units,
+                                 extent=extent)
+            if d is None:
+                log("Music modes: %s is left out for sound id %d: the new record's key has bits "
+                    "its descriptor cannot carry." % (what, sid), "warning")
+                continue
+            out.append((int(u["mode"]), int(sid), d))
+            n += 1
+        log("Music modes: mode %d of sound idx %d plays the new record through %d sound id(s) "
+            "of the game." % (u["mode"], u["slot"], n), "info")
+    return out
+
+
+def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir, log):
+    """PAD-494: write ``sounds.cfg`` for the runtime (:func:`.sound_modes.cfg_text`) into
+    *out_dir* and return its path, or ``""`` (and a warning) when the card cannot carry the music
+    modes after all - then every sound plays its own and MUSIC MODE is not added."""
+    from . import menu_settings as _MSet
+    from . import sound_modes as _SMo
+    from .adjustments import AdjustmentTable
+    try:
+        sounds = _sound_mode_descriptors(gr_path, staged, params, sites, used, log)
+        with open(_lp(gr_path), "rb") as f:
+            setting, _w, _c = _MSet.plan(AdjustmentTable(f.read()), _MSet.MUSIC_MODE,
+                                         modes.count, modes.menu_names())
+    except (RuntimeError, ValueError, OSError, struct.error) as e:
+        log("Music modes: not put on this card: %s. Every sound plays its own." % e, "warning")
+        return ""
+    if not sounds:
+        log("Music modes: none of the files for the other modes can be played on this card, so "
+            "MUSIC MODE is not added.", "warning")
+        return ""
+    os.makedirs(_lp(out_dir), exist_ok=True)
+    path = os.path.join(out_dir, _SMo.CFG_NAME)
+    with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write(_SMo.cfg_text(setting.live, modes.count, sounds, only))
+    return path
+
+
 def _install_modes(output_path, modes, landed, planned, log):
     """Item 149: put the modes' runtime on the built card's system partition
     and say, file by file, what the modes added.  Only once every whole-file
@@ -9100,8 +9545,9 @@ def _install_modes(output_path, modes, landed, planned, log):
     make it would be a card that looks modded and is not.  Returns
     ``(record, ok)`` - *record* is what the build record keeps."""
     from . import mode_write as _MW
-    # PAD-446: a card of random clips and no mode
-    who = "Modes" if modes.get("names") or not modes.get("variants") else "Random clips"
+    # PAD-446: a card of random clips and no mode; PAD-494: of music modes only
+    who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes"))
+           else "Random clips" if modes.get("variants") else "Music modes")
     if landed < planned:
         if who == "Modes":
             log("Modes: not every file reached the card, so the mode runtime was "
@@ -9110,6 +9556,11 @@ def _install_modes(output_path, modes, landed, planned, log):
                 "rewritten HUD and bank scenes can name a clip that did not "
                 "land), so do not use this card: fix the issue above and Write "
                 "again.", "error")
+        elif who == "Music modes":
+            log("Music modes: not every file reached the card, so the program "
+                "that picks them was NOT put on the system partition. The grown "
+                "sound bank and game program may already be on it, so do not use "
+                "this card: fix the issue above and Write again.", "error")
         else:
             # words a copy with the mode maker switched off may show (PAD-446)
             log("Random clips: not every file reached the card, so the program "
@@ -9119,12 +9570,13 @@ def _install_modes(output_path, modes, landed, planned, log):
         return None, False
     try:
         _MW.install_p2(output_path, modes["payload"], modes["p2_epoch"],
-                       log=log, modes=who == "Modes")
+                       log=log, modes=who == "Modes", who=who)
     except Exception as e:                   # the executor's CommandError too
         log("%s: the %s could not be put on the card's system partition, so "
             "this card carries no %s: %s"
             % (who, "mode runtime" if who == "Modes" else "program that picks them",
-               "modes" if who == "Modes" else "random clips", e), "error")
+               {"Modes": "modes", "Random clips": "random clips"}.get(who, "music modes"), e),
+            "error")
         return None, False
     for rel in modes.get("added") or ():
         log("%s: added %s." % (who, rel), "info")
@@ -9144,16 +9596,20 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("Modes: request %d (sound idx %d) plays %s's own %s."
             % (own["request"], own["idx"], own["name"],
                _MW.sound_words(own["key"])), "info")
-    if modes.get("names") or not modes.get("variants"):
+    if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")
+    if modes.get("music_modes"):
+        log("Music modes: %d file(s) for the other music modes on the card, played while the "
+            "operator menu's MUSIC MODE says their mode: %s."
+            % (len(modes["music_modes"]), ", ".join(modes["music_modes"])), "success")
     if modes.get("variants"):
         log("Random clips: %d clip(s) on the card play one of several at random "
             "each time the game plays them: %s."
             % (len(modes["variants"]), ", ".join(modes["variants"])), "success")
     rec = {k: modes.get(k) for k in ("names", "added", "rewritten", "port",
-                                     "p2", "end_sound", "variants")}
+                                     "p2", "end_sound", "variants", "music_modes")}
     if modes.get("own_sounds"):
         rec["own_sounds"] = modes.get("own_sounds")
     return rec, True
@@ -11657,6 +12113,17 @@ def _stock_render(emu, p, np, stereo):
     return np.asarray(out[0], np.int64)
 
 
+def _level_ref_render(emu, byidx, p, ref, np):
+    """The loudness reference for encoding *p*: :data:`_LEVEL_REF_UNSET` (its own
+    stock render, the encoders' default) unless *ref* names another record, whose
+    stock render it is then (PAD-494: a music mode's file, in a host record,
+    matches the slot it plays for)."""
+    q = byidx.get(ref) if ref is not None else None
+    if q is None:
+        return _LEVEL_REF_UNSET
+    return _stock_render(emu, q, np, stereo=p.get("chan") == 2)
+
+
 def _fit_level(a, orig, rng, np, headroom, gain_db=None):
     """Level the replacement *a* (int64, mono 1-D or stereo ``(n, 2)``): match
     the ORIGINAL sound's active RMS when a usable reference decoded, else fall
@@ -12869,13 +13336,14 @@ class _AudioBodyCache:
     _MAGIC_SKIP = b"PADAC0\n"
 
     def __init__(self, assets_dir, gr_path, img_path, byidx, ends, gains=None,
-                 img_ident=None):
+                 img_ident=None, refs=None):
         self.assets_dir = assets_dir
         self.dir = os.path.join(assets_dir, ".write_cache", "audio")
         os.makedirs(self.dir, exist_ok=True)
         self.byidx = byidx
         self.ends = ends
         self.gains = gains or {}
+        self.refs = refs or {}
         self.base_key = _audio_cache_base_key(
             gr_path, img_ident if img_ident is not None
             else _image_identity(img_path))
@@ -12899,6 +13367,11 @@ class _AudioBodyCache:
         h.update(self._fp_param(self.ends.get(p["body_off"])))
         h.update(wav_md5.encode())
         h.update(b"g%.3f" % self.gains.get(idx, 0.0))
+        if idx in self.refs:
+            # PAD-494: levelled against another record (a music mode's file
+            # matches its slot's loudness, not its host's)
+            h.update(b"ref%d" % self.refs[idx])
+            h.update(self._fp_param(self.byidx.get(self.refs[idx])))
         return h.hexdigest()
 
     def _path(self, idx, key):
@@ -13037,6 +13510,10 @@ def _grown_cache_sounds(assets_dir, audio_edits, grows, gains, loop_idx, own_use
     names = {}
     for u in own_used or ():
         if u.get("idx") is None:
+            continue
+        if u.get("level_ref") is not None:
+            # PAD-494: a music mode's file in a host record, levelled as its slot
+            names[int(u["idx"])] = ("slot", int(u["level_ref"]), int(u["mode"]))
             continue
         names[int(u["idx"])] = (("sid", int(u["sid"])) if u.get("sid")
                                 else ("request", int(u["request"])))
@@ -13180,13 +13657,15 @@ def _grown_cache_mismatch(kept, places):
 
 
 def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
-                        cancel, gains=None):
+                        cancel, gains=None, refs=None):
     """Single-process cat-0 re-encode (the fallback + correctness reference).
     Returns ``(patches, skipped, results)`` — *results* maps each freshly
     encoded idx to its ``(off, body)`` so the caller can cache it.  *gains*
     maps idx -> that clip's total loudness dB (see :func:`_slot_gain_maps`);
-    an idx it doesn't mention takes the build-wide offset."""
+    an idx it doesn't mention takes the build-wide offset.  *refs* ``{idx:
+    ref_idx}``: the record a sound's loudness matches instead of its own."""
     gains = gains or {}
+    refs = refs or {}
     from .spike2.codec import GenRecover, StereoRecover
     from .spike2.emulator import Spike2Emu
     log("Booting firmware codec engine...", "info")
@@ -13217,11 +13696,12 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                 continue
             try:
                 gdb = gains.get(idx)
+                orig = _level_ref_render(emu, byidx, p, refs.get(idx), np)
                 off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred,
-                                            log=log, gain_db=gdb)
+                                            log=log, gain_db=gdb, orig=orig)
                              if p["chan"] == 2
                              else _encode_mono(emu, gr, p, wav, np, pred=pred,
-                                               log=log, gain_db=gdb))
+                                               log=log, gain_db=gdb, orig=orig))
             except _EncodeVerifyError as e:
                 skipped.append(idx)
                 log("%s -- skipped, left unchanged in the output." % e,
@@ -13238,7 +13718,7 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
 
 
 def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
-                          log, progress, cancel, gains=None):
+                          log, progress, cancel, gains=None, refs=None):
     """Re-encode across ``nworkers`` spawned emulator processes (each boots once).
 
     Returns ``(patches, skipped, remaining, results)``: ``remaining`` is the
@@ -13269,7 +13749,7 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
     # worker keeps both shapes unchanged.
     pool = ctx.Pool(nworkers, initializer=init_encode_worker,
                     initargs=(gr_path, img_path, params, gains or {},
-                              [idx for idx, _w in edits]))
+                              [idx for idx, _w in edits], refs or {}))
     patches, skipped, done_idx, results = {}, [], set(), {}
     try:
         # Confirm a worker actually booted (a stalled/unguarded pool raises here
@@ -16300,7 +16780,7 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
 
 def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
                         progress, cancel, assets_dir=None, gains=None,
-                        cache_img_ident=None):
+                        cache_img_ident=None, level_refs=None):
     """Re-encode every edited cat-0 sound to its body bytes — parallel across
     processes with a single-process fallback.  Returns ``({body_off: body},
     [skipped_idx])`` or ``(None, None)`` if cancelled.
@@ -16308,6 +16788,9 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     With *assets_dir*, sounds unchanged since their last encode replay from
     that folder's :class:`_AudioBodyCache` instead of re-encoding.  *gains*
     maps idx -> that clip's total loudness dB (:func:`_slot_gain_maps`).
+    *level_refs* ``{idx: ref_idx}`` gives a sound the record whose loudness it
+    matches (default: its own; PAD-494: a music mode's file, in a host record,
+    matches its slot's).
 
     *cache_img_ident* is the identity the CACHE should be keyed on.  When this
     build grew the bank, the encode runs against the staged file but the cache
@@ -16316,6 +16799,7 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     the cache anyway: its own param record is part of its key and it now says a
     different body offset and length."""
     gains = gains or {}
+    refs = {i: r for i, r in (level_refs or {}).items() if i in audio_edits}
     byidx = {p["idx"]: p for p in params}
     for idx in sorted(set(audio_edits) - set(byidx)):
         log("idx %d not a known sound; skipping." % idx, "warning")
@@ -16336,7 +16820,8 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
         try:
             cache = _AudioBodyCache(assets_dir, gr_path, img_path, byidx,
                                     _slot_end_map(params), gains=gains,
-                                    img_ident=cache_img_ident)
+                                    img_ident=cache_img_ident,
+                                    **({"refs": refs} if refs else {}))
         except Exception as e:
             log("Audio encode cache unavailable (%s); encoding everything "
                 "fresh." % e, "info")
@@ -16377,7 +16862,7 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
             # each edit's layout-predecessor for the shared-boundary word.
             fresh, psk, remaining, results = _encode_cat0_parallel(
                 gr_path, img_path, params, todo, nworkers, np, log, progress,
-                cancel, gains=gains)
+                cancel, gains=gains, **({"refs": refs} if refs else {}))
             if fresh is None:
                 return None, None
             skipped.extend(psk)
@@ -16393,7 +16878,7 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     if remaining:
         sp, sk, sres = _encode_cat0_serial(
             gr_path, img_path, byidx, remaining, np, log, progress, cancel,
-            gains=gains)
+            gains=gains, **({"refs": refs} if refs else {}))
         if sp is None:
             return None, None
         fresh.update(sp)

@@ -78,10 +78,13 @@ EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 64))
 #: item 160: the "counts as" table of the game's own rules (sdk/MODE_SDK.md "Counts as"), the
 #: only other data file the runtime reads beside its mode files; placed when the install is
 #: given one (--file), taken off when it is not. PAD-446: clips.cfg, the clips that play one of
-#: several at random (sdk/pad_mode_runtime.c "clip variants") - on its own it is a whole install
-EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644))
+# several at random (sdk/pad_mode_runtime.c "clip variants") - on its own it is a whole install.
+#: PAD-494: sounds.cfg, the music modes (pad_mode_runtime.c "music modes") - a whole install too
+EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 0o100644))
 #: the extra file that is enough for an install without a mode (PAD-446)
 CLIPS_FILE = "clips.cfg"
+#: the extra files that are each enough for an install without a mode (PAD-446, PAD-494)
+STANDALONE_FILES = (CLIPS_FILE, "sounds.cfg")
 #: PAD-432: the project's modes as the Modes tab saves them to a file (sources, pictures, clips and
 #: sounds), so another project can load them straight from this card. The runtime never reads it;
 #: placed when the install is given one (--bundle) and it fits, taken off when it is not
@@ -183,7 +186,8 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
     ``extras`` (item 160): the runtime's other data files by their own names, ``stock.cfg``
     and (PAD-446) ``clips.cfg`` (:data:`EXTRA_FILES`); one an earlier install left and this one
     does not bring is removed too. A ``clips.cfg`` is an install on its own: a card whose only
-    change of ours is which clip plays needs no mode file.
+    change of ours is which clip plays needs no mode file; so is (PAD-494) a ``sounds.cfg``, the
+    music modes.
 
     ``bundle`` (PAD-432): the project's modes file (:data:`BUNDLE_FILE`), placed when p2 has room
     for it beside the rest; when it has not, the modes are installed without it and
@@ -201,8 +205,9 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
     if len(extra_cfgs) > len(EXTRA_CFGS):
         raise mk.Refused("a card holds at most %d mode files - nothing has been written"
                          % (1 + len(EXTRA_CFGS)))
-    if not cfg_path and not assets and CLIPS_FILE not in {os.path.basename(x) for x in extras}:
-        raise mk.Refused("no mode file, no code mode's assets and no clips.cfg - nothing has been written")
+    if not cfg_path and not assets and not set(STANDALONE_FILES) & {os.path.basename(x) for x in extras}:
+        raise mk.Refused("no mode file, no code mode's assets, no clips.cfg and no sounds.cfg - nothing "
+                         "has been written")
     if extra_cfgs and not cfg_path:
         raise mk.Refused("slot files without a mode.cfg - nothing has been written")
     for a in assets:
@@ -364,7 +369,8 @@ def main(argv=None):
     p.add_argument("--file", action="append", default=[],
                    help="another data file the runtime reads beside its mode files, by its own "
                         "name: stock.cfg, the counts-as table of the game's own rules (item 160), "
-                        "or clips.cfg, the clips that play one of several at random (PAD-446)")
+                        "clips.cfg, the clips that play one of several at random (PAD-446), "
+                        "or sounds.cfg, the music modes (PAD-494)")
     p.add_argument("--port", help="the SDK runtime's port file for this game (item 134)")
     p.add_argument("--bundle", help="the project's modes file (PAD-432), for another project to "
                                     "load them from this card; left off when p2 has no room")

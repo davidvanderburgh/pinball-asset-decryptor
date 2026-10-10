@@ -31,6 +31,9 @@ import sys
 import threading
 import time
 
+#: PAD-494: the most music modes a project may have (mode 1 is the sounds as they are)
+_MODES_MAX = 3
+
 from .. import compat
 from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
@@ -160,6 +163,11 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._keep = {}             # rel -> bool (JJP)
         self._level = {}            # rel -> int dB (Stern)
         self._keep_whole = []       # ordered rels (Stern Spike 2 grow)
+        # PAD-494: a slot's files for the other MUSIC MODES ({rel: {mode: path}}),
+        # the modes' names, and the plugin's answer to which slots can have them
+        self._modes = {}
+        self._mode_names = []
+        self._sm_offer = None
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -513,10 +521,17 @@ class AudioTab(FindOriginalsMixin, TabService):
                     assets_path, [s.rel_path for s in slots])
             except Exception:                           # noqa: BLE001
                 cats = {}
+            # PAD-494: which slots can have files for other music modes (it
+            # may open the card image, so here and not on the UI thread)
+            try:
+                offer = (mfr.sound_modes_offer(
+                    assets_path, [s.rel_path for s in slots]) if mfr else None)
+            except Exception:                           # noqa: BLE001
+                offer = None
             if self._scan_id != scan_id:
                 return
             self._post(self._populate_after_scan, slots, scan_id,
-                       assets_path, cats)
+                       assets_path, cats, offer)
 
         self._set_scanning(True)
         threading.Thread(target=_work, daemon=True,
@@ -561,12 +576,14 @@ class AudioTab(FindOriginalsMixin, TabService):
                  empty="Scan cancelled — click Scan to try again.")
         return True
 
-    def _populate_after_scan(self, slots, scan_id, scan_dir, cats=None):
+    def _populate_after_scan(self, slots, scan_id, scan_dir, cats=None,
+                             offer=None):
         from ...core import staged_changes
         if self._scan_id != scan_id:
             return
         self._set_scanning(False)
         self._cats = cats or {}
+        self._sm_offer = offer if isinstance(offer, dict) else None
         if scan_dir != self._scan_dir:
             self.audio_type_var.set("All types")
         self._refresh_type_filter()
@@ -594,9 +611,12 @@ class AudioTab(FindOriginalsMixin, TabService):
             persisted_trim = bool(staged.get("audio_trim", False))
             self._restore_change_filter(staged)
             self.audio_group_dups_var.set(False)
+            self._load_modes(staged)
         else:
             self._assign = {rel: rep for rel, rep in self._assign.items()
                             if rel in self._by_rel}
+            self._modes = {rel: v for rel, v in self._modes.items()
+                           if rel in self._by_rel}
         self._loop = {
             s.rel_path: (bool(saved_loops[s.rel_path])
                          if s.rel_path in saved_loops
@@ -950,6 +970,11 @@ class AudioTab(FindOriginalsMixin, TabService):
                                 in self._level.items() if db}
         data["grow_keep_whole"] = [r for r in self._keep_whole
                                    if r in self._by_rel]
+        modes = self._modes_json()
+        if modes:
+            data["sound_modes"] = modes
+        else:
+            data.pop("sound_modes", None)
         data["audio_trim"] = bool(self.audio_trim_var.get())
         data["audio_change_filter"] = self.audio_change_filter_var.get()
         names = dict(data.get("replacement_names") or {})
@@ -1007,7 +1032,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         mode = self.audio_change_filter_var.get()
         if mode not in ("Changed", "Unchanged"):
             return None
-        touched = set(self._assign) | self._changed
+        # PAD-494: a slot with files for other music modes is a change too
+        touched = set(self._assign) | self._changed | set(self._modes)
         want = mode == "Changed"
         return lambda rel: (rel in touched) == want
 
@@ -1045,6 +1071,10 @@ class AudioTab(FindOriginalsMixin, TabService):
                "loop": bool(self._loop.get(rel)),
                "keep": bool(self._keep.get(rel)),
                "lvl": self._level_disp(rel)}
+        md = self._modes.get(rel)
+        if md:
+            row["md"] = sorted(md)
+            row["md_tip"] = self._modes_words(rel)
         if depth:
             row["d"] = depth
         return row
@@ -1138,7 +1168,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                 rows.append(self._row(s, _cat_disp(s)))
 
         total = len(self._slots)
-        changed_total = len(set(self._assign) | changed)
+        changed_total = len(set(self._assign) | changed | set(self._modes))
         shown_n = len(slots)
         if total == 0:
             status = ""
@@ -2298,6 +2328,9 @@ class AudioTab(FindOriginalsMixin, TabService):
             items += [{"sep": True},
                       {"label": "Remove replacement", "action": "remove",
                        "icon": "x"}]
+        sm = self._modes_menu(rel)
+        if sm:
+            items += [{"sep": True}, sm]
         if self._audio_grow_active() and re.match(
                 r"idx\d+", os.path.basename(rel) or ""):
             items += [{"sep": True},
@@ -2323,6 +2356,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             return self._clear_selected(list(sel or self._sel))
         if rel not in self._by_rel:
             return False
+        if action.startswith("mode_"):
+            return self._mode_action(action, rel)
         if action == "play_orig":
             self._load_track(rel, autoplay="orig")
         elif action == "choose":
@@ -2358,6 +2393,183 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._find_in_partition(rel)
         else:
             return False
+        return True
+
+    # ------------------------------------------------------------------
+    # PAD-494: music modes - a slot's files for the other MUSIC MODES
+    # ------------------------------------------------------------------
+    def _load_modes(self, staged):
+        """The folder's music modes (``.staged_changes.json`` ``sound_modes``:
+        ``{"names": [...], "slots": {rel: {"2": file, ...}}}``), its slots
+        held to the ones this scan found."""
+        raw = staged.get("sound_modes") if isinstance(staged, dict) else None
+        raw = raw if isinstance(raw, dict) else {}
+        names = raw.get("names")
+        self._mode_names = ([str(n) if isinstance(n, str) else "" for n in names][:_MODES_MAX]
+                            if isinstance(names, (list, tuple)) else [])
+        self._modes = {}
+        slots = raw.get("slots")
+        for rel, files in (slots.items() if isinstance(slots, dict) else ()):
+            if rel not in self._by_rel or not isinstance(files, dict):
+                continue
+            keep = {}
+            for m, f in files.items():
+                try:
+                    m = int(m)
+                except (TypeError, ValueError):
+                    continue
+                if 2 <= m <= _MODES_MAX and isinstance(f, str) and f.strip():
+                    keep[m] = f
+            if keep:
+                self._modes[rel] = keep
+
+    def _modes_json(self):
+        names = list(self._mode_names)
+        while names and not str(names[-1] or "").strip():
+            names.pop()
+        slots = {rel: {str(m): f for m, f in sorted(v.items())}
+                 for rel, v in sorted(self._modes.items()) if v}
+        if not slots and not names:
+            return None
+        return {"names": names, "slots": slots}
+
+    def _mode_name(self, m):
+        n = self._mode_names[m - 1] if 0 < m <= len(self._mode_names) else ""
+        return " ".join(str(n or "").split()) or "Mode %d" % m
+
+    def _mode_label(self, m):
+        """"Mode 2 (Orchestral)", or "Mode 2" for one not named."""
+        n = self._mode_names[m - 1] if 0 < m <= len(self._mode_names) else ""
+        n = " ".join(str(n or "").split())
+        return "Mode %d (%s)" % (m, n) if n else "Mode %d" % m
+
+    def _modes_max(self):
+        return max(2, min(_MODES_MAX, int((self._sm_offer or {}).get("max") or _MODES_MAX)))
+
+    def _modes_words(self, rel):
+        """What the row says of a slot's music modes, or "" for one with none."""
+        md = self._modes.get(rel) or {}
+        if not md:
+            return ""
+        own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
+               else "the game's own sound")
+        parts = ["%s: %s" % (self._mode_label(1).lower(), own)]
+        parts += ["%s: %s" % (self._mode_label(m).lower(), os.path.basename(f))
+                  for m, f in sorted(md.items())]
+        return ("Music modes - the machine's MUSIC MODE setting picks which "
+                "plays: " + "; ".join(parts) + ".")
+
+    def _modes_why(self, rel):
+        offer = self._sm_offer or {}
+        return offer.get("why") or (offer.get("slots") or {}).get(rel, "")
+
+    def _modes_menu(self, rel):
+        """The row menu's "Music modes" entry and its submenu, or None where
+        the plugin offers no music modes and the slot has no mode files."""
+        md = self._modes.get(rel) or {}
+        if self._sm_offer is None and not md:
+            return None
+        why = self._modes_why(rel)
+        sub = []
+        if why:
+            sub.append({"label": "Why not this sound?", "action": "mode_why"})
+        else:
+            for m in range(2, self._modes_max() + 1):
+                f = md.get(m)
+                sub.append({"label": "%s: %s" % (
+                    self._mode_label(m),
+                    "change %s…" % os.path.basename(f) if f else "choose a sound…"),
+                    "action": "mode_pick:%d" % m, "icon": "file"})
+        if md:
+            sub.append({"sep": True})
+            for m, f in sorted(md.items()):
+                if not why:
+                    sub.append({"label": "Play mode %d's sound (%s)" % (m, os.path.basename(f)),
+                                "action": "mode_play:%d" % m, "icon": "play"})
+                sub.append({"label": "Take off mode %d's sound (%s)" % (m, os.path.basename(f)),
+                            "action": "mode_off:%d" % m, "icon": "x"})
+        if not why:
+            sub += [{"sep": True},
+                    {"label": "Name the music modes…", "action": "mode_names", "icon": "edit"}]
+        return {"label": "Music modes" + (" (%d)" % len(md) if md else ""),
+                "icon": "music", "submenu": sub}
+
+    def _modes_changed(self, rel):
+        self._save_staged_changes()
+        self._sel = [rel]
+        self._refresh_list()
+
+    def _mode_action(self, action, rel):
+        kind, _c, arg = action.partition(":")
+        try:
+            m = int(arg) if arg else 0
+        except ValueError:
+            return False
+        md = self._modes.get(rel) or {}
+        if kind == "mode_why":
+            why = self._modes_why(rel)
+            if why:
+                compat.messagebox.showinfo("Music modes", why)
+            return bool(why)
+        if kind == "mode_names":
+            return self._name_modes()
+        if not 2 <= m <= _MODES_MAX:
+            return False
+        if kind == "mode_pick":
+            if self._modes_why(rel):
+                return False
+            self._cancel_select_job()
+            self.stop_all_preview_playback()
+            path = self._ask_path(
+                "open", "audio_replacement",
+                "Choose the sound %s plays in music %s"
+                % (rel, self._mode_label(m).lower()), filetypes=_AUDIO_FILETYPES)
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+            if not path:
+                return False
+            self._modes.setdefault(rel, {})[m] = os.path.normpath(path)
+            self.log("Replace Audio: %s ← %s, for music %s."
+                     % (rel, os.path.basename(path), self._mode_label(m).lower()), "info")
+            self._modes_changed(rel)
+            return True
+        f = md.get(m)
+        if not f:
+            return False
+        if kind == "mode_play":
+            if rel != self._current_rel:
+                self._load_track(rel)
+            self._pane_load("rep", f, autoplay=True,
+                            label="%s: %s" % (self._mode_label(m), os.path.basename(f)))
+            return True
+        if kind == "mode_off":
+            md.pop(m, None)
+            if not md:
+                self._modes.pop(rel, None)
+            self.log("Replace Audio: %s no longer has a sound for music %s."
+                     % (rel, self._mode_label(m).lower()), "info")
+            self._modes_changed(rel)
+            return True
+        return False
+
+    def _name_modes(self):
+        """Ask for the music modes' names, one line: the machine shows them in
+        MUSIC MODE's help line ("1 = Standard, 2 = Orchestral")."""
+        n = self._modes_max()
+        now = ", ".join(self._mode_name(m) for m in range(1, n + 1))
+        text = compat.simpledialog.askstring(
+            "Name the music modes",
+            "The names of modes 1 to %d, separated by commas. Mode 1 is every sound as "
+            "it plays now; the machine's MUSIC MODE setting names them in its help "
+            "line." % n, initialvalue=now)
+        if text is None:
+            return False
+        names = [" ".join(t.split()) for t in str(text).split(",")][:n]
+        self._mode_names = names
+        self.log("Replace Audio: the music modes are %s." % ", ".join(
+            "%d %s" % (m, self._mode_name(m)) for m in range(1, n + 1)), "info")
+        self._save_staged_changes()
+        self._refresh_list()
         return True
 
     def _open_target(self, rel, which):

@@ -632,6 +632,45 @@ static int hook_veto_bl(unsigned addr, veto_n_fn logger, unsigned n, unsigned re
     return 1;
 }
 
+/* PAD-494: a WRAP - our function takes the game function's place and calls the game's own work
+ * itself, so it sees (and may change) what that returns. The entry jumps straight to `wrapper`, with
+ * every register and the stack as the caller left them; the trampoline holds the two moved words and
+ * jumps back to addr + 8, so CALLING THE TRAMPOLINE IS CALLING THE ORIGINAL. Returns the trampoline,
+ * 0 when refused: neither moved word may read pc (a literal load or a pc operand would run from the
+ * wrong address), and the first must be the function's `push {.., lr}`. Four words:
+ *   0,1 the original two words   2 ldr pc,[pc,#-4]   3 addr + 8      14,15 the moved words again
+ * The trampoline is not the logger shape (t[0] is not push {r0-r3,ip,lr}), so words_match() in
+ * another object stops at our jump and refuses the site rather than reading a wrong pair. */
+static void *hook_wrap(unsigned addr, void *wrapper)
+{
+    unsigned *p = (unsigned *)(unsigned long)addr, *t;
+    int i;
+    if (!addr || !wrapper || (tramp_used + 1) * 16 > TRAMP_WORDS) return 0;
+    if ((p[0] & 0xFFFF4000u) != 0xE92D4000u) return 0;                  /* push {.., lr} */
+    for (i = 0; i < 2; i++) {
+        unsigned w = p[i];
+        if ((w & 0x0C000000u) == 0x04000000u && ((w >> 16) & 0xF) == 15) return 0;   /* ldr/str [pc, ..] */
+        if ((w & 0x0C000000u) == 0x00000000u                                 /* data processing: */
+            && (((w >> 16) & 0xF) == 15 || (!(w & 0x02000000u) && (w & 0xF) == 15))) return 0;   /* pc in */
+        if (((w >> 12) & 0xF) == 15) return 0;                          /* writes pc */
+    }
+    t = tramp + tramp_used++ * 16;
+    for (i = 0; i < 16; i++) t[i] = 0;
+    t[0] = p[0];
+    t[1] = p[1];
+    t[2] = 0xe51ff004u;                       /* ldr pc, [pc, #-4] -> t[3] */
+    t[3] = addr + 8u;
+    t[14] = p[0];
+    t[15] = p[1];
+    mprotect(tramp, sizeof tramp, 7);
+    mprotect((void *)(unsigned long)(addr & ~0xfffu), 0x2000, 7);
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    p[1] = (unsigned)(unsigned long)wrapper;
+    p[0] = 0xe51ff004u;                       /* ldr pc, [pc, #-4] */
+    __builtin___clear_cache((char *)p, (char *)(p + 2));
+    return t;
+}
+
 /* ---- the game, right now ------------------------------------------------------------- */
 unsigned pm_player(void)
 {
@@ -8460,6 +8499,179 @@ static void clipv_arm(void)
     }
 }
 
+/* ---- music modes (PAD-494): an operator setting picks which set of sounds the game plays ---------
+ * A tester asked for one card with an orchestral and a standard score instead of a card of each: the
+ * Audio tab gives a sound more files than its own, one per MUSIC MODE, and the machine's service menu
+ * gets a MUSIC MODE adjustment (a setting the game never reads, re-labelled by the build). Mode 1 is
+ * the card as it is; each other mode's files are records the build appended to the sound bank, which
+ * nothing the game plays names.
+ *
+ * The game finds a sound through its DESCRIPTOR: get_asset_descriptor(asset id, out) (`site
+ * sound_resolve`) returns a pointer to the descriptor in the bank and puts the keystream that whitens it
+ * in out[0]. The descriptor names the record (an op11 payload, the record's key) and DECLARES how long it
+ * plays (bytes 3..6, 1/4000 s), and the voice plays that long - so a swap of the record's key alone
+ * (pm_sound_swap) would cut an orchestral song at the stock loop's length. Instead the resolver is
+ * WRAPPED (hook_wrap): the game's own resolve runs, and when the setting says mode m and sounds.cfg has
+ * mode m's descriptor for the asset, the game gets those bytes - the card's own script, naming the
+ * mode's record and declaring its length, written out by the build - with a keystream of zeros, so
+ * they read as they are. sounds.cfg (/usr/local/padmode/sounds.cfg on a card, /dump/sounds.cfg in the
+ * rig), one TAB-separated line each:
+ *
+ *     only                                 the card carries no modes: arm this and nothing else
+ *     setting <TAB> <live> <TAB> <n>        the adjustment's live value (its address), modes 1..n
+ *     sound <TAB> <m> <TAB> <id> <TAB> <hex> mode m's descriptor for asset id (the resolver's r0)
+ *     force <TAB> <m>                      a rig run's own pick (the build never writes it)
+ *
+ * The setting is read at every resolve (one word), so a change in the menu is heard from the next
+ * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg. */
+#define SNDM_FILE_MAX   (512 * 1024)
+#define SNDM_SOUNDS     3072
+#define SNDM_DESC       96                  /* a descriptor's bytes as the resolver's caller reads them */
+#define SNDM_MODES      8
+static const char *const SNDM_FILES[] = { "/usr/local/padmode/sounds.cfg", "/dump/sounds.cfg" };
+struct sndm {
+    unsigned id;
+    unsigned char mode, said;
+    unsigned char desc[SNDM_DESC];
+};
+static char sndm_raw[SNDM_FILE_MAX + 1];
+static struct sndm sndm[SNDM_SOUNDS];
+static const unsigned char sndm_zeros[1024];    /* the keystream our descriptors are read with */
+static unsigned n_sndm, sndm_live, sndm_n, sndm_force;
+static int sndm_only, sndm_dropped, sndm_bad;
+static volatile unsigned sndm_last = 1;         /* the mode the last resolve played, for the log */
+static unsigned (*sndm_orig)(unsigned, unsigned *);
+
+static void sndm_line(char *s)
+{
+    const char *p;
+    char *f[4];
+    unsigned n = 0, k, m;
+    int ok;
+    struct sndm *e;
+    while (*s == ' ') s++;
+    if (*s == '#' || !*s) return;
+    for (;;) {
+        if (n < 4) f[n++] = s;
+        while (*s && *s != '\t') s++;
+        if (!*s) break;
+        *s++ = 0;
+    }
+    if (n == 1 && str_eq(f[0], "only")) { sndm_only = 1; return; }
+    if (n >= 3 && str_eq(f[0], "setting")) {
+        p = f[1];
+        sndm_live = (unsigned)number(&p, &ok);
+        p = f[2];
+        m = (unsigned)number(&p, &ok);
+        sndm_n = ok && m >= 1 && m <= SNDM_MODES ? m : 0;
+        return;
+    }
+    if (n >= 2 && str_eq(f[0], "force")) {
+        p = f[1];
+        m = (unsigned)number(&p, &ok);
+        sndm_force = ok && m >= 1 && m <= SNDM_MODES ? m : 0;
+        return;
+    }
+    if (n < 4 || !str_eq(f[0], "sound")) return;
+    if (n_sndm >= SNDM_SOUNDS) { sndm_dropped++; return; }
+    e = &sndm[n_sndm];
+    p = f[1];
+    m = (unsigned)number(&p, &ok);
+    if (!ok || m < 2 || m > SNDM_MODES) { sndm_bad++; return; }
+    p = f[2];
+    e->id = (unsigned)number(&p, &ok);
+    if (!ok) { sndm_bad++; return; }
+    for (k = 0; k < SNDM_DESC; k++) e->desc[k] = 0;
+    for (k = 0, p = f[3]; k < SNDM_DESC && hexval(p[0]) >= 0 && hexval(p[1]) >= 0; k++, p += 2)
+        e->desc[k] = (unsigned char)(hexval(p[0]) << 4 | hexval(p[1]));
+    if (k < 8 || e->desc[0] != 5) { sndm_bad++; return; }   /* a descriptor starts with its magic, 5 */
+    e->mode = (unsigned char)m;
+    n_sndm++;
+}
+
+static int sndm_read(void)
+{
+    long n = -1, i, start = 0;
+    unsigned k;
+    for (k = 0; k < sizeof SNDM_FILES / sizeof SNDM_FILES[0] && n < 0; k++)
+        n = pm_read_file(SNDM_FILES[k], sndm_raw, SNDM_FILE_MAX);
+    if (n <= 0) return 0;
+    sndm_raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || sndm_raw[i] == '\n' || sndm_raw[i] == '\r') {
+            sndm_raw[i] = 0;
+            sndm_line(sndm_raw + start);
+            start = i + 1;
+        }
+    return 1;
+}
+
+/* the mode the operator's setting says now: 1..n, else 1 (a value the game never wrote, a store
+ * from another card) */
+static unsigned sndm_mode(void)
+{
+    unsigned v;
+    if (sndm_force) return sndm_force;
+    if (!sndm_live) return 1;
+    v = *(volatile const unsigned *)(unsigned long)sndm_live;
+    return v >= 1 && v <= sndm_n ? v : 1;
+}
+
+/* get_asset_descriptor(id, out), wrapped: the game's own first, then mode m's bytes for the asset */
+static unsigned sndm_resolve(unsigned id, unsigned *out)
+{
+    unsigned d = sndm_orig(id, out), m, i;
+    struct sndm *e = 0;
+    if (!d || !out) return d;
+    m = sndm_mode();
+    if (m != sndm_last) {
+        sndm_last = m;
+        say("music modes: mode %u from here on (asset 0x%x is the first sound it starts)", m, id);
+    }
+    if (m < 2) return d;
+    for (i = 0; i < n_sndm; i++)
+        if (sndm[i].id == id && sndm[i].mode == m) { e = &sndm[i]; break; }
+    if (!e) return d;
+    if (!e->said) {
+        e->said = 1;
+        say("music modes: asset 0x%x plays mode %u's sound (its descriptor at 0x%08x is the card's)", id, m, d);
+    }
+    out[0] = (unsigned)(unsigned long)sndm_zeros;
+    return (unsigned)(unsigned long)e->desc;
+}
+
+/* from the constructor, after the port gate: read sounds.cfg and wrap the game's resolver */
+static void sndm_arm(void)
+{
+    if (!sndm_read()) return;
+    if (sndm_dropped || sndm_bad)
+        say("music modes: %d line(s) not read (the table holds %d sounds), %d not a sound line", sndm_dropped,
+            SNDM_SOUNDS, sndm_bad);
+    if (!n_sndm) {
+        say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
+        return;
+    }
+    if (sndm_live && !maps_has(sndm_live, 4, MAP_R)) {
+        say("music modes: the setting's value at 0x%08x is not in the game's memory - every sound plays mode 1's",
+            sndm_live);
+        sndm_live = 0;
+    }
+    if (!fn("sound_resolve")) {
+        say("music modes: off - the port has no sound_resolve that matches this build; every sound plays mode 1's");
+        n_sndm = 0;
+        return;
+    }
+    sndm_orig = (unsigned (*)(unsigned, unsigned *))hook_wrap(fn("sound_resolve"), (void *)sndm_resolve);
+    if (!sndm_orig) {
+        say("music modes: off - sound_resolve 0x%08x cannot be wrapped; every sound plays mode 1's", fn("sound_resolve"));
+        n_sndm = 0;
+        return;
+    }
+    say("music modes: %u sound(s) over %u mode(s), the setting at 0x%08x (now %u)%s; get_asset_descriptor "
+        "0x%08x is wrapped", n_sndm, sndm_n, sndm_live, sndm_live ? *(volatile const unsigned *)(unsigned long)sndm_live : 0,
+        sndm_force ? " - FORCED by the file" : "", fn("sound_resolve"));
+}
+
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -8481,8 +8693,11 @@ static void pad_mode_start(void)
             port.n_switch, N_SWITCHES);
     if (!port_gate()) return;
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
-    if (clipv_only) {
-        say("armed: clip variants only (clips.cfg says the card has no modes) - nothing else is hooked");
+    sndm_arm();                               /* PAD-494: nor does a music mode */
+    if (clipv_only || sndm_only) {
+        say("armed: %s only (%s says the card has no modes) - nothing else is hooked",
+            clipv_only && sndm_only ? "clip variants and music modes" : clipv_only ? "clip variants" : "music modes",
+            clipv_only ? "clips.cfg" : "sounds.cfg");
         return;
     }
     if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */

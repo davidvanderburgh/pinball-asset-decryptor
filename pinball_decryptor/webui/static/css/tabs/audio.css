@@ -42,6 +42,10 @@
 .aud-stray .aud-name .muted { color: var(--warn); opacity: .75; }
 .aud-rep { all: unset; display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; border-radius: 4px; }
 .aud-rep.choose { color: var(--ink-3); }
+.aud-repcell { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.aud-repcell .aud-rep { flex: 0 1 auto; min-width: 0; }
+.aud-modes { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 9px; background: var(--info-soft); color: var(--info); font-size: 12px; line-height: 18px; cursor: default; }
+.aud-modes .i { width: 13px; height: 13px; }
 .aud-rep:hover { text-decoration: underline; }
 .aud-rep.choose:hover { color: var(--accent); }
 .aud-rep:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

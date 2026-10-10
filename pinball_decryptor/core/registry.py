@@ -969,6 +969,16 @@ class Manufacturer(ABC):
         thread: it may open the project's card image."""
         return None
 
+    def sound_modes_offer(self, assets_dir, rels):
+        """Which Replace-Audio slots can have files for other MUSIC MODES that
+        an operator setting picks between (PAD-494): ``{"why": why_none,
+        "slots": {rel: why_not}, "max": n}`` - why no slot of this project can
+        (``""`` when they can), per slot why that one cannot (``""`` when it
+        can), and how many modes a project may have. ``None`` (the default)
+        when the plugin has no such thing, and the tab offers nothing. Called
+        off the UI thread: it may open the project's card image."""
+        return None
+
     def video_pins_byte_size(self, assets_dir=None) -> bool:
         """Whether this plugin's Write may hold a replacement clip to the
         original's exact byte length.

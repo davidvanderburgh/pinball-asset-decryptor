@@ -532,11 +532,14 @@ export default function AudioTab() {
     const items = await call("audio.menu", r.k, cur);
     if (!items || !items.length) return;
     // a toggle entry reads as a box, ticked or not ("☑  Keep this song
-    // whole…" / "☐  …", the Tk menu's own labels)
-    openMenu({ x, y }, items.map((it) => it.sep ? { sep: true } : ({
+    // whole…" / "☐  …", the Tk menu's own labels); PAD-494: an entry may open
+    // a submenu of its own ("Music modes")
+    const item = (it) => it.sep ? { sep: true } : ({
       label: it.checked == null ? it.label : (it.checked ? "☑  " : "☐  ") + it.label,
       icon: it.icon, kbd: it.kbd, disabled: it.disabled,
-      onClick: it.action ? () => doAction(it.action, r.k, cur) : undefined })));
+      submenu: it.submenu ? it.submenu.map(item) : undefined,
+      onClick: it.action ? () => doAction(it.action, r.k, cur) : undefined });
+    openMenu({ x, y }, items.map(item));
   };
   const openProps = async () => {
     const data = await call("audio.props_info");
@@ -618,8 +621,10 @@ export default function AudioTab() {
       titleOf: () => T.level, render: (r) => r.lvl || "" }] : []),
     { key: "rep", label: "Replacement", sort: "rep", width: `minmax(${MIN_W.rep}px,1fr)`, titleOf: (r) => r.rep,
       render: (r) => r.g ? html`<span class="muted">${r.rep}</span>`
-        : html`<button type="button" class=${cx("aud-rep", r.t === "picked" && "picked", r.t === "ondisk" && "ondisk", r.t === "stray" && "stray", !r.t && "choose")}
-            onDblClick=${noDbl} onClick=${once(() => { selectOne(r.k); call("audio.choose", r.k); })}>${r.rep}</button>` },
+        : html`<span class="aud-repcell"><button type="button" class=${cx("aud-rep", r.t === "picked" && "picked", r.t === "ondisk" && "ondisk", r.t === "stray" && "stray", !r.t && "choose")}
+            onDblClick=${noDbl} onClick=${once(() => { selectOne(r.k); call("audio.choose", r.k); })}>${r.rep}</button>${r.md
+          ? html`<span class="aud-modes" aria-label=${`Sounds for music modes ${r.md.join(", ")}`} ...${tip({ head: "Music modes", lines: [r.md_tip] })}><${Icon} name="music" />${r.md.join(" ")}</span>`
+          : null}</span>` },
   ];
   const selected = sel.length === 1 ? sel[0] : new Set(sel);
   const selRel = sel.find((k) => index.has(k) && !String(k).startsWith("::dupgrp::")) || null;

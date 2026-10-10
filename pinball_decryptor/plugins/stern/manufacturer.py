@@ -813,6 +813,13 @@ class SternManufacturer(Manufacturer):
         why, slots = offer(assets_dir, rels, probe=True)
         return {"why": why, "slots": slots, "max": MAX_EXTRA}
 
+    def sound_modes_offer(self, assets_dir, rels):
+        # PAD-494: the sound bank's sounds, on a title the music modes were
+        # proven on (sound_modes.PROVEN)
+        from .sound_modes import MAX_MODES, offer
+        why, slots = offer(assets_dir, rels, probe=True)
+        return {"why": why, "slots": slots, "max": MAX_MODES}
+
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games
         # partition, which neither a Whitestar ROM zip nor a Spike 1 card has.

@@ -17,6 +17,9 @@ site shot_dispatch    0x000d1a9c 0xe92d41f0 0xe24dd008
 site ball_end         0x000d3dcc 0xe92d40f8 0xe3016c10
 #   sound_lookup: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site sound_lookup     0x00345ab0 0xe92d4038 0xe1a05000
+#   sound_resolve: PAD-494 music modes - get_asset_descriptor(asset id, out), WRAPPED (sounds.cfg); the
+#   resolver spike2/sfx_names._find_resolver drives [Godzilla Premium/LE 1.16 0x43c104, Godzilla Pro 1.16]
+site sound_resolve    0x002ab79c 0xe92d41f0 0xe1a05820
 #   score_add: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site score_add        0x00257458 0xe30518ea 0xe340107e
 #   callout: placed through 3 callers, e.g. the bl at 0x433b8; other titles' ports place 0x2ac950 (The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]

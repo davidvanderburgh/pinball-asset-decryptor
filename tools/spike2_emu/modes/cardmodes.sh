@@ -73,7 +73,7 @@ forget() {
     [ -f "$MARK" ] || return 0
     rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP/game.port" \
           "$DUMP"/mode.start "$DUMP"/mode[1-7].start "$DUMP/mode.stop" "$DUMP/mode.clip" \
-          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$MARK" 2>/dev/null
+          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$MARK" 2>/dev/null
     return 0
 }
 
@@ -147,6 +147,14 @@ if [ "$CLIPS" != 0 ]; then
     if [ "$N" = 0 ]; then WHAT="$CLIPS clip(s) that play one of several at random"
     else WHAT="$WHAT and $CLIPS clip(s) that play one of several at random"; fi
 fi
+# PAD-494: sounds.cfg (the music modes) is a reason of its own too
+SOUNDS=0
+[ -f "$S/sounds.cfg" ] && SOUNDS=$(grep -c "^sound	" "$S/sounds.cfg" 2>/dev/null)
+case "$SOUNDS" in ''|*[!0-9]*) SOUNDS=0 ;; esac
+if [ "$SOUNDS" != 0 ]; then
+    if [ "$N" = 0 ] && [ "$CLIPS" = 0 ]; then WHAT="music modes ($SOUNDS sound id(s))"
+    else WHAT="$WHAT and music modes ($SOUNDS sound id(s))"; fi
+fi
 
 if ! python3 "$RIG/parts.py" --rootfs-file /etc/init.d/game_monitor "$CARD" 2>/dev/null \
         | grep -qF "$HOOK"; then
@@ -160,7 +168,7 @@ if [ -n "${PAD_MODE_SO:-}" ]; then
         "(PAD_MODE_SO=$PAD_MODE_SO): that one runs, the card's own modes are left out"
     exit 0
 fi
-if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ]; }; then
+if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ]; }; then
     forget
     say "$WHO carries a mode object but no $([ -f "$S/game.port" ] && echo "mode file" || echo "port file") beside it:"
     say "  nothing the emulator can run. This run boots without it"
@@ -182,7 +190,7 @@ fi
 if [ "$(id -u)" = 0 ]; then
     _o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
     [ -n "$_o" ] && [ "$_o" != root ] && chown "$_o" "$ROOT$OBJECT" "$DUMP/game.port" \
-        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$MARK" 2>/dev/null
+        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$MARK" 2>/dev/null
 fi
 say "$WHO carries $WHAT: their runtime runs in this game, as on the machine"
 echo "$OBJECT"

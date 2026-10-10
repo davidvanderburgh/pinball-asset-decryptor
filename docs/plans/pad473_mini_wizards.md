@@ -27,7 +27,7 @@ strings naming a wizard; `C:/tmp/PAD-473/modecensus.txt`, `wizstrings.txt`) and 
 | The Beatles 1.29 | Beatlemania Multiball (the rulesheets' Help / Beatlemania: level 3 in all five modes; Taxman is the final) | plain C: 0x39270 r0 1, flag 81 | **proven** (run 3) |
 | Deadpool LE / Pro 1.16 | Mr. Sinister: Megakrakolodonus Rex, Clone Multiball (scoop) | `cmrsinister_rex`, `cmrsinister_clones` | **proven** (run 1, mode route) |
 | Dungeons & Dragons LE / Pro 1.10 | Tiny's Dice Game, Tavern Brawl (center spinner) | `ctinys_dice_game`, `ctavern_brawl` | Pro **proven**; LE lines written, no game on the rig |
-| Elvira's House of Horrors 1.13 | House Party, They Came From Space (the House) | Rule classes | open |
+| Elvira's House of Horrors 1.13 | House Party, They Came From Space (the House) | rule objects: v[22] 0xd57d8 / 0x181dd8, r0 0x87e06c / 0x885e28 | **proven** (run 3) |
 | Foo Fighters LE / Pro 1.04 | Austin, D.C. (left ramp, van map) | `cmode_austin_wizard`, `cmode_dc_wizard` | **proven** (run 1, mode route) |
 | Godzilla LE / Pro 1.16 | Monster Zero, Terror of Mechagodzilla (building), Planet X Multiball (City Select) | `cmode_monster_zero`, `cmode_terror_of_mechagodzilla`, `cmode_planet_x_multiball` | **proven** (run 1, mode route) |
 | Guardians / LE 1.15 | Cherry Bomb Multiball, Immolation Initiative (right scoop) | plain C: Cherry Bomb 0x2f704, flag 52, earned check hooked | Cherry Bomb **proven** (run 3, before the launch); Immolation Initiative not found |
@@ -177,22 +177,26 @@ wizard_slot_enable 42` makes the runtime call v[42] first - Austin then started,
   `p12` / `p13`): Medley Tour Multiball (the glass's name for Medley) 3 balls, Cherry Bomb 6 balls and its 60-second
   TIME REMAINING, with no song played and no mode completed (the earned checks hooked). Aerosmith Pro started a game
   only on PAD-420's NVRAM past Guided Setup (`/home/david/pad420_nv/aerosmith`, from slot 1; `NVSEED=1`).
+- **Elvira 1.13**: its mini-wizards are rule objects (`HousePartyRule` 0x87e06c - the static at 0x87e068 + 4, its
+  vtable 0x5e2af8 written by 0xd9a58, which gives it to the House manager as house 5 - and `TheyCameFromSpaceRule`
+  0x885e28, the port's House 25). The House manager's start (0xdd12c) calls the selected house's v[22]; each rule's
+  v[22] (0xd57d8 / 0x181dd8) asks its own v[20] first (no House and no other rule running, two rules' per-player bytes
+  clear - no earned check) and serves the balls; its running test (v[15]) reads +0x32. So the function route calls v[22]
+  with the rule in r0. Probe (`p14`, PAD-420's NVRAM, `NVSEED=1`): vtables as read, They Came From Space started (6
+  balls, +0x32 up), House Party's start while it ran returned 0 (its own rules). Proven (`p15`): House Party started (4
+  balls, +0x32, the House lit up), They Came From Space waited behind it. The House manager's own bookkeeping (the
+  player's selected house, its played bits) is not done for a hand-over - the game's start of the rule is.
 - The probe and proofs ran as root: slots 1-4 had ~3,300 root-owned entries given back to david afterwards.
 
 ## Still open
 
 Shots: `work/artifacts/PAD-473` (bondpro, kong, kongstart, munsters, turtles: run 1; batman: run 2).
 
-After run 3: 51 of the 53 latest builds are done - 47 proven (Bond LE and Pro; 33 C++ builds on the mode route; 10
-plain-C builds and X-Men LE / Pro on the function route) and 4 leave the section out - and 2 are open:
+After run 3: 52 of the 53 latest builds are done - 48 proven (Bond LE and Pro; 33 C++ builds on the mode route; 10
+plain-C builds, X-Men LE / Pro and Elvira on the function route) and 4 leave the section out - and 1 is open:
 
 - **D&D LE 1.10** starts no game on the rig at all (a known rig limit, PAD-420): its lines stay unproven unless a
   machine run proves them.
-- **Elvira 1.13** (House Party, They Came From Space): C++ rule objects (`HousePartyRule`, `TheyCameFromSpaceRule` at
-  0x885e28, House 25; their running test the port's `mode_rule_slot` 15). A House starts through the House manager
-  (0xdd12c: the player's selected house, its rule's v[22], then the manager's played bits), so a hand-over either sets
-  the player's selected house first or calls the rule's v[22] and does the manager's bookkeeping itself - neither yet
-  understood well enough to call. House Party (a multiball) not located.
 - Guardians' Immolation Initiative: no FG_ flag of its own - its start and running query not found.
 - A mini-wizard named on the rulesheet whose class was not found: John Wick's Red Circle Reckoning (run by
   `crule_wizard_modes`), The Mandalorian's I Like Those Odds.

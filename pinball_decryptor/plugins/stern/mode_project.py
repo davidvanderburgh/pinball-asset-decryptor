@@ -1011,6 +1011,9 @@ WIZARDS_PROVEN = frozenset({
     # X-Men: its own enable-and-start on the mode singleton (r0), the object's running byte (sweep p13)
     "uncanny_xmen_le-0.98",   # The Future started (+0xdc, HELP KITTY PRYDE ESCAPE); Save Senator Kelly waited behind it
     "uncanny_xmen_pro-0.98",   # The Future started (+0xdc); Save Senator Kelly waited behind it
+    # Elvira: its rules' own start (v[22]) on the rule object, the rule's +0x32 its own running test reads (sweep p15,
+    # PAD-420's NVRAM past Guided Setup); the probe p14 started They Came From Space the same way, 6 balls
+    "elvira3-1.13",   # House Party started (+0x32, 4 balls, the House lit up); They Came From Space waited
 })
 #: how a mode hands one over: lit for the game's start shot, or started at once
 WIZARD_HOW = ("light", "start")

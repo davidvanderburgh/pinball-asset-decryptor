@@ -295,3 +295,97 @@ def test_the_scenes_page_saves_and_loads_them(tmp_path):
             (l.get("color") or {}).get("on") for l in
             (w.state("text_scenes").get("tree_view") or {}).get("layers") or ()))
         assert scene_edit.ops_for(str(mine), GCARD) == []
+
+
+# ---------------------------------------------------------------------------------------------
+# his two shadows: "already built in" on a scene that had neither (PAD-403's check)
+# ---------------------------------------------------------------------------------------------
+# A shadow is a new node, a tint the colour track: neither changed the fingerprint PAD-403 tells
+# a scene by (tracks, text box, hidden), so a scene as shipped looked like one built with them.
+# Loading his file said "1 scene on this card already has some or all of the file's edits
+# built in", and the preview and the Write left both shadows out.
+TCARD = "/godzilla_le/assets/lcd/demand_loaded/abc/scene.radium"
+SHADOW_TINT = [{"op": "shadow", "node": 53, "id": 2130706433, "dx": 4.0, "dy": 4.0,
+                "mul": [0.0, 0.0, 0.0, 0.6]},
+               {"op": "tint", "node": 50, "mul": [1.0, 0.5, 0.5, 1.0]}]
+
+
+def _man():
+    from pinball_decryptor.plugins.stern import scene_eval as E, scene_tree as T
+    from tests.test_stern_scene_tree import scene
+    return E.manifest(T.parse(scene()))
+
+
+def _built(ops):
+    man, notes = scene_edit.apply_manifest(_man(), ops)
+    assert notes == []
+    return man
+
+
+def _edits_project(path, edits, trees):
+    (path / "images" / "scene_textures").mkdir(parents=True, exist_ok=True)
+    scene_edit.save(str(path), edits)
+    (path / "images" / "scene_textures" / "scene_tree.json").write_text(
+        json.dumps(trees), encoding="utf-8")
+    return str(path)
+
+
+def test_shadows_and_tints_load_onto_a_scene_as_shipped(tmp_path):
+    mine = _edits_project(tmp_path / "mine", {TCARD: SHADOW_TINT}, {TCARD: _man()})
+    zp = str(tmp_path / "s.zip")
+    scene_edit.export_edits(mine, zp)
+    states = scene_edit.read_states(zp)
+    theirs = _edits_project(tmp_path / "theirs", {}, {TCARD: _man()})
+    scene_edit.import_edits(theirs, zp, [TCARD])
+    assert scene_edit.note_shown(theirs, {TCARD: _man()}, states=states) == {TCARD: 0}
+    assert scene_edit.to_apply(theirs, TCARD, _man()) == SHADOW_TINT
+    # his own file loaded back into his own project: still drawn
+    scene_edit.import_edits(mine, zp, [TCARD])
+    assert scene_edit.note_shown(mine, {TCARD: _man()}, states=states) == {TCARD: 0}
+    assert scene_edit.to_apply(mine, TCARD, _man()) == SHADOW_TINT
+
+
+def test_a_card_built_with_them_still_gets_neither_twice(tmp_path):
+    mine = _edits_project(tmp_path / "mine", {TCARD: SHADOW_TINT}, {TCARD: _man()})
+    zp = str(tmp_path / "s.zip")
+    scene_edit.export_edits(mine, zp)
+    built = _built(SHADOW_TINT)
+    theirs = _edits_project(tmp_path / "theirs", {}, {TCARD: built})
+    scene_edit.import_edits(theirs, zp, [TCARD])
+    assert scene_edit.note_shown(theirs, {TCARD: built},
+                                 states=scene_edit.read_states(zp)) == {TCARD: 2}
+    assert scene_edit.to_apply(theirs, TCARD, built) == []
+    # the shadow alone built: the tint after it is still to apply
+    half = _built(SHADOW_TINT[:1])
+    os.remove(os.path.join(theirs, *scene_edit.RELDIR, scene_edit.CARRIED_FILENAME))
+    assert scene_edit.note_shown(theirs, {TCARD: half},
+                                 states=scene_edit.read_states(zp)) == {TCARD: 1}
+
+
+def test_his_file_saved_before_the_fix_draws_its_shadows(tmp_path):
+    """His file's states: each shadow's node looking the same before and after it."""
+    states = scene_edit.states_of(_man(), SHADOW_TINT[:1])
+    for fp in list(states["before"].values()) + states["after"]:
+        fp.pop("c", None)
+        fp.pop("s", None)
+    assert states["after"][0] == states["before"]["53"]
+    a = _edits_project(tmp_path, {TCARD: SHADOW_TINT[:1]}, {TCARD: _man()})
+    assert scene_edit.note_shown(a, {TCARD: _man()}, states={TCARD: states}) == {TCARD: 0}
+    assert scene_edit.to_apply(a, TCARD, _man()) == SHADOW_TINT[:1]
+
+
+def test_a_moved_line_a_profile_recolored_on_the_card_is_still_told_by_its_move(tmp_path):
+    """The colour track counts only for a node a tint edits: PAD-438 writes a profiled line's
+    colour into it, and a moved line must not then look unmoved and be moved twice."""
+    moves = [{"op": "move", "node": 53, "dx": 30.0, "dy": 0.0}]
+    mine = _edits_project(tmp_path / "mine", {TCARD: moves}, {TCARD: _man()})
+    zp = str(tmp_path / "m.zip")
+    scene_edit.export_edits(mine, zp)
+    built = _built(moves)
+    for n, _sibs in scene_edit._man_index(built).values():
+        if n["id"] == 53:
+            n["col"] = [[1, [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 0.0, 0.0]]]
+    theirs = _edits_project(tmp_path / "theirs", {}, {TCARD: built})
+    scene_edit.import_edits(theirs, zp, [TCARD])
+    assert scene_edit.note_shown(theirs, {TCARD: built},
+                                 states=scene_edit.read_states(zp)) == {TCARD: 1}

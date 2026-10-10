@@ -1342,10 +1342,20 @@ def _r(v):
     return round(float(v), 3)
 
 
+def _shadows_before(sibs, n, name_of):
+    """How many shadows (PAD-452: a node named ``<name>_Shadow`` just before it) node *n* of
+    the kids list *sibs* has."""
+    i = next((i for i, s in enumerate(sibs) if s is n), 0)
+    k = 0
+    while k < i and name_of(sibs[i - k - 1]) == name_of(n) + "_Shadow":
+        k += 1
+    return k
+
+
 class _Base:
     """What a scene shows of the nodes edits touch, read off a preview manifest or off a card's
-    scene tree: a node's *fingerprint* (its tracks' affines, its text box, hidden or not) and
-    how many nodes carry a name."""
+    scene tree: a node's *fingerprint* (its tracks' affines, its text box, hidden or not, its
+    colour track and its shadows) and how many nodes carry a name."""
 
     def __init__(self, fps, names):
         self._fps, self._names = fps, names
@@ -1367,14 +1377,16 @@ class _Base:
             got = index.get(nid)
             if got is None:
                 return None
-            n = got[0]
+            n, sibs = got
             rect = None
             for _s, oid in n["comps"]:
                 o = man["objects"].get(str(oid)) or {}
                 if o.get("kind") == "Text" and o.get("rect") is not None:
                     rect = [_r(v) for v in o["rect"]]
             return {"m": [[_r(v) for v in m[:6]] for _f, m in n["tr"] or ()],
-                    "r": rect, "h": [list(k) for k in n["kf"] or ()] == [[1, 0]]}
+                    "r": rect, "h": [list(k) for k in n["kf"] or ()] == [[1, 0]],
+                    "c": _col_fp(n["col"]),
+                    "s": _shadows_before(sibs, n, lambda x: x.get("name"))}
         return cls(fps, names)
 
     @classmethod
@@ -1388,13 +1400,14 @@ class _Base:
             got = index.get(nid)
             if got is None:
                 return None
-            n = got[0]
+            n, sibs = got
             rect = None
             for c in n.components:
                 if c.obj.kind == "Text" and c.obj.body.get("rect") is not None:
                     rect = [_r(v) for v in c.obj.body["rect"]]
             return {"m": [[_r(v) for v in _m6_of16(m)] for _f, m in n.tracks or ()],
-                    "r": rect, "h": [list(k) for k in n.keyframes or ()] == [[1, 0]]}
+                    "r": rect, "h": [list(k) for k in n.keyframes or ()] == [[1, 0]],
+                    "c": _col_fp(n.colors), "s": _shadows_before(sibs, n, lambda x: x.name)}
         return cls(fps, names)
 
 
@@ -1402,11 +1415,45 @@ def _near(x, y):
     return abs(x - y) <= 0.01 + 1e-5 * abs(y)
 
 
+def _col_fp(steps):
+    return [[int(f), [_r(v) for v in m], [_r(v) for v in a]] for f, m, a in _tint_steps(steps)]
+
+
+#: PAD-502: the parts of a fingerprint only these edits change, kept for the nodes they touch
+#: alone (a line's colour track is also what a colour profile writes, PAD-438, which must not
+#: make a moved line look unlike its move)
+_FP_ONLY = {"c": ("tint",), "s": ("shadow",)}
+
+
+def _fp_for(fp, kinds):
+    """Fingerprint *fp* with the parts none of the edit *kinds* change left out."""
+    if not isinstance(fp, dict):
+        return fp
+    return {k: v for k, v in fp.items()
+            if k not in _FP_ONLY or any(x in kinds for x in _FP_ONLY[k])}
+
+
+def _kinds(ops):
+    """``{node: {op kinds}}`` of the game's own nodes *ops* edit."""
+    out = {}
+    for op in ops:
+        if _stock_node(op):
+            out.setdefault(op["node"], set()).add(op["op"])
+    return out
+
+
 def _close(a, b):
-    """Two fingerprints the same within what the card's 32-bit floats keep."""
+    """Two fingerprints the same within what the card's 32-bit floats keep (a part only one
+    of them has, as a file saved before PAD-502 has no colour track, is left out)."""
     if a is None or b is None:
         return a is b
     if a.get("h") != b.get("h") or (a.get("r") is None) != (b.get("r") is None):
+        return False
+    if "s" in a and "s" in b and a["s"] != b["s"]:
+        return False
+    if "c" in a and "c" in b and (len(a["c"]) != len(b["c"]) or not all(
+            p[0] == q[0] and all(_near(x, y) for x, y in zip(p[1] + p[2], q[1] + q[2]))
+            for p, q in zip(a["c"], b["c"]))):
         return False
     if a.get("r") is not None and (len(a["r"]) != len(b["r"]) or
                                    not all(_near(x, y) for x, y in zip(a["r"], b["r"]))):
@@ -1442,14 +1489,16 @@ def states_of(man, ops):
     beside the edits so a scene that already shows some of them is told exactly."""
     ops = [dict(op) for op in ops or ()]
     base = _Base.of_manifest(man)
+    kinds = _kinds(ops)
     before = {}
     for op in ops:
         if _stock_node(op) and str(op["node"]) not in before:
-            before[str(op["node"])] = base.fp(op["node"])
+            before[str(op["node"])] = _fp_for(base.fp(op["node"]), kinds[op["node"]])
     after, cur = [], man
     for op in ops:
         cur, _n = apply_manifest(cur, [op])
-        after.append(_Base.of_manifest(cur).fp(op["node"]) if _stock_node(op) else None)
+        after.append(_fp_for(_Base.of_manifest(cur).fp(op["node"]), kinds[op["node"]])
+                     if _stock_node(op) else None)
     return {"ops": ops, "before": before, "after": after}
 
 
@@ -1499,16 +1548,35 @@ def _states_for(states, ops):
     return {"ops": ops[:n], "before": states["before"], "after": states["after"][:n]}
 
 
+def _told(states, i):
+    """Whether the *i*-th of *states*' ops changes what its node shows, so that a scene
+    showing it can be told from one that does not (PAD-502: a shadow or a tint saved before
+    their fingerprint parts were, a re-order, a Text's spacing, cannot)."""
+    after = states["after"][i]
+    if after is None:
+        return True
+    ops = states["ops"]
+    nid = ops[i].get("node")
+    was = states["before"].get(str(nid))
+    for j in range(i):
+        if ops[j].get("node") == nid and states["after"][j] is not None:
+            was = states["after"][j]
+    return was is None or not _close(after, was)
+
+
 def shown_count(base, ops, states=None):
     """How many leading *ops* the scene *base* (:class:`_Base`) already shows: 0 for a scene
-    as shipped.  Exact with *states* (:func:`states_of`); else the most leading ops nothing on
-    the scene goes against, when something on it tells (a text box, a node an add made)."""
+    as shipped.  Exact with *states* (:func:`states_of`), as far as the scene tells: the last
+    op counted is one it can tell (PAD-502: a stock scene "showed" a file's shadows, its
+    nodes looking the same with them, and they were never drawn); else the most leading ops
+    nothing on the scene goes against, when something on it tells (a text box, a node an add
+    made)."""
     ops = list(ops or ())
     st = _states_for(states, ops)
     if st is not None:
         n = len(st["ops"])
         for k in range(n, -1, -1):
-            if _shows(base, ops[:n], k, st):
+            if (k == 0 or _told(st, k - 1)) and _shows(base, ops[:n], k, st):
                 return k
     for k in range(len(ops), 0, -1):
         if _shows(base, ops, k):
@@ -1518,7 +1586,8 @@ def shown_count(base, ops, states=None):
 
 def _base_info(base, ops):
     """What *base* shows of the nodes *ops* touch, to know the same scene again."""
-    return ({str(op["node"]): base.fp(op["node"]) for op in ops if _stock_node(op)},
+    kinds = _kinds(ops)
+    return ({str(nid): _fp_for(base.fp(nid), ks) for nid, ks in kinds.items()},
             {name: base.count(name) for name in _added_names(ops)})
 
 

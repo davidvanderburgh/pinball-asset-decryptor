@@ -10,7 +10,8 @@ the teardown under test): watch.sh's "a hidden run is silent" rule is switched o
 and rigslot.muted() no longer mutes a hidden run.  The player is the real
 padplay.py, muted by this app's own scratch audio_ctl.json ({"gain": 0.0, "muted":
 true}); the driver stops the run at once if the player never says "volume -> 0.00".
-The rig is one this script takes on the board (riglock.sh take --any) and releases,
+The rig is one this script takes on the board under the app's own label
+(riglock.sh take --any PAD-510-check, so the app's Start may use it) and releases,
 in Ubuntu; the card is the Heisei 1.96a custom on C: (booted in place, no cache copy).
 
 The app presses Start.  That card's game goes quiet in attract by itself (as
@@ -54,7 +55,7 @@ R=$1
 export HOME=/home/david
 case "$2" in
 take)
-    out=$(bash "$R/riglock.sh" take --any PAD-510 "PAD-510 app-level close proof" 2>&1)
+    out=$(bash "$R/riglock.sh" take --any PAD-510-check "PAD-510 app-level close proof" 2>&1)
     echo "$out"
     printf '%s\n' "$out" | grep -o 'slot=[0-9]*' | head -1 | cut -d= -f2 > /mnt/c/tmp/PAD-510/slot
     exit 0 ;;
@@ -66,11 +67,11 @@ export PAD_HOME=/home/david PAD_SLOT=$SLOT
 L=$PAD_LOGDIR/padaudio.log
 case "$2" in
 release)
-    PAD_LABEL=PAD-510 bash "$R/killgame.sh" >/dev/null 2>&1
+    PAD_LABEL=PAD-510-check bash "$R/killgame.sh" >/dev/null 2>&1
     # a root run leaves root-owned files in the rig; give them back
     find "$PAD_HOME/padslots/$SLOT/root/data" "$PAD_HOME/padslots/$SLOT/root/dump" \
         -user root -exec chown -h david:david {} + 2>/dev/null
-    bash "$R/riglock.sh" release "$SLOT" PAD-510 ;;
+    bash "$R/riglock.sh" release "$SLOT" PAD-510-check ;;
 count)
     a=$(grep -a '\[aud\] ---' "$PAD_LOGDIR/gzwatch.log" 2>/dev/null | tail -1 | sed -n 's/.*writei calls=\([0-9]*\).*/\1/p')
     echo "procs=$(bash "$R/alive.sh" --procs) stub=$(pad_count -f 'padplay\.py') restarts=$(grep -c 'restarting it' "$L" 2>/dev/null) muted=$(grep -c 'volume -> 0.00' "$L" 2>/dev/null) writei=${a:-?} game=$(pad_count -x game) host=$(pad_count -x padglhost) watch=$(pad_count -f '^bash .*watch\.sh')" ;;
@@ -228,9 +229,10 @@ def main():
             c = counts(rig)
             say("game up:", tab(), "| rig:", c)
             if c.get("muted", "0") == "0":
-                say("NO MUTE LINE FROM THE PLAYER: stopping now")
-                webui_shot.api(url, "emulate.toggle")
-                time.sleep(20)
+                say("NO MUTE LINE FROM THE PLAYER (or no run): stopping now")
+                if tab()[0] == "Stop emulator":
+                    webui_shot.api(url, "emulate.toggle")
+                    time.sleep(20)
                 return
 
             # the feed goes dead: by itself, or frozen as a pause freezes it

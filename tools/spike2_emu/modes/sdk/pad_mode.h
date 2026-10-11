@@ -664,5 +664,11 @@ int pm_game_wizard_claim_named(const char *name);
  * 0 = something is, -1 = no game, or this game's port names no such check. From a tick, shot or event callback (the
  * game's own thread). A blocks mode lit at a shot (Light the mode at) waits on it, as the game's own mini-wizards do. */
 int pm_game_wizard_way(void);
+/* PAD-503: a mode lit at a shot claims it, renewed every tick while it would start there now (the player up's, nothing
+ * of its own or the game's in its way; 0 = no claim). A hit on a claimed shot's switch holds the game's own mode starts
+ * off (the ones the port's block_start lines hook) while the game handles that switch, so the shot starts the lit mode
+ * and not, on James Bond's Right ramp, one of the game's henchman or villain modes. A claim not renewed for 250 ms is
+ * gone; one of your modes beginning ends a hold. Shots from switches only (the port's switch lines). 1 = claimed. */
+int pm_lit_claim(uint64_t shots);
 
 #endif

@@ -1452,3 +1452,16 @@ def test_a_lit_mode_waits_out_the_games_own_modes_as_its_mini_wizards_do(tmp_pat
     assert out.count("START (a block)") == 1 and out.index("START (a block)") > out.index(">> way 1")
     out = play(tmp_path, dict(p, game_modes="stack"), "way", 0, "shot", "Left ramp")
     assert "START (a block)" in out
+
+
+def test_a_lit_mode_claims_its_shot_while_it_would_start_there(tmp_path):
+    """The owner on v1.169.3: film done, the ramp lit, the film's last mode played out - and the Right ramp started one
+    of the game's villains, again and again. On James Bond the Right ramp is where the game starts its henchman and
+    villain modes, and the game handles a shot before the modes hear of it, so the lit mode always found one running.
+    It claims its shot now (pm_lit_claim) while it would start there: the runtime then holds the game's own starts off
+    while the game handles that switch (proven on the rig; MODE_SDK.md). The claim follows the mode's own state."""
+    out = play(tmp_path, _lit_prog(), "secs", 0.2, "event", "skill_shot", "secs", 0.2, "way", 0, "secs", 0.2,
+               "way", 1, "secs", 0.2, "shot", "Right ramp", "secs", 0.2)
+    # lit; the game's own mode in the way; clear again; it started
+    assert re.findall(r"LITCLAIM (\w+) TEST MODE", out) == ["200000", "0", "200000", "0"]
+    assert "START (its lit shot)" in out

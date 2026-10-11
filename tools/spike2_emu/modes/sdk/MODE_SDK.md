@@ -2306,6 +2306,18 @@ whatever the mode says about the game's modes, and a Start the mode that gives w
 on it as on the game's flagged modes. Measured in the emulator (stock card): 1 through plain play, 0 from the game's own
 start of Mr Osato (`0x123f84`) on, and with game flag 139 set.
 
+**A lit mode claims its shot (PAD-503, the owner on v1.169.3).** Waiting was not enough: the Right ramp is where Bond
+starts its henchman and villain modes (on the rig the first ramp of a fresh game started one, the check's `0x1360d4`
+part 1), and the game handles a switch before the modes hear of it - the switch hooks only count a hit, the tick hands
+it on - so every ramp started the game's next one and the owner's mode found it running. `pm_lit_claim(shots)`, renewed
+every tick while the mode would start there now (the player up's, nothing of its own or the game's in its way; a claim
+not renewed for 250 ms is gone): a hit on a claimed switch, seen by the switch hook as the drain hands it to the game,
+holds off the game's mode starts the port's `block_start` lines hook while the game handles that switch (400 ms at
+most; one of our modes beginning ends it). A refused mini-wizard of the game's stays lit (`wizard_refused`); a refused
+henchman or villain is simply not started and waits for a later shot. Shots from switches only. Proven in the emulator
+(stock card, a blocks mode lit at Right ramp exit opto): `[pad] lit: the game's mode 24 (Fiona Volpe) did not start -
+switch 48 is YOLT WIZARD's lit shot`, then `START (its lit shot)` 16 ms later, the game's check still clear.
+
 ## The game's own mini-wizards on the other titles (PAD-473)
 
 Every latest build but James Bond's was greyed "The app has not found X's own mini-wizards". PAD-473 read each game's

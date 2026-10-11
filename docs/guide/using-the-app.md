@@ -162,7 +162,12 @@ many modes or long names); the machine offers modes up to the highest
 one any sound has a file for. A mode's file follows **Allow
 replacements longer than the original** like a replacement: on, it plays
 at its full length; off, a file longer than the sound it stands in for
-is cut to that length. Each music mode's file has its own loudness: **Music
+is cut to that length. Some songs play in parts: a short opening the
+Sound Test names ("SE GZ MX TUNE 16") and then a longer piece of music
+with no name of its own, often looped. A file for the opening part plays
+in place of the whole song, once or looped as the song was, and also
+where the game plays that song without its opening ("SE GZ MX TUNE 16
+NO INTRO"), so its length is the whole song's. Each music mode's file has its own loudness: **Music
 modes** > **Loudness of mode 2's sound…**, or play it from there and use
 the box beside the Replacement preview. A sound's own **Loudness for
 this clip** is for its own replacement only; it never reaches its mode

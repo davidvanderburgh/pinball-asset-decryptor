@@ -31,7 +31,13 @@ more), the project names the modes (``.staged_changes.json`` ``sound_modes``: ``
    mode's record and declaring the mode file's own length - and where the setting's value lives.
    The runtime (pad_mode_runtime.c "music modes") hands the game those bytes whenever the setting
    says that mode (emulator-proven on Godzilla Premium/LE 1.16: Music Mode set to 2 in the menu,
-   and the game's music request played the mode's record).
+   and the game's music request played the mode's record). A sound id plays one line per mode,
+   every slot of that mode it plays swapped in it. A slot the game plays as the OPENING part of
+   a song in parts (Godzilla's "SE GZ MX TUNE 16": idx 2241's 9.6 s, then the unnamed idx 799,
+   looped; PAD-511, where the tester heard their file's first seconds and then the game's own
+   song) gets a descriptor that plays the mode's record in place of the whole song, once or looped
+   as the song was, and the song's length is its file's room. So do the sound ids that play that
+   song without its opening ("SE GZ MX TUNE 16 NO INTRO": idx 799 alone).
 
 It rides the modes' delivery (the runtime, its port and the cfg on p2), so it needs an image
 file and a host that can add files to one, and it grows the game program, so an image build.

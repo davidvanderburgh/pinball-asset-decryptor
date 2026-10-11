@@ -5,8 +5,10 @@ Godzilla 1.16 plays TUNE 16 in two parts: idx 2241 (the 9.6 s the Sound Test nam
 16"), then idx 799 (38.4 s, a music record the Sound Test leaves unnamed), looped. The mode's
 descriptor swapped idx 2241 alone, so the game played the tester's file for 9.6 s and then its own
 song. A file for the opening part of a song in parts now plays in place of the whole song, once
-where the song played once and looped where its body looped. Every descriptor below is the game's
-own window, read through its resolver off the Godzilla LE 1.16 card."""
+where the song played once and looped where its body looped, and also where the game plays that
+song without its opening ("SE GZ MX TUNE 16 NO INTRO": idx 799 alone, which played the game's own
+song whatever the mode). Every descriptor below is the game's own window, read through its
+resolver off the Godzilla LE 1.16 card."""
 
 import struct
 
@@ -35,6 +37,13 @@ D2532 = bytes.fromhex("050101d02b0f000100000200010608010000000b0000002db27ae7b75
 #: a sound effect whose script has an op the rewrite does not know (0x09)
 D68 = bytes.fromhex("051c01493d00000200080900a0000000050000000500010000000b0000006051910df75450c210293a00"
                     "0009004001000005000000fbffffff00001101003bd82d2ffea0458268fa0652b9eb07c33e61")
+
+#: requests 95 and 153, TUNE 16 NO INTRO: idx 799 alone, looped (31 bytes) and once (28 bytes;
+#: its window runs on into idx 974's descriptor)
+D2500 = bytes.fromhex("050101d557020001000002000b07000b00000071f07b2ea5b05c4911010300451ebd8b5da6ec009d641e"
+                      "86370da9c546ef25620d37332160dd834c7f2c75a5f4964cc3d8ab4880e6df78701a50228279")
+D2536 = bytes.fromhex("050101d557020001000002000b0b00000071f07b2ea55029511101000501016e4a0500010000020003"
+                      "0b0000009ef94b2c17c48075110100f629f04e6ab670321e884dc26910c21344f4ac554b766f36")
 
 K2241 = bytes.fromhex("3e300bdab70200e0")          # the records' keys on the card
 K799 = bytes.fromhex("71f07b2ea5100040")
@@ -81,6 +90,21 @@ def test_a_song_opens_with_the_slot_and_goes_on_into_other_music():
     assert E._sound_mode_song(2241, plays, byidx, own={799}) == {}
     # the body is no song's opening part
     assert E._sound_mode_song(799, plays, byidx) == {}
+
+
+def test_a_short_openings_song_played_without_it_is_its_song_too():
+    byidx = {i: _row(i, s) for i, s in ((2241, 9.6), (799, 38.4), (5, 3.0), (2390, 38.1),
+                                        (221, 31.8))}
+    plays = {2541: [2241, 799], 2587: [2241, 799], 2500: [799], 2536: [799], 10: [2241],
+             11: [5], 2489: [2390, 221], 2510: [221]}
+    song = E._sound_mode_song(2241, plays, byidx)
+    assert E._sound_mode_bodies(2241, song, plays, byidx) == {2500: [799], 2536: [799]}
+    # a medley's first part is music of its own: its later parts played alone are tracks
+    medley = E._sound_mode_song(2390, plays, byidx)
+    assert medley == {2489: [221]} and E._sound_mode_bodies(2390, medley, plays, byidx) == {}
+    # a part some sound id plays with another record is another song's too
+    assert E._sound_mode_bodies(2241, song, dict(plays, x=[5, 799]), byidx) == {}
+    assert E._sound_mode_bodies(2241, {}, plays, byidx) == {}
 
 
 def test_the_records_a_sound_id_plays_are_read_off_the_play_tables():
@@ -157,11 +181,13 @@ def _rows():
             dict(host2, grown=True)]
 
 
-def _used(slot, host, song=None, mode=4):
+def _used(slot, host, song=None, mode=4, bodies=None):
     u = {"rel": "audio/idx%04d.wav" % slot, "slot": slot, "mode": mode, "host": host,
          "frames": 44100 * 60, "name": "Custom C", "level_ref": slot, "db": 0}
     if song:
         u["song"] = song
+    if bodies:
+        u["bodies"] = bodies
     return u
 
 
@@ -179,7 +205,7 @@ def test_a_file_for_the_tune_plays_in_place_of_the_whole_song_through_both_sound
 
 
 def test_without_the_song_the_tune_swaps_its_opening_part_alone():
-    """What v1.172.0 built for the tester: his file, then the game's own idx 799."""
+    """What v1.172.0 built for the tester: their file, then the game's own idx 799."""
     out = _table([_used(2241, 4)], FOUND, _rows(), [])
     assert _script(out[0][2], 2541) == "01 02 play HOST 11 07 play 799 11 03"
 
@@ -195,6 +221,39 @@ def test_two_slots_of_one_mode_in_one_sound_id_are_one_line():
     # its own modes stay apart
     out = _table([_used(2241, 4, mode=2), _used(799, 5, mode=3)], FOUND, _rows(), [])
     assert [(m, s) for m, s, _d in out] == [(2, 2541), (2, 2587), (3, 2541), (3, 2587)]
+
+
+FOUND_NO_INTRO = FOUND + [(2536, 1087, D2536), (2500, 1115, D2500)]
+BODIES = {2500: [799], 2536: [799]}
+
+
+def test_tune_16_without_its_opening_plays_the_file_too():
+    """The game's "TUNE 16 NO INTRO" (idx 799 alone) played its own song in every mode."""
+    logs = []
+    out = _table([_used(2241, 4, song={2541: [799], 2587: [799]}, bodies=BODIES)],
+                 FOUND_NO_INTRO, _rows(), logs)
+    assert [(m, s) for m, s, _d in out] == [(4, 2500), (4, 2536), (4, 2541), (4, 2587)]
+    by = {s: d for _m, s, d in out}
+    assert _script(by[2500], 2500, 31) == "01 02 07 play HOST 11 03"     # looped stays looped
+    assert _script(by[2536], 2536, 28) == "01 02 play HOST 11 00"        # once stays once
+    mu = 60 * 4000
+    pu = E._duration_units_emitted(_row(799, 38.4)["length"])
+    assert _dur(by[2500]) == _dur(D2500) + mu - pu and _dur(by[2536]) == _dur(D2536) + mu - pu
+    assert by[2536][28:] == D2536[28:]                   # idx 974's descriptor after it, kept
+    assert any("4 sound id(s)" in t and "2500, 2536 play it in place of the song without its "
+               "opening" in t for _l, t in logs)
+    # without the song's sound ids those are not the file's
+    out = _table([_used(2241, 4)], FOUND_NO_INTRO, _rows(), [])
+    assert [s for _m, s, _d in out] == [2541, 2587]
+
+
+def test_a_song_without_its_opening_that_moved_since_the_grow_plays_the_games_own():
+    logs = []
+    out = _table([_used(2241, 4, song={2541: [799], 2587: [799]}, bodies={2500: [799, 799]})],
+                 FOUND_NO_INTRO, _rows(), logs)
+    assert 2500 not in [s for _m, s, _d in out]
+    assert any(lvl == "warning" and "sound id 2500" in t and "the game's own" in t
+               for lvl, t in logs)
 
 
 def test_a_song_whose_parts_moved_since_the_grow_plays_the_plain_swap():
@@ -221,7 +280,7 @@ def _grow(tmp_path, monkeypatch, longer_ok, slots=None):
     rows = [_row(2241, 9.6, K2241), _row(799, 38.4, K799), _row(4, 100.0), _row(7, 4.0),
             _row(8, 50.0), _row(9, 3.0)]
     sites = []
-    for sid, start, desc in ((2541, 1000, D2541), (2587, 1045, D2587)):
+    for sid, start, desc in FOUND_NO_INTRO:
         for p, pl in E._op11_payloads(desc):
             sites.append(E._DescSite(sid, start + p, b"\0" * 8, pl, start + 3, b"\0" * 4, _dur(desc)))
     m = SMo.clean({"slots": slots or {TUNE16: {"4": "a.wav"}}})
@@ -239,10 +298,12 @@ def test_the_file_for_a_songs_opening_part_is_cut_to_the_song_not_the_part(tmp_p
     song = emitted_length(_row(2241, 9.6)["length"]) + emitted_length(_row(799, 38.4)["length"])
     assert [u["frames"] for u in used] == [song]
     assert used[0]["song"] == {2541: [799], 2587: [799]}
+    assert used[0]["bodies"] == BODIES                 # TUNE 16 NO INTRO: the file's too
     assert used[0]["level_ref"] == 799                 # the song's longest part
     assert E._sm_level_refs(used) == {used[0]["host"]: 799}
     assert any("in place of the whole song" in t for t in logs)
     assert any("cut to its song's" in t for t in logs)
+    assert any("2500, 2536 play that song without its opening" in t for t in logs)
 
 
 def test_the_file_for_a_songs_opening_part_plays_whole_when_longer_files_may(tmp_path, monkeypatch):
@@ -255,4 +316,5 @@ def test_a_tune_whose_body_has_its_own_file_in_that_mode_keeps_both(tmp_path, mo
         TUNE16: {"4": "a.wav"}, "audio/idx0799 - music.wav": {"4": "b.wav", "2": "a.wav"}})
     by = {(u["slot"], u["mode"]): u for u in used}
     assert "song" not in by[(2241, 4)] and "song" not in by[(799, 4)]
+    assert "bodies" not in by[(2241, 4)]
     assert by[(2241, 4)]["level_ref"] == 2241

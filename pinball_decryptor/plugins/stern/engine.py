@@ -9694,6 +9694,27 @@ def _sound_mode_song(slot, plays, byidx, own=()):
     return out
 
 
+def _sound_mode_bodies(slot, song, plays, byidx):
+    """PAD-511: ``{sid: [idx, ...]}`` - the sound ids that play the song *slot* opens (*song*,
+    :func:`_sound_mode_song`) WITHOUT its opening: only records of its later parts. Godzilla
+    1.16's "SE GZ MX TUNE 16 NO INTRO" is sound ids 2500 (idx 799 looped) and 2536 (once); the
+    tester's file for TUNE 16 played in neither. Only for a short opening (under
+    :data:`_SONG_PART_SECONDS`: the 37 s first part of a medley is music of its own, and its
+    later parts played alone are tracks of their own too), and none at all when a sound id plays
+    one of those parts with any other record (it is another song's as well)."""
+    if not song or int(byidx[slot].get("length", 0) or 0) >= _SONG_PART_SECONDS * 44100:
+        return {}
+    rest = {i for parts in song.values() for i in parts}
+    out = {}
+    for sid, idxs in plays.items():
+        if sid in song or not rest.intersection(idxs):
+            continue
+        if not all(i in rest for i in idxs):
+            return {}
+        out[sid] = list(idxs)
+    return out
+
+
 def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer_ok=True,
                       longer_why="", sites=()):
     """PAD-494: every music mode's file, made into its slot's format and put in a HOST record
@@ -9710,8 +9731,10 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
     PAD-511: a slot the game plays as the opening part of a song in parts (*sites*, the play
     tables: :func:`_sound_mode_song`) gives its file the whole song - ``"song"`` ``{sid: [idx,
     ...]}`` on its *used* entry, the sound ids whose mode descriptor plays the file in place of
-    every part (:func:`_mode_song_descriptor`). Its length is then the song's (every part's,
-    once), and it matches the loudness of the song's longest part."""
+    every part (:func:`_mode_song_descriptor`), and ``"bodies"`` ``{sid: [idx, ...]}``, the sound
+    ids that play that song without its opening and play the file too (:func:`_sound_mode_bodies`).
+    Its length is then the song's (every part's, once), and it matches the loudness of the song's
+    longest part."""
     from . import sound_modes as _SMo
     from .spike2.emulator import emitted_length
     byidx = {q["idx"]: q for q in params}
@@ -9747,6 +9770,7 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         own = {i for i in (_SMo.slot_idx(r) for r, f in modes.slots.items() if mode in f)
                if i is not None and i != slot}
         song = _sound_mode_song(slot, plays, byidx, own)
+        bodies = _sound_mode_bodies(slot, song, plays, byidx)
         room = emitted_length(int(p.get("length", 0) or 0))
         rest = sorted({i for parts in song.values() for i in parts})
         if song:
@@ -9757,6 +9781,8 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                  "level_ref": int(level_ref), "db": db}
         if song:
             entry["song"] = {int(s): [int(i) for i in parts] for s, parts in song.items()}
+        if bodies:
+            entry["bodies"] = {int(s): [int(i) for i in parts] for s, parts in bodies.items()}
         key = (slot, wav, db, None if longer_ok else room)
         if key in hosted:
             # the same file at the same loudness in another mode of this slot: its record
@@ -9771,6 +9797,11 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                 "into %s, so %s plays in place of the whole song (%.2f s) while MUSIC MODE is %d."
                 % (slot, " and ".join("idx %d (%.2f s)" % (i, int(byidx[i]["length"]) / 44100.0)
                                       for i in rest), what, room / 44100.0, mode), "info")
+        if bodies:
+            log("Music modes: sound id %s play%s that song without its opening, so %s plays there "
+                "too while MUSIC MODE is %d." % (
+                    ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
+                    mode), "info")
         if not longer_ok and want > room:
             # as a replacement is with "Allow replacements longer than the original" off
             try:
@@ -9915,7 +9946,9 @@ def _mode_song_descriptor(desc, sid, mask, slot_key, host_key, mode_units, slot_
     in place of the whole song. The opening play names it; a later play in the same stretch of
     the script as the opening one is dropped with its wait, and one in a loop the opening play is
     not in names the mode's record too - so a song that played once plays the file once, and one
-    whose body looped after its intro plays the file and then loops it. Its declared length moves
+    whose body looped after its intro plays the file and then loops it (a song played without
+    its opening, :func:`_sound_mode_bodies`, the same with *slot_key* and *slot_units* its first
+    part's). Its declared length moves
     by the same differences (*part_units*: the later plays' own lengths, in order, 1/4000 s); the
     bytes a dropped play took are zeros after the end. ``None`` when the script holds an op
     :func:`_desc_ops` does not know, its plays are not the song's, or *host_key* has bits the
@@ -10006,13 +10039,14 @@ def _mode_descriptor_table(found, params, mask, used, log):
     that mode it plays swapped in it (PAD-511: the runtime plays the first line it finds, so two
     lines for one sound id played one slot's file and the other's stock part). A sound id that
     plays a slot as the opening part of a song (*used* ``"song"``, :func:`_sound_modes_grow`)
-    plays its file in place of the whole song (:func:`_mode_song_descriptor`)."""
+    plays its file in place of the whole song (:func:`_mode_song_descriptor`), and so does one that
+    plays that song without its opening (``"bodies"``, :func:`_sound_mode_bodies`)."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import emitted_length
     byidx = {p["idx"]: p for p in params}
     # each descriptor's own bytes end where the next one starts (the window runs on into it)
     extents = _descriptor_extents([o for _s, o, _d in found], SN.DESC_WINDOW)
-    by_key = {}
+    by_key, by_sid = {}, {sid: (desc, extents[off]) for sid, off, desc in found}
     for sid, off, desc in found:
         for _o, payload in _own_payloads(desc, extents[off]):
             by_key.setdefault(_play_key(payload, sid, mask), {})[sid] = (desc, extents[off])
@@ -10038,10 +10072,34 @@ def _mode_descriptor_table(found, params, mask, used, log):
         sids = {}
         for slot_key in swaps:
             sids.update(by_key[slot_key])
-        n, songs = {}, {}
+        bodies = {}                     # sid -> (slot key, [idx, ...]): a song without its opening
+        for slot_key, sw in swaps.items():
+            for sid, idxs in (sw[3].get("bodies") or {}).items():
+                if int(sid) in by_sid and int(sid) not in sids:
+                    bodies[int(sid)] = (slot_key, idxs)
+                    sids[int(sid)] = by_sid[int(sid)]
+        n, songs, nointro = {}, {}, {}
         for sid, (desc, extent) in sorted(sids.items()):
             d, done = None, set()
             keys = [_play_key(pl, sid, mask) for _o, pl in _own_payloads(desc, extent)]
+            if sid in bodies:
+                slot_key, idxs = bodies[sid]
+                sw = swaps[slot_key]
+                parts = [byidx.get(int(i)) for i in idxs]
+                if (parts and all(q and q.get("findkey") for q in parts)
+                        and keys == [bytes(q["findkey"]) for q in parts]):
+                    units = [_duration_units_emitted(q["length"]) for q in parts]
+                    d = _mode_song_descriptor(desc, sid, mask, keys[0], sw[0], sw[1], units[0],
+                                              units[1:], extent=extent)
+                if d is None:
+                    log("Music modes: sound id %d plays the song sound idx %d opens without its "
+                        "opening, but not in a way this app can change, so in mode %d it plays "
+                        "the game's own." % (sid, sw[3]["slot"], mode), "warning")
+                    continue
+                out.append((int(mode), int(sid), d))
+                n[slot_key] = n.get(slot_key, 0) + 1
+                nointro.setdefault(sw[3]["slot"], []).append(sid)
+                continue
             sw = swaps.get(keys[0])
             song = (sw[3].get("song") or {}).get(sid) if sw else None
             if song:
@@ -10073,12 +10131,13 @@ def _mode_descriptor_table(found, params, mask, used, log):
                 n[k] = n.get(k, 0) + 1
         for slot_key, sw in sorted(swaps.items(), key=lambda kv: kv[1][3]["slot"]):
             slot = sw[3]["slot"]
+            how = ["; sound id %s play%s it in place of %s" % (
+                       ", ".join(map(str, sids_)), "s" if len(sids_) == 1 else "", what)
+                   for sids_, what in ((songs.get(slot), "the whole song"),
+                                       (nointro.get(slot), "the song without its opening"))
+                   if sids_]
             log("Music modes: mode %d of sound idx %d plays the new record through %d sound id(s) "
-                "of the game%s." % (
-                    mode, slot, n.get(slot_key, 0),
-                    "; sound id %s play%s it in place of the whole song" % (
-                        ", ".join(map(str, songs[slot])), "s" if len(songs[slot]) == 1 else "")
-                    if songs.get(slot) else ""), "info")
+                "of the game%s." % (mode, slot, n.get(slot_key, 0), "".join(how)), "info")
     return out
 
 

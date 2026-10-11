@@ -1481,19 +1481,20 @@ teardown() {
     # design). alive.sh already counted both, which is how the leak was seen.
     pad_pkill -9 -f 'padrelay\.py'
     pad_pkill -9 -f '^ffmpeg .*audio\.fifo'
-    # ...BUT THE RELAY'S DEATH ONLY REACHES A PLAYER IT IS CONNECTED TO
-    # (PAD-510). playaudio.sh's restart loop starts a new player each time the
-    # last one gives up on a dead feed, and a new one can still be starting
-    # up, or be on a half-open WSL localhost-proxy connection (what padplay.py's
-    # no-data watchdog is for), where the relay's end never arrives. It then
-    # lives until that watchdog, ~35 s. A tester closed the window on a
-    # Godzilla run whose game had stopped writing sound: 3 s later alive.sh
-    # still counted the player the loop had restarted 13 s before the close,
-    # and the app's one button said "Stop emulator" for a run that had ended.
-    # playaudio.sh's EXIT trap would have stopped it, but the SIGKILL above
-    # never runs a trap. So a moment for the polite exit, then Windows first
-    # and the stub second: killing only the stub leaves the Windows process,
-    # as with the playfield below.
+    # ...AND THE PLAYER MUST BE GONE BEFORE THIS SCRIPT IS (PAD-510). A game
+    # that goes quiet (Godzilla's Heisei custom does, in attract) has the
+    # player give up and playaudio.sh's loop restart it every ~36 s, so a
+    # close often lands on a player still on its way out, and the relay's
+    # end takes it seconds to see. If it is still there when this script
+    # exits, its Windows process ends with the run but its WSL stub stays
+    # behind for good, with nothing behind it (the playfield stub's story,
+    # below): alive.sh counts it, and the app's one button says "Stop
+    # emulator" for a run that has ended, until Stop. A tester met exactly
+    # that, and it reproduced through the app on rig 1 twice, 60 s and
+    # counting both times. playaudio.sh's EXIT trap would stop it, but the
+    # SIGKILL above never runs a trap. So a moment for the polite exit, then
+    # Windows first and the stub second: killing only the stub leaves the
+    # Windows process, as with the playfield below.
     for _ in 1 2 3 4; do
         [ -n "$(pad_pids -f 'padplay\.py')" ] || break
         sleep 0.5

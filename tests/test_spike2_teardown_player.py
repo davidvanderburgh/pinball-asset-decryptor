@@ -1,10 +1,12 @@
 """Closing the game window stops the run's Windows sound player too (PAD-510).
 
-DragonRR closed the window on a Godzilla run whose game had stopped writing
-sound. watch.sh's teardown SIGKILLs playaudio.sh, so its EXIT trap (the one
-thing that stopped the Windows player) never ran, and the player its restart
-loop had just started was one the relay's end never reached. alive.sh counted
-it, and the Emulate tab offered only "Stop emulator" for a run that had ended.
+DragonRR closed the window on a Godzilla run whose game had gone quiet, so its
+player kept giving up and being restarted. watch.sh's teardown SIGKILLs
+playaudio.sh, so its EXIT trap (the one thing that stopped the Windows player)
+never ran, and a player still on its way out when watch.sh exited left its WSL
+stub behind for good. alive.sh counted it, and the Emulate tab offered only
+"Stop emulator" for a run that had ended, until Stop (reproduced through the
+app twice on main; the branch has Start back 5 s after the close).
 
 The teardown now waits a moment for the polite exit and then stops what is
 left: Windows first (pad_win_stop_player), the WSL stub second, because killing

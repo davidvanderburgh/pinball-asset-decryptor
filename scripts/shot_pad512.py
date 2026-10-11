@@ -12,7 +12,8 @@ before and after:
 - scenes_click_title.png   Before: the click picks the full-screen picture on top, so a colour
                            set then lands on it.  After: it picks the title.
 
-After only: scenes_title_tinted.png, the title picked by that click and tinted red.
+After only: scenes_title_colors_bar.png, his own way on from there: the Colors bar beside
+the scene is on the title the click picked, and a colour set in it goes on the title alone.
 
 The click's pick goes to the console.  Needs Playwright (the user site-packages one).
 """
@@ -102,11 +103,21 @@ def main():
             settle(page)
             page.screenshot(path=out("scenes_click_title.png"))
             if after and props.get("id") == TITLE:
-                api("text_scenes.tree_tint", TITLE, "#ff3020", 100)
-                time.sleep(5)
-                print("tint:", (tv().get("props") or {}).get("tint"), flush=True)
+                # his own way: the Colors bar beside the scene, on the line the click picked
+                page.locator('button.cpd-handle[aria-label="Color profiles"]').first.click()
+                deadline = time.time() + 20
+                while time.time() < deadline and not (state().get("color") or {}).get("file"):
+                    time.sleep(0.5)
+                f = (state().get("color") or {}).get("file") or {}
+                print("colors bar file:", f.get("kind"), f.get("rel"), flush=True)
+                if not f:
+                    raise SystemExit("the Colors bar is not on the title")
+                print("preset none:", api("color.preset", "none"), flush=True)
+                time.sleep(1)
+                print("gain:", api("color.set_params", {"gain": [1.0, 0.35, 0.1]}), flush=True)
+                time.sleep(6)
                 settle(page)
-                page.screenshot(path=out("scenes_title_tinted.png"))
+                page.screenshot(path=out("scenes_title_colors_bar.png"))
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

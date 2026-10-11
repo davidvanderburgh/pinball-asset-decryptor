@@ -76,7 +76,11 @@ witness (player 1's score back to 0, or pm_in_game() rising while it is 0: ``new
 James Bond ends play at the end of each of its multiballs and wizard modes (mode-mask busy bits until the ball ends),
 and the next ball's pm_in_game() rising wiped the light, the "each game" values and the timers; (2) the lit shot,
 and any start that waits for the game's modes, also waits on the game's own check before one of its mini-wizards
-(pm_game_wizard_way: its henchman, villain and Q Branch modes, which the port's flags do not show).
+(pm_game_wizard_way: its henchman, villain and Q Branch modes, which the port's flags do not show). Then (v1.169.3):
+the Right ramp kept starting one of the game's villains instead - it is where Bond starts its henchman and villain
+modes, and the game handles a shot before the modes hear of it. So (3) while the mode would start on its lit shot,
+it CLAIMS the shot every tick (pm_lit_claim): a hit on that switch holds the game's own starts off while the game
+handles it, and the shot starts the lit mode; the game's henchman or villain waits for a later shot.
 
 What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 gives the blocks:
 
@@ -2613,6 +2617,9 @@ static void lit_tick(void)
         return;
     }
     if (pm_in_game() && p >= 1 && p <= 4 && !run.on) want = lit_as[p];
+    /* its shot is claimed while it would start there now: the game's own starts on that shot are held off (on James
+     * Bond the Right ramp starts its henchman and villain modes, and the game handles a shot before the modes do) */
+    pm_lit_claim(want && can_start() && pm_game_wizard_way() != 0 ? S[LIT_AT[want - 1].shot] : 0);
     if (want == lit_shown && (!want || p == lit_player)) return;
     lit_off();
     if (!want) return;

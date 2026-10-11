@@ -806,6 +806,8 @@ static int refused_said(const struct pm_mode *m)    /* 1 = already said for m; e
     return 0;                                       /* the table is full: say it */
 }
 
+static unsigned long lit_hold_until;  /* PAD-503: a lit mode's claimed shot holds the game's starts off until then */
+
 int pm_begin(void)
 {
     if (running && running != current) {
@@ -818,6 +820,7 @@ int pm_begin(void)
         begun++;
     }
     running = current;
+    lit_hold_until = 0;              /* PAD-503: a lit mode's claimed shot has done its work */
     disp_linger_other_began();
     clip_other_began();
     return 1;
@@ -3354,12 +3357,84 @@ static void block_defaults(unsigned *m)
 
 static void wizard_refused(unsigned start);   /* PAD-436: the game's mini-wizards, below */
 
+/* ---- PAD-503: a mode lit at a shot claims it --------------------------------------------------------------------
+ * A Bond owner's mini-wizards of their own, lit at the Right ramp, never got it: the game handles a switch before the
+ * modes hear of it (the switch hooks only count the hit; the tick hands it on), and on James Bond the Right ramp is
+ * where the game starts its henchman and villain modes - so the lit mode found one of the game's running and waited,
+ * ramp after ramp. A mode that would start on its lit shot now (pm_lit_claim, renewed every tick: the player up's,
+ * nothing of ours or the game's in its way) claims it. A hit on a claimed switch, seen as the drain hands it to the
+ * game (before the game's own handler), holds off the game's mode starts the port's block_start lines hook while the
+ * game handles it - a refused mini-wizard of the game's stays lit, a henchman or villain stays for a later shot - and
+ * the lit mode starts on the tick. Its begin ends the hold; LIT_HOLD_MS at most. The hooks and the tick run on one
+ * thread (Bond LE 1.06: both logged on the game's logic thread). */
+#define LIT_CLAIMS   8
+#define LIT_CLAIM_MS 250          /* a claim not renewed for this long is gone (its mode renews it every tick) */
+#define LIT_HOLD_MS  400          /* the most a claimed switch holds the game's starts off */
+static struct { const struct pm_mode *mode; uint64_t shots; unsigned long at; } lit_claims[LIT_CLAIMS];
+/* lit_hold_until: above pm_begin, which ends the hold */
+static const struct pm_mode *lit_hold_by;
+static unsigned lit_hold_switch;
+
+int pm_lit_claim(uint64_t shots)
+{
+    int k, free_k = -1;
+    if (!current) return 0;
+    for (k = 0; k < LIT_CLAIMS; k++) {
+        if (lit_claims[k].mode == current) break;
+        if (!lit_claims[k].mode && free_k < 0) free_k = k;
+    }
+    if (k == LIT_CLAIMS) {
+        if (!shots || free_k < 0) return 0;
+        k = free_k;
+    }
+    if (!shots) {
+        lit_claims[k].mode = 0;
+        return 0;
+    }
+    lit_claims[k].mode = current;
+    lit_claims[k].shots = shots;
+    lit_claims[k].at = pm_ms();
+    return 1;
+}
+
+/* a hit on switch id (the switch hooks): one a lit mode claims holds the game's own starts off */
+static void lit_hold_check(unsigned id)
+{
+    uint64_t mask = 0;
+    unsigned long now;
+    int i, k;
+    if (running || !pm_in_game()) return;      /* one of ours runs: the lit one could not begin */
+    for (i = 0; i < port.n_switch; i++)
+        if (port.sw[i].id == id) mask |= port.sw[i].mask;
+    if (!mask) return;
+    now = pm_ms();
+    for (k = 0; k < LIT_CLAIMS; k++)
+        if (lit_claims[k].mode && (lit_claims[k].shots & mask) && now - lit_claims[k].at < LIT_CLAIM_MS) break;
+    if (k == LIT_CLAIMS) return;
+    lit_hold_by = lit_claims[k].mode;
+    lit_hold_switch = id;
+    lit_hold_until = (now + LIT_HOLD_MS) | 1u;
+}
+
 static int on_block_start(unsigned *r, unsigned hook_n)
 {
     unsigned id;
-    if (!block_owner || running != block_owner || !pm_in_game()) return 0;
     for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
         if (block_hook_of[id] == hook_n + 1 && bm_has(block_named, id) && (!block_obj[id] || block_obj[id] == r[0])) break;
+    if (lit_hold_until && id < BLOCK_IDS) {     /* PAD-503: a lit mode's shot, the game handling it now */
+        if ((long)(lit_hold_until - pm_ms()) > 0 && !running && pm_in_game()) {
+            char key[24];
+            const char *nm;
+            pm_snprintf(key, sizeof key, "block_name_%u", id);
+            nm = pm_port_text(key);
+            say("lit: the game's mode %u (%s) did not start - switch %u is %s's lit shot", id, nm ? nm : "?",
+                lit_hold_switch, lit_hold_by && lit_hold_by->name ? lit_hold_by->name : "a mode's");
+            wizard_refused(block_hooked[hook_n]);
+            return 1;
+        }
+        lit_hold_until = 0;
+    }
+    if (!block_owner || running != block_owner || !pm_in_game()) return 0;
     if (id >= BLOCK_IDS || !bm_has(block_mask, id)) return 0;   /* not one this mode holds off */
     if (!bm_has(block_said, id)) {
         char key[24];
@@ -7954,6 +8029,7 @@ static void on_switch_hit(unsigned *r)
 {
     static volatile int said;
     unsigned id = r[switch_at];
+    if (id < N_SWITCH_IDS) lit_hold_check(id);           /* PAD-503 */
     if (id < N_SWITCH_IDS) __sync_fetch_and_add(&switch_fired[id], 1u);
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("switch hits run on thread %ld (first seen: switch %u)", syscall(SYS_GETTID), id);
@@ -8056,6 +8132,7 @@ static void on_switch_edge(unsigned *r)
         say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level & 1u,
             flags, pol, mask, playing, hit && playing ? " - a hit" : "");
     if (!hit || !playing) return;
+    lit_hold_check(id);                      /* PAD-503: before the game's own handler for it */
     __sync_fetch_and_add(&switch_fired[id], 1u);
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("switch edges run on thread %ld (first hit: switch %u)", syscall(SYS_GETTID), id);

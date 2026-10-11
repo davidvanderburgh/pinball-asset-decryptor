@@ -590,6 +590,20 @@ int pm_game_wizard_way(void)
 {
     return in_game && player ? wizard_way : -1;
 }
+/* PAD-503: a lit mode's claim on its shot - "LITCLAIM <shots> <mode>" each time a mode's claim changes */
+int pm_lit_claim(uint64_t shots)
+{
+    static const struct pm_mode *who[8];
+    static uint64_t had[8];
+    int k;
+    for (k = 0; k < 8 && who[k] && who[k] != current; k++) ;
+    if (k == 8) return 0;
+    who[k] = current;
+    if (had[k] != shots)
+        printf("%6lu LITCLAIM %llx %s\n", now_ms, (unsigned long long)shots, current && current->name ? current->name : "?");
+    had[k] = shots;
+    return shots != 0;
+}
 /* PAD-347: "BLOCK 1 <mode>" when a mode keeps the game's modes from starting, "BLOCK 0 <mode>" when it lets go */
 int pm_block_game_modes(int on)
 {

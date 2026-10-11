@@ -158,6 +158,25 @@ film's parts without playing their modes, so the rig's ramp never runs out of th
 ramp starts goes first and the lit mode waits, lit, for the next ramp shot: the game's own precedence for its own
 mini-wizards. In a real game the film's own henchman and villain are played by the time it is done.
 
+### Round 3 (v1.169.3 in the owner's games): the ramp started a villain instead
+
+The owner, both modes: the film completed, the ramp lit, the film's last mode played out - and the Right ramp "just
+started a villain". Round 2's precedence in practice: the game handles a switch before the modes hear of it (the
+runtime's switch hooks only count a hit; the tick hands it on), and the Right ramp starts the selected film's next
+henchman or villain, so the lit mode found one running at every ramp. Now the lit mode CLAIMS its shot every tick while
+it would start there (`pm_lit_claim`: the player up's, not running, nothing of the game's in the way); the runtime's
+switch-edge hook, which runs as the drain hands the switch to the game, sees a hit on a claimed switch and holds off the
+game's mode starts (the PAD-363 veto, every one the port's `block_start` lines hook) while the game handles it; the lit
+mode starts on the tick. A refused henchman or villain is simply not started and the next ramp starts it; a refused
+mini-wizard of the game's stays lit (`wizard_refused`).
+
+Proven in the emulator (stock card, PAD-Runtime rig 1, hidden, muted; C:/tmp/PAD-503 run16, run17): You Only Live
+Twice's four parts lit the mode; the Right ramp gave `lit: the game's mode 24 (Fiona Volpe) did not start - switch 48 is
+YOLT WIZARD's lit shot` and `START (its lit shot)` 16 ms later, the game's check still clear. The owner's whole game:
+the game's Mr Osato running when the film completed (lit); a ramp mid-Osato `not started ... still lit`; Mr Osato ran
+out; the next ramp held off Under Water Fight and started the mode; it ran its 30 s out; the next ramp started the
+game's own mode as ever. No abort.
+
 The plan as it was written (PAD-428):
 
 What the user asked first: the game's mini-wizard (its own mode, music and screens) lit

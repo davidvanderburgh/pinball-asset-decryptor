@@ -5160,6 +5160,211 @@ def _prepare_boot_screen_patches(disk_f, parts, games_base, boot_edits,
 
 
 # --------------------------------------------------------------------------
+# PAD-509: an edited picture's card bytes, kept from one build to the next
+# --------------------------------------------------------------------------
+#: Part of every cached picture's validity: bump it when what turns an edited
+#: picture into its card bytes changes on THIS side (the premultiply rule, the
+#: glyph splice, padding to the block grid).  The encoder itself (dds.py) is
+#: fingerprinted by its own file, so a change there needs no bump.
+_PICTURE_CACHE_REV = 1
+_PICTURE_PACK = os.path.join(".write_cache", "picture_bytes.bin")
+_PICTURE_INDEX = os.path.join(".write_cache", "picture_bytes.json")
+#: a pack whose dead bytes pass this share of it is written again, live only
+_PICTURE_PACK_SLACK = 0.5
+
+
+def _picture_cache_recipe():
+    """What every entry of the cache was made with: :data:`_PICTURE_CACHE_REV`
+    and the encoder's own file (this app's version where that can't be read)."""
+    from . import dds as _dds
+    try:
+        with open(_dds.__file__, "rb") as f:
+            enc = hashlib.sha1(f.read()).hexdigest()[:16]
+    except (OSError, TypeError, AttributeError):
+        from ... import __version__
+        enc = __version__
+    return "%d-%s" % (_PICTURE_CACHE_REV, enc)
+
+
+class _PictureCache:
+    """The BC-encoded bytes of every edited scene texture and scene picture
+    the last build made, under ``<assets>/.write_cache``, so a build encodes
+    only the pictures that changed since then.
+
+    PAD-509 (DragonRR: "Is it possible to store the changed assets for the
+    next emulation run - only altering those assets that have changed?
+    Currently it appears to re-encode every time"): a Godzilla project with
+    every picture color-corrected has 1,331 of them to encode, which was
+    two minutes of every Start, the same bytes each time.
+
+    A key is everything the bytes depend on: the picture (the md5 of its
+    PNG through the change scan's hash cache, or of the composited pixels of
+    an atlas rebuilt from glyph edits), the stock bytes of the slot it goes
+    into (whether to premultiply, and the glyph splice, read them), the slot's
+    format and block grid, and :func:`_picture_cache_recipe` for the whole
+    file.  Only pictures that keep their slot's size are cached: one fitted
+    or grown to a new size is made the way it always was.
+
+    One pack file and a JSON index rather than a file per picture (reading
+    1,331 small files back was measured at 4 s on Windows, the pack at a
+    fraction of it).
+    Entries the build did not use leave the index; their bytes are dropped
+    when they pass half the pack.  Every entry carries a CRC, so a pack and
+    index that disagree are a miss, never wrong bytes.  Advisory, like the
+    audio cache: ``PAD_STERN_PICTURE_CACHE=0`` turns it off, and deleting it
+    costs one build that encodes everything.
+    """
+
+    _LOCK = threading.Lock()
+
+    def __init__(self, assets_dir):
+        import json
+        self.assets_dir = assets_dir
+        self.pack = os.path.join(assets_dir, _PICTURE_PACK)
+        self.index = os.path.join(assets_dir, _PICTURE_INDEX)
+        self.recipe = _picture_cache_recipe()
+        self.entries = {}          # key -> [offset, length, crc32]
+        self.fresh = {}            # key -> bytes this build encoded
+        self.used = set()
+        self.hits = 0
+        self._f = None
+        try:
+            with open(_lp(self.index), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data.get("recipe") == self.recipe:
+                self.entries = {k: v for k, v in
+                                (data.get("entries") or {}).items()
+                                if isinstance(v, list) and len(v) == 3}
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+
+    @classmethod
+    def open(cls, assets_dir):
+        """The project's cache, or ``None`` when switched off."""
+        if os.environ.get("PAD_STERN_PICTURE_CACHE", "1") == "0" \
+                or not assets_dir:
+            return None
+        return cls(assets_dir)
+
+    def png_md5(self, path):
+        return _scan_md5(self.assets_dir, path)
+
+    @staticmethod
+    def key(*parts):
+        """md5 over *parts*; bytes go in by their own md5."""
+        h = hashlib.md5()
+        for p in parts:
+            if isinstance(p, (bytes, bytearray, memoryview)):
+                p = hashlib.md5(p).hexdigest()
+            h.update(repr(p).encode("utf-8"))
+            h.update(b"\0")
+        return h.hexdigest()
+
+    def get(self, key):
+        """The bytes stored under *key*, or ``None``."""
+        if key is None:
+            return None
+        got = self.fresh.get(key)
+        if got is not None:
+            return got
+        ent = self.entries.get(key)
+        if ent is None:
+            return None
+        try:
+            if self._f is None:
+                self._f = open(_lp(self.pack), "rb")
+            self._f.seek(int(ent[0]))
+            data = self._f.read(int(ent[1]))
+        except (OSError, ValueError, TypeError):
+            return None
+        import zlib
+        if len(data) != ent[1] or zlib.crc32(data) != ent[2]:
+            return None
+        self.used.add(key)
+        self.hits += 1
+        return data
+
+    def put(self, key, data):
+        if key is not None and data:
+            self.fresh[key] = bytes(data)
+            self.used.add(key)
+
+    def close(self):
+        if self._f is not None:
+            try:
+                self._f.close()
+            except OSError:
+                pass
+            self._f = None
+
+    def finish(self):
+        """Keep what this build used and made; drop the rest.  Best-effort:
+        a cache that can't be written costs the next build its encoding."""
+        import json
+        import zlib
+        self.close()
+        live = {k: v for k, v in self.entries.items()
+                if k in self.used and k not in self.fresh}
+        if not self.fresh and len(live) == len(self.entries):
+            return
+        with self._LOCK:
+            try:
+                os.makedirs(_lp(os.path.dirname(self.pack)), exist_ok=True)
+                try:
+                    size = os.path.getsize(_lp(self.pack))
+                except OSError:
+                    size, live = 0, {}
+                held = sum(int(v[1]) for v in live.values())
+                out = None
+                if size - held > _PICTURE_PACK_SLACK * size:
+                    out = self._rewrite(live)
+                if out is None:
+                    out = dict(live)
+                    with open(_lp(self.pack), "ab") as f:
+                        f.seek(0, 2)
+                        for k, data in self.fresh.items():
+                            out[k] = [f.tell(), len(data), zlib.crc32(data)]
+                            f.write(data)
+                tmp = self.index + ".tmp"
+                with open(_lp(tmp), "w", encoding="utf-8") as f:
+                    json.dump({"recipe": self.recipe, "entries": out}, f)
+                os.replace(_lp(tmp), _lp(self.index))
+            except OSError:
+                pass
+
+    def _rewrite(self, live):
+        """The pack written again with *live* and this build's entries only;
+        the new index entries, or ``None`` to append instead (the old pack is
+        open elsewhere)."""
+        import zlib
+        tmp = self.pack + ".tmp"
+        out = {}
+        try:
+            with open(_lp(tmp), "wb") as dst:
+                if live:
+                    with open(_lp(self.pack), "rb") as src:
+                        for k, (off, n, crc) in sorted(
+                                live.items(), key=lambda kv: kv[1][0]):
+                            src.seek(off)
+                            data = src.read(n)
+                            if len(data) != n or zlib.crc32(data) != crc:
+                                continue
+                            out[k] = [dst.tell(), n, crc]
+                            dst.write(data)
+                for k, data in self.fresh.items():
+                    out[k] = [dst.tell(), len(data), zlib.crc32(data)]
+                    dst.write(data)
+            os.replace(_lp(tmp), _lp(self.pack))
+            return out
+        except OSError:
+            try:
+                os.remove(_lp(tmp))
+            except OSError:
+                pass
+            return None
+
+
+# --------------------------------------------------------------------------
 # Replace scene textures: re-encode an edited PNG back to BC3 and patch the
 # original scene.assets/<N>.asset in place (size-neutral by construction).
 # --------------------------------------------------------------------------
@@ -5195,11 +5400,14 @@ def _changed_scene_textures(assets_dir, baseline):
     return out
 
 
-def _prepare_texture_patches(reader, texture_edits, log, cancel):
+def _prepare_texture_patches(reader, texture_edits, log, cancel, cache=None):
     """Re-encode each edited PNG to BC3 at its original dimensions and resolve it
     to its card inode.  Returns ``([(node, payload), ...], n_skipped)`` — each
     payload is exactly the inode's size (same W×H + DXT5 ⇒ identical byte
-    length), ready for an in-place ``disk_ranges`` write."""
+    length), ready for an in-place ``disk_ranges`` write.
+
+    *cache* (a :class:`_PictureCache`) hands back the bytes of a texture
+    whose PNG and slot are what an earlier build encoded (PAD-509)."""
     from . import dds as _dds
     try:
         from PIL import Image
@@ -5222,6 +5430,22 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel):
                 "skipped." % (output, card_path), "warning")
             skipped += 1
             continue
+        key = stock_raw = None
+        if cache is not None:
+            try:
+                stock_raw = reader.read_file_bytes(node)
+            except Exception:
+                stock_raw = None
+            png = cache.png_md5(staged)
+            if png is not None and stock_raw is not None:
+                key = cache.key("texture", fmt, w, h, node["size"], png,
+                                stock_raw)
+            payload = cache.get(key)
+            if payload is not None and len(payload) == node["size"]:
+                patches.append((node, payload))
+                log("Texture %s: ready to patch (%dx%d, %d bytes)."
+                    % (output, w, h, node["size"]), "info")
+                continue
         try:
             im = Image.open(_lp(staged)).convert("RGBA")
         except Exception as e:
@@ -5240,7 +5464,9 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel):
         pw, ph = ((w + 3) // 4) * 4, ((h + 3) // 4) * 4
         try:
             stock = (_dds.decode_bc1 if fmt == _DXT1_FORMAT
-                     else _dds.decode_bc3)(reader.read_file_bytes(node), pw, ph)
+                     else _dds.decode_bc3)(
+                stock_raw if stock_raw is not None
+                else reader.read_file_bytes(node), pw, ph)
         except Exception:
             stock = None
         arr, premult = _premultiply_like_stock(arr, stock)
@@ -5254,6 +5480,8 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel):
                 % (output, len(payload), node["size"]), "warning")
             skipped += 1
             continue
+        if cache is not None:
+            cache.put(key, payload)
         patches.append((node, payload))
         log("Texture %s: ready to patch (%dx%d, %d bytes)."
             % (output, w, h, node["size"]), "info")
@@ -5567,8 +5795,34 @@ def _radium_record_at(reader, node, data_off, length, pad_w, pad_h, fmt):
             and _padded4(tex_w) == pad_w and _padded4(tex_h) == pad_h)
 
 
+def _radium_cache_key(cache, reader, node, staged, override, data_off, length,
+                      pad_w, pad_h, fmt, assets_dir, baseline, output):
+    """The :class:`_PictureCache` key of a scene picture patched in place, or
+    ``None`` when its picture or its slot can't be read.  The picture is its
+    PNG, or for an atlas rebuilt from glyph edits its composited pixels and
+    whether the atlas PNG itself was edited (that picks the glyph splice);
+    the slot is its stock bytes, which both premultiplying and the splice
+    read."""
+    try:
+        stock = _file_range_bytes(reader, node, data_off, length)
+    except Exception:
+        return None
+    if len(stock) != length:
+        return None
+    if override is not None:
+        src = ("glyphs", override.size,
+               hashlib.md5(override.tobytes()).hexdigest(),
+               _atlas_png_changed(assets_dir, staged, baseline, output))
+    else:
+        src = cache.png_md5(staged)
+        if src is None:
+            return None
+    return cache.key("radium", fmt, pad_w, pad_h, length, src, stock)
+
+
 def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
-                         grow_dir=None, dest_is_device=False, grown=None):
+                         grow_dir=None, dest_is_device=False, grown=None,
+                         cache=None):
     """Re-encode each edited radium-embedded image to its format (BC3/DXT5 or
     BC1/DXT1) and resolve it to a flat ``[(disk_offset, bytes), ...]`` list
     patching the bytes in place inside the ``scene.radium`` inode (same form
@@ -5607,7 +5861,11 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
 
     Edited font-glyph slices (``scene_textures/glyphs/``) are composited into
     their atlas first (:func:`_glyph_atlas_overrides`), which makes the atlas
-    count as edited and re-encode from the pasted-over pixels."""
+    count as edited and re-encode from the pasted-over pixels.
+
+    *cache* (a :class:`_PictureCache`) hands back the bytes of a picture that
+    keeps its slot's size when the picture and the slot are what an earlier
+    build encoded (PAD-509); a fitted or grown one is made every time."""
     glyph_atlases = _glyph_atlas_overrides(assets_dir, baseline, log)
     scope = _load_glyph_scopes(assets_dir)
     edits = _changed_radium_images(assets_dir, baseline,
@@ -5725,6 +5983,17 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
         payload = encoded.get(staged)
         fit = False                # scaled to the slot: cached apart, because
         #                            another occurrence may still grow it
+        ckey = None
+        if payload is None and cache is not None:
+            ckey = _radium_cache_key(cache, reader, node, staged,
+                                     glyph_atlases.get(output), data_off,
+                                     length, pad_w, pad_h, fmt,
+                                     assets_dir, baseline, output)
+            payload = cache.get(ckey)
+            if payload is not None and len(payload) == length:
+                encoded[staged] = payload
+            else:
+                payload = None
         if payload is None:
             override = glyph_atlases.get(output)
             try:
@@ -5808,6 +6077,8 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                 payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
                            else _dds.encode_bc3(arr))
             (fitted if fit else encoded)[staged] = payload
+            if cache is not None and not fit and len(payload) == length:
+                cache.put(ckey, payload)
         if len(payload) != length:
             log("Radium image %s: re-encoded to %d bytes but the slot is %d; "
                 "skipped." % (output, len(payload), length), "warning")
@@ -8240,6 +8511,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # {data_off: (w, h, block bytes)})}, re-serialised below with the
         # scenes whose text grew.
         grown_images = {}
+        # PAD-509: the pictures' encoded bytes from the last build, so only
+        # the ones that changed since are encoded again
+        pictures = (_PictureCache.open(assets_dir)
+                    if radimg_edits or texture_edits else None)
         if radimg_edits:
             if progress:
                 progress(91, 100, "Preparing radium images...")
@@ -8247,9 +8522,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             radimg_writes, n_radimg, _i_ov = _radium_image_writes(
                 reader, assets_dir, baseline, log, cancel,
                 grow_dir=grow_work, dest_is_device=dest_is_device,
-                grown=grown_images)
+                grown=grown_images, cache=pictures)
             _merge_radium_overlays(radium_overlays, _i_ov)
             if cancel():
+                if pictures is not None:
+                    pictures.close()
                 return None, None, None, None, None
 
         # Scenes whose text outgrew its slot, or whose image changed size,
@@ -8467,9 +8744,21 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if progress:
                 progress(96, 100, "Preparing scene textures...")
             texture_patches, _tskip = _prepare_texture_patches(
-                reader, texture_edits, log, cancel)
+                reader, texture_edits, log, cancel, cache=pictures)
             if cancel():
+                if pictures is not None:
+                    pictures.close()
                 return None, None, None, None, None
+        if pictures is not None:
+            t0 = time.monotonic()
+            pictures.finish()
+            _stage_done(log, "keeping the encoded pictures for the next "
+                        "build", t0)
+            if pictures.hits:
+                log("%s edited picture(s) unchanged since the last build: "
+                    "their encoded bytes were kept, %s encoded now."
+                    % (format(pictures.hits, ","),
+                       format(len(pictures.fresh), ",")), "info")
 
         # Every kind of write below counts, the Scenes window's in-place ones
         # included: PAD-251 added tree_writes to the list but not to this
@@ -10791,6 +11080,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             _write_override_manifest(out_dir, {"version": OVERRIDE_VERSION,
                                                "building": True})
             written, records, delta = [], [], []
+            unchanged = 0           # files this build left as the last one did
             t0 = time.monotonic()
             total = len(by_file) + len((grow_plan or {}).get("jobs", ()))
             # the last stretch of the build's one bar (see _span)
@@ -10819,29 +11109,35 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                         log("Override: %s (%.1f MB)"
                             % (card_path, node["size"] / 1e6), "info")
                         reader.extract_file(node, _lp(dest))
+                        with open(_lp(dest), "r+b") as f:
+                            for f_off, buf in file_writes:
+                                f.seek(f_off)
+                                f.write(buf)
                         touched = None                  # all of it is new
                     else:
                         # PATCHED IN PLACE.  The card's own bytes go back over
                         # what the last build wrote, so an edit taken back
                         # since then is really gone, and then this build's
                         # writes go on top.  Both are bounded by the size of
-                        # the edits and never by the size of the file.
+                        # the edits and never by the size of the file, and
+                        # only the bytes that come out different are written
+                        # (PAD-509).
                         was = [(int(o), int(n))
                                for o, n in (rec.get("ranges") or [])]
-                        _restore_stock(disk_f, reader, node, dest, was)
-                        touched = _merge_ranges(was + ranges)
-                        log("Override: %s (%.1f MB of it, in place)"
-                            % (card_path,
-                               sum(n for _o, n in touched) / 1e6), "info")
-                    with open(_lp(dest), "r+b") as f:
-                        for f_off, buf in file_writes:
-                            f.seek(f_off)
-                            f.write(buf)
+                        touched = _patch_in_place(disk_f, reader, node, dest,
+                                                  was, file_writes)
+                        if touched:
+                            log("Override: %s (%.1f MB of it, in place)"
+                                % (card_path,
+                                   sum(n for _o, n in touched) / 1e6), "info")
+                        else:
+                            unchanged += 1
                     _override_card_mode(dest, node)
                     written.append((card_path, node["size"]))
                     records.append(_override_record(dest, card_path, ranges))
-                    delta.append(
-                        (card_path, _delta_ranges(touched, node["size"])))
+                    if touched is None or touched:
+                        delta.append(
+                            (card_path, _delta_ranges(touched, node["size"])))
 
                 # The grown files (an oversized replacement video kept at full
                 # quality, and the rebuilt blip-free firmware) are the easy
@@ -10925,6 +11221,10 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                 if fresh:
                     _rmtree(out_dir)
                 raise
+            if unchanged:
+                log("%s file(s) of the set came out just as the last build "
+                    "left them: not written again, and not copied into the "
+                    "emulator again." % format(unchanged, ","), "info")
             _stage_done(log, "writing the override files", t0)
         finally:
             _rmtree_grow_plan(grow_plan)
@@ -10997,11 +11297,13 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     # (it is part of the set) but has no line in the delta.
     _sizes = dict(written)
     copied = sum(_sizes.get(p, 0) for p, rs in delta if rs is None)
-    log("%s the emulator override set in %s: %d file(s), %.0f MB written "
+    mb = (copied + patched) / 1e6
+    log("%s the emulator override set in %s: %d file(s), %s MB written "
         "(%d sound(s), %d video(s), %d image(s), %d display string(s))."
         % ("Updated" if parent else "Built",
            _fmt_dur(time.monotonic() - t_all), len(written),
-           (copied + patched) / 1e6,
+           # PAD-509: one changed picture is a tenth of a MB, not "0 MB"
+           ("%.1f" % mb) if 0 < mb < 10 else "%.0f" % mb,
            counts[0], counts[1], counts[2], counts[3]), "success")
     return counts, audio_mode, valpatch_mode, written
 
@@ -11470,25 +11772,77 @@ def _restore_stock(disk_f, reader, node, dest, ranges):
     """
     if not ranges:
         return
-    from .ext4 import Ext4Error
     with open(_lp(dest), "r+b") as f:
         for off, length in ranges:
-            pos = off
-            try:
-                runs = reader.disk_ranges(node, off, length)
-            except Ext4Error:
-                # a HOLE in it (PAD-505): the card's own bytes there are zeros
-                f.seek(off)
-                f.write(reader.read_range(node, off, length))
+            f.seek(off)
+            f.write(_stock_bytes(disk_f, reader, node, off, length))
+
+
+def _stock_bytes(disk_f, reader, node, off, length):
+    """The card's own *length* bytes of *node* from file offset *off*."""
+    from .ext4 import Ext4Error
+    try:
+        runs = reader.disk_ranges(node, off, length)
+    except Ext4Error:
+        # a HOLE in it (PAD-505): the card's own bytes there are zeros
+        return reader.read_range(node, off, length)
+    buf = bytearray()
+    for disk, n in runs:
+        disk_f.seek(disk)
+        got = disk_f.read(n)
+        if len(got) != n:
+            raise OSError("the card image ended early at 0x%x" % disk)
+        buf += got
+    return bytes(buf)
+
+
+#: The compare step of :func:`_patch_in_place`: what differs is rewritten,
+#: and handed to the rig, in pieces of this size.
+_PATCH_CHUNK = 64 << 10
+
+
+def _patch_in_place(disk_f, reader, node, dest, was, file_writes):
+    """Bring the override file *dest* to this build's bytes, writing only what
+    differs, and return the ranges that changed (``[]``: the file is already
+    what this build makes).
+
+    Over every range the last build wrote (*was*) or this one writes
+    (*file_writes*, ``[(file_off, bytes), ...]``, later ones winning) the file
+    should hold the card's own bytes with this build's writes on top - the
+    undo and redo :func:`_restore_stock` and the plain writes used to do on
+    disk.  Composed in memory instead and compared with what is there.
+
+    PAD-509: an edit of one picture rebuilt a set of 1,243 files, and every
+    one of them was rewritten and handed to the rig in the delta, because the
+    unchanged pictures were written over themselves: 518 MB copied into WSL
+    on every Start while the game window sat black.  The same bytes now leave
+    the file, its modification time and the delta alone.
+    """
+    import bisect
+    spans = _merge_ranges(list(was) + [(o, len(b)) for o, b in file_writes])
+    # every write lies inside the one span it was merged into
+    starts = [o for o, _n in spans]
+    within = [[] for _s in spans]
+    for w_off, buf in file_writes:
+        if buf:
+            within[bisect.bisect_right(starts, w_off) - 1].append((w_off, buf))
+    changed = []
+    with open(_lp(dest), "r+b") as f:
+        for (off, n), writes in zip(spans, within):
+            want = bytearray(_stock_bytes(disk_f, reader, node, off, n))
+            for w_off, buf in writes:
+                want[w_off - off:w_off - off + len(buf)] = buf
+            f.seek(off)
+            have = f.read(n)
+            if have == want:
                 continue
-            for disk, n in runs:
-                disk_f.seek(disk)
-                buf = disk_f.read(n)
-                if len(buf) != n:
-                    raise OSError("the card image ended early at 0x%x" % disk)
-                f.seek(pos)
-                f.write(buf)
-                pos += n
+            for c in range(0, n, _PATCH_CHUNK):
+                piece = want[c:c + _PATCH_CHUNK]
+                if have[c:c + len(piece)] != piece:
+                    f.seek(off + c)
+                    f.write(piece)
+                    changed.append((off + c, len(piece)))
+    return _merge_ranges(changed)
 
 
 def _write_override_delta(out_dir, generation, parent, delta, removed):

@@ -1868,6 +1868,17 @@ if [ "${PAD_VID:-1}" != 0 ]; then
     fi
 fi
 
+# PAD-509: YOUR EDITS GO ONTO THE LINUX DISK BEFORE THE WINDOW OPENS. run_game.sh
+# stages the override set (overrides.sh) before it boots the game, which put the
+# copy inside the time the game window sat black: a Godzilla set of 1,243 picture
+# files is 523 MB over 9p, and the window stayed black for half a minute with
+# nothing in the log to say why. Staged here first, its [ovr] lines say what it
+# copies while there is no window yet, and run_game.sh's own call then finds the
+# stage current. A failure is left for run_game.sh to report, as it always was.
+if [ -n "${PAD_OVERRIDE_DIR:-}" ]; then
+    bash "$S/overrides.sh" "$PAD_OVERRIDE_DIR" > /dev/null || true
+fi
+
 echo "[watch] starting renderer (it opens the game window; the picture arrives"
 echo "[watch] with the guest's first frame, ~15 s later)"
 

@@ -123,6 +123,12 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
     replacement).  Returns ``(ok, detail)`` — on success *detail*
     summarises the conversions (may be empty); on failure it's an error
     message.
+
+    A conversion that comes out byte for byte the file already in the slot
+    leaves that file as it is, its modification time included (PAD-509: a
+    picture staged again the same way on every Emulate Start moved the
+    project's "have the edits changed?" fingerprint, and the emulator's
+    whole override set was rebuilt for nothing).
     """
     if not os.path.isfile(replacement_path):
         return False, "replacement file not found"
@@ -144,7 +150,12 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
                 except OSError:
                     pass
             return False, detail
-        replace_with_retry(tmp, slot.abs_path)
+        import filecmp
+        if os.path.isfile(slot.abs_path) and filecmp.cmp(
+                tmp, slot.abs_path, shallow=False):
+            os.remove(tmp)
+        else:
+            replace_with_retry(tmp, slot.abs_path)
         return True, detail
     except (OSError, ValueError) as e:
         if os.path.exists(tmp):

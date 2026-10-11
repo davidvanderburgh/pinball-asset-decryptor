@@ -1933,3 +1933,29 @@ pad_sounddevice_hint() {
     echo "(tick \"Add python.exe to PATH\"), then in a Windows terminal:"
     echo "python -m pip install --user sounddevice"
 }
+
+# ---- AND STOPPING THAT PLAYER ---------------------------------------------
+#
+# The sound player is a native Windows process reached through interop, so a
+# pkill in here reaches only its WSL-side stub, and killing the stub leaves the
+# Windows process running: the same asymmetry the playfield has (watch.sh's
+# teardown, measured 2026-08-05). So this asks Windows. It matches on the
+# SCRIPT and on THIS SLOT'S PORT, never on the image name: killing every
+# python.exe would take out whatever else the user runs, and another rig's
+# player is on another port. `Name -like 'py*'` keeps the query from matching
+# the powershell.exe running it, whose own command line carries both strings
+# (observed killing the invoking WSL session outright). Bounded, because it is
+# an interop exec (see pad_bounded), at 30 s rather than 10 because a busy
+# PC's PowerShell can take several seconds just to start. playaudio.sh's EXIT
+# trap and watch.sh's teardown both call it (PAD-510).
+pad_win_stop_player() {           # [port]
+    local port=${1:-${PAD_AUDIO_PORT:-45997}} t=
+    command -v timeout >/dev/null 2>&1 && t="timeout 30"
+    $t /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile \
+        -Command "Get-CimInstance Win32_Process |
+                  Where-Object { \$_.Name -like 'py*' -and
+                                 \$_.CommandLine -like '*padplay.py*' -and
+                                 \$_.CommandLine -like '* $port *' } |
+                  ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
+        >/dev/null 2>&1 || true
+}

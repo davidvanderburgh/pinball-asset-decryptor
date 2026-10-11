@@ -1481,6 +1481,29 @@ teardown() {
     # design). alive.sh already counted both, which is how the leak was seen.
     pad_pkill -9 -f 'padrelay\.py'
     pad_pkill -9 -f '^ffmpeg .*audio\.fifo'
+    # ...AND THE PLAYER MUST BE GONE BEFORE THIS SCRIPT IS (PAD-510). A game
+    # that goes quiet (Godzilla's Heisei custom does, in attract) has the
+    # player give up and playaudio.sh's loop restart it every ~36 s, so a
+    # close often lands on a player still on its way out, and the relay's
+    # end takes it seconds to see. If it is still there when this script
+    # exits, its Windows process ends with the run but its WSL stub stays
+    # behind for good, with nothing behind it (the playfield stub's story,
+    # below): alive.sh counts it, and the app's one button says "Stop
+    # emulator" for a run that has ended, until Stop. A tester met exactly
+    # that, and it reproduced through the app on rig 1 twice, 60 s and
+    # counting both times. playaudio.sh's EXIT trap would stop it, but the
+    # SIGKILL above never runs a trap. So a moment for the polite exit, then
+    # Windows first and the stub second: killing only the stub leaves the
+    # Windows process, as with the playfield below.
+    for _ in 1 2 3 4; do
+        [ -n "$(pad_pids -f 'padplay\.py')" ] || break
+        sleep 0.5
+    done
+    if [ -n "$(pad_pids -f 'padplay\.py')" ]; then
+        echo "[watch] the sound player did not close itself; closing it"
+        pad_is_wsl && pad_win_stop_player
+        pad_pkill -9 -f 'padplay\.py'
+    fi
     rm -f "$AUD_HOST" "$AUD_FMT_HOST"
     # The LED block is the virtual playfield's liveness signal: it polls the
     # file and closes itself once a run it has seen is gone (playfield.py,

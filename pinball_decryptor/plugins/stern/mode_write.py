@@ -1551,11 +1551,17 @@ def assets_fingerprint(assets_dir):
 
 def _assets_fingerprints(assets_dir, apart=None):
     """``(whole, rest)``: :func:`assets_fingerprint` of *assets_dir*, and the same of it without
-    the folder *apart* (``None``: ``rest`` is ``None``), in one walk."""
+    the folder *apart* (``None``: ``rest`` is ``None``), in one walk.  What the app keeps
+    in the folder for itself (its log, which every logged line moves, the caches, the
+    build output) is not walked: none of it is an edit (PAD-509)."""
+    from ...core.checksums import FINGERPRINT_SKIP_DIRS, FINGERPRINT_SKIP_FILES
     apart = os.path.normcase(os.path.abspath(apart)) if apart else None
     newest, count = 0, 0
     r_newest, r_count = 0, 0
-    for root, _dirs, files in os.walk(assets_dir):
+    for root, dirs, files in os.walk(assets_dir):
+        if root == assets_dir:
+            dirs[:] = [d for d in dirs if d not in FINGERPRINT_SKIP_DIRS]
+            files = [f for f in files if f not in FINGERPRINT_SKIP_FILES]
         inside = apart is not None and (
             os.path.normcase(os.path.abspath(root)) + os.sep).startswith(apart + os.sep)
         for name in files:

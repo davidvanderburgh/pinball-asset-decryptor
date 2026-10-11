@@ -394,9 +394,18 @@ def assets_fingerprint(assets_dir):
     recorded value has to be the one taken AFTER that write - and then a file
     restored from an older copy moves the fingerprint too, where a newest-wins
     test would call it unchanged.
+
+    What the app writes there for itself is left out of the walk
+    (``core.checksums.FINGERPRINT_SKIP_*``, at the top of the folder): none
+    of it is an edit, and its log changes between any two Starts (PAD-509:
+    no Start ever found its set current while the log was counted).
     """
+    from ..core.checksums import FINGERPRINT_SKIP_DIRS, FINGERPRINT_SKIP_FILES
     newest, count = 0, 0
-    for root, _dirs, files in os.walk(assets_dir):
+    for root, dirs, files in os.walk(assets_dir):
+        if root == assets_dir:
+            dirs[:] = [d for d in dirs if d not in FINGERPRINT_SKIP_DIRS]
+            files = [f for f in files if f not in FINGERPRINT_SKIP_FILES]
         for name in files:
             count += 1
             try:

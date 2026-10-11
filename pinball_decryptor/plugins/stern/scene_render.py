@@ -942,6 +942,39 @@ def _premultiplied(img, key, cache):
     return out
 
 
+#: PAD-512: the grid :func:`see_through` cuts a picture into: at most this many cells along
+#: its longer side, a cell clear when none of its pixels is above SEE_LEVEL
+SEE_CELLS = 64
+SEE_LEVEL = 8
+
+
+def see_through(img):
+    """``{"w", "h", "s", "c", "b"}``: where the Scenes preview's click goes through picture
+    *img* (as :func:`_picture` gives it, premultiplied) to what is drawn under it (PAD-512,
+    DragonRR: a full-screen picture of the score panel on top of a mode's screen, clear but
+    for the panel, took every click meant for the screen's title, so his colours went on
+    it).  The picture is cut into cells of ``s`` x ``s`` px, ``c`` to a row; ``b`` is base64
+    of one bit per cell, row by row, set where it shows (a premultiplied pixel with no alpha
+    but some colour adds light, so it shows).  ``None`` when every cell shows."""
+    import base64
+    import numpy as np
+    if img is None:
+        return None
+    v = np.asarray(img.convert("RGBA")).max(axis=2)
+    h, w = v.shape
+    if not (w and h):
+        return None
+    s = max(1, -(-max(w, h) // SEE_CELLS))
+    rows, cols = -(-h // s), -(-w // s)
+    grid = np.zeros((rows * s, cols * s), v.dtype)
+    grid[:h, :w] = v
+    shows = grid.reshape(rows, s, cols, s).max(axis=(1, 3)) > SEE_LEVEL
+    if shows.all():
+        return None
+    return {"w": w, "h": h, "s": s, "c": cols,
+            "b": base64.b64encode(np.packbits(shows.ravel()).tobytes()).decode("ascii")}
+
+
 def _load_file(path, key, cache):
     try:
         stamp = os.stat(path).st_mtime_ns if path else None

@@ -66,6 +66,7 @@ class TreeEditMixin:
         self._ttoken = 0
         self._tdefault = {}          # card -> the stock scene's resting frame (costly to find)
         self._tcache = {}            # pictures read for the renders, kept while unchanged
+        self._tsee = {}              # picture rel -> (picture, where a click goes through it)
         self._tlock = threading.Lock()
         self._tjob = None            # the newest render asked for (the worker takes it)
         self._trunning = False       # the render worker is up
@@ -82,6 +83,7 @@ class TreeEditMixin:
         self._filled_memo = None
         self._tdefault = {}
         self._tcache = {}
+        self._tsee = {}
         self._tshown_card = None
 
     def _load_trees(self):
@@ -766,10 +768,11 @@ class TreeEditMixin:
                     self._trunning = False
                     return
             img, paths = self._tree_draw(job)
+            see = self._tree_see(job) if img is not None else {}
             with self._tlock:
                 newer = self._tjob is not None
             if not newer:
-                self.ctx.loop.post(self._tree_show, job, img, paths)
+                self.ctx.loop.post(self._tree_show, job, img, paths, see)
 
     def _tree_draw(self, job):
         from ..plugins.stern import scene_render
@@ -804,7 +807,30 @@ class TreeEditMixin:
             return None, {}
         return parts["full"], paths
 
-    def _tree_show(self, job, img, paths):
+    def _tree_see(self, job):
+        """PAD-512: ``{picture rel: scene_render.see_through}`` for each picture the render
+        drew that can be clicked through somewhere: the page's click test goes on to what is
+        under it there.  Read from the pictures the render has just loaded."""
+        from ..plugins.stern import scene_render
+        out = {}
+        for d in job["draws"]:
+            rel = d.get("image")
+            if d["kind"] not in ("bitmap", "flip") or not rel or rel in out:
+                continue
+            try:
+                img = scene_render._picture(job["assets"], rel, job["cache"],
+                                            job.get("pictures"), job.get("sizes"))
+                got = self._tsee.get(rel)
+                if got is None or got[0] is not img:
+                    got = self._tsee[rel] = (img, scene_render.see_through(img))
+            except Exception:                        # noqa: BLE001
+                log.exception("scene tree see-through")
+                continue
+            if got[1] is not None:
+                out[rel] = got[1]
+        return out
+
+    def _tree_show(self, job, img, paths, see=None):
         if job["token"] != self._ttoken or not self._alive:
             return
         full = paths.get("full", "")
@@ -817,6 +843,7 @@ class TreeEditMixin:
                       "over": paths["over"]}
         self.set(frames=[full] if full else [], tree_layers=layers, tree_busy=False,
                  tree_loading=False, tree_img_rev=job["rev"], can_save=img is not None,
+                 tree_see=see or {},
                  # PAD-365: a scene that moves exports as a video
                  can_video=img is not None and self._tree_frame_count(job["man"]) > 1,
                  canvas_msg="" if full else "nothing could be drawn")
@@ -841,6 +868,8 @@ class TreeEditMixin:
                 continue
             hits.append({"id": d["node"], "name": d["path"][-1], "kind": d["kind"],
                          "path": " › ".join(d["path"]),
+                         # PAD-512: the picture, for its clear parts (tree_see)
+                         "img": d.get("image") if d["kind"] != "text" else None,
                          "filled": d["node"] in filled,
                          "pts": [[round(x, 1), round(y, 1)] for x, y in
                                  scene_eval.outline(d)]})

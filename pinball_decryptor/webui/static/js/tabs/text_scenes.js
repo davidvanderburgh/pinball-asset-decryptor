@@ -610,6 +610,32 @@ function inPoly(pts, x, y) {
   return inside;
 }
 
+// PAD-512 (DragonRR): a click goes through a picture where it is clear to what is drawn under
+// it (a full-screen picture of the score panel on top of a mode's screen took every click
+// meant for its title).  *see* is the server's grid of the picture (tree_see): one bit per
+// cell, set where it shows.
+const seeBits = new Map();
+export function clearAt(h, see, x, y) {
+  const m = h.img && see ? see[h.img] : null;
+  if (!m) return false;
+  const [p0, p1, , p3] = h.pts;
+  const ex = p1[0] - p0[0], ey = p1[1] - p0[1], fx = p3[0] - p0[0], fy = p3[1] - p0[1];
+  const det = ex * fy - fx * ey;
+  if (Math.abs(det) < 1e-9) return false;
+  const dx = x - p0[0], dy = y - p0[1];
+  const u = (dx * fy - fx * dy) / det, v = (ex * dy - ey * dx) / det;
+  const col = Math.min(m.c - 1, Math.max(0, Math.floor((u * m.w) / m.s)));
+  const row = Math.min(Math.ceil(m.h / m.s) - 1, Math.max(0, Math.floor((v * m.h) / m.s)));
+  let bits = seeBits.get(m.b);
+  if (!bits) {
+    if (seeBits.size > 400) seeBits.clear();
+    bits = Uint8Array.from(atob(m.b), (ch) => ch.charCodeAt(0));
+    seeBits.set(m.b, bits);
+  }
+  const i = row * m.c + col;
+  return !((bits[i >> 3] >> (7 - (i & 7))) & 1);
+}
+
 // PAD-447 (DragonRR): a click whose mouse jiggles a pixel or two picks a picture or a line of
 // text without moving it.  A press moves, resizes or scales nothing until the pointer has gone
 // DRAG_SLOP px on the screen from where it went down; from then on it follows the pointer from
@@ -1246,7 +1272,9 @@ function TreeCanvas({ s }) {
   };
   const pick = (x, y) => {
     const hits = t.hits || [];
-    for (let i = hits.length - 1; i >= 0; i--) if (inPoly(hits[i].pts, x, y)) return hits[i];
+    for (let i = hits.length - 1; i >= 0; i--) {
+      if (inPoly(hits[i].pts, x, y) && !clearAt(hits[i], s.tree_see, x, y)) return hits[i];
+    }
     return null;
   };
   const boxOf = (d) => ({ x: Math.min(d.fx, d.x), y: Math.min(d.fy, d.y), w: Math.abs(d.x - d.fx), h: Math.abs(d.y - d.fy) });

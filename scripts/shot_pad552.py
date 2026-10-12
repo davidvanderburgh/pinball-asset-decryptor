@@ -2,17 +2,21 @@
 changes (DragonRR's 70th_BETA_1.zip, from his own built card) loaded into a project of the
 stock card.
 
-    python scripts/shot_pad552.py <repo> <out_dir> <file.zip> [--after]
+    python scripts/shot_pad552.py <repo> <out_dir> <file.zip> [--after] [--leftovers <dir>]
 
 <repo> is the source tree to serve (the ticket branch, or a ``git archive`` of main for the
 "before" shots).  The page loads <file.zip> into a stock copy of shot_pad312's Godzilla project
 and photographs, under the same name before and after:
 
 - scenes_load_dialog.png  the message Load scene edits from a file shows when it is done
+- scenes_leftovers.png    with --leftovers: the battle scene after the load, in a project folder
+                          that still holds the radimg_*.png pictures of <dir> (an earlier
+                          extraction of his built card into the same folder)
 
 Needs Playwright (PAD_PWLIB or the user site-packages one) and the installed Edge.
 """
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -35,6 +39,13 @@ def main():
     out = lambda n: os.path.join(out_dir, ("after_" if after else "before_") + n)  # noqa: E731
     scratch = tempfile.mkdtemp(prefix="pad552-")
     project = shot_pad502._project(scratch, "gzho")
+    leftovers = (sys.argv[sys.argv.index("--leftovers") + 1] if "--leftovers" in sys.argv
+                 else None)
+    if leftovers:
+        tex = os.path.join(project, "images", "scene_textures")
+        for name in os.listdir(leftovers):
+            if name.startswith("radimg_") and not os.path.exists(os.path.join(tex, name)):
+                shutil.copy(os.path.join(leftovers, name), tex)
     print("serving", repo, "project", project, flush=True)
     proc, url = base._serve(repo, scratch, project)
     api = lambda m, *a: webui_shot.api(url, m, *a)          # noqa: E731
@@ -71,13 +82,18 @@ def main():
             modal = page.query_selector(".modal")
             if modal:
                 print("dialog:", modal.inner_text().replace("\n", " | "), flush=True)
-                page.screenshot(path=out("scenes_load_dialog.png"))
+                if not leftovers:
+                    page.screenshot(path=out("scenes_load_dialog.png"))
                 btn = page.query_selector('.modal .ft button:has-text("OK")')
                 if btn:
                     btn.click()
             else:
                 print("no dialog", flush=True)
             t.join(120)
+            if leftovers:
+                time.sleep(10)
+                page.mouse.move(5, 990)
+                page.screenshot(path=out("scenes_leftovers.png"))
             browser.close()
     finally:
         proc.terminate()

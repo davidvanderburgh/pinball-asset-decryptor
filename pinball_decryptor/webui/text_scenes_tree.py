@@ -3474,7 +3474,7 @@ class TreeEditMixin:
         images = self._flush_images()
         pics, gone, more = [], [], False
         tfits, tmissing, tlong, thave = [], [], 0, []
-        kept, saved_to, reset_n, shown = 0, None, 0, 0
+        kept, saved_to, reset_n, shown, elsewhere = 0, None, 0, 0, 0
         colours = {}
         try:
             scenes = scene_edit.read_share(path)
@@ -3577,6 +3577,10 @@ class TreeEditMixin:
                 states = scene_edit.read_states(path)
                 find = scene_edit.card_finder(states.keys())
                 trees = self._load_trees()
+                # PAD-552: a scene here that starts out otherwise than where the file was saved
+                elsewhere = sum(1 for c in got if c in trees and find(c) in states
+                                and scene_edit.starts_elsewhere(trees[c], got[c],
+                                                                states[find(c)]))
                 shown = sum(1 for k in scene_edit.note_shown(
                     self.assets_dir, {c: trees[c] for c in got if c in trees},
                     states={c: states[find(c)] for c in got if find(c) in states}).values()
@@ -3652,13 +3656,21 @@ class TreeEditMixin:
             words += (" The color profile%s of %d game picture%s not in this project %s left "
                       "out." % ("" if lost == 1 else "s", lost, "" if lost == 1 else "s",
                                 "was" if lost == 1 else "were"))
+        if elsewhere:
+            words += (" %d scene%s here %s not start out the way %s did in the project the "
+                      "file was saved from, so %s edits can land in other places: that "
+                      "project is of another card, or of a card built with other changes. "
+                      "For the same look, extract this project from the same card."
+                      % (elsewhere, "" if elsewhere == 1 else "s",
+                         "does" if elsewhere == 1 else "do", "it" if elsewhere == 1 else "they",
+                         "its" if elsewhere == 1 else "their"))
         if missing:
             words += (" %d scene%s in the file %s not on this card and %s left out."
                       % (len(missing), "" if len(missing) == 1 else "s",
                          "is" if len(missing) == 1 else "are",
                          "was" if len(missing) == 1 else "were"))
         self._set_caption(words)
-        if missing or gone or tmissing or tlong or lost:
+        if missing or gone or tmissing or tlong or lost or elsewhere:
             compat.messagebox.showinfo("Load scene edits", words)
         return sorted(got)
 

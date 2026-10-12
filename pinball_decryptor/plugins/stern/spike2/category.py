@@ -47,9 +47,16 @@ from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
 
 from . import locate as L
 from .elf import parse_elf
-from .emulator import DESC_BASE, MAX_RECORDS, PAGE, Spike2Emu, _R, _u32
+from .emulator import DESC_BASE, MAX_RECORDS, PAGE, Spike2Emu, _R, _algn, _u32
 
-DESC2 = 0xb0000000          # 2nd offset-identity window (clear of the image.bin one)
+# Fallback 2nd offset-identity window.  The real one is computed per card in
+# :class:`CatEmu.__init__` so it always sits clear of the image.bin window —
+# a fixed address here is NOT safe: Foo Fighters 1.04's 1.33 GB image.bin
+# covers 0xb0000000, and _backing checks the image.bin range FIRST, so a
+# DESC2 inside it serves the category file's reads from image.bin at the
+# wrong offset (every bank's header then registers as garbage and every
+# record-count gate fails — the songs silently never extracted).
+DESC2 = 0xb0000000
 
 
 # --------------------------------------------------------------------------
@@ -188,6 +195,11 @@ class CatEmu(Spike2Emu):
         super().__init__(game_real_path, image_path)
         self._mm_img = self.mm
         self._img0 = self._mm_img.size()
+        # The category window goes just past the image.bin window's end (page
+        # aligned), where _backing's image.bin branch can never reach it.  A
+        # ~2 GB image (MAX_IMAGE_BYTES) plus the largest bank still fits under
+        # 4 GB: 0x703da000 + 0x80000000 + 0x9000000 < 0x100000000.
+        self.DESC2 = _algn(DESC_BASE + self._img0 + 0x10000)
         self._catf = None
         self._mm_cat = None
         self.cat2size = 0
@@ -207,9 +219,10 @@ class CatEmu(Spike2Emu):
     def _backing(self, addr):
         if DESC_BASE <= addr < DESC_BASE + self._img0 + 0x10000:
             return (self._mm_img, addr - DESC_BASE)
+        d2 = self.DESC2
         if (self._mm_cat is not None
-                and DESC2 <= addr < DESC2 + self.cat2size + 0x10000):
-            return (self._mm_cat, addr - DESC2)
+                and d2 <= addr < d2 + self.cat2size + 0x10000):
+            return (self._mm_cat, addr - d2)
         return (None, None)
 
     def _ensure_page(self, addr):
@@ -231,7 +244,7 @@ class CatEmu(Spike2Emu):
     def _mmap(self):
         sp = self.mu.reg_read(UC_ARM_REG_SP)
         off = struct.unpack("<I", bytes(self.mu.mem_read(sp + 4, 4)))[0]
-        self._ret((DESC2 if self._serving_cat else DESC_BASE) + off)
+        self._ret((self.DESC2 if self._serving_cat else DESC_BASE) + off)
 
     def _fstat(self):
         sb = self.mu.reg_read(UC_ARM_REG_R2)
@@ -252,8 +265,9 @@ class CatEmu(Spike2Emu):
         """Map ``image-scNN.bin`` into the DESC2 window (replacing any previous
         one — its window pages are invalidated so they re-fill)."""
         if self._mm_cat is not None:
+            d2 = self.DESC2
             for base in [p for p in self.mapped_pages
-                         if DESC2 <= p < DESC2 + self.cat2size + 0x20000]:
+                         if d2 <= p < d2 + self.cat2size + 0x20000]:
                 try:
                     self.mu.mem_unmap(base, PAGE)
                 except UcError:

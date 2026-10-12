@@ -18126,25 +18126,29 @@ def _restore_bank_consumed(gr_path, img_path, rev, cid, sc_path, patches):
     returns the same with each body's consumed bytes restored."""
     from unicorn import UC_HOOK_MEM_READ
 
-    from .spike2.category import DESC2, CatEmu
+    from .spike2.category import CatEmu
     reads = {bo: set() for (_c, _i, bo, _b) in patches}
-
-    def _mk(b0, e0, acc):
-        def on_read(mu, access, addr, size, value, ud):
-            o = addr - DESC2
-            for k in range(size):
-                if b0 <= o + k < e0:
-                    acc.add(o + k)
-        return on_read
 
     emu = CatEmu(gr_path, img_path)
     try:
         emu.boot()
         emu.set_category_file(sc_path)
+        # the category window is per-card (clear of the image.bin one) — see
+        # CatEmu.__init__; never assume the module's fallback constant.
+        desc2 = emu.DESC2
+
+        def _mk(b0, e0, acc):
+            def on_read(mu, access, addr, size, value, ud):
+                o = addr - desc2
+                for k in range(size):
+                    if b0 <= o + k < e0:
+                        acc.add(o + k)
+            return on_read
+
         for (_c, _i, bo, body) in patches:
             emu.mu.hook_add(UC_HOOK_MEM_READ, _mk(bo, bo + len(body), reads[bo]),
-                            begin=(DESC2 + bo) & ~0xfff,
-                            end=((DESC2 + bo + len(body)) + 0xfff) & ~0xfff)
+                            begin=(desc2 + bo) & ~0xfff,
+                            end=((desc2 + bo + len(body)) + 0xfff) & ~0xfff)
         emu._derive_cat(cid, rev)
         out = []
         for (c, idx, bo, body) in patches:

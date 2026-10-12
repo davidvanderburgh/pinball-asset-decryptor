@@ -104,8 +104,38 @@ NO_KEY_HINT = (
     "music-ID settings.")
 
 FFMPEG_HINT = (
-    "Online music ID needs `ffmpeg` (already used for video) to compute the\n"
-    "acoustic fingerprint.  Install ffmpeg and ensure it's on PATH.")
+    "Online music ID needs a fingerprint of each clip.  Install `ffmpeg`\n"
+    "(already used for video) with the chromaprint muxer on PATH, or the\n"
+    "reference `fpcalc` tool (chromaprint package).")
+
+# Fingerprint shapes to try, in order.  ``-fp_format base64`` is the explicit
+# form on ffmpeg >= 4.4; some newer builds dropped the option (the muxer's
+# output is base64 by default there anyway), and homebrew's ffmpeg 9 dropped
+# the whole chromaprint muxer (libchromaprint) — hence the fpcalc fallback.
+_FINGERPRINT_FORMS = (
+    ("-fp_format", "base64"),
+    (),
+)
+# AcoustID wants base64; anything else (a text-format fp, a muxer banner,
+# a Windows console mixing garbage into stdout) must not be sent.
+_B64_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}$")
+
+
+def _fpcalc_fp(path):
+    """Fingerprint via the reference ``fpcalc`` tool, or ``None``."""
+    import shutil
+    fpcalc = shutil.which("fpcalc")
+    if not fpcalc:
+        return None
+    proc = subprocess.run([fpcalc, "-json", path], capture_output=True,
+                          text=True, creationflags=_CREATE_FLAGS)
+    if proc.returncode != 0:
+        return None
+    try:
+        d = json.loads(proc.stdout)
+        return d["fingerprint"], int(d["duration"])
+    except (ValueError, KeyError):
+        return None
 
 
 def resolve_client_key(explicit=None):
@@ -119,23 +149,36 @@ def resolve_client_key(explicit=None):
 # ---------------------------------------------------------------------------
 def fingerprint_file(path):
     """Return ``(fingerprint_b64, duration_seconds_int)`` via ffmpeg's
-    chromaprint muxer.  Raises ValueError on a decode/fingerprint failure.
+    chromaprint muxer, falling back to ``fpcalc`` when this ffmpeg build has
+    no chromaprint muxer (e.g. homebrew's ffmpeg 9+).  Raises ValueError on a
+    decode/fingerprint failure.
 
     Runs fully headless: ``creationflags=_CREATE_FLAGS`` keeps Windows from
     flashing a console window per clip."""
+    errs = []
     ffmpeg = find_ffmpeg()
+    if ffmpeg:
+        for form in _FINGERPRINT_FORMS:
+            proc = subprocess.run(
+                [ffmpeg, "-hide_banner", "-v", "error", "-i", path,
+                 "-f", "chromaprint", *form, "-"],
+                capture_output=True, creationflags=_CREATE_FLAGS)
+            fp = proc.stdout.decode("ascii", "ignore").strip()
+            if proc.returncode == 0 and _B64_RE.fullmatch(fp):
+                return fp, int(round(probe_duration(path)))
+            msg = proc.stderr.decode("utf-8", "replace")[:200].strip()
+            errs.append("ffmpeg: %s" % (msg or
+                      "no %sfingerprint emitted" %
+                      ("valid " if fp else "")))
+    got = _fpcalc_fp(path)
+    if got is not None:
+        return got
     if not ffmpeg:
         raise PipelineError("Identify music", FFMPEG_HINT)
-    proc = subprocess.run(
-        [ffmpeg, "-hide_banner", "-v", "error", "-i", path,
-         "-f", "chromaprint", "-fp_format", "base64", "-"],
-        capture_output=True, creationflags=_CREATE_FLAGS)
-    fp = proc.stdout.decode("ascii", "ignore").strip()
-    if proc.returncode != 0 or not fp:
-        msg = proc.stderr.decode("utf-8", "replace")[:300]
-        raise ValueError("ffmpeg fingerprint failed for %s: %s"
-                         % (os.path.basename(path), msg))
-    return fp, int(round(probe_duration(path)))
+    errs.append("fpcalc: not found — install the `chromaprint` package (or an "
+                "ffmpeg build with the chromaprint muxer)")
+    raise ValueError("fingerprint failed for %s: %s"
+                     % (os.path.basename(path), "; ".join(errs)))
 
 
 def lookup(fingerprint, duration, client_key, timeout=20,

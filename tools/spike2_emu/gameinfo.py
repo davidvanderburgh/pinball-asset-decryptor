@@ -147,16 +147,37 @@ def active(name=None):
     return None
 
 
+#: {title: directory} a caller that KNOWS where a title's files are has said
+#: so (set_game_dir). Process-local, and it beats everything below.
+_GIVEN_DIRS = {}
+
+
+def set_game_dir(name, path):
+    """Say where `name`'s `game` ELF and `assets/` are, for this process.
+
+    PAD-551: watch.sh builds the playfield tables BEFORE run_game.sh publishes
+    dump/title, so on a card run game_dir() read the PREVIOUS run's title from
+    it, fell back to the empty games/<title> stub, found no binary - and
+    mktables kept whatever device table was cached, for good, unless the same
+    title had been the last one run on that rig. watch.sh knows the card's
+    title directory (it reads the node directory from it) and now passes it.
+    """
+    if name and path:
+        _GIVEN_DIRS[name] = path
+
+
 def game_dir(name=None):
     """The directory holding the title's `game` ELF and `assets/`, or None.
 
-    Prefers what the run published, because that is the only answer that is
-    right for a card run. Falls back to `games/<title>` in the rootfs, which is
-    where an extracted title lives.
+    What a caller said (set_game_dir) first; then what the run published,
+    because that is the only answer that is right for a card run. Falls back
+    to `games/<title>` in the rootfs, which is where an extracted title lives.
     """
     game = active(name)
     if not game:
         return None
+    if game in _GIVEN_DIRS:
+        return _GIVEN_DIRS[game]
     pub = published()
     if pub.get("name") == game and pub.get("dir"):
         # Published by a WSL-side script, so it is a POSIX path; the playfield

@@ -160,9 +160,12 @@ play.
 **The cabinet's own lights get a column of their own.** Left of the
 artwork the window draws the topper (on the topper's own drawing
 where the title ships one), the backbox speaker lights as a ring and
-the expression-lighting blades as two bars, all lit live; each section
-appears once its board has sent anything, and a topper switched off
-the bus gets none. On a title with no artwork the LED grid shapes them
+the expression-lighting blades as two bars, and Stranger Things' UV
+Lighting Kit, all lit live; every section is drawn from the start, dark
+until the game lights it (most games leave the topper and the speakers
+off in attract, and some light the topper only during a game), and a
+topper switched off the bus gets none. On a title with no artwork the
+LED grid has their blocks from the start too, and shapes them
 the same way: the speakers a ring (pixel 1 at the top, clockwise) and
 the blades two columns, left and right (pixel 1 at the bottom). The side panel's **CABINET LIGHTS** box lists the
 boards and carries an **Expression lights (blades and speakers)** tick

@@ -933,7 +933,9 @@ function startMain() {
     box.title = "What the game drives the cabinet's shaker motor at (" + spec.addr + "), "
       + "over the last " + SPAN / 1000 + " s: the height is the power, n/255 of the board's PWM duty, "
       + "up to the scale in the corner";
-    box.append(head, cv, now, note, opt);
+    // the switch list has no picture to shake (PAD-551)
+    box.append(head, cv, now, note);
+    if (S.kind === "field") box.append(opt);
     const hist = [];        // [performance.now(), power] at each change
     let st = null, peak = 0;
     function update(d) {

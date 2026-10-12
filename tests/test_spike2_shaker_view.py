@@ -15,6 +15,7 @@ driven at and for how long, PAD-381). What is worth failing on:
 import os
 import struct
 import sys
+import types
 
 import pytest
 
@@ -177,3 +178,25 @@ def test_the_same_shake_again_is_a_second_shake(watch):
     watch.tick(_block(until=2000, pulse_t=20, pulse_pwr=51), 300.0)
     st = watch.tick(_block(until=2400, pulse_t=20, pulse_pwr=51), 400.0)
     assert st[0] == 51 and st[3] == 2
+
+
+def test_the_switch_list_view_has_the_shaker_panel_too(tmp_path, monkeypatch):
+    """PAD-551 (peanuts): "missing shaker" on Aerosmith, Sword of Rage, Elvira,
+    Foo Fighters, Guardians, Led Zeppelin, Mandalorian, Munsters, Rush, TMNT
+    and Venom - every one a title with no playfield picture, whose window is
+    the switch list, which had no shaker panel. It has the same one now,
+    driven from the same drive table."""
+    import playfield
+    p = _table(tmp_path, "coil SHAKER MOTOR 0 0 0 0 5 0 - -")
+    monkeypatch.setattr(playfield, "TDIR", str(tmp_path))
+    rows = [{"id": 5, "num": 5, "node": 8, "bit": 0, "name": "LEFT OUTLANE"}]
+    S = playfield.Schematic(types.SimpleNamespace(), rows)
+    spec = S.spec()
+    assert spec["kind"] == "schematic"
+    assert spec["shaker"] == {"name": "SHAKER MOTOR", "addr": "node 1 coil 0"}
+    assert S.dyn()["shaker"] is None
+    S.shaker.tick(_block(until=0), 1000.0)
+    S.shaker.tick(_block(until=500, pulse_t=150, pulse_pwr=31), 1100.0)
+    assert S.dyn()["shaker"][0] == 31
+    js = open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf-8").read()
+    assert "if (info && S.view.shaker)" in js       # the page is view-agnostic

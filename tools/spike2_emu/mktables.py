@@ -776,7 +776,13 @@ def main():
     ap.add_argument("--elf", default=None,
                     help="with --current: the running game binary (default: "
                          "the one the run published)")
+    ap.add_argument("--dir", default=None,
+                    help="the title's own directory (its game ELF and assets): "
+                         "watch.sh passes the card's, which the run has not "
+                         "published yet when the tables are built (PAD-551)")
     a = ap.parse_args()
+    if a.dir:
+        gameinfo.set_game_dir(gameinfo.active(a.game), a.dir)
     if a.current:
         ok, why = list_current(a.game, a.elf)
         print("switch list: %s" % why)

@@ -2487,6 +2487,15 @@ class LedGrid(LedRing):
         self._decoded = None
         self._init_ring()
 
+    def seed(self, keys):
+        """Give these (node, channel)s their cells before the wire shows them
+        (PAD-551: the cabinet's own boards, which the window knows from the
+        title's tables). A board the cabinet does not have stays out."""
+        keys = {tuple(k) for k in keys if k[0] not in self.gone} - self.seen
+        if keys:
+            self.seen |= keys
+            self._rebuild()
+
     def _discover(self, d):
         """Add every channel the block shows (val or seen) and we have not.
         Per node, with a C-level all-zero test first. True when it grew."""
@@ -2636,12 +2645,13 @@ class CabinetLights:
     MARKER: an RGB pixel is one dot in the colour its channels compose to, as
     an insert is (fixture_color).
 
-    A SECTION SHOWS ONCE ITS BOARD HAS SPOKEN, and stays: some of these boards
-    speak a strip encoding the shim does not decode (Godzilla's topper strips,
-    leddecode.py's "masked strip encoding"), and a block of dots that can never
-    light is a question, not a picture. "Spoken" is a lit channel, or one the
-    `seen` plane says the game addressed. The column itself appears with its
-    first section, the way the swatch grid grows a block.
+    EVERY SECTION SHOWS FROM THE START, dark until its board lights (PAD-551).
+    It used to wait for the board to speak, so that a strip encoding the shim
+    cannot decode would not leave dots that never light - but most games leave
+    the topper and the speakers off in attract, and peanuts read fifteen titles'
+    toppers and speaker rings as missing. `alive` still records that the board
+    has spoken (a lit channel, or one the `seen` plane says the game
+    addressed): the CABINET LIGHTS box says "nothing from it yet" until it has.
     """
 
     def __init__(self, expression=True, boards=None):
@@ -2673,7 +2683,11 @@ class CabinetLights:
                 self.pixels.append(P)
 
     def shown(self):
-        return [S for S in self.sections if S["alive"]]
+        return list(self.sections)
+
+    def channels(self):
+        """Every (node, channel) a section's pixels use."""
+        return {ch for P in self.pixels for ch in P["channels"].values()}
 
     def _spoken(self, S, d):
         """Has this section's board said anything: a lit channel, or one the
@@ -2766,8 +2780,7 @@ class CabinetLights:
         return out
 
     def dyn(self):
-        return {P["cid"]: P["drawn"] or 0 for P in self.pixels
-                if P["section"]["alive"]}
+        return {P["cid"]: P["drawn"] or 0 for P in self.pixels}
 
     def panel(self, heard=True):
         """The side panel's CABINET LIGHTS box: what the column holds, and the
@@ -3514,7 +3527,7 @@ class Field(LedRing):
         }
 
     def cab_spec(self):
-        """The cabinet column (PAD-500), or None until a section has spoken.
+        """The cabinet column (PAD-500), or None on a title with none.
         `w` is its width in the artwork's own pixels, so the page scales the
         two together."""
         secs = self.cab.spec()
@@ -3893,7 +3906,8 @@ class Field(LedRing):
             if fx:
                 frame["fx"] = fx
             # PAD-500: the cabinet column - a section that comes alive lays
-            # the page out again, the way a new swatch-grid block does
+            # the page out again, so its CABINET LIGHTS line stops saying
+            # "nothing from it yet"
             cab, grew = self.cab.tick(d)
             if cab:
                 frame["cab"] = cab
@@ -4017,6 +4031,13 @@ class Schematic:
         # tick box - with "Expression lights" off the blades' and speakers'
         # own boards leave the swatch grid
         self.cab = CabinetLights(expression_on())
+        # PAD-551: the cabinet's own boards are in the grid from the start,
+        # dark until they light - a topper or speaker ring the game leaves
+        # off in attract read as missing when its block waited for the wire
+        self.leds.seed(self.cab.channels())
+        # PAD-551: and the shaker panel, which only the artwork view had - so
+        # every title with no playfield picture lost it (Aerosmith, Venom...)
+        self.shaker = load_shaker()
         self.led_lit, self.led_total = 0, 0
         self._grid_gen = 0
         self.status = ""
@@ -4036,6 +4057,7 @@ class Schematic:
                 "entries": self.entries,
                 "grid": grid,
                 "cab_panel": self.cab.panel(heard=False),
+                "shaker": self.shaker.spec() if self.shaker else None,
                 "trough": self.trough.spec() if (
                     self.trough is not None and self.trough.clickable)
                 else None}
@@ -4043,6 +4065,7 @@ class Schematic:
     def dyn(self):
         return {"sw": {str(s): v for s, v in self._dot_drawn.items()},
                 "grid": self.leds.dyn(),
+                "shaker": self.shaker.drawn if self.shaker else None,
                 "trough": self.trough.dyn() if (
                     self.trough is not None and self.trough.clickable)
                 else None}
@@ -4078,6 +4101,10 @@ class Schematic:
                 frame["layout"] = True
             if changes:
                 frame["grid"] = changes
+            if self.shaker is not None and len(d) >= PADLED_READ:
+                shk = self.shaker.tick(d, time.monotonic() * 1000.0)
+                if shk is not None:
+                    frame["shaker"] = shk
         trough = (["Balls", self.sw.balls.text(), "", False]
                   if self.sw.positions else
                   ["Trough", "no switches identified", "", True])

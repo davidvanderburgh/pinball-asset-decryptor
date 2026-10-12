@@ -185,6 +185,58 @@ def connector_group_node(dev_rows):
     return {g: next(iter(n)) for g, n in seen.items() if len(n) == 1}
 
 
+def directory_group_node(nodedir_path):
+    """{group: node} for the playfield and accessory groups (>= 6), from the
+    title's own NODE DIRECTORY (node_ident.txt v2, nbdir.py's `group=`).
+
+    A device-table group is its board's place in the directory (PAD-500), and
+    the directory is the game's own declaration of its boards, so this is a
+    measurement, not an inference. PAD-551 (peanuts) is why it is consulted:
+    on all 53 latest builds the switch join agrees with it on every group it
+    can answer, and the only disagreements were the two weaker sources it now
+    overrules -
+
+      * the ascending rule counted pinnodes only, so a coil4node board was
+        skipped: Sword of Rage's group 8 is node 12 "TOPPER 1" (a coil4node),
+        the rule said node 13, and its topper was shown as node 13;
+      * GODZILLA'S CONSTANT stood in where nothing else answered: Elvira's and
+        Rush's group 6 is node 7, their BACKBOX SPEAKER LIGHTS, and the
+        constant read it as node 8 - the speaker ring showed the lower
+        playfield's lamps ("weird speaker lights");
+      * Batman 66's connector column names ONE row of group 9 "13a" and one
+        of group 8 "9c", against 37 group-10 rows that really are node 13: a
+        group of one row cannot outvote the directory, which puts group 9 on
+        node 12 "Accessory Topper" and group 8 on node 10 "Turntable" - the
+        board TURNTABLE BATPHONE is named for.
+
+    Groups below 6 are left alone: 4 and 5 are FIXED_GROUPS' and the Home
+    Editions' business (fixed_group_node), and 1-3 are the cabinet's strip
+    boards, which cablights.py places itself - mapping them here would make
+    elvira3's topper drawing (group 3) a usable layout, the regression
+    layout_is_usable() documents. A v1 directory (no `group=`) answers {}.
+    """
+    out = {}
+    if not nodedir_path:
+        return out
+    try:
+        with open(nodedir_path, encoding="ascii", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return out
+    for line in lines:
+        if not line.startswith("node="):
+            continue
+        head = line.partition(" name=")[0]
+        kv = dict(t.split("=", 1) for t in head.split() if "=" in t)
+        try:
+            node, group = int(kv["node"]), int(kv["group"])
+        except (KeyError, ValueError):
+            continue
+        if group >= 6 and 0 <= node < NODES:
+            out[group] = node
+    return out
+
+
 def fixed_group_node(dev_rows):
     """{group: node} for a FIXED_GROUPS group whose own rows say it is a board.
 
@@ -361,6 +413,8 @@ def group_node(rows, nodedir_path=None, dev_rows=None,
 
     dev_rows = dev_rows if dev_rows is not None else rows
     measured = dict(connector_group_node(dev_rows))
+    # the title's own node directory over the connector column (PAD-551)
+    measured.update(directory_group_node(nodedir_path))
     measured.update(fixed_group_node(dev_rows))
     measured.update(switch_group_node(dev_rows, switch_lines))
 

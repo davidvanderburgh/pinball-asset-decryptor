@@ -3475,13 +3475,14 @@ class TreeEditMixin:
         pics, gone, more = [], [], False
         tfits, tmissing, tlong, thave = [], [], 0, []
         kept, saved_to, reset_n, shown, elsewhere = 0, None, 0, 0, 0
-        colours = {}
+        colours, moved, shown_k, differs, tpairs, skip_scenes = {}, {}, {}, {}, [], set()
+        colours_missing = []
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
             # the scene nodes that draw it
             extras = scene_share.localise(self.assets_dir, scene_share.read_extras(path),
-                                          self._load_trees())
+                                          self._load_trees(), moved=moved)
             got, missing = scene_edit.match_cards(scenes, self._load_trees().keys())
             mine = scene_edit.load(self.assets_dir)
             # PAD-402: a scene of mine the file would leave as it is, is no conflict
@@ -3577,20 +3578,25 @@ class TreeEditMixin:
                 states = scene_edit.read_states(path)
                 find = scene_edit.card_finder(states.keys())
                 trees = self._load_trees()
-                # PAD-552: a scene here that starts out otherwise than where the file was saved
-                elsewhere = sum(1 for c in got if c in trees and find(c) in states
-                                and scene_edit.starts_elsewhere(trees[c], got[c],
-                                                                states[find(c)]))
-                shown = sum(1 for k in scene_edit.note_shown(
+                # PAD-552: a scene here that starts out otherwise than where the file was saved,
+                # and what of it does (the load report)
+                for c in got:
+                    if (c in trees and find(c) in states and scene_edit.starts_elsewhere(
+                            trees[c], got[c], states[find(c)])):
+                        differs[c] = scene_edit.start_differences(trees[c], got[c],
+                                                                  states[find(c)])
+                elsewhere = len(differs)
+                shown_k = scene_edit.note_shown(
                     self.assets_dir, {c: trees[c] for c in got if c in trees},
-                    states={c: states[find(c)] for c in got if find(c) in states}).values()
-                    if k)
+                    states={c: states[find(c)] for c in got if find(c) in states})
+                shown = sum(1 for k in shown_k.values() if k)
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
                                                        renamed=renamed, overlay=overlay,
                                                        cards_here=self._load_trees().keys(),
                                                        files_profile=files_profile,
-                                                       counts=colours)
+                                                       counts=colours,
+                                                       missing_colored=colours_missing)
             if tfits:
                 if text_tab is not None:
                     text_tab._set_replacements(
@@ -3669,6 +3675,26 @@ class TreeEditMixin:
                       % (len(missing), "" if len(missing) == 1 else "s",
                          "is" if len(missing) == 1 else "are",
                          "was" if len(missing) == 1 else "were"))
+        # PAD-552: every scene, picture and text edit the load could not put in place as it was,
+        # by name, in a report beside the project's logs
+        find_here = scene_edit.card_finder(self._load_trees().keys())
+        srows = []
+        for card, ops in sorted(scenes.items()):
+            here = find_here(card)
+            status = ("not on this card, left out" if here is None
+                      else "kept your own" if here in skip_scenes
+                      else "starts out otherwise here" if here in differs else "loaded")
+            srows.append({"label": self._scene_label(card), "card": card, "ops": len(ops),
+                         "status": status, "shown": shown_k.get(here) or 0,
+                         "differs": differs.get(here) or []})
+        report = scene_share.write_load_report(self.assets_dir, path, {
+            "scenes": srows, "pictures_missing": gone,
+            "colored_missing": colours_missing, "moved": moved,
+            "text_missing": tmissing, "text_have": thave,
+            "text_long": [(r, new) for r, new in tpairs
+                          if R.row_len(r, new) > R.row_budget(r)]})
+        if report and (missing or gone or tmissing or tlong or lost or elsewhere):
+            words += " What was left out or lands elsewhere, by name: %s" % report
         self._set_caption(words)
         if missing or gone or tmissing or tlong or lost or elsewhere:
             compat.messagebox.showinfo("Load scene edits", words)

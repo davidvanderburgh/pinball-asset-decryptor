@@ -75,6 +75,12 @@ def test_the_page_says_so_when_it_loads_them(tmp_path):
         cap = w.state("text_scenes")["caption_full"]
         assert "1 scene here does not start out the way it did" in cap, cap
         assert "extract this project from the same card" in cap, cap
+        # round 3: what lands elsewhere, by name, in a report in the project's logs
+        logs = list((mine / "logs").glob("Load his scenes *.txt"))
+        assert len(logs) == 1 and str(logs[0]) in cap, cap
+        report = logs[0].read_text(encoding="utf-8")
+        assert "1 starting out otherwise here" in report, report
+        assert "node 53 Title: off by -300.0,+0.0 px" in report, report
 
         _open(w, same)
         w.answers.append(zip_path)
@@ -122,3 +128,12 @@ def test_a_picture_a_scene_here_draws_keeps_its_name(tmp_path):
     # drawn here by another scene, or carrying no nodes to look it up by: as before
     assert sorted(got["colored"]) == ["images/scene_textures/left_over.png",
                                       "images/scene_textures/shared.png"]
+
+
+def test_start_differences_name_the_node_and_how_far():
+    his = _built(_man(), EARLIER)
+    st = X.states_of(his, MOVES)
+    got = X.start_differences(_man(), MOVES, st)
+    assert got == [{"node": 53, "name": "Title", "what": "off by -300.0,+0.0 px"}]
+    assert X.start_differences(his, MOVES, st) == []
+    assert X.start_differences(_man(), MOVES, None) == []

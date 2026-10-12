@@ -369,7 +369,7 @@ def _other_game_folder(assets_dir, rel):
     return same[0] if len(same) == 1 else None
 
 
-def localise(assets_dir, extras, trees):
+def localise(assets_dir, extras, trees, moved=None):
     """*extras* (:func:`read_extras`) with its replaced pictures named as this project names
     them (PAD-385).  A picture this project has under the file's name keeps it.  One it does
     not is looked up by the nodes that draw it in the file's scenes (*trees*: this project's
@@ -379,7 +379,9 @@ def localise(assets_dir, extras, trees):
     file saved before PAD-385, a scene this card does not have) keeps the file's name and is
     left out at load, as before.  A picture no scene draws (a boot screen, a backglass logo) is
     found in the other game folder here (le/pro folders matched, PAD-401).  The game's own
-    pictures with a color profile (``colored``, PAD-502) are named the same way."""
+    pictures with a color profile (``colored``, PAD-502) are named the same way.  *moved*, a
+    dict, is filled with ``{rel in the file: [rel here, ...]}`` of each named otherwise here
+    (PAD-552: the load report)."""
     if not (extras.get("pictures") or extras.get("colored")):
         return extras
     find = scene_edit.card_finder((trees or {}).keys())
@@ -387,11 +389,12 @@ def localise(assets_dir, extras, trees):
     for man in (trees or {}).values():
         shown.update("images/" + pic for pic in manifest_drawers(man))
     return dict(extras, pictures=_localised(assets_dir, extras.get("pictures") or {}, find,
-                                            trees, shown),
-                colored=_localised(assets_dir, extras.get("colored") or {}, find, trees, shown))
+                                            trees, shown, moved),
+                colored=_localised(assets_dir, extras.get("colored") or {}, find, trees, shown,
+                                   moved))
 
 
-def _localised(assets_dir, pics, find, trees, shown=None):
+def _localised(assets_dir, pics, find, trees, shown=None, moved=None):
     """:func:`localise` of one ``{rel: {"drawn"?, ...}}`` of the file.  A picture here under the
     file's name that no scene here draws (*shown*), while the file's scenes draw it, is a
     leftover of an earlier extraction into the same folder (PAD-552, DragonRR: every color
@@ -425,6 +428,8 @@ def _localised(assets_dir, pics, find, trees, shown=None):
         mine = [h for h in sorted(found.get(rel, ())) if claims[h] == [rel] and h not in pics]
         for here in mine or [rel]:
             out[here] = p
+        if mine and moved is not None and mine != [rel]:
+            moved[rel] = mine
     return out
 
 
@@ -559,6 +564,80 @@ def _names(stored):
     return ", ".join(names[:3]) + (" and %d more" % more if more > 0 else "")
 
 
+#: where :func:`write_load_report` puts its reports, inside the project folder (never scanned
+#: as slots: core.checksums.NON_ASSET_DIRS)
+REPORT_DIR = "logs"
+
+
+def write_load_report(assets_dir, zip_path, report):
+    """PAD-552 (DragonRR: "is there a log of exact locations and filenames of incorrect
+    files?"): write what a load of *zip_path* could not put in place as it was, to a text file
+    in the project's :data:`REPORT_DIR`, and return its path (None when it cannot be written).
+
+    *report*: ``{"scenes": [{"label", "card", "ops", "status", "shown", "differs"}],
+    "pictures_missing", "colored_missing", "moved": {rel: [rel here]}, "text_missing":
+    [edit], "text_long": [(row, new)], "text_have": [edit]}`` (any may be left out); a scene's
+    *differs* is :func:`scene_edit.start_differences`."""
+    import time
+    from ... import __version__
+    stem = re.sub(r"[\\/:*?\"<>|]+", "_",
+                  os.path.splitext(os.path.basename(zip_path))[0]).strip(" .") or "scenes"
+    lines = ["Load scene edits: %s" % os.path.basename(zip_path),
+             "Project: %s" % assets_dir,
+             "PAD %s, %s" % (__version__, time.strftime("%Y-%m-%d %H:%M:%S")), ""]
+    scenes = report.get("scenes") or []
+    elsewhere = [s for s in scenes if s.get("differs")]
+    lines.append("SCENES (%d in the file, %d starting out otherwise here)" % (
+        len(scenes), len(elsewhere)))
+    for s in scenes:
+        lines.append("  %s  %s  (%d edit%s): %s" % (
+            s["label"], s["card"], s["ops"], "" if s["ops"] == 1 else "s", s["status"]))
+        if s.get("shown"):
+            lines.append("      the first %d edit%s already on this card, not applied again"
+                         % (s["shown"], "" if s["shown"] == 1 else "s"))
+        if s.get("differs"):
+            lines.append("      parts it edits that look otherwise here than in the project "
+                         "the file was saved from:")
+        for d in s.get("differs") or ():
+            lines.append("        node %d %s: %s" % (d["node"], d["name"] or "(no name)",
+                                                    d["what"]))
+    if elsewhere:
+        lines += ["", "  A scene starting out otherwise is of another card, or of a card built "
+                  "with other changes: its edits move and resize from there, so they land in "
+                  "other places. Extract the project from the same card for the same look."]
+
+    def section(title, items):
+        if items:
+            lines.extend(["", "%s (%d)" % (title, len(items))] + ["  " + i for i in items])
+    section("PICTURES IN THE FILE NOT IN THIS PROJECT, LEFT OUT",
+            sorted(report.get("pictures_missing") or ()))
+    section("GAME PICTURES WHOSE COLOR PROFILE WAS LEFT OUT (NOT IN THIS PROJECT)",
+            sorted(report.get("colored_missing") or ()))
+    section("PICTURES NAMED OTHERWISE HERE, FOUND BY THE SCENE PARTS THAT DRAW THEM",
+            ["%s -> %s" % (r, ", ".join(h)) for r, h in sorted(
+                (report.get("moved") or {}).items())])
+    section("TEXT EDITS FOR WORDS NOT ON THIS CARD, LEFT OUT",
+            ['%s: "%s" -> "%s"' % (e["path"], e["original"], e["new"])
+             for e in report.get("text_missing") or ()])
+    section("TEXT EDITS TOO LONG FOR THIS CARD'S LINE, LEFT OUT",
+            ['%s: "%s" -> "%s"' % (r["path"], r["original"], new)
+             for r, new in report.get("text_long") or ()])
+    section("TEXT EDITS ALREADY ON THIS CARD",
+            ['%s: "%s"' % (e["path"], e["new"]) for e in report.get("text_have") or ()])
+    folder = os.path.join(assets_dir, REPORT_DIR)
+    base = "Load %s %s" % (stem, time.strftime("%Y-%m-%d %H.%M.%S"))
+    path, n = os.path.join(folder, base + ".txt"), 2
+    try:
+        os.makedirs(folder, exist_ok=True)
+        while os.path.exists(path):
+            path, n = os.path.join(folder, "%s (%d).txt" % (base, n)), n + 1
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError:
+        return None
+    return path
+
+
 def backup(assets_dir, loading, trees):
     """PAD-402: save every scene's edits, replaced picture, color profile and text edit of the
     project, as Save every scene... does, to a new file in its Backups folder before *loading*
@@ -582,7 +661,7 @@ def _digest(data):
 
 
 def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, cards_here=None,
-                  files_profile=True, counts=None):
+                  files_profile=True, counts=None, missing_colored=None):
     """Put *extras* (:func:`read_extras` of *zip_path*) into the project: each replaced
     picture copied into :data:`SHARED_DIR` and picked, with its Keep size tick, color switch
     and profile; each added picture's switch and profile (*renamed*: ``{its rel in the file:
@@ -596,7 +675,8 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
     A picture this project does not have, or has replaced, is left out.  Nothing is deleted or
     overwritten.  Returns ``(pictures loaded, [picture of the file not here])``; *counts*, a
     dict, is filled with the ``"colored"`` game pictures and ``"lines"`` loaded and the
-    game pictures not here (``"colored_missing"``)."""
+    game pictures not here (``"colored_missing"``); *missing_colored*, a list, with those
+    pictures."""
     from ...core import colour_profile as cp, staged_changes
     renamed = renamed or {}
     stem = os.path.splitext(os.path.basename(zip_path))[0]
@@ -714,6 +794,8 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
         data[cp.STOCK_IMAGES_KEY] = True
     if counts is not None:
         counts.update(colored=len(colored), lines=lines_n, colored_missing=len(colored_missing))
+    if missing_colored is not None:
+        missing_colored.extend(colored_missing)              # PAD-552: the load report
     data["image"] = picks
     data["image_keep_size"] = sorted(r for r in keep if r in picks)
     for key, val in ((cp.IMAGE_SLOTS_KEY, slots_on), (cp.FILE_PROFILES_KEY["images"], owns),

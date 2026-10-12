@@ -1803,6 +1803,49 @@ def starts_elsewhere(man, ops, states):
     return not any(_shows(base, ops[:n], k, st) for k in range(n + 1))
 
 
+def start_differences(man, ops, states):
+    """What of the nodes *ops* edit looks otherwise on the scene *man* than where they were
+    made (*states*), for the load report (PAD-552): ``[{"node", "name", "what"}]``, *what* in
+    a few words (``not in this scene``, ``off by -12.0,+30.5 px``, ``118 % of the size``,
+    ``hidden``, ``shown``, ``another text box``, ``another color``, ``looks otherwise``)."""
+    st = _states_for(states, list(ops or ()))
+    if st is None or man is None:
+        return []
+    base = _Base.of_manifest(man)
+    index = _man_index(man)
+    out = []
+    for nid, want in sorted(st["before"].items(), key=lambda kv: int(kv[0])):
+        got = base.fp(int(nid))
+        if want is None or _close(got, want):
+            continue
+        name = (index.get(int(nid)) or ({"name": ""}, None))[0].get("name") or ""
+        words = []
+        if got is None:
+            words.append("not in this scene")
+        else:
+            gm, wm = got.get("m") or [], want.get("m") or []
+            if gm and wm and len(gm[0]) == 6 and len(wm[0]) == 6:
+                dx, dy = gm[0][4] - wm[0][4], gm[0][5] - wm[0][5]
+                if not (_near(gm[0][4], wm[0][4]) and _near(gm[0][5], wm[0][5])):
+                    words.append("off by %+.1f,%+.1f px" % (dx, dy))
+                ws = (wm[0][0] ** 2 + wm[0][1] ** 2) ** 0.5
+                gs = (gm[0][0] ** 2 + gm[0][1] ** 2) ** 0.5
+                if ws and not _near(gs, ws):
+                    words.append("%d %% of the size" % round(100.0 * gs / ws))
+            elif len(gm) != len(wm):
+                words.append("other movement")
+            if got.get("h") != want.get("h") and "h" in want:
+                words.append("hidden" if got.get("h") else "shown")
+            if want.get("r") is not None and (got.get("r") is None or len(got["r"]) != len(
+                    want["r"]) or not all(_near(x, y) for x, y in zip(got["r"], want["r"]))):
+                words.append("another text box")
+            if "c" in want and "c" in got and got["c"] != want["c"]:
+                words.append("another color")
+        out.append({"node": int(nid), "name": name,
+                    "what": ", ".join(words) or "looks otherwise"})
+    return out
+
+
 def _base_info(base, ops):
     """What *base* shows of the nodes *ops* touch, to know the same scene again."""
     kinds = _kinds(ops)

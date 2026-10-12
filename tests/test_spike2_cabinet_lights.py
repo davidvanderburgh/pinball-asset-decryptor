@@ -117,6 +117,25 @@ def test_the_three_roles():
     assert cablights.role(_row("led", "SPEAKERPHONE", 7, 0)) is None
 
 
+def test_the_uv_kit_is_a_section_of_its_own():
+    """PAD-551 (peanuts: Stranger Things "missing UV Lighting Kit"): the kit's
+    two outputs are lamp channels on a playfield board with no place on any
+    picture. A playfield insert merely named for UV (Metallica) stays one."""
+    assert cablights.role(_row("led", "UV CONTROL 1 (OPTIONAL)", 7, 3)) == "uv"
+    assert cablights.role(_row("led", "HAMMER UV", 8, 18, 166, 271, "playfield")) is None
+    rows = [_row("led", "UV CONTROL 1 (OPTIONAL)", 7, 3),
+            _row("led", "UV CONTROL 2 (OPTIONAL)", 7, 4),
+            _row("led", "LEFT ORBIT", 7, 5, 40, 300, "playfield")]
+    secs, left = cablights.sections(rows, {7: 9}, {9: {"type": "pinnode", "group": 7,
+                                                       "name": "Playfield"}})
+    assert [(S["key"], S["label"], len(S["pixels"])) for S in secs] == [
+        ("uv:9", "UV Lighting Kit", 2)] and left == []
+    # only the measured map places it: a board's place alone proves nothing
+    secs, left = cablights.sections(rows, {}, {9: {"type": "pinnode", "group": 7,
+                                                   "name": "Playfield"}})
+    assert secs == [] and left[0][:2] == ("uv", 2)
+
+
 def test_one_pixel_however_the_title_spells_its_channels():
     assert cablights.split_channel("SPEAKER 1-G") == ("SPEAKER 1", "G")
     assert cablights.split_channel("TOPPER BIKE - R") == ("TOPPER BIKE", "R")

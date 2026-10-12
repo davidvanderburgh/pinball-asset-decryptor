@@ -18,6 +18,11 @@ not inserts and that no playfield picture has a place for:
   SPEAKER      the backbox speaker lights, "SPEAKER n": 23 RGB pixels on node
                7, "Backbox Speaker Lights" (Foo Fighters, Led Zeppelin, Rush,
                Venom, Elvira).
+  UV           the UV lighting kit's own outputs, "UV CONTROL 1 (OPTIONAL)"
+               and 2 on Stranger Things: two lamp channels on a playfield
+               board, with no place on any picture (PAD-551, peanuts:
+               "missing UV Lighting Kit"). A lamp merely NAMED for UV on the
+               playfield (Metallica's "HAMMER UV") is an insert, not this.
 
 WHICH BOARD A ROW IS ON is the whole difficulty, and it is why these were never
 drawn. The device table gives each row a GROUP; coilmap.group_node() maps the
@@ -35,7 +40,7 @@ Pure: no Tk, no window, no padled. playfield.py draws what this decides.
 import os
 import re
 
-TOPPER, EXPRESSION, SPEAKER = "topper", "expression", "speaker"
+TOPPER, EXPRESSION, SPEAKER, UV = "topper", "expression", "speaker", "uv"
 
 #: The roles the window's "Expression lights" tick box takes out: the blades
 #: and the speakers - "a toggle to disable expression lights (blades and
@@ -44,7 +49,7 @@ EXPRESSION_ROLES = (EXPRESSION, SPEAKER)
 
 #: How each role is labelled when its board has no name of its own.
 LABEL = {TOPPER: "Topper", EXPRESSION: "Expression lighting",
-         SPEAKER: "Speaker lighting"}
+         SPEAKER: "Speaker lighting", UV: "UV Lighting Kit"}
 
 #: Node 14 is the universal topper on every title, and every title names it
 #: "Topper Lights" - which John Wick also calls its own topper on node 12. It
@@ -56,9 +61,12 @@ EXPRESSION_TOPPER = "Topper Expression Light"
 
 #: The column's order, top to bottom: the topper sits above the backbox, the
 #: speakers in it, the blades down the cabinet below.
-ORDER = {TOPPER: 0, SPEAKER: 1, EXPRESSION: 2}
+ORDER = {TOPPER: 0, SPEAKER: 1, EXPRESSION: 2, UV: 3}
 
 _SPEAKER = re.compile(r"^SPEAKER\b")
+#: "UV CONTROL 1 (OPTIONAL)": the kit's outputs start with UV; an insert that
+#: ends with it (Metallica's "LEFT SLING UV") is on the playfield picture
+_UV = re.compile(r"^UV\b")
 #: one channel of an RGB pixel, however the title spells it: "SPEAKER 1-G",
 #: Venom's "TOPPER BIKE - R", Guardians' "RIGHT SCOOP RECTANGLE-RED"
 _CHANNEL = re.compile(r"^(.*?)\s*-\s*(R|G|B|RED|GRN|GREEN|BLU|BLUE)$", re.I)
@@ -75,6 +83,8 @@ def role(row):
         return EXPRESSION
     if _SPEAKER.match(name):
         return SPEAKER
+    if _UV.match(name):
+        return UV
     if "TOPPER" in name or "topper" in (row.get("image") or "").lower():
         return TOPPER
     return None
@@ -182,6 +192,10 @@ def resolve(which, group, group_node, board_map):
     b = board_map[node]
     if which == TOPPER:
         ok = "TOPPER" in b["name"].upper()
+    elif which == UV:
+        # the kit's outputs are lamp channels on a playfield board, which only
+        # the measured map can name; a place alone proves nothing about them
+        return None, "group %s is not one the title's tables place" % group
     else:
         ok = "ws2812" in b["type"]
     if not ok:

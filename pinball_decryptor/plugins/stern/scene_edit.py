@@ -1788,6 +1788,21 @@ def shown_count(base, ops, states=None):
     return 0
 
 
+def starts_elsewhere(man, ops, states):
+    """Whether the scene *man* (a preview manifest) neither looks as it did where *ops* were
+    made (*states*, :func:`states_of`) nor shows some of them: a project of another card, one
+    a Write built with other changes (PAD-552, DragonRR: a file saved from the project of his
+    own built card, loaded on a PC with a project of another card, put his moves in other
+    places).  False when *states* cannot tell (a file saved before PAD-403)."""
+    ops = list(ops or ())
+    st = _states_for(states, ops)
+    if st is None or man is None:
+        return False
+    base = _Base.of_manifest(man)
+    n = len(st["ops"])
+    return not any(_shows(base, ops[:n], k, st) for k in range(n + 1))
+
+
 def _base_info(base, ops):
     """What *base* shows of the nodes *ops* touch, to know the same scene again."""
     kinds = _kinds(ops)

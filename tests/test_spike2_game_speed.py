@@ -546,8 +546,8 @@ def test_a_hidden_run_builds_the_tables_and_opens_no_window():
     i = w.index('if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then')
     end = w.index("\nfi\n", i)
     tables = w[i:end]
-    assert 'python3 "$RIG/mktables.py" > "$TBL_OUT" 2>&1' in tables                 # pass one
-    assert '"$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT"' in tables           # pass two
+    assert 'python3 "$RIG/mktables.py" "${MKT_ARGS[@]}" > "$TBL_OUT" 2>&1' in tables  # pass one
+    assert '"$RIG/mktables.py" "${MKT_ARGS[@]}" --log "$LOG" --wait "$PF_WAIT"' in tables  # pass two
     assert "playfield.py" not in tables
     # with no window, nothing waits on the switch list in the foreground
     assert 'elif [ "${PAD_PLAYFIELD:-1}" = 0 ] || grep -q \'^drawable=yes\' "$TBL_OUT"; then' in tables

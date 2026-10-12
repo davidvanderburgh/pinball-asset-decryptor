@@ -2427,7 +2427,13 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then
 
     # PASS ONE: everything that needs no run at all - the artwork, the device
     # positions, the insert map. Fast, and cached after the first time.
-    python3 "$RIG/mktables.py" > "$TBL_OUT" 2>&1
+    # PAD-551: --game and --dir name THIS run's title and where its files are.
+    # dump/title still describes the previous run here, so without them a card
+    # run of a title that was not the last one on this rig found no binary and
+    # kept a device table from an older reader for good.
+    MKT_ARGS=(--game "$GAME")
+    [ -f "$GAME_ELF" ] && MKT_ARGS+=(--dir "${GAME_ELF%/*}")
+    python3 "$RIG/mktables.py" "${MKT_ARGS[@]}" > "$TBL_OUT" 2>&1
     grep -v '^drawable=' "$TBL_OUT" | sed 's/^/[watch]   /'
 
     # ★ ITEM 49: PASS ONE JUST RAN AS ROOT ON A PIVOT RUN, AND PASS TWO RUNS
@@ -2470,7 +2476,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then
                 sleep 1
             done
             exec python3 "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
-            "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$PAD_LOGDIR/padtables.log" 2>&1 &
+            "$RIG/mktables.py" "${MKT_ARGS[@]}" --log "$LOG" --wait "$PF_WAIT" > "$PAD_LOGDIR/padtables.log" 2>&1 &
         TBLPG=$!
     elif [ "${PAD_PLAYFIELD:-1}" = 0 ] || grep -q '^drawable=yes' "$TBL_OUT"; then
         # no window (a hidden run) has nothing to wait for, whatever it can draw
@@ -2479,7 +2485,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then
         else
             echo "[watch]   opening now; the switch table follows in the background"
         fi
-        setsid_as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
+        setsid_as_user python3 "$RIG/mktables.py" "${MKT_ARGS[@]}" --log "$LOG" --wait "$PF_WAIT" \
             > "$PAD_LOGDIR/padtables.log" 2>&1 &
         TBLPG=$!
     else
@@ -2490,7 +2496,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then
         # the cache one branch below the cure. Foreground and piped, so
         # as_user (plain runuser) rather than setsid_as_user: the output is
         # the [watch] pane's, and teardown has nothing to kill here.
-        as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" 2>&1 \
+        as_user python3 "$RIG/mktables.py" "${MKT_ARGS[@]}" --log "$LOG" --wait "$PF_WAIT" 2>&1 \
             | grep -v '^drawable=' | sed 's/^/[watch]   /'
     fi
     rm -f "$TBL_OUT"

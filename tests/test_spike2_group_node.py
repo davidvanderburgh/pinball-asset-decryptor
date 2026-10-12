@@ -360,6 +360,94 @@ def test_a_title_neither_source_can_speak_for_is_unchanged(coilmap):
     assert m.get(8) is None
 
 
+# --- PAD-551: the title's own node directory ------------------------------
+
+#: Sword of Rage LE 1.19's directory (nbdir v2): group 8 is node 12, a
+#: coil4node, which the ascending rule - pinnodes only - stepped over.
+SOR_IDENT = """# nbdir v2 elf=game nodes=8 src=x
+node=1 type=pinnode code=2 hex=p.hex group=5 name=CABINET
+node=2 type=ws2812node code=23 hex=w.hex group=1 name=Cabinet Lights
+node=4 type=node4 code=29 hex=n.hex group=2 name=QR Scanner
+node=8 type=pinnode code=4 hex=p.hex group=6 name=PLAYFIELD 1
+node=9 type=pinnode code=4 hex=p.hex group=7 name=PLAYFIELD 2
+node=12 type=coil4node code=18 hex=c.hex group=8 name=TOPPER 1
+node=13 type=pinnode code=18 hex=p.hex group=9 name=TOPPER 2
+node=14 type=ws2812node code=23 hex=w.hex group=3 name=Topper Lights
+# skipped node=0 code=41 reason=no-type (CPU/bridge or reserved) group=4 name=CPU / BRIDGE
+"""
+
+#: Batman 66 1.14's: two toppers, a turntable board, and an LCD.
+BATMAN_IDENT = """# nbdir v2 elf=game nodes=10 src=x
+node=1 type=pinnode code=2 hex=p.hex group=5 name=Cabinet
+node=8 type=pinnode code=4 hex=p.hex group=6 name=Playfield 1
+node=9 type=pinnode code=4 hex=p.hex group=7 name=Playfield 2
+node=10 type=pinnode code=8 hex=p.hex group=8 name=Turntable
+node=12 type=pinnode code=9 hex=p.hex group=9 name=Accessory Topper (Optional)
+node=13 type=pinnode code=10 hex=p.hex group=10 name=LE/SLE Topper (Optional)
+node=14 type=ws2812node code=23 hex=w.hex group=3 name=Topper Lights
+node=24 type=lcdnode code=11 hex=l.hex group=11 name=Villain Vision
+"""
+
+
+def _ident(tmp_path, text):
+    p = tmp_path / "node_ident.txt"
+    p.write_text(text)
+    return str(p)
+
+
+def test_the_directory_places_a_coil4node_the_ascending_rule_skipped(coilmap, tmp_path):
+    """Sword of Rage: coil groups {6, 7, 8} against pinnodes {8, 9, 13} put its
+    topper on node 13 (peanuts: "topper marked as node 13 instead of 12")."""
+    rows = rows_of(
+        ["coil      LEFT FLIPPER                 1  1 20 20    6     0  -      -",
+         "coil      TROUGH                       1  1 20 20    7     1  -      -",
+         "coil      TOPPER MOTOR                 1  1 20 20    8     0  -      -",
+         "led       TOPPER DRAGON                1  1 20 20    8     4  -      -"], coilmap)
+    nd = _ident(tmp_path, SOR_IDENT)
+    assert coilmap.directory_group_node(nd) == {6: 8, 7: 9, 8: 12, 9: 13}
+    m = coilmap.group_node(coils_of(rows), nd, dev_rows=rows)
+    assert m[8] == 12 and m[6] == 8 and m[7] == 9 and m[5] == 1 and m[4] == 0
+
+
+def test_the_directory_outvotes_a_one_row_connector_group(coilmap, tmp_path):
+    """Batman 66: one group-9 row's connector reads "13a" and one group-8
+    row's "9c"; the 37 group-10 rows really are node 13. The directory puts
+    group 9 on the Accessory Topper and group 8 on the Turntable."""
+    rows = rows_of(
+        ["led       TURNTABLE BATPHONE         147 151 20 20    8    12  9c     Test/batman_playfield",
+         "led       RIGHT SPEAKER 4              0   0  0  0    9    27  13a    -",
+         "led       LOGO                         0   0  0  0   10     1  13a    -",
+         "led       MARS LIGHT 1                 0   0  0  0   10     4  13b    -",
+         "led       LEFT ORBIT                   1   1 20 20    6     3  8b     Test/batman_playfield"], coilmap)
+    assert coilmap.connector_group_node(rows)[9] == 13
+    m = coilmap.group_node([], _ident(tmp_path, BATMAN_IDENT), dev_rows=rows)
+    assert (m[8], m[9], m[10], m[6]) == (10, 12, 13, 8)
+
+
+def test_the_running_games_switch_table_still_has_the_last_word(coilmap, tmp_path):
+    rows = rows_of(BOND, coilmap)
+    nd = _ident(tmp_path, SOR_IDENT.replace("group=6 name=PLAYFIELD 1", "group=8 name=X")
+                .replace("group=8 name=TOPPER 1", "group=6 name=Y"))
+    m = coilmap.group_node(coils_of(rows), nd, dev_rows=rows,
+                           switch_lines=BOND_SWITCHES)
+    assert m[8] == 8 and m[9] == 9
+
+
+def test_the_directory_leaves_the_cabinet_and_strip_groups_alone(coilmap, tmp_path):
+    """Groups 1-5 are not the directory's to answer here: 4/5 are the pin's and
+    the Home Editions', 1-3 the strip boards cablights places (elvira3's
+    topper drawing, group 3, must not become a usable layout)."""
+    m = coilmap.directory_group_node(_ident(tmp_path, SOR_IDENT))
+    assert not set(m) & {1, 2, 3, 4, 5}
+
+
+def test_a_v1_directory_or_none_answers_nothing(coilmap, tmp_path):
+    v1 = "# nbdir v1 elf=game\nnode=8 type=pinnode code=4 hex=p.hex\n"
+    assert coilmap.directory_group_node(_ident(tmp_path, v1)) == {}
+    assert coilmap.directory_group_node(None) == {}
+    assert coilmap.directory_group_node(str(tmp_path / "nope.txt")) == {}
+
+
 # --- the written evidence --------------------------------------------------
 
 def test_group_node_text_counts_devices_and_names_what_has_no_node(coilmap):

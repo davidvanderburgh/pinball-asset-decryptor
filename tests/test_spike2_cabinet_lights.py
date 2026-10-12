@@ -417,19 +417,25 @@ def test_the_swatch_grid_names_the_cabinet(pf):
     assert names[(8, 3)] == "LEFT ORBIT"
 
 
-def test_a_section_shows_once_its_board_has_spoken(pf):
+def test_every_section_shows_from_the_start_dark(pf):
+    """PAD-551 (peanuts): fifteen titles' toppers and speaker rings read as
+    missing, because a section waited for its board to speak and most games
+    leave those boards off in attract. Every section is drawn from the start,
+    dark; the box says which boards have not spoken yet."""
     cab = pf.CabinetLights(True)
     b = _block()
     changes, grew = cab.tick(bytes(b))
-    assert cab.spec() == [] and not grew       # nothing from either board yet
+    assert [s["key"] for s in cab.spec()] == ["speaker:7", "expression:2"]
+    assert not grew and set(cab.dyn().values()) == {0}
+    assert [ln[2].endswith("nothing from it yet") for ln in cab.panel()["lines"]] == [True, True]
     # the right blade's top pixel, channels 285-287 - all three past index 95
     for ch, v in ((285, 0x00), (286, 0xFF), (287, 0x00)):
         b[coilmap.HI_OFF + 2 * coilmap.HI_IDX + ch - 96] = v
     changes, grew = cab.tick(bytes(b))
     assert grew
     spec = cab.spec()
-    assert [s["key"] for s in spec] == ["expression:2"]
-    top = spec[0]["bars"][1][-1]
+    assert [s["key"] for s in spec] == ["speaker:7", "expression:2"]
+    top = spec[1]["bars"][1][-1]
     assert changes[top][:3] == [255, 0, 0] and changes[top][3] > 0.5
     assert cab.dyn()[top] == changes[top]
     # the speakers speak through the `seen` plane before they light
@@ -437,6 +443,7 @@ def test_a_section_shows_once_its_board_has_spoken(pf):
     _c, grew = cab.tick(bytes(b))
     spec = cab.spec()
     assert grew and [s["key"] for s in spec] == ["speaker:7", "expression:2"]
+    assert not any(ln[2].endswith("nothing from it yet") for ln in cab.panel()["lines"])
     assert "R=channel 286" in cab.describe(top) and "Cabinet Lights" in cab.describe(top)
     # the speakers are a ring, in chain order (Sam, 2026-10-11)
     assert len(spec[0]["ring"]) == 23 and "row" not in spec[0]
@@ -477,11 +484,12 @@ def test_the_tick_box_is_kept_and_takes_effect(pf):
     assert json.load(open(pf.STATE)) == {"expression_lights": False}
     assert ctl.view.cab.sections == [] and published == ["layout"]
     assert pf.Playfield.api_expression(ctl, True) is True
-    # what had already spoken is shown at once, the speakers still wait
-    assert [S["key"] for S in ctl.view.cab.shown()] == []
+    # every section is back at once (PAD-551); what had spoken keeps saying so
+    assert [S["key"] for S in ctl.view.cab.shown()] == ["speaker:7", "expression:2"]
+    assert not any(S["alive"] for S in ctl.view.cab.sections)
     ctl.view.cab = old
     pf.Playfield.api_expression(ctl, True)
-    assert [S["key"] for S in ctl.view.cab.shown()] == ["expression:2"]
+    assert [S["key"] for S in ctl.view.cab.sections if S["alive"]] == ["expression:2"]
 
 
 def test_the_box_folds_and_is_kept_folded(pf):
@@ -513,7 +521,7 @@ def test_the_schematic_drops_the_blades_and_speakers_blocks(pf):
     S.cab = pf.CabinetLights(False)
     S.leds = types.SimpleNamespace(cells=[], spec=lambda: {"gen": 1, "blocks": [
         {"node": 2, "cells": []}, {"node": 7, "cells": []}, {"node": 8, "cells": []}]})
-    S.bar, S.info, S.entries, S.trough = "", [], [], None
+    S.bar, S.info, S.entries, S.trough, S.shaker = "", [], [], None, None
     spec = S.spec()
     assert [b["node"] for b in spec["grid"]["blocks"]] == [8]
     assert spec["cab_panel"]["expression"] is False
@@ -539,7 +547,7 @@ def test_the_grid_draws_the_speakers_as_a_ring_and_the_blades_as_columns(pf):
     grid.tick(bytes(b), 0.0)
     S = object.__new__(pf.Schematic)
     S.cab, S.leds = pf.CabinetLights(True), grid
-    S.bar, S.info, S.entries, S.trough = "", [], [], None
+    S.bar, S.info, S.entries, S.trough, S.shaker = "", [], [], None, None
     blocks = {blk["node"]: blk for blk in S.spec()["grid"]["blocks"]}
     ring = blocks[7]["ring"]
     assert len(ring) == 23 and ring[:2] == ["7:SPEAKER 1", "7:SPEAKER 2"]
@@ -555,6 +563,30 @@ def test_the_grid_draws_the_speakers_as_a_ring_and_the_blades_as_columns(pf):
     S.cab = pf.CabinetLights(False)
     assert 2 not in {blk["node"] for blk in S.spec()["grid"]["blocks"]}
     assert pf.CabinetLights(False).grid_shapes(grid.cells) == {}
+
+
+def test_the_schematic_grid_has_the_cabinet_blocks_from_the_start(pf):
+    """PAD-551: the switch list's grid grows a block when the wire shows it,
+    so a topper or speaker ring the game leaves off in attract had none. The
+    cabinet's boards are seeded from the tables: the ring is whole and dark
+    before a single write."""
+    grid = pf.LedGrid(pf.load_led_names())
+    cab = pf.CabinetLights(True)
+    grid.seed(cab.channels())
+    S = object.__new__(pf.Schematic)
+    S.cab, S.leds = cab, grid
+    S.bar, S.info, S.entries, S.trough, S.shaker = "", [], [], None, None
+    blocks = {blk["node"]: blk for blk in S.spec()["grid"]["blocks"]}
+    assert sorted(blocks) == [2, 7]
+    assert len(blocks[7]["ring"]) == 23 and None not in blocks[7]["ring"]
+    assert blocks[7]["ring"][0] == "7:SPEAKER 1"
+    assert None not in blocks[2]["bars"][0] + blocks[2]["bars"][1]
+    assert set(grid.dyn().values()) == {0}
+    # a board the cabinet does not have (Topper off, PAD-498) is not seeded
+    grid = pf.LedGrid({})
+    grid.gone = {7}
+    grid.seed(cab.channels())
+    assert {C["node"] for C in grid.cells} == {2}
 
 
 # ------------------------------------------------------------------ the page --

@@ -86,6 +86,23 @@ def _category_flags(cats):
     )
 
 
+def _read_back(card, output_dir, flags, log, parts=None, open_disk=None):
+    """PAD-553: the music modes and random clips a card this app wrote carries, back in the
+    project an extract of it made (:func:`.media_share.readback`). Never stops the extract."""
+    if not (flags.get("do_audio") or flags.get("do_video")):
+        return
+    try:
+        from . import media_share, mode_from_card
+        try:
+            padmode = mode_from_card.read_padmode(card, parts=parts, open_disk=open_disk)
+        except Exception:                               # noqa: BLE001 - no system partition to read
+            padmode = {}
+        media_share.readback(card, output_dir, log, padmode=padmode)
+    except Exception as e:                              # noqa: BLE001
+        log("Music modes and random clips: could not be read back from this card (%s)." % e,
+            "warning")
+
+
 def _extract_summary(n, output_dir, flags, *, source=""):
     """Build the end-of-extract summary line.
 
@@ -370,6 +387,7 @@ class SternExtractPipeline(BasePipeline):
                            progress_cb=self._progress,
                            cancel=lambda: self._cancelled)
         self._check_cancel()
+        _read_back(self.input_path, self.output_dir, flags, self._log)
         self._done(True, _extract_summary(n, self.output_dir, flags))
 
 
@@ -553,6 +571,8 @@ class SternDirectSsdExtractPipeline(BasePipeline):
                            progress_cb=self._progress,
                            cancel=lambda: self._cancelled)
         self._check_cancel()
+        _read_back(self.device_path, self.output_dir, flags, self._log, parts=parts,
+                   open_disk=lambda: RawDeviceFile(self.device_path, writable=False))
         self._done(True, _extract_summary(n, self.output_dir, flags,
                                           source=" from the SD card"))
 

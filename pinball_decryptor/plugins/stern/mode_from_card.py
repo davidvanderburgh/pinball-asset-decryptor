@@ -39,21 +39,23 @@ class CardModesError(MP.ModeProjectError):
     pass
 
 
-def read_padmode(image):
+def read_padmode(image, parts=None, open_disk=None):
     """``{name: bytes}``: every file of ``/usr/local/padmode`` on the card image ``image``, or
     ``{}`` when no partition of it has that folder (a card with no modes). Raises
-    :class:`CardModesError` when ``image`` is not a card image the app can read."""
+    :class:`CardModesError` when ``image`` is not a card image the app can read. PAD-553: a
+    card read straight off the SD card gives its ``parts`` and ``open_disk`` (the extract's)."""
     from .ext4 import S_IFDIR, S_IFMT, S_IFREG, Ext4Reader
     from .formats import linux_partitions
     from . import mode_write as MW
     name = os.path.basename(str(image))
-    try:
-        parts = linux_partitions(image)
-    except (OSError, ValueError) as e:
-        raise CardModesError("%s could not be read as a card image (%s)" % (name, e)) from None
+    if parts is None:
+        try:
+            parts = linux_partitions(image)
+        except (OSError, ValueError) as e:
+            raise CardModesError("%s could not be read as a card image (%s)" % (name, e)) from None
     if not parts:
         raise CardModesError("%s is not a card image: it has no Linux partitions" % name)
-    with open(image, "rb") as f:
+    with (open_disk() if open_disk else open(image, "rb")) as f:
         for off, size in parts:
             try:
                 reader = Ext4Reader(f, off, size)

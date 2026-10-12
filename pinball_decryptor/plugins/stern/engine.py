@@ -10551,6 +10551,8 @@ def _mode_descriptor_table(found, params, mask, used, log):
                 n[k] = n.get(k, 0) + 1
         for slot_key, sw in sorted(swaps.items(), key=lambda kv: kv[1][3]["slot"]):
             slot = sw[3]["slot"]
+            # PAD-553: what the card's record names (a file no sound id plays did not land)
+            sw[3]["lines"] = n.get(slot_key, 0)
             how = ["; sound id %s play%s it in place of %s" % (
                        ", ".join(map(str, sids_)), "s" if len(sids_) == 1 else "", what)
                    for sids_, what in ((songs.get(slot), "the whole song"),
@@ -10583,7 +10585,8 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_SMo.cfg_text(setting.live, modes.count, sounds, only))
+        f.write(_SMo.cfg_text(setting.live, modes.count, sounds, only,
+                              record=_SMo.card_record(modes, used)))
     return path
 
 

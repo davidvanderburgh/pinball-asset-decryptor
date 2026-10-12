@@ -197,7 +197,7 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
                  best_tip=BEST_TIP, best_supported=False,
                  color_offered=False, color_stock=False,
                  compare={"open": False, "max": COMPARE_MAX, "tiles": []},
-                 widths=self._saved_widths())
+                 widths=self._saved_widths(), var_share=False)
         threading.Thread(target=vh.prune_cache, daemon=True,
                          name="video-cache-prune").start()
 
@@ -828,6 +828,7 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         # the modes the card's program names (read once per card; a card read
         # before publishes now, so the rows below carry them)
         self._m_kick(scan_dir)
+        self.set(var_share=self._var_offer is not None or bool(self._variants))
         self._refresh_list()
         # Default to the first clip so a poster frame shows on a fresh scan
         # (PAD-444: the row a copy was just made or dropped for, when it is listed)
@@ -2386,6 +2387,113 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
                  "were taken off)." % rel, "info")
         self._variants_changed(rel)
         return True
+
+    # -- random clips as a file of their own (PAD-553) -----------------------
+    @rpc
+    def variants_save(self):
+        """More > Save the random clips to a file...: every slot's random clips, the clips
+        themselves too, in one file another project loads. Returns its path, or None."""
+        from ...plugins.stern import media_share as MS
+        project = self._assets_path()
+        if not project or not self._variants:
+            compat.messagebox.showinfo(
+                "Save the random clips",
+                "This project has no random clips to save: no clip plays one of several yet "
+                "(right-click a clip > Random clips).")
+            return None
+        self._save_staged()
+        path = self.window.ask_save(
+            "random_clips_file", "Save the random clips to a file",
+            initialfile="%s random clips.zip" % (os.path.basename(os.path.normpath(project))
+                                                 or "project"),
+            filetypes=[("PAD random clips", "*.zip")], defaultextension=".zip")
+        if not path:
+            return None
+        try:
+            got = MS.save_random_clips(project, path)
+        except (MS.ShareError, OSError) as e:
+            compat.messagebox.showinfo("Save the random clips", str(e))
+            return None
+        self.log("Replace Video: saved the random clips of %d clip(s) (%d file(s)) to %s."
+                 % (got["slots"], got["files"], path), "success")
+        if got["gone"]:
+            compat.messagebox.showinfo(
+                "Save the random clips", "Saved to %s.\n\nLeft out, no longer on this PC: %s."
+                % (os.path.basename(path), ", ".join(os.path.basename(f) for _r, f in got["gone"])))
+        return path
+
+    @rpc
+    @undoable("Load random clips")
+    def variants_load(self, path=None):
+        """More > Load random clips from a file...: a file Save the random clips to a file
+        wrote, here or on another PC, onto this project's clips (the same clip found by what it
+        is or where the card keeps it when this card names it otherwise). A clip's random clips
+        replace the ones it has (asked first). Returns the report, or None."""
+        from ...plugins.stern import media_share as MS
+        project = self._assets_path()
+        if not project or self._is_running():
+            return None
+        if not path:
+            path = self.window.ask_open("random_clips_file", "Load random clips from a file",
+                                        [("PAD random clips", "*.zip"), ("All files", "*.*")])
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+        if not path:
+            return None
+        try:
+            got = MS.load_random_clips(project, path)
+        except (MS.ShareError, OSError) as e:
+            compat.messagebox.showinfo("Load random clips", str(e))
+            return None
+        found = {rel: files for rel, files in got["variants"].items() if rel in self._by_rel}
+        left = list(got["left"]) + [(rel, "this project's scan does not list it")
+                                    for rel in got["variants"] if rel not in found]
+        if not found:
+            compat.messagebox.showinfo(
+                "Load random clips", "Nothing in %s could be loaded here:\n\n%s" % (
+                    os.path.basename(path), "\n".join("%s: %s" % (os.path.basename(r), w)
+                                                      for r, w in left[:12])))
+            return None
+        clash = sorted(rel for rel in found if self._variants.get(rel))
+        if clash and not compat.messagebox.askyesno(
+                "Load random clips",
+                "%d of the clips in %s already play other clips at random here (%s). Loading "
+                "replaces those.\n\nLoad the file?" % (
+                    len(clash), os.path.basename(path),
+                    ", ".join(os.path.basename(r) for r in clash[:6])
+                    + (", ..." if len(clash) > 6 else ""))):
+            return None
+        for rel, files in found.items():
+            self._variants[rel] = list(files)
+        self.set(var_share=True)
+        self._save_staged()
+        self._refresh_list()
+        if self._current in found:
+            self._update_note(self._current)
+        self._reselect(sorted(found)[:1])
+        self.log("Replace Video: loaded the random clips of %s: %d clip(s), the files in the "
+                 "\"%s\" folder." % (os.path.basename(path), len(found), MS.CLIPS_DIR), "success")
+        lines = ["%d clip(s) play one of several at random: %s." % (
+            len(found), ", ".join(os.path.basename(r) for r in sorted(found)[:6])
+            + (", ..." if len(found) > 6 else ""))]
+        made = (got["about"] or {}).get("label")
+        if made:
+            lines.append("The file was saved from a project of %s." % made)
+        for r, to, how in got["found"]:
+            self.log("Replace Video: %s from the file is %s here (%s)." % (
+                os.path.basename(r), os.path.basename(to), how), "info")
+        if got["found"]:
+            lines.append("%d clip(s) have another name on this card and were found by what "
+                         "they are (the log names them)." % len(got["found"]))
+        for r, why in left:
+            self.log("Replace Video: %s from the file is left out: %s." % (r, why), "warning")
+        if left:
+            more = len(left) - 6
+            lines.append("Left out: %s%s." % ("; ".join(
+                "%s (%s)" % (os.path.basename(r), w) for r, w in left[:6]),
+                " and %d more (the log names them)" % more if more > 0 else ""))
+        compat.messagebox.showinfo("Load random clips", "\n\n".join(lines))
+        return {"loaded": len(found), "found": len(got["found"]), "left": len(left)}
 
     def _scene_browser(self):
         for name in ("_open_scene_browser", "open_scene_browser"):

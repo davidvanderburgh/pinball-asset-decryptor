@@ -41,9 +41,13 @@ SHARED_PICTURES_DIR = "Shared pictures"
 # modes (core.modpack, PAD-494): the user's own sounds for the card's slots,
 # never slots of their own.
 MUSIC_MODE_FILES_DIR = "Music mode files"
+# "Random clip files" holds the clips a file of random clips carried
+# (plugins.stern.media_share, PAD-553): the user's own clips for the card's
+# slots, never slots of their own.
+RANDOM_CLIP_FILES_DIR = "Random clip files"
 NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
                             ".write_cache", SHARED_PICTURES_DIR,
-                            MUSIC_MODE_FILES_DIR})
+                            MUSIC_MODE_FILES_DIR, RANDOM_CLIP_FILES_DIR})
 
 # What the app keeps in a project folder for itself and no edit lives in, left
 # out of the "have the edits moved since the emulator's set was built?" walks

@@ -175,6 +175,19 @@ files, and a sound with no replacement keeps its stock sound as it is.
 Music modes need an image build, not a direct SD write, and every mode
 file takes room in the sound bank.
 
+**More** > **Save the music modes to a file…** puts the modes' names,
+every sound's files for the other modes with their loudness, and the
+files themselves in one .zip; **Load music modes from a file…** gives
+them to another project's sounds (on another PC too), copying the files
+into its `Music mode files/` folder. A sound the other card numbers
+differently (Pro and Premium/LE) is found by what it is, and one it does
+not have is named and left out. A card built with music modes says on
+the card which files they are, so extracting that card brings them
+back: the Audio tab shows them as they were set, the files in the
+project's `Music mode files/` folder. A card built before this version
+does not say, and gives them back only while the project it was built
+from is still on the same PC.
+
 ### Editions
 
 On the same games, one card can also hold several editions of the game
@@ -303,6 +316,12 @@ attract loop, says *Why not this clip?* instead. The extra clips are
 converted to the slot's format like a replacement and added to the
 card as new files, so it takes an image build (not a direct SD
 write), and the card gets a small program that does the picking.
+**More → Save the random clips to a file…** puts every slot's random
+clips, the clips too, in one .zip, and **Load random clips from a
+file…** gives them to another project's slots (copied into its
+`Random clip files/` folder; a slot named differently there is found by
+its clip or by where the card keeps it). Extracting a card built with
+random clips brings them back on its slots by itself.
 It does nothing else, and the machine still reports its scores to
 Insider Connected.
 **Played in (Stern Spike 2 titles whose modes the app can tell apart,
@@ -484,7 +503,8 @@ files you gave each sound for its other modes (wherever they sat on the
 exporting PC), with the modes' names and each file's own loudness, and
 Import puts the files in the project's `Music mode files/` folder (as
 invisible to the Replace tabs as `card_files/`) and points the sounds
-at them. *Transfer Mods to New Version* moves a sound's music modes
+at them. A video slot's **random clips** ride the same way, into the
+project's `Random clip files/` folder. *Transfer Mods to New Version* moves a sound's music modes
 with it, by the same content match its replacement uses. Pipeline working files
 (decrypted blobs, raw
 `.img`s) are left out, so a pack weighs what its assets weigh. For Stern

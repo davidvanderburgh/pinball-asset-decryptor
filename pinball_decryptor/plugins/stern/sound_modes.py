@@ -327,13 +327,72 @@ def cut(wav, frames):
 
 
 # ---- the runtime's table ------------------------------------------------------------------------
-def cfg_text(live, count, sounds, only):
+def cfg_text(live, count, sounds, only, record=()):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes, *sounds*
-    ``[(mode, sound id, descriptor bytes)]``, *only* when the card carries no modes."""
+    ``[(mode, sound id, descriptor bytes)]``, *only* when the card carries no modes. PAD-553:
+    *record* (:func:`card_record`) goes in as comment lines the runtime skips, so an extract of
+    the card brings the modes back (:func:`read_card_record`)."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
     lines.append("setting\t0x%08x\t%d" % (int(live), int(count)))
     for mode, sid, desc in sounds:
         lines.append("sound\t%d\t%d\t%s" % (int(mode), int(sid), bytes(desc).hex()))
+    lines += list(record)
     return "\n".join(lines) + "\n"
+
+
+# ---- the card's record (PAD-553) ----------------------------------------------------------------
+#: the comment lines of ``sounds.cfg`` that say what the project gave the card: a mode's name
+#: (``#mode <m> <name>``) and a slot's file for a mode (``#file <m> <slot idx> <record idx> <dB or
+#: -> <slot rel> <the file's own name>``), TAB-separated. The runtime skips every ``#`` line.
+REC_MODE, REC_FILE = "#mode", "#file"
+
+
+def _rec_word(text):
+    """*text* as one field of a record line: no TAB or line break in it."""
+    return re.sub(r"[\t\r\n]+", " ", str(text or "")).strip()
+
+
+def card_record(modes, used):
+    """The record lines for a card built with *modes* (a :class:`Modes`): every mode's name, and
+    for every file that landed (*used*, the engine's entries: ``rel``, ``slot``, ``mode``,
+    ``host``, ``db`` and ``lines``, how many sound ids play it) the record holding it."""
+    out = ["# PAD-553 what the project gave the card, for an extract of it to bring back"]
+    out += ["%s\t%d\t%s" % (REC_MODE, m, _rec_word(modes.name(m))) for m in range(1, modes.count + 1)]
+    for u in used:
+        if not u.get("lines"):
+            continue
+        src = (modes.slots.get(u["rel"]) or {}).get(int(u["mode"]), "")
+        db = u.get("db")
+        out.append("\t".join([REC_FILE, str(int(u["mode"])), str(int(u["slot"])), str(int(u["host"])),
+                              "-" if db is None else str(int(db)), _rec_word(u["rel"]),
+                              _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
+    return out
+
+
+def read_card_record(text):
+    """``{"names": [...], "files": [{"mode", "slot", "host", "db", "rel", "name"}]}`` from a card's
+    ``sounds.cfg`` (*text*), or ``None`` when it has no record (a card written before PAD-553)."""
+    names, files, seen = {}, [], False
+    for line in str(text or "").splitlines():
+        f = line.split("\t")
+        try:
+            if f[0] == REC_MODE and len(f) >= 3:
+                seen = True
+                m = int(f[1])
+                if 1 <= m <= MAX_MODES:
+                    names[m] = f[2].strip()
+            elif f[0] == REC_FILE and len(f) >= 6:
+                seen = True
+                m = int(f[1])
+                if 2 <= m <= MAX_MODES:
+                    files.append({"mode": m, "slot": int(f[2]), "host": int(f[3]),
+                                  "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
+                                  "rel": f[5], "name": f[6] if len(f) > 6 else ""})
+        except ValueError:
+            continue
+    if not seen:
+        return None
+    top = max(list(names) + [0])
+    return {"names": [names.get(m, "") for m in range(1, top + 1)], "files": files}

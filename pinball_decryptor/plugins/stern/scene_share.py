@@ -383,15 +383,23 @@ def localise(assets_dir, extras, trees):
     if not (extras.get("pictures") or extras.get("colored")):
         return extras
     find = scene_edit.card_finder((trees or {}).keys())
-    return dict(extras, pictures=_localised(assets_dir, extras.get("pictures") or {}, find, trees),
-                colored=_localised(assets_dir, extras.get("colored") or {}, find, trees))
+    shown = set()
+    for man in (trees or {}).values():
+        shown.update("images/" + pic for pic in manifest_drawers(man))
+    return dict(extras, pictures=_localised(assets_dir, extras.get("pictures") or {}, find,
+                                            trees, shown),
+                colored=_localised(assets_dir, extras.get("colored") or {}, find, trees, shown))
 
 
-def _localised(assets_dir, pics, find, trees):
-    """:func:`localise` of one ``{rel: {"drawn"?, ...}}`` of the file."""
+def _localised(assets_dir, pics, find, trees, shown=None):
+    """:func:`localise` of one ``{rel: {"drawn"?, ...}}`` of the file.  A picture here under the
+    file's name that no scene here draws (*shown*), while the file's scenes draw it, is a
+    leftover of an earlier extraction into the same folder (PAD-552, DragonRR: every color
+    profile went to another card's pictures, and his scenes showed none): it is looked up by
+    its nodes too."""
     found = {}
     for rel, p in pics.items():
-        if _here(assets_dir, rel):
+        if _here(assets_dir, rel) and (shown is None or not p.get("drawn") or rel in shown):
             continue
         other = _other_game_folder(assets_dir, rel)
         if other:

@@ -81,3 +81,44 @@ def test_the_page_says_so_when_it_loads_them(tmp_path):
         assert w.call("text_scenes.edits_load") == [CARD]
         cap = w.state("text_scenes")["caption_full"]
         assert "start out" not in cap, cap
+
+
+# ---------------------------------------------------------------------------------------------
+# round 2: "no area has the color profile attached visually" - a project folder extracted
+# again from another card keeps the first card's pictures, so the file's picture names were all
+# "here", and every color profile went to a leftover no scene draws
+# ---------------------------------------------------------------------------------------------
+SCARD = "/godzilla_le/assets/lcd/auto_loaded/abc/scene.radium"
+OTHER = "/godzilla_le/assets/lcd/auto_loaded/def/scene.radium"
+
+
+def _folder(tmp_path):
+    from PIL import Image
+    tex = tmp_path / "images" / "scene_textures"
+    tex.mkdir(parents=True)
+    for name in ("now.png", "left_over.png", "shared.png"):
+        Image.new("RGB", (4, 4), (200, 40, 40)).save(str(tex / name))
+    return str(tmp_path), {
+        SCARD: {"objects": {"1": {"kind": "Bitmap", "image": "scene_textures/now.png"}}},
+        OTHER: {"objects": {"2": {"kind": "Bitmap", "image": "scene_textures/shared.png"}}}}
+
+
+def test_a_leftover_of_another_card_does_not_take_the_profile(tmp_path):
+    from pinball_decryptor.plugins.stern import scene_share
+    a, trees = _folder(tmp_path)
+    extras = {"pictures": {}, "colored": {
+        "images/scene_textures/left_over.png": {"profile": None, "drawn": [[SCARD, "1"]]}}}
+    got = scene_share.localise(a, extras, trees)
+    assert sorted(got["colored"]) == ["images/scene_textures/now.png"]
+
+
+def test_a_picture_a_scene_here_draws_keeps_its_name(tmp_path):
+    from pinball_decryptor.plugins.stern import scene_share
+    a, trees = _folder(tmp_path)
+    extras = {"pictures": {}, "colored": {
+        "images/scene_textures/shared.png": {"profile": None, "drawn": [[SCARD, "1"]]},
+        "images/scene_textures/left_over.png": {"profile": None}}}
+    got = scene_share.localise(a, extras, trees)
+    # drawn here by another scene, or carrying no nodes to look it up by: as before
+    assert sorted(got["colored"]) == ["images/scene_textures/left_over.png",
+                                      "images/scene_textures/shared.png"]

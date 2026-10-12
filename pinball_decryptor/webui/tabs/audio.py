@@ -222,7 +222,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                  running=False, profile_busy=False, adv_marker=False,
                  prefix="", sort={"key": "#0", "desc": False},
                  panes=dict(self._panes), dup_scanning=False,
-                 widths=self._saved_widths(), pex=False)
+                 widths=self._saved_widths(), pex=False, modes_share=False)
 
     # ------------------------------------------------------------------
     # small helpers
@@ -673,7 +673,8 @@ class AudioTab(FindOriginalsMixin, TabService):
               and any(r not in self._by_rel
                       for _l, _d, rels in self._dup_groups for r in rels)):
             self._dup_groups = None
-        self.set(prefix=self._common_prefix())
+        self.set(prefix=self._common_prefix(),
+                 modes_share=self._sm_offer is not None or bool(self._modes))
         if self.audio_group_dups_var.get():
             self._ensure_dup_groups(quiet=True)
         self._refresh_list()
@@ -2731,6 +2732,110 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._save_staged_changes()
         self._refresh_list()
         return True
+
+    # PAD-553: the music modes as a file of their own
+    @rpc
+    def modes_save(self):
+        """More > Save the music modes to a file...: the modes' names, every sound's files for
+        the other modes with their loudness, and those files, in one file another project
+        loads. Returns its path, or None."""
+        from ...plugins.stern import media_share as MS
+        project = self._assets()
+        if not project or not self._modes:
+            compat.messagebox.showinfo(
+                "Save the music modes",
+                "This project has no music modes to save: no sound has a file for another mode "
+                "yet (right-click a sound > Music modes).")
+            return None
+        self._save_staged_changes()
+        path = self._ask_path(
+            "save", "music_modes_file", "Save the music modes to a file",
+            initialfile="%s music modes.zip" % (os.path.basename(os.path.normpath(project))
+                                                or "project"),
+            filetypes=[("PAD music modes", "*.zip")], defaultextension=".zip")
+        if not path:
+            return None
+        try:
+            got = MS.save_music_modes(project, path)
+        except (MS.ShareError, OSError) as e:
+            compat.messagebox.showinfo("Save the music modes", str(e))
+            return None
+        self.log("Replace Audio: saved the music modes (%d sound(s), %d file(s)) to %s."
+                 % (got["slots"], got["files"], path), "success")
+        if got["gone"]:
+            compat.messagebox.showinfo(
+                "Save the music modes", "Saved to %s.\n\nLeft out, no longer on this PC: %s."
+                % (os.path.basename(path), ", ".join("%s (mode %d)" % (os.path.basename(f), m)
+                                                     for _r, m, f in got["gone"])))
+        return path
+
+    @rpc
+    def modes_load(self, path=None):
+        """More > Load music modes from a file...: a file Save the music modes to a file wrote,
+        here or on another PC, onto this project's sounds (the same sound found by what it is
+        when this card numbers it otherwise). A sound's file for a mode replaces the one it has
+        (asked first). Returns the report, or None."""
+        from ...plugins.stern import media_share as MS
+        from ...core import staged_changes
+        project = self._assets()
+        if not project or self._running():
+            return None
+        if not path:
+            path = self._ask_path("open", "music_modes_file", "Load music modes from a file",
+                                  filetypes=[("PAD music modes", "*.zip"), ("All files", "*.*")])
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+        if not path:
+            return None
+        self._save_staged_changes()
+        try:
+            got = MS.load_music_modes(project, path)
+        except (MS.ShareError, OSError) as e:
+            compat.messagebox.showinfo("Load music modes", str(e))
+            return None
+        rec = got["record"]
+        if not rec["slots"]:
+            compat.messagebox.showinfo(
+                "Load music modes", "Nothing in %s could be loaded here:\n\n%s" % (
+                    os.path.basename(path), "\n".join("%s: %s" % (os.path.basename(r), w)
+                                                      for r, w in got["left"][:12])))
+            return None
+        clash = MS.replaced_music(project, rec)
+        if clash and not compat.messagebox.askyesno(
+                "Load music modes",
+                "%d of the sounds in %s already have a file here for the same mode (%s). Loading "
+                "replaces them.\n\nLoad the file?" % (
+                    len(clash), os.path.basename(path), ", ".join(
+                        "%s mode %d" % (os.path.basename(r), m) for r, m in clash[:6])
+                    + (", ..." if len(clash) > 6 else ""))):
+            return None
+        n = MS.put_music(project, rec)
+        self._load_modes(staged_changes.load(project))
+        self.set(modes_share=True)
+        self._refresh_list()
+        self.log("Replace Audio: loaded the music modes of %s: %d sound(s), their files in the "
+                 "\"%s\" folder." % (os.path.basename(path), n, MS.MUSIC_DIR), "success")
+        lines = ["%d sound(s) have their files for the other music modes (%s)." % (
+            n, ", ".join("%d %s" % (m, self._mode_name(m))
+                         for m in range(1, self._modes_max() + 1)))]
+        made = (got["about"] or {}).get("label")
+        if made:
+            lines.append("The file was saved from a project of %s." % made)
+        for r, to, how in got["found"]:
+            self.log("Replace Audio: %s from the file is %s here (%s)." % (
+                os.path.basename(r), os.path.basename(to), how), "info")
+        if got["found"]:
+            lines.append("%d sound(s) have another name on this card and were found by what "
+                         "they are (the log names them)." % len(got["found"]))
+        for r, why in got["left"]:
+            self.log("Replace Audio: %s from the file is left out: %s." % (r, why), "warning")
+        if got["left"]:
+            more = len(got["left"]) - 6
+            lines.append("Left out: %s%s." % ("; ".join(
+                "%s (%s)" % (os.path.basename(r), w) for r, w in got["left"][:6]),
+                " and %d more (the log names them)" % more if more > 0 else ""))
+        compat.messagebox.showinfo("Load music modes", "\n\n".join(lines))
+        return {"loaded": n, "found": len(got["found"]), "left": len(got["left"])}
 
     def _open_target(self, rel, which):
         """The file "Open in default app" hands the OS (PAD-208): the

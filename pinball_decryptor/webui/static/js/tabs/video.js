@@ -1106,7 +1106,7 @@ export default function VideoTab() {
       <${Button} icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
       ${s.best_supported ? html`<${Button} kind="ghost" icon="star" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
       <${Button} kind="ghost" icon="more" label="More"
-        title=${s.quality_report ? "More: Export CSV, Clear replacements…, Save / load settings, Check card…" : "More: Export CSV, Clear replacements…, Save / load settings"}
+        title=${"More: Export CSV, Clear replacements…, Save / load settings" + (s.var_share ? ", Save / load random clips" : "") + (s.quality_report ? ", Check card…" : "")}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("video.export_csv") },
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || running,
@@ -1117,6 +1117,13 @@ export default function VideoTab() {
           { label: "Load settings from a file…", icon: "upload", disabled: running,
             title: "Put the settings in a file saved here or by someone else onto the same slots of this card. A slot this card does not have is left out.",
             onClick: () => call("video.settings_load") },
+          s.var_share ? { sep: true } : null,
+          s.var_share ? { label: "Save the random clips to a file…", icon: "download",
+            title: "Every clip's random clips, the clips themselves too, in one file to keep or to load into another project.",
+            onClick: () => call("video.variants_save") } : null,
+          s.var_share ? { label: "Load random clips from a file…", icon: "upload", disabled: running,
+            title: "Give this project's clips the random clips in a file saved here or on another PC. A clip this card names otherwise is found by what it is.",
+            onClick: () => call("video.variants_load") } : null,
           s.quality_report ? { sep: true } : null,
           s.quality_report ? { label: "Check card…", icon: "check", title: T.check,
             onClick: () => call("video.quality_open") } : null,

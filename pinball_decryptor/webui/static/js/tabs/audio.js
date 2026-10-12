@@ -648,7 +648,7 @@ export default function AudioTab() {
       <${Button} icon="search" disabled=${s.running} title=${T.originals} onClick=${() => call("audio.originals_open")}>Find originals…<//>
       ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
       <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
-        title=${s.adv_cap ? "More: Export CSV, Clear replacements…, Save / load settings, Profile vs stock" : "More: Export CSV, Clear replacements…, Save / load settings"}
+        title=${"More: Export CSV, Clear replacements…, Save / load settings" + (s.modes_share ? ", Save / load music modes" : "") + (s.adv_cap ? ", Profile vs stock" : "")}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("audio.export_csv") },
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || s.running,
@@ -659,6 +659,13 @@ export default function AudioTab() {
           { label: "Load settings from a file…", icon: "upload", disabled: s.running,
             title: "Put the settings in a file saved here or by someone else onto the same slots of this card. A slot this card does not have is left out.",
             onClick: () => call("audio.settings_load") },
+          s.modes_share ? { sep: true } : null,
+          s.modes_share ? { label: "Save the music modes to a file…", icon: "download",
+            title: "The music modes' names, every sound's files for the other modes with their loudness, and those files, in one file to keep or to load into another project.",
+            onClick: () => call("audio.modes_save") } : null,
+          s.modes_share ? { label: "Load music modes from a file…", icon: "upload", disabled: s.running,
+            title: "Give this project's sounds the music modes in a file saved here or on another PC. A sound this card names otherwise is found by what it is.",
+            onClick: () => call("audio.modes_load") } : null,
           s.adv_cap ? { sep: true } : null,
           s.adv_cap ? { label: s.profile_busy ? "Profiling…" : "Profile vs stock", icon: "wave", title: T.profile,
             disabled: s.profile_busy, onClick: () => call("audio.profile") } : null,

@@ -6,13 +6,14 @@ shared :mod:`core.checksums` module.
 
 import json
 import os
+import shutil
 import zipfile
 
 from . import hashcache
 from . import staged_changes
 from . import staged_originals
-from .checksums import (CHECKSUMS_FILE, MUSIC_MODE_FILES_DIR, TRACKING_SIDECARS,
-                        read_baseline_any)
+from .checksums import (CHECKSUMS_FILE, MUSIC_MODE_FILES_DIR, RANDOM_CLIP_FILES_DIR,
+                        TRACKING_SIDECARS, read_baseline_any)
 from . import lineage as lineage_mod
 from .extract_source import read_extract_source, version_hint_from_name
 
@@ -72,6 +73,12 @@ IMPORTED_CARD_DIR = "card_files"
 # to other project?" - the tester who asked for them.
 MODES_DIR = ".modpack_modes"
 _EXTRA_SOUND_MODES = "sound_modes"
+# PAD-553: a Stern project's RANDOM CLIPS (``video_variants``, PAD-446: a clip's
+# extra clips, ``{rel: [file, ...]}``).  Also the user's own files, anywhere on
+# their PC, so they ride the same way: their bytes under this zip folder, and
+# an import puts them in RANDOM_CLIP_FILES_DIR and points the record there.
+CLIPS_DIR = ".modpack_clips"
+_EXTRA_VARIANTS = "video_variants"
 
 
 def _is_packable(rel):
@@ -161,7 +168,48 @@ def project_extras(assets_folder):
     sm = staged_changes.sound_modes_of(data)
     if sm:
         extras[_EXTRA_SOUND_MODES] = sm
+    vv = _variant_map(data.get(_EXTRA_VARIANTS))
+    if vv:
+        extras[_EXTRA_VARIANTS] = vv
     return extras
+
+
+def _variant_map(raw):
+    """A sidecar's ``video_variants`` as ``{rel: [file, ...]}``, empty ones left out."""
+    out = {}
+    for rel, files in (raw.items() if isinstance(raw, dict) else ()):
+        if isinstance(rel, str) and isinstance(files, (list, tuple)):
+            keep = [f for f in files if isinstance(f, str) and f.strip()]
+            if keep:
+                out[rel] = keep
+    return out
+
+
+def pack_variants(rec):
+    """Split a random clips record (:func:`project_extras`) into what a pack
+    carries: ``(record, [(file, member)], [(rel, file)] gone)``, its files zip
+    members under :data:`CLIPS_DIR` (one per file however many clips use it)."""
+    members, files, gone, slots = {}, [], [], {}
+    for rel, paths in sorted(_variant_map(rec).items()):
+        keep = []
+        for path in paths:
+            if not os.path.isfile(path):
+                gone.append((rel, path))
+                continue
+            key = os.path.normcase(os.path.abspath(path))
+            if key not in members:
+                members[key] = "%s/%d/%s" % (CLIPS_DIR, len(members),
+                                             os.path.basename(path) or "clip")
+                files.append((path, members[key]))
+            keep.append(members[key])
+        if keep:
+            slots[rel] = keep
+    return (slots or None), files, gone
+
+
+def _variants_words(rec):
+    files = {f for v in rec.values() for f in v}
+    return "random clips (%d file(s) on %d clip(s))" % (len(files), len(rec))
 
 
 def pack_sound_modes(rec):
@@ -369,10 +417,11 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                 skipped_scratch += 1
     hashcache.save(assets_folder, hcache)
 
-    if not changed and not staged_changes.sound_modes_of(
-            staged_changes.load(assets_folder)):
-        # a project of music modes alone changes no file of the extract, and
-        # is still something to pack (PAD-494)
+    _staged = staged_changes.load(assets_folder)
+    if not changed and not staged_changes.sound_modes_of(_staged) \
+            and not _variant_map(_staged.get(_EXTRA_VARIANTS)):
+        # a project of music modes (PAD-494) or random clips (PAD-553) alone
+        # changes no file of the extract, and is still something to pack
         raise ValueError("No modified files found. Modify some files first.")
 
     total_bytes = 0
@@ -426,6 +475,20 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                        "%s for mode %s of %s" % (os.path.basename(f), m,
                                                   os.path.basename(r))
                        for r, m, f in gone[:4])), "warning")
+    clip_files = []
+    if extras.get(_EXTRA_VARIANTS):
+        rec, clip_files, gone = pack_variants(extras[_EXTRA_VARIANTS])
+        if rec:
+            extras[_EXTRA_VARIANTS] = rec
+        else:
+            extras.pop(_EXTRA_VARIANTS)
+        if gone and log_cb:
+            log_cb("NOT in the pack: %d random clip(s), no longer at the path "
+                   "they were picked from (%s). Pick them again on the Video "
+                   "tab before packing to carry them."
+                   % (len(gone), ", ".join(
+                       "%s of %s" % (os.path.basename(f), os.path.basename(r))
+                       for r, f in gone[:4])), "warning")
     carried_card, named_card = pack_card_files(
         card_replacements(assets_folder))
     manifest = {
@@ -460,6 +523,8 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
             rode.append("%d %s" % (n_sm, _stock_modes_words()))
         if extras.get(_EXTRA_SOUND_MODES):
             rode.append(_sound_modes_words(extras[_EXTRA_SOUND_MODES]))
+        if extras.get(_EXTRA_VARIANTS):
+            rode.append(_variants_words(extras[_EXTRA_VARIANTS]))
         if rode:
             log_cb("Also packing " + ", ".join(rode)
                    + " — they are project settings, not files.", "info")
@@ -505,6 +570,14 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                 if log_cb:
                     log_cb("Could not pack %s (a file for a music mode) — %s."
                            % (path, err), "warning")
+        for path, member in clip_files:
+            try:
+                # clips are packed already: stored, not squeezed again
+                zf.write(path, member, compress_type=zipfile.ZIP_STORED)
+            except OSError as err:
+                if log_cb:
+                    log_cb("Could not pack %s (a random clip) — %s."
+                           % (path, err), "warning")
 
     return len(changed), zip_path
 
@@ -541,7 +614,8 @@ def inspect_mod_pack(zip_path, assets_folder):
         # them would report every one as a file "this card doesn't have".
         names = [n for n in zf.namelist()
                  if n != MANIFEST_NAME and not n.endswith(("/", "\\"))
-                 and not n.startswith((CARD_DIR + "/", MODES_DIR + "/"))]
+                 and not n.startswith((CARD_DIR + "/", MODES_DIR + "/",
+                                       CLIPS_DIR + "/"))]
         try:
             manifest = json.loads(zf.read(MANIFEST_NAME).decode("utf-8"))
         except (KeyError, ValueError, UnicodeDecodeError):
@@ -732,6 +806,13 @@ def apply_extras(assets_folder, extras, log_cb=None):
         n = staged_changes.merge_sound_modes(data, extras[_EXTRA_SOUND_MODES])
         if n:
             applied[_EXTRA_SOUND_MODES] = n
+    vv = _variant_map(extras.get(_EXTRA_VARIANTS))
+    if vv:
+        # a clip the pack gives random clips gets the pack's; the others keep theirs
+        merged = _variant_map(data.get(_EXTRA_VARIANTS))
+        merged.update(vv)
+        data[_EXTRA_VARIANTS] = merged
+        applied[_EXTRA_VARIANTS] = len(vv)
     if not applied:
         return {}
     staged_changes.save(assets_folder, data)
@@ -752,7 +833,8 @@ def apply_extras(assets_folder, extras, log_cb=None):
                  "replacement_names": "the name(s) of %d replacement file(s)",
                  "menu_expose_through": "the Adjustments-menu reveal",
                  _EXTRA_STOCK_MODES: "%d " + _stock_modes_words(),
-                 _EXTRA_SOUND_MODES: "music mode files for %d sound(s)"}
+                 _EXTRA_SOUND_MODES: "music mode files for %d sound(s)",
+                 _EXTRA_VARIANTS: "random clips for %d clip(s)"}
         parts = []
         for key, n in applied.items():
             if key == _EXTRA_STOCK_MODES and not n:
@@ -782,8 +864,8 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
     manifest = plan.get("manifest") or {}
     applicable = plan["applicable"]
     modes_only = (not plan["names"]
-                  and isinstance((manifest.get("extras") or {}).get(
-                      _EXTRA_SOUND_MODES), dict))
+                  and any(isinstance((manifest.get("extras") or {}).get(k), dict)
+                          for k in (_EXTRA_SOUND_MODES, _EXTRA_VARIANTS)))
     if log_cb:
         for level, text in mismatch_lines(plan):
             log_cb(text, level)
@@ -843,6 +925,13 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
             extras_in[_EXTRA_SOUND_MODES] = rec
         else:
             extras_in.pop(_EXTRA_SOUND_MODES)
+    if isinstance(extras_in.get(_EXTRA_VARIANTS), dict):
+        rec = _unpack_variants(zip_path, assets_folder,
+                               extras_in[_EXTRA_VARIANTS], log_cb=log_cb)
+        if rec:
+            extras_in[_EXTRA_VARIANTS] = rec
+        else:
+            extras_in.pop(_EXTRA_VARIANTS)
     extras = apply_extras(assets_folder, extras_in, log_cb=log_cb)
     _note_imported(assets_folder, plan.get("pack_lineage"), zip_path)
     card_files = manifest.get("card_files") or []
@@ -916,6 +1005,52 @@ def _prune_empty(assets_folder, removed):
             except OSError:
                 break
             cur = os.path.dirname(cur)
+
+
+def _unpack_variants(zip_path, assets_folder, rec, log_cb=None):
+    """Write a pack's random clips into the project's
+    :data:`checksums.RANDOM_CLIP_FILES_DIR` and return its record pointing at
+    them (``None`` when nothing could be unpacked).  A file of the same name
+    already there with other bytes is kept, and this one gets a free name."""
+    slots, written = {}, {}
+    base = os.path.join(assets_folder, RANDOM_CLIP_FILES_DIR)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        names = set(zf.namelist())
+        for rel, members in rec.items():
+            if not isinstance(rel, str) or not isinstance(members, list):
+                continue
+            keep = []
+            for member in members:
+                parts = str(member).split("/")
+                if (len(parts) != 3 or parts[0] != CLIPS_DIR or ":" in member
+                        or any(q in ("", ".", "..") for q in parts)
+                        or member not in names):
+                    continue
+                if member not in written:
+                    os.makedirs(base, exist_ok=True)
+                    stem, ext = os.path.splitext(parts[2])
+                    dest, k = os.path.join(base, parts[2]), 2
+                    info = zf.getinfo(member)
+                    while os.path.isfile(dest):
+                        if os.path.getsize(dest) == info.file_size:
+                            with open(dest, "rb") as f, zf.open(member) as g:
+                                if f.read() == g.read():
+                                    break
+                        dest = os.path.join(base, "%s (%d)%s" % (stem, k, ext))
+                        k += 1
+                    else:
+                        with zf.open(member) as g, open(dest, "wb") as f:
+                            shutil.copyfileobj(g, f)
+                    written[member] = dest
+                keep.append(written[member])
+            if keep:
+                slots[rel] = keep
+    if not slots:
+        return None
+    if log_cb:
+        log_cb("The pack's random clips (%d) are in this project's \"%s\" "
+               "folder." % (len(written), RANDOM_CLIP_FILES_DIR), "info")
+    return slots
 
 
 def _unpack_sound_modes(zip_path, assets_folder, rec, log_cb=None):

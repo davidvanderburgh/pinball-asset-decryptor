@@ -686,6 +686,10 @@ def _baked_variants(modded_dir):
     return out
 
 
+#: PAD-553: an extract's own random clips, for the extract's read-back (plugins.stern.media_share)
+baked_variants = _baked_variants
+
+
 def _variant_rels(variants, modded_dir):
     """The extract rels of every random clip in :func:`_baked_variants`' answer."""
     return {os.path.relpath(f, modded_dir).replace(os.sep, "/")

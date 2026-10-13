@@ -378,6 +378,11 @@ echo "[save] externals:${DUMP_EXT[*]+ ${DUMP_EXT[*]}}${TTY_EXT[*]+ ${TTY_EXT[*]}
 # from its start). Like padglhost's it errs SHORT - whole ms, less one - so
 # the game's clock can step forward a hair at the thaw but never backwards.
 T_CRIU0=$(date +%s%3N)
+# ...and the same moment on the MONOTONIC clock, read AFTER the wall one so
+# the seize it dates comes out a hair late - the load's credit below then
+# errs short too. Monotonic, because a load can come hours later and the
+# wall clock may have been stepped since.
+MONO0=$(python3 -c 'import time; print(int(time.monotonic() * 1000))' 2>/dev/null)
 GSW="/proc/$PID/root/dump/padsw"
 SWPY=$(dirname "$0")
 credit_freeze() {
@@ -424,6 +429,22 @@ if [ "$RC" != 0 ] || grep -aq 'Dumping FAILED' "$DDIR/dump.log"; then
     credit_freeze
     kill -CONT "$PID" 2>/dev/null
     exit 1
+fi
+
+# --- WHEN THE GAME'S CLOCK STOPPED, for the load (PAD-559 round 3) --------
+# A restored game wakes in a time namespace criu sets to the moment it read
+# the clock during this dump - AFTER the seize, by however long the dump
+# took - and a dump over 10 s made a slot whose every load tripped the game's
+# dispatch watchdog (the Bond LE owner's "loaded the state, started the
+# emulator and crashed", twice). restorestate.sh credits the time the
+# restored game perceives since the seize to paused_ms, and this is the
+# moment it counts from: the seize, on the monotonic clock, with the boot it
+# belongs to (for a criu that restores without a time namespace).
+SEIZE_OFF=$(awk 'match($0, /^\( *[0-9]+\.[0-9]+\)/) && /[Ss]eiz/ {
+                     s = substr($0, 2, RLENGTH - 2); gsub(/ /, "", s)
+                     printf "%d\n", s * 1000; exit }' "$DDIR/dump.log" 2>/dev/null)
+if [ -n "$MONO0" ] && [ -n "$SEIZE_OFF" ]; then
+    echo "frozen_at $(( MONO0 + SEIZE_OFF )) $(cat /proc/sys/kernel/random/boot_id)" >> "$DDIR/restore.env"
 fi
 
 # --- the rig's shared rings (guest frozen: freeze-exact) ------------------

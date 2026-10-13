@@ -9127,23 +9127,42 @@ static void clipv_arm(void)
  *     setting <TAB> <live> <TAB> <n>        the adjustment's live value (its address), modes 1..n
  *     sound <TAB> <m> <TAB> <id> <TAB> <hex> mode m's descriptor for asset id (the resolver's r0)
  *     force <TAB> <m>                      a rig run's own pick (the build never writes it)
+ *     turn <TAB> <k> <TAB> <id> <TAB> <hex>  PAD-565: the k-th file (2..) asset id plays IN TURN
  *
  * The setting is read at every resolve (one word), so a change in the menu is heard from the next
- * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg. */
+ * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg.
+ *
+ * SOUNDS IN TURN (PAD-565): an owner asked to "assign two other sounds to a single sound and play
+ * them alternately". A slot's extra files are records of their own, as a mode's are, and a `turn`
+ * line names each one's descriptor for every asset id that plays the slot. Each time the game
+ * starts that asset it gets the next one: its own sound (or the slot's replacement), then file 2,
+ * file 3... and round again. A resolve within SNDT_GAP ms of the asset's last one is the same start
+ * (the game asks again for a sound it is starting) and gets the same pick. A music mode's own file
+ * for the asset wins over the turns while that mode is set. */
 #define SNDM_FILE_MAX   (512 * 1024)
 #define SNDM_SOUNDS     3072
 #define SNDM_DESC       96                  /* a descriptor's bytes as the resolver's caller reads them */
 #define SNDM_MODES      8
+#define SNDT_MAX        16                  /* files one sound plays in turn, its own one included */
+#define SNDT_IDS        1024                /* sound ids that play in turn */
+#define SNDT_GAP        150                 /* ms: a resolve this soon after the last is the same start */
 static const char *const SNDM_FILES[] = { "/usr/local/padmode/sounds.cfg", "/dump/sounds.cfg" };
 struct sndm {
     unsigned id;
-    unsigned char mode, said;
+    unsigned char mode, said, turn;         /* turn: a `turn` line's k (its mode is 0), else 0 */
     unsigned char desc[SNDM_DESC];
+};
+struct sndt {                               /* a sound id that plays in turn */
+    unsigned id, plays;
+    unsigned char n, pick;                  /* n files, its own one included; pick 0 = its own */
+    unsigned long last;                     /* pm_ms() of its last resolve */
+    const unsigned char *desc[SNDT_MAX];    /* desc[k] for k = 1..n-1 */
 };
 static char sndm_raw[SNDM_FILE_MAX + 1];
 static struct sndm sndm[SNDM_SOUNDS];
 static const unsigned char sndm_zeros[1024];    /* the keystream our descriptors are read with */
-static unsigned n_sndm, sndm_live, sndm_n, sndm_force;
+static struct sndt sndt[SNDT_IDS];
+static unsigned n_sndm, sndm_live, sndm_n, sndm_force, n_sndt, sndt_says;
 static int sndm_only, sndm_dropped, sndm_bad;
 static volatile unsigned sndm_last = 1;         /* the mode the last resolve played, for the log */
 static unsigned (*sndm_orig)(unsigned, unsigned *);
@@ -9178,12 +9197,19 @@ static void sndm_line(char *s)
         sndm_force = ok && m >= 1 && m <= SNDM_MODES ? m : 0;
         return;
     }
-    if (n < 4 || !str_eq(f[0], "sound")) return;
+    if (n < 4 || !(str_eq(f[0], "sound") || str_eq(f[0], "turn"))) return;
     if (n_sndm >= SNDM_SOUNDS) { sndm_dropped++; return; }
     e = &sndm[n_sndm];
     p = f[1];
     m = (unsigned)number(&p, &ok);
-    if (!ok || m < 2 || m > SNDM_MODES) { sndm_bad++; return; }
+    if (f[0][0] == 't') {
+        if (!ok || m < 2 || m > SNDT_MAX) { sndm_bad++; return; }
+        e->turn = (unsigned char)m;
+        m = 0;
+    } else {
+        if (!ok || m < 2 || m > SNDM_MODES) { sndm_bad++; return; }
+        e->turn = 0;
+    }
     p = f[2];
     e->id = (unsigned)number(&p, &ok);
     if (!ok) { sndm_bad++; return; }
@@ -9193,6 +9219,53 @@ static void sndm_line(char *s)
     if (k < 8 || e->desc[0] != 5) { sndm_bad++; return; }   /* a descriptor starts with its magic, 5 */
     e->mode = (unsigned char)m;
     n_sndm++;
+}
+
+/* the turns of every `turn` line: one entry per asset id, its files in order (an id whose
+ * numbers skip one plays the files it has) */
+static void sndt_build(void)
+{
+    unsigned i, j, k;
+    struct sndt *t;
+    for (i = 0; i < n_sndm; i++) {
+        if (!sndm[i].turn) continue;
+        for (j = 0; j < n_sndt && sndt[j].id != sndm[i].id; j++) ;
+        if (j == n_sndt) {
+            if (n_sndt >= SNDT_IDS) { sndm_dropped++; continue; }
+            sndt[n_sndt++].id = sndm[i].id;
+        }
+    }
+    for (j = 0; j < n_sndt; j++) {
+        t = &sndt[j];
+        t->n = 1;
+        for (k = 2; k <= SNDT_MAX; k++)
+            for (i = 0; i < n_sndm; i++)
+                if (sndm[i].turn == k && sndm[i].id == t->id) { t->desc[t->n++] = sndm[i].desc; break; }
+    }
+}
+
+/* the turn asset `id` plays at this start: the next one, or the same when the game asks again
+ * within SNDT_GAP ms; 0 when the id has no turns */
+static struct sndt *sndt_next(unsigned id)
+{
+    unsigned j;
+    unsigned long now;
+    struct sndt *t = 0;
+    for (j = 0; j < n_sndt; j++)
+        if (sndt[j].id == id) { t = &sndt[j]; break; }
+    if (!t || t->n < 2) return 0;
+    now = pm_ms();
+    if (!t->plays || now - t->last > SNDT_GAP) {
+        t->pick = t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+        t->plays++;
+        if (sndt_says < 40 || !(t->plays % 50)) {
+            sndt_says++;
+            say("sounds in turn: asset 0x%x started (%u time(s)) - file %u of %u plays", id, t->plays,
+                t->pick + 1, t->n);
+        }
+    }
+    t->last = now;
+    return t;
 }
 
 static int sndm_read(void)
@@ -9228,16 +9301,22 @@ static unsigned sndm_resolve(unsigned id, unsigned *out)
 {
     unsigned d = sndm_orig(id, out), m, i;
     struct sndm *e = 0;
+    struct sndt *t;
     if (!d || !out) return d;
     m = sndm_mode();
     if (m != sndm_last) {
         sndm_last = m;
         say("music modes: mode %u from here on (asset 0x%x is the first sound it starts)", m, id);
     }
-    if (m < 2) return d;
-    for (i = 0; i < n_sndm; i++)
-        if (sndm[i].id == id && sndm[i].mode == m) { e = &sndm[i]; break; }
-    if (!e) return d;
+    if (m >= 2)
+        for (i = 0; i < n_sndm; i++)
+            if (sndm[i].id == id && sndm[i].mode == m) { e = &sndm[i]; break; }
+    if (!e) {                                   /* PAD-565: no mode file for it - its turn */
+        t = n_sndt ? sndt_next(id) : 0;
+        if (!t || !t->pick) return d;
+        out[0] = (unsigned)(unsigned long)sndm_zeros;
+        return (unsigned)(unsigned long)t->desc[t->pick];
+    }
     if (!e->said) {
         e->said = 1;
         say("music modes: asset 0x%x plays mode %u's sound (its descriptor at 0x%08x is the card's)", id, m, d);
@@ -9250,6 +9329,7 @@ static unsigned sndm_resolve(unsigned id, unsigned *out)
 static void sndm_arm(void)
 {
     if (!sndm_read()) return;
+    sndt_build();
     if (sndm_dropped || sndm_bad)
         say("music modes: %d line(s) not read (the table holds %d sounds), %d not a sound line", sndm_dropped,
             SNDM_SOUNDS, sndm_bad);
@@ -9273,9 +9353,10 @@ static void sndm_arm(void)
         n_sndm = 0;
         return;
     }
-    say("music modes: %u sound(s) over %u mode(s), the setting at 0x%08x (now %u)%s; get_asset_descriptor "
-        "0x%08x is wrapped", n_sndm, sndm_n, sndm_live, sndm_live ? *(volatile const unsigned *)(unsigned long)sndm_live : 0,
-        sndm_force ? " - FORCED by the file" : "", fn("sound_resolve"));
+    say("music modes: %u sound(s) over %u mode(s), the setting at 0x%08x (now %u)%s, %u sound id(s) in turn; "
+        "get_asset_descriptor 0x%08x is wrapped", n_sndm, sndm_n, sndm_live,
+        sndm_live ? *(volatile const unsigned *)(unsigned long)sndm_live : 0,
+        sndm_force ? " - FORCED by the file" : "", n_sndt, fn("sound_resolve"));
 }
 
 /* ---- picture settings (PAD-537): BRIGHTNESS, CONTRAST and SATURATION in the operator's menu -------

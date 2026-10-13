@@ -7144,14 +7144,33 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
            and not dest_is_device)
     if own:
         _HOLE_WRITES.writes = held = []
+    outer = getattr(_HOST_EXCLUDE, "idxs", None) is None
+    if outer:
+        _HOST_EXCLUDE.idxs = set()
     try:
-        got = _compute_patches_inner(
-            disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
-            label=label, dest_is_device=dest_is_device,
-            boot_screen=boot_screen, sound_ok=sound_ok)
+        for _round in range(_HOST_ROUNDS + 1):
+            _HOST_EXCLUDE.last = _round == _HOST_ROUNDS     # the last round leaves them out
+            try:
+                got = _compute_patches_inner(
+                    disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
+                    label=label, dest_is_device=dest_is_device,
+                    boot_screen=boot_screen, sound_ok=sound_ok)
+                break
+            except _HostsRetry as r:
+                # PAD-565: a music mode's or a sound in turn's record the encode
+                # could not re-encode: work the edits out again without it
+                _HOST_EXCLUDE.idxs |= set(r.idxs)
+                if own:
+                    del held[:]
+                log("The record(s) holding %d file(s) for music modes or sounds in turn "
+                    "(sound idx %s) cannot be re-encoded; working the build out again "
+                    "with other records." % (len(r.idxs), ", ".join(map(str, r.idxs))),
+                    "info")
     finally:
         if own:
             _HOLE_WRITES.writes = None
+        if outer:
+            _HOST_EXCLUDE.idxs = None
     if own and held and got[0] is not None:
         try:
             got = _hole_files_whole(disk_f, parts, got, held, log, label)
@@ -7729,6 +7748,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # PAD-494: the music modes' files that went into the bank, and the runtime's table
         sound_mode_used = []
         sound_modes_cfg = ""
+        _askip = ()                      # the sounds the encode skipped (its codec)
         if audio_edits or music_edits or mode_sound or mode_own or sound_modes:
             phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
             if cancel():                # before the sound bank is read (PAD-489)
@@ -8137,6 +8157,28 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         _save_grown_consumed(gr_path, img_path, _greads, log)
                     _stage_done(log, "re-encoding %d replaced sound(s)"
                                 % len(audio_edits), t0)
+                    if sound_mode_used and _askip:
+                        # PAD-565: a host the encode skipped holds the stock
+                        # record's bytes, not the file: never name it
+                        _dead = set(int(i) for i in _askip)
+                        _hit = sorted({int(u["host"]) for u in sound_mode_used
+                                       if int(u["host"]) in _dead})
+                        _ex = getattr(_HOST_EXCLUDE, "idxs", None)
+                        if (_hit and _ex is not None
+                                and not getattr(_HOST_EXCLUDE, "last", True)):
+                            if grow_work:
+                                import shutil as _sh
+                                _sh.rmtree(grow_work, ignore_errors=True)
+                            raise _HostsRetry(_hit)
+                        for _u in [u for u in sound_mode_used if int(u["host"]) in _dead]:
+                            from . import sound_modes as _SMo
+                            log("%s: %s is left out: its record (a copy of sound "
+                                "idx %d) could not be re-encoded." % (
+                                    _SMo.who(_u["mode"]),
+                                    _SMo.what(_u["rel"], _u["mode"], _u.get("name", "")),
+                                    int(_u["host"])), "warning")
+                        sound_mode_used = [u for u in sound_mode_used
+                                           if int(u["host"]) not in _dead]
                     if sound_mode_used:
                         # PAD-494: every sound id that plays a slot with a
                         # mode file, that mode's descriptor, off the bank as
@@ -10071,26 +10113,44 @@ def _sm_gains(gains, used):
     return out
 
 
+#: PAD-565: the stock records a build must not use as hosts (the encode could not re-encode
+#: their grown copies: :class:`_HostsRetry`), per thread, and how many times a build is worked
+#: out again for them before the files are left out instead
+_HOST_EXCLUDE = threading.local()
+_HOST_ROUNDS = 2
+
+
+class _HostsRetry(Exception):
+    """PAD-565: the encode skipped these hosts (*idxs*): :func:`_compute_patches` works the
+    build out again without them."""
+
+    def __init__(self, idxs):
+        super().__init__("hosts not re-encodable: %s" % ", ".join(map(str, idxs)))
+        self.idxs = sorted(idxs)
+
+
 def _sound_mode_host(params, slot_p, want, audio_edits, taken):
     """A stock record to hold one music mode's file: the slot's channels, not replaced, grown or
     holding another; the longest no longer than the file (so the copy grows to the file's own
-    length), else the shortest longer one. ``None`` when there is none."""
+    length), else the shortest longer one. ``None`` when there is none.
+
+    PAD-565: never a record this build already found its encode cannot re-encode as a grown copy
+    (``_HOST_EXCLUDE``, :class:`_HostsRetry`): the encode skips such a copy and leaves the
+    stock record's bytes in it, which the game then played as noise (Aerosmith Pro 1.16, idx
+    925; its stock record passes the encoder's self-test, its grown copy does not)."""
     chan = slot_p.get("chan")
-    shorter = longer = None
+    shorter, longer = [], []
     for q in params:
         i, n = q["idx"], int(q.get("length", 0) or 0)
         if (i == slot_p.get("idx") or i in taken or i in audio_edits or q.get("grown")
-                or not q.get("findkey")):
+                or not q.get("findkey") or i in (getattr(_HOST_EXCLUDE, "idxs", None) or ())):
             continue
         if q.get("chan") != chan or n <= 0:
             continue
-        if n <= want:
-            if shorter is None or n > shorter[0] or (n == shorter[0] and i < shorter[1]):
-                shorter = (n, i)
-        elif longer is None or n < longer[0] or (n == longer[0] and i < longer[1]):
-            longer = (n, i)
-    pick = shorter or longer
-    return pick[1] if pick else None
+        (shorter if n <= want else longer).append((n, i, q))
+    order = (sorted(shorter, key=lambda t: (-t[0], t[1]))
+             or sorted(longer, key=lambda t: (t[0], t[1])))
+    return order[0][1] if order else None
 
 
 #: PAD-511: a record at least this long is a song's music (the Sound Test leaves such records

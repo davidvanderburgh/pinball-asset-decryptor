@@ -280,3 +280,62 @@ def test_a_game_without_them_says_why(tmp_path, monkeypatch):
         assert [s["label"] for s in e["submenu"]] == ["Why not this sound?"]
         assert w.call("audio.menu_action", "turn_why", rel) is True
         assert said == [("Play in turn", "Not on this game.")]
+
+
+# ---- every Spike 2 build ---------------------------------------------------------------------------
+def test_a_record_whose_grown_copy_the_encode_skipped_is_never_a_host_again():
+    """Aerosmith Pro 1.16: the grown copy of idx 925 could not be re-encoded, the encode left it
+    as it was, and the game played its old bytes as noise at file 3's turn."""
+    params = [_p(2, 30000), _p(925, 25000), _p(1222, 24000), _p(258, 20000)]
+    slot = params[0]
+    assert E._sound_mode_host(params, slot, 26000, {}, set()) == 925
+    E._HOST_EXCLUDE.idxs = {925}
+    try:
+        assert E._sound_mode_host(params, slot, 26000, {}, set()) == 1222
+    finally:
+        E._HOST_EXCLUDE.idxs = None
+
+
+def test_a_skipped_host_works_the_build_out_again_without_it(monkeypatch):
+    calls, said = [], []
+
+    def inner(*a, **k):
+        calls.append(set(E._HOST_EXCLUDE.idxs))
+        if len(calls) == 1:
+            raise E._HostsRetry([925])
+        return (None, None, None, None, None)
+
+    monkeypatch.setattr(E, "_compute_patches_inner", inner)
+    got = E._compute_patches(None, [], "proj", lambda t, lvl="info": said.append(t), None,
+                             lambda: False, dest_is_device=True)
+    assert got[0] is None and calls == [set(), {925}]
+    assert "sound idx 925" in said[0] and "again with other records" in said[0]
+    assert E._HOST_EXCLUDE.idxs is None
+
+
+def test_a_build_no_port_was_shipped_for_gets_one_derived(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from pinball_decryptor.plugins.stern import clip_variants as CV
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import title_reader as TR
+    image = tmp_path / "foo_fighters_le-1_03_0.Release.16G.sdcard.raw"
+    image.write_bytes(b"x")
+    derived = SimpleNamespace(key="foo_fighters_le_1_03")
+    read = []
+    monkeypatch.setattr(CV, "project_title", lambda project, probe=False: None)
+    monkeypatch.setattr(MP, "project_card", lambda project: SimpleNamespace(
+        game_dir="foo_fighters_le", version="1.03.0", image=str(image)))
+    monkeypatch.setattr(TR, "read_card", lambda card: read.append(card) or SimpleNamespace(port_path="x.port"))
+    monkeypatch.setattr(MP, "profile_for_card", lambda g, v: derived if read else None)
+    assert SMo.project_title("proj", probe=True) is derived and read == [str(image)]
+    assert SMo.project_title("proj", probe=False) is None          # never opens the card on the UI thread
+
+
+def test_the_proof_sweep_switch_offers_turns_on_any_build_with_the_record_lookup(monkeypatch):
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    other = MP.profile("godzilla_pro_1_15")
+    monkeypatch.setattr(SMo, "TURN_PROVEN", frozenset())
+    assert SMo.title_refusal(other, turns=True) == SMo.NOT_PROVEN_TURNS % other.label
+    monkeypatch.setenv(SMo.TURNS_ANY_ENV, "1")
+    assert SMo.title_refusal(other, turns=True) == ""
+    assert SMo.title_refusal(other) == SMo.NOT_PROVEN % other.label     # music modes stay gated

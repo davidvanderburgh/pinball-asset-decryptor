@@ -311,13 +311,23 @@ def title_key(prof):
     return "%s-%s" % (prof.game_dir, prof.version) if prof is not None else ""
 
 
+#: PAD-565: ``PAD_STERN_TURNS_ANY=1`` offers the sounds in turn on every build whose port names
+#: ``sound_lookup``, proven or not: the proof sweep builds each one with it before it is listed in
+#: :data:`TURN_PROVEN`
+TURNS_ANY_ENV = "PAD_STERN_TURNS_ANY"
+
+
+def turns_any():
+    return os.environ.get(TURNS_ANY_ENV) == "1"
+
+
 def title_refusal(prof, turns=False):
     """Why no sound of ``prof``'s title can have mode files (*turns*: files in turn, PAD-565: the
     record lookup, not the resolver), or ``""``."""
     if prof is None:
         return NO_TITLE if not turns else NO_TITLE.replace("give it a MUSIC MODE",
                                                            "play its sounds in turn")
-    if title_key(prof) not in (TURN_PROVEN if turns else PROVEN):
+    if title_key(prof) not in (TURN_PROVEN if turns else PROVEN) and not (turns and turns_any()):
         return (NOT_PROVEN_TURNS if turns else NOT_PROVEN) % prof.label
     from . import mode_project as MP
     try:
@@ -330,9 +340,25 @@ def title_refusal(prof, turns=False):
 
 
 def project_title(project, probe=False):
-    """The profile of the card ``project`` was made from, or None (:func:`.clip_variants.project_title`)."""
+    """The profile of the card ``project`` was made from, or None (:func:`.clip_variants.project_title`).
+    PAD-565: with *probe*, a build no port was shipped for gets one derived now from the card's
+    game program (:func:`.title_reader.read_card`, as the Modes tab's read does), so the sounds in
+    turn reach every Spike 2 build, not only the ones a person opened the Modes tab on."""
     from .clip_variants import project_title as _pt
-    return _pt(project, probe=probe)
+    prof = _pt(project, probe=probe)
+    if prof is not None or not probe:
+        return prof
+    from . import mode_project as MP
+    try:
+        card = MP.project_card(project)
+        if card is None or not card.game_dir or not card.image or not os.path.isfile(card.image):
+            return None
+        from .title_reader import read_card
+        if not read_card(card.image).port_path:
+            return None
+        return MP.profile_for_card(card.game_dir, card.version)
+    except Exception:                                   # noqa: BLE001 - no port to be had: no title
+        return None
 
 
 def offer_turns(project, rels, probe=True):

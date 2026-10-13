@@ -196,6 +196,9 @@ def test_the_credit_starts_at_the_seize_and_errs_short():
         'T=$(mktemp -d); DDIR=$T\n'
         "printf '(00.000100) Version: 4.1\n(00.300000) Seized task 42, state 1\n' > $T/dump.log\n"
         'command -v python3 >/dev/null || { echo NOPY; exit 0; }\n'
+        # the rig's GNU date gives milliseconds with %3N; macOS's BSD date
+        # prints the "3N" literally, so stand in for it there
+        'case $(date +%s%3N) in *[!0-9]*) date() { python3 -c "import time; print(int(time.time() * 1000))"; };; esac\n'
         'python3 -c "import struct,sys; b=bytearray(4096); struct.pack_into(\'<I\',b,0,0x53444150);'
         ' struct.pack_into(\'<I\',b,1088,500); open(sys.argv[1],\'wb\').write(b)" $T/padsw\n'
         'GSW=$T/padsw\n'

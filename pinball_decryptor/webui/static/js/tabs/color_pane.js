@@ -184,13 +184,14 @@ function CopyPaste({ p, update, mode, name }) {
 }
 
 // PAD-439: the words of Apply to all, by the kind of file, on the hosts that list them
-// (PAD-471: lines of text, in Scenes)
+// (PAD-471: lines of text, in Scenes; PAD-566 (DragonRR): a picture in Scenes too, as on
+// the Images tab)
 const ALL_WORDS = {
   images: ["image's", "images", "image"],
   videos: ["video's", "videos", "video"],
   text: ["line's", "lines of text", "line of text"],
 };
-const ALL_HOSTS = { images: "images", video: "videos", scenes: "text" };
+const ALL_HOSTS = { images: ["images"], video: ["videos"], scenes: ["text", "images"] };
 // PAD-462 (DragonRR, round 2): Apply to all's tooltip in his words, exactly as he wrote them
 // (Images: the same, of images)
 const ALL_TIP = (one, many) => `This will change all of your unlocked ${many} to the profile you have selected below in this tab. This may mean that every single ${one} existing and replaced will be affected. You can undo this function`;
@@ -203,7 +204,7 @@ function FileLine({ s, host }) {
   const f = s.file;
   if (!f) return null;
   const n = f.count || 1;
-  const all = ALL_HOSTS[host] === f.kind ? ALL_WORDS[f.kind] : null;
+  const all = (ALL_HOSTS[host] || []).includes(f.kind) ? ALL_WORDS[f.kind] : null;
   const many = f.kind === "images" ? "images" : "videos";
   // PAD-438: a line of text in Scenes has one too (PAD-471: and Apply to all, of lines)
   const what = f.kind === "text" ? "This line of text" : n > 1 ? `These ${n} ${many}` : "This file";
@@ -227,7 +228,7 @@ function FileLine({ s, host }) {
     ${all ? html`<div class="row cpd-file-all">
       <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "profiled")}
         title=${{ head: `Apply this ${all[0]} color profile to all profiled ${all[1]}`, lines: [profile,
-          `Every ${all[2]} ${f.kind === "text" ? "in every scene" : "on this tab"} with a color profile attached gets this one, in place of the one it has now.`,
+          `Every ${all[2]} ${f.kind === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab"} with a color profile attached gets this one, in place of the one it has now.`,
           `A ${all[2]} with no color profile attached is left as it is.`,
           "You are asked first. Undo puts them all back."] }}>Apply to all profiled ${all[1]}…<//>
       <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "all")}

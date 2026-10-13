@@ -9,7 +9,7 @@ What the Tk ``MainWindow`` kept around the notebook, on the page:
   the Extract tab shows beside Auto-name call-outs (PAD-460);
 * the green ? "Tips for this tab" window (``webui/help_content.py``);
 * the Project menu's windows (``shellx_projects.py``) and Manage disk space
-  (``shellx_disk.py``);
+  (``shellx_disk.py``), and the top bar's Reset... (``shellx_reset.py``, PAD-569);
 * updates: the blue banner, the "Up to date" answer, the download progress
   window (``show_update_banner`` & co, which the run logic calls);
 * the amber "source image changed" banner on the asset-editing tabs;
@@ -32,6 +32,7 @@ from .. import compat
 from ..picker_data import MFR_VISUALS, peek_text, tooltip_text
 from ..shellx_disk import DiskMixin
 from ..shellx_projects import ProjectsMixin
+from ..shellx_reset import ResetMixin
 from ..update_interval import (UPDATE_INTERVAL_CHOICES,
                                normalize_update_interval)
 from ..autosave_interval import (AUTOSAVE_INTERVAL_CHOICES, AUTOSAVE_TIP,
@@ -77,7 +78,7 @@ def _visuals():
     return dict(MFR_VISUALS)
 
 
-class ShellExtras(ProjectsMixin, DiskMixin, TabService):
+class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
     ns = "shellx"
     key = ""
     label = ""
@@ -126,6 +127,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, TabService):
         self._log_seeded = False
         self._projects_init()
         self._disk_init()
+        self._reset_init()
         self.set(update_state="", download=None, log_seed=None,
                  disk_badge="", picker=self._picker_cards(),
                  prereq_hints={}, platform=sys.platform,

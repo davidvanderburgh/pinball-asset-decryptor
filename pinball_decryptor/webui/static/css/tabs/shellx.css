@@ -183,3 +183,8 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .logdrawer .lines:focus { outline: none; }
 .logdrawer .lines:focus-visible { outline: 1px solid var(--line-2); outline-offset: -1px; border-radius: 0; }
 .logdrawer a:focus-visible { outline: 1px solid var(--info); }
+
+/* PAD-569: the top bar's Reset… */
+.sx-reset-list { padding: 2px 0; }
+.sx-reset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; }
+.sx-reset-detail { grid-column: 1 / -1; padding-left: 26px; line-height: 1.4; }

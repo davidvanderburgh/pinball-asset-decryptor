@@ -10,7 +10,7 @@
 // preview_dialog.py, disk_dialog.py, disclaimer.py).
 
 import { html, useEffect, useRef, useState, Modal, Button, Field, Select, Icon, Note, Table,
-         Progress, Spinner, cx, tip, menuOpen } from "./core/ui.js";
+         Progress, Spinner, Check, cx, tip, menuOpen } from "./core/ui.js";
 import { useNs, useEvent } from "./core/store.js";
 import { call } from "./core/rpc.js";
 import { registerDialog, openDialog } from "./core/dialogs.js";
@@ -413,6 +413,54 @@ function DiskSpaceDialog({ close }) {
   <//>`;
 }
 registerDialog("disk_space", DiskSpaceDialog);
+
+// ------------------------------------------------------- Reset…
+// PAD-569 (DragonRR): the top bar's Reset… — the kinds of change in the open project,
+// ticked, put back the way they were extracted (shellx_reset.py).  The Write tab's "Revert
+// all changes…" opens it with every kind ticked (`all`).
+function ResetDialog({ close, all = false }) {
+  const dup = useSingleton("reset", close);
+  const r = useNs("shellx").reset;
+  const [ticked, setTicked] = useState(() => new Set());
+  useEffect(() => { if (!dup) call("shellx.reset_open"); }, []);
+  useEffect(() => {
+    if (all && r && r.rows) setTicked(new Set(r.rows.map((x) => x.key)));
+  }, [all, !!(r && r.rows)]);
+  const shut = () => { call("shellx.reset_close"); close(); };
+  const [uid, onClose] = useWin(shut);
+  if (dup) return null;
+  const rows = (r && r.rows) || [];
+  const every = rows.length > 0 && rows.every((x) => ticked.has(x.key));
+  const flip = (key, on) => {
+    const next = new Set(ticked);
+    if (on) next.add(key); else next.delete(key);
+    setTicked(next);
+  };
+  const go = async () => {
+    const ok = await call("shellx.reset_run", rows.filter((x) => ticked.has(x.key)).map((x) => x.key));
+    if (ok) close();
+  };
+  const count = (x) => r && r.busy && !x.n ? "counting…" : x.n ? `${x.n} change${x.n === 1 ? "" : "s"}` : "nothing to reset";
+  return html`<${Modal} title=${"Reset " + ((r && r.name) || "project") + "…"} icon="refresh" wide onClose=${onClose} cls=${cx(uid, "sx-reset")}
+    footer=${html`<span class="grow small dim ellip" title=${r ? r.folder : ""}>${r ? r.folder : ""}</span>
+      <${Button} onClick=${shut}>Cancel<//>
+      <${Button} kind="danger" disabled=${!ticked.size || !(r && r.ok) || (r && r.running)} onClick=${go}>${every ? "Reset everything…" : "Reset…"}<//>`}>
+    <p class="sx-p muted">${r ? r.intro : ""}</p>
+    <${Note} kind="warn">${r ? r.warning : ""}<//>
+    ${r && !r.ok ? html`<${Note} kind="err">Open a project first: there is no project folder to reset.<//>` : null}
+    <div class="stack sx-reset-list" style="gap:6px">
+      <${Check} checked=${every} disabled=${!rows.length} onChange=${(v) => setTicked(new Set(v ? rows.map((x) => x.key) : []))}
+        label=${html`<b>Everything</b><span class="small muted"> — the project as it was extracted</span>`} />
+      <hr class="sx-hr" />
+      ${rows.map((x) => html`<div class="sx-reset-row">
+        <${Check} checked=${ticked.has(x.key)} onChange=${(v) => flip(x.key, v)} label=${x.label} />
+        <span class=${cx("small", x.n ? "warn-ink" : "dim")}>${count(x)}</span>
+        <div class="small muted sx-reset-detail">${x.detail}</div>
+      </div>`)}
+    </div>
+  <//>`;
+}
+registerDialog("reset", ResetDialog);
 
 // ------------------------------------------------------- New project
 const BAD_NAME = /[<>:"/\\|?*]/;

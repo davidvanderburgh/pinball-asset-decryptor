@@ -347,6 +347,9 @@ function TopBar({ shell }) {
       ${proj.caption ? html`<span class="dim ellip hide-narrow">${proj.caption}</span>` : null}
       <span class="muted">▾</span>
     </button>
+    ${working && proj.folder ? html`<${Button} size="sm" kind="ghost" icon="refresh" disabled=${!!shell.running}
+        onClick=${() => openDialog("reset")}
+        title=${{ head: "Reset this project", lines: [["Click", "put images, videos, sounds, text, fonts, scenes, colors or modes back as extracted, or everything at once"]] }}>Reset…<//>` : null}
     <span class="grow"></span>
     ${pyChanged.length ? html`<${Chip} kind="warn" dot onClick=${() => call("shell.dev_restart")}
         title=${"Python files changed since this app started:\n" + pyChanged.slice(0, 12).join("\n") + (pyChanged.length > 12 ? "\n…" : "") + "\n\nClick to restart the app with them (development checkout only)."}>Python changed · Restart<//>` : null}

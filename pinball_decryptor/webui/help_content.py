@@ -702,7 +702,7 @@ HELP_CONTENT = {
                  "text": "**Delete** (or right-click) asks first. A layer you added is "
                          "taken out; the game's own are hidden in both. **Undo** brings "
                          "it back."}]},
-            "- A new scene opens with eyes shut on layers hidden in the game; **Reset** "
+            "- A new scene opens with eyes shut on layers hidden in the game; **Revert** "
             "puts eyes back.\n"
             "- Selecting shows a layer even with its eye shut; it never changes an eye.\n"
             "- A crossed-out eye: off because its switchable part shows another look. The "
@@ -714,8 +714,9 @@ HELP_CONTENT = {
             "### Onto the card\n"
             "- Edits are listed on **Write**. Moves, resizes, tints, hides and order can "
             "go straight to an SD card; an added picture or text needs an image build.\n"
-            "- **Reset** puts a scene, or every scene, back to the last Write or as "
-            "shipped. **Export picture…** only makes a picture for you.\n"
+            "- **Revert** puts a scene, or every scene, back to the last Write or as "
+            "shipped: its layout, not its color profiles or replaced pictures (the top "
+            "bar's **Reset…** puts those back). **Export picture…** only makes a picture for you.\n"
             "- On a running Emulate (**Apply my replaced assets on top**), edits reach the "
             "game live: most screens at their next showing, ones loaded at start (score "
             "display, Battle Select) after a restart. Untick **Include my Scenes tab "
@@ -729,7 +730,7 @@ HELP_CONTENT = {
             "- Rows of W's or AAA are placeholders the game fills in, like high score "
             "initials.\n"
             "- Godzilla's score panel: select a score line for four color swatches, picked "
-            "as the machine shows them (**Reset** puts the game's back). The game program "
+            "as the machine shows them (**Revert** puts the game's back). The game program "
             "paints them, so Write adds a program step.",
         ]),
         ("Save and load scene edits", [
@@ -758,7 +759,7 @@ HELP_CONTENT = {
             "picture, a line of text, the overlay, color profiles), it lists each one "
             "beside the file's "
             "and asks: **Cancel**, **Skip conflicts** (load only the rest), **Replace "
-            "all**, tick the ones to replace and **Replace ticked only**, or **Reset my "
+            "all**, tick the ones to replace and **Replace ticked only**, or **Revert my "
             "scenes, then load** (every scene back as the game shipped it, then the whole "
             "file). Before any of "
             "yours is replaced it saves them to a file in the project's **Backups** "
@@ -1372,8 +1373,8 @@ HELP_CONTENT = {
          "- Click a column header to sort; again to flip; a third time for the scan's "
          "order.\n"
          "- **Export CSV** saves the rows, to compare two projects in a spreadsheet.\n"
-         "- **Revert all changes…** puts every changed asset back to its extract "
-         "original (not on any card)."),
+         "- **Revert all changes…** opens the top bar's **Reset…** with everything "
+         "ticked: the whole project back as extracted (not on any card)."),
         ("Build / flash an SD card", [
             "On Stern Spike 2 and CGC, **Build / flash SD card…** does both; tick "
             "either part, or both. Other machines have a plain **Build**.",
@@ -3211,6 +3212,20 @@ GENERAL_CONTENT = [
      "**Install / repair prerequisites…** entry. All green means every check passed, not "
      "that nothing is left: ffplay (for the audio Preview) is checked by none, and "
      "re-running the installer brings the full ffmpeg that has it."),
+    ("Reset… (start a project over)",
+     "**Reset…** beside the project name puts parts of the project back the way "
+     "they were extracted. Tick what goes, or **Everything**:\n\n"
+     "- **Scenes edits**: every scene as shipped, and the score panel's colors\n"
+     "- **Color profiles**: the project's and every file's or line's own, switches off\n"
+     "- **Replaced images**, **Replaced videos**, **Replaced sounds**: the picks and "
+     "the files they changed\n"
+     "- **Text edits** and the text colors picked on Text\n"
+     "- **Fonts**: every letter back from the game's own font pictures\n"
+     "- **Modes**: every mode made in the project (its folder under modes) and every "
+     "change to the game's own modes\n\n"
+     "It cannot be undone, and works on the whole project only: one scene goes back "
+     "with **Revert** on the Scenes tab. Your own files picked from elsewhere stay "
+     "where they are; nothing on a card changes until the next Write."),
     ("Recent paths",
      "Every file or folder box remembers recent paths per manufacturer: open its "
      "dropdown to reuse one."),

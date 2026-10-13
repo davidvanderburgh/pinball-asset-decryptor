@@ -84,6 +84,12 @@ class ScenesTab(TabService):
         return opened
 
     # -- hooks -------------------------------------------------------------
+    def refresh_after_revert(self):
+        """PAD-569: Reset… closed the scenes (their undo could put back what it reset); the
+        page shows them again, as they are now."""
+        if self._showing():
+            self.show_project()
+
     def on_show(self):
         self.show_project()
 

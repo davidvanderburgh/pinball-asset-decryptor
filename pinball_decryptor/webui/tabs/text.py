@@ -212,6 +212,15 @@ class TextTab(TabService):
         if self._is_visible():
             self._scan_text_strings()
 
+    def forget_reset(self, assets_dir, kinds):
+        """PAD-569 Reset…: the Scenes and Fonts windows show what it resets (their undo
+        history could put it back): they close.  Reset text edits leave no edit here."""
+        self.scenes.close()
+        self.fonts.close(force=True)
+        if "text" in kinds:
+            for r in self._text_rows:
+                r["replacement"] = ""
+
     def refresh_after_revert(self):
         """The revert wiped the manifest: reload it if it had been scanned."""
         if self._text_scan_dir:

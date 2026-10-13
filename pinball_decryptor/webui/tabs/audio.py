@@ -416,6 +416,17 @@ class AudioTab(FindOriginalsMixin, TabService):
             kept = {}
         staged_changes.save(assets_dir, kept)
 
+    def forget_reset(self, assets_dir, kinds):
+        """PAD-569 Reset…: forget the picks it resets, so a later save of this tab cannot
+        write them back over the sidecar the reset just cleared."""
+        if "sounds" in kinds:
+            self._assign = {}
+            self._loop = {}
+            self._keep = {}
+            self._level = {}
+            self._keep_whole = []
+            self._modes = {}
+
     def refresh_after_revert(self):
         self._changed = set()
         self._foreign = set()

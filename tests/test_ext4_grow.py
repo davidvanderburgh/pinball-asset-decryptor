@@ -336,6 +336,8 @@ def test_e2fsprogs_is_looked_for_in_sbin_on_linux(monkeypatch, tmp_path):
     sbin.mkdir()
     for name in ("debugfs", "e2fsck"):
         (sbin / name).write_bytes(b"")
+    # not the app's own copy (the macOS CI run points this at it, PAD-573)
+    monkeypatch.delenv("PAD_E2FSPROGS_DIR", raising=False)
     monkeypatch.setattr(ext4_grow, "E2FSPROGS_DIRS", (str(sbin),))
     monkeypatch.setattr(shutil, "which", lambda n: None)
     assert ext4_grow._find_e2fsprogs() == {"debugfs": str(sbin / "debugfs"),

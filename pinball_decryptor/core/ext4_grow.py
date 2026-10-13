@@ -30,7 +30,7 @@ import shlex
 import subprocess
 import sys
 
-from .executor import create_executor
+from .executor import bundled_e2fsprogs_dir, create_executor
 
 
 def _mb(n):
@@ -191,6 +191,24 @@ E2FSPROGS_DIRS = ("/opt/homebrew/opt/e2fsprogs/sbin",     # Homebrew ARM
                   "/sbin", "/usr/sbin")                   # Linux (PAD-314)
 
 
+def e2fsprogs_dirs():
+    """:data:`E2FSPROGS_DIRS` behind the e2fsprogs the macOS app ships itself
+    (PAD-573), which comes first: it is the copy every release is built and
+    tested with, and on most Macs the only one there is."""
+    own = bundled_e2fsprogs_dir()
+    return ((own,) if own else ()) + E2FSPROGS_DIRS
+
+
+def with_bundled_debugfs(probe):
+    """A prerequisite *probe* for debugfs that also passes on the app's own
+    copy (PAD-573)."""
+    own = bundled_e2fsprogs_dir()
+    if not own:
+        return probe
+    return "test -x %s || %s" % (shlex.quote(os.path.join(own, "debugfs")),
+                                 probe)
+
+
 def _find_e2fsprogs():
     """Locate the e2fsprogs binaries: macOS keeps them keg-only (Homebrew) and a
     Linux user's PATH leaves out /sbin, where Debian puts them.
@@ -203,7 +221,7 @@ def _find_e2fsprogs():
     instead, which never goes through blkid.
     """
     import shutil
-    dirs = E2FSPROGS_DIRS
+    dirs = e2fsprogs_dirs()
     tools = {}
     for name in ("debugfs", "e2fsck"):
         for d in dirs:

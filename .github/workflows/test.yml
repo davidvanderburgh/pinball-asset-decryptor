@@ -95,12 +95,20 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gnupg
 
-      # e2fsprogs: the CGC Extract/Write round trip on a built installer
-      # (tests/test_cgc_mac_portable.py) - the Mac's own dd/wc/find with
-      # Homebrew's keg-only debugfs, which is what a Mac user has (PAD-571).
-      - name: Install gpg + e2fsprogs (macOS)
+      - name: Install gpg (macOS)
         if: runner.os == 'macOS'
-        run: brew install gnupg e2fsprogs
+        run: brew install gnupg
+
+      # e2fsprogs: the CGC Extract/Write round trip on a built installer
+      # (tests/test_cgc_mac_portable.py) - the Mac's own dd/wc/find with the
+      # e2fsprogs the macOS app ships, built by the same script the DMG build
+      # runs and found through PAD_E2FSPROGS_DIR, with no Homebrew copy: a
+      # user's Mac has none (PAD-571, PAD-573).
+      - name: Build the app's own e2fsprogs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          bash installer/build_mac_e2fsprogs.sh "$RUNNER_TEMP/e2fsprogs"
+          echo "PAD_E2FSPROGS_DIR=$RUNNER_TEMP/e2fsprogs" >> "$GITHUB_ENV"
 
       - name: Run tests (Linux)
         if: runner.os == 'Linux'

@@ -200,6 +200,21 @@ HELP_CONTENT = {
          "- Needs an image build, not a direct SD write. Every file takes room in the "
          "sound bank, the 2 GB limit included; one that does not fit is left out, "
          "and the log says so."),
+        ("Play in turn",
+         "Stern Spike 2, the latest version of each game. A "
+         "sound can play more than one file: each time the game plays it, the next one "
+         "plays, and after the last it starts again.\n\n"
+         "- Right-click a sound > **Play in turn** > **Add a sound to play in turn…** "
+         "(up to 15 more). Sound 1 is the sound as it plays now: its replacement, or the "
+         "stock one. The row shows how many it plays in turn.\n"
+         "- **Play sound 2 (…)** previews one; **Take off sound 2 (…)** drops it.\n"
+         "- Each file plays for as long as the sound it stands in for: a longer one is "
+         "cut to that length, and it is matched to that sound's loudness.\n"
+         "- Which one plays first after the machine is switched on is not fixed; every "
+         "play after that is the next in turn.\n"
+         "- In a music mode a sound has a file of its own for, that file plays every time.\n"
+         "- Needs an image build, not a direct SD write. Each file takes room in the "
+         "sound bank."),
         ("Replace from folder",
          "**Replace from folder…**, beside the project folder, picks a whole folder "
          "of your files at once: each file goes to the slot with its name.\n\n"

@@ -54,6 +54,7 @@ def _pred(kind, mode, assignments, changed_on_disk):
     setattr(stub, changed, set(changed_on_disk))
     stub._variants = {}                   # no random clips (PAD-446, video)
     stub._modes = {}                      # no music modes (PAD-494, audio)
+    stub._turns = {}                      # no sounds in turn (PAD-565, audio)
     return fn(stub)
 
 

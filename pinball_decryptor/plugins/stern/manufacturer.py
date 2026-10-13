@@ -815,9 +815,12 @@ class SternManufacturer(Manufacturer):
     def sound_modes_offer(self, assets_dir, rels):
         # PAD-494: the sound bank's sounds, on a title the music modes were
         # proven on (sound_modes.PROVEN)
-        from .sound_modes import MAX_MODES, offer
+        from .sound_modes import MAX_MODES, offer, offer_turns
         why, slots = offer(assets_dir, rels, probe=True)
-        return {"why": why, "slots": slots, "max": MAX_MODES}
+        # PAD-565: and which can play files in turn (no menu setting, so more titles)
+        twhy, tslots = offer_turns(assets_dir, rels, probe=True)
+        return {"why": why, "slots": slots, "max": MAX_MODES,
+                "turns_why": twhy, "turn_slots": tslots}
 
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games

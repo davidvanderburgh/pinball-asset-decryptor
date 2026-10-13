@@ -292,7 +292,20 @@ def same_stem_sibling(path):
 
 #: PAD-494: a Stern project's music modes (``plugins.stern.sound_modes``):
 #: ``{"names": [...], "slots": {rel: {"2": file}}, "levels": {rel: {"2": dB}}}``
+#: and (PAD-565) its sounds in turn, ``"turns": {rel: [file 2, file 3, ...]}``
 SOUND_MODES_KEY = "sound_modes"
+#: PAD-565: the mod routes carry a slot's file k in turn as one more of its
+#: files, under this mode key + k ("t2"), so it travels wherever its slot's
+#: music mode files do; :func:`merge_sound_modes` puts it back in ``turns``
+TURN_KEY = "t"
+
+
+def _turn_k(m):
+    """File k in turn for a carried mode key ("t2" -> 2), else None."""
+    m = str(m)
+    if m.startswith(TURN_KEY) and m[len(TURN_KEY):].isdigit():
+        return int(m[len(TURN_KEY):])
+    return None
 
 
 def sound_modes_of(data):
@@ -315,7 +328,14 @@ def sound_modes_of(data):
     names = raw.get("names")
     names = ([n if isinstance(n, str) else "" for n in names]
              if isinstance(names, list) else [])
-    if not slots and not any(names):
+    turns = {}
+    for rel, files in (raw.get("turns") or {}).items():
+        if isinstance(rel, str) and isinstance(files, list):
+            keep = {"%s%d" % (TURN_KEY, k): f for k, f in enumerate(
+                [f for f in files if isinstance(f, str) and f.strip()], 2)}
+            if keep:
+                turns[rel] = keep
+    if not slots and not any(names) and not turns:
         return None
     levels = raw.get("levels")
     if isinstance(levels, dict):
@@ -326,6 +346,8 @@ def sound_modes_of(data):
         own = (data or {}).get("audio_levels") or {}
         levels = {rel: {m: own[rel] for m in files}
                   for rel, files in slots.items() if own.get(rel)}
+    for rel, files in turns.items():
+        slots.setdefault(rel, {}).update(files)
     return {"names": names, "slots": slots,
             "levels": {rel: v for rel, v in levels.items() if v}}
 
@@ -342,6 +364,11 @@ def merge_sound_modes(data, rec):
     here = sound_modes_of(data) or {
         "names": [], "slots": {}, "levels": {}}
     slots = {rel: dict(v) for rel, v in here["slots"].items()}
+    # PAD-565: a slot the record gives files in turn takes the record's, in its order
+    for rel, by_mode in (rec.get("slots") or {}).items():
+        if isinstance(by_mode, dict) and rel in slots and any(
+                _turn_k(m) is not None for m in by_mode):
+            slots[rel] = {m: f for m, f in slots[rel].items() if _turn_k(m) is None}
     levels = {rel: dict(v) for rel, v in here["levels"].items()}
     n = 0
     for rel, by_mode in (rec.get("slots") or {}).items():
@@ -365,7 +392,16 @@ def merge_sound_modes(data, rec):
             names[i] = name
     if not n and names == here["names"]:
         return 0
-    data[SOUND_MODES_KEY] = {
-        "names": names, "slots": slots,
-        "levels": {rel: v for rel, v in levels.items() if v}}
+    turns = {}
+    for rel, by_mode in slots.items():
+        got = sorted((_turn_k(m), f) for m, f in by_mode.items() if _turn_k(m) is not None)
+        if got:
+            turns[rel] = [f for _k, f in got]
+    slots = {rel: {m: f for m, f in v.items() if _turn_k(m) is None}
+             for rel, v in slots.items()}
+    out = {"names": names, "slots": {rel: v for rel, v in slots.items() if v},
+           "levels": {rel: v for rel, v in levels.items() if v}}
+    if turns:
+        out["turns"] = turns
+    data[SOUND_MODES_KEY] = out
     return n

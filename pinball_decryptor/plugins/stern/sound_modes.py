@@ -41,6 +41,19 @@ more), the project names the modes (``.staged_changes.json`` ``sound_modes``: ``
 
 It rides the modes' delivery (the runtime, its port and the cfg on p2), so it needs an image
 file and a host that can add files to one, and it grows the game program, so an image build.
+
+SOUNDS IN TURN (PAD-565): an owner asked "is it possible to assign two other sounds to a single
+sound and play them alternately?". A slot can also have more files that the game plays IN TURN
+with its own (``turns``: ``{rel: [file 2, file 3, ...]}``, at most :data:`TURN_MAX` in all, its
+own one included): each time the game starts that sound it plays the next one, its own sound (or
+its replacement) first, then file 2, file 3... and round again. They take the music modes' road
+whole: each one is a record of its own made the same way, under a pseudo mode
+(:func:`turn_mode`: :data:`TURN_BASE` + k, never a menu value), and ``sounds.cfg`` names its
+record key on a ``turn`` line beside the slot's own (pad_mode_runtime.c "sounds in turn": the
+game's record lookup, ``site sound_lookup``, gets the next key each time it looks the slot up). A
+file plays for as long as its slot's sound, so each one is cut to that length. No setting goes in the menu for them.
+While a music mode gives the slot a file of its own, that file plays every time (its descriptor
+names that file's record, not the slot's).
 """
 from __future__ import annotations
 
@@ -70,12 +83,42 @@ CACHE_DIR = os.path.join(".write_cache", "sound_modes")
 #: ``<game>-<version>`` of the builds where the swap and the menu setting were SEEN working
 #: (emulator: the setting on Audio Content, set in the menu, the game playing the mode's record)
 PROVEN = frozenset({"godzilla_le-1.16", "godzilla_pro-1.16"})
+#: PAD-565: the most files one sound plays in turn, its own one included (pad_mode_runtime.c
+#: SNDT_MAX), and the pseudo mode file k of them is built under (:func:`turn_mode`)
+TURN_MAX = 16
+TURN_BASE = 100
+#: PAD-565: ``<game>-<version>`` of the builds where the sounds in turn were SEEN working: the
+#: LATEST build of every Stern Spike 2 game in the image library (David: "just the latest
+#: versions"), each swept in the emulator (an override set built by Write's own code, the slot's
+#: request fired six times, the files heard in the order the runtime picked them; work/artifacts/
+#: PAD-565/emulator/sweep). They need only the record lookup, not the resolver or the menu setting.
+#: Not here: Avengers Infinity Quest Pro 1.10, whose sound bank cannot be rewritten at all
+#: (PAD-481), and every build older than its game's latest.
+TURN_PROVEN = frozenset({
+    "aerosmith-1.16", "aerosmith_le-1.16", "avengers_infinity_le-1.10", "batman-1.14",
+    "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.10",
+    "dungeons_and_dragons_pro-1.10", "elvira3-1.13", "foo_fighters_le-1.04",
+    "foo_fighters_pro-1.04", "godzilla_le-1.16", "godzilla_pro-1.16", "guardians-1.15",
+    "guardians_le-1.15", "iron_maiden_le-1.18", "iron_maiden_pro-1.18", "james_bond_60th_le-1.11",
+    "james_bond_le-1.06", "james_bond_pro-1.06", "jaws_le-1.02", "jaws_pro-1.02",
+    "john_wick_le-1.02", "john_wick_pro-1.02", "jurassic_park_le-1.16", "jurassic_park_pro-1.16",
+    "jurassic_park_the_pin-1.05", "king_kong_le-0.97", "king_kong_pro-0.97",
+    "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22", "mando_le-1.45", "mando_pro-1.45",
+    "metallica_spike-1.04", "munsters_le-1.28", "munsters_pro-1.28", "rush_le-1.19",
+    "rush_pro-1.19", "star_wars_elg-1.10", "star_wars_le-1.31", "star_wars_pro-1.31",
+    "stranger_things-1.13", "stranger_things_le-1.13", "sword_of_rage_le-1.19",
+    "sword_of_rage_pro-1.19", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98",
+    "uncanny_xmen_pro-0.98", "venom_le-1.07", "venom_pro-1.07",
+})
 
 NO_TITLE = ("The app cannot tell which game this project is for, so it cannot give it a "
             "MUSIC MODE.")
 NOT_PROVEN = ("Music modes have not been tried on %s yet, so they are not offered there. "
               "Godzilla Pro and Premium/LE 1.16 have them.")
+NOT_PROVEN_TURNS = ("Sounds in turn are not offered on %s. They work on the latest version of each "
+                    "Stern Spike 2 game: update the machine's code to use them.")
 NOT_SOUND = "Only a sound the game keeps in its sound bank (an idx file) can have a file for another mode."
+NOT_SOUND_TURN = "Only a sound the game keeps in its sound bank (an idx file) can play files in turn."
 
 _IDX_RE = re.compile(r"(?:^|/)idx(\d+)")
 
@@ -96,6 +139,12 @@ class Modes:
     names: list = field(default_factory=list)
     slots: dict = field(default_factory=dict)      # {rel: {mode: file}}
     levels: dict = field(default_factory=dict)     # {rel: {mode: dB}}, or None
+    turns: dict = field(default_factory=dict)      # PAD-565: {rel: [file 2, file 3, ...]}
+
+    @property
+    def any(self):
+        """Whether a build has anything of these to carry: a music mode or a sound in turn."""
+        return bool(self.count or self.turns)
 
     @property
     def count(self):
@@ -104,6 +153,8 @@ class Modes:
         return top if top >= 2 else 0
 
     def name(self, mode):
+        if is_turn(mode):
+            return "in turn"
         n = self.names[mode - 1] if 0 < mode <= len(self.names) else ""
         return " ".join(str(n or "").split()) or default_name(mode)
 
@@ -112,15 +163,63 @@ class Modes:
         return [self.name(m) for m in range(1, self.count + 1)]
 
     def files(self):
-        """``[(rel, mode, file)]``, in slot then mode order."""
-        return [(rel, m, f) for rel in sorted(self.slots) for m, f in sorted(self.slots[rel].items())]
+        """``[(rel, mode, file)]``, in slot then mode order, then the sounds in turn (each under
+        its pseudo mode, :func:`turn_mode`)."""
+        return ([(rel, m, f) for rel in sorted(self.slots) for m, f in sorted(self.slots[rel].items())]
+                + [(rel, turn_mode(k), f) for rel in sorted(self.turns)
+                   for k, f in enumerate(self.turns[rel], 2)])
 
     def level(self, rel, mode):
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
-        sound), or ``None`` for a project saved before mode files had their own."""
+        sound), or ``None`` for a project saved before mode files had their own. A sound in turn
+        is matched to its slot's sound (0)."""
+        if is_turn(mode):
+            return 0
         if self.levels is None:
             return None
         return int((self.levels.get(rel) or {}).get(mode, 0) or 0)
+
+
+def turn_mode(k):
+    """The pseudo mode a slot's file *k* in turn (2..:data:`TURN_MAX`) is built under."""
+    return TURN_BASE + int(k)
+
+
+def is_turn(mode):
+    return int(mode) > TURN_BASE
+
+
+def turn_of(mode):
+    """File k of a slot's sounds in turn, from its pseudo mode."""
+    return int(mode) - TURN_BASE
+
+
+def who(mode):
+    """The log lines' heading for a file built under *mode*."""
+    return "Sounds in turn" if is_turn(mode) else "Music modes"
+
+
+def what(rel, mode, name=""):
+    """A file built under *mode* for slot *rel*, as the log names it."""
+    base = os.path.basename(str(rel).replace("\\", "/"))
+    if is_turn(mode):
+        return "%s's file %d in turn" % (base, turn_of(mode))
+    return "%s's file for mode %d (%s)" % (base, mode, name or default_name(mode))
+
+
+def tag(rel, mode):
+    """The build record's words for a file built under *mode* for slot *rel*."""
+    base = os.path.basename(str(rel).replace("\\", "/"))
+    if is_turn(mode):
+        return "%s (file %d in turn)" % (base, turn_of(mode))
+    return "%s (mode %d)" % (base, int(mode))
+
+
+def when(mode):
+    """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
+    if is_turn(mode):
+        return "at its turn (file %d)" % turn_of(mode)
+    return "while MUSIC MODE is %d" % int(mode)
 
 
 def default_name(mode):
@@ -171,6 +270,14 @@ def clean(raw):
             keep = _modes_of(files, lambda f: f if isinstance(f, str) and f.strip() else None)
             if keep:
                 out.slots[rel] = keep
+    turns = raw.get("turns")
+    if isinstance(turns, dict):
+        for rel, files in turns.items():
+            if not isinstance(rel, str) or not isinstance(files, (list, tuple)):
+                continue
+            keep = [f for f in files if isinstance(f, str) and f.strip()][:TURN_MAX - 1]
+            if keep:
+                out.turns[rel] = keep
     levels = raw.get("levels")
     if not isinstance(levels, dict):
         out.levels = None
@@ -188,11 +295,13 @@ def to_json(modes):
     names = [n for n in modes.names]
     while names and not str(names[-1] or "").strip():
         names.pop()
-    if not modes.slots and not names:
+    if not modes.slots and not names and not modes.turns:
         return None
     out = {"names": names,
            "slots": {rel: {str(m): f for m, f in sorted(files.items())}
                      for rel, files in sorted(modes.slots.items()) if files}}
+    if modes.turns:
+        out["turns"] = {rel: list(files) for rel, files in sorted(modes.turns.items()) if files}
     if modes.levels is not None:
         out["levels"] = {rel: {str(m): int(db) for m, db in sorted(v.items()) if db}
                          for rel, v in sorted(modes.levels.items()) if any(v.values())}
@@ -221,26 +330,65 @@ def title_key(prof):
     return "%s-%s" % (prof.game_dir, prof.version) if prof is not None else ""
 
 
-def title_refusal(prof):
-    """Why no sound of ``prof``'s title can have mode files, or ``""``."""
+#: PAD-565: ``PAD_STERN_TURNS_ANY=1`` offers the sounds in turn on every build whose port names
+#: ``sound_lookup``, proven or not: the proof sweep builds each one with it before it is listed in
+#: :data:`TURN_PROVEN`
+TURNS_ANY_ENV = "PAD_STERN_TURNS_ANY"
+
+
+def turns_any():
+    return os.environ.get(TURNS_ANY_ENV) == "1"
+
+
+def title_refusal(prof, turns=False):
+    """Why no sound of ``prof``'s title can have mode files (*turns*: files in turn, PAD-565: the
+    record lookup, not the resolver), or ``""``."""
     if prof is None:
-        return NO_TITLE
-    if title_key(prof) not in PROVEN:
-        return NOT_PROVEN % prof.label
+        return NO_TITLE if not turns else NO_TITLE.replace("give it a MUSIC MODE",
+                                                           "play its sounds in turn")
+    if title_key(prof) not in (TURN_PROVEN if turns else PROVEN) and not (turns and turns_any()):
+        return (NOT_PROVEN_TURNS if turns else NOT_PROVEN) % prof.label
     from . import mode_project as MP
     try:
         port = MP.read_port(MP.port_path(prof))
     except OSError:
-        return NOT_PROVEN % prof.label
-    if "sound_resolve" not in port["site"]:
-        return NOT_PROVEN % prof.label
+        return (NOT_PROVEN_TURNS if turns else NOT_PROVEN) % prof.label
+    if ("sound_lookup" if turns else "sound_resolve") not in port["site"]:
+        return (NOT_PROVEN_TURNS if turns else NOT_PROVEN) % prof.label
     return ""
 
 
 def project_title(project, probe=False):
-    """The profile of the card ``project`` was made from, or None (:func:`.clip_variants.project_title`)."""
+    """The profile of the card ``project`` was made from, or None (:func:`.clip_variants.project_title`).
+    PAD-565: with *probe*, a build no port was shipped for gets one derived now from the card's
+    game program (:func:`.title_reader.read_card`, as the Modes tab's read does), so the sounds in
+    turn reach every Spike 2 build, not only the ones a person opened the Modes tab on."""
     from .clip_variants import project_title as _pt
-    return _pt(project, probe=probe)
+    prof = _pt(project, probe=probe)
+    if prof is not None or not probe:
+        return prof
+    from . import mode_project as MP
+    try:
+        card = MP.project_card(project)
+        if card is None or not card.game_dir or not card.image or not os.path.isfile(card.image):
+            return None
+        from .title_reader import read_card
+        if not read_card(card.image).port_path:
+            return None
+        return MP.profile_for_card(card.game_dir, card.version)
+    except Exception:                                   # noqa: BLE001 - no port to be had: no title
+        return None
+
+
+def offer_turns(project, rels, probe=True):
+    """PAD-565: :func:`offer` for the sounds in turn."""
+    if not enabled():
+        return ("%s=0 leaves sounds in turn out of this app." % GATE_ENV), {}
+    prof = project_title(project, probe=probe)
+    why = title_refusal(prof, turns=True)
+    if why:
+        return why, {}
+    return "", {rel: ("" if slot_idx(rel) is not None else NOT_SOUND_TURN) for rel in rels}
 
 
 def offer(project, rels, probe=True):
@@ -327,17 +475,22 @@ def cut(wav, frames):
 
 
 # ---- the runtime's table ------------------------------------------------------------------------
-def cfg_text(live, count, sounds, only, record=()):
-    """``sounds.cfg``: *live* the setting's value address, *count* the modes, *sounds*
-    ``[(mode, sound id, descriptor bytes)]``, *only* when the card carries no modes. PAD-553:
-    *record* (:func:`card_record`) goes in as comment lines the runtime skips, so an extract of
-    the card brings the modes back (:func:`read_card_record`)."""
+def cfg_text(live, count, sounds, only, record=(), turns=()):
+    """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
+    the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
+    *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
+    turn (PAD-565: ``turn`` lines, the record keys the runtime swaps at the game's lookup).
+    PAD-553: *record* (:func:`card_record`) goes in as comment lines the runtime skips, so an
+    extract of the card brings the modes back (:func:`read_card_record`)."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
-    lines.append("setting\t0x%08x\t%d" % (int(live), int(count)))
+    if count:
+        lines.append("setting\t0x%08x\t%d" % (int(live), int(count)))
     for mode, sid, desc in sounds:
         lines.append("sound\t%d\t%d\t%s" % (int(mode), int(sid), bytes(desc).hex()))
+    for k, slot, host in turns:
+        lines.append("turn\t%d\t%s\t%s" % (int(k), bytes(slot).hex(), bytes(host).hex()))
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -347,6 +500,9 @@ def cfg_text(live, count, sounds, only, record=()):
 #: (``#mode <m> <name>``) and a slot's file for a mode (``#file <m> <slot idx> <record idx> <dB or
 #: -> <slot rel> <the file's own name>``), TAB-separated. The runtime skips every ``#`` line.
 REC_MODE, REC_FILE = "#mode", "#file"
+#: PAD-565: a slot's file in turn: ``#turn <k> <slot idx> <record idx> <dB or -> <slot rel>
+#: <the file's own name>``
+REC_TURN = "#turn"
 
 
 def _rec_word(text):
@@ -363,18 +519,26 @@ def card_record(modes, used):
     for u in used:
         if not u.get("lines"):
             continue
-        src = (modes.slots.get(u["rel"]) or {}).get(int(u["mode"]), "")
+        m = int(u["mode"])
+        if is_turn(m):
+            files = modes.turns.get(u["rel"]) or []
+            src = files[turn_of(m) - 2] if 0 <= turn_of(m) - 2 < len(files) else ""
+        else:
+            src = (modes.slots.get(u["rel"]) or {}).get(m, "")
         db = u.get("db")
-        out.append("\t".join([REC_FILE, str(int(u["mode"])), str(int(u["slot"])), str(int(u["host"])),
+        out.append("\t".join([REC_TURN if is_turn(m) else REC_FILE,
+                               str(turn_of(m) if is_turn(m) else m), str(int(u["slot"])), str(int(u["host"])),
                               "-" if db is None else str(int(db)), _rec_word(u["rel"]),
                               _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
     return out
 
 
 def read_card_record(text):
-    """``{"names": [...], "files": [{"mode", "slot", "host", "db", "rel", "name"}]}`` from a card's
-    ``sounds.cfg`` (*text*), or ``None`` when it has no record (a card written before PAD-553)."""
-    names, files, seen = {}, [], False
+    """``{"names": [...], "files": [{"mode", "slot", "host", "db", "rel", "name"}]}`` (and
+    ``"turns"`` ``[{"turn", "slot", "host", "db", "rel", "name"}]`` when the card plays sounds in
+    turn, PAD-565) from a card's ``sounds.cfg`` (*text*), or ``None``
+    when it has no record (a card written before PAD-553)."""
+    names, files, turns, seen = {}, [], [], False
     for line in str(text or "").splitlines():
         f = line.split("\t")
         try:
@@ -390,9 +554,19 @@ def read_card_record(text):
                     files.append({"mode": m, "slot": int(f[2]), "host": int(f[3]),
                                   "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
                                   "rel": f[5], "name": f[6] if len(f) > 6 else ""})
+            elif f[0] == REC_TURN and len(f) >= 6:
+                seen = True
+                k = int(f[1])
+                if 2 <= k <= TURN_MAX:
+                    turns.append({"turn": k, "slot": int(f[2]), "host": int(f[3]),
+                                  "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
+                                  "rel": f[5], "name": f[6] if len(f) > 6 else ""})
         except ValueError:
             continue
     if not seen:
         return None
     top = max(list(names) + [0])
-    return {"names": [names.get(m, "") for m in range(1, top + 1)], "files": files}
+    out = {"names": [names.get(m, "") for m in range(1, top + 1)], "files": files}
+    if turns:
+        out["turns"] = turns
+    return out

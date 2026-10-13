@@ -1202,8 +1202,13 @@ static int key_is(const unsigned char *a, const unsigned char *b)
     return 1;
 }
 
+static void sndt_lookup(unsigned *r);
+static volatile int sndt_live;              /* PAD-565: the lookup hook takes the sounds in turn */
+static int lookup_hooked;                   /* sound_lookup is hooked (on_sound_lookup), once */
+
 static void on_sound_lookup(unsigned *r)
 {
+    if (sndt_live && r[1]) sndt_lookup(r);   /* PAD-565: a sound's files in turn */
     if (swaps_live && r[1]) {
         const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
         int i;
@@ -9127,13 +9132,30 @@ static void clipv_arm(void)
  *     setting <TAB> <live> <TAB> <n>        the adjustment's live value (its address), modes 1..n
  *     sound <TAB> <m> <TAB> <id> <TAB> <hex> mode m's descriptor for asset id (the resolver's r0)
  *     force <TAB> <m>                      a rig run's own pick (the build never writes it)
+ *     turn <TAB> <k> <TAB> <slot key> <TAB> <file k's key>   PAD-565: a sound's files IN TURN
  *
  * The setting is read at every resolve (one word), so a change in the menu is heard from the next
- * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg. */
+ * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg.
+ *
+ * SOUNDS IN TURN (PAD-565): an owner asked to "assign two other sounds to a single sound and play
+ * them alternately". A slot's extra files are records of their own, as a mode's are, and a `turn`
+ * line names the slot's record key (16 hex digits, what the game looks up) and file k's (2..). The
+ * game's record lookup (`site sound_lookup`, the hook the modes' own sounds swap keys at, item 163)
+ * gets the next one each time it looks the slot up: its own record (the stock sound or the slot's
+ * replacement), then file 2, file 3... and round again. A lookup within SNDT_GAP ms of the slot's
+ * last is the same play and gets the same pick. The key, not the descriptor the music modes hand
+ * the resolver: every port names sound_lookup (only Godzilla 1.16's name the resolver), and the
+ * swap needs no descriptor of the game's read and rewritten at build time. Emulator-proven on James
+ * Bond 007 Pro 1.06 (PAD-565: six plays of request 22 sounded files 3, 1, 2, 3, 1, 2 as picked; a
+ * spike through the resolver wrap did too). A file plays as long as the slot's descriptor says, so
+ * the build cuts each one to its slot's length. */
 #define SNDM_FILE_MAX   (512 * 1024)
 #define SNDM_SOUNDS     3072
 #define SNDM_DESC       96                  /* a descriptor's bytes as the resolver's caller reads them */
 #define SNDM_MODES      8
+#define SNDT_MAX        16                  /* files one sound plays in turn, its own one included */
+#define SNDT_SLOTS      512                 /* sounds that play files in turn */
+#define SNDT_GAP        150                 /* ms: a lookup this soon after the slot's last is the same play */
 static const char *const SNDM_FILES[] = { "/usr/local/padmode/sounds.cfg", "/dump/sounds.cfg" };
 struct sndm {
     unsigned id;
@@ -9147,6 +9169,46 @@ static unsigned n_sndm, sndm_live, sndm_n, sndm_force;
 static int sndm_only, sndm_dropped, sndm_bad;
 static volatile unsigned sndm_last = 1;         /* the mode the last resolve played, for the log */
 static unsigned (*sndm_orig)(unsigned, unsigned *);
+struct sndt {                               /* a sound that plays files in turn */
+    unsigned char key[8];                   /* its own record's key */
+    unsigned char host[SNDT_MAX][8];        /* file k's record key at host[k - 1], k = 2..n */
+    unsigned char n, pick;                  /* n files, its own one included; pick 0 = its own */
+    unsigned plays;
+    unsigned long last;                     /* pm_ms() of its last lookup */
+};
+static struct sndt sndt[SNDT_SLOTS];
+static unsigned n_sndt, sndt_says;
+
+static int key_hex(const char *p, unsigned char out[8])
+{
+    int k;
+    for (k = 0; k < 8; k++, p += 2) {
+        if (hexval(p[0]) < 0 || hexval(p[1]) < 0) return 0;
+        out[k] = (unsigned char)(hexval(p[0]) << 4 | hexval(p[1]));
+    }
+    return 1;
+}
+
+/* a `turn` line: file k (2..SNDT_MAX) of the slot whose record key is `slot` is the record `host` */
+static void sndt_line(const char *ks, const char *slot, const char *host)
+{
+    const char *p = ks;
+    unsigned char key[8], h[8];
+    unsigned j, k;
+    int ok, i;
+    struct sndt *t;
+    k = (unsigned)number(&p, &ok);
+    if (!ok || k < 2 || k > SNDT_MAX || !key_hex(slot, key) || !key_hex(host, h)) { sndm_bad++; return; }
+    for (j = 0; j < n_sndt && !key_is(sndt[j].key, key); j++) ;
+    if (j == n_sndt) {
+        if (n_sndt >= SNDT_SLOTS) { sndm_dropped++; return; }
+        for (i = 0; i < 8; i++) sndt[j].key[i] = key[i];
+        n_sndt++;
+    }
+    t = &sndt[j];
+    for (i = 0; i < 8; i++) t->host[k - 1][i] = h[i];
+    if (k > t->n) t->n = (unsigned char)k;
+}
 
 static void sndm_line(char *s)
 {
@@ -9176,6 +9238,10 @@ static void sndm_line(char *s)
         p = f[1];
         m = (unsigned)number(&p, &ok);
         sndm_force = ok && m >= 1 && m <= SNDM_MODES ? m : 0;
+        return;
+    }
+    if (n >= 4 && str_eq(f[0], "turn")) {
+        sndt_line(f[1], f[2], f[3]);
         return;
     }
     if (n < 4 || !str_eq(f[0], "sound")) return;
@@ -9246,6 +9312,53 @@ static unsigned sndm_resolve(unsigned id, unsigned *out)
     return (unsigned)(unsigned long)e->desc;
 }
 
+/* PAD-565: the record the game looks up for a sound with files in turn - the next one, or the same
+ * when it looks it up again within SNDT_GAP ms (a slot whose files skip a number plays its own there) */
+static void sndt_lookup(unsigned *r)
+{
+    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    unsigned j;
+    unsigned long now;
+    struct sndt *t = 0;
+    for (j = 0; j < n_sndt; j++)
+        if (key_is(k, sndt[j].key)) { t = &sndt[j]; break; }
+    if (!t || t->n < 2) return;
+    now = pm_ms();
+    if (!t->plays || now - t->last > SNDT_GAP) {
+        t->pick = t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+        t->plays++;
+        if (sndt_says < 40 || !(t->plays % 50)) {
+            sndt_says++;
+            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x looked up (%u time(s)) - file %u of %u plays",
+                k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7], t->plays, t->pick + 1, t->n);
+        }
+    }
+    t->last = now;
+    if (t->pick && (t->host[t->pick][0] | t->host[t->pick][1] | t->host[t->pick][2] | t->host[t->pick][3]))
+        r[1] = (unsigned)(unsigned long)t->host[t->pick];
+}
+
+/* PAD-565: hook the record lookup for the sounds in turn (once: the modes' own sounds share it) */
+static void sndt_arm(void)
+{
+    if (!n_sndt) return;
+    if (!fn("sound_lookup")) {
+        say("sounds in turn: off - the port has no sound_lookup for this build; every sound plays its own");
+        n_sndt = 0;
+        return;
+    }
+    if (!lookup_hooked && !hook(fn("sound_lookup"), on_sound_lookup)) {
+        say("sounds in turn: off - sound_lookup 0x%08x cannot be hooked; every sound plays its own",
+            fn("sound_lookup"));
+        n_sndt = 0;
+        return;
+    }
+    lookup_hooked = 1;
+    sndt_live = 1;
+    say("sounds in turn: %u sound(s) play their files in turn; sound_lookup 0x%08x is hooked", n_sndt,
+        fn("sound_lookup"));
+}
+
 /* from the constructor, after the port gate: read sounds.cfg and wrap the game's resolver */
 static void sndm_arm(void)
 {
@@ -9253,7 +9366,9 @@ static void sndm_arm(void)
     if (sndm_dropped || sndm_bad)
         say("music modes: %d line(s) not read (the table holds %d sounds), %d not a sound line", sndm_dropped,
             SNDM_SOUNDS, sndm_bad);
+    sndt_arm();                               /* PAD-565: the files in turn need no resolver */
     if (!n_sndm) {
+        if (n_sndt) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }
@@ -9826,7 +9941,8 @@ static void pad_mode_start(void)
     ck_arm();                                 /* PAD-530: a mode's clip comes back after the game's */
     status_bar_arm();                         /* PAD-521: the game's own status bar */
     frame_arm();                              /* PAD-301: a full-screen clip drawn at the frame hand-over */
-    if (can & PM_CAN_OWN_SOUND) hook(fn("sound_lookup"), on_sound_lookup);
+    if ((can & PM_CAN_OWN_SOUND) && !lookup_hooked && hook(fn("sound_lookup"), on_sound_lookup))
+        lookup_hooked = 1;
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
      * takes is logged ("[pad] sound <request> <n>"), so a check game is also the sound census that
      * says which stock requests a build never plays (the carriers a mode's own sounds ride on) */

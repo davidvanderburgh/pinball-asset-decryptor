@@ -210,12 +210,32 @@ def _member(members, p):
     return members.get(os.path.normcase(os.path.abspath(p)))
 
 
+def _carried_key(m):
+    """How a file under mode *m* is keyed in a carried record: "2" for music mode 2, "t2" for a
+    slot's file 2 in turn (PAD-565, :data:`.staged_changes.TURN_KEY`)."""
+    from ...core.staged_changes import TURN_KEY
+    return "%s%d" % (TURN_KEY, SMo.turn_of(m)) if SMo.is_turn(m) else str(int(m))
+
+
+def _key_ok(m):
+    """A carried record's mode key this app takes: a music mode 2..MAX_MODES or a file k in turn
+    (2..TURN_MAX)."""
+    from ...core.staged_changes import _turn_k
+    k = _turn_k(m)
+    if k is not None:
+        return 2 <= k <= SMo.TURN_MAX
+    try:
+        return 2 <= int(m) <= SMo.MAX_MODES
+    except (TypeError, ValueError):
+        return False
+
+
 def save_music_modes(project, path):
     """The project's music modes in one file at *path*. Returns ``{"slots", "files", "gone"}``
     (*gone*: ``[(rel, mode, file)]`` no longer on this PC, left out). Raises :class:`ShareError`
     when there is nothing to save."""
     modes = SMo.load(project)
-    if not modes.slots:
+    if not modes.any:
         raise ShareError("This project has no music modes to save: no sound has a file for "
                          "another mode yet.")
     from ...core import staged_changes
@@ -229,7 +249,7 @@ def save_music_modes(project, path):
         mem = _member(members, f)
         if not mem:
             continue
-        slots.setdefault(rel, {})[str(m)] = mem
+        slots.setdefault(rel, {})[_carried_key(m)] = mem
         db = SMo.clean_level((own.get(rel) or {}).get(str(m)))
         if db:
             levels.setdefault(rel, {})[str(m)] = int(db)
@@ -359,11 +379,7 @@ def load_music_modes(project, path):
                 continue
             keep = {}
             for m, member in sorted(by_mode.items()):
-                try:
-                    m = int(m)
-                except (TypeError, ValueError):
-                    continue
-                if not 2 <= m <= SMo.MAX_MODES or not _member_ok(member) or member not in names:
+                if not _key_ok(m) or not _member_ok(member) or member not in names:
                     continue
                 keep[str(m)] = _unpack(z, member, folder, cache)
                 db = SMo.clean_level(((levels_in or {}).get(rel) or {}).get(str(m)))
@@ -433,7 +449,8 @@ def replaced_music(project, record):
     """``[(rel, mode)]`` the project already gives a file that *record* would replace."""
     have = SMo.load(project).slots
     return [(rel, int(m)) for rel, by in sorted(record.get("slots", {}).items())
-            for m in sorted(by, key=int) if int(m) in (have.get(rel) or {})]
+            for m in sorted((m for m in by if str(m).isdigit()), key=int)
+            if int(m) in (have.get(rel) or {})]
 
 
 def put_music(project, record, keep_own=False):
@@ -444,8 +461,12 @@ def put_music(project, record, keep_own=False):
     from ...core import staged_changes
     rec = dict(record)
     if keep_own:
-        have = SMo.load(project).slots
-        rec["slots"] = {rel: {m: f for m, f in by.items() if int(m) not in (have.get(rel) or {})}
+        now = SMo.load(project)
+        have = now.slots
+        # PAD-565: a slot's files in turn come in only where it has none
+        rec["slots"] = {rel: {m: f for m, f in by.items()
+                              if (int(m) not in (have.get(rel) or {}) if str(m).isdigit()
+                                  else not now.turns.get(rel))}
                         for rel, by in record.get("slots", {}).items()}
         rec["slots"] = {rel: by for rel, by in rec["slots"].items() if by}
     data = staged_changes.load(project)
@@ -508,6 +529,18 @@ def music_from_card(project, cfg_text):
         slots.setdefault(slot, {})[str(f["mode"])] = copied[host]
         if f["db"]:
             levels.setdefault(slot, {})[str(f["mode"])] = int(f["db"])
+    # PAD-565: a slot's files in turn, each from the record holding it
+    for f in rec.get("turns") or ():
+        slot, host = idx.get(f["slot"]), idx.get(f["host"])
+        if slot is None or host is None:
+            left.append((f["rel"], SMo.turn_mode(f["turn"]), "this extract has no sound idx %d"
+                         % (f["slot"] if slot is None else f["host"])))
+            continue
+        if host not in copied:
+            stem = os.path.splitext(_safe_name(f["name"], ""))[0] or "%s - in turn %d" % (
+                os.path.splitext(os.path.basename(slot))[0], f["turn"])
+            copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
+        slots.setdefault(slot, {})[_carried_key(SMo.turn_mode(f["turn"]))] = copied[host]
     return {"names": rec["names"], "slots": slots, "levels": levels}, left
 
 
@@ -522,9 +555,10 @@ def _built_project_modes(card):
     if not src or not os.path.isdir(src):
         return None
     modes = SMo.load(src)
-    files = {rel: {str(m): f for m, f in by.items() if os.path.isfile(f)}
-             for rel, by in modes.slots.items()}
-    files = {rel: by for rel, by in files.items() if by}
+    files = {}
+    for rel, mode, f in modes.files():
+        if os.path.isfile(f):
+            files.setdefault(rel, {})[_carried_key(mode)] = f
     if not files:
         return None
     rec = {"names": list(modes.names), "slots": files}
@@ -562,8 +596,9 @@ def readback(card, project, log=None, padmode=None):
                     "warning")
         if record is not None:
             for rel, m, why in left:
-                log("Music modes: %s's file for mode %d is not back: %s." % (
-                    os.path.basename(rel), m, why), "warning")
+                log("%s: %s is not back: %s." % (
+                    SMo.who(m), SMo.what(rel, m) if SMo.is_turn(m) else "%s's file for mode %d"
+                    % (os.path.basename(rel), m), why), "warning")
             done["music"] = put_music(project, record, keep_own=True)
             if done["music"]:
                 names = SMo.clean(record)

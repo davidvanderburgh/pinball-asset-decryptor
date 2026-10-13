@@ -639,6 +639,11 @@ def write_load_report(assets_dir, zip_path, report):
             sorted(report.get("pictures_missing") or ()))
     section("GAME PICTURES WHOSE COLOR PROFILE WAS LEFT OUT (NOT IN THIS PROJECT)",
             sorted(report.get("colored_missing") or ()))
+    section("PICTURES REPLACED HERE GIVEN THE FILE'S COLOR PROFILE (THE CARD IT WAS SAVED FROM "
+            "WAS BUILT FROM THIS PROJECT, SO ITS PICTURE IS YOUR REPLACEMENT)",
+            sorted(report.get("replaced_given") or ()))
+    section("PICTURES REPLACED HERE, LEFT WITH THEIR OWN COLOR PROFILE (THE FILE'S WAS FOR THE "
+            "GAME'S PICTURE)", sorted(report.get("replaced_kept") or ()))
     section("PICTURES NAMED OTHERWISE HERE, FOUND BY THE SCENE PARTS THAT DRAW THEM",
             ["%s -> %s" % (r, ", ".join(h)) for r, h in sorted(
                 (report.get("moved") or {}).items())])
@@ -687,7 +692,8 @@ def _digest(data):
 
 
 def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, cards_here=None,
-                  files_profile=True, counts=None, missing_colored=None):
+                  files_profile=True, counts=None, missing_colored=None, replaced_too=False,
+                  replaced_out=None):
     """Put *extras* (:func:`read_extras` of *zip_path*) into the project: each replaced
     picture copied into :data:`SHARED_DIR` and picked, with its Keep size tick, color switch
     and profile; each added picture's switch and profile (*renamed*: ``{its rel in the file:
@@ -702,7 +708,10 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
     overwritten.  Returns ``(pictures loaded, [picture of the file not here])``; *counts*, a
     dict, is filled with the ``"colored"`` game pictures and ``"lines"`` loaded and the
     game pictures not here (``"colored_missing"``); *missing_colored*, a list, with those
-    pictures."""
+    pictures.  A game picture of the file that this project has replaced is left as it is,
+    unless *replaced_too* (PAD-552: the file was saved from a card built from this project, so
+    its game picture is my replacement): then it takes the file's switch and profile.
+    *replaced_out*, a dict, is filled with ``{"given": [those], "kept": [the ones left]}``."""
     from ...core import colour_profile as cp, staged_changes
     renamed = renamed or {}
     stem = os.path.splitext(os.path.basename(zip_path))[0]
@@ -757,10 +766,16 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
     built = cp.built_image_rels(assets_dir, data)
     theirs = _files_profile(extras)
     colored, colored_missing = set(), []
+    replaced, replaced_skipped = set(), []
     for rel, p in sorted((extras.get("colored") or {}).items()):
         if picks.get(rel) or rel in built:
-            continue                        # replaced here: the file's color was for the game's
-        if not _here(assets_dir, rel):
+            if not replaced_too:
+                replaced_skipped.append(rel)
+                continue                    # replaced here: the file's color was for the game's
+            # PAD-552 (DragonRR's computer B): the file was saved from a card built from this
+            # project, so its game picture is my replacement as that card has it
+            replaced.add(rel)
+        elif not _here(assets_dir, rel):
             colored_missing.append(rel)
             continue
         own = p.get("profile")
@@ -774,8 +789,10 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
             owns.pop(rel, None)
         else:
             owns[rel] = dict(theirs)
-        colored.add(rel)
-    if files_profile and any(extras["colored"][r].get("profile") is None for r in colored):
+        if rel not in replaced:
+            colored.add(rel)
+    if files_profile and any(extras["colored"][r].get("profile") is None
+                             for r in colored | replaced):
         if theirs.get("recommended"):
             data.pop(cp.ASSET_KEY, None)
         else:
@@ -819,7 +836,10 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
         tslots = {r: v for r, v in tslots.items() if r in lines_on}
         data[cp.STOCK_IMAGES_KEY] = True
     if counts is not None:
-        counts.update(colored=len(colored), lines=lines_n, colored_missing=len(colored_missing))
+        counts.update(colored=len(colored) + len(replaced), lines=lines_n,
+                      colored_missing=len(colored_missing))
+    if replaced_out is not None:
+        replaced_out.update(given=sorted(replaced), kept=replaced_skipped)
     if missing_colored is not None:
         missing_colored.extend(colored_missing)              # PAD-552: the load report
     data["image"] = picks

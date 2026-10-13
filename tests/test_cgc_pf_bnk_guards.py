@@ -24,7 +24,8 @@ from pinball_decryptor.plugins.cgc.pipeline import ExtractPipeline
 # ---------------------------------------------------------------------------
 
 class _FakeExecutor:
-    """Returns canned debugfs `ls -l` and `find` output keyed on the cmd."""
+    """Returns canned debugfs `ls -l` and `find ... -exec wc -c` output
+    ("<size> <dir>/<name>") keyed on the cmd."""
 
     def __init__(self, ls_out, find_out):
         self._ls_out = ls_out
@@ -57,12 +58,12 @@ def test_verify_staged_sizes_all_present():
     # Every file staged at its full source size -> no problems, and the
     # directory entry is correctly ignored.
     find_out = "\n".join([
-        "171042893 pfsndfx.bnk",
-        "232897688 pfmusic.bnk",
-        "96326912 pfspeech.bnk",
-        "93973300 pfspeechBEEPD.bnk",
-        "2872003 pfsndui.bnk",
-        "3173963 pfsnddiag.bnk",
+        "171042893 /st/pfsndfx.bnk",
+        "232897688 /st/pfmusic.bnk",
+        "96326912 /st/pfspeech.bnk",
+        "93973300 /st/pfspeechBEEPD.bnk",
+        "2872003 /st/pfsndui.bnk",
+        "3173963 /st/pfsnddiag.bnk",
     ])
     ex = _FakeExecutor(_LS_OUT, find_out)
     assert cgc_pipeline._verify_staged_sizes(ex, "inner.img", "/src", "/st") == []
@@ -71,11 +72,11 @@ def test_verify_staged_sizes_all_present():
 def test_verify_staged_sizes_truncated_and_missing():
     # pfspeech.bnk truncated to 0 bytes; pfsnddiag.bnk never staged.
     find_out = "\n".join([
-        "171042893 pfsndfx.bnk",
-        "232897688 pfmusic.bnk",
-        "0 pfspeech.bnk",
-        "93973300 pfspeechBEEPD.bnk",
-        "2872003 pfsndui.bnk",
+        "171042893 /st/pfsndfx.bnk",
+        "232897688 /st/pfmusic.bnk",
+        "0 /st/pfspeech.bnk",
+        "93973300 /st/pfspeechBEEPD.bnk",
+        "2872003 /st/pfsndui.bnk",
     ])
     ex = _FakeExecutor(_LS_OUT, find_out)
     problems = cgc_pipeline._verify_staged_sizes(ex, "inner.img", "/src", "/st")

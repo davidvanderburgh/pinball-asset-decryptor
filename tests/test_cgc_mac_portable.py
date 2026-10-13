@@ -1,0 +1,283 @@
+"""PAD-571 (a Mac user): "Missing tool: debugfs / Install in WSL" on every CGC
+extract.  Three things stood between a Mac and a CGC extract:
+
+* Homebrew keeps e2fsprogs keg-only, so debugfs/e2fsck/dumpe2fs were on no
+  PATH the Mac executor looked along;
+* the pipeline's shell spoke GNU: ``dd iflag=skip_bytes,count_bytes``,
+  ``stat -c%s`` and ``find -printf``, none of which a Mac has;
+* the prerequisite rows were WSL-only ("n/a" on a Mac) and the error said
+  "Install in WSL" on a machine with no WSL.
+
+The round trip at the bottom builds a real (tiny) CGC installer with
+e2fsprogs and runs Extract, Write and Extract again through the real
+executor: on the macOS CI runner that is the Mac's own dd/wc/find/xxd and
+Homebrew's keg-only debugfs, which is the user's case.
+"""
+
+import os
+import random
+import shlex
+import shutil
+import struct
+import subprocess
+import sys
+
+import pytest
+
+from pinball_decryptor.core import executor as EX
+from pinball_decryptor.core.ext4_grow import E2FSPROGS_DIRS
+from pinball_decryptor.plugins.cgc import pipeline as P
+from pinball_decryptor.plugins.cgc.manufacturer import CGCManufacturer
+
+
+# --- dd byte ranges ---------------------------------------------------------
+
+def _apply_dd(cmd, files):
+    """Run a `_dd_range` command against in-memory files, the way POSIX dd
+    reads its operands (bs, skip, seek and count are all in blocks)."""
+    for one in cmd.split(" && "):
+        toks = shlex.split(one)
+        assert toks[0] == "dd", one
+        ops = dict(t.split("=", 1) for t in toks[1:])
+        assert set(ops) <= {"if", "of", "bs", "skip", "seek", "count",
+                            "conv"}, f"non-POSIX dd operand in {one}"
+        assert ops.get("conv") == "notrunc"
+        bs = int(ops["bs"])
+        src = files[ops["if"]]
+        chunk = src[int(ops["skip"]) * bs:(int(ops["skip"]) + int(ops["count"])) * bs]
+        assert len(chunk) == int(ops["count"]) * bs, "read past the source"
+        dst = files.setdefault(ops["of"], bytearray())
+        at = int(ops["seek"]) * bs
+        if len(dst) < at:
+            dst.extend(b"\0" * (at - len(dst)))
+        dst[at:at + len(chunk)] = chunk
+
+
+@pytest.mark.parametrize("start,size,seek", [
+    (3645 * 2 ** 20, 3702 * 2 ** 20, 0),        # whole MiB
+    (2048 * 512, 9437180 * 512, 0),              # Pulp Fiction: 4607.998 MiB
+    (2055 * 512, 16387 * 512, 0),                # odd sector start
+    (0, 16387 * 512, 2055 * 512),                # write back at an odd sector
+    (7, 1000, 13),                               # not even sector-sized
+])
+def test_dd_range_copies_exactly_those_bytes(start, size, seek):
+    rnd = random.Random(start ^ size ^ seek)
+    scale = 1 if start + size < 2 ** 26 else 0
+    if not scale:
+        # Too big to hold; check the arithmetic instead of the bytes.
+        cmd = P._dd_range("a", "b", start, size, seek)
+        covered = 0
+        for one in cmd.split(" && "):
+            ops = dict(t.split("=", 1) for t in shlex.split(one)[1:])
+            bs = int(ops["bs"])
+            assert int(ops["skip"]) * bs == start + covered
+            assert int(ops["seek"]) * bs == seek + covered
+            covered += int(ops["count"]) * bs
+        assert covered == size
+        assert len(cmd.split(" && ")) <= 2
+        return
+    src = bytearray(rnd.getrandbits(8) for _ in range(start + size + 4096))
+    dst = bytearray(rnd.getrandbits(8) for _ in range(seek + size + 4096))
+    files = {"a": src, "b": bytearray(dst)}
+    _apply_dd(P._dd_range("a", "b", start, size, seek), files)
+    want = bytearray(dst)
+    want[seek:seek + size] = src[start:start + size]
+    assert files["b"] == want
+
+
+def test_dd_range_bulk_moves_in_big_blocks():
+    """Pulp Fiction's 4.5 GiB P3 must not be copied 512 bytes at a time."""
+    cmd = P._dd_range("in.img", "p3.img", 2048 * 512, 9437180 * 512)
+    first = dict(t.split("=", 1) for t in shlex.split(cmd.split(" && ")[0])[1:])
+    assert first["bs"] == str(1 << 20)
+
+
+def test_dd_range_quotes_spaced_paths():
+    cmd = P._dd_range("/x/AFMr Decryptor/in.img", "/s/p3.img", 0, 4096)
+    assert "if=/x/AFMr Decryptor/in.img" in shlex.split(cmd)
+
+
+def test_no_gnu_only_commands_left_in_the_cgc_pipeline():
+    src = open(P.__file__, encoding="utf-8").read()
+    for gnu in ("iflag=", "oflag=", '"stat -c', "-printf '", "status=none"):
+        assert gnu not in src, f"GNU-only {gnu!r} in cgc/pipeline.py"
+
+
+def test_staged_sizes_read_wc_lines_with_spaces_and_total():
+    class Ex:
+        def run(self, cmd, timeout=0):
+            if cmd.startswith("debugfs"):
+                return ("  12  100644 (1)   0   0   5 1-Jan-2024 00:00 a b.wav\n"
+                        "  13  100644 (1)   0   0   9 1-Jan-2024 00:00 c.bnk\n")
+            assert "-exec wc -c {} +" in cmd, cmd
+            return ("  5 /s/d/a b.wav\n  7 /s/d/c.bnk\n  3 /s/d/x y.txt\n"
+                    " 15 total\n")
+    assert P._verify_staged_sizes(Ex(), "/i", "/home/d", "/s/d") == [
+        ("c.bnk", 9, 7)]
+
+
+# --- where the tools are found, and what a missing one says ------------------
+
+def test_mac_executor_finds_keg_only_e2fsprogs_after_the_system_path():
+    ex = EX.MacExecutor()
+    for d in ("/opt/homebrew/opt/e2fsprogs/sbin",
+              "/usr/local/opt/e2fsprogs/sbin"):
+        assert d in ex._SBIN_PATH.split(":")
+    path = ex._env()["PATH"]
+    assert path.startswith(ex._EXTRA_PATH + os.pathsep)
+    assert path.endswith(os.pathsep + ex._SBIN_PATH)
+    wrapped = ex._wrap("command -v debugfs")
+    assert ":$PATH:" + ex._SBIN_PATH in wrapped
+
+
+def test_native_linux_executor_looks_in_sbin():
+    path = EX.NativeExecutor._env()["PATH"].split(os.pathsep)
+    assert "/usr/sbin" in path and "/sbin" in path
+
+
+@pytest.mark.parametrize("plat,says,never", [
+    ("darwin", "brew install e2fsprogs", "WSL"),
+    ("linux", "apt install e2fsprogs", "WSL"),
+    ("win32", "Install in WSL", "brew"),
+])
+def test_missing_tool_hint_names_this_machines_installer(plat, says, never):
+    hint = P._missing_tool_hint(plat)
+    assert says in hint and never not in hint
+
+
+def test_missing_tool_error_on_a_mac_says_brew(monkeypatch):
+    monkeypatch.setattr(P.sys, "platform", "darwin")
+
+    class NoDebugfs:
+        def check_available(self):
+            return True, "macOS native"
+
+        def run(self, cmd, timeout=0):
+            if "debugfs" in cmd:
+                raise EX.CommandError(cmd, 1, "")
+            return ""
+    with pytest.raises(P.PipelineError) as e:
+        P._verify_executor_tools(NoDebugfs())
+    assert "Missing tool: debugfs" in str(e.value)
+    assert "brew install e2fsprogs" in str(e.value)
+    assert "WSL" not in str(e.value)
+
+
+def test_cgc_prereqs_are_probed_on_the_mac_and_installable():
+    rows = {p.name: p for p in CGCManufacturer.prerequisites}
+    assert rows["debugfs"].where == "native"
+    assert rows["xxd"].where == "native"
+    assert rows["debugfs"].mac_pkg == "e2fsprogs"
+    assert "/opt/homebrew/opt/e2fsprogs/sbin/debugfs" in rows["debugfs"].probe
+
+
+# --- the real thing: Extract -> Write -> Extract on a built installer --------
+
+def _tool(name):
+    for d in E2FSPROGS_DIRS:
+        p = os.path.join(d, name)
+        if os.path.isfile(p):
+            return p
+    return shutil.which(name)
+
+
+_HAVE = (sys.platform != "win32" and _tool("mke2fs") and _tool("debugfs")
+         and shutil.which("xxd"))
+
+
+def _mbr(parts):
+    mbr = bytearray(512)
+    for i, (ptype, start, sectors) in enumerate(parts):
+        mbr[0x1BE + 16 * i:0x1BE + 16 * (i + 1)] = struct.pack(
+            "<BBBBBBBBII", 0, 0, 0, 0, ptype, 0, 0, 0, start, sectors)
+    mbr[510:512] = b"\x55\xaa"
+    return bytes(mbr)
+
+
+def _ext4(path, size, root):
+    with open(path, "wb") as f:
+        f.truncate(size)
+    subprocess.run([_tool("mke2fs"), "-q", "-F", "-t", "ext4", "-b", "1024",
+                    "-d", str(root), str(path)], check=True,
+                   capture_output=True)
+
+
+def _disk(path, parts):
+    """*parts*: (type, start sector, partition image or None, sectors)."""
+    end = max(s + n for _t, s, _f, n in parts)
+    with open(path, "wb") as out:
+        out.truncate((end + 7) * 512)   # a few spare sectors past the end
+        out.write(_mbr([(t, s, n) for t, s, _f, n in parts]))
+        for _t, s, f, _n in parts:
+            if f:
+                out.seek(s * 512)
+                out.write(open(f, "rb").read())
+
+
+def _build_installer(tmp, assets):
+    """A miniature AFM remake installer: MBR P3 (odd sector, odd size) ext4
+    holding /emmc.img, whose MBR P2 (odd again) ext4 holds the game tree."""
+    root = tmp / "inner_root" / "home" / "debian" / "emumm"
+    for rel, data in assets.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    inner_sectors = 16387                         # 8 MiB + 1.5 KiB
+    _ext4(tmp / "inner.raw", inner_sectors * 512, tmp / "inner_root")
+    (tmp / "p3_root").mkdir()
+    _disk(tmp / "p3_root" / "emmc.img",
+          [(0x0C, 9, None, 2000), (0x83, 2055, tmp / "inner.raw", inner_sectors)])
+    p3_sectors = 26627
+    _ext4(tmp / "p3.raw", p3_sectors * 512, tmp / "p3_root")
+    img = tmp / "in put" / "AttackFromMars test Installer.img"
+    img.parent.mkdir()
+    _disk(img, [(0x0C, 1, None, 100), (0x83, 101, None, 300),
+                (0x83, 4099, tmp / "p3.raw", p3_sectors)])
+    return img
+
+
+def _run(pipe):
+    done = {}
+    pipe._done = lambda ok, msg: done.update(ok=ok, msg=msg)
+    pipe.run()
+    assert done.get("ok") is True, done.get("msg")
+
+
+def _extract(img, out):
+    _run(P.ExtractPipeline(str(img), str(out), lambda *a, **k: None,
+                           lambda *a, **k: None, lambda *a, **k: None, None))
+
+
+@pytest.mark.skipif(not _HAVE, reason="needs e2fsprogs (mke2fs, debugfs) and "
+                                      "xxd on a Linux or Mac host")
+def test_extract_write_extract_round_trip_on_this_host(tmp_path, monkeypatch):
+    rnd = random.Random(571)
+    assets = {
+        "afmdata/sound one.wav": bytes(rnd.getrandbits(8) for _ in range(70001)),
+        "afmdata/music.bin": bytes(rnd.getrandbits(8) for _ in range(5000)),
+        "afmdata/sub/deep.dat": b"deep" * 333,
+        "emumm.cfg": b"cfg=1\n",
+    }
+    img = _build_installer(tmp_path, assets)
+
+    out = tmp_path / "out dir"
+    _extract(img, out)
+    for rel, data in assets.items():
+        assert (out / rel).read_bytes() == data, rel
+
+    # Write a changed sound back into a new installer, then read that back.
+    new_wav = bytes(rnd.getrandbits(8) for _ in range(91234))
+    (out / "afmdata" / "sound one.wav").write_bytes(new_wav)
+    monkeypatch.setattr(P.WritePipeline, "_MIN_PLAUSIBLE_EMMC", 1)
+    built = tmp_path / "built" / "AttackFromMars test Installer.img"
+    _run(P.WritePipeline(str(img), str(out), str(built), lambda *a, **k: None,
+                         lambda *a, **k: None, lambda *a, **k: None, None))
+
+    again = tmp_path / "again"
+    _extract(built, again)
+    assert (again / "afmdata" / "sound one.wav").read_bytes() == new_wav
+    for rel in ("afmdata/music.bin", "afmdata/sub/deep.dat", "emumm.cfg"):
+        assert (again / rel).read_bytes() == assets[rel], rel
+    # The partition table and everything outside P3 came through untouched.
+    a, b = img.read_bytes(), built.read_bytes()
+    assert len(a) == len(b) and a[:4099 * 512] == b[:4099 * 512]

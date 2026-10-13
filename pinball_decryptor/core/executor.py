@@ -250,12 +250,24 @@ class NativeExecutor(CommandExecutor):
             NativeExecutor._sudo_ok = _passwordless_sudo()
         return ["sudo", "bash", "-c"] if NativeExecutor._sudo_ok else ["bash", "-c"]
 
+    @staticmethod
+    def _env():
+        """The process environment with /usr/sbin and /sbin on the end of PATH:
+        Debian keeps e2fsprogs there and leaves both off a user's PATH, so the
+        user's own shell said "Missing tool: debugfs" with debugfs installed
+        (PAD-571; sudo's secure_path already has them)."""
+        env = os.environ.copy()
+        env["PATH"] = os.pathsep.join(
+            (env.get("PATH", ""), "/usr/sbin", "/sbin"))
+        return env
+
     def run(self, bash_cmd, timeout=120):
         full_cmd = [*self._prefix(), bash_cmd]
         try:
             result = subprocess.run(
                 full_cmd, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout,
+                env=self._env(),
             )
         except subprocess.TimeoutExpired as e:
             raise CommandError(bash_cmd, -1, f"Timed out after {timeout}s") from e
@@ -269,6 +281,7 @@ class NativeExecutor(CommandExecutor):
         proc = subprocess.Popen(
             full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
+            env=self._env(),
         )
         with self._lock:
             self._current_proc = proc
@@ -294,7 +307,7 @@ class NativeExecutor(CommandExecutor):
 
     def popen_binary(self, bash_cmd):
         return subprocess.Popen([*self._prefix(), bash_cmd],
-                                stdout=subprocess.PIPE)
+                                stdout=subprocess.PIPE, env=self._env())
 
     def to_exec_path(self, host_path):
         return host_path
@@ -305,13 +318,22 @@ class NativeExecutor(CommandExecutor):
 
 class MacExecutor(CommandExecutor):
     _EXTRA_PATH = "/opt/homebrew/bin:/usr/local/bin:/opt/local/bin"
+    # Homebrew's e2fsprogs is keg-only: debugfs, e2fsck and dumpe2fs live in
+    # its own sbin, which no PATH names, so a Mac with e2fsprogs installed
+    # still answered "Missing tool: debugfs" on a CGC extract (PAD-571).
+    # Appended, not prepended: macOS has none of these tools of its own, and
+    # the keg also ships an fsck that must not shadow the system's.
+    _SBIN_PATH = ("/opt/homebrew/opt/e2fsprogs/sbin:"
+                  "/usr/local/opt/e2fsprogs/sbin:/opt/local/sbin")
 
     def _wrap(self, bash_cmd):
-        return f'export PATH="{self._EXTRA_PATH}:$PATH" && {bash_cmd}'
+        return (f'export PATH="{self._EXTRA_PATH}:$PATH:{self._SBIN_PATH}" '
+                f'&& {bash_cmd}')
 
     def _env(self):
         env = os.environ.copy()
-        env["PATH"] = self._EXTRA_PATH + os.pathsep + env.get("PATH", "")
+        env["PATH"] = os.pathsep.join(
+            (self._EXTRA_PATH, env.get("PATH", ""), self._SBIN_PATH))
         return env
 
     def run(self, bash_cmd, timeout=120):

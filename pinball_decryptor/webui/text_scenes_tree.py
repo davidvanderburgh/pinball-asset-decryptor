@@ -3476,7 +3476,7 @@ class TreeEditMixin:
         tfits, tmissing, tlong, thave = [], [], 0, []
         kept, saved_to, reset_n, shown, elsewhere = 0, None, 0, 0, 0
         colours, moved, shown_k, differs, tpairs, skip_scenes = {}, {}, {}, {}, [], set()
-        colours_missing = []
+        colours_missing, ontop = [], {}
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -3485,8 +3485,20 @@ class TreeEditMixin:
                                           self._load_trees(), moved=moved)
             got, missing = scene_edit.match_cards(scenes, self._load_trees().keys())
             mine = scene_edit.load(self.assets_dir)
+            # PAD-552 (DragonRR, computer B): a file saved from the project of a card built
+            # with my edits carries only what was changed since; where my scene with my edits
+            # looks as it did there, its edits go after mine instead of replacing them
+            states = scene_edit.read_states(path)
+            sfind = scene_edit.card_finder(states.keys())
+            trees = self._load_trees()
+            for c in got:
+                if mine.get(c) and c in trees and sfind(c) in states:
+                    rest = scene_edit.on_top_of(trees[c], mine[c], got[c], states[sfind(c)])
+                    if rest is not None:
+                        ontop[c] = rest
             # PAD-402: a scene of mine the file would leave as it is, is no conflict
-            over = {c: (mine[c], got[c]) for c in got if mine.get(c) and mine[c] != got[c]}
+            over = {c: (mine[c], got[c]) for c in got
+                    if mine.get(c) and mine[c] != got[c] and c not in ontop}
             more = scene_share.has_extras(extras)
             # PAD-387: the Text tab's edits it carries, on this card's lines, when they fit
             text_tab, rows = (self._text_rows_here() if extras["text"] else (None, []))
@@ -3545,6 +3557,7 @@ class TreeEditMixin:
                 if reset:
                     reset_n = len(mine)
                     scene_edit.clear(self.assets_dir)
+                    ontop = {}
                 skip_scenes = {c for c in over if "scene:" + c not in take}
                 for c in skip_scenes:
                     got.pop(c, None)
@@ -3573,22 +3586,33 @@ class TreeEditMixin:
                 got, missing = scene_edit.import_edits(self.assets_dir, path,
                                                        self._load_trees().keys(),
                                                        renamed=renamed, skip=skip_scenes)
+                # PAD-552: the file's edits made on top of mine go after mine (an added
+                # picture of the file copied in under another name keeps that name)
+                if ontop:
+                    edits = scene_edit.load(self.assets_dir)
+                    for c, rest in ontop.items():
+                        for op in rest:
+                            if op.get("op") == "add_picture" and op.get("image") in renamed:
+                                op["image"] = renamed[op["image"]]
+                        edits[c] = list(mine[c]) + rest
+                    scene_edit.save(self.assets_dir, edits)
                 # PAD-403: a scene here that already shows the file's edits (the card was
                 # built with them) gets only the ones it does not
-                states = scene_edit.read_states(path)
                 find = scene_edit.card_finder(states.keys())
                 trees = self._load_trees()
                 # PAD-552: a scene here that starts out otherwise than where the file was saved,
                 # and what of it does (the load report)
                 for c in got:
-                    if (c in trees and find(c) in states and scene_edit.starts_elsewhere(
+                    if (c in trees and c not in ontop and find(c) in states
+                            and scene_edit.starts_elsewhere(
                             trees[c], got[c], states[find(c)])):
                         differs[c] = scene_edit.start_differences(trees[c], got[c],
                                                                   states[find(c)])
                 elsewhere = len(differs)
                 shown_k = scene_edit.note_shown(
                     self.assets_dir, {c: trees[c] for c in got if c in trees},
-                    states={c: states[find(c)] for c in got if find(c) in states})
+                    states={c: states[find(c)] for c in got
+                            if find(c) in states and c not in ontop})
                 shown = sum(1 for k in shown_k.values() if k)
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
@@ -3662,6 +3686,12 @@ class TreeEditMixin:
             words += (" The color profile%s of %d game picture%s not in this project %s left "
                       "out." % ("" if lost == 1 else "s", lost, "" if lost == 1 else "s",
                                 "was" if lost == 1 else "were"))
+        if ontop:
+            words += (" %d scene%s here %s your own edits the file's were made on top of (the "
+                      "card it was saved from was built with them), so its edits were added "
+                      "after your own edits instead of replacing them."
+                      % (len(ontop), "" if len(ontop) == 1 else "s",
+                         "has" if len(ontop) == 1 else "have"))
         if elsewhere:
             words += (" %d scene%s here %s not start out the way %s did in the project the "
                       "file was saved from, so %s edits can land in other places: that "
@@ -3683,6 +3713,11 @@ class TreeEditMixin:
             here = find_here(card)
             status = ("not on this card, left out" if here is None
                       else "kept your own" if here in skip_scenes
+                      else ("added after your own %d edit%s: your scene with them looks as it "
+                            "did where the file was saved" % (
+                                len(mine.get(here) or ()),
+                                "" if len(mine.get(here) or ()) == 1 else "s"))
+                      if here in ontop
                       else "starts out otherwise here" if here in differs else "loaded")
             srows.append({"label": self._scene_label(card), "card": card, "ops": len(ops),
                          "status": status, "shown": shown_k.get(here) or 0,

@@ -1803,6 +1803,60 @@ def starts_elsewhere(man, ops, states):
     return not any(_shows(base, ops[:n], k, st) for k in range(n + 1))
 
 
+def on_top_of(man, mine, theirs, states):
+    """PAD-552 (DragonRR, computer B): the edits of a file (*theirs*, made on a project of a
+    card a Write built with *mine*) still to add after *mine* on the scene *man* here, or None
+    when they were not made on top of *mine*.  The scene as shipped starts out otherwise than
+    where the file was saved, the scene with *mine* applied does not: the file carries only
+    what was changed since, so it goes after *mine* rather than in place of it.  ``[]`` when
+    *mine* already ends with all of it (the same file loaded again)."""
+    theirs = list(theirs or ())
+    st = _states_for(states, theirs)
+    if not mine or st is None or man is None or not starts_elsewhere(man, theirs, states):
+        return None
+    for k in range(len(mine) + 1):
+        # the same file loaded before: mine ends with (some of) its edits, applied after mine[:k]
+        head, tail = list(mine[:k]), list(mine[k:])
+        if tail and tail == theirs[:len(tail)]:
+            built, _n = apply_manifest(man, head)
+            if not starts_elsewhere(built, theirs, states):
+                return theirs[len(tail):]
+    built, _n = apply_manifest(man, list(mine))
+    if starts_elsewhere(built, theirs, states):
+        return None
+    n = len(st["ops"])
+    base = _Base.of_manifest(built)
+    k = 0
+    for j in range(n, -1, -1):
+        if (j == 0 or _told(st, j - 1)) and _shows(base, theirs[:n], j, st):
+            k = j
+            break
+    return _renumbered(theirs[k:], mine)
+
+
+def _renumbered(ops, mine):
+    """*ops* with every node an add of theirs makes given an id no op of *mine* uses."""
+    used = {op["id"] for op in mine if isinstance(op.get("id"), int)}
+    used |= {op["node"] for op in mine if isinstance(op.get("node"), int)
+             and op["node"] >= FIRST_ADDED_ID}
+    clash = sorted({op["id"] for op in ops if isinstance(op.get("id"), int)} & used)
+    if not clash:
+        return [dict(op) for op in ops]
+    nxt = max(used | {op["id"] for op in ops if isinstance(op.get("id"), int)}
+              | {FIRST_ADDED_ID - 1}) + 2
+    remap = {}
+    for old in clash:
+        remap[old], nxt = nxt, nxt + 2
+    out = []
+    for op in ops:
+        op = dict(op)
+        for key in ("id", "node"):
+            if isinstance(op.get(key), int) and op[key] in remap:
+                op[key] = remap[op[key]]
+        out.append(op)
+    return out
+
+
 def start_differences(man, ops, states):
     """What of the nodes *ops* edit looks otherwise on the scene *man* than where they were
     made (*states*), for the load report (PAD-552): ``[{"node", "name", "what"}]``, *what* in

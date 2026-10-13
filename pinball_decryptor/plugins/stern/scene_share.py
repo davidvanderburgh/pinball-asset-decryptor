@@ -417,6 +417,8 @@ def _localised(assets_dir, pics, find, trees, shown=None, moved=None):
             here = scene_edit._safe_rel("images/" + img) if img else None
             if here and _here(assets_dir, here):
                 heres.add(here)
+        if not heres:
+            heres = _added_here(assets_dir, rel, p, find)
         if heres:
             found[rel] = heres
     claims = {}
@@ -430,6 +432,30 @@ def _localised(assets_dir, pics, find, trees, shown=None, moved=None):
             out[here] = p
         if mine and moved is not None and mine != [rel]:
             moved[rel] = mine
+    return out
+
+
+#: the name extraction gives a picture a Write put on the card for a picture added in Scenes:
+#: ``radimg_<the added node's name>_<w>x<h>_<hash>.png`` (the added names start ``PAD_``)
+_ADDED_ON_CARD = re.compile(r"^radimg_(PAD_.+)_\d+x\d+_[0-9a-f]{8}\.png$")
+
+
+def _added_here(assets_dir, rel, p, find):
+    """PAD-552 (DragonRR, computer B): a picture of the file that a Write put on its card for a
+    picture added in Scenes (``radimg_PAD_<name>_...``), here still the picture an edit of the
+    same scene adds under that name: ``{its rel here}``, or an empty set."""
+    m = _ADDED_ON_CARD.match(rel.rsplit("/", 1)[-1])
+    if not m:
+        return set()
+    edits = scene_edit.load(assets_dir)
+    out = set()
+    for d in p.get("drawn") or ():
+        card = find(d[0]) if isinstance(d, list) and d and isinstance(d[0], str) else None
+        for op in edits.get(card) or () if card else ():
+            img = op.get("image") if op.get("op") == "add_picture" else None
+            here = scene_edit._safe_rel("images/" + img) if isinstance(img, str) else None
+            if op.get("name") == m.group(1) and here and _here(assets_dir, here):
+                out.add(here)
     return out
 
 

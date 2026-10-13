@@ -159,3 +159,61 @@ def test_the_status_bar_names_crius_reason():
     text = src("savestate.sh")
     assert line_of(text, 'echo "[save] FAILED (exit $RC):"') < \
         line_of(text, 'echo "[save] could not save:')
+
+
+# ---- round 2: the save's freeze is time the game must not see -------------
+# The reporter's SECOND save held the game ~13 s; its dispatch watchdog
+# (10 s absolute deadline, exit 5) ended it seconds after the thaw. Pause
+# credits frozen time to padsw's paused_ms before the SIGCONT; the save now
+# does the same. Rig proof: a save stretched 12 s past criu ended Bond LE with
+# GAME EXIT DISPATCH TIMEOUT on the shipped scripts and left it running with
+# the fix (16.4 s credited).
+
+def test_the_freeze_is_credited_before_every_thaw():
+    text = src("savestate.sh")
+    lines = text.split("\n")
+    cont = [i for i, l in enumerate(lines, 1)
+            if l.strip().startswith('kill -CONT "$PID"')]
+    assert cont, "no thaw found"
+    # the FIRST thaw of each path is preceded by its credit
+    for n in (cont[0], next(i for i in cont if i > line_of(text, "# --- thaw"))):
+        before = "\n".join(lines[max(0, n - 6):n - 1])
+        assert "credit_freeze" in before, n
+    # the moment criu starts is taken BEFORE it runs
+    assert line_of(text, "T_CRIU0=$(date +%s%3N)") < line_of(text, '"$CRIU" dump')
+    # a game paused DURING the save is left to Pause's own credit
+    paused = text[text.index("Pause was pressed during the save"):]
+    paused = paused[:paused.index("\nelse\n")]
+    assert "credit_freeze" not in paused.replace("No credit", "")
+
+
+@pytest.mark.skipif(not HAS_BASH, reason="no usable bash")
+def test_the_credit_starts_at_the_seize_and_errs_short():
+    text = src("savestate.sh")
+    fn = text[text.index("credit_freeze() {"):]
+    fn = fn[:fn.index("\nPYEOF\n}\n") + len("\nPYEOF\n}\n")]
+    script = (
+        'T=$(mktemp -d); DDIR=$T\n'
+        "printf '(00.000100) Version: 4.1\n(00.300000) Seized task 42, state 1\n' > $T/dump.log\n"
+        'command -v python3 >/dev/null || { echo NOPY; exit 0; }\n'
+        'python3 -c "import struct,sys; b=bytearray(4096); struct.pack_into(\'<I\',b,0,0x53444150);'
+        ' struct.pack_into(\'<I\',b,1088,500); open(sys.argv[1],\'wb\').write(b)" $T/padsw\n'
+        'GSW=$T/padsw\n'
+        "SWPY=$(wslpath -u '" + RIG + "' 2>/dev/null || echo '" + RIG + "')\n"
+        'T_CRIU0=$(( $(date +%s%3N) - 5300 ))\n'
+        + fn +
+        'credit_freeze\n'
+        'python3 -c "import struct,sys; print(\'total\', struct.unpack_from(\'<I\', open(sys.argv[1],\'rb\').read(), 1088)[0])" $T/padsw\n'
+        'rm -rf $T\n')
+    r = subprocess.run(["bash", "-s"], input=script.encode().replace(b"\r", b""),
+                       capture_output=True, timeout=60)
+    out = r.stdout.decode().replace("\r", "")
+    if "NOPY" in out:
+        pytest.skip("no python3 in that bash")
+    assert r.returncode == 0, r.stderr.decode()
+    total = int(out.split("total ")[1].split()[0])
+    # 500 already held + 5300 ms since criu started - 300 ms before the seize
+    # - 1 ms short: ~4999, never more (a credit past the gap steps the
+    # game's clock backwards)
+    assert 500 + 4999 <= total <= 500 + 4999 + 200, out
+    assert "frozen 5.0 s" in out or "frozen 5.1 s" in out or "frozen 5.2 s" in out, out

@@ -125,7 +125,10 @@ def test_staged_sizes_read_wc_lines_with_spaces_and_total():
 
 # --- where the tools are found, and what a missing one says ------------------
 
-def test_mac_executor_finds_keg_only_e2fsprogs_after_the_system_path():
+def test_mac_executor_finds_keg_only_e2fsprogs_after_the_system_path(
+        monkeypatch):
+    # with no copy of its own (a source run; the macOS CI run sets this)
+    monkeypatch.delenv("PAD_E2FSPROGS_DIR", raising=False)
     ex = EX.MacExecutor()
     for d in ("/opt/homebrew/opt/e2fsprogs/sbin",
               "/usr/local/opt/e2fsprogs/sbin"):

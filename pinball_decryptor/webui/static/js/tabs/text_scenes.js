@@ -520,13 +520,14 @@ function Contents({ s, onMenu }) {
         <button type="button" class="sc-gh" onClick=${() => setOpen({ ...open, [g.key]: !opened })}>
           <${Icon} name=${opened ? "down" : "right"} />${g.title}</button>
         ${opened ? g.items.map((it, n) => html`<div key=${it.id || g.key + n} data-id=${it.id || ""}
-            class=${cx("sc-item", it.id && s.item === it.id && "sel", !it.id && "note")}
+            class=${cx("sc-item", "ct-item", it.id && s.item === it.id && "sel", !it.id && "note")}
             onClick=${() => it.id && call("text_scenes.select_item", it.id)}
             onDblClick=${() => it.id && call("text_scenes.activate", it.id)}
-            onContextMenu=${(e) => { e.preventDefault(); onMenu(it, e); }}>
-          ${it.swatch ? html`<span class="swatch sc-sw" style=${`background:${it.swatch}`}></span>` : html`<span></span>`}
-          <span class="sc-t ellip" title=${it.text}>${it.text}</span>
-          <span class="sc-i small muted ellip" title=${it.info}>${it.info}</span>
+            onContextMenu=${(e) => { e.preventDefault(); onMenu(it, e); }}
+            ...${tip({ head: it.text, lines: [it.info] })}>
+          ${it.thumb ? html`<span class="sc-pic"><img src=${mediaUrl(it.thumb)} alt="" loading="lazy" decoding="async" /></span>`
+            : it.swatch ? html`<span class="swatch sc-sw" style=${`background:${it.swatch}`}></span>` : html`<span></span>`}
+          <span class="sc-t ellip">${it.text}</span>
         </div>`) : null}
       </div>`;
     })}
@@ -670,7 +671,7 @@ function TreeTop({ s, onMenu }) {
       { value: "layers", label: html`<${Icon} name="scenes" />Layers`,
         title: "Every part of the scene, in the order it is drawn: pick, hide or edit them" },
       { value: "contents", label: html`<${Icon} name="list" />Contents`,
-        title: "The pictures, fonts and text this scene uses: double-click one to find it on its own tab" }]} /></div>
+        title: "The pictures, fonts and text this scene uses: click one to pick it on the preview, double-click it to find it on its own tab" }]} /></div>
     ${view === "layers" ? html`<${TreeLayers} t=${s.tree_view} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
   </div>`;
 }

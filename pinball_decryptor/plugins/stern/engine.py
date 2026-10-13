@@ -10244,8 +10244,9 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                 "too %s." % (
                     who, ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
                     when), "info")
-        if not longer_ok and want > room:
-            # as a replacement is with "Allow replacements longer than the original" off
+        if (not longer_ok or _SMo.is_turn(mode)) and want > room:
+            # as a replacement is with "Allow replacements longer than the original" off; a file
+            # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says)
             try:
                 wav = _SMo.cut(wav, room)
             except (OSError, EOFError) as e:
@@ -10254,7 +10255,8 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                 continue
             log("%s: %s (%.2f s) is cut to its %s %.2f s: %s." % (
                 who, what, want / 44100.0, "song's" if song else "slot's", room / 44100.0,
-                longer_why or "longer replacements are off"), "info")
+                "the game plays it for as long as its sound" if _SMo.is_turn(mode)
+                else longer_why or "longer replacements are off"), "info")
             want = room
         host = _sound_mode_host(params, p, want, audio_edits, taken)
         if host is None:
@@ -10602,8 +10604,11 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     from .adjustments import AdjustmentTable
     who = "Music modes" if modes.count else "Sounds in turn"
     live = 0
+    turns = _turn_key_lines(params, [u for u in used if _SMo.is_turn(u["mode"])], log)
+    used_modes = [u for u in used if not _SMo.is_turn(u["mode"])]
     try:
-        sounds = _sound_mode_descriptors(gr_path, staged, params, sites, used, log)
+        sounds = (_sound_mode_descriptors(gr_path, staged, params, sites, used_modes, log)
+                  if used_modes else [])
         if modes.count:
             with open(_lp(gr_path), "rb") as f:
                 setting, _w, _c = _MSet.plan(AdjustmentTable(f.read()), _MSet.MUSIC_MODE,
@@ -10612,18 +10617,42 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     except (RuntimeError, ValueError, OSError, struct.error) as e:
         log("%s: not put on this card: %s. Every sound plays its own." % (who, e), "warning")
         return ""
-    if not sounds:
+    if modes.count and not sounds:
         log("Music modes: none of the files for the other modes can be played on this card, so "
-            "MUSIC MODE is not added." if modes.count else
-            "Sounds in turn: none of the files can be played on this card; every sound plays its "
+            "MUSIC MODE is not added.", "warning")
+        if not turns:
+            return ""
+        modes.slots, modes.names = {}, []
+    if not sounds and not turns:
+        log("Sounds in turn: none of the files can be played on this card; every sound plays its "
             "own.", "warning")
         return ""
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_SMo.cfg_text(live, modes.count, sounds, only,
+        f.write(_SMo.cfg_text(live, modes.count if sounds else 0, sounds, only, turns=turns,
                               record=_SMo.card_record(modes, used)))
     return path
+
+
+def _turn_key_lines(params, used, log):
+    """PAD-565: ``[(k, slot key, file k's key)]`` - for each slot's file k in turn (*used*, its
+    pseudo mode), the record key the game looks the slot up by and its file's record's, off the
+    grown bank's params (``sounds.cfg`` ``turn`` lines: the runtime swaps the looked-up key in
+    turn). An entry whose keys did not come out of the bank is left out and logged; one that
+    landed gets ``lines`` 1 (the card's record names it)."""
+    from . import sound_modes as _SMo
+    byidx = {p["idx"]: p for p in params}
+    out = []
+    for u in used or ():
+        sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
+        if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
+            log("Sounds in turn: %s is left out: its record did not come out of the grown bank."
+                % _SMo.what(u["rel"], u["mode"]), "warning")
+            continue
+        out.append((_SMo.turn_of(u["mode"]), bytes(sp["findkey"]), bytes(hp["findkey"])))
+        u["lines"] = 1
+    return sorted(out, key=lambda t: (t[1], t[0]))
 
 
 def _install_modes(output_path, modes, landed, planned, log):
@@ -10639,6 +10668,8 @@ def _install_modes(output_path, modes, landed, planned, log):
                                                  or modes.get("picture"))
            else "Random clips" if modes.get("variants") else "Music modes"
            if modes.get("music_modes") else "Picture settings")
+    if who == "Music modes" and all(t.endswith(" in turn)") for t in modes["music_modes"]):
+        who = "Sounds in turn"           # PAD-565: the same program, its own words
     if landed < planned:
         if who == "Modes":
             log("Modes: not every file reached the card, so the mode runtime was "

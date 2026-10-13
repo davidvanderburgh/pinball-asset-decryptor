@@ -49,8 +49,11 @@ own one included): each time the game starts that sound it plays the next one, i
 its replacement) first, then file 2, file 3... and round again. They take the music modes' road
 whole: each one is a record of its own made the same way, under a pseudo mode
 (:func:`turn_mode`: :data:`TURN_BASE` + k, never a menu value), and ``sounds.cfg`` names its
-descriptor on a ``turn`` line (pad_mode_runtime.c "sounds in turn"). No setting goes in the menu
-for them. While a music mode gives the slot a file of its own, that file plays every time.
+record key on a ``turn`` line beside the slot's own (pad_mode_runtime.c "sounds in turn": the
+game's record lookup, ``site sound_lookup``, gets the next key each time it looks the slot up). A
+file plays for as long as its slot's sound, so each one is cut to that length. No setting goes in the menu for them.
+While a music mode gives the slot a file of its own, that file plays every time (its descriptor
+names that file's record, not the slot's).
 """
 from __future__ import annotations
 
@@ -84,8 +87,9 @@ PROVEN = frozenset({"godzilla_le-1.16", "godzilla_pro-1.16"})
 #: SNDT_MAX), and the pseudo mode file k of them is built under (:func:`turn_mode`)
 TURN_MAX = 16
 TURN_BASE = 100
-#: PAD-565: ``<game>-<version>`` of the builds where the sounds in turn were SEEN working; they
-#: need only the resolver wrap, not the menu setting
+#: PAD-565: ``<game>-<version>`` of the builds where the sounds in turn were SEEN working (the
+#: emulator: the slot's request fired again and again, the files heard in turn); they need only the
+#: record lookup, not the resolver or the menu setting
 TURN_PROVEN = PROVEN | {"james_bond_le-1.06", "james_bond_pro-1.06"}
 
 NO_TITLE = ("The app cannot tell which game this project is for, so it cannot give it a "
@@ -308,8 +312,8 @@ def title_key(prof):
 
 
 def title_refusal(prof, turns=False):
-    """Why no sound of ``prof``'s title can have mode files (*turns*: files in turn, PAD-565), or
-    ``""``."""
+    """Why no sound of ``prof``'s title can have mode files (*turns*: files in turn, PAD-565: the
+    record lookup, not the resolver), or ``""``."""
     if prof is None:
         return NO_TITLE if not turns else NO_TITLE.replace("give it a MUSIC MODE",
                                                            "play its sounds in turn")
@@ -320,7 +324,7 @@ def title_refusal(prof, turns=False):
         port = MP.read_port(MP.port_path(prof))
     except OSError:
         return (NOT_PROVEN_TURNS if turns else NOT_PROVEN) % prof.label
-    if "sound_resolve" not in port["site"]:
+    if ("sound_lookup" if turns else "sound_resolve") not in port["site"]:
         return (NOT_PROVEN_TURNS if turns else NOT_PROVEN) % prof.label
     return ""
 
@@ -426,10 +430,11 @@ def cut(wav, frames):
 
 
 # ---- the runtime's table ------------------------------------------------------------------------
-def cfg_text(live, count, sounds, only, record=()):
+def cfg_text(live, count, sounds, only, record=(), turns=()):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
     the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
-    pseudo mode, :func:`turn_mode`, is a ``turn`` line), *only* when the card carries no modes.
+    *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
+    turn (PAD-565: ``turn`` lines, the record keys the runtime swaps at the game's lookup).
     PAD-553: *record* (:func:`card_record`) goes in as comment lines the runtime skips, so an
     extract of the card brings the modes back (:func:`read_card_record`)."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
@@ -438,10 +443,9 @@ def cfg_text(live, count, sounds, only, record=()):
     if count:
         lines.append("setting\t0x%08x\t%d" % (int(live), int(count)))
     for mode, sid, desc in sounds:
-        if is_turn(mode):
-            lines.append("turn\t%d\t%d\t%s" % (turn_of(mode), int(sid), bytes(desc).hex()))
-        else:
-            lines.append("sound\t%d\t%d\t%s" % (int(mode), int(sid), bytes(desc).hex()))
+        lines.append("sound\t%d\t%d\t%s" % (int(mode), int(sid), bytes(desc).hex()))
+    for k, slot, host in turns:
+        lines.append("turn\t%d\t%s\t%s" % (int(k), bytes(slot).hex(), bytes(host).hex()))
     lines += list(record)
     return "\n".join(lines) + "\n"
 

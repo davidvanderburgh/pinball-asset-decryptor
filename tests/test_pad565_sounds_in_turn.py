@@ -46,21 +46,38 @@ def test_files_in_turn_are_not_music_modes():
 
 
 # ---- the runtime's table -------------------------------------------------------------------------
-def test_the_runtime_table_names_each_file_in_turn_and_no_setting_without_modes():
-    text = SMo.cfg_text(0, 0, [(SMo.turn_mode(2), 10, b"\x05\x01"), (SMo.turn_mode(3), 10, b"\x05\x02")],
-                        only=True)
-    assert text.splitlines()[1:] == ["only", "turn\t2\t10\t0501", "turn\t3\t10\t0502"]
-    both = SMo.cfg_text(0x7A4E78, 2, [(2, 2578, b"\x05"), (SMo.turn_mode(2), 10, b"\x05\x01")], False)
-    assert both.splitlines()[1:] == ["setting\t0x007a4e78\t2", "sound\t2\t2578\t05", "turn\t2\t10\t0501"]
+def test_the_runtime_table_names_each_file_s_record_key_beside_its_slot_s():
+    slot, b, c = bytes.fromhex("9ad919226f1d0000"), bytes(range(8)), bytes(range(8, 16))
+    text = SMo.cfg_text(0, 0, [], only=True, turns=[(2, slot, b), (3, slot, c)])
+    assert text.splitlines()[1:] == ["only", "turn\t2\t9ad919226f1d0000\t0001020304050607",
+                                     "turn\t3\t9ad919226f1d0000\t08090a0b0c0d0e0f"]
+    both = SMo.cfg_text(0x7A4E78, 2, [(2, 2578, b"\x05")], False, turns=[(2, slot, b)])
+    assert both.splitlines()[1:] == ["setting\t0x007a4e78\t2", "sound\t2\t2578\t05",
+                                     "turn\t2\t9ad919226f1d0000\t0001020304050607"]
 
 
-def test_the_runtime_reads_turn_lines_and_lets_a_music_mode_win():
+def test_the_runtime_swaps_the_looked_up_key_in_turn():
+    """At the record lookup the modes' own sounds swap keys at (item 163), hooked once for both."""
     with open(RUNTIME, encoding="utf-8") as f:
         c = f.read()
-    assert 'str_eq(f[0], "turn")' in c
+    assert 'str_eq(f[0], "turn")' in c and "sndt_line(f[1], f[2], f[3])" in c
     assert "#define SNDT_MAX        16" in c and SMo.TURN_MAX == 16
-    # the music mode's own file for the asset first, its turn only without one
-    assert c.index("sndm[i].mode == m") < c.index("t = n_sndt ? sndt_next(id) : 0;")
+    assert "if (sndt_live && r[1]) sndt_lookup(r);" in c
+    assert c.count('hook(fn("sound_lookup"), on_sound_lookup)') == 2
+    assert '!lookup_hooked && !hook(fn("sound_lookup"), on_sound_lookup)' in c        # the turns'
+    assert '!lookup_hooked && hook(fn("sound_lookup"), on_sound_lookup)' in c         # the modes'
+
+
+def test_the_build_writes_each_file_s_record_key_beside_its_slot_s():
+    params = [{"idx": 2, "findkey": b"S" * 8}, {"idx": 40, "findkey": b"H" * 8, "grown": True},
+              {"idx": 41, "findkey": b"J" * 8}]
+    used = [{"rel": TANK, "slot": 2, "mode": SMo.turn_mode(2), "host": 40},
+            {"rel": TANK, "slot": 2, "mode": SMo.turn_mode(3), "host": 41}]
+    logs = []
+    assert E._turn_key_lines(params, used, lambda t, lvl="info": logs.append(t)) == [(2, b"S" * 8, b"H" * 8)]
+    assert used[0]["lines"] == 1 and "lines" not in used[1]
+    assert logs == ["Sounds in turn: idx0002 - SE GZ FX TANK FIRE DOUBLE FAST 1.wav's file 3 in turn is left "
+                    "out: its record did not come out of the grown bank."]
 
 
 def test_the_card_record_brings_the_files_in_turn_back():
@@ -86,10 +103,10 @@ def test_bond_plays_sounds_in_turn_but_has_no_music_mode():
     assert SMo.title_refusal(other, turns=True) == SMo.NOT_PROVEN_TURNS % other.label
 
 
-def test_the_bond_ports_name_the_resolver_the_runtime_wraps():
-    for port in ("james_bond_le-1.06", "james_bond_pro-1.06"):
-        with open(os.path.join(PORTS, port + ".port"), encoding="utf-8") as f:
-            assert any(line.split()[:2] == ["site", "sound_resolve"] for line in f), port
+def test_the_proven_titles_ports_name_the_record_lookup_the_runtime_hooks():
+    for key in SMo.TURN_PROVEN:
+        with open(os.path.join(PORTS, key + ".port"), encoding="utf-8") as f:
+            assert any(line.split()[:2] == ["site", "sound_lookup"] for line in f), key
 
 
 def test_the_audio_tab_offers_turns_per_slot(monkeypatch):
@@ -131,6 +148,15 @@ def test_each_file_in_turn_goes_on_the_card_as_a_record_of_its_own(tmp_path, mon
     assert any("file 3 in turn" in t and "at its turn (file 3)" in t for t in logs)
     assert not any("MUSIC MODE" in t for t in logs)
     assert E._SMo_tag(TANK, SMo.turn_mode(3)).endswith("(file 3 in turn)")
+    # a file longer than its sound is cut to it, longer replacements allowed or not: the game plays
+    # it for as long as its slot's descriptor says
+    made["c.wav"] = _wav(tmp_path / "long_c.wav", 3.0)
+    logs.clear()
+    _e, _g, used = E._sound_modes_grow(str(tmp_path), params, {}, {}, m,
+                                       lambda t, lvl="info": logs.append(t), longer_ok=True)
+    assert used[1]["frames"] < 2 * 44100
+    assert any("is cut to its slot's" in t and "the game plays it for as long as its sound" in t
+               for t in logs)
 
 
 # ---- carried: mod routes, the music modes file, back out of a card ---------------------------------

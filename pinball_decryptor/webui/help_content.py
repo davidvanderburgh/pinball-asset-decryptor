@@ -201,7 +201,7 @@ HELP_CONTENT = {
          "sound bank, the 2 GB limit included; one that does not fit is left out, "
          "and the log says so."),
         ("Play in turn",
-         "Spike 2, Godzilla Pro and Premium/LE 1.16 and James Bond 007 Pro and LE 1.06. A "
+         "Stern Spike 2, the latest version of each game. A "
          "sound can play more than one file: each time the game plays it, the next one "
          "plays, and after the last it starts again.\n\n"
          "- Right-click a sound > **Play in turn** > **Add a sound to play in turn…** "

@@ -93,6 +93,9 @@ The same owner then (PAD-521) wanted their modes to look like the game's own: wh
 qualified the Right ramp's villain inserts cycle and the film's insert is solid. So the block's ``insert`` may name
 several inserts, separated by commas as pm_lamp_set takes them (up to LIT_INSERTS_MAX; a Chase runs across them in
 that order), and ``solid`` / ``solid_color`` one insert more held solid while it is lit (the film's).
+Then (PAD-556): Blofeld, the game's villain mode, won the film's last part and the villains began to rove at once,
+though the mode could not start until Blofeld was over; the game's own rove only then. So while the game's own check
+says one of its modes is in the way, only the solid insert is held: the shot and the chase come once it is clear.
 
 What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 gives the blocks:
 
@@ -2805,6 +2808,8 @@ static const struct {
 %(rows)s};
 static int lit_as[5];                   /* per player: 1 + the LIT_AT it is lit as; 0 = not lit */
 static unsigned lit_player;             /* whose light lit_shown is; 0 = hold it again */
+static int lit_waiting;                 /* PAD-556: lit_shown's shot and inserts wait out the game's own mode (only the
+                                         * solid one is held) */
 
 UNUSED static int lit_now(void)          /* "the mode is lit", for the player up */
 {
@@ -2825,17 +2830,19 @@ static void lit_off(void)
 {
     int k = lit_shown - 1;
     if (k < 0) return;
-    if (S[LIT_AT[k].shot] && !LIT[LIT_AT[k].shot].on) pm_lamp_release_shot(S[LIT_AT[k].shot]);
-    if (LIT_AT[k].insert[0]) pm_lamp_release(LIT_AT[k].insert);
+    if (!lit_waiting && S[LIT_AT[k].shot] && !LIT[LIT_AT[k].shot].on) pm_lamp_release_shot(S[LIT_AT[k].shot]);
+    if (!lit_waiting && LIT_AT[k].insert[0]) pm_lamp_release(LIT_AT[k].insert);
     if (LIT_AT[k].solid[0]) pm_lamp_release(LIT_AT[k].solid);
     lit_shown = 0;
 }
 
-/* every tick: the player up's light on the playfield while the mode is not running */
+/* every tick: the player up's light on the playfield while the mode is not running. While one of the game's own
+ * modes is in its way (James Bond: the villain mode that won the film's last part) its shot and inserts wait, as the
+ * game's own mini-wizards' do, and only the solid one (the film's) is held: the chase starts once that mode is over */
 static void lit_tick(void)
 {
     unsigned p = pm_player();
-    int want = 0, k;
+    int want = 0, waiting, k;
     if (SHOWING) {                      /* a show paints every insert, and hands them all back at its end */
         lit_shown = 0;
         return;
@@ -2843,15 +2850,18 @@ static void lit_tick(void)
     if (pm_in_game() && p >= 1 && p <= 4 && !run.on) want = lit_as[p];
     /* its shot is claimed while it would start there now: the game's own starts on that shot are held off (on James
      * Bond the Right ramp starts its henchman and villain modes, and the game handles a shot before the modes do) */
-    pm_lit_claim(want && can_start() && pm_game_wizard_way() != 0 ? S[LIT_AT[want - 1].shot] : 0);
-    if (want == lit_shown && (!want || p == lit_player)) return;
+    waiting = want && pm_game_wizard_way() == 0;
+    pm_lit_claim(want && can_start() && !waiting ? S[LIT_AT[want - 1].shot] : 0);
+    if (want == lit_shown && (!want || (p == lit_player && waiting == lit_waiting))) return;
     lit_off();
+    lit_waiting = 0;
     if (!want) return;
     k = want - 1;
-    if (S[LIT_AT[k].shot]) pm_lamp_shot(S[LIT_AT[k].shot], LIT_AT[k].rgb, LIT_AT[k].pattern, LIT_AT[k].ms);
-    if (LIT_AT[k].insert[0]) pm_lamp_set(LIT_AT[k].insert, LIT_AT[k].rgb, LIT_AT[k].pattern, LIT_AT[k].ms);
+    if (!waiting && S[LIT_AT[k].shot]) pm_lamp_shot(S[LIT_AT[k].shot], LIT_AT[k].rgb, LIT_AT[k].pattern, LIT_AT[k].ms);
+    if (!waiting && LIT_AT[k].insert[0]) pm_lamp_set(LIT_AT[k].insert, LIT_AT[k].rgb, LIT_AT[k].pattern, LIT_AT[k].ms);
     if (LIT_AT[k].solid[0]) pm_lamp_set(LIT_AT[k].solid, LIT_AT[k].solid_rgb, PM_LAMP_SOLID, 0);
     lit_shown = want;
+    lit_waiting = waiting;
     lit_player = p;
 }
 

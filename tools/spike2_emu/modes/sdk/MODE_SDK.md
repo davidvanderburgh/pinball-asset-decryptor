@@ -2304,7 +2304,9 @@ the check (`site wizard_way 0x00110b90 0xe92d4038 0xebfe3a51`; the Pro's `0x0010
 `pm_game_wizard_way()` answers it: 1 clear, 0 in the way, -1 no game or no check. A blocks mode's lit shot waits on it
 whatever the mode says about the game's modes, and a Start the mode that gives way or holds the game's modes off waits
 on it as on the game's flagged modes. Measured in the emulator (stock card): 1 through plain play, 0 from the game's own
-start of Mr Osato (`0x123f84`) on, and with game flag 139 set.
+start of Mr Osato (`0x123f84`) on, and with game flag 139 set. Its light waits on it too (PAD-556): while it is 0 only
+the insert held solid (the film's) shows, and the shot's lights and the villain chase come once it is 1, as the game's own
+wait to cycle their villains until the mode that won the film's last part is over.
 
 **A lit mode claims its shot (PAD-503, the owner on v1.169.3).** Waiting was not enough: the Right ramp is where Bond
 starts its henchman and villain modes (on the rig the first ramp of a fresh game started one, the check's `0x1360d4`

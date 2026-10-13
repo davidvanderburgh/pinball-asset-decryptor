@@ -1483,6 +1483,11 @@ class ColorTab(TabService):
         if same:
             self._load()
 
+    def refresh_after_revert(self):
+        """PAD-569 Reset…: the profiles may be gone; show what the project has now."""
+        if self._project:
+            self._load()
+
     # -- the preview picture -----------------------------------------------
     def _replacement_pictures(self):
         """``[(label, path)]`` of the pictures the user has assigned on the

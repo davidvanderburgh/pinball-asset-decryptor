@@ -634,6 +634,19 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         staged_changes.save(assets_dir, kept)
         self._u_reset()
 
+    def forget_reset(self, assets_dir, kinds):
+        """PAD-569 Reset…: forget the picks (and color switches) it resets, so a later save
+        of this tab cannot write them back over the sidecar the reset just cleared."""
+        if "videos" in kinds:
+            self._assign = {}
+            self._asis = {}
+            self._length = {}
+            self._variants = {}
+        if "colours" in kinds:
+            self._color = {}
+            self._color_stock = False
+            self._stock_on = set()
+
     def refresh_after_revert(self):
         """The video part of MainWindow.refresh_after_revert."""
         self._changed = set()

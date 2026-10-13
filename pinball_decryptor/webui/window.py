@@ -837,6 +837,10 @@ class WebWindow:
     def clear_replace_assignments(self, assets_dir):
         self._fan("clear_replace_assignments", assets_dir)
 
+    def forget_reset(self, assets_dir, kinds):
+        """PAD-569 Reset…: every tab forgets what it holds of the kinds reset."""
+        self._fan("forget_reset", assets_dir, kinds)
+
     def begin_revert_view(self):
         self._fan("begin_revert_view")
 

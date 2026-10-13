@@ -2556,6 +2556,21 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._slug, self._spec = None, None
         self.refresh()
 
+    def forget_reset(self, assets_dir, kinds):
+        """PAD-569 Reset…: modes reset deletes the modes folder; an edit waiting to be
+        saved must not write a mode back into it."""
+        if "modes" not in kinds:
+            return
+        if self._save_job is not None:
+            self.ctx.loop.after_cancel(self._save_job)
+            self._save_job = None
+        self._dirty = False
+        self._slug, self._spec, self._code_slug = None, None, None
+
+    def refresh_after_revert(self):
+        """PAD-569 Reset…: the modes folder may be gone; list what is there now."""
+        self.refresh()
+
     @rpc
     def delete(self):
         if self._code_slug:

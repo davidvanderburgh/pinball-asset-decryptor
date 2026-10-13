@@ -414,6 +414,7 @@ class App:
             on_write_cancel=self._cancel,
             on_apply_delta=self._start_apply_delta,
             on_revert_all=self._start_revert_all,
+            on_reset=self._start_reset,
             on_flash_image=self._start_flash_image,
             on_read_card=self._start_read_card,
             on_build_flash=self._on_build_flash_request,
@@ -4666,10 +4667,53 @@ class App:
             target=self._run_revert, args=(assets_dir, instant),
             daemon=True).start()
 
-    def _run_revert(self, assets_dir, instant_count):
+    def _start_reset(self, assets_dir, kinds):
+        """PAD-569: the top bar's Reset… (asked in its own dialog): the kinds of change
+        ticked (:mod:`core.project_reset`) back the way the project was extracted.  Every
+        kind is Revert all changes plus the Scenes edits and the project's own modes."""
+        from .core import history_log, project_reset
+
+        kinds = project_reset.normalise(kinds)
+        if not kinds or not assets_dir or not os.path.isdir(assets_dir)                 or self.window._running:
+            return False
+        everything = len(kinds) == len(project_reset.KEYS)
+        labels = ", ".join(project_reset.LABELS[k] for k in kinds)
+        self.msg_queue.put(LogMsg(
+            "Resetting %s in %s…" % ("everything" if everything else labels, assets_dir),
+            "info"))
+        self.window.begin_revert_view()
+        history_log.record(assets_dir, "reset  %s back as extracted"
+                           % ("everything" if everything else labels))
+        # the tabs' own picks first: a tab writes what it holds over the sidecar
+        self.window.forget_reset(assets_dir, kinds)
+        said = project_reset.drop_records(assets_dir, kinds)
+        if everything:
+            # as Revert all: every Replace tab drops what else it holds of the sidecar
+            self.window.clear_replace_assignments(assets_dir)
+        try:
+            instant = len(project_reset.restore_snapshots(assets_dir, kinds))
+        except Exception:
+            instant = 0
+        for line in said:
+            self.msg_queue.put(LogMsg("Reset: " + line, "info"))
+        self._active_mode = "write"
+        self._revert_active = True
+        self._reset_run = True
+        self._cancel_requested = False
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+        self.window.set_status("Resetting…")
+        threading.Thread(
+            target=self._run_revert,
+            args=(assets_dir, instant, project_reset.rel_filter(kinds)),
+            daemon=True).start()
+        return True
+
+    def _run_revert(self, assets_dir, instant_count, keep=None):
         """Worker: find edits with no snapshot (legacy / hand-edited) and, if a
         source card + a plugin fallback are available, re-derive them; otherwise
-        report them as needing a re-extract.  Posts a DoneMsg either way."""
+        report them as needing a re-extract.  Posts a DoneMsg either way.
+        *keep* (PAD-569's Reset…): ``rel -> bool``, the changed files to put back."""
         from .core.checksums import all_changed
 
         log = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
@@ -4681,6 +4725,8 @@ class App:
                 progress=lambda c, t: prog(c, t, "Checking files…"),
                 cancel=lambda: self._cancel_requested,
                 quick=True))
+            if keep is not None:
+                remaining = [rel for rel in remaining if keep(rel)]
         except Exception as e:
             log("Change scan failed (%s); restored snapshots only." % e,
                 "warning")
@@ -4785,6 +4831,8 @@ class App:
         # a post-run rescan (on-disk asset bytes changed under the tabs).
         if getattr(self, "_revert_active", False):
             self._revert_active = False
+            word = "Reset" if getattr(self, "_reset_run", False) else "Revert"
+            self._reset_run = False
             self.window.set_running(False, mode="write")
             if self._cancel_requested:
                 self._cancel_requested = False
@@ -4793,10 +4841,10 @@ class App:
             elif success:
                 self.window.set_status("Reverted")
                 self.window.append_log(summary, "success")
-                messagebox.showinfo("Revert Complete", summary)
+                messagebox.showinfo("%s Complete" % word, summary)
             else:
                 self.window.set_status("Failed")
-                messagebox.showerror("Revert Failed", summary)
+                messagebox.showerror("%s Failed" % word, summary)
             self.window.refresh_after_revert()
             return
 

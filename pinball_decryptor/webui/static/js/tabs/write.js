@@ -7,6 +7,7 @@
 import { html, useState, useEffect, PageHead, Card, Button, Field, Select, Seg, Check, Chip, Note, Table, Empty,
          Icon, InfoBadge, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { openDialog } from "../core/dialogs.js";
 import { FlashDialog, DiagDialog, InfoDialog, flashDialogHosted } from "./write_dialogs.js";
 
 export const css = true;
@@ -293,7 +294,8 @@ export default function WriteTab() {
       ${count ? html`<${Chip} kind="acc">${count} ${plural(count, "change", "changes")} for the next build<//>` : null}
       <${Button} kind="ghost" onClick=${() => call("write.export_csv")} title=${s.export_tip}>Export CSV<//>
       ${s.revert_cap ? html`<${Button} kind="danger" disabled=${!s.revert_enabled}
-        onClick=${() => call("write.revert_all")}>Revert all changes…<//>` : null}
+        title="The whole project back as it was extracted: opens Reset… with everything ticked"
+        onClick=${() => openDialog("reset", { all: true })}>Revert all changes…<//>` : null}
     <//>
     <div class="wr-body"><div class="wr-cols">
       <div class="wr-left">

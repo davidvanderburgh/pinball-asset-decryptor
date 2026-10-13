@@ -2945,6 +2945,16 @@ class ImagesTab(FindOriginalsMixin, TabService):
         if getattr(self, "_visible", False):
             self._scan_image_slots_async()
 
+    def forget_reset(self, assets_dir, kinds):
+        """PAD-569 Reset…: forget the picks (and color switches) it resets, so a later save
+        of this tab cannot write them back over the sidecar the reset just cleared."""
+        if "images" in kinds:
+            self._assignments = {}
+            self._keep_size = set()
+        if "colours" in kinds:
+            self._color = {}
+            self._color_unlocked = False
+
     def refresh_after_revert(self):
         # Also run after Emulate's Start wrote the picks over the folder's
         # files (window.folder_staged, PAD-209).  Either way the files that

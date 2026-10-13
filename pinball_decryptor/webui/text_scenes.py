@@ -75,7 +75,7 @@ TIPS = {
                       "becomes Cancel while it runs.",
     "rebuild": "Re-read the scenes from the card image on the Extract "
                "tab, so an improved preview reaches this project folder. Your scene edits are "
-               "kept: this is not a reset (Reset, under the preview, is)."
+               "kept: this is not a reset (Revert, under the preview, is)."
                "\n\nTakes a few seconds and rewrites only the layout file — "
                "your images, glyph slices and font imports are left alone "
                "(a full re-extract would overwrite them).",

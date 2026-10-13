@@ -3440,7 +3440,8 @@ class TreeEditMixin:
         if not compat.messagebox.askyesno(
                 "Scene edits", "Put EVERY scene back the way the game shipped it? That drops "
                 "all %d edit(s) in %d scene(s): moves, resizes, tints, layer changes and added "
-                "pictures and text." % (n, len(edits))):
+                "pictures and text. Color profiles and replaced pictures stay (Reset… on the "
+                "top bar puts those back)." % (n, len(edits))):
             return False
         scene_edit.clear(self.assets_dir)
         self._tree_view_reset()
@@ -3620,7 +3621,7 @@ class TreeEditMixin:
                 n = len(items)
                 answer = self.window.ask_conflicts(
                     "Load scene edits", "%s changes %d thing%s you edited yourself. Tick the "
-                    "ones the file's should replace, or answer for all of them. Reset my "
+                    "ones the file's should replace, or answer for all of them. Revert my "
                     "scenes puts every scene back as the game shipped it first; otherwise "
                     "nothing else of yours changes. No file on this PC is deleted or "
                     "overwritten: the "
@@ -3630,7 +3631,7 @@ class TreeEditMixin:
                     backup_label="Save my scenes, pictures and text to a backup file before "
                                  "replacing any",
                     buttons=[{"id": "cancel", "label": "Cancel"},
-                             {"id": "reset", "label": "Reset my scenes, then load"},
+                             {"id": "reset", "label": "Revert my scenes, then load"},
                              {"id": "skip", "label": "Skip conflicts"},
                              {"id": "replace", "label": "Replace all"},
                              {"id": "pick", "label": "Replace ticked only",
@@ -3866,7 +3867,8 @@ class TreeEditMixin:
             return False
         if not compat.messagebox.askyesno(
                 "Scene edits", "Put this scene back the way the game shipped it? Every move, "
-                "resize, tint, layer change and added picture or text in it is dropped."):
+                "resize, tint, layer change and added picture or text in it is dropped. Its color "
+                "profiles and replaced pictures stay (Reset… on the top bar puts those back)."):
             return False
         scene_edit.clear(self.assets_dir, card)
         self._tree_view_reset(card)

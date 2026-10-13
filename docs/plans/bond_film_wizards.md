@@ -192,6 +192,10 @@ TV, the bar kept, "TOTAL 3,625,000" under the bar.
 
 Done:
 - (1) Light the mode at names several inserts (a Chase across them) and one more held solid (block_modes.py, 059f1f18).
+  PAD-556: the chase (and the shot's lights) wait while `pm_game_wizard_way()` is 0, as the game's own villains do: the
+  owner's Blofeld won YOLT and the villains roved through it. Only the solid film insert shows then. Emulator-proven on
+  the stock LE 1.06 (C:/tmp/PAD-556 run.sh, Mr Osato in the way): main held the chase at the lit, 86 s before Osato
+  ended; the branch held Y.O.L.T. alone and started the chase the tick the way check cleared.
 - (3)/(6) a clip "behind the HUD, over and over" loops in the TV and comes back after a one-shot, a full-screen clip
   or a clip of the game's: the runtime's backdrop on the bank's surface, `value backdrop_surface 1` (a395dd56; MODE_SDK
   "The backdrop on a clip v2 build"). Emulator-proven with the game's own clips (run r1).

@@ -1498,7 +1498,7 @@ def test_a_lit_mode_waits_out_the_games_own_modes_as_its_mini_wizards_do(tmp_pat
     out = play(tmp_path, _lit_prog(), "event", "skill_shot", "way", 0, "shot", "Right ramp", "secs", 0.2, "lamps",
                "way", 1, "shot", "Right ramp")
     assert "not started (its lit shot): one of the game's own modes is in its way - still lit" in out
-    assert re.findall(r"HELD (RIGHT RAMP|MASER READY)", out) == ["RIGHT RAMP", "MASER READY"]
+    assert re.findall(r"HELD (RIGHT RAMP|MASER READY|none)", out) == ["none"]        # PAD-556: its light waits too
     assert out.count("START (its lit shot)") == 1 and out.index("START (its lit shot)") > out.index(">> way 1")
     # a Start the mode that gives way waits on it too; one that runs beside the game's modes does not
     p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
@@ -1508,6 +1508,26 @@ def test_a_lit_mode_waits_out_the_games_own_modes_as_its_mini_wizards_do(tmp_pat
     assert out.count("START (a block)") == 1 and out.index("START (a block)") > out.index(">> way 1")
     out = play(tmp_path, dict(p, game_modes="stack"), "way", 0, "shot", "Left ramp")
     assert "START (a block)" in out
+
+
+def test_a_lit_mode_chases_only_once_the_games_own_mode_is_over(tmp_path):
+    """The Bond owner (PAD-556): Blofeld, the game's villain mode, won You Only Live Twice's last part, and the villain
+    inserts began to rove at once - though the mode cannot start until Blofeld is over, and the game's own mini-wizards
+    rove only then. While the game's own check says something is in the way, only the solid insert (the film's) is
+    held; the shot and the chase come once it is clear, and go again if the game's next mode gets in the way."""
+    lit = dict(LIT, insert="MASER READY,TANK 2,HEAT RAY", pattern="chase", solid="SKILL SHOT", solid_color="#ffffff")
+    p = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [lit]}], seconds=5)
+    out = play(tmp_path, p, "way", 0, "event", "skill_shot", "secs", 0.2, "lamps",      # film won mid-Blofeld
+               "way", 1, "secs", 0.2, "lamps",                                          # Blofeld over: it roves
+               "way", 0, "secs", 0.2, "lamps",                                          # the game's next mode
+               "way", 1, "secs", 0.2, "shot", "Right ramp")
+    held = re.findall(r"HELD (RIGHT RAMP|MASER READY|TANK 2|HEAT RAY|SKILL SHOT|none)", out)
+    assert held == ["SKILL SHOT",
+                    "RIGHT RAMP", "MASER READY", "SKILL SHOT", "TANK 2", "HEAT RAY",
+                    "SKILL SHOT"]
+    assert out.index("LAMP MASER READY ffd000 chase 150") > out.index(">> way 1")
+    assert "LAMP OFF MASER READY TEST MODE" in out
+    assert "START (its lit shot): player 1" in out
 
 
 def test_a_lit_mode_claims_its_shot_while_it_would_start_there(tmp_path):

@@ -35,6 +35,8 @@ import time
 #: many the row menu offers before "Add a music mode…" ("need at least 4", the tester)
 _MODES_MAX = 8
 _MODES_SHOWN = 4
+#: PAD-565: the most files one sound plays in turn, its own one included (sound_modes.TURN_MAX)
+_TURNS_MAX = 16
 
 from .. import compat
 from ..find_originals import FindOriginalsMixin
@@ -176,6 +178,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._mode_levels = {}
         self._modes_legacy = False
         self._rep_mode = None
+        # PAD-565: a slot's files the game plays IN TURN with its own ({rel: [path, ...]}, file 2
+        # first), kept in the same record as the music modes
+        self._turns = {}
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -629,6 +634,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                            if rel in self._by_rel}
             self._mode_levels = {rel: v for rel, v in self._mode_levels.items()
                                  if rel in self._modes}
+            self._turns = {rel: v for rel, v in self._turns.items()
+                           if rel in self._by_rel}
         self._loop = {
             s.rel_path: (bool(saved_loops[s.rel_path])
                          if s.rel_path in saved_loops
@@ -674,7 +681,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                       for _l, _d, rels in self._dup_groups for r in rels)):
             self._dup_groups = None
         self.set(prefix=self._common_prefix(),
-                 modes_share=self._sm_offer is not None or bool(self._modes))
+                 modes_share=(self._sm_offer is not None or bool(self._modes)
+                              or bool(self._turns)))
         if self.audio_group_dups_var.get():
             self._ensure_dup_groups(quiet=True)
         self._refresh_list()
@@ -1053,7 +1061,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         if mode not in ("Changed", "Unchanged"):
             return None
         # PAD-494: a slot with files for other music modes is a change too
-        touched = set(self._assign) | self._changed | set(self._modes)
+        touched = set(self._assign) | self._changed | set(self._modes) | set(self._turns)
         want = mode == "Changed"
         return lambda rel: (rel in touched) == want
 
@@ -1095,6 +1103,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         if md:
             row["md"] = sorted(md)
             row["md_tip"] = self._modes_words(rel)
+        tn = self._turns.get(rel)
+        if tn:
+            row["tn"] = len(tn) + 1
+            row["tn_tip"] = self._turns_words(rel)
         if depth:
             row["d"] = depth
         return row
@@ -1188,7 +1200,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                 rows.append(self._row(s, _cat_disp(s)))
 
         total = len(self._slots)
-        changed_total = len(set(self._assign) | changed | set(self._modes))
+        changed_total = len(set(self._assign) | changed | set(self._modes)
+                            | set(self._turns))
         shown_n = len(slots)
         if total == 0:
             status = ""
@@ -2374,6 +2387,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         sm = self._modes_menu(rel)
         if sm:
             items += [{"sep": True}, sm]
+        tm = self._turns_menu(rel)
+        if tm:
+            items += [] if sm else [{"sep": True}]
+            items.append(tm)
         if self._audio_grow_active() and re.match(
                 r"idx\d+", os.path.basename(rel) or ""):
             items += [{"sep": True},
@@ -2401,6 +2418,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             return False
         if action.startswith("mode_"):
             return self._mode_action(action, rel)
+        if action.startswith("turn_"):
+            return self._turn_action(action, rel)
         if action == "play_orig":
             self._load_track(rel, autoplay="orig")
         elif action == "choose":
@@ -2483,6 +2502,14 @@ class AudioTab(FindOriginalsMixin, TabService):
                     keep[m] = max(min(db, 12), -12)
             if keep:
                 self._mode_levels[rel] = keep
+        self._turns = {}
+        turns = raw.get("turns")
+        for rel, files in (turns.items() if isinstance(turns, dict) else ()):
+            if rel not in self._by_rel or not isinstance(files, (list, tuple)):
+                continue
+            keep = [f for f in files if isinstance(f, str) and f.strip()][:_TURNS_MAX - 1]
+            if keep:
+                self._turns[rel] = keep
 
     def _modes_json(self):
         names = list(self._mode_names)
@@ -2490,7 +2517,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             names.pop()
         slots = {rel: {str(m): f for m, f in sorted(v.items())}
                  for rel, v in sorted(self._modes.items()) if v}
-        if not slots and not names:
+        turns = {rel: list(v) for rel, v in sorted(self._turns.items()) if v}
+        if not slots and not names and not turns:
             return None
         levels = {}
         for rel, v in sorted(self._mode_levels.items()):
@@ -2498,7 +2526,10 @@ class AudioTab(FindOriginalsMixin, TabService):
                     if db and m in (self._modes.get(rel) or {})}
             if keep:
                 levels[rel] = keep
-        return {"names": names, "slots": slots, "levels": levels}
+        out = {"names": names, "slots": slots, "levels": levels}
+        if turns:
+            out["turns"] = turns
+        return out
 
     def _mode_level(self, rel, m):
         """Mode *m*'s file's own loudness offset for slot *rel*, in dB."""
@@ -2693,6 +2724,99 @@ class AudioTab(FindOriginalsMixin, TabService):
             return True
         return False
 
+    # ------------------------------------------------------------------
+    # PAD-565: sounds in turn - a slot's files the game plays one after another
+    # ------------------------------------------------------------------
+    def _turns_why(self, rel):
+        offer = self._sm_offer or {}
+        return offer.get("turns_why") or (offer.get("turn_slots") or {}).get(rel, "")
+
+    def _turns_words(self, rel):
+        """What the row says of a slot's files in turn, or "" for one with none."""
+        tn = self._turns.get(rel) or []
+        if not tn:
+            return ""
+        own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
+               else "the game's own sound")
+        names = [own] + [os.path.basename(f) for f in tn]
+        return ("Each time the game plays this sound it plays the next of these, then starts "
+                "again: " + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
+
+    def _turns_menu(self, rel):
+        """The row menu's "Play in turn" entry and its submenu, or None where the plugin offers
+        no sounds in turn and the slot has none."""
+        tn = self._turns.get(rel) or []
+        offer = self._sm_offer or {}
+        if "turns_why" not in offer and not tn:
+            return None
+        why = self._turns_why(rel)
+        sub = []
+        if why:
+            sub.append({"label": "Why not this sound?", "action": "turn_why"})
+        elif len(tn) + 1 < _TURNS_MAX:
+            sub.append({"label": "Add a sound to play in turn…", "action": "turn_add",
+                        "icon": "plus"})
+        if tn:
+            sub.append({"sep": True})
+            for k, f in enumerate(tn, 2):
+                if not why:
+                    sub.append({"label": "Play sound %d (%s)" % (k, os.path.basename(f)),
+                                "action": "turn_play:%d" % k, "icon": "play"})
+                sub.append({"label": "Take off sound %d (%s)" % (k, os.path.basename(f)),
+                            "action": "turn_off:%d" % k, "icon": "x"})
+        return {"label": "Play in turn" + (" (%d sounds)" % (len(tn) + 1) if tn else ""),
+                "icon": "shuffle", "submenu": sub}
+
+    def _turn_action(self, action, rel):
+        kind, _c, arg = action.partition(":")
+        try:
+            k = int(arg) if arg else 0
+        except ValueError:
+            return False
+        tn = self._turns.get(rel) or []
+        if kind == "turn_why":
+            why = self._turns_why(rel)
+            if why:
+                compat.messagebox.showinfo("Play in turn", why)
+            return bool(why)
+        if kind == "turn_add":
+            if self._turns_why(rel) or len(tn) + 1 >= _TURNS_MAX:
+                return False
+            self._cancel_select_job()
+            self.stop_all_preview_playback()
+            path = self._ask_path(
+                "open", "audio_replacement",
+                "Choose a sound %s plays in turn with its own" % rel,
+                filetypes=_AUDIO_FILETYPES)
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+            if not path:
+                return False
+            self._turns.setdefault(rel, []).append(os.path.normpath(path))
+            self.log("Replace Audio: %s plays %s in turn (sound %d of %d)."
+                     % (rel, os.path.basename(path), len(self._turns[rel]) + 1,
+                        len(self._turns[rel]) + 1), "info")
+            self._modes_changed(rel)
+            return True
+        if not 2 <= k <= len(tn) + 1:
+            return False
+        f = tn[k - 2]
+        if kind == "turn_play":
+            if rel != self._current_rel:
+                self._load_track(rel)
+            self._pane_load("rep", f, autoplay=True,
+                            label="Sound %d in turn: %s" % (k, os.path.basename(f)))
+            return True
+        if kind == "turn_off":
+            del tn[k - 2]
+            if not tn:
+                self._turns.pop(rel, None)
+            self.log("Replace Audio: %s no longer plays %s in turn."
+                     % (rel, os.path.basename(f)), "info")
+            self._modes_changed(rel)
+            return True
+        return False
+
     def _add_mode(self):
         """One more music mode (up to the game's most), named as it is added."""
         n = self._modes_max() + 1
@@ -2741,7 +2865,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         loads. Returns its path, or None."""
         from ...plugins.stern import media_share as MS
         project = self._assets()
-        if not project or not self._modes:
+        if not project or not (self._modes or self._turns):
             compat.messagebox.showinfo(
                 "Save the music modes",
                 "This project has no music modes to save: no sound has a file for another mode "

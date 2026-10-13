@@ -2106,6 +2106,7 @@ def _apply_sound_modes(tgt, plan, record, prior, include_flagged):
         here["slots"] = {r: v for r, v in (here.get("slots") or {}).items() if v}
         here["levels"] = {r: v for r, v in (here.get("levels") or {}).items()
                           if v and r in here["slots"]}
-        if not here["slots"] and not any(here.get("names") or []):
+        if not here["slots"] and not any(here.get("names") or []) \
+                and not here.get("turns"):
             tgt.pop(_SOUND_MODES_KEY, None)
     return n

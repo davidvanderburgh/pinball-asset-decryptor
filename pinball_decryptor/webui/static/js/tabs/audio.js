@@ -626,6 +626,8 @@ export default function AudioTab() {
         : html`<span class="aud-repcell"><button type="button" class=${cx("aud-rep", r.t === "picked" && "picked", r.t === "ondisk" && "ondisk", r.t === "stray" && "stray", !r.t && "choose")}
             onDblClick=${noDbl} onClick=${once(() => { selectOne(r.k); call("audio.choose", r.k); })}>${r.rep}</button>${r.md
           ? html`<span class="aud-modes" aria-label=${`Sounds for music modes ${r.md.join(", ")}`} ...${tip({ head: "Music modes", lines: [r.md_tip] })}><${Icon} name="music" />${r.md.join(" ")}</span>`
+          : null}${r.tn
+          ? html`<span class="aud-modes" aria-label=${`Plays ${r.tn} sounds in turn`} ...${tip({ head: "Play in turn", lines: [r.tn_tip] })}><${Icon} name="shuffle" />${r.tn}</span>`
           : null}</span>` },
   ];
   const selected = sel.length === 1 ? sel[0] : new Set(sel);

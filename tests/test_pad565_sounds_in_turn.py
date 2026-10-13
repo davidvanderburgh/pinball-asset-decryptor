@@ -131,3 +131,126 @@ def test_each_file_in_turn_goes_on_the_card_as_a_record_of_its_own(tmp_path, mon
     assert any("file 3 in turn" in t and "at its turn (file 3)" in t for t in logs)
     assert not any("MUSIC MODE" in t for t in logs)
     assert E._SMo_tag(TANK, SMo.turn_mode(3)).endswith("(file 3 in turn)")
+
+
+# ---- carried: mod routes, the music modes file, back out of a card ---------------------------------
+def test_the_mod_routes_carry_files_in_turn_with_their_slot():
+    from pinball_decryptor.core import staged_changes as SC
+    data = {"sound_modes": {"names": [], "slots": {BOC: {"2": "a.wav"}}, "turns": {TANK: ["b.wav", "c.wav"]}}}
+    rec = SC.sound_modes_of(data)
+    assert rec["slots"] == {BOC: {"2": "a.wav"}, TANK: {"t2": "b.wav", "t3": "c.wav"}}
+    assert SC.sound_modes_of({"sound_modes": {"turns": {TANK: ["b.wav"]}}})["slots"] == {TANK: {"t2": "b.wav"}}
+    # into another project, under the slot it paired with there
+    other = "audio/idx0007 - SE TANK.wav"
+    tgt = {"sound_modes": {"names": [], "slots": {}, "turns": {other: ["mine.wav"]}}}
+    assert SC.merge_sound_modes(tgt, {"names": [], "slots": {other: rec["slots"][TANK]}}) == 1
+    assert tgt["sound_modes"]["turns"] == {other: ["b.wav", "c.wav"]}     # the record's, in order
+    assert tgt["sound_modes"]["slots"] == {}
+    assert SMo.clean(tgt["sound_modes"]).turns == {other: ["b.wav", "c.wav"]}
+
+
+def test_files_in_turn_go_to_the_music_modes_file_and_come_back(tmp_path):
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.plugins.stern import media_share as MS
+    from tests.test_webui_audio import _wav as wav
+    src = str(tmp_path / "src")
+    wav(os.path.join(src, *TANK.split("/")), seconds=0.3)
+    mine = str(tmp_path / "mine" / "Tank B.wav")
+    wav(mine, seconds=0.4, amp=700)
+    SC.save(src, {"sound_modes": {"names": [], "slots": {}, "turns": {TANK: [mine]}}})
+    path = str(tmp_path / "modes.zip")
+    assert MS.save_music_modes(src, path) == {"slots": 1, "files": 1, "gone": []}
+    dst = str(tmp_path / "dst")
+    wav(os.path.join(dst, *TANK.split("/")), seconds=0.3)
+    got = MS.load_music_modes(dst, path)
+    copy = os.path.join(dst, "Music mode files", "Tank B.wav")
+    assert got["record"]["slots"] == {TANK: {"t2": copy}}
+    assert MS.replaced_music(dst, got["record"]) == []
+    assert MS.put_music(dst, got["record"]) == 1
+    assert SMo.load(dst).turns == {TANK: [copy]}
+
+
+def test_an_extract_of_the_card_has_its_files_in_turn_back(tmp_path):
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.plugins.stern import media_share as MS
+    from tests.test_webui_audio import _wav as wav
+    proj = str(tmp_path / "proj")
+    wav(os.path.join(proj, *TANK.split("/")), seconds=0.3)
+    wav(os.path.join(proj, "audio", "idx0040 - SE X.wav"), seconds=0.5, amp=900)
+    m = SMo.clean({"turns": {TANK: [r"C:\mine\Tank B.wav"]}})
+    used = [{"rel": TANK, "slot": 2, "mode": SMo.turn_mode(2), "host": 40, "db": 0, "lines": 1}]
+    cfg = SMo.cfg_text(0, 0, [(SMo.turn_mode(2), 10, b"\x05\x01")], True, record=SMo.card_record(m, used))
+    said = []
+    assert MS.readback("card.raw", proj, lambda t, lvl="info": said.append(t),
+                       padmode={"sounds.cfg": cfg.encode()})["music"] == 1
+    copy = os.path.join(proj, "Music mode files", "Tank B.wav")
+    assert SMo.load(proj).turns == {TANK: [copy]}
+    assert SC.load(proj)["sound_modes"]["turns"] == {TANK: [copy]}
+    # an extract already playing files in turn keeps its own
+    SC.save(proj, {"sound_modes": {"turns": {TANK: ["C:/my.wav"]}}})
+    assert MS.readback("card.raw", proj, padmode={"sounds.cfg": cfg.encode()})["music"] == 0
+    assert SMo.load(proj).turns == {TANK: ["C:/my.wav"]}
+
+
+# ---- the Audio tab ----------------------------------------------------------------------------------
+def test_the_audio_tab_adds_plays_and_takes_off_files_in_turn(tmp_path, monkeypatch):
+    from tests.test_webui_audio import _open, _project, _sidecar, _wav as wav
+    from tests.webui_harness import web_app
+    rel = "audio/idx0001 - Jackpot.wav"
+    monkeypatch.setattr(SMo, "offer", lambda project, rels, probe=True: ("not here", {}))
+    monkeypatch.setattr(SMo, "offer_turns", lambda project, rels, probe=True: (
+        "", {r: "" for r in rels}))
+    proj = _project(tmp_path)
+    b, c = str(tmp_path / "mine" / "Jackpot B.wav"), str(tmp_path / "mine" / "Jackpot C.wav")
+    wav(b)
+    wav(c)
+
+    def entry(w):
+        items = w.call("audio.menu", rel, [rel])
+        return next((i for i in items if str(i.get("label", "")).startswith("Play in turn")), None)
+
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        e = entry(w)
+        assert e["label"] == "Play in turn" and e["icon"] == "shuffle"
+        assert [s["label"] for s in e["submenu"]] == ["Add a sound to play in turn…"]
+        for f in (b, c):
+            w.answers.append(f)
+            assert w.call("audio.menu_action", "turn_add", rel) is True
+        assert _sidecar(proj)["sound_modes"]["turns"] == {rel: [os.path.normpath(b), os.path.normpath(c)]}
+        r = next(r for r in w.state("audio")["rows"] if r["k"] == rel)
+        assert r["tn"] == 3
+        assert r["tn_tip"] == ("Each time the game plays this sound it plays the next of these, then "
+                               "starts again: 1. the game's own sound; 2. Jackpot B.wav; 3. Jackpot C.wav.")
+        assert w.state("audio")["status"].startswith("1 of 3 slots changed")
+        e = entry(w)
+        assert e["label"] == "Play in turn (3 sounds)"
+        assert [s["label"] for s in e["submenu"] if not s.get("sep")] == [
+            "Add a sound to play in turn…", "Play sound 2 (Jackpot B.wav)", "Take off sound 2 (Jackpot B.wav)",
+            "Play sound 3 (Jackpot C.wav)", "Take off sound 3 (Jackpot C.wav)"]
+        assert w.call("audio.menu_action", "turn_play:3", rel) is True
+        assert w.state("audio")["panes"]["rep"]["name"] == "Sound 3 in turn: Jackpot C.wav"
+        assert w.call("audio.menu_action", "turn_off:2", rel) is True
+        assert _sidecar(proj)["sound_modes"]["turns"] == {rel: [os.path.normpath(c)]}
+    # a fresh session has them back
+    with web_app(tmp_path / "again", mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        assert next(r for r in w.state("audio")["rows"] if r["k"] == rel)["tn"] == 2
+
+
+def test_a_game_without_them_says_why(tmp_path, monkeypatch):
+    from tests.test_webui_audio import _open, _project
+    from tests.webui_harness import web_app
+    rel = "audio/idx0001 - Jackpot.wav"
+    monkeypatch.setattr(SMo, "offer", lambda project, rels, probe=True: ("not here", {}))
+    monkeypatch.setattr(SMo, "offer_turns", lambda project, rels, probe=True: ("Not on this game.", {}))
+    from pinball_decryptor.webui import compat
+    said = []
+    monkeypatch.setattr(compat.messagebox, "showinfo", lambda title, text, **k: said.append((title, text)))
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, _project(tmp_path))
+        items = w.call("audio.menu", rel, [rel])
+        e = next(i for i in items if str(i.get("label", "")).startswith("Play in turn"))
+        assert [s["label"] for s in e["submenu"]] == ["Why not this sound?"]
+        assert w.call("audio.menu_action", "turn_why", rel) is True
+        assert said == [("Play in turn", "Not on this game.")]

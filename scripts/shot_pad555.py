@@ -69,7 +69,7 @@ def main():
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
             page = browser.new_page(viewport={"width": 1440, "height": 900})
-            page.add_init_script("try { localStorage.setItem('pad.log.open', '0'); } catch (e) {}")
+            page.add_init_script("try { localStorage.setItem('pad.log.open', '1'); } catch (e) {}")
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             api("ui.pick_manufacturer", "stern")

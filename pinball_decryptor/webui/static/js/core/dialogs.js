@@ -60,7 +60,8 @@ export function FileBrowser({ spec, onDone }) {
   useEffect(() => { load(dir); }, [ft]);
   const entries = (listing && listing.entries) || [];
   const shown = mode === "folder" ? entries.filter((e) => e.dir) : entries;
-  const join = (d, n) => (d.endsWith("/") || d.endsWith("\\") ? d + n : d + (d.includes("\\") ? "\\" : "/") + n);
+  // a whole path typed into the name box is taken as it is
+  const join = (d, n) => /^([A-Za-z]:[\\/]|[\\/])/.test(n) ? n : (d.endsWith("/") || d.endsWith("\\") ? d + n : d + (d.includes("\\") ? "\\" : "/") + n);
   const ok = () => {
     if (mode === "folder") return onDone(dir);
     if (mode === "save") return name ? onDone(join(dir, name)) : null;

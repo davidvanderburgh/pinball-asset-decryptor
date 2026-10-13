@@ -187,3 +187,15 @@ def test_revert_all_changes_is_reset_with_everything_ticked(tmp_path):
     js = open(os.path.join(os.path.dirname(__file__), "..", "pinball_decryptor", "webui", "static",
                            "js", "tabs", "write.js"), encoding="utf-8").read()
     assert 'openDialog("reset", { all: true })}>Revert all changes…' in js
+
+
+def test_the_text_list_file_counts_by_its_edits_not_its_bytes(tmp_path):
+    """The app rewrites text/strings.tsv itself (a project opened on Text or Scenes), so the
+    file differs from the extract's with no edit in it: Text edits counts its edits only."""
+    from pinball_decryptor.core import project_reset as PR
+    from pinball_decryptor.core import text_manifest
+    proj = tmp_path / "proj"
+    text_manifest.save(str(proj), [{"path": "x.radium", "original": "HELLO", "replacement": ""}])
+    assert PR.counts(str(proj), changed=["text/strings.tsv"])["text"] == 0
+    text_manifest.save(str(proj), [{"path": "x.radium", "original": "HELLO", "replacement": "HI"}])
+    assert PR.counts(str(proj), changed=["text/strings.tsv"])["text"] == 1

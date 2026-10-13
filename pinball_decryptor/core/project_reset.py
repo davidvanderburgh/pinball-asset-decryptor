@@ -57,6 +57,11 @@ _SIDECAR = {
 }
 
 
+#: extracted files that hold a kind's records: the app rewrites them, so they differ from the
+#: extract with no change in them; their changes are counted from what they record
+_RECORD_FILES = frozenset({"text/strings.tsv"})
+
+
 def _colour_keys():
     from . import colour_profile as cp
     return (cp.KEY, cp.ASSET_KEY, cp.ALL_IMAGES_KEY, cp.ALL_VIDEOS_KEY, cp.IMAGE_SLOTS_KEY,
@@ -165,6 +170,8 @@ def counts(assets_dir, changed=None):
     except Exception:                                # noqa: BLE001
         pass
     for rel in changed or ():
+        if rel.replace("\\", "/").lower() in _RECORD_FILES:
+            continue                                 # counted by its edits above
         kind = kind_of_rel(rel)
         if kind is not None:
             out[kind] += 1

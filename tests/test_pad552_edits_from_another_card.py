@@ -137,3 +137,76 @@ def test_start_differences_name_the_node_and_how_far():
     assert got == [{"node": 53, "name": "Title", "what": "off by -300.0,+0.0 px"}]
     assert X.start_differences(his, MOVES, st) == []
     assert X.start_differences(_man(), MOVES, None) == []
+
+
+# ---------------------------------------------------------------------------------------------
+# round 4 (computer B): B's project is of the stock card with B's own edits; A's project is of
+# the card B wrote from them, and A's file holds only what A changed since.  Loaded on B it
+# replaced B's edits, so B's banner, hidden text and moves were gone: it goes after them now
+# ---------------------------------------------------------------------------------------------
+def test_edits_made_on_top_of_mine_go_after_mine():
+    st = X.states_of(_built(_man(), EARLIER), MOVES)
+    assert X.on_top_of(_man(), EARLIER, MOVES, st) == MOVES
+    # loaded again: nothing more to add
+    assert X.on_top_of(_man(), EARLIER + MOVES, MOVES, st) == []
+    assert X.on_top_of(_man(), EARLIER + MOVES[:1], MOVES, st) == MOVES[1:]
+    # other edits of mine, or a file made on the stock card, or no states: not on top of mine
+    other = [{"op": "move", "node": 53, "dx": 0.0, "dy": 77.0}]
+    assert X.on_top_of(_man(), other, MOVES, st) is None
+    assert X.on_top_of(_man(), EARLIER, MOVES, X.states_of(_man(), MOVES)) is None
+    assert X.on_top_of(_man(), EARLIER, MOVES, None) is None
+
+
+def test_an_add_of_theirs_gets_an_id_mine_does_not_use():
+    mine = [{"op": "shadow", "node": 53, "id": X.FIRST_ADDED_ID + 1, "dx": 4.0, "dy": 4.0,
+             "mul": [0.0, 0.0, 0.0, 0.6]}]
+    theirs = [dict(mine[0], node=50), {"op": "move", "node": X.FIRST_ADDED_ID + 1,
+                                       "dx": 1.0, "dy": 0.0}]
+    got = X._renumbered(theirs, mine)
+    assert got[0]["id"] != X.FIRST_ADDED_ID + 1 and got[1]["node"] == got[0]["id"]
+
+
+def test_the_page_puts_them_after_mine(tmp_path):
+    from tests.test_gui_scene_editor import CARD, _open, _seed
+    from tests.webui_harness import web_app
+    a, b = tmp_path / "a", tmp_path / "b"
+    for d in (a, b):
+        _seed(d)
+    # A's project is of the card B wrote with EARLIER
+    tree = a / "images" / "scene_textures" / "scene_tree.json"
+    trees = json.loads(tree.read_text(encoding="utf-8"))
+    trees[CARD] = _built(trees[CARD], EARLIER)
+    tree.write_text(json.dumps(trees), encoding="utf-8")
+    X.save(str(a), {CARD: MOVES})
+    zip_path = str(tmp_path / "a scenes.zip")
+    assert X.export_edits(str(a), zip_path) == 1
+    X.save(str(b), {CARD: EARLIER})
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, b)
+        for _round in range(2):                       # the second load adds nothing
+            w.answers.append(zip_path)
+            assert w.call("text_scenes.edits_load") == [CARD]
+            assert X.ops_for(str(b), CARD) == EARLIER + MOVES
+            cap = w.state("text_scenes")["caption_full"]
+            assert "start out" not in cap, cap
+            assert "after your own edits" in cap, cap
+        report = sorted((b / "logs").glob("Load a scenes *.txt"))[-1].read_text(
+            encoding="utf-8")
+        assert "added after your own 1 edit" in report, report
+
+
+def test_a_picture_the_write_put_on_the_card_is_my_added_one(tmp_path):
+    from PIL import Image
+    from pinball_decryptor.plugins.stern import scene_share
+    tex = tmp_path / "images" / "scene_textures" / "added"
+    tex.mkdir(parents=True)
+    Image.new("RGB", (4, 4), (200, 40, 40)).save(str(tex / "Logo_1.png"))
+    X.save(str(tmp_path), {SCARD: [{"op": "add_picture", "id": X.FIRST_ADDED_ID + 1,
+                                    "name": "PAD_Logo", "image": "scene_textures/added/Logo_1.png",
+                                    "parent": 1, "index": 1, "w": 4, "h": 4, "x": 0, "y": 0}]})
+    rel = "images/scene_textures/radimg_PAD_Logo_2048x683_abe91f0e.png"
+    extras = {"pictures": {}, "colored": {rel: {"profile": None, "drawn": [[SCARD, "1246"]]}}}
+    moved = {}
+    got = scene_share.localise(str(tmp_path), extras, {SCARD: {"objects": {}}}, moved=moved)
+    assert sorted(got["colored"]) == ["images/scene_textures/added/Logo_1.png"]
+    assert moved == {rel: ["images/scene_textures/added/Logo_1.png"]}

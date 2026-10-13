@@ -68,6 +68,15 @@ if [ "$MP" = "/" ]; then WREL=$W; else WREL=${W#"$MP"}; fi
 case "${1:-game}" in
 game)
     for pid in $(pgrep -x game 2>/dev/null); do
+        # A ZOMBIE is nobody's running game, and it would land in the "alive
+        # but unreadable" branch below: its mountinfo cannot be read while
+        # /proc/<pid> still exists.  PAD-558: a Spike 2 slot run's defunct
+        # guest made the Spike 1 tab open its DMD and switch windows at app
+        # start and reopen them on every poll.  The state is the field after
+        # the ") " that closes comm.
+        st=$(cat "/proc/$pid/stat" 2>/dev/null) || continue
+        st=${st##*) }
+        case "$st" in Z*|X*) continue ;; esac
         if mi=$(cat "/proc/$pid/mountinfo" 2>/dev/null); then
             case "$mi" in *"$WREL/"*) echo "$pid" ;; esac
         elif [ -d "/proc/$pid" ]; then

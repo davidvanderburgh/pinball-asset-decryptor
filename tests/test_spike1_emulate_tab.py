@@ -436,6 +436,14 @@ def test_helper_runs_and_answers_nothing_when_no_guest_is_ours(tmp_path):
     assert out.stdout.decode().strip() == ""
 
 
+def test_a_zombie_guest_is_nobodys_game():
+    """PAD-558: a zombie's mountinfo is unreadable while /proc/<pid> exists,
+    so the "alive but unreadable" branch claimed a Spike 2 run's defunct
+    guest and the Spike 1 windows opened at app start."""
+    own = _rig_code("s1own.sh")
+    assert "/proc/$pid/stat" in own
+    assert "Z*" in own
+
 # ------------------------------------------------- the speaker's PCM rate --
 # The DMD generation is 44100x2; the 2012 home models run their DAC at 24000
 # (sys_dac_init asks for rate index 3).  Opening the speaker at the wrong rate

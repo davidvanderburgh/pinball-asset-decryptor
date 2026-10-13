@@ -890,6 +890,8 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         if d != self._sel:
             self._focus_want = None
             self._drop_live_edit()
+        else:
+            self.set(item=None, thumb="")             # picked again: nothing in it picked
         self._tree_unselect()
         self._sel = d
         self._on_select()
@@ -930,7 +932,9 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                        % len(sc["images"]), "open": True, "items": [
                            {"id": "img::" + rel,
                             "text": os.path.basename(rel),
-                            "info": "double-click: show on Images tab"}
+                            "info": "double-click: show on Images tab",
+                            # PAD-567: the row's own small picture
+                            "thumb": self._item_thumb(rel)}
                            for _off, rel in sc["images"]]})
         fonts = [{"id": "font::" + table, "text": "%s (%dpx)"
                   % (name or table, px),
@@ -984,7 +988,12 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                             "text": os.path.basename(rel),
                             "info": "double-click: show on Video tab"}
                            for rel in sc["videos"]]})
-        item = None
+        # PAD-567: the list drawn again for the same scene (the Text tab's scan, a recolour)
+        # keeps the row that was picked
+        was = self.store.get(self.ns, "contents") or {}
+        item = self.store.get(self.ns, "item") if was.get("path") == sel else None
+        if item not in {it["id"] for g in groups for it in g["items"]}:
+            item = None
         if self._focus_want:
             scene, line = self._focus_want
             if scene == sel:
@@ -997,19 +1006,24 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                 self._focus_want = None
         self.set(sel=sel, detail=sel, contents={"path": sel,
                                                 "groups": groups},
-                 item=item, thumb="")
+                 item=item, thumb=self._item_thumb(item[5:])
+                 if item and item.startswith("img::") else "")
         self._render_preview(sel)
+
+    def _item_thumb(self, rel):
+        """The picture file at *rel* under the project, "" when it is not there."""
+        path = os.path.join(self.assets_dir, *rel.split("/"))
+        return path if os.path.isfile(path) else ""
 
     @rpc
     def select_item(self, iid):
         """A contents row was picked: an image shows as a thumbnail."""
-        thumb = ""
-        if iid and iid.startswith("img::"):
-            rel = iid[5:]
-            path = os.path.join(self.assets_dir, *rel.split("/"))
-            if os.path.isfile(path):
-                thumb = path
+        thumb = self._item_thumb(iid[5:]) if iid and iid.startswith("img::") else ""
         self.set(item=iid, thumb=thumb)
+        # PAD-567 (DragonRR: "when any of the items in the list is selected it does
+        # nothing"): in the scene editor the row picks its layer on the preview, which is
+        # drawn on top while it is picked
+        tree = bool(iid) and bool(self.store.get(self.ns, "tree")) and self._tman is not None
         if iid and iid.startswith("txt::") and self._item_text(iid) is not None:
             # a line picked by hand: Previous / Next go on from it (PAD-468)
             hits = self._find_hits()
@@ -1017,6 +1031,14 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
             if hit in hits:
                 self._find_at = hit
                 self.set(find={"pos": hits.index(hit) + 1, "n": len(hits)})
+            if tree:
+                self._find_stepping = True
+                try:
+                    self._find_layer(self._sel, int(iid[5:]))
+                finally:
+                    self._find_stepping = False
+        elif tree:
+            self._tree_pick_item(iid)
         return True
 
     # ------------------------------------------------------------------

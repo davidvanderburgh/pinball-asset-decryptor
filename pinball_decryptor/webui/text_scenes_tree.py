@@ -1591,6 +1591,61 @@ class TreeEditMixin:
             self._tree_publish(card, self._tman, self._tree_frame(card, _man))
         return True
 
+    def _tree_item_nodes(self, iid):
+        """PAD-567 (DragonRR): the layers a Contents row (``img::``, ``font::``, ``vid::``)
+        stands for, in drawing order.  A picture is the layers that draw it themselves, else
+        the groups holding them; a font the lines of text drawn in it; a video the video
+        layers that play it (any video layer when none names it)."""
+        man = self._tman
+        if man is None or not iid or "::" not in iid:
+            return []
+        what, key = iid.split("::", 1)
+        objs = man["objects"]
+        walk = [n for n, _p, _d in _walk_man(man)]
+
+        def own(n, kind):
+            return [o for o in ((objs.get(str(oid)) or {}) for _s, oid in n["comps"])
+                    if o.get("kind") == kind]
+
+        if what == "img":
+            rel = key[len("images/"):] if key.startswith("images/") else key
+
+            def draws(n):
+                for _s, oid in n["comps"]:
+                    o = objs.get(str(oid)) or {}
+                    k = o.get("kind")
+                    if (k == "Bitmap" and o.get("image") == rel
+                            or k == "Shape" and o.get("fill") is not None
+                            and (objs.get(str(o["fill"])) or {}).get("image") == rel
+                            or k == "StreamingFlipbook"
+                            and any(fr and fr.get("image") == rel for fr in o.get("seq") or ())):
+                        return True
+                return False
+            out = [n["id"] for n in walk if draws(n)]
+            if not out:
+                memo = {}
+                out = [n["id"] for n in walk if rel in _pics_of(man, n, memo)]
+            return out
+        if what == "font":
+            return [n["id"] for n in walk if any(o.get("font") == key for o in own(n, "Text"))]
+        if what == "vid":
+            stem = os.path.splitext(os.path.basename(key))[0].lower()
+            vids = [n for n in walk if own(n, "Video")]
+            named = [n["id"] for n in vids
+                     if any(stem in (c.lower() for c in o.get("clips") or ())
+                            for o in own(n, "Video"))]
+            return named or [n["id"] for n in vids]
+        return []
+
+    def _tree_pick_item(self, iid):
+        """PAD-567: a Contents row picked in the scene editor picks its layer; the same row
+        again goes on to the next layer that uses it (a picture drawn several times)."""
+        nodes = self._tree_item_nodes(iid)
+        if not nodes:
+            return False
+        at = nodes.index(self._tsel) + 1 if self._tsel in nodes else 0
+        return self.tree_select(nodes[at % len(nodes)])
+
     def _tree_select_more(self, card, node, how):
         sels = self._tree_sels()
         if how == "add":

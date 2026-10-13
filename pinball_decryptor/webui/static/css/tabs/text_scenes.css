@@ -103,6 +103,12 @@
 .sc-item.sel { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
 .sc-item.note { color: var(--ink-3); font-style: italic; }
 .sc-sw { width: 12px; height: 12px; border-radius: 3px; }
+/* PAD-567 (DragonRR): a Contents row is its name, after its small picture (or text colour) */
+.ct-item { grid-template-columns: 22px minmax(0, 1fr); gap: 8px; padding-left: 22px; }
+.sc-pic { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 3px;
+  background: repeating-conic-gradient(#3a3a42 0% 25%, #2a2a30 0% 50%) 0 0 / 8px 8px; overflow: hidden; }
+.sc-pic img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.ct-item .sc-sw { justify-self: center; }
 .scenes-canvas { aspect-ratio: 1360 / 768; border-radius: 8px; border: 1px solid var(--line-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .scenes-canvas img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .scenes-msg { color: #6b6b76; font-size: 13px; }

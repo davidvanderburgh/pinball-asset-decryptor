@@ -20,8 +20,9 @@ log = logging.getLogger(__name__)
 INTRO = ("Put parts of this project back the way they were extracted from the card, to "
          "start over. It works on the whole project at once: to put back one scene, use "
          "Revert on the Scenes tab instead.")
-WARNING = ("This cannot be undone. What you tick is deleted from the project folder; files "
-           "of your own you picked from elsewhere stay where they are.")
+WARNING = ("This cannot be undone: your changes to what you tick are gone for good. Files of "
+           "your own that you picked from elsewhere stay where they are, and nothing on a card "
+           "changes until the next Write.")
 
 
 class ResetMixin:

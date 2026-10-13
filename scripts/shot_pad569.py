@@ -40,6 +40,15 @@ def main():
     project = base._project(scratch)
     if os.path.isdir(MODE):
         shutil.copytree(MODE, os.path.join(project, "modes", "new_mode"))
+    # the copy leaves out audio/ (too big): its baseline rows would count as 2,500 missing
+    # sounds to put back
+    base_file = os.path.join(project, ".checksums.md5")
+    st = os.stat(base_file)
+    with open(base_file, encoding="utf-8") as f:
+        rows = [r for r in f if not r.startswith(tuple(n + "/" for n in base.SKIP))]
+    with open(base_file, "w", encoding="utf-8", newline="\n") as f:
+        f.writelines(rows)
+    os.utime(base_file, (st.st_atime, st.st_mtime))
     print("serving", repo, "project", project, flush=True)
     proc, url = base._serve(repo, scratch, project)
     api = lambda m, *a: webui_shot.api(url, m, *a)          # noqa: E731

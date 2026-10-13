@@ -240,3 +240,35 @@ def test_text_tab_saves_and_loads_edits(tmp_path):
         assert got[("/g/aaaaaaaaaaaaaaaaaaaa/scene.radium", "GODZILLA VS EBIRAH")] == \
             "GODZILLA VS RODAN"
         assert "1 of them is not on this card" in json.dumps(w.asked[-1])
+
+
+def test_video_tab_saves_and_loads_into_another_project(tmp_path):
+    """PAD-555: the Video tab's Save settings stopped on "'VideoTab' object
+    has no attribute '_save_staged_changes'" (and Load settings would have)."""
+    from tests import test_webui_video as T
+    from tests.webui_harness import web_app
+    a_root, b_root = tmp_path / "a", tmp_path / "b"
+    a_root.mkdir()
+    b_root.mkdir()
+    src, dst = T._project(a_root), T._project(b_root)
+    mine = T._mine(tmp_path)
+    out = str(tmp_path / "video settings.json")
+    with web_app(tmp_path, mfr="stern") as w:
+        T._scan(w, src)
+        w.answers.append(str(mine))
+        assert w.call("video.choose", "video/intro.mp4") is True
+        w.answers = [out]
+        assert w.call("video.settings_save") == out
+        assert TS.read(out, "video")
+
+        T._set_project(w, dst)
+        w.call("video.scan")
+        T._wait(w, lambda st: not st.get("scanning") and st.get("rows")
+                and st.get("project") == str(dst))
+        assert w.window.pending_video_assignments(str(dst)) is None
+        w.answers = [out]
+        assert w.call("video.settings_load") == {"slots": 1, "missing": 0, "gone": 0}
+        T._wait(w, lambda st: not st.get("scanning") and st.get("rows")
+                and w.window.pending_video_assignments(str(dst))[1])
+        assigns = w.window.pending_video_assignments(str(dst))[1]
+        assert assigns == {"video/intro.mp4": str(mine)}

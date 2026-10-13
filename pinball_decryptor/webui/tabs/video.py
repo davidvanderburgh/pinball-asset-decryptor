@@ -2167,7 +2167,7 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         from .. import tab_settings_ui
         folder = self._settings_dir()
         return tab_settings_ui.save_media(self, "video", folder, bool(folder),
-                                          self._save_staged_changes)
+                                          self._save_staged)
 
     @rpc
     def settings_load(self, path=None):
@@ -2177,7 +2177,7 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         return tab_settings_ui.load_media(
             self, "video", self._settings_dir(),
             set(self._by_rel) - set(self._m_virtual),
-            self._is_running(), self._save_staged_changes,
+            self._is_running(), self._save_staged,
             self._scan_async, path)
 
     # ---- Export CSV (MainWindow._video_export_csv) ----------------------

@@ -7763,9 +7763,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         "modes are not put on this card (its sounds can't be "
                         "re-encoded).", "warning")
                 if sound_modes:
-                    log("Music modes: the files for the other music modes are "
-                        "not put on this card (its sounds can't be re-encoded).",
-                        "warning")
+                    log("Music modes: the files for the other music modes and "
+                        "the sounds in turn are not put on this card (its sounds "
+                        "can't be re-encoded).", "warning")
                     sound_modes = None
                 audio_edits = {}
                 music_edits = []
@@ -8393,7 +8393,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # PAD-494: MUSIC MODE in the operator menu, once the bank carries the
         # music modes' files (sound_modes_cfg); without it they are not played
         music_menu = (_MusicModeMenu(sound_modes.count, sound_modes.menu_names(),
-                                     log) if sound_modes_cfg else None)
+                                     log) if sound_modes_cfg and sound_modes.count else None)
         # PAD-495: EDITION beside it, one category table for both
         edition_menu = _EditionMenu(len(editions), editions, log) if editions else None
         # PAD-537: the picture settings take the spare settings those two leave
@@ -8964,8 +8964,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "variants": ([v.rel for v in mode_plan.variants.slots]
                              if mode_plan.variants is not None else []),
                 # PAD-494: the slots with files for other music modes
-                "music_modes": ([("%s (mode %d)" % (os.path.basename(u["rel"]), u["mode"]))
-                                 for u in sound_mode_used]
+                "music_modes": ([_SMo_tag(u["rel"], u["mode"]) for u in sound_mode_used]
                                 if getattr(mode_plan, "sounds_file", "") else []),
                 # PAD-537: the picture settings the operator menu got
                 "picture": ([m.setting.caption.upper() for m in picture_menus
@@ -9774,7 +9773,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     from . import mode_write as _MW
     from . import sound_modes as _SMo
     modes = _SMo.load(assets_dir)
-    if not modes.count:
+    if not modes.any:
         return None, None
     n = len(modes.files())
     if not _SMo.enabled():
@@ -9794,14 +9793,30 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     prof = None
     if not why:
         prof = _SMo.project_title(assets_dir, probe=True)
-        why = _SMo.title_refusal(prof)
+        why = _SMo.title_refusal(prof) if modes.count else ""
+        if why and modes.turns and not _SMo.title_refusal(prof, turns=True):
+            # PAD-565: a title the sounds in turn work on and the menu setting not (yet)
+            log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
+                % (len(modes.files()) - sum(map(len, modes.turns.values())), why.rstrip(".")),
+                "warning")
+            modes.slots, modes.names, why = {}, [], ""
+        elif not why and modes.turns:
+            why = _SMo.title_refusal(prof, turns=True)
     if why:
-        log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
-            % (n, why.rstrip(".")), "warning")
+        if modes.count:
+            log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
+                % (n, why.rstrip(".")), "warning")
+        else:
+            log("Sounds in turn: %d file(s) the game would play in turn are left out of this build: "
+                "%s." % (n, why.rstrip(".")), "warning")
         return None, None
-    log("Found %d file(s) for %d music modes (%s)." % (
-        n, modes.count, ", ".join("%d %s" % (m, modes.name(m)) for m in range(1, modes.count + 1))),
-        "info")
+    if modes.count:
+        log("Found %d file(s) for %d music modes (%s)." % (
+            len(modes.files()) - sum(map(len, modes.turns.values())), modes.count,
+            ", ".join("%d %s" % (m, modes.name(m)) for m in range(1, modes.count + 1))), "info")
+    if modes.turns:
+        log("Found %d sound(s) that play %d more file(s) in turn." % (
+            len(modes.turns), sum(map(len, modes.turns.values()))), "info")
     return modes, prof
 
 
@@ -10018,6 +10033,11 @@ def _editions_for_build(assets_dir, log):
     return names
 
 
+def _SMo_tag(rel, mode):
+    from . import sound_modes as _SMo
+    return _SMo.tag(rel, mode)
+
+
 def _sm_hosts(used):
     """The host records of the music modes' files (grown, left un-pointed)."""
     return {int(u["host"]) for u in used or ()}
@@ -10169,26 +10189,27 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
     used, taken = [], {i for i in (_SMo.slot_idx(r) for r in modes.slots) if i is not None}
     hosted = {}                       # (slot, converted file, dB, room) -> (host, frames)
     for rel, mode, src in modes.files():
-        what = "%s's file for mode %d (%s)" % (os.path.basename(rel), mode, modes.name(mode))
+        what = _SMo.what(rel, mode, modes.name(mode))
+        who, when = _SMo.who(mode), _SMo.when(mode)
         db = modes.level(rel, mode)
         slot = _SMo.slot_idx(rel)
         p = byidx.get(slot) if slot is not None else None
         if p is None:
-            log("Music modes: %s is not put on this card: %s" % (what, _SMo.NOT_SOUND), "warning")
+            log("%s: %s is not put on this card: %s" % (who, what, _SMo.NOT_SOUND), "warning")
             continue
         try:
             wav = _SMo.convert(assets_dir, rel, mode, src, log)
         except (_SMo.SoundModeError, OSError) as e:
-            log("Music modes: %s is not put on this card: %s." % (what, e), "warning")
+            log("%s: %s is not put on this card: %s." % (who, what, e), "warning")
             continue
         want = _wav_frames_44k(wav)
         if not want:
-            log("Music modes: %s is not put on this card: its converted copy cannot be read."
-                % what, "warning")
+            log("%s: %s is not put on this card: its converted copy cannot be read."
+                % (who, what), "warning")
             continue
         # the other slots with a file of their own in this mode play their own part of a song
         own = {i for i in (_SMo.slot_idx(r) for r, f in modes.slots.items() if mode in f)
-               if i is not None and i != slot}
+               if i is not None and i != slot} if not _SMo.is_turn(mode) else set()
         song = _sound_mode_song(slot, plays, byidx, own)
         bodies = _sound_mode_bodies(slot, song, plays, byidx)
         room = emitted_length(int(p.get("length", 0) or 0))
@@ -10208,36 +10229,37 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
             # the same file at the same loudness in another mode of this slot: its record
             host, want = hosted[key]
             used.append(dict(entry, host=int(host), frames=int(want), idx=int(host)))
-            log("Music modes: %s (%s) is the same file as another mode of sound idx %d and plays "
-                "from the same new record (idx %d's copy) while MUSIC MODE is %d." % (
-                    what, os.path.basename(src), slot, host, mode), "info")
+            log("%s: %s (%s) is the same file as another %s sound idx %d and plays "
+                "from the same new record (idx %d's copy) %s." % (
+                    who, what, os.path.basename(src),
+                    "file in turn of" if _SMo.is_turn(mode) else "mode of", slot, host, when), "info")
             continue
         if song:
-            log("Music modes: the game plays sound idx %d as the start of a song that goes on "
-                "into %s, so %s plays in place of the whole song (%.2f s) while MUSIC MODE is %d."
-                % (slot, " and ".join("idx %d (%.2f s)" % (i, int(byidx[i]["length"]) / 44100.0)
-                                      for i in rest), what, room / 44100.0, mode), "info")
+            log("%s: the game plays sound idx %d as the start of a song that goes on "
+                "into %s, so %s plays in place of the whole song (%.2f s) %s."
+                % (who, slot, " and ".join("idx %d (%.2f s)" % (i, int(byidx[i]["length"]) / 44100.0)
+                                           for i in rest), what, room / 44100.0, when), "info")
         if bodies:
-            log("Music modes: sound id %s play%s that song without its opening, so %s plays there "
-                "too while MUSIC MODE is %d." % (
-                    ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
-                    mode), "info")
+            log("%s: sound id %s play%s that song without its opening, so %s plays there "
+                "too %s." % (
+                    who, ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
+                    when), "info")
         if not longer_ok and want > room:
             # as a replacement is with "Allow replacements longer than the original" off
             try:
                 wav = _SMo.cut(wav, room)
             except (OSError, EOFError) as e:
-                log("Music modes: %s is not put on this card: it could not be cut to its slot's "
-                    "length (%s)." % (what, e), "warning")
+                log("%s: %s is not put on this card: it could not be cut to its slot's "
+                    "length (%s)." % (who, what, e), "warning")
                 continue
-            log("Music modes: %s (%.2f s) is cut to its %s %.2f s: %s." % (
-                what, want / 44100.0, "song's" if song else "slot's", room / 44100.0,
+            log("%s: %s (%.2f s) is cut to its %s %.2f s: %s." % (
+                who, what, want / 44100.0, "song's" if song else "slot's", room / 44100.0,
                 longer_why or "longer replacements are off"), "info")
             want = room
         host = _sound_mode_host(params, p, want, audio_edits, taken)
         if host is None:
-            log("Music modes: %s is not put on this card: no sound record is left to hold it."
-                % what, "warning")
+            log("%s: %s is not put on this card: no sound record is left to hold it."
+                % (who, what), "warning")
             continue
         hlen = int(byidx[host].get("length", 0) or 0)
         audio_edits[host] = wav
@@ -10245,10 +10267,10 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         taken.add(host)
         hosted[key] = (host, int(want))
         used.append(dict(entry, host=int(host), frames=int(want), idx=int(host)))
-        log("Music modes: %s (%s, %.2f s%s) goes on the card as a new record (a copy of sound idx "
-            "%d) that the game plays for sound idx %d while MUSIC MODE is %d." % (
-                what, os.path.basename(src), want / 44100.0,
-                ", its own loudness %+d dB" % db if db else "", host, slot, mode), "info")
+        log("%s: %s (%s, %.2f s%s) goes on the card as a new record (a copy of sound idx "
+            "%d) that the game plays for sound idx %d %s." % (
+                who, what, os.path.basename(src), want / 44100.0,
+                ", its own loudness %+d dB" % db if db else "", host, slot, when), "info")
     return audio_edits, grows, used
 
 
@@ -10256,6 +10278,7 @@ def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
     """PAD-494: the music modes' files take what the sound bank has left (the game's 2 GB) after
     every sound the game plays in each mode; one that does not fit is left out, and that slot
     plays its own sound in that mode. Returns ``(grows, audio_edits, used)``."""
+    from . import sound_modes as _SMo
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
     with open(_lp(img_path), "rb") as f:
@@ -10270,10 +10293,11 @@ def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
     out = []
     for u in used:
         if int(u["host"]) in cut:
-            log("Music modes: %s's file for mode %d (%s) is left out: the sound bank would pass "
-                "the %d MB the game can open. That slot plays its own sound in mode %d." % (
-                    os.path.basename(u["rel"]), u["mode"], u["name"], MAX_IMAGE_BYTES // 10**6,
-                    u["mode"]), "warning")
+            log("%s: %s is left out: the sound bank would pass the %d MB the game can open. That "
+                "slot plays its own sound %s." % (
+                    _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u["name"]),
+                    MAX_IMAGE_BYTES // 10**6, _SMo.when(u["mode"]).replace("at its turn", "in its turn")
+                    ), "warning")
             continue
         out.append(u)
     return grows, audio_edits, out
@@ -10460,7 +10484,9 @@ def _mode_descriptor_table(found, params, mask, used, log):
     lines for one sound id played one slot's file and the other's stock part). A sound id that
     plays a slot as the opening part of a song (*used* ``"song"``, :func:`_sound_modes_grow`)
     plays its file in place of the whole song (:func:`_mode_song_descriptor`), and so does one that
-    plays that song without its opening (``"bodies"``, :func:`_sound_mode_bodies`)."""
+    plays that song without its opening (``"bodies"``, :func:`_sound_mode_bodies`). PAD-565: a
+    slot's file in turn is a pseudo mode of its own (:func:`.sound_modes.turn_mode`)."""
+    from . import sound_modes as _SMo
     from .spike2 import sfx_names as SN
     from .spike2.emulator import emitted_length
     byidx = {p["idx"]: p for p in params}
@@ -10473,14 +10499,15 @@ def _mode_descriptor_table(found, params, mask, used, log):
     modes = {}                          # mode -> {slot key: (host key, mode units, slot units, u)}
     for u in used:
         sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
-        what = "%s's file for mode %d (%s)" % (os.path.basename(u["rel"]), u["mode"], u["name"])
+        what = _SMo.what(u["rel"], u["mode"], u["name"])
+        who = _SMo.who(u["mode"])
         if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
-            log("Music modes: %s is left out: its record did not come out of the grown bank."
-                % what, "warning")
+            log("%s: %s is left out: its record did not come out of the grown bank."
+                % (who, what), "warning")
             continue
         slot_key, host_key = bytes(sp["findkey"]), bytes(hp["findkey"])
         if not by_key.get(slot_key):
-            log("Music modes: %s is left out: no sound id of the game plays that slot." % what,
+            log("%s: %s is left out: no sound id of the game plays that slot." % (who, what),
                 "warning")
             continue
         slot_units = _duration_units_emitted(sp["length"])
@@ -10512,9 +10539,10 @@ def _mode_descriptor_table(found, params, mask, used, log):
                     d = _mode_song_descriptor(desc, sid, mask, keys[0], sw[0], sw[1], units[0],
                                               units[1:], extent=extent)
                 if d is None:
-                    log("Music modes: sound id %d plays the song sound idx %d opens without its "
-                        "opening, but not in a way this app can change, so in mode %d it plays "
-                        "the game's own." % (sid, sw[3]["slot"], mode), "warning")
+                    log("%s: sound id %d plays the song sound idx %d opens without its "
+                        "opening, but not in a way this app can change, so %s it plays "
+                        "the game's own." % (_SMo.who(mode), sid, sw[3]["slot"], _SMo.when(mode)),
+                        "warning")
                     continue
                 out.append((int(mode), int(sid), d))
                 n[slot_key] = n.get(slot_key, 0) + 1
@@ -10530,10 +10558,10 @@ def _mode_descriptor_table(found, params, mask, used, log):
                         desc, sid, mask, keys[0], sw[0], sw[1], sw[2],
                         [_duration_units_emitted(q["length"]) for q in parts], extent=extent)
                 if d is None:
-                    log("Music modes: sound id %d plays sound idx %d as the start of a song, but "
-                        "not in a way this app can change, so in mode %d it plays the file and "
-                        "then the rest of the game's own song." % (sid, sw[3]["slot"], mode),
-                        "warning")
+                    log("%s: sound id %d plays sound idx %d as the start of a song, but "
+                        "not in a way this app can change, so %s it plays the file and "
+                        "then the rest of the game's own song." % (
+                            _SMo.who(mode), sid, sw[3]["slot"], _SMo.when(mode)), "warning")
                 else:
                     done = {keys[0]}
                     songs.setdefault(sw[3]["slot"], []).append(sid)
@@ -10542,9 +10570,9 @@ def _mode_descriptor_table(found, params, mask, used, log):
             if d is None:
                 for k in sorted(set(keys) & set(swaps)):
                     u = swaps[k][3]
-                    log("Music modes: %s's file for mode %d (%s) is left out for sound id %d: the "
-                        "new record's key has bits its descriptor cannot carry." % (
-                            os.path.basename(u["rel"]), mode, u["name"], sid), "warning")
+                    log("%s: %s is left out for sound id %d: the new record's key has bits its "
+                        "descriptor cannot carry." % (
+                            _SMo.who(mode), _SMo.what(u["rel"], mode, u["name"]), sid), "warning")
                 continue
             out.append((int(mode), int(sid), d))
             for k in done:
@@ -10558,8 +10586,10 @@ def _mode_descriptor_table(found, params, mask, used, log):
                    for sids_, what in ((songs.get(slot), "the whole song"),
                                        (nointro.get(slot), "the song without its opening"))
                    if sids_]
-            log("Music modes: mode %d of sound idx %d plays the new record through %d sound id(s) "
-                "of the game%s." % (mode, slot, n.get(slot_key, 0), "".join(how)), "info")
+            log("%s: %s of sound idx %d plays the new record through %d sound id(s) of the "
+                "game%s." % (_SMo.who(mode), "file %d in turn" % _SMo.turn_of(mode)
+                             if _SMo.is_turn(mode) else "mode %d" % mode, slot,
+                             n.get(slot_key, 0), "".join(how)), "info")
     return out
 
 
@@ -10570,22 +10600,28 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     from . import menu_settings as _MSet
     from . import sound_modes as _SMo
     from .adjustments import AdjustmentTable
+    who = "Music modes" if modes.count else "Sounds in turn"
+    live = 0
     try:
         sounds = _sound_mode_descriptors(gr_path, staged, params, sites, used, log)
-        with open(_lp(gr_path), "rb") as f:
-            setting, _w, _c = _MSet.plan(AdjustmentTable(f.read()), _MSet.MUSIC_MODE,
-                                         modes.count, modes.menu_names())
+        if modes.count:
+            with open(_lp(gr_path), "rb") as f:
+                setting, _w, _c = _MSet.plan(AdjustmentTable(f.read()), _MSet.MUSIC_MODE,
+                                             modes.count, modes.menu_names())
+            live = setting.live
     except (RuntimeError, ValueError, OSError, struct.error) as e:
-        log("Music modes: not put on this card: %s. Every sound plays its own." % e, "warning")
+        log("%s: not put on this card: %s. Every sound plays its own." % (who, e), "warning")
         return ""
     if not sounds:
         log("Music modes: none of the files for the other modes can be played on this card, so "
-            "MUSIC MODE is not added.", "warning")
+            "MUSIC MODE is not added." if modes.count else
+            "Sounds in turn: none of the files can be played on this card; every sound plays its "
+            "own.", "warning")
         return ""
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_SMo.cfg_text(setting.live, modes.count, sounds, only,
+        f.write(_SMo.cfg_text(live, modes.count, sounds, only,
                               record=_SMo.card_record(modes, used)))
     return path
 
@@ -10665,9 +10701,15 @@ def _install_modes(output_path, modes, landed, planned, log):
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")
     if modes.get("music_modes"):
-        log("Music modes: %d file(s) for the other music modes on the card, played while the "
-            "operator menu's MUSIC MODE says their mode: %s."
-            % (len(modes["music_modes"]), ", ".join(modes["music_modes"])), "success")
+        _turns = [t for t in modes["music_modes"] if t.endswith(" in turn)")]
+        _mm = [t for t in modes["music_modes"] if t not in _turns]
+        if _mm:
+            log("Music modes: %d file(s) for the other music modes on the card, played while the "
+                "operator menu's MUSIC MODE says their mode: %s."
+                % (len(_mm), ", ".join(_mm)), "success")
+        if _turns:
+            log("Sounds in turn: %d file(s) on the card, each played when its sound's turn comes "
+                "round: %s." % (len(_turns), ", ".join(_turns)), "success")
     if modes.get("picture"):
         log("Picture settings: %s in the operator menu change the whole screen as soon as "
             "the operator accepts a value." % ", ".join(modes["picture"]), "success")

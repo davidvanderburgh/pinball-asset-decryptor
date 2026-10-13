@@ -895,14 +895,21 @@ def sound_modes_plan(project, game_elf, prof, cfg):
     from . import sound_modes as SMo
     if prof is None:
         raise ModeWriteError(SMo.NO_TITLE)
-    why = SMo.title_refusal(prof)
+    # PAD-565: a card of sounds in turn only has no MUSIC MODE setting line
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            turns = not any(line.startswith("setting\t") for line in f)
+    except OSError:
+        turns = False
+    why = SMo.title_refusal(prof, turns=turns)
     if why:
         raise ModeWriteError(why)
     try:
         port = find_port(prof, game_elf)
     except ModeWriteError:
         raise ModeWriteError("this card's game program is not the %s the app knows how to play "
-                             "music modes on" % prof.label) from None
+                             "%s on" % (prof.label, "sounds in turn" if turns else "music modes")
+                             ) from None
     result = ModePlan(project=project, profile=prof, port=port, build=None)
     result.sounds_file = cfg
     return result

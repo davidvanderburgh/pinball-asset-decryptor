@@ -30,6 +30,9 @@ _ORDER = ("up", "down", "front", "back")
 _DROP = ("before", "after", "into")
 _GROUP_KINDS = ("Sprite", "StreamingFlipbook")
 _HIDE_WARNED = "scenes_hide_warned"  # settings.json: the first hide in the game has warned (PAD-535)
+_RESIZE_FROM = "scenes_resize_from"  # settings.json: what stays put when a size is set (PAD-557)
+#: Resize from: its top-left corner (X, Y) stays where it is, or its middle does
+RESIZE_FROM = ("corner", "middle")
 
 
 #: a sprite state that is on its way in or out (tree_show tries these last)
@@ -1804,9 +1807,11 @@ class TreeEditMixin:
                                "dy": round(ly, 3)})
 
     @rpc
-    def tree_scale(self, node, factor, factor_y=None):
-        """Resize by *factor* (and, when given, the height by *factor_y*) about the middle of
-        what the node draws."""
+    def tree_scale(self, node, factor, factor_y=None, at=None):
+        """Resize by *factor* (and, when given, the height by *factor_y*) about *at*, a point
+        on the glass (a corner drag: the corner across from the one dragged), else about what
+        Resize from says (DragonRR, PAD-557): the top-left corner of what the node draws, so
+        its X and Y stay put, or its middle."""
         from ..plugins.stern import scene_eval
         node = int(node)
         factor = float(factor)
@@ -1816,16 +1821,48 @@ class TreeEditMixin:
         box = self._tree_box(node)
         world = (self._tworlds.get(node) or (None, scene_eval.IDENTITY))[1]
         px = py = 0.0
-        if box is not None:
+        if at is not None:
+            gx, gy = float(at[0]), float(at[1])
+        elif box is not None and self._tree_resize_from() == "corner":
+            gx, gy = box[0], box[1]
+        elif box is not None:
+            gx, gy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+        else:
+            gx = gy = None
+        if gx is not None:
             inv = scene_eval.invert(world)
             if inv is not None:
-                px, py = scene_eval.apply(inv, (box[0] + box[2]) / 2.0,
-                                          (box[1] + box[3]) / 2.0)
+                px, py = scene_eval.apply(inv, gx, gy)
         op = {"op": "scale", "node": node, "s": round(factor, 6),
               "px": round(px, 3), "py": round(py, 3)}
         if abs(fy - factor) > 1e-6:
             op["sy"] = round(fy, 6)
         return self._tree_add(op)
+
+    def _tree_resize_from(self):
+        """Resize from, as last picked (settings.json): "corner" (the default) or "middle"."""
+        app = getattr(getattr(self, "ctx", None), "app", None)
+        settings = getattr(app, "_settings", None)
+        got = settings.get(_RESIZE_FROM) if isinstance(settings, dict) else None
+        return got if got in RESIZE_FROM else RESIZE_FROM[0]
+
+    @rpc
+    def tree_resize_from(self, where):
+        """Resize from (DragonRR, PAD-557: "by default retain xy coord when scaling but
+        include a button to toggle to center"): what stays put when Size %, Width %,
+        Height %, W px / H px or a corner drag resizes a layer.  Kept for next time."""
+        if where not in RESIZE_FROM:
+            return False
+        app = getattr(self.ctx, "app", None)
+        settings = getattr(app, "_settings", None)
+        if isinstance(settings, dict) and settings.get(_RESIZE_FROM) != where:
+            settings[_RESIZE_FROM] = where
+            try:
+                app._save_settings()
+            except Exception:                           # noqa: BLE001
+                pass
+        self.set(resize_from=where)
+        return True
 
     def _tree_pivot(self, node):
         """The middle of what *node* draws now, in the node's own units (0, 0 if nothing)."""

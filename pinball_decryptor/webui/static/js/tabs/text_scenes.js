@@ -450,7 +450,7 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
       <div class="scenes-inspector" ref=${inspRef}>
         ${editor ? html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
             style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
-            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} openFont=${openFont}
+            <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} openFont=${openFont} from=${s.resize_from}
               find=${s.find} searching=${searching} /></div>
           <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
           <${TreeTop} s=${s} onMenu=${itemMenu} />`
@@ -1357,7 +1357,10 @@ function TreeCanvas({ s }) {
       return;
     }
     if (corner(x, y)) {
-      const cx0 = selBox.x + selBox.w / 2, cy0 = selBox.y + selBox.h / 2;
+      // PAD-557: Resize from Top-left keeps the corner across from the one dragged; Middle, the middle
+      const mid = s.resize_from === "middle";
+      const cx0 = mid ? selBox.x + selBox.w / 2 : x < selBox.x + selBox.w / 2 ? selBox.x + selBox.w : selBox.x;
+      const cy0 = mid ? selBox.y + selBox.h / 2 : y < selBox.y + selBox.h / 2 ? selBox.y + selBox.h : selBox.y;
       setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1, ...at });
       return;
     }
@@ -1391,7 +1394,7 @@ function TreeCanvas({ s }) {
         .then((ok) => { if (ok === false) setBoxPend(null); }, () => setBoxPend(null));
     }
     if (d.mode === "scale" && Math.abs(d.f - 1) > 0.01)
-      send([d.node], { m: "scale", cx: d.cx, cy: d.cy, f: d.f }, () => call("text_scenes.tree_scale", d.node, d.f));
+      send([d.node], { m: "scale", cx: d.cx, cy: d.cy, f: d.f }, () => call("text_scenes.tree_scale", d.node, d.f, null, [d.cx, d.cy]));
   };
   const key = (e) => {
     if (!p) return;
@@ -1582,7 +1585,12 @@ function gameTurnText(g) {
   return g.mirrored ? (turn ? `mirrored and ${turn}` : "mirrored") : turn;
 }
 
-function TreeSide({ t, play, playFrame, openFont, find, searching }) {
+// PAD-557 (DragonRR): what stays put when a size is set
+const RESIZE_FROM = [
+  { value: "corner", label: "Top-left", title: "Its top-left corner stays where it is, so X and Y keep their numbers. A corner dragged on the preview keeps the corner across from it." },
+  { value: "middle", label: "Middle", title: "Its middle stays where it is: it grows or shrinks all round, so X and Y change. A corner dragged on the preview does the same." }];
+
+function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
   const p = t.props;
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
   const [keepShape, setKeepShape] = useState(true);
@@ -1673,6 +1681,12 @@ function TreeSide({ t, play, playFrame, openFont, find, searching }) {
         <input type="checkbox" checked=${keepShape && !isText} disabled=${isText || p.w == null}
           onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
       </label>
+      <div class=${cx("tree-row", p.x == null && "tree-off")}>
+        <span class="lbl" ...${tip(isText
+          ? "What stays put when Size % or a corner drag resizes it. W px / H px on a line of text keep the side its words sit on."
+          : "What stays put when Size %, Width %, Height %, W px / H px or a corner drag resizes it")}>Resize from</span>
+        <${Seg} value=${from || "corner"} options=${RESIZE_FROM} onChange=${(v) => call("text_scenes.tree_resize_from", v)} />
+      </div>
       <div class="tree-row">
         ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), isText
           ? "The size of the words (and their box with them), both ways at once; 100 = the size the game ships"

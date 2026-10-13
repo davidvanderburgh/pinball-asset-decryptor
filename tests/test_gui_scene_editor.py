@@ -3,7 +3,7 @@ side panel make (webui/text_scenes_tree.py, ``text_scenes.tree_*``).
 
 A scene the project has a tree for (``scene_tree.json``) is drawn from that tree and edited in
 place: pick an element, drag it (a glass move turned into the node's own units), resize it from
-a corner (about its middle), tint it, hide it, re-layer it, add a line of text, undo, put it
+a corner (its top-left stays put, PAD-557), tint it, hide it, re-layer it, add a line of text, undo, put it
 back.  Every edit lands in ``scene_edits.json``, is drawn at once, and is listed on the Write
 tab as a pending change.
 """
@@ -97,6 +97,9 @@ def test_undo_and_redo_take_back_every_kind_of_edit(tmp_path):
         start = _ops(folder)
 
         assert w.call("text_scenes.tree_select", art)
+        # about its middle (PAD-557): from the top-left, Draw 1:1 folds into the 40 % (both
+        # keep that corner) and the two cancel out, so there would be no step to undo apart
+        assert w.call("text_scenes.tree_resize_from", "middle")
         assert w.call("text_scenes.tree_set_scale", art, 40)
         s40 = _ops(folder)
         assert w.call("text_scenes.tree_one_to_one", art)
@@ -174,14 +177,14 @@ def test_the_editor_draws_the_tree_and_edits_it(tmp_path):
         p = _tv(w)["props"]
         assert (p["x"], p["y"]) == (x0 + 30, y0 - 10)
 
-        # a corner drag to 150 %: about the middle, so the middle stays put
-        mid = (p["x"] + p["w"] / 2.0, p["y"] + p["h"] / 2.0)
+        # to 150 %: Resize from Top-left (PAD-557), so X and Y stay put
+        tl = (p["x"], p["y"])
         assert w.call("text_scenes.tree_scale", art["id"], 1.5)
         p = _tv(w)["props"]
         assert p["scale"] == 150
-        assert abs(p["x"] + p["w"] / 2.0 - mid[0]) <= 1 and abs(p["y"] + p["h"] / 2.0 - mid[1]) <= 1
+        assert abs(p["x"] - tl[0]) <= 1 and abs(p["y"] - tl[1]) <= 1
 
-        # width and height apart: a stretch, about the middle too
+        # width and height apart: a stretch, from the top-left too
         assert w.call("text_scenes.tree_set_size", art["id"], 300, None)
         p = _tv(w)["props"]
         assert (p["scale"], p["scale_y"]) == (300, 150)

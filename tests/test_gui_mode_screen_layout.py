@@ -100,18 +100,18 @@ def test_a_mode_screen_is_laid_out_into_its_mode_file(tmp_path):
         assert _layout(folder) == {"x": 400.0, "y": 180.0}
         assert scene_edit.ops_for(str(folder), CARD) == []
         assert w.state("text_scenes")["mode_layout"]["laid_out"]
-        # sized about its middle: the corner moves too, the size is kept as one number
+        # sized from its top-left (PAD-557): the corner stays, the size is kept as one number
         assert w.call("text_scenes.tree_set_scale", ML.ART_ID, 50)
         lay = _layout(folder)
-        assert lay["scale"] == 0.5 and (lay["x"], lay["y"]) == (560.0, 220.0)
+        assert lay["scale"] == 0.5 and (lay["x"], lay["y"]) == (400.0, 180.0)
         assert w.call("text_scenes.tree_select", ML.ART_ID)
         assert _tv(w)["props"]["scale"] == 50
         # a drag of a sized picture moves it as far on the glass as the pointer went
         assert w.call("text_scenes.tree_move", ML.ART_ID, -60, 30)
         lay = _layout(folder)
-        assert (lay["x"], lay["y"], lay["scale"]) == (500.0, 250.0, 0.5)
+        assert (lay["x"], lay["y"], lay["scale"]) == (340.0, 210.0, 0.5)
         box = w.run(text.scenes._tree_box, ML.ART_ID)
-        assert (round(box[0]), round(box[1])) == (500, 250)
+        assert (round(box[0]), round(box[1])) == (340, 210)
         # under the HUD: Send to back puts it before every one of the scene's own
         assert w.call("text_scenes.tree_order", ML.GROUP_ID, "back")
         assert _layout(folder)["order"] == 0

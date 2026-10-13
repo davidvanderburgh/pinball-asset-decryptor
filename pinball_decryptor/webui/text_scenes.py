@@ -361,7 +361,8 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
                  tree_loading=False, tree_img_rev=0, tree_see={}, preparing=None,
                  tree_live=None,
-                 card_note="", pic_note="", tree_play=None, mode_layout=None)
+                 card_note="", pic_note="", tree_play=None, mode_layout=None,
+                 resize_from=self._tree_resize_from())
 
     def is_open(self):
         return self._alive

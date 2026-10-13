@@ -54,7 +54,7 @@ class _RecordingExecutor(WslExecutor):
             # Clean journal (no needs_recovery) -- the armed case gets its
             # own stateful executor below.
             return "Filesystem features:      has_journal ext_attr extent"
-        if bash_cmd.startswith("stat -c%s"):
+        if bash_cmd.startswith("wc -c <"):
             return str(self.EMMC_SIZE)
         if bash_cmd.startswith("debugfs -R") and "'stat /emmc.img'" in bash_cmd:
             return (f"Inode: 14   Type: regular    Mode:  0644\n"
@@ -163,14 +163,14 @@ def test_write_dd_commands_are_byte_exact(tmp_path, monkeypatch):
     dd_cmds = [c for c in rec.commands if c.startswith("dd ")]
     counts = []
     for cmd in dd_cmds:
-        toks = shlex.split(cmd)
-        # A byte-exact copy must declare its byte-granularity intent.
-        flag_toks = [t for t in toks if t.startswith(("iflag=", "oflag="))]
-        assert any("count_bytes" in t for t in flag_toks), (
-            f"dd missing count_bytes (would round count to whole MiB): {cmd}")
-        for t in toks:
-            if t.startswith("count="):
-                counts.append(int(t.split("=", 1)[1]))
+        # Each partition move is one _dd_range: up to two plain dd's whose
+        # block counts add up to the byte size exactly (no GNU *_bytes flags,
+        # which a Mac's dd lacks -- PAD-571).
+        total = 0
+        for one in cmd.split(" && "):
+            ops = dict(t.split("=", 1) for t in shlex.split(one)[1:])
+            total += int(ops["count"]) * int(ops["bs"])
+        counts.append(total)
     # The exact partition sizes must appear verbatim as a count somewhere.
     assert p3_size in counts, counts
     assert inner_size in counts, counts
@@ -227,7 +227,7 @@ def test_write_verifies_inner_fs_and_repacked_emmc(tmp_path, monkeypatch):
         f"re-packed P3 never fsck'd: {fsck_targets}")
 
     # The emmc guard consulted both sides: staged size + debugfs inode size.
-    assert any(c.startswith("stat -c%s") and "emmc.img" in c
+    assert any(c.startswith("wc -c <") and "emmc.img" in c
                for c in rec.commands), "staged emmc.img size never read"
     assert any(c.startswith("debugfs -R") and "'stat /emmc.img'" in c
                for c in rec.commands), "re-packed /emmc.img never stat'd"

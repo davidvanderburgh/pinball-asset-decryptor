@@ -234,17 +234,15 @@ class ExtractPipeline(BasePipeline):
             self._progress(0, 100, "dd P3")
             self.executor.run(f"mkdir -p {stage} && rm -f {p3_exec}",
                               timeout=30)
-            # Byte-exact copy (skip_bytes/count_bytes): a partition whose size
+            # Byte-exact copy (_dd_range): a partition whose size
             # isn't a whole number of MiB (Pulp Fiction P3 = 4607.998 MiB) would
             # otherwise lose its sub-MiB tail to whole-MiB rounding, leaving an
             # ext4 image shorter than its superblock declares ("likely corrupt"
             # per e2fsck). Harmless for a read-only extract, but the same
             # rounding in Write corrupts the round-tripped filesystem.
             self.executor.run(
-                f"dd if={shlex.quote(img_exec)} of={shlex.quote(p3_exec)} "
-                f"bs=1M iflag=skip_bytes,count_bytes "
-                f"skip={data_part['start_bytes']} "
-                f"count={data_part['size_bytes']} status=none",
+                _dd_range(img_exec, p3_exec, data_part['start_bytes'],
+                          data_part['size_bytes']),
                 timeout=900,
             )
             self._progress(50, 100, "dump emmc.img")
@@ -255,7 +253,7 @@ class ExtractPipeline(BasePipeline):
                 timeout=900,
             )
             emmc_size = int(self.executor.run(
-                f"stat -c%s {emmc_exec}", timeout=10).strip())
+                _size_cmd(emmc_exec), timeout=10).strip())
             self._log(
                 f"  emmc.img: {emmc_size / (1024 ** 3):.2f} GiB",
                 "info")
@@ -288,10 +286,8 @@ class ExtractPipeline(BasePipeline):
             self._log("Extracting inner game partition...", "info")
             self._progress(0, 100, "dd inner")
             self.executor.run(
-                f"dd if={shlex.quote(emmc_exec)} of={shlex.quote(inner_exec)} "
-                f"bs=1M iflag=skip_bytes,count_bytes "
-                f"skip={inner_part['start_bytes']} "
-                f"count={inner_part['size_bytes']} status=none",
+                _dd_range(emmc_exec, inner_exec, inner_part['start_bytes'],
+                          inner_part['size_bytes']),
                 timeout=900,
             )
             # emmc.img is consumed too now -- the rest of Extract only reads
@@ -875,16 +871,14 @@ class WritePipeline(BasePipeline):
                               f"{emmc_exec} {inner_exec}", timeout=30)
 
             self._log("Extracting installer P3 from output .img...", "info")
-            # Byte-exact (skip_bytes/count_bytes) — see the matching note in
+            # Byte-exact (_dd_range) — see the matching note in
             # Extract. Whole-MiB rounding here dropped P3's sub-MiB tail
             # (Pulp Fiction P3 = 4607.998 MiB), so the round-tripped ext4 came
             # out shorter than its superblock and the machine froze mounting
             # /data at power-up.
             self.executor.run(
-                f"dd if={shlex.quote(out_exec)} of={shlex.quote(p3_exec)} "
-                f"bs=1M iflag=skip_bytes,count_bytes "
-                f"skip={data_part['start_bytes']} "
-                f"count={data_part['size_bytes']} status=none",
+                _dd_range(out_exec, p3_exec, data_part['start_bytes'],
+                          data_part['size_bytes']),
                 timeout=900,
             )
             # CGC ships every installer with P3's journal DIRTY (the factory
@@ -914,10 +908,8 @@ class WritePipeline(BasePipeline):
                 f"xxd -s 446 -l 64 -c 64 -p {emmc_exec}", timeout=10).strip()
             inner_part = _parse_mbr_for_linux(mbr_hex)
             self.executor.run(
-                f"dd if={shlex.quote(emmc_exec)} of={shlex.quote(inner_exec)} "
-                f"bs=1M iflag=skip_bytes,count_bytes "
-                f"skip={inner_part['start_bytes']} "
-                f"count={inner_part['size_bytes']} status=none",
+                _dd_range(emmc_exec, inner_exec, inner_part['start_bytes'],
+                          inner_part['size_bytes']),
                 timeout=900,
             )
             # Stock inner game filesystems ship clean today, but this is the
@@ -943,11 +935,8 @@ class WritePipeline(BasePipeline):
             # Byte-exact seek/count so the inner ext4's sub-MiB tail isn't
             # dropped (same rounding trap as the extract dd's above).
             self.executor.run(
-                f"dd if={shlex.quote(inner_exec)} of={shlex.quote(emmc_exec)} "
-                f"bs=1M oflag=seek_bytes iflag=count_bytes "
-                f"seek={inner_part['start_bytes']} "
-                f"count={inner_part['size_bytes']} "
-                f"conv=notrunc status=none", timeout=900)
+                _dd_range(inner_exec, emmc_exec, 0, inner_part['size_bytes'],
+                          seek=inner_part['start_bytes']), timeout=900)
 
             self._log("Re-packing installer P3 (emmc.img into P3)...", "info")
             self.executor.run(
@@ -976,11 +965,8 @@ class WritePipeline(BasePipeline):
             self._log("Re-packing installer .img (P3 into output)...", "info")
             try:
                 self.executor.run(
-                    f"dd if={shlex.quote(p3_exec)} of={shlex.quote(out_exec)} "
-                    f"bs=1M oflag=seek_bytes iflag=count_bytes "
-                    f"seek={data_part['start_bytes']} "
-                    f"count={data_part['size_bytes']} "
-                    f"conv=notrunc status=none", timeout=1800)
+                    _dd_range(p3_exec, out_exec, 0, data_part['size_bytes'],
+                              seek=data_part['start_bytes']), timeout=1800)
             except Exception:
                 # A failed/partial write-back leaves the output half-stock,
                 # half-modified: complete-looking, flashable, and broken.
@@ -1242,7 +1228,7 @@ class WritePipeline(BasePipeline):
         downstream compares 0 == 0 and misses it.  Catch it at the source.
         """
         size = int(self.executor.run(
-            f"stat -c%s {shlex.quote(emmc_exec)}", timeout=10).strip() or "0")
+            _size_cmd(emmc_exec), timeout=10).strip() or "0")
         if size < self._MIN_PLAUSIBLE_EMMC:
             raise PipelineError("Stage partitions",
                 f"The source installer image holds an empty or truncated "
@@ -1266,7 +1252,7 @@ class WritePipeline(BasePipeline):
         """
         self._log("Verifying re-packed emmc.img inside P3...", "info")
         want = int(self.executor.run(
-            f"stat -c%s {shlex.quote(emmc_exec)}", timeout=10).strip())
+            _size_cmd(emmc_exec), timeout=10).strip())
         out = self.executor.run(
             f"debugfs -R 'stat {EMMC_INNER_PATH}' {shlex.quote(p3_exec)} "
             f"2>&1", timeout=60)
@@ -1965,27 +1951,34 @@ def _verify_staged_sizes(executor, image_exec, src_dir, staged_dir):
         timeout=120)
     src = {}
     for line in ls_out.splitlines():
-        toks = line.split()
+        # The name is everything after the time, spaces and all: split on
+        # every space, "sound one.wav" came back as "one.wav", which no
+        # staged file is called, and the extract aborted as out of space
+        # (PAD-571; transcribe names callouts with spaces).
+        toks = line.split(None, 8)
         # debugfs `ls -l`: inode mode (type) uid gid size date time name
         # Regular files have a mode field beginning "100" (0100000);
         # directories start "40", symlinks "120" — skip those.
         if len(toks) < 9 or not toks[1].startswith("100"):
             continue
         try:
-            src[toks[-1]] = int(toks[5])
+            src[toks[8]] = int(toks[5])
         except (ValueError, IndexError):
             continue
     if not src:
         return []
+    # `wc -c` per file, not GNU find's -printf, which a Mac's find lacks
+    # (PAD-571).  Each line is "<size> <dir>/<name>"; the "<n> total" line wc
+    # adds for several files has no slash, so it never names a file.
     stat_out = executor.run(
-        f"find {staged_dir} -maxdepth 1 -type f -printf '%s %f\\n' "
+        f"find {staged_dir} -maxdepth 1 -type f -exec wc -c {{}} + "
         f"2>/dev/null", timeout=60)
     staged = {}
     for line in stat_out.splitlines():
         parts = line.split(None, 1)
-        if len(parts) == 2:
+        if len(parts) == 2 and "/" in parts[1]:
             try:
-                staged[parts[1]] = int(parts[0])
+                staged[parts[1].rsplit("/", 1)[1]] = int(parts[0])
             except ValueError:
                 pass
     problems = []
@@ -2037,19 +2030,76 @@ def _detect_wsl_distro():
     return None
 
 
+def _pow2_dividing(*values, cap=1 << 20):
+    """The largest power of two up to *cap* that divides every value."""
+    b = cap
+    while b > 1 and any(v % b for v in values):
+        b >>= 1
+    return b
+
+
+def _dd_range(src, dst, start, size, seek=0):
+    """A shell command copying *size* bytes of *src* from byte *start* into
+    *dst* at byte *seek*, exactly - partitions are not whole MiB (Pulp
+    Fiction's P3 is 4607.998 MiB) and a rounded copy leaves an ext4 shorter
+    than its superblock.
+
+    Plain POSIX dd: the bulk in the largest block (up to 1 MiB) both offsets
+    allow, then the sub-block tail in a block that fits it.  GNU dd's
+    skip_bytes/count_bytes/seek_bytes flags did this in one call, but a
+    Mac's dd has no such flags (PAD-571).  ``conv=notrunc``
+    keeps the rest of an existing *dst* and is harmless on a new one."""
+    def dd(off, bs, n):
+        return (f"dd if={shlex.quote(src)} of={shlex.quote(dst)} bs={bs} "
+                f"skip={(start + off) // bs} seek={(seek + off) // bs} "
+                f"count={n} conv=notrunc")
+    bs = _pow2_dividing(start, seek)
+    head = size // bs * bs
+    cmds = [dd(0, bs, head // bs)] if head else []
+    tail = size - head
+    if tail:
+        tbs = _pow2_dividing(start + head, seek + head, tail)
+        cmds.append(dd(head, tbs, tail // tbs))
+    return " && ".join(cmds) or "true"
+
+
+def _size_cmd(path):
+    """Shell command printing a file's size in bytes, on GNU and BSD alike
+    (``stat -c%s`` is GNU's spelling; a Mac's stat wants ``-f%z``)."""
+    return f"wc -c < {shlex.quote(path)}"
+
+
+#: The executor-side tools the CGC pipelines run, all from e2fsprogs except
+#: dd and xxd (which every Mac has).
+_EXECUTOR_TOOLS = ("debugfs", "dd", "xxd", "e2fsck", "dumpe2fs")
+
+
+def _missing_tool_hint(platform=None):
+    """How to get the executor's tools on this machine.  It used to say
+    "Install in WSL" everywhere, which sent a Mac user looking for a WSL a Mac
+    does not have (PAD-571)."""
+    p = platform or sys.platform
+    if p == "darwin":
+        return ("Install e2fsprogs with Homebrew: brew install e2fsprogs\n"
+                "(or press Install Missing on the prerequisites strip).")
+    if p == "win32":
+        return "Install in WSL: apt-get install e2fsprogs xxd coreutils"
+    return ("Install them: sudo apt install e2fsprogs xxd  (Debian/Ubuntu; "
+            "other distros: the e2fsprogs and xxd packages)")
+
+
 def _verify_executor_tools(executor):
     ok, msg = executor.check_available()
     if not ok:
         raise PipelineError("Detect",
             f"Executor not available: {msg}\n\n"
             f"On Windows, install WSL2 via: wsl --install -d Ubuntu")
-    for tool in ("debugfs", "dd", "xxd", "e2fsck", "dumpe2fs"):
+    for tool in _EXECUTOR_TOOLS:
         try:
             executor.run(f"command -v {tool} >/dev/null", timeout=10)
         except CommandError:
             raise PipelineError("Detect",
-                f"Missing tool: {tool}\n\n"
-                f"Install in WSL: apt-get install e2fsprogs xxd coreutils")
+                f"Missing tool: {tool}\n\n{_missing_tool_hint()}")
 
 
 def _copy_with_progress(src, dst, total_bytes, progress_cb,

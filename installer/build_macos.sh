@@ -36,6 +36,14 @@ cd "$ROOT_DIR"
 # install must abort the build, not silently ship a broken bundle.
 pip3 install -r "$ROOT_DIR/requirements.txt" -r "$ROOT_DIR/requirements-build.txt" -r "$ROOT_DIR/requirements-ui.txt"
 
+# The e2fsprogs tools every CGC extract/write and every Stern card write on a
+# Mac runs (debugfs, e2fsck, ...): a Mac has none of them, so the app ships
+# its own instead of sending the user to Homebrew (PAD-573).  Built from the
+# release tarball for the oldest macOS the app runs on; see the script.
+E2FS_DIR="$SCRIPT_DIR/build/e2fsprogs"
+rm -rf "$E2FS_DIR"
+bash "$SCRIPT_DIR/build_mac_e2fsprogs.sh" "$E2FS_DIR"
+
 # --add-data lines bundle the per-plugin Dockerfiles so the macOS
 # DockerExecutor in spooky / jjp can find them at runtime.
 #
@@ -75,6 +83,13 @@ pyinstaller \
     --icon "$SCRIPT_DIR/build/icon.icns" \
     --paths "$ROOT_DIR" \
     --add-data "$ROOT_DIR/pinball_decryptor/icon.png:pinball_decryptor" \
+    `# executor.bundled_e2fsprogs_dir() finds these in <bundle>/e2fsprogs.` \
+    --add-binary "$E2FS_DIR/debugfs:e2fsprogs" \
+    --add-binary "$E2FS_DIR/e2fsck:e2fsprogs" \
+    --add-binary "$E2FS_DIR/dumpe2fs:e2fsprogs" \
+    --add-binary "$E2FS_DIR/mke2fs:e2fsprogs" \
+    --add-data "$E2FS_DIR/NOTICE:e2fsprogs" \
+    --add-data "$E2FS_DIR/SOURCE:e2fsprogs" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/Dockerfile:pinball_decryptor/plugins/spooky" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/Dockerfile:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/partclone_to_raw.py:pinball_decryptor/plugins/jjp" \
@@ -268,6 +283,17 @@ pyinstaller \
     "$SCRIPT_DIR/pyinstaller_entry.py"
 
 APP_PATH="$SCRIPT_DIR/build/dist/Pinball Asset Decryptor.app"
+
+# The bundled e2fsprogs must be where the app looks and must run there with
+# nothing from Homebrew on the PATH (PAD-573).
+for t in debugfs e2fsck dumpe2fs mke2fs; do
+    b="$APP_PATH/Contents/Frameworks/e2fsprogs/$t"
+    if [ ! -x "$b" ]; then
+        echo "ERROR: $b is missing or not executable" >&2
+        exit 1
+    fi
+done
+env -i PATH=/usr/bin:/bin "$APP_PATH/Contents/Frameworks/e2fsprogs/debugfs" -V
 
 # --- Ad-hoc code signing so macOS doesn't flag the app as "damaged" ------
 echo "Ad-hoc code signing..."

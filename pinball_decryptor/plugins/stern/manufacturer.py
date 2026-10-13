@@ -17,7 +17,7 @@ import os
 import re
 import sys
 
-from ...core.ext4_grow import LOOP_PROBE
+from ...core.ext4_grow import LOOP_PROBE, with_bundled_debugfs
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from ...core.transcribe import TranscribePipeline
@@ -203,8 +203,9 @@ def _ext4_grow_prereqs(platform):
     as root while owning zero loop devices: the strip said OK on a machine
     where every grow failed with a bare losetup error, after the card's
     .sidx had already been rewritten (PAD-13, a 489-video write that shipped
-    nothing).  macOS needs e2fsprogs' ``debugfs`` (probed in the same
-    keg-only locations ``ext4_grow._find_e2fsprogs`` searches); native Linux
+    nothing).  macOS needs e2fsprogs' ``debugfs`` (probed in the app's own
+    copy, PAD-573, and the same keg-only locations
+    ``ext4_grow._find_e2fsprogs`` searches); native Linux
     takes the same debugfs route since PAD-314 (a loop mount needs root, which a
     desktop app has no terminal to ask sudo for), so it declares e2fsprogs too,
     looked for where Debian keeps it off a user's PATH (/sbin, /usr/sbin)."""
@@ -227,12 +228,14 @@ def _ext4_grow_prereqs(platform):
         return (
             Prerequisite(
                 name="e2fsprogs", where="host",
-                probe="test -x /opt/homebrew/opt/e2fsprogs/sbin/debugfs || "
-                      "test -x /usr/local/opt/e2fsprogs/sbin/debugfs || "
-                      "test -x /opt/local/sbin/debugfs || "
-                      "command -v debugfs",
+                probe=with_bundled_debugfs(
+                    "test -x /opt/homebrew/opt/e2fsprogs/sbin/debugfs || "
+                    "test -x /usr/local/opt/e2fsprogs/sbin/debugfs || "
+                    "test -x /opt/local/sbin/debugfs || "
+                    "command -v debugfs"),
                 reason=_EXT4_GROW_REASON,
-                install_hint="brew install e2fsprogs"),
+                install_hint="brew install e2fsprogs",
+                mac_pkg="e2fsprogs"),
         )
     if platform.startswith("linux"):                     # PAD-314
         return (

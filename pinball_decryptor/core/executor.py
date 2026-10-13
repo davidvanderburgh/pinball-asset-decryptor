@@ -316,6 +316,36 @@ class NativeExecutor(CommandExecutor):
         return True, "Native Linux"
 
 
+def bundled_e2fsprogs_dir():
+    """The folder of e2fsprogs tools (debugfs, e2fsck, dumpe2fs, mke2fs) the
+    macOS app ships inside itself, or None when this run has none.
+
+    A Mac has no e2fsprogs, and "brew install e2fsprogs" left a Mac without
+    Homebrew at the same "Missing tool: debugfs" pop-up after PAD-571 taught
+    the app where Homebrew keeps it (PAD-573).  installer/build_mac_e2fsprogs.sh
+    builds them and build_macos.sh puts them in the bundle's ``e2fsprogs``
+    folder.  ``PAD_E2FSPROGS_DIR`` names such a folder outside a bundle: the
+    macOS CI run tests the built tools through it, with no Homebrew copy."""
+    d = os.environ.get("PAD_E2FSPROGS_DIR")
+    if d:
+        return d if os.path.isfile(os.path.join(d, "debugfs")) else None
+    if not getattr(sys, "frozen", False):
+        return None
+    contents = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
+    for base in (getattr(sys, "_MEIPASS", ""),
+                 os.path.join(contents, "Frameworks"),
+                 os.path.join(contents, "Resources")):
+        d = os.path.join(base, "e2fsprogs")
+        if base and os.path.isfile(os.path.join(d, "debugfs")):
+            return d
+    return None
+
+
+def _dq(s):
+    """*s* made safe inside a bash double-quoted string."""
+    return re.sub(r'(["\\$`])', r"\\\1", s)
+
+
 class MacExecutor(CommandExecutor):
     _EXTRA_PATH = "/opt/homebrew/bin:/usr/local/bin:/opt/local/bin"
     # Homebrew's e2fsprogs is keg-only: debugfs, e2fsck and dumpe2fs live in
@@ -326,14 +356,20 @@ class MacExecutor(CommandExecutor):
     _SBIN_PATH = ("/opt/homebrew/opt/e2fsprogs/sbin:"
                   "/usr/local/opt/e2fsprogs/sbin:/opt/local/sbin")
 
+    def _tail_path(self):
+        """What goes on the END of PATH: the app's own e2fsprogs (PAD-573)
+        ahead of Homebrew's and MacPorts' copies."""
+        own = bundled_e2fsprogs_dir()
+        return f"{own}:{self._SBIN_PATH}" if own else self._SBIN_PATH
+
     def _wrap(self, bash_cmd):
-        return (f'export PATH="{self._EXTRA_PATH}:$PATH:{self._SBIN_PATH}" '
-                f'&& {bash_cmd}')
+        return (f'export PATH="{self._EXTRA_PATH}:$PATH:'
+                f'{_dq(self._tail_path())}" && {bash_cmd}')
 
     def _env(self):
         env = os.environ.copy()
         env["PATH"] = os.pathsep.join(
-            (self._EXTRA_PATH, env.get("PATH", ""), self._SBIN_PATH))
+            (self._EXTRA_PATH, env.get("PATH", ""), self._tail_path()))
         return env
 
     def run(self, bash_cmd, timeout=120):

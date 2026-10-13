@@ -3,6 +3,7 @@
 import os
 import sys
 
+from ...core.ext4_grow import with_bundled_debugfs
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from .formats import detect_game
@@ -98,14 +99,16 @@ class CGCManufacturer(Manufacturer):
     # "n/a" on a Mac, so a Mac without e2fsprogs showed nothing missing and
     # then failed the extract with "Missing tool: debugfs ... Install in WSL"
     # (PAD-571).  debugfs is looked for where Homebrew (keg-only), MacPorts
-    # and Debian (/sbin, off a user's PATH) keep it, as the executor does.
+    # and Debian (/sbin, off a user's PATH) keep it, as the executor does,
+    # and first in the macOS app itself, which ships its own (PAD-573).
     prerequisites = (
         Prerequisite(name="debugfs", where="native",
-                     probe="command -v debugfs || "
-                           "test -x /opt/homebrew/opt/e2fsprogs/sbin/debugfs || "
-                           "test -x /usr/local/opt/e2fsprogs/sbin/debugfs || "
-                           "test -x /opt/local/sbin/debugfs || "
-                           "test -x /usr/sbin/debugfs || test -x /sbin/debugfs",
+                     probe=with_bundled_debugfs(
+                         "command -v debugfs || "
+                         "test -x /opt/homebrew/opt/e2fsprogs/sbin/debugfs || "
+                         "test -x /usr/local/opt/e2fsprogs/sbin/debugfs || "
+                         "test -x /opt/local/sbin/debugfs || "
+                         "test -x /usr/sbin/debugfs || test -x /sbin/debugfs"),
                      reason="ext4 read/write on installer P3 + emmc.img P2",
                      install_hint=(
                          "brew install e2fsprogs  (macOS)"

@@ -11,7 +11,14 @@ extract.  Three things stood between a Mac and a CGC extract:
 The round trip at the bottom builds a real (tiny) CGC installer with
 e2fsprogs and runs Extract, Write and Extract again through the real
 executor: on the macOS CI runner that is the Mac's own dd/wc/find/xxd and
-Homebrew's keg-only debugfs, which is the user's case.
+the e2fsprogs the macOS app now ships itself.
+
+PAD-573: the same Mac, on the fixed release, still got "Missing tool:
+debugfs" - now with "brew install e2fsprogs", which a Mac without Homebrew
+cannot do.  So the macOS app carries its own e2fsprogs
+(installer/build_mac_e2fsprogs.sh), the executor and the prerequisite rows
+look there first, and the macOS CI run builds those exact tools and runs the
+round trip on them with no Homebrew copy installed (PAD_E2FSPROGS_DIR).
 """
 
 import os
@@ -25,7 +32,7 @@ import sys
 import pytest
 
 from pinball_decryptor.core import executor as EX
-from pinball_decryptor.core.ext4_grow import E2FSPROGS_DIRS
+from pinball_decryptor.core import ext4_grow as EG
 from pinball_decryptor.plugins.cgc import pipeline as P
 from pinball_decryptor.plugins.cgc.manufacturer import CGCManufacturer
 
@@ -171,10 +178,91 @@ def test_cgc_prereqs_are_probed_on_the_mac_and_installable():
     assert "/opt/homebrew/opt/e2fsprogs/sbin/debugfs" in rows["debugfs"].probe
 
 
+# --- the e2fsprogs the macOS app ships (PAD-573) ------------------------------
+
+def _fake_tools(d):
+    d.mkdir(parents=True)
+    for t in ("debugfs", "e2fsck", "dumpe2fs", "mke2fs"):
+        (d / t).write_text("")
+    return str(d)
+
+
+def test_no_bundled_e2fsprogs_outside_an_app(monkeypatch):
+    monkeypatch.delenv("PAD_E2FSPROGS_DIR", raising=False)
+    monkeypatch.delattr(EX.sys, "frozen", raising=False)
+    assert EX.bundled_e2fsprogs_dir() is None
+
+
+def test_bundled_e2fsprogs_found_in_the_frozen_app(tmp_path, monkeypatch):
+    """PyInstaller's .app: the executable in Contents/MacOS, sys._MEIPASS =
+    Contents/Frameworks, where --add-binary puts the tools."""
+    monkeypatch.delenv("PAD_E2FSPROGS_DIR", raising=False)
+    contents = tmp_path / "Pinball Asset Decryptor.app" / "Contents"
+    want = _fake_tools(contents / "Frameworks" / "e2fsprogs")
+    (contents / "MacOS").mkdir()
+    exe = contents / "MacOS" / "Pinball Asset Decryptor"
+    exe.write_text("")
+    monkeypatch.setattr(EX.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(EX.sys, "executable", str(exe))
+    monkeypatch.setattr(EX.sys, "_MEIPASS", str(contents / "Frameworks"),
+                        raising=False)
+    assert EX.bundled_e2fsprogs_dir() == want
+    # ... and from the executable's place alone (no _MEIPASS)
+    monkeypatch.delattr(EX.sys, "_MEIPASS")
+    assert os.path.samefile(EX.bundled_e2fsprogs_dir(), want)
+
+
+def test_bundled_e2fsprogs_dir_override_must_hold_debugfs(tmp_path,
+                                                          monkeypatch):
+    monkeypatch.setenv("PAD_E2FSPROGS_DIR", str(tmp_path))
+    assert EX.bundled_e2fsprogs_dir() is None
+    want = _fake_tools(tmp_path / "e2fs")
+    monkeypatch.setenv("PAD_E2FSPROGS_DIR", want)
+    assert EX.bundled_e2fsprogs_dir() == want
+
+
+def test_mac_executor_puts_the_apps_own_e2fsprogs_ahead_of_homebrews(
+        tmp_path, monkeypatch):
+    own = _fake_tools(tmp_path / "Pin Ball $x" / "e2fsprogs")
+    monkeypatch.setenv("PAD_E2FSPROGS_DIR", own)
+    ex = EX.MacExecutor()
+    path = ex._env()["PATH"]
+    assert path.endswith(os.pathsep + own + ":" + ex._SBIN_PATH)
+    # in the shell line, quoted so the space and the $ survive bash
+    quoted = own.replace("\\", "\\\\").replace("$", "\\$")
+    assert ":$PATH:" + quoted + ":" + ex._SBIN_PATH in ex._wrap("true")
+
+
+def test_prereq_probes_pass_on_the_apps_own_debugfs(tmp_path, monkeypatch):
+    own = _fake_tools(tmp_path / "with space" / "e2fsprogs")
+    monkeypatch.setenv("PAD_E2FSPROGS_DIR", own)
+    probe = EG.with_bundled_debugfs("command -v debugfs")
+    assert probe == "test -x %s || command -v debugfs" % shlex.quote(
+        os.path.join(own, "debugfs"))
+    assert EG.e2fsprogs_dirs()[0] == own
+    monkeypatch.delenv("PAD_E2FSPROGS_DIR")
+    assert EG.with_bundled_debugfs("command -v debugfs") == "command -v debugfs"
+
+
+@pytest.mark.skipif(not os.environ.get("PAD_E2FSPROGS_DIR"),
+                    reason="the macOS CI run sets PAD_E2FSPROGS_DIR to the "
+                           "tools build_mac_e2fsprogs.sh built")
+def test_ci_round_trip_runs_on_the_apps_own_e2fsprogs():
+    """Guards the round trip below: on the macOS CI run it must find the
+    tools the app ships, not some other copy, or it proves nothing."""
+    own = EX.bundled_e2fsprogs_dir()
+    assert own, "PAD_E2FSPROGS_DIR does not hold a debugfs"
+    assert _HAVE
+    ex = EX.create_executor()
+    for t in ("debugfs", "e2fsck", "dumpe2fs"):
+        assert ex.run("command -v %s" % t).strip() == os.path.join(own, t)
+    assert _tool("mke2fs") == os.path.join(own, "mke2fs")
+
+
 # --- the real thing: Extract -> Write -> Extract on a built installer --------
 
 def _tool(name):
-    for d in E2FSPROGS_DIRS:
+    for d in EG.e2fsprogs_dirs():
         p = os.path.join(d, name)
         if os.path.isfile(p):
             return p

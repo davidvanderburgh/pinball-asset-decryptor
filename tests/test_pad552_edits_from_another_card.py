@@ -210,3 +210,47 @@ def test_a_picture_the_write_put_on_the_card_is_my_added_one(tmp_path):
     got = scene_share.localise(str(tmp_path), extras, {SCARD: {"objects": {}}}, moved=moved)
     assert sorted(got["colored"]) == ["images/scene_textures/added/Logo_1.png"]
     assert moved == {rel: ["images/scene_textures/added/Logo_1.png"]}
+
+
+# ---------------------------------------------------------------------------------------------
+# round 5 (DoomWalrus666 on computer B): the battle scene got no color profile - every picture
+# of it B replaced (its own art, which the card A saved from shows as the game's) was left out
+# ---------------------------------------------------------------------------------------------
+def _replaced_project(tmp_path):
+    from PIL import Image
+    from pinball_decryptor.core import staged_changes
+    tex = tmp_path / "images" / "scene_textures"
+    tex.mkdir(parents=True)
+    Image.new("RGB", (4, 4), (200, 40, 40)).save(str(tex / "body.png"))
+    art = tmp_path / "my art.png"
+    Image.new("RGB", (4, 4), (10, 200, 10)).save(str(art))
+    staged_changes.save(str(tmp_path), {"image": {"images/scene_textures/body.png": str(art)}})
+    zp = tmp_path / "file.zip"
+    import zipfile
+    with zipfile.ZipFile(str(zp), "w") as z:
+        z.writestr("pad_scene_edits.json", json.dumps({"format": 1, "kind": "pad-scene-edits",
+                                                       "scenes": {}}))
+    return str(tmp_path), str(zp)
+
+
+def test_a_replaced_picture_takes_the_files_profile_when_the_card_was_built_from_here(tmp_path):
+    from pinball_decryptor.core import colour_profile as cp, staged_changes
+    from pinball_decryptor.plugins.stern import scene_share
+    a, zp = _replaced_project(tmp_path)
+    red = {"name": "Red", "gain": [4.0, 1.0, 1.0], "gamma": [1.0, 1.0, 1.0],
+           "lift": [0.0, 0.0, 0.0], "saturation": 0.0}
+    extras = {"pictures": {}, "added": {}, "overlay": None, "lines": {},
+              "colored": {"images/scene_textures/body.png": {"profile": red}}}
+    out = {}
+    scene_share.import_extras(a, zp, extras, replaced_out=out)
+    data = staged_changes.load(a)
+    assert not (data.get(cp.IMAGE_SLOTS_KEY) or {}).get("images/scene_textures/body.png")
+    assert out == {"given": [], "kept": ["images/scene_textures/body.png"]}
+    out = {}
+    scene_share.import_extras(a, zp, extras, replaced_too=True, replaced_out=out)
+    data = staged_changes.load(a)
+    assert data[cp.IMAGE_SLOTS_KEY]["images/scene_textures/body.png"] is True
+    assert cp._own_dicts(data, "images")["images/scene_textures/body.png"] == red
+    assert out == {"given": ["images/scene_textures/body.png"], "kept": []}
+    # the pick itself is mine still
+    assert data["image"]["images/scene_textures/body.png"].endswith("my art.png")

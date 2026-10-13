@@ -3476,7 +3476,7 @@ class TreeEditMixin:
         tfits, tmissing, tlong, thave = [], [], 0, []
         kept, saved_to, reset_n, shown, elsewhere = 0, None, 0, 0, 0
         colours, moved, shown_k, differs, tpairs, skip_scenes = {}, {}, {}, {}, [], set()
-        colours_missing, ontop = [], {}
+        colours_missing, ontop, replaced_out = [], {}, {}
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -3620,7 +3620,9 @@ class TreeEditMixin:
                                                        cards_here=self._load_trees().keys(),
                                                        files_profile=files_profile,
                                                        counts=colours,
-                                                       missing_colored=colours_missing)
+                                                       missing_colored=colours_missing,
+                                                       replaced_too=bool(ontop),
+                                                       replaced_out=replaced_out)
             if tfits:
                 if text_tab is not None:
                     text_tab._set_replacements(
@@ -3725,6 +3727,8 @@ class TreeEditMixin:
         report = scene_share.write_load_report(self.assets_dir, path, {
             "scenes": srows, "pictures_missing": gone,
             "colored_missing": colours_missing, "moved": moved,
+            "replaced_given": replaced_out.get("given") or [],
+            "replaced_kept": replaced_out.get("kept") or [],
             "text_missing": tmissing, "text_have": thave,
             "text_long": [(r, new) for r, new in tpairs
                           if R.row_len(r, new) > R.row_budget(r)]})

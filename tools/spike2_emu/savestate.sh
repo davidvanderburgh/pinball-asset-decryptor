@@ -71,6 +71,64 @@ cp -f "/proc/$PID/root/dump/boot.id" "$DDIR/boot.id" 2>/dev/null || true
 # The restore SOURCE is decided here (the one place that knows the mapping):
 #   @PTY@ / @CARD@ placeholders, else a real host path.
 DUMP_EXT=()
+# host_path <major:minor> <root field>: where a guest mount's fs, at that
+# subpath, sits HERE - the host mount of that fs whose own root holds the
+# path (the LONGEST such root, so a subdir bind on the host resolves
+# exactly). Empty when this side has no mount of that fs.
+host_path() {
+    awk -v mm="$1" -v fr="$2" '
+        $3 == mm {
+            r = $4; if (r == "/") r = ""
+            if (fr == r || index(fr, r "/") == 1) {
+                if (!found || length(r) > best) {
+                    best = length(r); found = 1
+                    rest = substr(fr, length(r) + 1)
+                    if (rest == "/") rest = ""
+                    p = ($5 == "/" ? "" : $5) rest
+                    if (p == "") p = "/"
+                }
+            }
+        }
+        END { if (found) print p }' /proc/self/mountinfo
+}
+# The guest's root mount, for telling its own binds from the host's (below).
+GUEST_ROOT_MM=$(awk '$5 == "/" {print $3; exit}' "/proc/$PID/mountinfo")
+GUEST_ROOT_FR=$(awk '$5 == "/" {print $4; exit}' "/proc/$PID/mountinfo")
+# ...and where that root is on this side: the path run_game.sh mounted
+# everything under before the pivot (an overlay's lowerdir names it).
+GUEST_ROOT_HOST=$(host_path "$GUEST_ROOT_MM" "$GUEST_ROOT_FR")
+[ "$GUEST_ROOT_FR" = / ] && GUEST_ROOT_FR=
+# lower_host <path> <overlay mount id>: one overlay lowerdir as a HOST path.
+# run_game.sh mounted the overlay before the pivot, so a layer under the
+# guest's root was named by its pre-pivot path ($R/games/...) - which, on a
+# card, is the card's bind inside the guest's namespace, a path nothing
+# outside it can open. Such a layer is resolved through the guest mount
+# that held it then (the deepest one mounted before the overlay) to where
+# that mount's fs sits here. Any other layer (the staged override set) is
+# already a host path.
+lower_host() {
+    local L=$1 id=$2 gp hit mm fr gmp hp
+    case "$L" in
+    "$GUEST_ROOT_HOST"|"$GUEST_ROOT_HOST"/*) ;;
+    *) printf '%s\n' "$L"; return 0 ;;
+    esac
+    gp=${L#"$GUEST_ROOT_HOST"}; [ -n "$gp" ] || gp=/
+    hit=$(awk -v gp="$gp" -v id="$id" '
+        $1 + 0 < id + 0 {
+            m = ($5 == "/" ? "" : $5)
+            if (gp == $5 || index(gp, m "/") == 1)
+                if (!found || length(m) > best) {
+                    best = length(m); found = 1; out = $3 " " $4 " " $5
+                }
+        }
+        END { if (found) print out }' "/proc/$PID/mountinfo")
+    [ -n "$hit" ] || return 1
+    read -r mm fr gmp <<<"$hit"
+    hp=$(host_path "$mm" "$fr")
+    [ -n "$hp" ] || return 1
+    [ "$gmp" = / ] && gmp=
+    printf '%s\n' "${hp%/}${gp#"$gmp"}"
+}
 while IFS= read -r line; do
     mp=$(awk '{print $5}' <<<"$line")
     fstype=$(awk '{for(i=7;i<=NF;i++) if($i=="-"){print $(i+1); exit}}' <<<"$line")
@@ -116,6 +174,68 @@ while IFS= read -r line; do
         else
             echo "card $key $mp @CARD@" >> "$DDIR/restore.env"
         fi
+        DUMP_EXT+=(--external "mnt[$mp]:$key")
+        ;;
+    overlay)
+        # PAD-559, the other half of your edits: a NEW file (a mode's own
+        # clip, PAD-444) has no card file to bind over, so run_game.sh lays
+        # the set's directory over the card's as a read-only overlay. criu
+        # dumps that happily and then cannot mount it back ("Unable to mount
+        # overlay ... No such file or directory"): it replays the lowerdir
+        # paths, and one of them only ever meant something inside the dead
+        # guest's namespace. Record the layers as host paths instead;
+        # restorestate builds the same overlay here and binds it in. The
+        # slot root itself (the rootfs overlay) stays criu's own business.
+        majmin=$(awk '{print $3}' <<<"$line")
+        [ "$majmin" = "$GUEST_ROOT_MM" ] && continue
+        mid=$(awk '{print $1}' <<<"$line")
+        lowers=$(awk '{for(i=7;i<=NF;i++) if($i=="-"){print $(i+3); exit}}' <<<"$line" \
+                 | tr ',' '\n' | sed -n 's/^lowerdir=//p' | head -1)
+        hl=""
+        IFS=: read -ra parts <<<"$lowers"
+        for l in "${parts[@]}"; do
+            h=$(lower_host "$l" "$mid") || h=""
+            if [ -z "$h" ]; then
+                echo "[save] REFUSED: the overlay on $mp has a layer this side"
+                echo "[save] cannot find ($l), so a save of it could never be loaded."
+                exit 1
+            fi
+            hl="${hl:+$hl:}$h"
+        done
+        echo "ovl $key $mp $hl" >> "$DDIR/restore.env"
+        DUMP_EXT+=(--external "mnt[$mp]:$key")
+        ;;
+    proc|sysfs|tmpfs|mqueue|cgroup*|binfmt_misc|\
+    debugfs|tracefs|securityfs|configfs|pstore|bpf|nsfs|autofs|hugetlbfs)
+        ;;
+    *)
+        # ★ PAD-559: A FILE OF THE HOST'S OWN DISK BOUND INTO THE GUEST - the
+        # app's "your edits" set (PAD-103). run_game.sh binds every edited
+        # card file from the staged set ($PAD_SLOTDIR/override, ext4) over
+        # the card's copy, and criu cannot place a mount whose root lies
+        # outside the checkpoint: "112:./games/james_bond_le/<file> doesn't
+        # have a proper root mount". So EVERY save of a run with edits
+        # failed - a Bond LE owner testing his own modes, 2026-10-13. Same
+        # recipe as the card: the guest line's major:minor names the fs, our
+        # own mountinfo says where that fs sits here, and its root field
+        # (the file's path inside that fs) completes the host path. The
+        # rootfs and its self-binds never get here: they are the overlay.
+        majmin=$(awk '{print $3}' <<<"$line")
+        fsroot=$(awk '{print $4}' <<<"$line")
+        # A rootfs that is a plain directory (no slot overlay) is ext4 too:
+        # it and its self-binds (/games, /data, /dump) are inside the
+        # checkpoint's root, and criu's to recreate.
+        case "$majmin" in "$GUEST_ROOT_MM")
+            case "$fsroot/" in "$GUEST_ROOT_FR"/*|"$GUEST_ROOT_FR") continue ;; esac ;;
+        esac
+        src=$(host_path "$majmin" "$fsroot")
+        if [ -z "$src" ]; then
+            echo "[save] REFUSED: $mp is mounted into the game from a"
+            echo "[save] filesystem this side cannot see ($fstype $majmin $fsroot),"
+            echo "[save] so a save of it could never be loaded."
+            exit 1
+        fi
+        echo "bind $key $mp $src" >> "$DDIR/restore.env"
         DUMP_EXT+=(--external "mnt[$mp]:$key")
         ;;
     esac
@@ -249,6 +369,14 @@ RC=$?
 if [ "$RC" != 0 ] || grep -aq 'Dumping FAILED' "$DDIR/dump.log"; then
     echo "[save] FAILED (exit $RC):"
     grep -aE 'Error' "$DDIR/dump.log" | tail -12 | sed 's/^/    /'
+    # AND THE REASON AGAIN AS THE LAST TAGGED LINE (PAD-559). The window's
+    # status bar shows the last tagged line that says something, and the
+    # indented criu lines above are not tagged - so a failed save showed
+    # "[save] FAILED (exit 1):" and nothing after the colon. criu's first
+    # Error is the cause; "Dumping FAILED" is only its echo.
+    why=$(grep -a 'Error' "$DDIR/dump.log" | grep -av 'Dumping FAILED' | head -1 \
+          | sed 's/^([^)]*) *//; s/^Error ([^)]*): *//')
+    echo "[save] could not save: ${why:-criu stopped without saying why (exit $RC) - see $DDIR/dump.log}"
     # A failed dump must not leave the game frozen on screen.
     kill -CONT "$PID" 2>/dev/null
     exit 1

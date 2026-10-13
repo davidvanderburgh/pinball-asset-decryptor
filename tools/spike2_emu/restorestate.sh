@@ -112,6 +112,33 @@ while read -r kind a b c; do
     fi
 done < "$DDIR/restore.env"
 
+# PAD-559: a file of your edits (the app's override set) the save had bound
+# over the card. It is re-bound from where it was, so it has to still be
+# there - a run started without those edits has no staged set to bind from.
+while read -r kind a b c; do
+    [ "$kind" = bind ] || continue
+    c=$(unesc "$c")
+    if [ ! -e "$c" ]; then
+        echo "[restore] this save was made with your edits applied, and the"
+        echo "[restore] edited file behind $b is gone ($c)."
+        echo "[restore] start the emulator with the same edits and load again"
+        exit 1
+    fi
+done < "$DDIR/restore.env"
+# ...and the layers of a new-files overlay (savestate.sh's `ovl`), the same way.
+while read -r kind a b c; do
+    [ "$kind" = ovl ] || continue
+    IFS=: read -ra layers <<<"$c"
+    for l in "${layers[@]}"; do
+        l=$(unesc "$l")
+        [ -d "$l" ] && continue
+        echo "[restore] this save was made with your edits applied, and the"
+        echo "[restore] new files behind $b are gone ($l)."
+        echo "[restore] start the emulator with the same edits and load again"
+        exit 1
+    done
+done < "$DDIR/restore.env"
+
 # THE GUEST'S OWN LIBRARIES MUST STILL BE THE ONES THE SAVE WAS TAKEN
 # AGAINST, and this check exists because the alternative is a wall of criu
 # and a broken rootfs. criu validates every file-backed mapping by size and
@@ -315,6 +342,9 @@ fi
 
 # --- build the restore externals from restore.env ------------------------
 REST_EXT=(); INHERIT=(); TTYFD=""
+# Every host mount a bind external lives on, one per line, for nsclean.
+NSKEEP=$DDIR/nskeep; : > "$NSKEEP"
+OVL_BASE=""
 while read -r kind a b c; do
     case "$kind" in
     mnt)
@@ -344,6 +374,34 @@ while read -r kind a b c; do
         # criu cannot resolve the external it was just handed (the ladder's
         # rung E kept its card mount for the same reason).
         CARD_KEEP=$(findmnt -no TARGET --target "$src" 2>/dev/null)
+        ;;
+    bind)
+        # a=key b=guest mountpoint c=the host file (PAD-559, your edits).
+        # Checked by the pre-flight; its mount is kept through nsclean.
+        src=$(unesc "$c")
+        REST_EXT+=(--external "mnt[$a]:$src")
+        findmnt -no TARGET --target "$src" 2>/dev/null >> "$NSKEEP"
+        ;;
+    ovl)
+        # a=key b=guest mountpoint c=the overlay's layers as HOST paths
+        # (PAD-559, new files of your edits). The guest's own overlay died
+        # with it and its recorded lowerdirs only meant something inside its
+        # namespace, so the same overlay is built HERE and bound in like any
+        # other external. Its host-side mount is dropped when this script
+        # ends: by then the restored guest holds its own reference.
+        # On the root fs, NOT /run: nsclean unmounts every tmpfs, and the
+        # overlay went with /run ("Failed to open_tree ... No such file").
+        if [ -z "$OVL_BASE" ]; then
+            OVL_BASE=$(mktemp -d /var/tmp/pad_ovl.XXXXXX)
+            trap 'umount -l "$OVL_BASE"/* 2>/dev/null; rm -rf "$OVL_BASE"' EXIT
+        fi
+        mkdir -p "$OVL_BASE/$a"
+        if ! mount -t overlay overlay -o "ro,lowerdir=$(unesc "$c")" "$OVL_BASE/$a"; then
+            echo "[restore] could not rebuild the new-files overlay for $b"
+            exit 1
+        fi
+        REST_EXT+=(--external "mnt[$a]:$OVL_BASE/$a")
+        echo "$OVL_BASE/$a" >> "$NSKEEP"
         ;;
     tty)
         # a=old fd number  b=tty[key]  c=old slave path. The NEW slave carries
@@ -548,6 +606,7 @@ awk '\$5 != "/" && \$5 != "/proc" && \$5 != "/dev" && \$5 != "/dev/pts" { print 
     mp=\$(printf '%b' "\$mp")
     [ -n "\$PAD_NS_KEEP" ] && [ "\$mp" = "\$PAD_NS_KEEP" ] && continue
     [ -n "\$PAD_NS_KEEP_ROOT" ] && [ "\$mp" = "\$PAD_NS_KEEP_ROOT" ] && continue
+    grep -qxF -- "\$mp" "$NSKEEP" 2>/dev/null && continue
     umount -l "\$mp" 2>/dev/null
 done
 umount -l /proc 2>/dev/null

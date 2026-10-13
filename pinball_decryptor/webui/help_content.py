@@ -635,6 +635,8 @@ HELP_CONTENT = {
             "- After a click in **Layers** or **Contents**, Up and Down pick the row "
             "above or below (Shift+Up/Down in Layers takes a range).\n"
             "- Drag to move, drag a corner to resize, arrows to nudge (Shift: 10 px).\n"
+            "- A resize keeps the layer's X and Y (its top-left stays put); **Resize from** "
+            "under **Keep its shape** switches it to **Middle** to grow and shrink from the centre.\n"
             "- Drag a row in **Layers** above or below another to re-order it; drop an "
             "added layer on a group's row to move it into that group. The game's own "
             "layers stay in their group.\n"

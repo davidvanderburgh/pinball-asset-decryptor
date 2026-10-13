@@ -226,6 +226,29 @@ def parse(data):
     return Bank(vname, w, h, library, surface, surface_node, labels, max(ids))
 
 
+#: PAD-562: banks whose own clips are not the shape their Video says, by the stock bank's md5:
+#: the size most of its clips are. The game draws every clip of a bank stretched over the same
+#: place on the glass, so a clip made at the Video's size is squeezed there. Bond LE and Pro 1.06
+#: (one bank) say 1360x768, but the TV above the score panel is 2.2:1 and the game's clips are
+#: 920x416 (also 928x416 and 988x446, the same shape): a mode's own video made at 1360x768 came
+#: out squashed, with bars. Census of every ported title's stock card (2026-10-13, 40 clips a
+#: bank, 50 banks read): every other bank's clips are its Video's shape (Deadpool's 454x256 is
+#: smaller, not another shape), but for JP The Pin 1.05, whose one scene mixes 800x480 clips with
+#: 1360x768 ones (not one place on the glass, so it keeps its Video's size).
+CLIP_FRAMES = {"63f6bc13a70ee6f16f24fa6ab6e908fa": (920, 416)}
+
+
+def clip_frame(data, bank=None):
+    """``(w, h)`` a clip added to the bank scene ``data`` is made at: its clips' own size where
+    that is not its Video's shape (:data:`CLIP_FRAMES`), else the Video's. ``bank``: ``data``'s
+    parse, when the caller has it."""
+    known = CLIP_FRAMES.get(hashlib.md5(data).hexdigest())
+    if known:
+        return known
+    bank = bank or parse(data)
+    return bank.width, bank.height
+
+
 def _sorted_at(vm, name):
     key = name.encode("latin1")
     for c in vm.entries:

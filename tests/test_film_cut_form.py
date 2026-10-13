@@ -205,6 +205,20 @@ def test_apply_cuts_all_three_into_the_mode_folder(film, ff, tmp_path):
     assert res["summary"].startswith("Clip: 6 s from 0:02. Sound: 3 s from 0:06. Picture: the frame at 0:07.")
 
 
+def test_a_bond_mode_cuts_its_clip_at_the_tvs_920x416(film, ff, tmp_path):
+    """PAD-562: Bond LE's clips are 920x416 (its 2.2:1 TV), so a Bond mode's cut is made that size and
+    shape, and its preview is that shape; any other title's stays 1360x768."""
+    f = FilmCutForm.from_spec(MP.ModeSpec(title="james_bond_le_1_06"), "clip")
+    assert f.frame == (920, 416)
+    assert FilmCutForm.from_spec(MP.ModeSpec(title="godzilla_pro_1_15"), "clip").frame == FC.CLIP_SIZE
+    f.film, f.start, f.length, f.crop = film, "0:02", "1", "fill"
+    assert f.preview(ff).size == FC.preview_size((480, 270), (920, 416))
+    folder = str(tmp_path / "m")
+    f.apply(folder, ff)
+    (v,) = _streams(os.path.join(folder, "clip.mp4"))
+    assert (v["width"], v["height"]) == (920, 416)
+
+
 def test_apply_refuses_before_writing_anything(film, ff, tmp_path):
     folder = str(tmp_path / "m")
     with pytest.raises(FC.FilmCutError, match="past the end"):

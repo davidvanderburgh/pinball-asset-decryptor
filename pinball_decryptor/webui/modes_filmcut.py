@@ -46,7 +46,7 @@ class FilmCutForm:
 
     def __init__(self, film="", start="0:00", length="6", crop="letterbox", take_clip=True,
                  take_sound=False, take_still=False, sound_same=True, sound_start="",
-                 sound_length="", still_at="", channels=1):
+                 sound_length="", still_at="", channels=1, frame=FC.CLIP_SIZE):
         self.film = film
         self.start = start
         self.length = length
@@ -59,6 +59,7 @@ class FilmCutForm:
         self.sound_length = sound_length
         self.still_at = still_at
         self.channels = channels             # a mode's own sound record is mono
+        self.frame = tuple(frame)            # PAD-562: the clip's size, the shape the game shows it
         # what the film is, found once per file; SHARED by every snapshot of this form, and
         # the lock makes a second worker wait for the first one's answer instead of
         # probing the same film again
@@ -73,7 +74,9 @@ class FilmCutForm:
     @classmethod
     def from_spec(cls, spec, take="clip"):
         """A form for ``spec``, opened on the film, times and crop its cut of ``take`` last
-        came from (the other cuts' when ``take`` was never cut), with only ``take`` ticked."""
+        came from (the other cuts' when ``take`` was never cut), with only ``take`` ticked. The
+        clip is cut at the size of the game's own clips on the mode's title (PAD-562)."""
+        from ..plugins.stern import mode_project as MP
         cuts = {"clip": (spec.clip_source, spec.clip_from, spec.clip_length,
                          getattr(spec, "clip_crop", "")),
                 "sound": (spec.sound_source, spec.sound_from, spec.sound_length, ""),
@@ -94,7 +97,8 @@ class FilmCutForm:
                 break
         return cls(film=film, start=start, length=length, crop=crop or "letterbox",
                    take_clip=take == "clip", take_sound=take == "sound", take_still=take == "still",
-                   still_at=FC.format_time(spec.art_from) if spec.art_source and take == "still" else "")
+                   still_at=FC.format_time(spec.art_from) if spec.art_source and take == "still" else "",
+                   frame=MP.clip_frame(getattr(spec, "title", "")))
 
     # ---- the film -------------------------------------------------------------------
     def _probed(self):
@@ -196,7 +200,7 @@ class FilmCutForm:
         if problems:
             raise FC.FilmCutError(" ".join(problems))
         return FC.preview_frame(self.film, FC.parse_time(self.start), ffmpeg, box=box, crop=self.crop,
-                                picture=self.picture(ffmpeg))
+                                frame=self.frame, picture=self.picture(ffmpeg))
 
     def apply(self, mode_folder, ffmpeg=None):
         """Cut what is taken into ``mode_folder``. Returns the mode's new keys (``clip_file``,
@@ -213,8 +217,8 @@ class FilmCutForm:
         result = {"mode_folder": mode_folder}
         if "clip" in spans:
             start, length = spans["clip"]
-            FC.cut_clip(film, start, length, os.path.join(mode_folder, CLIP_NAME), ffmpeg, crop=self.crop,
-                        picture=picture)
+            FC.cut_clip(film, start, length, os.path.join(mode_folder, CLIP_NAME), ffmpeg, size=self.frame,
+                        crop=self.crop, picture=picture)
             result.update(clip_file=CLIP_NAME, clip_source=film, clip_from=start, clip_length=length,
                           clip_crop=self.crop)
         if "sound" in spans:

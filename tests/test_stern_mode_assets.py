@@ -237,6 +237,69 @@ def test_grafted_clips_go_in_the_hud_beside_the_screens(tmp_path, monkeypatch):
     assert SW.string("PadMode_Clips") in new and SW.string("S") in new
 
 
+# ---- PAD-562 (luvthatapex, Bond LE): a clip at the size of the bank's own clips --------------------------
+def test_bond_clip_frame_is_its_tv_clips_not_its_video():
+    """Bond LE/Pro 1.06's bank says 1360x768, but its clips are 920x416 (the 2.2:1 TV the game stretches
+    every clip over); every other bank's clips are its Video's shape."""
+    assert VB.CLIP_FRAMES == {"63f6bc13a70ee6f16f24fa6ab6e908fa": (920, 416)}
+    stock = _synthetic_bank(3)
+    bank = VB.parse(stock)
+    assert VB.clip_frame(stock) == (bank.width, bank.height)
+    assert VB.clip_frame(stock, bank) == (bank.width, bank.height)
+    for key in ("james_bond_le_1_06", "james_bond_pro_1_06"):
+        assert MP.clip_frame(key) == (920, 416)
+    assert MP.clip_frame("godzilla_pro_1_15") == (1360, 768)
+    assert MP.clip_frame("no_such_title_1_00") == (1360, 768)
+
+
+def _clip_sizes(monkeypatch):
+    sizes = []
+
+    def encode(job, path, ffmpeg):
+        sizes.append((job.kind, job.w, job.h))
+        with open(path, "wb") as f:
+            f.write(b"\0" * 1234)
+    monkeypatch.setattr(MA, "_encode_clip", encode)
+    monkeypatch.setattr(MA, "make_clips", lambda jobs, ffmpeg, progress=None: ({}, None))
+    return sizes
+
+
+@pytest.mark.parametrize("frame", [None, (920, 416)])
+def test_every_clip_of_a_build_is_made_at_the_banks_clip_frame(tmp_path, monkeypatch, frame):
+    """A mode's own video, its title card and its second clip all at the bank's clip frame: Bond's
+    920x416 where the bank is in CLIP_FRAMES, the Video's size (as before) where it is not."""
+    stock = _synthetic_bank(3)
+    bank = VB.parse(stock)
+    if frame:
+        monkeypatch.setattr(VB, "CLIP_FRAMES", {hashlib.md5(stock).hexdigest(): frame})
+    sizes = _clip_sizes(monkeypatch)
+    project, out = str(tmp_path / "proj"), str(tmp_path / "out")
+    _mode(project, "Alpha", screen=False, clip="title", clip_seconds=1.0,
+          clip_both={"clip": "title", "title": "ALPHA OVER", "seconds": 1})
+    slug = _mode(project, "Beta", screen=False, clip="file", clip_file="mine.mp4")
+    open(os.path.join(MP.mode_folder(project, slug), "mine.mp4"), "wb").write(b"\0")
+    MA.build(project, b"", stock, out, ffmpeg="ffmpeg")
+    w, h = frame or (bank.width, bank.height)
+    assert sizes == [("title", w, h), ("title", w, h), ("file", w, h)]
+
+
+def test_a_bond_sized_build_encodes_a_920x416_clip(tmp_path, monkeypatch):
+    """The real encoder: a 16:9 video given to a mode on a 920x416 bank comes out 920x416 (bars at its
+    sides only, where its shape differs), not 1360x768."""
+    ff = _ffmpeg()
+    stock = _synthetic_bank(3)
+    monkeypatch.setattr(VB, "CLIP_FRAMES", {hashlib.md5(stock).hexdigest(): (920, 416)})
+    project, out = str(tmp_path / "proj"), str(tmp_path / "out")
+    slug = _mode(project, "Alpha", screen=False, clip="file", clip_file="mine.mp4")
+    src = os.path.join(MP.mode_folder(project, slug), "mine.mp4")
+    subprocess.run([ff, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30:duration=1",
+                    "-pix_fmt", "yuv420p", src], check=True)
+    res = MA.build(project, b"", stock, out, ffmpeg=ff)
+    (clip,) = res.new_files
+    v = [s for s in _probe(os.path.join(out, *clip.split("/"))) if s["codec_type"] == "video"][0]
+    assert (v["width"], v["height"]) == (920, 416)
+
+
 # ---- PAD-314 (Ales's Metallica picture): where a mode's screen goes on the glass ---------------------------
 def test_the_generated_panel_sits_where_it_always_has_and_a_big_picture_stays_on_the_glass():
     import numpy as np

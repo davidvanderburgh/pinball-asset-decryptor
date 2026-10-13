@@ -1695,6 +1695,20 @@ def _title_words(base):
     return " ".join(out)
 
 
+def clip_frame(title, default=(1360, 768)):
+    """PAD-562: ``(w, h)`` a mode's own clip is made at on ``title`` (a profile key): the size of
+    the game's own clips in its bank (:data:`.video_bank.CLIP_FRAMES`, Bond's 920x416 TV), else
+    ``default``, the bank Video's size on every other title. For a cut made before the build
+    (From a film), so it is already the shape the game shows."""
+    from . import video_bank as VB
+    try:
+        prof = profile(title)
+    except ModeProjectError:
+        return default
+    bank = TITLE_SCENES.get("%s-%s" % (prof.game_dir, prof.version), {}).get("bank")
+    return VB.CLIP_FRAMES.get(bank, default)
+
+
 def title_label(game, version=""):
     """``godzilla_pro``, ``1.15`` -> ``Godzilla Pro 1.15``; ``beatles`` -> ``The Beatles``.
 

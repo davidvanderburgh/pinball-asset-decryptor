@@ -510,10 +510,12 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     def with_screens(bank):
         return SW.add_screens(bank, screens, stock=stock_bank, font_source=stock_font)[0] if shared else bank
     made, scratch = {}, None
+    # PAD-562: every clip at the size the bank's own clips are (Bond's TV clips are not its Video's)
+    frame = _Frame(*VB.clip_frame(stock_bank)) if clips or code_clips else None
     if clips or code_clips:
         if not ffmpeg:
             raise ModeAssetError("building a clip needs ffmpeg, and none was found")
-        size = VB.parse(stock_bank)
+        size = frame
         jobs = []
         for slug, spec in clips:
             jobs.append(_first_clip_job(project, slug, spec, size))
@@ -523,7 +525,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     try:
         if code_clips and not clips:
             bank, _parsed = _add_code_clips(project, code_clips, stock_bank, VB.parse(stock_bank),
-                                            prof, out_dir, ffmpeg, result, made)
+                                            prof, out_dir, ffmpeg, result, made, frame=frame)
             write("%s/scene.radium" % prof.lcd("bank"), with_screens(bank))
             code_clips = []
         if clips:
@@ -535,16 +537,16 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
                 rel = "%s/scene.assets/%s" % (prof.lcd("bank"), path)
                 local = os.path.join(out_dir, *rel.split("/"))
                 os.makedirs(os.path.dirname(local), exist_ok=True)
-                _place_clip(_first_clip_job(project, slug, spec, parsed), local, made, ffmpeg)
+                _place_clip(_first_clip_job(project, slug, spec, frame), local, made, ffmpeg)
                 result.files.append(rel)
                 result.new_files.append(rel)
                 bank, _info = VB.add_clip(bank, names["clip"], os.path.getsize(local), path)
                 parsed = VB.parse(bank)
                 bank, parsed = _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir,
-                                                ffmpeg, result, made)
+                                                ffmpeg, result, made, frame=frame)
             if code_clips:
                 bank, parsed = _add_code_clips(project, code_clips, bank, parsed, prof, out_dir,
-                                               ffmpeg, result, made)
+                                               ffmpeg, result, made, frame=frame)
             write("%s/scene.radium" % prof.lcd("bank"), with_screens(bank))
     finally:
         if scratch:
@@ -603,11 +605,13 @@ def _modes_for_the_card(project, found):
     return out
 
 
-def _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, result, made=None):
+def _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, result, made=None,
+                     frame=None):
     """Item 141: a mode's SECOND clip (``clip_both`` a title card or a video file), added to
     the bank as :func:`MP.second_clip_name`. "same" plays the first clip again and adds
-    nothing. Returns the bank and its parse. ``made``: the clips :func:`make_clips` made."""
-    job = _second_clip_job(project, slug, spec, parsed)
+    nothing. Returns the bank and its parse. ``made``: the clips :func:`make_clips` made;
+    ``frame``: the clip's size (the bank's parse's when not given)."""
+    job = _second_clip_job(project, slug, spec, frame or parsed)
     if job is None:
         return bank, parsed
     path = VB.next_path(parsed)
@@ -818,11 +822,13 @@ def _code_screens(project, code, prof):
                   for slug, spec in code or () if getattr(spec, "info_line", False) and prof.can("screen")]
 
 
-def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None):
+def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None,
+                    frame=None):
     """The code modes' start clips into the bank, after the form modes' (``PadMode_<slug>_Clip``),
     each made into the bank's format like a form mode's own video. Returns the bank and its parse.
-    ``made``: the clips :func:`make_clips` made."""
-    for job, name in _code_clip_jobs(project, code_clips, parsed):
+    ``made``: the clips :func:`make_clips` made; ``frame``: their size (the bank's parse's when
+    not given)."""
+    for job, name in _code_clip_jobs(project, code_clips, frame or parsed):
         path = VB.next_path(parsed)
         rel = "%s/scene.assets/%s" % (prof.lcd("bank"), path)
         local = os.path.join(out_dir, *rel.split("/"))
@@ -837,7 +843,7 @@ def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, re
 
 @dataclass
 class _Frame:
-    """A clip's frame size, where the bank's parse would give it."""
+    """A clip's frame size, where the bank's parse would give it (PAD-562: :func:`.video_bank.clip_frame`)."""
     width: int
     height: int
 

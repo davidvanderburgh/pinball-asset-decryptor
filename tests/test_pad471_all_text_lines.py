@@ -259,7 +259,7 @@ def test_the_page_offers_it():
     assert 'call("text_scenes.tree_color", l.id, !l.color.on, true)' in scenes
     assert "Color profile attached through its font" in scenes
     pane = src("color_pane.js")
-    assert 'scenes: "text"' in pane and '"lines of text", "line of text"' in pane
+    assert 'scenes: ["text", "images"]' in pane and '"lines of text", "line of text"' in pane
     # the videos' and images' tooltip is still DragonRR's own words (PAD-462)
     assert ("every single ${one} existing and replaced will be affected. You can undo this "
             "function") in pane

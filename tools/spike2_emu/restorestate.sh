@@ -697,6 +697,9 @@ do_restore() {
 rm -f "$DDIR/restored.pid"
 echo "[restore] restoring...${COMPAT:+ (compat engine)}"
 for _attempt in 1 2 3 4 5 6; do
+    # when THIS attempt began (monotonic ms), for an older slot's clock
+    # credit below - only the attempt that succeeds counts
+    REST0=$(python3 -c 'import time; print(int(time.monotonic() * 1000))' 2>/dev/null)
     do_restore
     RC=$?
     { [ "$RC" = 0 ] && ! grep -aq 'Restoring FAILED' "$DDIR/restore.log"; } && break
@@ -804,15 +807,21 @@ fi
 # credit, and a ms is taken off besides, so the game's clock steps forward a
 # hair at the thaw, never backwards. Without a time namespace (an older
 # criu) the offset is 0 and the gap is real time, which only means anything
-# on the boot the save was made on. A slot from before this has no
-# `frozen_at`: it is restored as before. Then the thaw, for every task of
-# the restored tree (its own pid namespace).
-FROZEN_AT=$(awk '$1 == "frozen_at" {print $2, $3; exit}' "$DDIR/restore.env")
-if [ -n "$FROZEN_AT" ]; then
-    read -r FZ_MS FZ_BOOT <<<"$FROZEN_AT"
-    python3 - "$R/dump/padsw" "$FZ_MS" "$FZ_BOOT" "$NEWPID" "$RIG" <<'PYEOF'
+# on the boot the save was made on.
+#
+# A SLOT FROM BEFORE THIS has no `frozen_at` - the owner's own "diamonds"
+# slot is one. Its restored game is still credited, with what can be
+# measured safely: how long this restore took, from the start of the criu
+# attempt that worked. criu reads the clock it restores from near the END of
+# the dump, so what such a game perceives is the dump's own seconds plus the
+# restore's, and the restore's alone is a credit that can only fall short of
+# it - the dump's seconds still show, as they always did. Then the thaw, for
+# every task of the restored tree (its own pid namespace).
+read -r FZ_MS FZ_BOOT <<<"$(awk '$1 == "frozen_at" {print $2, $3; exit}' "$DDIR/restore.env")"
+python3 - "$R/dump/padsw" "${FZ_MS:--}" "${FZ_BOOT:--}" "$NEWPID" "$RIG" "${REST0:--}" <<'PYEOF'
 import os, struct, sys, time
-path, fz_ms, fz_boot, pid = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+path, fz, fz_boot, pid, rest0 = (sys.argv[1], sys.argv[2], sys.argv[3],
+                                 sys.argv[4], sys.argv[6])
 sys.path.insert(0, sys.argv[5])
 import padsw
 off_ms = 0
@@ -821,17 +830,27 @@ try:
     guest_ns = os.readlink("/proc/%s/ns/time" % pid)
 except OSError:
     guest_ns = own_ns
-if guest_ns != own_ns:
+own_timens = guest_ns != own_ns
+if own_timens:
     with open("/proc/%s/timens_offsets" % pid) as f:
         for line in f:
             p = line.split()
             if p and p[0] == "monotonic":
                 off_ms = int(p[1]) * 1000 + int(p[2]) // 1000000
-elif fz_boot != open("/proc/sys/kernel/random/boot_id").read().strip():
-    print("[restore] NOTE: this save is from before WSL last restarted and the"
-          " game is in no time namespace, so the time since it cannot be measured")
+now = int(time.monotonic() * 1000)
+if fz != "-":
+    if not own_timens and fz_boot != open("/proc/sys/kernel/random/boot_id").read().strip():
+        print("[restore] NOTE: this save is from before WSL last restarted and the"
+              " game is in no time namespace, so the time since it cannot be measured")
+        sys.exit(0)
+    ms = now + off_ms - int(fz) - 1
+    said = "the game wakes %.1f s after it was saved"
+elif own_timens and rest0 != "-":
+    ms = now - int(rest0) - 1
+    said = ("the restore took %.1f s (an older save: it does not say when the"
+            " game was stopped, so only this part is skipped)")
+else:
     sys.exit(0)
-ms = int(time.monotonic() * 1000) + off_ms - fz_ms - 1
 if ms <= 0:
     sys.exit(0)
 with open(path, "r+b") as f:
@@ -842,10 +861,8 @@ with open(path, "r+b") as f:
     total = struct.unpack_from("<I", head, padsw.OFF_PAUSED_MS)[0] + ms
     f.seek(padsw.OFF_PAUSED_MS)
     f.write(struct.pack("<I", total & 0xffffffff))
-print("[restore] the game wakes %.1f s after it was saved; its clock skips that,"
-      " as for Pause" % (ms / 1000.0))
+print("[restore] " + (said % (ms / 1000.0)) + "; its clock skips that, as for Pause")
 PYEOF
-fi
 GUEST_NS=$(readlink "/proc/$NEWPID/ns/pid" 2>/dev/null)
 for d in /proc/[0-9]*; do
     [ -n "$GUEST_NS" ] && [ "$(readlink "$d/ns/pid" 2>/dev/null)" = "$GUEST_NS" ] \

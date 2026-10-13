@@ -246,19 +246,23 @@ def test_the_load_credits_the_restored_game_before_it_runs():
     text = src("restorestate.sh")
     # criu leaves the restored tree stopped, so the credit lands first
     assert "restore.log -d --leave-stopped" in text
-    credit = line_of(text, 'FROZEN_AT=$(awk \'$1 == "frozen_at"')
+    credit = line_of(text, 'awk \'$1 == "frozen_at" {print $2, $3; exit}\'')
     thaw = line_of(text, 'kill -CONT "${d#/proc/}"')
     assert line_of(text, '[restore] ok - guest restored') < credit < thaw
     # the restored game's own clock: ours plus its time namespace's offset
     assert "timens_offsets" in text and '"monotonic"' in text
     # the thaw reaches every task of the restored tree, not just its init
     assert 'readlink "$d/ns/pid"' in text
+    # an older slot is credited the restore's own duration, measured from
+    # the start of the criu attempt that worked
+    assert line_of(text, "REST0=$(python3") < line_of(text, "    do_restore")
+    assert '"${REST0:--}"' in text and "the restore took %.1f s" in text
 
 
 @pytest.mark.skipif(not HAS_BASH, reason="no usable bash")
 def test_the_load_credit_is_the_time_the_game_perceives_and_errs_short():
     text = src("restorestate.sh")
-    body = text[text.index("python3 - \"$R/dump/padsw\" \"$FZ_MS\""):]
+    body = text[text.index("python3 - \"$R/dump/padsw\" \"${FZ_MS:--}\""):]
     body = body[body.index("<<'PYEOF'\n") + len("<<'PYEOF'\n"):body.index("\nPYEOF\n")]
     script = (
         '[ -e /proc/self/ns/time ] || { echo NOPROC; exit 0; }\n'
@@ -271,10 +275,13 @@ def test_the_load_credit_is_the_time_the_game_perceives_and_errs_short():
         # saved 7.5 s ago, on this boot; the "guest" is this shell, which
         # shares our time namespace, so no offset applies
         'FZ=$(( $(python3 -c "import time; print(int(time.monotonic()*1000))") - 7500 ))\n'
-        'python3 $T/credit.py $T/padsw $FZ "$(cat /proc/sys/kernel/random/boot_id)" $$ "$SWPY"\n'
+        'python3 $T/credit.py $T/padsw $FZ "$(cat /proc/sys/kernel/random/boot_id)" $$ "$SWPY" -\n'
         'python3 -c "import struct,sys; print(\'total\', struct.unpack_from(\'<I\', open(sys.argv[1],\'rb\').read(), 1088)[0])" $T/padsw\n'
         # and a save from another boot, with no time namespace: no credit
-        'python3 $T/credit.py $T/padsw $FZ not-this-boot $$ "$SWPY"\n'
+        'python3 $T/credit.py $T/padsw $FZ not-this-boot $$ "$SWPY" -\n'
+        # an OLDER slot (no frozen_at) in no time namespace of its own: the
+        # restore's duration is only a safe credit under criu's namespace
+        'python3 $T/credit.py $T/padsw - - $$ "$SWPY" $(( $(python3 -c "import time; print(int(time.monotonic()*1000))") - 3000 ))\n'
         'python3 -c "import struct,sys; print(\'again\', struct.unpack_from(\'<I\', open(sys.argv[1],\'rb\').read(), 1088)[0])" $T/padsw\n'
         'rm -rf $T\n')
     r = subprocess.run(["bash", "-s"], input=script.encode().replace(b"\r", b""),

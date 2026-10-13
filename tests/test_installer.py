@@ -263,6 +263,30 @@ def test_pip_step_fixes_read_permissions():
         "ACL.")
 
 
+def test_update_leaves_the_desktop_icon_where_the_user_put_it():
+    """PAD-561: Inno deletes and re-creates every shortcut it writes, and
+    Explorer drops a re-created desktop icon into the next free slot, so
+    each update moved the user's icon.  The desktop entry must sit behind
+    DesktopShortcutNeeded, and that check must compare the very values the
+    entry writes - otherwise a later edit to one side makes it rewrite the
+    icon every time (the bug again) or keep a stale one."""
+    iss = ISS.read_text(encoding="utf-8")
+    entry = next(line for line in iss.splitlines()
+                 if line.startswith('Name: "{autodesktop}\\'))
+    assert "Check: DesktopShortcutNeeded" in entry
+    func = iss[iss.index("function DesktopShortcutNeeded"):]
+    func = func[:func.index("\nend;")]
+    name = re.search(r'Name: "([^"]+)"', entry).group(1)
+    assert "'%s.lnk'" % name in func
+    assert 'Filename: "wscript.exe"' in entry and "'wscript.exe'" in func
+    assert 'Parameters: """{app}\\launcher.vbs"""' in entry
+    assert "'\"' + ExpandConstant('{app}\\launcher.vbs') + '\"'" in func
+    assert 'WorkingDir: "{app}"' in entry
+    assert "Link.WorkingDirectory, ExpandConstant('{app}')" in func
+    assert 'IconFilename: "{app}\\pinball_decryptor\\icon.ico"' in entry
+    assert "ExpandConstant('{app}\\pinball_decryptor\\icon.ico') + ',0'" in func
+
+
 # Derived from the registry's actual load list, NOT hardcoded — so the
 # guard can never go stale.  The moment a manufacturer is added to
 # core/registry._PLUGIN_MODULES it becomes required in the build scripts

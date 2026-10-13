@@ -191,7 +191,12 @@ Name: "{group}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Parameters: ""
 Name: "{group}\Install Prerequisites"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_prerequisites.ps1"""; WorkingDir: "{app}"; Comment: "Install WSL2, partclone, debugfs, gpg"
 Name: "{group}\{cm:UninstallProgram,Pinball Asset Decryptor}"; Filename: "{uninstallexe}"
 
-Name: "{autodesktop}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\pinball_decryptor\icon.ico"; Tasks: desktopicon; Comment: "Decrypt and modify pinball machine assets"
+; Inno deletes and re-creates a shortcut it writes, and Explorer places a
+; re-created desktop icon in the next free slot, so every update threw the
+; icon back to wherever Windows puts new ones.  DesktopShortcutNeeded leaves
+; one that already launches this install alone; one that is missing or
+; points at another install dir is still (re)written.
+Name: "{autodesktop}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\pinball_decryptor\icon.ico"; Tasks: desktopicon; Check: DesktopShortcutNeeded; Comment: "Decrypt and modify pinball machine assets"
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_prerequisites.ps1"""; WorkingDir: "{app}"; StatusMsg: "Installing prerequisites..."; Flags: runascurrentuser shellexec waituntilterminated; Tasks: runprereqs
@@ -239,6 +244,31 @@ Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\jjp\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\dp\__pycache__"
 
 [Code]
+{ False when the desktop shortcut already exists and launches this install
+  exactly as the [Icons] entry would write it, so an update leaves it (and
+  its place on the desktop) untouched.  Any doubt - no shortcut, a different
+  target, an unreadable one - writes it as before. }
+function DesktopShortcutNeeded(): Boolean;
+var
+  Shell, Link: Variant;
+  LinkPath: String;
+begin
+  Result := True;
+  LinkPath := ExpandConstant('{autodesktop}\Pinball Asset Decryptor.lnk');
+  if not FileExists(LinkPath) then
+    Exit;
+  try
+    Shell := CreateOleObject('WScript.Shell');
+    Link := Shell.CreateShortcut(LinkPath);
+    Result := not ((CompareText(ExtractFileName(Link.TargetPath), 'wscript.exe') = 0)
+      and (CompareText(Link.Arguments, '"' + ExpandConstant('{app}\launcher.vbs') + '"') = 0)
+      and (CompareText(Link.WorkingDirectory, ExpandConstant('{app}')) = 0)
+      and (CompareText(Link.IconLocation, ExpandConstant('{app}\pinball_decryptor\icon.ico') + ',0') = 0));
+  except
+    Log('Desktop shortcut unreadable, rewriting it: ' + GetExceptionMessage);
+  end;
+end;
+
 { True when the app's in-app updater launched this install
   (/RELAUNCH=1 on the command line) — see the [Run] relaunch entry. }
 function RelaunchRequested(): Boolean;

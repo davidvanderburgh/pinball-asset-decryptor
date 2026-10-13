@@ -179,7 +179,8 @@ int main(void)
 
 
 def _ck_struct(src):
-    m = re.search(r"#define CK_END_MS.*?\n\} ck;\nstatic int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;\n", src, re.S)
+    m = re.search(r"#define CK_END_MS.*?\n\} ck;\nstatic int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;\n"
+                  r".*?static unsigned long ck_idle_due;\n", src, re.S)
     assert m
     return m.group(0)
 
@@ -251,3 +252,96 @@ def test_both_bond_builds_name_the_surfaces_seek_and_the_main_play_video(port, s
     assert re.search(r"^site surface_duration\s+%s 0xe5d030d4 0xe92d40f0$" % length, text, re.M)
     assert re.search(r"^site surface_position\s+%s 0xe5d030d4 0xe92d40f0$" % where, text, re.M)
     assert re.search(r"^text backdrop_idle MainPlayLoop$", text, re.M)
+
+
+IDLE_MAIN = r"""
+static int in_game = 1, bd_v2;
+static struct { int on; } bd;
+static int pm_in_game(void) { return in_game; }
+static void tick(unsigned long ms)
+{
+    now_ms += ms;
+    if (clip.on && state != 2) clip.on = 0;        /* clip_tick: the surface is idle */
+    ck_tick();
+    ck_idle_tick();
+    if (state == 2 && !looping && position(&surf_obj) >= length_of(video)) state = 0;   /* its end */
+}
+static void game(const char *name)
+{
+    unsigned str = std_string(name);
+    set_video(&surf_obj, &str);
+    play(&surf_obj, 0, -1);
+}
+static void game_loop(const char *name)
+{
+    unsigned str = std_string(name);
+    set_video(&surf_obj, &str);
+    play(&surf_obj, 1, -1);
+}
+static void begin(const struct pm_mode *m) { current = running = m; begun++; }
+static void ticks(int n, unsigned long ms) { while (n--) tick(ms); }
+int main(void)
+{
+    ck_can = 1;
+    game_loop("MainPlayLoop_DrNo");                /* the ball starts: the game's main-play video */
+    tick(16);
+    printf("-- ours plays to its end; the game asks for nothing\n");
+    begin(&mode_a);
+    pm_clip("PadMode_long_Clip"); ticks(41, 1000);
+    running = 0;
+    ticks(10, 100);
+    printf("-- the game's own clip ends and leaves the surface idle: the game's business\n");
+    game("LeftRamp"); ticks(30, 100);
+    printf("-- ours stopped (its mode ended) leaves it idle\n");
+    begin(&mode_a);
+    pm_clip("PadMode_long_Clip"); tick(16); tick(5000);
+    running = 0; state = 0;                        /* pm_clip_stop: the surface stopped */
+    ticks(10, 100);
+    printf("-- not in a game (the game is over)\n");
+    begin(&mode_a);
+    pm_clip("PadMode_long_Clip"); tick(16); tick(5000);
+    in_game = 0; state = 0;
+    ticks(10, 100);
+    printf("done\n");
+    return 0;
+}
+"""
+
+
+def test_the_games_main_play_video_comes_back_when_ours_ends(tmp_path):
+    """Round 4 (Jim-Beam on v1.184.3): his 45 s clip ran to its end with his mode, and the game's own background video
+    did not come back until another game clip played (emulator, Bond Pro: our clip's end of stream and no ask from the
+    game; the last frame stayed). The runtime asks for the main-play video the game last asked for, looped, once a clip
+    of OURS has left the surface idle for 500 ms in a game - never after a clip of the game's, nor outside a game."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    parts = [_ck_struct(src)] + [_lift(src, s) for s in (
+        "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
+        "static void ck_drop(const char *why)", "static int clip2_start(void *surf, const char *name)",
+        "static void ck_seen(unsigned *r)", "static void ck_play_seen(unsigned *r)", "static void ck_tick(void)\n{",
+        "int pm_clip(const char *name)")]
+    idle = _lift(src, "static void ck_idle_tick(void)\n{")
+    pre = PRELUDE.replace("static void ck_seen(unsigned *r);", "static void ck_seen(unsigned *r);\nstatic void ck_idle_tick(void);")
+    out = _host_run(tmp_path, pre + "\n".join(parts) + "\n" + IDLE_MAIN.split("int main(void)")[0]
+                    + idle + "\nint main(void)" + IDLE_MAIN.split("int main(void)")[1],
+                    flags=("-no-pie", "-fno-pie")).splitlines()
+    if not out:
+        pytest.skip("this host links above 4 GB even with -no-pie")
+    assert out == [
+        "PLAY MainPlayLoop_DrNo (looped)",
+        "-- ours plays to its end; the game asks for nothing",
+        "PLAY PadMode_long_Clip", "PLAY MainPlayLoop_DrNo (looped)",     # back 500 ms after ours ended
+        "-- the game's own clip ends and leaves the surface idle: the game's business",
+        "PLAY LeftRamp",
+        "-- ours stopped (its mode ended) leaves it idle",
+        "PLAY PadMode_long_Clip", "PLAY MainPlayLoop_DrNo (looped)",
+        "-- not in a game (the game is over)",
+        "PLAY PadMode_long_Clip",
+        "done"]
+
+
+def test_the_idle_watch_runs_from_the_tick_and_a_backdrop_counts_as_ours():
+    src = RUNTIME.read_text(encoding="utf-8")
+    assert "ck_idle_tick();" in _lift(src, "static void clip_tick(void)")
+    assert "ck_last_ours = 1;" in _lift(src, "static void bd2_play(void *surf)")
+    seen = _lift(src, "static void ck_seen(unsigned *r)")
+    assert seen.index("ck_last_ours = 0;") < seen.index("if (!ck.name[0]) return;")   # recorded with no clip of ours too

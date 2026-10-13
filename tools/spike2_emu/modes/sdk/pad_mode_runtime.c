@@ -2085,6 +2085,7 @@ static char disp_clip_name[96], disp_lost_name[64];
 static void display_tick(void);           /* the display priority section, below */
 static void block_tick(void);             /* PAD-347: a mode that keeps the game's modes from starting */
 static void bd2_tick(void);               /* PAD-521: the backdrop on the bank's surface, below */
+static void ck_idle_tick(void);           /* PAD-530: the game's main-play video back after ours, below */
 
 /* PAD-530: A MODE'S CLIP COMES BACK AFTER ONE OF THE GAME'S (clip v2, James Bond 1.06). The bank's surface is the one
  * TV, and the game puts its own short clips on it in the middle of a mode (Ball Lock, Extra Ball): a mode's own clip was
@@ -2120,6 +2121,16 @@ static struct {
     unsigned asks;
 } ck;
 static int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;
+/* PAD-530 round 4 (Jim-Beam on v1.184.3): when the mode's clip ran to its end, the bank's surface was left with its last
+ * frame and the game's own main-play video did not come back until a clip of the game's played. The game puts its
+ * main-play video back after ITS clips, not after ours (emulator, Bond Pro: EOS of ours, and no ask from the game).
+ * So the runtime remembers the main-play video the game last asked for (`text backdrop_idle`), and when the surface
+ * holds a clip of OURS that has ended (the start clip at its end, a clip stopped by its mode's end, a backdrop taken
+ * away) and stays idle CK_IDLE_MS in a game, it asks for it again as the game does: set and play, looped. */
+#define CK_IDLE_MS 500
+static char ck_idle[96];                  /* the game's main-play video, the last one it asked for */
+static int ck_last_ours;                  /* the last clip put on the bank's surface was ours */
+static unsigned long ck_idle_due;
 static int sv_hook(void);
 static int have_sites(const char *const *names);
 
@@ -2151,6 +2162,7 @@ static int clip2_start(void *surf, const char *name)
     if (ok) {
         clip2_show(1);
         ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
+        ck_last_ours = 1;
     }
     ck_ours = 0;
     return ok;
@@ -2165,7 +2177,7 @@ static void ck_seen(unsigned *r)
     unsigned i;
     int playing, is_idle = 0;
     long long at, len;
-    if (ck_ours || ck_in || !ck.name[0] || !s) return;
+    if (ck_ours || ck_in || !s) return;
     ck_in = 1;
     bank = clip2_surface();
     ck_in = 0;
@@ -2176,6 +2188,12 @@ static void ck_seen(unsigned *r)
         for (i = 0; idle[i] && name[i] == idle[i]; i++) ;
         is_idle = !idle[i];
     }
+    ck_last_ours = 0;                     /* round 4: the game has the surface now */
+    if (is_idle) {
+        for (i = 0; name[i] && i + 1 < sizeof ck_idle; i++) ck_idle[i] = name[i];
+        ck_idle[i] = 0;
+    }
+    if (!ck.name[0]) return;
     if (ck.on) {                          /* ours had the surface until now: how far it got */
         ck.on = 0;                        /* (clip.on stays: the surface plays, so a backdrop waits as before) */
         playing = ((int (*)(void *))(unsigned long)fn("surface_state"))(bank) == (int)pm_port_value("surface_playing", 2);
@@ -2374,6 +2392,7 @@ static void clip_tick(void)
     block_tick();                             /* PAD-347: a block ends with its mode */
     bd2_tick();                               /* PAD-521: the loop on the bank's surface */
     ck_tick();                                /* PAD-530: a mode's clip back after the game's */
+    ck_idle_tick();                           /* PAD-530: the game's main-play video back after ours ended */
     if (!clip.on && clip_v2 && !clip2_hidden && pm_ms() - clip2_tried > 1000) {
         clip2_tried = pm_ms();                /* a grafted surface out of sight, once its scene is up */
         clip2_show(0);
@@ -2684,6 +2703,7 @@ static void bd2_play(void *surf)
         return;
     }
     ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
+    ck_last_ours = 1;                     /* PAD-530: ours on the surface (its end gives the game's video back) */
     bd.obj = 1;
     bd.playing_once = once;
     if (bd.plays++ < 60)
@@ -2734,6 +2754,36 @@ static void bd2_tick(void)
     if (pm_ms() - bd.since < 500) return;  /* just played: the surface may not say "playing" yet */
     if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) return;
     bd2_play(surf);                       /* its end, the one-shot's or the game's clip over: the loop (again) */
+}
+
+/* PAD-530 round 4: every tick, from clip_tick. A clip of ours that ended left the bank's surface idle: in a game, once
+ * it stays idle CK_IDLE_MS, the game's own main-play video goes back on it, looped, as the game plays it */
+static void ck_idle_tick(void)
+{
+    void *surf;
+    unsigned str;
+    static unsigned said;
+    if (!ck_can || !ck_last_ours || !ck_idle[0] || clip.on || ck.lost || (bd_v2 && bd.on) || !pm_in_game()) {
+        ck_idle_due = 0;
+        return;
+    }
+    surf = clip2_surface();
+    if (!surf) return;
+    if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) {
+        ck_idle_due = 0;                  /* ours still plays (a backdrop, or past its mode's end) */
+        return;
+    }
+    if (!ck_idle_due) ck_idle_due = pm_ms() + CK_IDLE_MS;
+    if (pm_ms() < ck_idle_due) return;
+    ck_idle_due = 0;
+    ck_last_ours = 0;
+    str = std_string(ck_idle);
+    ck_ours = 1;
+    if (((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str))
+        ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 1, -1);
+    ck_ours = 0;
+    if (said++ < 20)
+        say("clip: ours ended and the game left the surface empty - its main-play video \"%s\" is back on it", ck_idle);
 }
 
 int pm_backdrop(const char *name)

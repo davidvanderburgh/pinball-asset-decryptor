@@ -448,3 +448,25 @@ def test_a_swapped_sound_is_grown_but_its_descriptors_are_left_alone():
     used = [{"name": "A", "key": "sound_start", "request": 900, "idx": 41, "swap": True}]
     engine._mode_swap_keys(used, params, log)
     assert used == [] and _said(msgs, "did not come out of the grown bank")
+
+
+def test_a_measured_layout_naming_every_record_wins_over_a_known_one_naming_some():
+    """PAD-565: James Bond 007 Pro 1.06 measures 0x80005FFF (2351 of 2351 records named) where
+    Led Zeppelin's 0xE0001FFF names 343 by the bits the two share - under ten times as many, so
+    the measured mask was passed over and no Bond sound id could be re-pointed."""
+    bond = 0x80005FFF
+    params, sites = [], []
+    for i in range(40):
+        w1 = 0x1000 + i
+        # a few records whose second word Led Zeppelin's mask happens to read right
+        w2 = (0x00001000 + i) if i < 6 else (0x00004000 + i)
+        junk = 0x01650000 if i >= 6 else 0
+        params.append({"idx": i, "grown": False, "findkey": _key(w1, w2 & bond)})
+        sites.append(_site(100 + i, 0x1000 + 0x20 * i, _key(w1, (w2 & bond) | junk)))
+    msgs, log = _capture()
+    got = engine._desc_key_mask(params, sites, log)
+    stock = {p["findkey"] for p in params}
+    assert {engine._play_key(s.payload, s.sid, got) for s in sites} == stock
+    assert _said(msgs, "measured on this build")
+    known = len({engine._play_key(s.payload, s.sid, MASK) for s in sites} & stock)
+    assert 0 < known * 10 >= len(stock)                    # the old rule would not have measured

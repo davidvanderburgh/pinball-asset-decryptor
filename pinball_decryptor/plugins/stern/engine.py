@@ -17097,7 +17097,10 @@ def _desc_key_mask(params, sites, log=None):
     mask is kept, so the plan refuses per sound with its own reason.  A build whose
     tables match neither known layout gets the mask measured on it
     (:func:`_measured_key_mask`) when that names ten times what the best known one
-    does."""
+    does, or nearly every stock record and three times what the best known one does
+    (PAD-565: James Bond 007 Pro 1.06 measures 0x80005FFF, 2351 of 2351 records
+    named, where 0xE0001FFF names 343 - and its sounds, each named by the wrong
+    key, could not be re-pointed)."""
     stock = set()
     for p in params:
         k = p.get("stock_findkey") if p.get("grown") else p.get("findkey")
@@ -17112,7 +17115,7 @@ def _desc_key_mask(params, sites, log=None):
     measured = _measured_key_mask(stock, sites)
     if measured is not None:
         n = len({_play_key(s.payload, s.sid, measured) for s in sites} & stock)
-        if n and best * 10 < n:
+        if n and (best * 10 < n or (best * 3 <= n and n * 10 >= len(stock) * 9)):
             if log:
                 log("Play-table key layout 0x%08X, measured on this build: the "
                     "descriptors name %d of %d sound record(s) (the known layouts "

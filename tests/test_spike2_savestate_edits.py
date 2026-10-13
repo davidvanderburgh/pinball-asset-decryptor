@@ -220,3 +220,73 @@ def test_the_credit_starts_at_the_seize_and_errs_short():
     # game's clock backwards)
     assert 500 + 4999 <= total <= 500 + 4999 + 200, out
     assert "frozen 5.0 s" in out or "frozen 5.1 s" in out or "frozen 5.2 s" in out, out
+
+
+# ---- round 3: a LOAD wakes the game where the save stopped it -------------
+# The reporter's slot came back and ended itself at once, both from a running
+# game and from a fresh Launch: "worst gap 10392 ms", then exit 5 from
+# 0x1c49c (GAME EXIT DISPATCH TIMEOUT). criu restores the guest into a time
+# namespace that hides the time the slot sat on disk, but not the seize-to-
+# restore stretch, and on a slow PC that passes the game's 10 s watchdog.
+# Rig proof: a restore stalled 12 s ended Bond LE exactly so on v1.187.6
+# (worst gap 18615 ms, exit 5 from 0x1c49c); with this the restored game's
+# first video line read "worst gap 43 ms" and it ran on.
+
+def test_the_save_records_when_the_game_was_seized():
+    text = src("savestate.sh")
+    assert line_of(text, "T_CRIU0=$(date +%s%3N)") < line_of(text, "MONO0=$(python3")
+    assert line_of(text, "MONO0=$(python3") < line_of(text, '"$CRIU" dump')
+    assert line_of(text, '"$CRIU" dump') < line_of(text, 'echo "frozen_at $(( MONO0 + SEIZE_OFF ))')
+    # recorded only for a dump that worked: after the failure branch's exit
+    fail = text.index('echo "[save] FAILED (exit $RC):"')
+    assert text.index('echo "frozen_at') > text.index("\nfi\n", fail)
+
+
+def test_the_load_credits_the_restored_game_before_it_runs():
+    text = src("restorestate.sh")
+    # criu leaves the restored tree stopped, so the credit lands first
+    assert "restore.log -d --leave-stopped" in text
+    credit = line_of(text, 'FROZEN_AT=$(awk \'$1 == "frozen_at"')
+    thaw = line_of(text, 'kill -CONT "${d#/proc/}"')
+    assert line_of(text, '[restore] ok - guest restored') < credit < thaw
+    # the restored game's own clock: ours plus its time namespace's offset
+    assert "timens_offsets" in text and '"monotonic"' in text
+    # the thaw reaches every task of the restored tree, not just its init
+    assert 'readlink "$d/ns/pid"' in text
+
+
+@pytest.mark.skipif(not HAS_BASH, reason="no usable bash")
+def test_the_load_credit_is_the_time_the_game_perceives_and_errs_short():
+    text = src("restorestate.sh")
+    body = text[text.index("python3 - \"$R/dump/padsw\" \"$FZ_MS\""):]
+    body = body[body.index("<<'PYEOF'\n") + len("<<'PYEOF'\n"):body.index("\nPYEOF\n")]
+    script = (
+        '[ -e /proc/self/ns/time ] || { echo NOPROC; exit 0; }\n'
+        'command -v python3 >/dev/null || { echo NOPROC; exit 0; }\n'
+        'T=$(mktemp -d)\n'
+        'python3 -c "import struct,sys; b=bytearray(4096); struct.pack_into(\'<I\',b,0,0x53444150);'
+        ' struct.pack_into(\'<I\',b,1088,700); open(sys.argv[1],\'wb\').write(b)" $T/padsw\n'
+        "cat > $T/credit.py <<'PYEOF'\n" + body + "\nPYEOF\n"
+        "SWPY=$(wslpath -u '" + RIG + "' 2>/dev/null || echo '" + RIG + "')\n"
+        # saved 7.5 s ago, on this boot; the "guest" is this shell, which
+        # shares our time namespace, so no offset applies
+        'FZ=$(( $(python3 -c "import time; print(int(time.monotonic()*1000))") - 7500 ))\n'
+        'python3 $T/credit.py $T/padsw $FZ "$(cat /proc/sys/kernel/random/boot_id)" $$ "$SWPY"\n'
+        'python3 -c "import struct,sys; print(\'total\', struct.unpack_from(\'<I\', open(sys.argv[1],\'rb\').read(), 1088)[0])" $T/padsw\n'
+        # and a save from another boot, with no time namespace: no credit
+        'python3 $T/credit.py $T/padsw $FZ not-this-boot $$ "$SWPY"\n'
+        'python3 -c "import struct,sys; print(\'again\', struct.unpack_from(\'<I\', open(sys.argv[1],\'rb\').read(), 1088)[0])" $T/padsw\n'
+        'rm -rf $T\n')
+    r = subprocess.run(["bash", "-s"], input=script.encode().replace(b"\r", b""),
+                       capture_output=True, timeout=60)
+    out = r.stdout.decode().replace("\r", "")
+    if "NOPROC" in out:
+        pytest.skip("no Linux /proc in that bash")
+    assert r.returncode == 0, r.stderr.decode()
+    total = int(out.split("total ")[1].split()[0])
+    # 700 the save held + ~7.5 s since the seize - 1 ms; never more than the
+    # real gap (that would step the game's clock backwards)
+    assert 700 + 7499 <= total <= 700 + 7499 + 300, out
+    assert "wakes 7.5 s after it was saved" in out or "wakes 7.6 s" in out, out
+    assert int(out.split("again ")[1].split()[0]) == total, out
+    assert "before WSL last restarted" in out, out

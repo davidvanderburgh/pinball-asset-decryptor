@@ -672,7 +672,7 @@ fi
 
 do_restore() {
     unshare -m bash "$NSCLEAN" ${SETPRIV[@]+"${SETPRIV[@]}"} \
-        "$CRIU" restore -D "$DDIR" -v4 -o restore.log -d \
+        "$CRIU" restore -D "$DDIR" -v4 -o restore.log -d --leave-stopped \
             --pidfile "$DDIR/restored.pid" \
             --root "$R" ${COMPAT[@]+"${COMPAT[@]}"} \
             ${REST_EXT[@]+"${REST_EXT[@]}"} ${INHERIT[@]+"${INHERIT[@]}"}
@@ -778,6 +778,80 @@ if [ -n "$NEWPID" ] && kill -0 "$NEWPID" 2>/dev/null; then
 else
     echo "[restore] restore reported ok but the guest is not alive"; exit 1
 fi
+
+# --- THE GAME'S CLOCK PICKS UP WHERE THE SAVE STOPPED IT (PAD-559) --------
+# A Bond LE owner's save, loaded twice - once over a running game, once from
+# a fresh Launch - came back and ended itself at once: GAME EXIT DISPATCH
+# TIMEOUT, the game's 10 s watchdog (exit 5, PAD-200), on v1.187.5. The
+# restored game's first video line said why, the same both times: "worst gap
+# 10392 ms". It was woken 10.4 s after the instant it was saved in.
+#
+# NOT the time the slot sat on disk. criu restores the guest into a time
+# namespace of its own whose monotonic offset hides that (measured: the
+# restored game's /proc/PID/timens_offsets read "monotonic -24 166914377"
+# after a 26.6 s save-to-load), so its clock resumes from the moment criu
+# READ the clock during the dump - which is after the seize by however long
+# the dump took. A big game in a busy mode takes a while to dump, and a dump
+# over 10 s makes a slot whose every load trips the watchdog.
+#
+# So the restored game's clock is credited, through paused_ms - the switch
+# ring rewind above has just put the save's own value there - with exactly
+# the time IT perceives since the seize: its own monotonic now (ours plus its
+# namespace's offset) less the save's `frozen_at`. hwshim takes paused_ms off
+# every clock the game reads and adds it to every deadline it waits on, the
+# way Pause works. The guest is still stopped (criu restored it with
+# --leave-stopped), both ends of the measurement err towards a SHORTER
+# credit, and a ms is taken off besides, so the game's clock steps forward a
+# hair at the thaw, never backwards. Without a time namespace (an older
+# criu) the offset is 0 and the gap is real time, which only means anything
+# on the boot the save was made on. A slot from before this has no
+# `frozen_at`: it is restored as before. Then the thaw, for every task of
+# the restored tree (its own pid namespace).
+FROZEN_AT=$(awk '$1 == "frozen_at" {print $2, $3; exit}' "$DDIR/restore.env")
+if [ -n "$FROZEN_AT" ]; then
+    read -r FZ_MS FZ_BOOT <<<"$FROZEN_AT"
+    python3 - "$R/dump/padsw" "$FZ_MS" "$FZ_BOOT" "$NEWPID" "$RIG" <<'PYEOF'
+import os, struct, sys, time
+path, fz_ms, fz_boot, pid = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+sys.path.insert(0, sys.argv[5])
+import padsw
+off_ms = 0
+own_ns = os.readlink("/proc/self/ns/time") if os.path.exists("/proc/self/ns/time") else ""
+try:
+    guest_ns = os.readlink("/proc/%s/ns/time" % pid)
+except OSError:
+    guest_ns = own_ns
+if guest_ns != own_ns:
+    with open("/proc/%s/timens_offsets" % pid) as f:
+        for line in f:
+            p = line.split()
+            if p and p[0] == "monotonic":
+                off_ms = int(p[1]) * 1000 + int(p[2]) // 1000000
+elif fz_boot != open("/proc/sys/kernel/random/boot_id").read().strip():
+    print("[restore] NOTE: this save is from before WSL last restarted and the"
+          " game is in no time namespace, so the time since it cannot be measured")
+    sys.exit(0)
+ms = int(time.monotonic() * 1000) + off_ms - fz_ms - 1
+if ms <= 0:
+    sys.exit(0)
+with open(path, "r+b") as f:
+    head = f.read(padsw.SIZE)
+    if len(head) < padsw.SIZE or struct.unpack_from("<I", head, padsw.OFF_MAGIC)[0] != padsw.MAGIC:
+        print("[restore] NOTE: no switch block to credit the game's %.1f s to" % (ms / 1000.0))
+        sys.exit(0)
+    total = struct.unpack_from("<I", head, padsw.OFF_PAUSED_MS)[0] + ms
+    f.seek(padsw.OFF_PAUSED_MS)
+    f.write(struct.pack("<I", total & 0xffffffff))
+print("[restore] the game wakes %.1f s after it was saved; its clock skips that,"
+      " as for Pause" % (ms / 1000.0))
+PYEOF
+fi
+GUEST_NS=$(readlink "/proc/$NEWPID/ns/pid" 2>/dev/null)
+for d in /proc/[0-9]*; do
+    [ -n "$GUEST_NS" ] && [ "$(readlink "$d/ns/pid" 2>/dev/null)" = "$GUEST_NS" ] \
+        && kill -CONT "${d#/proc/}" 2>/dev/null
+done
+kill -CONT "$NEWPID" 2>/dev/null
 
 # What should the picture look like?  With the journal replayed, complete:
 # the renderer holds the save's whole GL world whatever session it came

@@ -51,7 +51,7 @@ static unsigned bd_surface_state(void) { return state; }
 static void bd_field(unsigned obj, unsigned v) { printf("FIELD written\n"); }
 static int disp_clip_ours;
 static int bd_v2 = 1;
-static int ck_ours;                                /* PAD-530: our own asks of the surface */
+static int ck_ours, ck_last_ours;                                /* PAD-530: our own asks of the surface */
 """
 
 MAIN = r"""

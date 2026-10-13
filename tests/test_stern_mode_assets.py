@@ -283,6 +283,39 @@ def test_every_clip_of_a_build_is_made_at_the_banks_clip_frame(tmp_path, monkeyp
     assert sizes == [("title", w, h), ("title", w, h), ("file", w, h)]
 
 
+def _frame_rgb(ff, path, w, h, at=0.5):
+    raw = subprocess.run([ff, "-v", "error", "-ss", str(at), "-i", path, "-frames:v", "1", "-f", "rawvideo",
+                          "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 3)
+
+
+def test_burned_in_bars_are_cut_off_so_the_picture_fills_the_tv(tmp_path):
+    """PAD-562 round 2 (luvthatapex): a 920x416 video that is a 16:9 letterboxed film fitted into 920x416
+    (its 740x314 picture in black on all four sides) fills the 920x416 clip, as From a film's cuts do."""
+    ff = _ffmpeg()
+    src, out = str(tmp_path / "barred.mp4"), str(tmp_path / "out.asset")
+    subprocess.run([ff, "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=740x314:rate=30:duration=3",
+                    "-vf", "pad=920:416:90:51:black", "-pix_fmt", "yuv420p", src], check=True)
+    MA.convert_clip(src, out, 920, 416, ff)
+    px = _frame_rgb(ff, out, 920, 416).astype(int)
+    # the picture (2.36:1) is a hair wider than the TV (2.21:1): it reaches both sides, with thin
+    # bars above and below only
+    assert px[208, 4].max() > 40 and px[208, 915].max() > 40
+    assert px[60:356, 4].mean() > 40
+    assert px[2].max() < 30 and px[413].max() < 30
+    before = _frame_rgb(ff, src, 920, 416).astype(int)
+    assert before[208, 4].max() < 30                     # the source's own side bars
+
+
+def test_a_video_without_bars_is_converted_as_before(tmp_path):
+    ff = _ffmpeg()
+    src = str(tmp_path / "plain.mp4")
+    subprocess.run([ff, "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=920x416:rate=30:duration=3",
+                    "-pix_fmt", "yuv420p", src], check=True)
+    assert MA.burned_picture(src, ff) is None
+    assert MA.burned_picture(str(tmp_path / "missing.mp4"), ff) is None
+
+
 def test_a_bond_sized_build_encodes_a_920x416_clip(tmp_path, monkeypatch):
     """The real encoder: a 16:9 video given to a mode on a 920x416 bank comes out 920x416 (bars at its
     sides only, where its shape differs), not 1360x768."""

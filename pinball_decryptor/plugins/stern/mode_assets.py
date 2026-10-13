@@ -154,12 +154,26 @@ def render_title_clip(out, title, w, h, seconds, panel_color, title_color, ffmpe
 MODE_CLIP_MAX_SECONDS = 300
 
 
+def burned_picture(src, ffmpeg):
+    """PAD-562: the picture inside black bars burned into a person's own video, ``(w, h, x, y)``
+    (:func:`.film_cut.detect_picture`, what From a film leaves out), or None. luvthatapex's
+    920x416 Bond video was a 16:9 letterboxed film fitted into 920x416, so its picture sat in
+    black on all four sides and the TV showed it small in the middle."""
+    from . import film_cut as FC
+    try:
+        return FC.detect_picture(src, ffmpeg)
+    except (FC.FilmCutError, OSError, ValueError):
+        return None
+
+
 def convert_clip(src, out, w, h, ffmpeg, max_seconds=MODE_CLIP_MAX_SECONDS):
     """A user's own video, made into what the bank plays: the bank's size (letterboxed,
-    never stretched), 30 fps, silent, and no longer than ``max_seconds``."""
+    never stretched), 30 fps, silent, and no longer than ``max_seconds``. Black bars burned
+    into the video are cut off first (:func:`burned_picture`), so its picture fills the frame."""
     head, tail = _encode_args(ffmpeg, out)
-    vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%d"
-          % (w, h, w, h, FPS))
+    pic = burned_picture(src, ffmpeg)
+    vf = ("%sscale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%d"
+          % ("crop=%d:%d:%d:%d," % pic if pic else "", w, h, w, h, FPS))
     cmd = head + ["-i", src, "-t", str(max_seconds), "-vf", vf] + tail
     r = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
     if r.returncode != 0 or not os.path.isfile(out):
@@ -179,8 +193,9 @@ CLIP_CACHE_ENV = "PAD_CLIP_CACHE"
 CLIP_WORKERS = 4
 #: Clips kept at most; the least recently used go first.
 CLIP_CACHE_KEEP = 40
-#: Bump when a clip's encode changes in a way its key does not show.
-_CLIP_REV = 1
+#: Bump when a clip's encode changes in a way its key does not show (2: PAD-562 cuts a video's
+#: burned-in bars off).
+_CLIP_REV = 2
 
 
 @dataclass(frozen=True)

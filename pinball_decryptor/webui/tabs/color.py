@@ -185,21 +185,30 @@ class _TextLines:
     def color_targets(self, scope="profiled"):
         """``{rel: attached}``: "profiled", the lines with a color profile
         attached; "all", every line that is not locked, but for one its
-        font's pictures correct already (counted in :attr:`left_out`)."""
+        font's pictures already give the profile on show (counted in
+        :attr:`left_out`).  PAD-568 (DragonRR): one they give another, No
+        change on Black and white pictures, is counted in: it gets its own."""
         from ...plugins.stern import text_colour
         self.left_out = 0
         assets = self.tab._project
         if not (assets and os.path.isdir(assets)):
             return {}
+        data = staged_changes.peek(assets)
+        resolve, want = None, None
         out = {}
-        for rel, sw in text_colour.every_line(assets).items():
+        for rel, sw in text_colour.every_line(assets, data=data).items():
             if sw.get("on"):
                 out[rel] = True
             elif scope == "all":
                 if sw.get("font_on"):
-                    self.left_out += 1
-                else:
-                    out[rel] = False
+                    if resolve is None:
+                        resolve = cp.asset_resolver(assets, data, identity=True)
+                        want = self.tab._shown().key()
+                    if all(p is not None and p.key() == want
+                           for p in text_colour.font_looks(sw, data, resolve)):
+                        self.left_out += 1
+                        continue
+                out[rel] = False
         return out
 
     def put_color_switches(self, switches):

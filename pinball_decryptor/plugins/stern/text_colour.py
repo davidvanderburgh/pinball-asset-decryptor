@@ -475,6 +475,21 @@ def font_on(sw, data):
                               for r in rels)
 
 
+def font_looks(sw, data, resolve):
+    """What each of a line's font's pictures (*sw* :func:`line_switch`'s, a line in a font
+    with colours of its own) has baked in on the card: its profile, ``None`` where it is left
+    as the game has it (switched off, or a profile that changes nothing).  *resolve* is
+    :func:`colour_profile.asset_resolver`'s."""
+    from ...core import colour_profile as cp
+    slots = data.get(cp.IMAGE_SLOTS_KEY)
+    slots = slots if isinstance(slots, dict) else {}
+    out = []
+    for r in (sw or {}).get("font_pictures") or []:
+        r = r if r.startswith("images/") else "images/" + r
+        out.append(resolve("images", r) if slots.get(r) else None)
+    return out
+
+
 def every_line(assets_dir, trees=None, data=None, fonts=None):
     """``{rel: switch}`` of every line of text in every scene of the project that is not
     locked, the ones added in Scenes too, as the user's edits leave them (PAD-471, DragonRR:
@@ -610,6 +625,7 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
         record = load_record(assets_dir)
     rec = record.get(card) if isinstance(record.get(card), dict) else {}
     resolve = cp.asset_resolver(assets_dir, data)
+    exact = []                                    # the same, No change too (PAD-568)
     picks = text_colors.colors_for(assets_dir, card)
     nodes = _walk(man)
     users = {}
@@ -698,8 +714,15 @@ def line_ops(assets_dir, card, man, ops=(), data=None, fonts=None, record=None, 
         if o is None:
             continue
         sw = line_switch(assets_dir, card, man, n, ops, data, fonts)
-        prof = (resolve("text", sw["rel"])
-                if bake and sw and sw.get("line") and sw.get("on") else None)
+        on = bool(bake and sw and sw.get("line") and sw.get("on"))
+        prof = resolve("text", sw["rel"]) if on else None
+        if (prof is None and on and sw.get("art")
+                and any(p is not None for p in font_looks(sw, data, resolve))):
+            # PAD-568 (DragonRR): No change on a line whose font's pictures are corrected
+            # (Black and white on every image): its own copy of the font, as the game has it
+            if not exact:
+                exact.append(cp.asset_resolver(assets_dir, data, identity=True))
+            prof = exact[0]("text", sw["rel"])
         base_rgb, base_col = base_of(n, o)
         if prof is None and n["id"] in kept:
             continue                              # it keeps its look beside one (PAD-514)

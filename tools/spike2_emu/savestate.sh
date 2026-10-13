@@ -363,6 +363,48 @@ done < <(for fd in /proc/$PID/fd/*; do
 # switch ring. The honest cost: the game is visibly frozen and the audio
 # underruns for the stash + journal beat on top of the dump's own freeze.
 echo "[save] externals:${DUMP_EXT[*]+ ${DUMP_EXT[*]}}${TTY_EXT[*]+ ${TTY_EXT[*]}}"
+# ★ PAD-559, round 2: THE FREEZE IS TIME THE GAME MUST NOT SEE. A stopped
+# process's clocks run on, and the game's dispatch loop waits on an absolute
+# 10 s deadline (exit 5, "GAME EXIT DISPATCH TIMEOUT", PAD-200). A save that
+# held the game longer than that - the same Bond LE owner's SECOND save, 13 s
+# deep into a game with the GL journal to write - woke it past the deadline
+# and it ended itself seconds later. Pause solved this long ago (PAD-204):
+# the frozen time goes into the switch block's paused_ms BEFORE the SIGCONT,
+# and hwshim takes it off every clock the game reads and adds it to every
+# deadline it waits on. So the save credits its freeze the same way.
+#
+# The freeze starts when criu SEIZES the task, not when criu starts, and
+# credit_freeze takes that moment from criu's own log (its timestamps count
+# from its start). Like padglhost's it errs SHORT - whole ms, less one - so
+# the game's clock can step forward a hair at the thaw but never backwards.
+T_CRIU0=$(date +%s%3N)
+GSW="/proc/$PID/root/dump/padsw"
+SWPY=$(dirname "$0")
+credit_freeze() {
+    local off now ms
+    off=$(awk 'match($0, /^\( *[0-9]+\.[0-9]+\)/) && /[Ss]eiz/ {
+                   s = substr($0, 2, RLENGTH - 2); gsub(/ /, "", s)
+                   printf "%d\n", s * 1000; exit }' "$DDIR/dump.log" 2>/dev/null)
+    [ -n "$off" ] || { echo "[save] NOTE: criu's log does not say when it froze the game; no clock credit"; return 0; }
+    now=$(date +%s%3N)
+    ms=$(( now - T_CRIU0 - off - 1 ))
+    [ "$ms" -gt 0 ] || return 0
+    python3 - "$GSW" "$ms" "$SWPY" <<'PYEOF'
+import struct, sys
+path, ms = sys.argv[1], int(sys.argv[2])
+sys.path.insert(0, sys.argv[3])
+import padsw
+with open(path, "r+b") as f:
+    head = f.read(padsw.SIZE)
+    if len(head) < padsw.SIZE or struct.unpack_from("<I", head, padsw.OFF_MAGIC)[0] != padsw.MAGIC:
+        print("[save] NOTE: no switch block to credit the freeze to (%d ms)" % ms)
+        sys.exit(0)
+    total = struct.unpack_from("<I", head, padsw.OFF_PAUSED_MS)[0] + ms
+    f.seek(padsw.OFF_PAUSED_MS)
+    f.write(struct.pack("<I", total & 0xffffffff))
+print("[save] the game was frozen %.1f s; its clock skips that, as for Pause" % (ms / 1000.0))
+PYEOF
+}
 "$CRIU" dump -t "$PID" -D "$DDIR" -v4 -o dump.log --leave-stopped \
     ${DUMP_EXT[@]+"${DUMP_EXT[@]}"} ${TTY_EXT[@]+"${TTY_EXT[@]}"}
 RC=$?
@@ -377,7 +419,9 @@ if [ "$RC" != 0 ] || grep -aq 'Dumping FAILED' "$DDIR/dump.log"; then
     why=$(grep -a 'Error' "$DDIR/dump.log" | grep -av 'Dumping FAILED' | head -1 \
           | sed 's/^([^)]*) *//; s/^Error ([^)]*): *//')
     echo "[save] could not save: ${why:-criu stopped without saying why (exit $RC) - see $DDIR/dump.log}"
-    # A failed dump must not leave the game frozen on screen.
+    # A failed dump must not leave the game frozen on screen - nor wake it
+    # past its watchdog, if criu had already seized it.
+    credit_freeze
     kill -CONT "$PID" 2>/dev/null
     exit 1
 fi
@@ -460,7 +504,13 @@ fi
 if [ "${PAD_SAVE_STOP:-0}" = 1 ]; then
     kill -9 "$PID" 2>/dev/null
     echo "[save] guest ended (PAD_SAVE_STOP=1)"
+elif [ "$(od -An -tu4 -j1084 -N4 "$GSW" 2>/dev/null | tr -d ' ')" = 1 ]; then
+    # Pause was pressed during the save: the game is the user's to resume,
+    # and padglhost credits the frozen time from its own press. No credit
+    # here - the two would overlap and step the game's clock backwards.
+    echo "[save] the game was paused during the save; it stays paused"
 else
+    credit_freeze
     kill -CONT "$PID" 2>/dev/null
     for _ in 1 2 3 4 5; do
         st=$(awk '{print $3}' "/proc/$PID/stat" 2>/dev/null)

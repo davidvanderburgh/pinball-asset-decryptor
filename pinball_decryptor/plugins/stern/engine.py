@@ -9960,6 +9960,8 @@ def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     from . import mode_write as _MW
     from . import picture_settings as _PS
     if not _PS.load(assets_dir):
+        if not _PS.OFFERED and _PS.asked(assets_dir):         # PAD-575: switched off for now
+            log(_PS.SWITCHED_OFF, "warning")
         return None
     if dest_is_device:
         why = ("a direct-SD write cannot add files to the card or grow its game program; build "
@@ -9982,7 +9984,7 @@ def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):
             "%s." % why.rstrip("."), "warning")
         return None
     log("Picture settings: this card gets BRIGHTNESS, CONTRAST and SATURATION in its operator "
-        "menu, applied to the screen as soon as they are changed.", "info")
+        "menu, applied to the screen from the game's next start after they are changed.", "info")
     return prof
 
 

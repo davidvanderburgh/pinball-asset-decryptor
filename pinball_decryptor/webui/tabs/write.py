@@ -114,15 +114,17 @@ EDITIONS_TIP = (
     "EDITION setting names\" ticked: the card shows no menu, and the edition "
     "the setting names boots at the next power-up.")
 EDITIONS_NONE = "None. This card is not one of several editions."
-#: PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu, applied live
-#: (plugins/stern/picture_settings.py)
+#: PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu (plugins/stern/
+#: picture_settings.py); PAD-575: a change shows from the game's next start, and at 5 the
+#: game draws as it does without them
 PICTURE_LABEL = "Picture settings in the service menu"
 PICTURE_TIP = (
     "Gives the card BRIGHTNESS, CONTRAST and SATURATION in its operator menu "
     "(Adjustments > Machine Settings > LCD/Lamp), values 1 to 9, 5 for no change. "
-    "A value the operator accepts changes the whole screen at once, on top of the "
-    "colors the card was built with, and the Color profile tab's test card shows "
-    "in the corner for a few seconds so they can see what it did. They share the "
+    "A value the operator changes shows from the game's next start, on the whole "
+    "screen and on top of the colors the card was built with. While all three are "
+    "at 5 the game draws exactly as it does without them. Away from 5 every picture "
+    "takes an extra step on the machine, which can slow busy scenes. They share the "
     "game's spare settings with the Audio tab's music choice and with Editions: with "
     "both on the card, only Brightness fits.")
 EDITABLE_HINT = (
@@ -1786,10 +1788,10 @@ class WriteTab(TabService):
     def _publish_picture(self):
         """The tick, and under it where the rows land, how many fit, or in red
         why this project's game cannot have them."""
-        if not self._editions_applies():
+        from ...plugins.stern import picture_settings as _PS
+        if not _PS.OFFERED or not self._editions_applies():      # PAD-575: not offered for now
             self.set(picture_cap=False)
             return
-        from ...plugins.stern import picture_settings as _PS
         assets = self._info_assets_dir()
         on = bool(assets) and _PS.load(assets)
         note, kind = "", ""
@@ -1819,7 +1821,7 @@ class WriteTab(TabService):
         """Tick or untick the picture settings for this project."""
         from ...core import history_log
         from ...plugins.stern import picture_settings as _PS
-        if self.window._running or not self._editions_applies():
+        if self.window._running or not _PS.OFFERED or not self._editions_applies():
             return False
         assets = self._info_assets_dir()
         if not assets:

@@ -314,7 +314,8 @@ const char *pm_stock_mode_what(unsigned kind);   /* "a battle", "a multiball", "
  * five times a second); 0 on a port that cannot tell, and outside a game. */
 int pm_aside(void);
 /* PAD-347 / PAD-363: ISOLATION. A mode may keep the game's own modes from STARTING while it runs: the
- * start of each mode the port names (generated from the game program; never a multiball) is refused at its
+ * start of each mode the port names (generated from the game program; never a multiball's start - on James Bond, PAD-578, Jetpack and Bird One
+ * Multiball's lock-open check, refused with 0, so no lock lights or counts) is refused at its
  * entry, so that mode never begins and the rule that asked carries on. Which ones: the mode's own list
  * (pm_block_list: n of the game's mode ids, 0-127 - the port's `text block_name_<id>` names them), or the
  * port's checked defaults (`text block_default <ids>`). On Godzilla a blocking mode also keeps a battle from

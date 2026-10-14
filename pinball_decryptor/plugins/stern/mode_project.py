@@ -4453,6 +4453,10 @@ def asset_names(slug):
         "screen_text": stem + "_Screen." + stem + "_Screen_Words",
         "info_node": stem + "_Info",                     # PAD-547: its info line ("SUPER JACKPOT = 53,200,000")
         "info_text": stem + "_Info." + stem + "_Info_Words",
+        "total_name_node": stem + "_TotalName",           # PAD-574: its TOTAL as the game's own: the word...
+        "total_name_text": stem + "_TotalName." + stem + "_TotalName_Words",
+        "total_node": stem + "_Total",                   # ...and under it the number, large
+        "total_text": stem + "_Total." + stem + "_Total_Words",
         "clip": stem + "_Clip",
     }
 

@@ -1049,7 +1049,7 @@ def test_the_hud_c_calls_only_the_header_and_the_kit():
     assert kit_used and kit_used <= kit, kit_used - kit
     assert 'static struct kit_hud hud = { .slug = "maser" };' in src
     # a HUD with no priority of its own takes a mode's 180 (PAD-377's choice wins when made)
-    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_MS)" in src
+    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_MS + total_due" in src
     p = maser_hud()
     p["priority"] = 190
     assert re.search(r"#define DISPLAY_PRIORITY 190\b", BM.to_c(p, "maser"))
@@ -1620,12 +1620,79 @@ def test_words_alone_show_the_name_then_a_line_then_the_total(tmp_path):
     assert any(abs(t - start) <= 40 for t in on_at)
     assert any(3900 <= t - start <= 4100 for t in off_at)                         # the name, 4 s
     assert any(abs(t - shot) <= 40 for t in on_at) and any(2900 <= t - shot <= 3100 for t in off_at)
-    assert re.search(r"WORDS PadMode_blk_Screen_Words: TOTAL 500", out)
-    assert any(abs(t - end) <= 40 for t in on_at) and any(2900 <= t - end <= 3200 for t in off_at)
+    # PAD-574: the TOTAL as the game's own modes end: its two screens under the bar, the words screen hidden
+    assert re.search(r"WORDS PadMode_blk_Total_Words: 500", out) and re.search(r"WORDS PadMode_blk_TotalName_Words: TOTAL", out)
+    assert not re.search(r"WORDS PadMode_blk_Screen_Words: TOTAL", out)
+    tot = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Total (\d)$", out, re.M)]
+    assert any(abs(t - end) <= 40 for t, on in tot if on) and any(2900 <= t - end <= 3200 for t, on in tot if not on)
+    assert any(abs(t - end) <= 40 for t in off_at)
     # the panel stays up all along, as ever
     out = play(tmp_path, dict(p, screen_style="panel"), "shot", "Left ramp", "secs", 6)
     assert not [t for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Screen (\d)$", out, re.M) if on == "0"
                 and int(t) > 100]
+
+
+# ---- PAD-574: an Award on its own screen, and the TOTAL after it ---------------------------------------------------
+def _award(**kw):
+    """The Bond owner's ending (PAD-574): the last Right ramp scores, awards its SUPER JACKPOT and ends the mode; When
+    the mode ends awards TOTAL and its points. No HUD: the Awards go on its own screen."""
+    return prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+                 {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"},
+                  "do": [{"op": "score", "points": num(700)},
+                         {"op": "hud_award", "text": "SUPER JACKPOT", "value": num(3500), "sub": "", "seconds": 2},
+                         {"op": "end_mode"}]},
+                 {"hat": {"kind": "mode_end"},
+                  "do": [{"op": "hud_award", "text": "TOTAL", "value": {"k": "total"}, "sub": "", "seconds": 2}]}],
+                seconds=30, screen=True, **kw)
+
+
+def test_an_award_ending_the_mode_shows_then_the_next_then_the_total(tmp_path):
+    out = play(tmp_path, _award(screen_style="words"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp", "secs", 10)
+    end = _at_any(out, r"END \(a block\)")
+    assert abs(_at_any(out, r"WORDS PadMode_blk_Screen_Words: SUPER JACKPOT 3,500") - end) <= 40
+    assert 1900 <= _at_any(out, r"WORDS PadMode_blk_Screen_Words: TOTAL 700") - end <= 2100     # its own turn, 2 s on
+    assert 3900 <= _at_any(out, r"WORDS PadMode_blk_Total_Words: 700") - end <= 4100            # then the TOTAL
+    tot = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Total (\d)$", out, re.M)]
+    assert any(3900 <= t - end <= 4100 for t, on in tot if on) and any(6900 <= t - end <= 7200 for t, on in tot if not on)
+    assert "has no HUD" not in BM.to_c(_award(screen_style="words"), "blk")
+    assert BM.problems(_award(screen_style="words")) == [] and not [t for t in BM.notes(_award(screen_style="words")) if "HUD" in t]
+    # a drain while they wait: nothing of it stays
+    out = play(tmp_path, _award(screen_style="words"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp",
+               "ball_end", "secs", 6)
+    assert not re.search(r"WORDS PadMode_blk_Total_Words", out)
+
+
+def test_an_award_on_a_panel_and_with_no_screen(tmp_path):
+    out = play(tmp_path, _award(screen_style="panel"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp", "secs", 8)
+    end = _at_any(out, r"END \(a block\)")
+    assert abs(_at_any(out, r"WORDS PadMode_blk_Screen_Words: SUPER JACKPOT 3,500") - end) <= 40
+    totals = [int(t) - end for t in re.findall(r"^\s*(\d+) WORDS PadMode_blk_Screen_Words: TOTAL 700$", out, re.M)]
+    assert len(totals) == 2 and 1900 <= totals[0] <= 2100 and 3900 <= totals[1] <= 4100   # its Award, then the TOTAL
+    assert "PadMode_blk_Total" not in out                                     # a panel keeps its TOTAL on itself
+    off = dict(_award(), screen=False)
+    assert "/* hud_award: the mode has no HUD */" in BM.to_c(off, "off")
+    assert any("An Award shows on its HUD or its own screen" in t for t in BM.notes(off))
+
+
+def test_a_words_screen_builds_its_total_where_the_game_puts_its_own(tmp_path):
+    project = str(tmp_path)
+    slug, _c = BM.new_blocks_mode(project, "BON APPETIT")
+    BM.save(project, slug, BM.normalize({"name": "BON APPETIT", "screen": True, "screen_style": "words", "scripts": []}))
+    from pinball_decryptor.plugins.stern import code_modes as CM, mode_assets as MA, mode_project as MP
+    spec = CM.load(project, slug)
+    prof = MP.profile("james_bond_le_1_06")
+    names = MP.asset_names(slug)
+    got = {s["name"]: s for s in MA._code_screens(project, [(slug, spec)], prof)}
+    word, number = got[names["total_name_node"]], got[names["total_node"]]
+    cx, cy = prof.info_at
+    for s, dy in ((word, MA.TOTAL_NAME_DY), (number, MA.TOTAL_DY)):
+        h, w = s["art_rgba"].shape[:2]
+        assert s["words"] == " " and not s["art_rgba"].any()               # built blank: the mode writes them
+        assert (s["x"] + w / 2.0, s["y"] + h / 2.0) == (cx, cy + dy)
+    assert number["words_scale"] > word["words_scale"]
+    assert names["total_text"] == names["total_node"] + "." + number["words_name"]
+    BM.save(project, slug, BM.normalize({"name": "BON APPETIT", "screen": True, "scripts": []}))      # a panel: none
+    assert names["total_node"] not in {s["name"] for s in MA._code_screens(project, [(slug, CM.load(project, slug))], prof)}
 
 
 # ---- PAD-547: an info line under its name ("SUPER JACKPOT = 53,200,000") --------------------------------------------

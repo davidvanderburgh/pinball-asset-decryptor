@@ -4128,6 +4128,15 @@ saying `"info_line": true`.
 its name in the blue bar and SUPER JACKPOT = 5,000,000 under it at the start, 6,250,000 and 7,500,000 after two Side
 ramps, gone with the TOTAL over its end clip. With main's code the same mode showed the bar alone. No abort.
 
+**Its TOTAL as the game's own (PAD-574).** A mode whose screen is words alone also gets two blank screens of its own,
+`PadMode_<slug>_TotalName` and `PadMode_<slug>_Total` (assets: `total_name_node` / `total_node`), 12 and 55 px under
+the port's `info_line_at`: a blocks mode writes "TOTAL" and its number into them at its end, hides its words screen
+and shows them for 3 s, under the bar as James Bond's own modes end. An Award block on a mode with no HUD shows on
+its own screen, and an End the mode right after an Award lets it show (and one Award of When the mode ends after it)
+before the TOTAL. A mode in C uses the two screens with `pm_node`, `pm_text` and `pm_set_text`. Emulator-proven on the
+stock Bond LE 1.06 card (rig 1, 2026-10-14) with the owner's own BON APPETIT blocks: SUPER JACKPOT for 2 s, then TOTAL
+14,000,000 under the bar for 3 s, then all gone. No abort.
+
 ### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
 
 On David's Premium 1.16 (2026-10-01, a traced card and a phone video) a mode's full-screen clip (`pm_clip`:

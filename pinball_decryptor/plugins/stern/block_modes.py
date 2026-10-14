@@ -828,8 +828,10 @@ def notes(program):
     if "words" in ops and not program["screen"]:
         out.append("Show words needs the mode's own screen: tick Its own screen.")
     hud = program["hud"]
-    if not hud["on"] and {"hud_text", "hud_counter", "hud_gauge", "hud_award"} & ops:
+    if not hud["on"] and {"hud_text", "hud_counter", "hud_gauge"} & ops:
         out.append("The HUD blocks need the HUD: tick Its HUD.")
+    if not hud["on"] and not program["screen"] and "hud_award" in ops:     # PAD-574: or on its own screen
+        out.append("An Award shows on its HUD or its own screen: tick Its HUD or Its own screen.")
     if hud["on"]:
         named = set()
         for s in program["scripts"]:
@@ -1493,6 +1495,15 @@ class _Gen:
                 out.append(pad + "if (run.on && pm_multiball_start(%du, %du)) run.own_mball = 1;" % (balls, save))
             elif op == "log":
                 out.append(pad + 'pm_log("%%s", %s);' % _c_str(str(b.get("text") or "")[:TEXT_MAX]))
+            elif op == "hud_award" and not self.p["hud"]["on"] and self.p["screen"]:
+                value = b.get("value")      # PAD-574: on its own screen, as a Words block for the award's moment
+                try:
+                    secs = max(1, min(AWARD_SECONDS_MAX, int(b.get("seconds"))))
+                except (TypeError, ValueError):
+                    secs = 2
+                out.append(pad + "award_words(%s, %s, %d, %du);" % (
+                    _c_str(str(b.get("text") or "")[:HUD_TEXT_MAX]),
+                    self.num(value) if value is not None else "0LL", 0 if value is None else 1, secs * 1000))
             elif op.startswith("hud_") and not self.p["hud"]["on"]:
                 out.append(pad + "/* %s: the mode has no HUD */" % op)
             elif op == "hud_text":
@@ -1754,6 +1765,13 @@ def to_c(program, slug):
     L.append("/* The screen a build added for this mode (its folder is \"%s\"). Not there = no screen. */" % slug)
     L.append('#define SCREEN_NODE  "PadMode_%s_Screen"' % slug)
     L.append('#define SCREEN_TEXT  "PadMode_%s_Screen.PadMode_%s_Screen_Words"' % (slug, slug))
+    if words_only:
+        L.append("/* PAD-574: its TOTAL as the game's own modes end (James Bond: TOTAL over the number, under the bar): two")
+        L.append(" * screens a build put there. Not there = the TOTAL over its video, on its own screen. */")
+        L.append('#define TOTAL_NAME_NODE "PadMode_%s_TotalName"' % slug)
+        L.append('#define TOTAL_NAME_TEXT "PadMode_%s_TotalName.PadMode_%s_TotalName_Words"' % (slug, slug))
+        L.append('#define TOTAL_NODE   "PadMode_%s_Total"' % slug)
+        L.append('#define TOTAL_TEXT   "PadMode_%s_Total.PadMode_%s_Total_Words"' % (slug, slug))
     if has_info:
         L.append("/* PAD-547: its info line, a screen of its own the build put where the title's port says (James Bond: under")
         L.append(" * the status bar). Not there = no line. */")
@@ -1802,6 +1820,13 @@ def to_c(program, slug):
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
     L.append("static unsigned ended_begun;          /* PAD-413: pm_begun() at its end, while its total shows */")
+    L.append("static unsigned award_ticks;          /* PAD-574: an Award's words up this much longer */")
+    L.append("static unsigned total_due;            /* PAD-574: ticks until its TOTAL: an Award it ended on shows first */")
+    if not has_hud:
+        L.append("static char award_next[96];           /* PAD-574: an Award of When the mode ends, after the one showing */")
+        L.append("static unsigned award_next_ticks;")
+    if words_only:
+        L.append("static void *total, *total_words, *total_name, *total_name_words;   /* PAD-574: its TOTAL's two screens */")
     if has_bar:
         L.append("static unsigned bar_max, bar_hold;     /* PAD-521: the clock's most ticks; the bar kept through the total */")
     if watch:
@@ -1882,6 +1907,7 @@ def to_c(program, slug):
     L.append("{")
     L.append("    char number[32], line[96];")
     L.append("    if (!screen_words) return;")
+    L.append("    award_ticks = 0;")
     L.append("    if (with_value) {")
     L.append("        pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);")
     L.append('        pm_snprintf(line, sizeof line, "%s%s%s", text, text[0] ? " " : "", number);')
@@ -1893,6 +1919,62 @@ def to_c(program, slug):
     L.append("        flash_ticks = %d * TICKS_PER_SECOND / 1000;" % WORDS_SHOW_MS)
     L.append("        if (!screen_away) pm_show(screen, 1);" if watch else "        pm_show(screen, 1);")
     L.append("    }")
+    L.append("}")
+    L.append("")
+    if not has_hud:
+        L.append("/* PAD-574: an Award block with no HUD: its words and value on its own screen for its moment (its smaller line")
+        L.append(" * has no place there); an End the mode after it lets it show before the TOTAL */")
+        L.append("UNUSED static void award_words(const char *text, long long value, int with_value, unsigned ms)")
+        L.append("{")
+        L.append("    if (!screen_words || !run.on) return;")
+        L.append("    if (ending && award_ticks) {      /* in When the mode ends, after the Award it ended on: next */")
+        L.append("        char number[32];")
+        L.append("        if (with_value) {")
+        L.append("            pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);")
+        L.append('            pm_snprintf(award_next, sizeof award_next, "%s%s%s", text, text[0] ? " " : "", number);')
+        L.append("        } else {")
+        L.append('            pm_snprintf(award_next, sizeof award_next, "%s", text);')
+        L.append("        }")
+        L.append("        award_next_ticks = ms * TICKS_PER_SECOND / 1000;")
+        L.append("        return;")
+        L.append("    }")
+        L.append("    words(text, value, with_value);")
+        L.append("    award_ticks = ms * TICKS_PER_SECOND / 1000;")
+        L.append("    if (WORDS_ONLY && screen) flash_ticks = award_ticks;")
+        L.append("}")
+        L.append("")
+    L.append("/* its TOTAL for its moment at its end (on its own screen; PAD-574: a words-alone one's under the bar as the game's")
+    L.append(" * own modes show theirs, when the build put the two screens there) */")
+    L.append("static void total_show(void)")
+    L.append("{")
+    L.append("    if (!screen) return;")
+    if words_only:
+        L.append("    if (total && total_words) {")
+        L.append("        char n[32];")
+        L.append("        pm_show(screen, 0);")
+        L.append("        pm_commas(n, sizeof n, run.total);")
+        L.append("        pm_set_text(total_words, n);")
+        L.append("        pm_show(total, 1);")
+        L.append("        if (total_name && total_name_words) {")
+        L.append('            pm_set_text(total_name_words, "TOTAL");')
+        L.append("            pm_show(total_name, 1);")
+        L.append("        }")
+        L.append("    } else {")
+        L.append("        if (WORDS_ONLY) pm_show(screen, 1);   /* PAD-521: its TOTAL over the game's video */")
+        L.append('        words("TOTAL", (long long)run.total, 1);')
+        L.append("    }")
+    else:
+        L.append('    words("TOTAL", (long long)run.total, 1);')
+    L.append("    hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
+    L.append("}")
+    L.append("")
+    L.append("static void total_hide(void)")
+    L.append("{")
+    L.append("    total_due = 0;")
+    L.append("    if (screen) pm_show(screen, 0);")
+    if words_only:
+        L.append("    if (total) pm_show(total, 0);")
+        L.append("    if (total_name) pm_show(total_name, 0);")
     L.append("}")
     L.append("")
     L.append("UNUSED static void score(long long points)")
@@ -2144,19 +2226,20 @@ def to_c(program, slug):
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
     if has_info:
         L.append("    info_show(0);                     /* PAD-547: its line goes with it */")
+    L.append("    total_due = screen && screen_words ? award_ticks%s : 0;   /* PAD-574: an Award it ended on, then its TOTAL */"
+             % ("" if has_hud else " + award_next_ticks"))
+    L.append("    award_ticks = 0;")
     if has_bar:
         L.append("    bar_show(0);                      /* PAD-521: the bar full, kept through its total */")
-        L.append("    bar_hold = ENDING_MS / 1000 * TICKS_PER_SECOND;")
+        L.append("    bar_hold = ENDING_MS / 1000 * TICKS_PER_SECOND + total_due;")
         L.append("    ended_begun = pm_begun();")
     L.append("    if (screen) {")
     L.append("        flash_ticks = 0;")
-    L.append("        if (WORDS_ONLY) pm_show(screen, 1);   /* PAD-521: its TOTAL over the game's video */")
-    L.append('        words("TOTAL", (long long)run.total, 1);')
-    L.append("        hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
     L.append("        ended_begun = pm_begun();")
     if watch:
         L.append("        if (screen_away) pm_show(screen, 1);")
         L.append("        screen_away = 0;")
+    L.append("        if (!total_due) total_show();")
     L.append("    }")
     if has_hud:
         L.append("    {                                 /* the TOTAL, as the examples end */")
@@ -2172,7 +2255,8 @@ def to_c(program, slug):
     L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
     L.append("    /* the total keeps the display watched for its moment on its HUD or its own screen (the kit's")
     L.append("     * kit_end_after, pm_end_holding); a drain or the game hands it back at once (end_now) */")
-    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_MS))) {" % ("1" if has_hud else "screen"))
+    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
+             % ("1" if has_hud else "screen"))
     L.append("        pm_display_priority(0);")
     L.append("        pm_end();")
     L.append("    }")
@@ -2186,6 +2270,7 @@ def to_c(program, slug):
     L.append("{")
     L.append("    end(why);")
     L.append("    hide_ticks = 0;")
+    L.append("    total_hide();                     /* PAD-574: its TOTAL, and an Award waiting for it, go too */")
     if has_bar:
         L.append("    bar_hold = 0;")
         L.append("    pm_status_bar(0, 0, 0);           /* PAD-521: the game's display comes at once */")
@@ -2227,6 +2312,20 @@ def to_c(program, slug):
     L.append("    if (!run.on) pm_show(screen, 0);")
     L.append("}")
     L.append("")
+    if words_only:
+        L.append("static void find_total(void)          /* PAD-574 */")
+        L.append("{")
+        L.append("    static unsigned tries;")
+        L.append("    if (total || !pm_can(PM_CAN_SCREENS) || (tries++ % 30) != 0) return;")
+        L.append('    total = pm_node("hud", TOTAL_NODE);')
+        L.append("    if (!total) return;")
+        L.append('    total_words = pm_text("hud", TOTAL_TEXT);')
+        L.append('    total_name = pm_node("hud", TOTAL_NAME_NODE);')
+        L.append('    total_name_words = total_name ? pm_text("hud", TOTAL_NAME_TEXT) : 0;')
+        L.append("    pm_show(total, 0);                /* built shown, as every screen is */")
+        L.append("    if (total_name) pm_show(total_name, 0);")
+        L.append("}")
+        L.append("")
     if has_info:
         L.append("static void find_info(void)           /* PAD-547 */")
         L.append("{")
@@ -2267,6 +2366,8 @@ def to_c(program, slug):
     L.append("    unsigned seconds = 0;")
     L.append("    int in_game = pm_in_game();")
     L.append("    find_screen();")
+    if words_only:
+        L.append("    find_total();")
     if has_info:
         L.append("    find_info();")
     if has_hud:
@@ -2293,9 +2394,9 @@ def to_c(program, slug):
     L.append('        if (pm_trigger("%s.start")) start("trigger file", 0);' % slug)
     L.append('        if (pm_trigger("%s.stop")) end("trigger file");' % slug)
     L.append("    }")
-    L.append("    if (hide_ticks && !run.on && pm_begun() != ended_begun) {   /* PAD-413: another mode began */")
+    L.append("    if ((hide_ticks || total_due) && !run.on && pm_begun() != ended_begun) {   /* PAD-413: another mode began */")
     L.append("        hide_ticks = 0;")
-    L.append("        if (screen) pm_show(screen, 0);")
+    L.append("        total_hide();")
     L.append('        pm_log("its total gives way - another mode began");')
     L.append("    }")
     if has_bar:
@@ -2303,7 +2404,14 @@ def to_c(program, slug):
         L.append("        bar_hold = 0;")
         L.append("        pm_status_bar(0, 0, 0);       /* PAD-521: the bar back (not if another mode of ours has it) */")
         L.append("    }")
-    L.append("    if (hide_ticks && --hide_ticks == 0 && !run.on && screen) pm_show(screen, 0);")
+    L.append("    if (hide_ticks && --hide_ticks == 0 && !run.on) total_hide();")
+    if not has_hud:
+        L.append("    if (award_next_ticks && (!total_due || run.on)) award_next_ticks = 0;")
+        L.append("    if (award_next_ticks && total_due == award_next_ticks) {   /* PAD-574: the next Award's turn */")
+        L.append("        if (screen_words) pm_set_text(screen_words, award_next);")
+        L.append("        award_next_ticks = 0;")
+        L.append("    }")
+    L.append("    if (total_due && !run.on && --total_due == 0) total_show();   /* PAD-574: the Award it ended on has shown */")
     timer_scripts = scripts_of("timer_done")
     if timer_scripts:
         L.append("    if (in_game) {                    /* the timers that ran out, then their scripts */")
@@ -2337,6 +2445,7 @@ def to_c(program, slug):
     L.append("    }")
     L.append("    (void)seconds;")
     L.append("    if (WORDS_ONLY && flash_ticks && --flash_ticks == 0 && screen) pm_show(screen, 0);   /* PAD-521 */")
+    L.append("    if (award_ticks) award_ticks--;")
     if has_bar:
         L.append("    bar_show(1);                      /* PAD-521: the clock along the bar */")
     L.append("    lamps_tick();")

@@ -68,7 +68,7 @@ const TIP = {
   timer: "The badge on the left edge counting the mode's clock down, with its label and icon (a mode with no clock has none).",
   gauge: "Pips on the right edge, lit up to a number: a gauge of how far along the mode is.",
   gaugeFollows: "How many pips are lit, kept up to date by itself. Empty: a Fill the gauge block sets it.",
-  hudAward: "A big line, and a smaller one under it, for a moment (a jackpot). Before the mode starts it is a note shown alone, when no other mode's HUD is up.",
+  hudAward: "A big line, and a smaller one under it, for a moment (a jackpot). Before the mode starts it is a note shown alone, when no other mode's HUD is up. With no HUD it shows on the mode's own screen (the big line only), and an End the mode after it lets it show before the TOTAL. It shows points, it does not score them: add a Score block for that.",
   setTime: "Puts the mode's clock at this many seconds, up or down (0 = time is up). Put up, a When that many seconds are left does not run again.",
   shared: "Shared with the other modes: every mode with a variable of this name reads and writes the same number, so one mode can be lit by what another did (played it, won it). It resets each ball or each game.",
   timers: "A timer counts down in milliseconds, apart from the mode's clock: start it from a block (any value, so a window can get shorter), and a When it runs out script runs the moment it does. A ball ending stops every timer.",

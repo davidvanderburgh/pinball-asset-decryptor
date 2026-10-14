@@ -1430,6 +1430,25 @@ def test_both_bonds_can_hold_off_the_games_henchman_and_villain_modes(key):
     assert all(re.search(r"^value block_ret_%d\s+0$" % i, port, re.M) for i in range(16, 28))
 
 
+@pytest.mark.parametrize("key", ["james_bond_le_1_06", "james_bond_pro_1_06"])
+def test_both_bonds_can_hold_off_jetpack_and_bird_one_multiball(key):
+    """PAD-578: an owner's mode was killed by Jetpack Multiball, started mid-mode; Bird One Multiball the same. A
+    multiball's start is never refused (balls held for it), so each is the game's own LOCK-OPEN check instead (ids
+    28, 29), refused with 0 - the lock closed as the game closes it for its own gadget modes - ticked by default."""
+    p = MP.profile(key)
+    names = {i: n for i, n, _on in p.game_modes}
+    assert (names.get(28), names.get(29)) == ("Jetpack Multiball", "Bird One Multiball")
+    assert all(on for i, _n, on in p.game_modes if i in (28, 29))
+    port = open(os.path.join(SDK, "ports", key.replace("_1_06", "-1.06") + ".port"), encoding="utf-8").read()
+    assert all(re.search(r"^value block_ret_%d\s+0$" % i, port, re.M) for i in (28, 29))
+    # the sites are c_port_tool's LOCKS, each opening `push {r3, lr}; bl <the game's in-the-way check>`
+    tool = open(os.path.join(SDK, "cstarts", "c_port_tool.py"), encoding="utf-8").read()
+    for i in (28, 29):
+        addr, w0, w1 = re.search(r"^site block_start_%d\s+(0x\w+) (0x\w+) (0x\w+)$" % i, port, re.M).groups()
+        assert w0 == "0xe92d4008" and int(w1, 16) >> 24 == 0xEB
+        assert '("%s", 0x%x)' % (names[i], int(addr, 16)) in tool
+
+
 def test_a_mode_lit_at_a_shot_starts_from_it_ball_after_ball_and_per_player(tmp_path):
     out = play(tmp_path, _lit_prog(),
                "shot", "Right ramp",                                # not lit yet: nothing

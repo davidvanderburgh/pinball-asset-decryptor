@@ -583,6 +583,7 @@ site multiball_serve       0x003f59ec 0xe92d41f0 0xe305e11e
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
 # plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+# PAD-578: Jetpack Multiball, Bird One Multiball: not their start but the game's lock-open check, refused with 0 (the lock closes as for the game's own modes)
 site block_start_0      0x0005be50 0xe92d4010 0xe30001ad
 text block_name_0       Bullshit Scoring
 site block_start_1      0x000b1b90 0xe3011648 0xe300019f
@@ -639,6 +640,10 @@ site block_start_26     0x0012aa04 0xe92d40f8 0xe3a00003
 text block_name_26      Training Grounds
 site block_start_27     0x00132194 0xe92d40f8 0xe3a00003
 text block_name_27      Diamond Death Ray
+site block_start_28     0x000ec898 0xe92d4008 0xeb02c868
+text block_name_28      Jetpack Multiball
+site block_start_29     0x00170450 0xe92d4008 0xebfee9c1
+text block_name_29      Bird One Multiball
 value block_ret_16          0
 value block_ret_17          0
 value block_ret_18          0
@@ -651,6 +656,12 @@ value block_ret_24          0
 value block_ret_25          0
 value block_ret_26          0
 value block_ret_27          0
+value block_ret_28          0
+value block_ret_29          0
+# EMU 2026-10-14 (PAD-578, C:/tmp/PAD-578 proof.sh + rig/lock578.c, stock card, hidden, muted): each lock lit one short of
+# its multiball, the game's own lock handler called (0xecd68 / 0x170c3c, as its switch handlers do). A mode of ours
+# blocking: both checks 0, nothing counted, balls 1, the locks still lit for later. Its list without 28 / 29: Jetpack
+# Multiball served (balls 2); Bird One Multiball served (balls 3, its own run). No abort. PROVEN.
 
 # ---- PAD-420: held coils by their board address (generation C)
 # (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the

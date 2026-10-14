@@ -306,6 +306,7 @@ lamp 111          0              RIGHT SLING FLASH  # lamp 106, I/O group 7 inde
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
 # plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
+# PAD-578: Jetpack Multiball, Bird One Multiball: not their start but the game's lock-open check, refused with 0 (the lock closes as for the game's own modes)
 site block_start_0      0x0005be58 0xe92d4010 0xe30001ad
 text block_name_0       Bullshit Scoring
 site block_start_1      0x000b1978 0xe3011430 0xe300019f
@@ -364,6 +365,10 @@ site block_start_26     0x001299cc 0xe92d40f8 0xe3a00003
 text block_name_26      Training Grounds
 site block_start_27     0x0013115c 0xe92d40f8 0xe3a00003
 text block_name_27      Diamond Death Ray
+site block_start_28     0x000ebe44 0xe92d4008 0xeb02c501
+text block_name_28      Jetpack Multiball
+site block_start_29     0x0016f2e0 0xe92d4008 0xebfeea0f
+text block_name_29      Bird One Multiball
 value block_ret_16          0
 value block_ret_17          0
 value block_ret_18          0
@@ -376,6 +381,11 @@ value block_ret_24          0
 value block_ret_25          0
 value block_ret_26          0
 value block_ret_27          0
+value block_ret_28          0
+value block_ret_29          0
+# EMU 2026-10-14 (PAD-578, as the LE's with this build's addresses: handlers 0xec314 / 0x16facc): a mode of ours
+# blocking: both checks 0, nothing counted, balls 1; its list without 28 / 29: Jetpack Multiball served (balls 2).
+# No abort. PROVEN.
 
 # ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards"), James Bond LE 1.06's code
 # on this build: the same table (4 entries of 0x20 bytes: index, bit, insert lamp, start, running query - the inserts

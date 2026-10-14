@@ -28,6 +28,19 @@ CHAPTERS = {
                                              "Mr Osato", "Professor Dent", "Mr Wint & Mr Kidd", "Feeding Frenzy",
                                              "Fiona Volpe", "Under Water Fight", "Training Grounds", "Diamond Death Ray"]),
 }
+# PAD-578 (luvthatapex, Bond LE: "I can start Jet Pack MB which killed my mode in progress"): a multiball's start is
+# never refused (balls held in a lock), but the game asks its own LOCK-OPEN check before each lock counts and before
+# the lock is lit, and that check already answers 0 while one of its gadget / mini-wizard / victory-lap modes runs.
+# Refused with 0, the lock is closed exactly as the game closes it for its own modes: no lock lit, no lock counted,
+# so the multiball cannot begin and no ball is ever held for it. Each check is `push {r3, lr}; bl 0x19ea44 (Pro
+# 0x19d254)` and its only callers are the multiball's lock handler (which alone calls the multiball's start), its
+# lamp / display updaters and its shot handlers (which score instead when it says 0).
+LOCKS = {
+    "james_bond_le-1.06": [("Jetpack Multiball", 0xec898),      # lock 0xecd68 -> start 0xe650c
+                           ("Bird One Multiball", 0x170450)],    # lock 0x170c3c -> start 0x165f50 (AUD_ROCKET_..)
+    "james_bond_pro-1.06": [("Jetpack Multiball", 0xebe44),     # lock 0xec314 -> start 0xe6058
+                            ("Bird One Multiball", 0x16f2e0)],   # lock 0x16facc -> start 0x164f2c
+}
 CS = os.path.join(HERE, "json")
 PORTS = os.path.join(wt, "tools", "spike2_emu", "modes", "sdk", "ports")
 TITLES = keys or sorted(f[:-5] for f in os.listdir(CS) if f.endswith(".json"))
@@ -65,12 +78,25 @@ for key in TITLES:
                 modes.append(G.GameMode(nxt, "", nm, 0, 0, f, w, False))
                 ret0.add(nxt)
                 nxt += 1
+    if key in LOCKS:
+        from pinball_decryptor.plugins.stern import stock_scan as S
+        prog = S.Program(open(os.path.join(ELVES, key + ".elf"), "rb").read())
+        for nm, f in LOCKS[key]:
+            w = (prog.word(f), prog.word(f + 4))
+            if nxt < G.MAX_ID and G.movable(w):
+                modes.append(G.GameMode(nxt, "", nm, 0, 0, f, w, False))
+                ret0.add(nxt)
+                nxt += 1
     modes = [m for m in modes if m.blockable]
     if not modes:
         print("%-28s nothing to name" % key)
         continue
-    section = G.port_lines(modes, header=["plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)"]
-                           if d.get("family") == "c" else ["start slot %s (the start finder; the scanner finds none)" % d.get("start_slot")])
+    header = (["plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)"] if d.get("family") == "c"
+              else ["start slot %s (the start finder; the scanner finds none)" % d.get("start_slot")])
+    if key in LOCKS:
+        header.append("PAD-578: %s: not their start but the game's lock-open check, refused with 0 (the lock closes as "
+                      "for the game's own modes)" % ", ".join(nm for nm, _f in LOCKS[key]))
+    section = G.port_lines(modes, header=header)
     section += ["value block_ret_%-11d 0" % i for i in sorted(ret0)]
     port = os.path.join(PORTS, key + ".port")
     raw = open(port, "rb").read().decode("utf-8")

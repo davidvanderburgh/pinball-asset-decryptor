@@ -3824,7 +3824,9 @@ int pm_aside(void)
  * tells them apart; a start with no object is one mode's own) and, while a mode of ours that asked runs, refuses
  * the start for the ids in that mode's list (`pm_block_list`, a mode file's `block_modes`) or, when it gave none,
  * every one the port names (PAD-398). A refused start never runs: the mode never begins,
- * and the rule that asked carries on. A multiball is never named (balls in a lock, a magnet: PAD-353). Ids are
+ * and the rule that asked carries on. A multiball's start is never named (balls in a lock, a magnet: PAD-353); PAD-578: on James Bond the
+ * game's own lock-open check before Jetpack and Bird One Multiball is, refused with 0 (`value block_ret_<id> 0`): the
+ * lock closes as for the game's own gadget modes, nothing lights or counts, no ball is held. Ids are
  * 0-127 (D&D's map modes run to 70, Venom's to 91). */
 #define BLOCK_IDS 128
 #define BLOCK_WORDS (BLOCK_IDS / 32)
@@ -3893,6 +3895,7 @@ static struct { const struct pm_mode *mode; uint64_t shots; unsigned long at; } 
 /* lit_hold_until: above pm_begin, which ends the hold */
 static const struct pm_mode *lit_hold_by;
 static unsigned lit_hold_switch;
+static unsigned lit_said[BLOCK_WORDS];         /* PAD-578: the ids refused this hold, said once (a lock check is asked often) */
 
 int pm_lit_claim(uint64_t shots)
 {
@@ -3933,6 +3936,7 @@ static void lit_hold_check(unsigned id)
     lit_hold_by = lit_claims[k].mode;
     lit_hold_switch = id;
     lit_hold_until = (now + LIT_HOLD_MS) | 1u;
+    for (k = 0; k < BLOCK_WORDS; k++) lit_said[k] = 0;
 }
 
 static int on_block_start(unsigned *r, unsigned hook_n)
@@ -3946,8 +3950,10 @@ static int on_block_start(unsigned *r, unsigned hook_n)
             const char *nm;
             pm_snprintf(key, sizeof key, "block_name_%u", id);
             nm = pm_port_text(key);
-            say("lit: the game's mode %u (%s) did not start - switch %u is %s's lit shot", id, nm ? nm : "?",
-                lit_hold_switch, lit_hold_by && lit_hold_by->name ? lit_hold_by->name : "a mode's");
+            if (!bm_has(lit_said, id))
+                say("lit: the game's mode %u (%s) did not start - switch %u is %s's lit shot", id, nm ? nm : "?",
+                    lit_hold_switch, lit_hold_by && lit_hold_by->name ? lit_hold_by->name : "a mode's");
+            bm_set(lit_said, id);
             wizard_refused(block_hooked[hook_n]);
             return 1;
         }

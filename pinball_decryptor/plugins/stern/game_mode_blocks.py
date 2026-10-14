@@ -12,7 +12,8 @@ vtable. From that, each mode gets one veto site in the title's port:
 The runtime hooks each named start and refuses it, while a mode of ours that asked runs, for the objects
 that mode listed (`pm_block_list`, a mode file's `block_modes`) or the port's checked defaults (`value
 block_default`). A MULTIBALL is never written: balls sit in a lock or on a magnet while it starts (PAD-353),
-so a refused one could strand them. Ids from 128 up are left out (the runtime's masks are 128 bits), and so is a
+so a refused one could strand them (PAD-578: on James Bond the game's own lock-open check before Jetpack and Bird One
+Multiball is named instead, cstarts/c_port_tool.py LOCKS: closed, no lock lights or counts). Ids from 128 up are left out (the runtime's masks are 128 bits), and so is a
 start whose first two words cannot be moved into the veto's trampoline (:func:`movable`).
 """
 

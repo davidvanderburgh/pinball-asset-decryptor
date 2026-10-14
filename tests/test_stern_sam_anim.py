@@ -110,7 +110,7 @@ def graft(data, recs, trailer=True, old_header=False):
     body = bytearray(data[:-4] if trailer else data)
     body += bytes(-len(body) % 16)
     font_at = len(body)
-    body += bytes(20)                                       # one font
+    body += bytes(40)                                       # two fonts
     gfx_at = len(body)
     body += bytes(4 * len(recs))
     offs = []
@@ -129,7 +129,7 @@ def graft(data, recs, trailer=True, old_header=False):
     body += bytes(-len(body) % 4)
     for i, o in enumerate(offs):
         struct.pack_into("<I", body, gfx_at + 4 * i, sam_sound.bank_pointer(o))
-    struct.pack_into("<4I", body, LITERALS, 1, sam_sound.bank_pointer(font_at),
+    struct.pack_into("<4I", body, LITERALS, 2, sam_sound.bank_pointer(font_at),
                      len(recs), sam_sound.bank_pointer(gfx_at))
     body += b"\x00" * 8 + (b"\x00" * 4 if trailer else b"")
     end1 = len(body) - (4 if trailer else 0) - 1
@@ -370,6 +370,24 @@ def test_stills_and_frames_split(art):
     assert A.animation_numbers(data, t) == set(range(3, 17))
 
 
+def test_a_picture_before_a_format_8_frame_is_a_still():
+    # the 2008-2010 engine's 8 is a whole run-length frame (format 7's
+    # code), not a delta: the picture before it is a plain still, and the
+    # one before its 10 (a delta) is an animation frame
+    recs = [(0x100 + i, 0, _picture(9, 12, 20 + i), 0) for i in range(16)]
+    recs += [(0x110, 0, _picture(24, 8, 40), 8),
+             (0x111, 4, _picture(24, 8, 41), 0),
+             (0x112, 1, _picture(24, 8, 42), 10)]
+    data, _ = graft(make_image()[0], recs)
+    t = A.read_table(data)
+    stills = A.still_numbers(data, t)
+    frames = A.animation_numbers(data, t)
+    assert 15 in stills                  # its next record is a format 8
+    assert 17 in frames                  # a delta builds on it
+    assert {16, 18} <= frames
+    assert stills | frames == set(range(len(recs))) and not stills & frames
+
+
 def test_allowed_formats_keep_the_cache_behaving(art):
     data, _ = art
     t = A.read_table(data)
@@ -512,7 +530,7 @@ def test_extract_writes_every_animation_frame(art, tmp_path, monkeypatch):
     data, frames = art
     path = _register(tmp_path, monkeypatch, data)
     out_dir, res = _extract(path, tmp_path)
-    assert "and 14 animation frame(s)" in res["msg"]
+    assert "And 14 DMD animation frame(s), in animations/." in res["msg"]
     names = sorted(os.listdir(os.path.join(out_dir, "animations")))
     assert names == ["img%04d.png" % n for n in range(3, 17)]
     for n in range(3, 17):
@@ -522,7 +540,7 @@ def test_extract_writes_every_animation_frame(art, tmp_path, monkeypatch):
         assert np.array_equal(assets.from_image(im), frames[n])
     sums = open(os.path.join(out_dir, ".checksums.md5")).read()
     assert "animations/img0003.png" in sums
-    assert SamExtractPipeline.PHASES[2] == "Decode animations"
+    assert SamExtractPipeline.PHASES[3] == "Decode animations"
 
 
 def test_extract_of_a_title_without_animations(tmp_path, monkeypatch):
@@ -590,7 +608,8 @@ def test_write_skips_a_frame_of_the_wrong_size(art, tmp_path, monkeypatch):
     lines, log = _log()
     res = _run(SamWritePipeline(path, out_dir, out, log, lambda i: None,
                                 lambda *a: None, None))
-    assert res["ok"] and "No changes found" in res["msg"]
+    assert res["ok"]
+    assert "No changed audio, pictures or animations" in res["msg"]
     assert "(2 skipped" in res["msg"]
     assert any("img0004.png is 5x5; this frame is 24x8" in x for x in lines)
     assert any("img0999.png: no such animation frame" in x for x in lines)

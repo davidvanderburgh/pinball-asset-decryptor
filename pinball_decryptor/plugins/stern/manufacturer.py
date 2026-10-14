@@ -145,9 +145,11 @@ _CAPTURE_ERAS = ("whitestar", "sam")
 # ...and, from PAD-582, every sound read straight out of the code update and
 # written back: Extract (the Basic box) decodes the game's own sound table to
 # WAVs, Replace Audio + Write re-encode edits into their slots in a copy of
-# the .bin (sam_audio.py).  From PAD-584 the DMD animation frames too: PNGs
-# under animations/, re-encoded into the game's own frame formats on Write
-# (sam_anim_assets.py).
+# the .bin (sam_audio.py).  PAD-583: the still pictures and font glyphs too
+# (sam_images.py) - Extract writes them as PNGs, Replace Images + Write put
+# edits back in place.  PAD-584: the DMD animation frames (sam_anim_assets.py)
+# - PNGs under animations/, re-encoded into the game's own frame formats on
+# Write.
 _SAM_CAPS = Capabilities(
     extract=True,
     capture=True,
@@ -155,6 +157,7 @@ _SAM_CAPS = Capabilities(
     modpack=True,
     replace_audio=True,
     replace_image=True,
+    dmd_shades=True,
     audio_level_offset=True,
     transcribe=True,
     music_id=True,
@@ -550,7 +553,8 @@ class SternManufacturer(Manufacturer):
     # The Extract tab's Basic box, for SAM (the only Stern era with both a
     # basic extract and a capture): the sounds, and the capture runs attract
     # mode only.
-    capture_basic_label = "Basic extract (every sound and animation frame)"
+    capture_basic_label = (
+        "Basic extract (every sound, picture, font and animation frame)")
     capture_simulates_gameplay = False
 
     def capture_help_text(self, basic, capture):
@@ -558,7 +562,8 @@ class SternManufacturer(Manufacturer):
             return None
         if basic and capture:
             return ("Both: decodes every sound in the game file to a WAV "
-                    "(audio/) and every DMD animation frame to a PNG "
+                    "(audio/), every still picture and font to a PNG "
+                    "(images/) and every DMD animation frame to a PNG "
                     "(animations/), then runs the game in attract mode under "
                     "PinMAME and records its DMD animations + audio as MP4s, "
                     "into the same project folder.  Capture requires "
@@ -569,10 +574,10 @@ class SternManufacturer(Manufacturer):
                     "Most SAM games play no sound in attract mode.  Requires "
                     "libpinmame.")
         return ("Basic only: decodes every sound in the game file to a WAV "
-                "(audio/), ready for Replace Audio, and every DMD animation "
-                "frame to a PNG (animations/), ready for Replace Images.  "
-                "Tick \"Use PinMAME\" too to ALSO record the animations as "
-                "they play, as MP4s.")
+                "(audio/), every still picture and font to a PNG (images/) "
+                "and every DMD animation frame to a PNG (animations/), ready "
+                "for Replace Audio and Replace Images.  Tick \"Use PinMAME\" "
+                "too to ALSO record the animations as they play, as MP4s.")
     write_direct_button = "Write to SD card"
     direct_medium_noun = "SD card"
     # The card is small removable media in a reader — bias the picker away
@@ -752,8 +757,22 @@ class SternManufacturer(Manufacturer):
     def image_note(self):
         # No inline note — the auto-fit / per-store fitting rules live in the
         # "?" help window (a tester: the tab read as cluttered; the earlier
-        # one-line summary went too).
+        # one-line summary went too).  SAM's DMD has its own rules, short
+        # enough to say.
+        if self._era == "sam":
+            return ("The DMD shows 16 shades of one color: a replacement is "
+                    "scaled to the original's size and its grays are taken "
+                    "to the nearest shade (transparent stays transparent).  "
+                    "Build the game file on the Write tab.")
         return ""
+
+    def image_slot_dirs(self, assets_dir):
+        # SAM: the pictures Write puts back (images/), and the decoded
+        # animations (animations/, PAD-584) - not the capture's frames
+        if self._era == "sam":
+            return [os.path.join(assets_dir, d)
+                    for d in ("images", "animations")]
+        return super().image_slot_dirs(assets_dir)
 
     def detect(self, path):
         # Route by signature + extension: MAME ROM zip => classic Whitestar

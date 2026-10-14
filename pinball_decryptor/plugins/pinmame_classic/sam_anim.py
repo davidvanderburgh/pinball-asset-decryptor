@@ -206,29 +206,17 @@ def _movable(data, art):
 
 
 def still_numbers(data, art):
-    """Records that are plain pictures, not animation frames: raw (format 0
-    with every pixel a shade or transparent, or format 12), ending before
-    the next record, and no delta's base (no delta record's id - 1 is
-    theirs, on the low 16 bits the frame cache compares).  The Replace
-    Images side (``sam_art``, PAD-583) writes these; every other record
-    is an animation frame and written here."""
-    order = art.by_offset()
-    nxt = {r.number: (b.offset if b is not None else len(data))
-           for r, b in zip(order, order[1:] + [None])}
-    delta_bases = {(r.key - 1) & 0xFFFF for r in art.records if r.is_delta}
-    out = set()
-    for r in art.records:
-        if r.fmt not in (0, 12) or r.key in delta_bases:
-            continue
-        if r.offset + r.length > nxt[r.number]:
-            continue
-        if r.fmt == 0:
-            px = np.frombuffer(data, np.uint8, r.width * r.height,
-                               r.offset + HEADER)
-            if ((px > 15) & (px != TRANSPARENT)).any():
-                continue
-        out.add(r.number)
-    return out
+    """Records that are plain pictures, not animation frames: the ones the
+    Replace Images side writes (:func:`sam_art.read_art`'s bitmaps, PAD-583:
+    raw, every pixel a shade or clear, ending before the next record, and
+    no delta's base).  Every other record is an animation frame and
+    written here, so between them each record has exactly one writer."""
+    from . import sam_art
+    try:
+        stills = set(sam_art.read_art(data).bitmaps)
+    except sam_art.SamArtError:
+        return set()
+    return {n for n in stills if n < len(art.records)}
 
 
 def animation_numbers(data, art):
@@ -717,7 +705,8 @@ def plan_write(data, art, frames, edits, owned):
             off = start + len(buf)
             if off != recs[n].offset:
                 plan.moved[n] = off
-            buf += body[n] if n in body else                 data[recs[n].offset:recs[n].offset + recs[n].length]
+            r = recs[n]
+            buf += body[n] if n in body else data[r.offset:r.offset + r.length]
         # what was there past the last record stays (padding is unread)
         plan.patches.append((start, bytes(buf)))
 

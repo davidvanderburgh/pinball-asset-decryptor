@@ -1,4 +1,4 @@
-# Stern SAM: what PAD can do with it (PAD-582)
+# Stern SAM: what PAD can do with it (PAD-582, PAD-583)
 
 David's ask: a full analysis of SAM compatibility, replacing audio first,
 ideally as complete as BoF or JJP support.  This is that analysis, and the
@@ -22,7 +22,7 @@ Layout (file offsets; TRON LE 1.74 as the example):
 |---|---|
 | `0 .. 0x11FFFF` | ARM code (the first 1 MB is also copied to RAM at boot) |
 | `0x120000` | section checksum table: `(start, end, ~bytesum)` triplets |
-| `0x120048 ..` | the data area: sound table, then DMD art (fonts, stills, animations) |
+| `0x120048 ..` | the data area: sound table, font table, picture table, then DMD art (fonts, stills, animations) |
 | `0x84B4C0 .. end` | the sound samples, packed end to end |
 | last 4 bytes | (2010 on) `~bytesum` of everything before them |
 
@@ -135,12 +135,101 @@ runner standing by.").
 - Real-machine check: PinMAME doesn't emulate the USB update, so the
   update's own check is reasoned from the file format (above), not run.
 
+## Pictures and fonts (built, PAD-583)
+
+Worked out from the files, checked against the renderer by PAD-584 (which
+decodes the animations) and against PinMAME's own DMD output.
+
+- **Two tables name the art.**  The code keeps four words in a row --
+  `font count, font table, picture count, picture table` (World Poker Tour:
+  the two pairs swapped) -- with the picture table starting right where the
+  font table's 20-byte records end, so a plain scan of the first 2 MB finds
+  them on all 24 titles.  The picture table is one bank pointer per
+  *picture number*, the number the game code draws by (TRON: 8,181).
+- **A record** is a header and data.  2007 on: `u32 id, u32 flags, s16 w,
+  s16 h, u8 format` (13 bytes); World Poker Tour, Family Guy, Pirates and
+  Wheel of Fortune: `s16 w, s16 h, u8 format` (5 bytes).  Formats: **0** one
+  byte per pixel, row by row; **12** four bits per pixel, low nibble first
+  (`ceil(w*h/2)` bytes; the spare nibble of an odd count is left alone);
+  1/7 run-length and 3/9 delta frames (8/10 on the 2008 titles) are the
+  animations.  A pixel is a shade 0..15 or 0xFF transparent.
+- **Plain pictures** are the format 0/12 records whose bytes are all shades
+  (or 0xFF), that end before the next record, and that no delta frame
+  builds on (a delta patches the cached record whose id's low half is one
+  less; those keyframes are left to the animation side).  The id's high
+  half is no guide to "still or frame": Metallica 1.64 sets it on every
+  still, 1.70 on none.
+- **Fonts**: a font record is `u32 end, u32 start` of its glyph array, then
+  the height; each glyph entry is `(bank pointer to a picture, s16 dx, s16 dy)`,
+  8 bytes, 12 from the 2012 titles on.  On TRON the start/end words carry no
+  bank (`0x254d0` is file `0x8254d0`), so each bank is tried.  The fonts do
+  not share one character map (some leave out `&`, some carry a glyph past
+  `Z`), and the map is in the code, so glyphs are named by number only.
+
+| title | plain pictures | fonts / glyphs |
+|---|---|---|
+| World Poker Tour 1.40 | 2,650 | 31 / 1,335 |
+| Family Guy 12.00 | 2,148 | 30 / 1,248 |
+| Pirates of the Caribbean 6.00 | 2,448 | 31 / 1,346 |
+| Wheel of Fortune 5.00 | 2,713 | 32 / 1,451 |
+| Shrek 1.41 | 2,460 | 27 / 1,189 |
+| Batman (Dark Knight) 2.94 | 3,719 | 27 / 1,189 |
+| Indiana Jones 2.10 | 1,712 | 28 / 1,200 |
+| CSI 2.40 | 1,622 | 27 / 1,189 |
+| 24 1.50 | 2,092 | 34 / 1,266 |
+| Big Buck Hunter Pro 1.70 | 2,366 | 28 / 1,222 |
+| The Rolling Stones 1.10 LE | 1,438 | 27 / 1,211 |
+| Spider-Man 2.61 | 3,426 | 28 / 1,251 |
+| Iron Man 1.83 VE | 3,987 | 30 / 1,325 |
+| Avatar 2.00 | 4,561 | 27 / 1,211 |
+| TRON: Legacy 1.74 LE | 4,031 | 44 / 1,639 |
+| X-Men 1.50 LE | 1,531 | 27 / 1,211 |
+| AC/DC 1.60 / 1.68 LE | 3,002 / 3,033 | 30 / 1,340 |
+| The Avengers 1.70 | 1,966 | 27 / 1,211 |
+| Star Trek 1.61 LE | 1,840 | 31 / 1,334 |
+| Mustang 1.45 LE | 1,743 | 29 / 1,286 |
+| Metallica 1.64 / 1.70 | 2,050 | 39 / 1,683 |
+| The Walking Dead 1.56 LE | 2,682 | 42 / 1,771 |
+
+Every title's pictures were looked at as contact sheets (icons, title
+cards, fonts, four-bit frames all whole and upright).  (PAD-584: the 2008-2010 engine's format 8 is a whole run-length frame,
+not a delta, so the pictures before one are plain ones too: 3 more on CSI,
+1 on Indiana Jones, 8 on 24.)
+
+### What the app does
+
+- **Extract** writes each plain picture to `images/pictures/imgNNNN.png` and
+  each glyph to `images/fonts/fontNN (H px)/imgNNNN.png` (`NNNN` = picture
+  number), gray + alpha: shade `s` is gray `s * 17`, transparent is alpha 0
+  (TRON: 4,031 PNGs in ~10 s, after the sounds).  A file whose tables can't
+  be found still extracts its sounds.
+- **Replace Images** lists them (the tab is on for SAM; it scans `images/`
+  and PAD-584's `animations/`).  **Write** takes each PNG that differs from
+  the extract's baseline, scales it to the picture's size, takes its grays to
+  the nearest shade (alpha under half: transparent; a four-bit picture has no
+  transparency, so black) and writes it over the record in place, then the
+  same checksum fix as the sounds -- one build carries both.  **Revert**
+  re-decodes the original.
+- Proven in PinMAME on TRON: 83 extracted pictures and glyphs are found
+  pixel for pixel in the stock attract mode's DMD frames; a 348x128 color
+  picture staged through the Images tab over picture 1440 (87x32) and a
+  whole font (15, the attract mode's GAME OVER) drawn as boxes, written by
+  the app's Write, showed on the DMD exactly in place of the originals.
+
+### Limits (pictures)
+
+- **A picture keeps its size**: records are packed end to end.  A bigger
+  picture means moving it and repointing the table, the animation side's
+  repack (PAD-584) territory.
+- **16 shades of one color**, as the DMD shows them.
+- **Glyphs by number**: which character a glyph draws is in the code's
+  per-font map, not read yet.
+
 ## The rest of SAM (not built)
 
 | area | state | effort |
 |---|---|---|
 | DMD animations | captured as MP4 by PinMAME (PAD-577) | -- |
-| Fonts + still pictures | found: ~2,200 records on TRON, 13-byte header (id, flags, width, height, format) + one byte per pixel (16 shades, 0xFF transparent).  Replaceable in place at the same size | medium (PAD-583) |
 | DMD animations as data | **built** (PAD-584, below) | -- |
 | Text / messages | plain ASCII in the code area, 5 languages; same-length edits only | small |
 | Default settings | the adjustment names are plain; their defaults are in the code's tables, as on Spike 1 | medium |
@@ -148,8 +237,8 @@ runner standing by.").
 
 So SAM is now at Spike 1's level for audio (Extract, Replace, Write,
 Revert, Mod Pack).  To reach BoF / JJP completeness the next steps are, in
-order of value for effort: still pictures and fonts (Replace Images),
-text, then the animation format.
+order of value for effort: text.  Still pictures and fonts are built
+(PAD-583, above), and the animations (PAD-584, below).
 
 ## DMD animations (built, PAD-584)
 

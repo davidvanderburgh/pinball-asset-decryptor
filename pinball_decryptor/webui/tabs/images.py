@@ -429,6 +429,10 @@ class ImagesTab(FindOriginalsMixin, TabService):
             note = ""
         self.set(note=note, scanning=False, dir="",
                  pex=self._pex_available(),
+                 # Stern SAM's DMD: shades of one color - no Colors bar,
+                 # no scenes to group by
+                 shades_only=bool(getattr(mfr.capabilities, "dmd_shades",
+                                          False)),
                  empty={"text": EMPTY_NO_FOLDER, "busy": False})
         self._refresh_pillow()
         self._refresh_image_list()

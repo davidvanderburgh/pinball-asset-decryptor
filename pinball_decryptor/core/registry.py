@@ -274,6 +274,11 @@ class Capabilities:
     # loose files Write round-trips — e.g. Stern Spike 2 (loose .png on the SD
     # card, patched in place size-neutral).
     replace_image: bool = False
+    # The pictures are shades of one color (Stern SAM's 16-shade DMD,
+    # PAD-583): there is nothing for a color profile to do and no scenes to
+    # lay them out in, so the Scenes and Color Profile tabs and the Images
+    # tab's Colors bar stay away.
+    dmd_shades: bool = False
     # Replace-text path: surfaces a "Replace Text" tab that loads the editable
     # on-screen-text manifest Extract produced (``<assets>/text/strings.tsv`` —
     # see core.text_manifest) and lets the user edit each player-facing display

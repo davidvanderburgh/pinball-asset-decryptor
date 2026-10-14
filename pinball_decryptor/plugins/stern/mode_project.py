@@ -100,6 +100,9 @@ class TitleProfile:
     #                                  on Bond's Right ramp, shot or not); () = none it can light on this title
     status_bar: bool = False         # PAD-521: the port names the game's own status bar (`site status_bar`): a mode's
     #                                  name, colour and clock can go in it (Bond LE: the coloured bar under the TV)
+    limits: tuple = ()               # PAD-479: the parts (PARTS, "end_game" = the game's own time-up call, "stack",
+    #                                  "own_music") whose reason is a GAME limit, every place on the card checked:
+    #                                  the tab says so in grey, not in yellow (nothing left for the app to find)
     info_at: tuple = ()              # PAD-547: (x, y) on the glass, the middle of a mode's info line (its words and a
     #                                  value, "SUPER JACKPOT = 53,200,000"), from the port's `text info_line_at`: where
     #                                  the game shows its own (Bond LE: under the status bar); () = INFO_AT_DEFAULT
@@ -117,6 +120,10 @@ class TitleProfile:
     def why_not(self, part):
         """Why this title cannot do ``part``, as a sentence; "" when it can."""
         return dict(self.cannot).get(part, "")
+
+    def limit(self, part):
+        """PAD-479: True when what keeps ``part`` from this title is the game itself (:attr:`limits`)."""
+        return part in self.limits
 
     def mask(self, names):
         """The OR of the named shots' masks. Raises on a name this title does not have."""
@@ -1323,6 +1330,31 @@ def end_sound_carried(game, version):
     return bool(c and c.swap and c.calls)
 
 
+#: PAD-479: builds whose voice has no "time is up" line: every request's first five clips (mono and stereo,
+#: <= 4.5 s; PAD-420's run had read mono only, and Star Wars speaks in stereo) transcribed (C:/tmp/PAD-479/t2
+#: voices.py + pick_tu.py, 2026-10-14) and no request says the time is up in every clip it may play, so the game's
+#: own call cannot end a mode there - a game limit, said in grey. A mode's own end sound still can
+#: (end_sound_carried). Near misses: Deadpool's "Time's up!" is one of request 261's 25 random lines; X-Men's
+#: 565 "... nine, Time!" is a count to ten like 557-567 (a misheard "Ten"); the "almost out of time" lines are
+#: the ten-seconds calls. The requests whose records the resolver could not name are the music block (Deadpool
+#: 62-177, John Wick 112-126) or name no record on the card (every descriptor site was named on each build).
+TIME_UP_NONE = frozenset({
+    "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16", "elvira3-1.13", "john_wick_le-1.02",
+    "john_wick_pro-1.02", "jurassic_park_the_pin-1.05", "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22",
+    "star_wars_elg-1.10", "star_wars_le-1.31", "star_wars_pro-1.31", "turtles_le-1.59", "turtles_pro-1.59",
+    "uncanny_xmen_le-0.98", "uncanny_xmen_pro-0.98",
+})
+
+
+def own_music_none(game, version):
+    """PAD-479: True when a mode's own music cannot ride on title ``game`` ``version`` because the game
+    has no spare music: its carriers were measured (item 163's census) and every stereo music request is
+    one the game plays, and no music bed is free either (The Beatles, Deadpool) - a game limit."""
+    from . import mode_sounds as MS
+    c = MS.carriers(game, version)
+    return bool(c is not None and c.swap and not c.music and not c.beds)
+
+
 #: item 164: the plain-C titles whose OTHER modes a ``stack no`` mode was seen wait for in the emulator:
 #: the framework's game flags (``data game_flags``) and each mode's own flag (``value mode_flag_1`` ..),
 #: set by the mode's start function. Until a build is here its note says multiballs only.
@@ -1855,6 +1887,7 @@ def profile_from_port(path):
     callouts, scenes = port["callout"], port["scene"]
     measured = TITLE_SCENES.get("%s-%s" % (game, version), {})
     cannot = []
+    limits = []
 
     def no(part, why):
         cannot.append((part, why % dict(label=label)))
@@ -1865,6 +1898,7 @@ def profile_from_port(path):
     elif not callouts.get("countdown") and "%s-%s" % (game, version) in COUNTDOWN_NO_NUMBERS:
         no("countdown", "%(label)s's voice never says a number on its own (every callout on the "
                         "card was checked), so the game's own voice cannot count down.")
+        limits.append("countdown")                 # PAD-479: the game's, and no number is pushed in instead
     elif not callouts.get("countdown"):         # ten_seconds is optional: the count is 5..1 without it
         no("countdown", "The app does not know which of %(label)s's callouts count down, so the "
                         "game's own voice cannot count down.")
@@ -1938,6 +1972,8 @@ def profile_from_port(path):
     elif _stack_balls(sites) and key in STACK_BALLS_PROVEN and _stack_objects(data, values)             and key in STACK_OBJECTS_PROVEN:
         pass                                  # item 165: its modes too, from their own rule objects
     elif _stack_balls(sites) and key in STACK_BALLS_PROVEN:
+        if key in STACK_NOTE_WHY:
+            limits.append("stack")                 # PAD-479: Beatles' songs always run
         stack_note = (STACK_NOTE_WHY.get(key) or
                       "On %s a mode of yours waits only for the game's multiballs: the app cannot yet "
                       "see its other modes.") % label
@@ -2002,6 +2038,8 @@ def profile_from_port(path):
         switch_shots=switch_shots,
         switch_shots_note=switch_note,
         stack_note=stack_note,
+        limits=tuple(limits) + (("end_game",) if not callouts.get("time_up") and key in TIME_UP_NONE else ())
+        + (("own_music",) if own_music_none(game, version) else ()),
         game_modes=_game_modes(port),
         game_rules=_game_rules(port),                        # PAD-398
         lamps=_lit_inserts(port) if key in LAMPS_PROVEN else 0,

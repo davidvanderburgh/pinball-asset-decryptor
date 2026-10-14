@@ -1910,10 +1910,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                      "film_still", "film_sound", "own_extra", "lit_shots",
                                      "show_order", "multiball", "ball_save", "give_way", "block",
                                      "magnet", "scoop", "coils", "shield", "shaker", "shows", "wizard")}
-            self.set(reasons={}, dis=dis, hide={}, editor_on=False, dup_ok=False,
+            self.set(reasons={}, limits={}, dis=dis, hide={}, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
-        reasons, dis = {}, {}
+        # PAD-479: a reason in `limits` is the game's own limit (nothing left for the app to find): the page
+        # says it in grey, not yellow
+        reasons, dis, limits = {}, {}, {}
+        is_limit = getattr(p, "limit", lambda part: False)
         # PAD-420: a part the machine has no hardware for is left out of the page, not explained
         absent = set(getattr(p, "absent", ()) or ())
         hide = {part: True for part in absent}
@@ -1922,26 +1925,39 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             dis[part] = bool(why) or part in absent
             if why and part not in absent:
                 reasons[part] = "Not on this game: " + why
-        sound = []
+        sound, sound_limit = [], []
         dis["countdown"] = bool(p.why_not("countdown"))
         if dis["countdown"]:
-            sound.append(p.why_not("countdown"))
+            (sound_limit if is_limit("countdown") else sound).append(p.why_not("countdown"))
         dis["own_sound"] = bool(p.why_not("own_sound"))
         dis["end_game"] = not p.callout_time_up
-        if not p.callout_time_up:
+        own_end = "" if dis["own_sound"] else " A sound of the mode's own (My sound…) can play then instead."
+        if not p.callout_time_up and is_limit("end_game"):
+            sound_limit.append("%s's voice has no time-is-up line (every callout on the card was checked), so "
+                               "the game's own call cannot play when time is up.%s" % (p.label, own_end))
+        elif not p.callout_time_up and not dis["own_sound"]:
+            sound.append("The app does not know %s's time-up callout, so the game's own call cannot play when "
+                         "time is up.%s" % (p.label, own_end))
+        elif not p.callout_time_up:
             sound.append("The app does not know %s's time-up callout, so nothing plays when time "
                          "is up and a sound of the mode's own has no call to replace." % p.label)
         elif p.why_not("own_sound"):
             sound.append(p.why_not("own_sound"))
         if sound:
             reasons["sound"] = "Not on this game: " + " ".join(sound)
+        if sound_limit:
+            reasons["sound_limit"] = "Not on this game: " + " ".join(sound_limit)
+            limits["sound_limit"] = True
         why = self._own_extra_why(p)
         dis["own_extra"] = bool(why)
         if why:
             reasons["own_extra"] = "Not on this game yet: " + why
         why = "" if why else self._own_music_why(p)
         dis["own_music"] = bool(why)
-        if why:
+        if why and is_limit("own_music"):
+            reasons["own_music"] = "Not on this game: " + why
+            limits["own_music"] = True
+        elif why:
             reasons["own_music"] = "Not on this game yet: " + why
         dis["lit_shots"] = getattr(p, "lamps", -1) == 0
         if dis["lit_shots"]:
@@ -1970,6 +1986,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             reasons["stack"] = "Not on this game: " + why
         elif getattr(p, "stack_note", ""):
             reasons["stack"] = p.stack_note         # item 164: live, but multiballs only
+            limits["stack"] = is_limit("stack")     # PAD-479: Beatles' songs always run
         # PAD-363: giving way needs what stack no needs (knowing a game's mode runs); holding them off needs
         # the port's block lines (game_mode_blocks.py)
         dis["give_way"] = dis["stack"]
@@ -1993,7 +2010,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if why:
             reasons["events"] = "Not on this game: " + why
         editor_on = on and not self._no_port
-        self.set(reasons=reasons, dis=dis, hide=hide, editor_on=editor_on,
+        self.set(reasons=reasons, limits={k: True for k, v in limits.items() if v}, dis=dis, hide=hide, editor_on=editor_on,
                  dup_ok=bool(editor_on or (self._code_slug and not self._no_port)),
                  del_ok=bool(on or self._code_slug))
 
@@ -2019,9 +2036,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import mode_sounds as MS
         if p is None:
             return ""
-        c = MS.carriers(*MS.title_version(p.key))
+        game, version = MS.title_version(p.key)
+        c = MS.carriers(game, version)
         if c is None or c.music:
             return ""
+        if MP.own_music_none(game, version):            # PAD-479: a game limit
+            return ("every piece of music on %s is one the game itself plays, so none is spare to carry a "
+                    "mode's own music, and the game's music plays on under the mode." % p.label)
         return ("the app has not found a stock tune on %s to carry a mode's own music, so it "
                 "cannot be picked here." % p.label)
 

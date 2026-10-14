@@ -98,16 +98,19 @@ function useStored(key, init) {
 }
 
 // ---------------------------------------------------------------- small pieces
-function Reason({ text }) {
+// A reason a part is off: yellow while the app may still find what it needs, grey (limit) when it is the
+// game's own limit and nothing is left to find (PAD-479).
+function Reason({ text, limit }) {
   if (!text) return null;
-  return html`<div class="modes-reason small">${text}</div>`;
+  return html`<div class=${cx("modes-reason small", limit && "limit")}>${text}</div>`;
 }
 
-function Sec({ title, reason, children, extra, tipText }) {
+function Sec({ title, reason, limit, note, children, extra, tipText }) {
   return html`<section class="modes-sec">
     <div class="modes-sec-hd"><span class="lbl" ...${tip(tipText)}>${title}</span><span class="grow"></span>${extra}</div>
     ${children}
-    <${Reason} text=${reason} />
+    <${Reason} text=${reason} limit=${limit} />
+    <${Reason} text=${note} limit />
   </section>`;
 }
 
@@ -346,7 +349,7 @@ function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
 }
 
 // ------------------------------------------------------------------ the pages
-function ModePage({ s, f, off, dis, rs }) {
+function ModePage({ s, f, off, dis, rs, lim }) {
   const hide = s.hide || {};   // PAD-420: the parts this machine has no hardware for
   const prof = s.profile || {};
   const shots = prof.shots || [];
@@ -528,7 +531,7 @@ function ModePage({ s, f, off, dis, rs }) {
         </div>` : null}
       <//>
       ${oftenSec}
-      <${Sec} title="The game's own modes" reason=${rs.stack}>
+      <${Sec} title="The game's own modes" reason=${rs.stack} limit=${lim.stack}>
         <div class="row wrap">
           <span class="dim nw">While it runs, the game's modes</span>
           <${Select} value=${f.game_modes || "block"} options=${gmOpts} ns="modes" k="f:game_modes" disabled=${off} width=${260} title=${T.gameModes} />
@@ -768,7 +771,7 @@ function LightsPage({ s, f, off, dis, rs }) {
   </div>`;
 }
 
-function SoundsPage({ s, f, off, dis, rs, labels, files }) {
+function SoundsPage({ s, f, off, dis, rs, lim, labels, files }) {
   const prof = s.profile || {};
   const choices = prof.callouts || [];
   const pickMenu = (e, i) => openMenu(e.currentTarget, choices.length
@@ -778,7 +781,7 @@ function SoundsPage({ s, f, off, dis, rs, labels, files }) {
                ["music", "music_mode", "Music underneath"]];
   return html`<div class="modes-grid2">
     <div class="stack" style="gap:14px">
-      <${Sec} title="Sound" reason=${rs.sound}>
+      <${Sec} title="Sound" reason=${rs.sound} note=${rs.sound_limit}>
         <${Check} label="Count down the last seconds in the game's own voice" checked=${f.countdown} disabled=${off || dis.countdown} ns="modes" k="f:countdown" />
         <div class="row wrap">
           <span class="lbl nw">When time is up</span>
@@ -801,7 +804,7 @@ function SoundsPage({ s, f, off, dis, rs, labels, files }) {
               ${attr === "sound_shot" ? html`<div class="row"><span class="dim nw">on every</span><${Num} k="sound_shot_every" value=${f.sound_shot_every} disabled=${off || dis.own_extra} width=${64} /><span class="dim nw">scoring shot(s)</span></div>` : null}
               ${labels[attr] ? html`<div class="row small"><span class="dim">${labels[attr]}</span><${PlayButton} path=${files[attr]} />
                 ${!offA ? html`<${Button} size="xs" kind="ghost" onClick=${() => call("modes.choose", attr)}>Change…<//>` : null}</div>` : null}
-              ${attr === "music" && rs.own_music ? html`<div class="modes-reason small">${rs.own_music}</div>` : null}
+              ${attr === "music" ? html`<${Reason} text=${rs.own_music} limit=${lim.own_music} />` : null}
             </div>`; })}
         </div>
         ${dis.own_extra ? null : html`<div class="small muted wrap">Each plays in place of a stock call the game never makes. Write puts them on the card, and names any it cannot carry.</div>`}
@@ -856,6 +859,7 @@ function Editor({ s, showClip }) {
   const off = !s.editor_on;
   const dis = s.dis || {};
   const rs = s.reasons || {};
+  const lim = s.limits || {};
   const labels = s.labels || {};
   const files = s.files || {};
   const ready = !!s.ready;
@@ -864,7 +868,7 @@ function Editor({ s, showClip }) {
     : s.save_state === "saved" ? (s.write_waits ? "Saved · Write carries it after a Try it" : "Saved · put on the card by Write") : "";
   const handOff = handsOver(f, dis);                                           // PAD-436
   const offPages = new Set(handOff ? ["show", "lights", "sounds", "scoring"] : dis.show_order ? ["show"] : []);
-  const props = { s, f, off, dis, rs, labels, files, showClip };
+  const props = { s, f, off, dis, rs, lim, labels, files, showClip };
   const P = { mode: ModePage, show: ShowPage, lights: LightsPage, sounds: SoundsPage, scoring: ScoringPage }[page] || ModePage;
   const offTip = handOff ? "This mode is the game's own mini-wizard: nothing on this page is used."
     : "Nothing on this page works on this game yet: the page says why.";

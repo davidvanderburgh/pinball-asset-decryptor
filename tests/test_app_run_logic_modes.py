@@ -1508,7 +1508,8 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         # item 163: TMNT Pro 1.59 counts down now (441, heard); item 164: it has no time-up call, so a
         # mode's own end sound rides a carrier of its own (heard at time-up in the emulator)
         assert not st["dis"]["countdown"] and not st["dis"]["own_sound"]
-        assert "time-up" in st["reasons"]["sound"]              # nothing of the game's own plays then
+        # nothing of the game's own plays then: PAD-479, its voice has no such line - grey, not yellow
+        assert "no time-is-up line" in st["reasons"]["sound_limit"] and "sound" not in st["reasons"]
         assert st["editor_on"] is True                          # the shots stay live
         # PAD-420: its inserts are tied to its shots (by the game's names), so the shots that score light up
         assert not st["dis"]["lit_shots"] and "lit_shots" not in st["reasons"]
@@ -1839,7 +1840,7 @@ def test_modes_tab_advanced_and_the_games_call_follow_the_title(tmp_path):
         assert st["profile"]["end_shots"] == [svc.PARAM_NEVER, MP.END_SHOT_OTHERS, svc.END_PICK]   # PAD-314
         assert st["profile"]["callouts"] == [] and "TMNT Pro 1.59" in st["profile"]["callouts_none"]
         assert st["dis"]["end_game"]                            # "The game's own call" greyed
-        assert "nothing plays when time is up" in st["reasons"]["sound"]
+        assert "cannot play when time is up" in st["reasons"]["sound_limit"]    # PAD-479: grey
         assert st["editor_on"] is True                          # a shot's own points stay live
         assert not st["dis"]["clip_both"]                     # item 164: TMNT Pro 1.59 plays a clip
 

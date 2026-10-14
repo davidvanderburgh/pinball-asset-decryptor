@@ -41,7 +41,7 @@ EMPTY_SCANNING = "Scanning for on-screen text…"
 EMPTY_NONE = ("No editable on-screen text found in this folder.\n"
               "Run Extract on a Spike 2 card first — it writes "
               "text/strings.tsv.")
-EMPTY_CANCELLED = "Scan cancelled — click Scan to try again."
+EMPTY_CANCELLED = "Scan canceled — click Scan to try again."
 
 #: Sortable columns: Tk's _text_sort_cfg ids, and whether each starts
 #: descending (Max does).
@@ -301,7 +301,7 @@ class TextTab(TabService):
         self._text_scan_id += 1
         t0, self._scan_t0 = self._scan_t0, None
         if t0 is not None:
-            self.log("Text scan cancelled after %.1f s."
+            self.log("Text scan canceled after %.1f s."
                      % (time.monotonic() - t0), "info")
         self.set(scanning=False, view=[], empty=EMPTY_CANCELLED)
         return True

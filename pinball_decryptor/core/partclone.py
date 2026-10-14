@@ -156,7 +156,7 @@ class PartcloneImage:
                     if progress_cb:
                         progress_cb(written, self.usedblocks)
             if cancel_cb and cancel_cb():
-                raise PartcloneError("Restore cancelled.")
+                raise PartcloneError("Restore canceled.")
 
         # Pad the image out to the full device size so the trailing unused
         # blocks read back as zeros (and the ext4 size is correct).

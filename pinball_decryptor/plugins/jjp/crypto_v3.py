@@ -611,7 +611,7 @@ def reencrypt_asset(original_encrypted, new_content, path, game_name,
         f1 = detect_filler_size(original_encrypted, path, game_name)
     if f1 < 0:
         raise ValueError("could not locate the lead pad — not a scheme-3 "
-                         "asset, or an unrecognised content type")
+                         "asset, or an unrecognized content type")
     if f1 < 4:
         raise ValueError("lead pad too small to carry the CRC forge")
 

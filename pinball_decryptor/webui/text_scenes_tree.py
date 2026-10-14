@@ -184,7 +184,7 @@ class TreeEditMixin:
             lines, _w = text_colour.line_ops(self.assets_dir, card, edited, ops,
                                              bake=self._look_sw()["files"])
         except Exception:                            # noqa: BLE001
-            log.exception("scene text colours")
+            log.exception("scene text colors")
             lines = []
         if lines:
             edited, _n = scene_edit.apply_manifest(edited, lines)
@@ -195,7 +195,7 @@ class TreeEditMixin:
             game = score_colours.preview_ops(self.assets_dir, edited,
                                              bake=self._look_sw()["files"])
         except Exception:                            # noqa: BLE001
-            log.exception("score panel colours")
+            log.exception("score panel colors")
             game = []
         if game:
             edited, _n = scene_edit.apply_manifest(edited, game)
@@ -1093,7 +1093,7 @@ class TreeEditMixin:
             profiled = sc.profiled(self.assets_dir)
             want = sc.wanted(self.assets_dir)
         except Exception:                            # noqa: BLE001
-            log.exception("score panel colours")
+            log.exception("score panel colors")
             return None
         return {"group": group, "roles": [
             {"role": r, "label": label, "hex": sc._hex(want[r]), "game": sc._hex(sc.SHOWN[r]),
@@ -1113,7 +1113,7 @@ class TreeEditMixin:
         try:
             sc.set_pick(self.assets_dir, role, rgb)
         except (OSError, ValueError) as e:
-            log.warning("score colour: %s", e)
+            log.warning("score color: %s", e)
             return False
         log.info("Scenes: the score panel's %s %s", sc.LABELS[role],
                  "is %s" % sc._hex(rgb) if rgb else "has the game's own color")
@@ -2262,7 +2262,7 @@ class TreeEditMixin:
         try:
             got = text_colour.saved_colours(self._text_colour_folders())
         except Exception:                            # noqa: BLE001
-            log.exception("saved text colours")
+            log.exception("saved text colors")
             got = []
         return [{"name": name, "path": path, "pick": pick, "bright": bright}
                 for name, path, pick, bright in got[:self._COLOURS_SHOWN]]
@@ -2975,7 +2975,7 @@ class TreeEditMixin:
             try:
                 images.set_color_unlocked(on)
             except Exception:                            # noqa: BLE001
-                log.exception("scene colour unlock")
+                log.exception("scene color unlock")
         data = staged_changes.load(self.assets_dir)
         if bool(data.get(_cp.STOCK_IMAGES_KEY)) != on:
             # the Images tab has not scanned this folder: its own record is the file.  As
@@ -3140,7 +3140,7 @@ class TreeEditMixin:
                 try:
                     fn()
                 except Exception:                        # noqa: BLE001
-                    log.exception("scene text colour %s.%s", ns, name)
+                    log.exception("scene text color %s.%s", ns, name)
 
     def _picture_color(self, rel, on):
         """One picture's colour switch (*rel* under images/), recorded where the Images tab
@@ -3152,7 +3152,7 @@ class TreeEditMixin:
             try:
                 done = bool(here.set_color(rel, bool(on)))
             except Exception:                            # noqa: BLE001
-                log.exception("scene colour switch")
+                log.exception("scene color switch")
         if not done:
             # the Images tab has not scanned this folder: its own record is the file
             from ..core import colour_profile as _cp

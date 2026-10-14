@@ -133,7 +133,7 @@ def test_nothing_found_as_admin_says_the_card_was_not_recognised(
         _set_seq(w, 1)
         _apply(w, 1, "")
         text = w.state("extract")["card_line"]
-        assert "not recognised" in text and "Administrator" not in text
+        assert "not recognized" in text and "Administrator" not in text
 
 
 def test_an_empty_drive_pick_clears_the_row(tmp_path):

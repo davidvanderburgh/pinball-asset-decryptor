@@ -28,10 +28,13 @@ import os
 import re
 import threading
 
-#: the languages the app offers: code -> its own name for itself
-LANGUAGES = (("en", "English"), ("es", "Español"), ("de", "Deutsch"),
-             ("fr", "Français"))
-CODES = tuple(c for c, _ in LANGUAGES)
+#: the languages the app offers: (code, its own name for itself, the short
+#: code the top bar's button shows).  The app is written in American English;
+#: English (UK) is the same words spelled the British way (en-gb.json, made by
+#: scripts/i18n_extract.py --british).
+LANGUAGES = (("en", "English (US)", "EN-US"), ("en-gb", "English (UK)", "EN-GB"),
+             ("es", "Español", "ES"), ("de", "Deutsch", "DE"), ("fr", "Français", "FR"))
+CODES = tuple(lang[0] for lang in LANGUAGES)
 DEFAULT = "en"
 
 CATALOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -63,7 +66,7 @@ def normalize(text):
 
 def language(code):
     """*code* if the app offers it, else English."""
-    code = str(code or "").strip().lower()
+    code = str(code or "").strip().lower().replace("_", "-")
     return code if code in CODES else DEFAULT
 
 

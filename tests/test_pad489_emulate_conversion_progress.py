@@ -462,13 +462,13 @@ def test_cancel_says_so_at_once_and_until_the_work_stops(monkeypatch):
     tab._preparing = "Converting videos: 3 of 658 (about 15 minutes left)"
     assert tab.toggle() is True
     assert tab._cancel_prepare is True
-    assert painted[-1] == "Cancelling…"
-    assert shown["run_btn"] == {"label": "Cancelling…", "enabled": False, "mode": "busy"}
+    assert painted[-1] == "Canceling…"
+    assert shown["run_btn"] == {"label": "Canceling…", "enabled": False, "mode": "busy"}
     # what the staging says while it winds down does not take the words back
     tab._show_preparing("Converting videos: 4 of 658 (about 15 minutes left)", 1)
-    assert painted[-1] == "Cancelling…"
+    assert painted[-1] == "Canceling…"
     tab.set_preparing("Preparing your modes…")
-    assert tab._preparing == "Cancelling…"
+    assert tab._preparing == "Canceling…"
     # a second press asks nothing more
     assert tab.toggle() is True
 
@@ -496,10 +496,10 @@ def test_a_cancel_ends_the_start_after_the_staging(monkeypatch):
     monkeypatch.setattr(tab, "_paint_run_btn", lambda: None, raising=False)
     assert tab._stage_pending("C:/proj") is False
     # after the staging's own lines, which go through the app's queue
-    assert queued == [("[emulate] Cancelled: the game was not started. The 2 videos "
-                       "converted before you cancelled are kept, so the next Start goes on "
+    assert queued == [("[emulate] Canceled: the game was not started. The 2 videos "
+                       "converted before you canceled are kept, so the next Start goes on "
                        "from there.", "info")]
-    assert not any("Cancelled:" in l for l in logged)
+    assert not any("Canceled:" in l for l in logged)
     assert told == ["C:/proj"]                  # the tabs still learn what changed
     assert not any("None of the" in l for l in logged)
 
@@ -588,4 +588,4 @@ def test_a_clip_cut_off_by_cancel_is_not_called_a_failure(tmp_path, monkeypatch)
                                                    "video/c.mp4": "x"},
                "best_quality": False}
     App._stage_pending_video(_S(), str(tmp_path), staging=staging)
-    assert said[-1] == ("Applied 2 video replacement(s).  Cancelled before the rest.", "warning")
+    assert said[-1] == ("Applied 2 video replacement(s).  Canceled before the rest.", "warning")

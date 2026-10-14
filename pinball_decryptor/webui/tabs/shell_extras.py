@@ -710,7 +710,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
             return False
         st["cancelled"] = True
         cur = dict(self.get("download") or {})
-        cur.update(detail="Cancelling…", cancelling=True)
+        cur.update(detail="Canceling…", cancelling=True)
         self.set(download=cur)
         try:
             st["on_cancel"]()

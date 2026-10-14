@@ -384,7 +384,7 @@ def _stage_items(items, slots_by_rel, baseline, failures, cache, colour,
     for i, (rel, rep) in enumerate(items):
         if cancel_cb is not None and cancel_cb():
             if log_cb:
-                log_cb("Cancelled — skipping the remaining image "
+                log_cb("Canceled — skipping the remaining image "
                        "replacement(s).", "error")
             break
         slot = slots_by_rel[rel]

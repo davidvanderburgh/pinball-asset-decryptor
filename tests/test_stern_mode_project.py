@@ -129,7 +129,7 @@ def test_validate_names_every_problem(tmp_path):
                        clip="file", clip_file="", screen_art="missing.png")
     problems = " ".join(MP.validate(spec, str(tmp_path)))
     for words in ("needs a name", "starts the mode", "at least one shot", "at least a second",
-                  "'Flipper'", "worth something", "panel colour", "video file", "missing.png"):
+                  "'Flipper'", "worth something", "panel color", "video file", "missing.png"):
         assert words in problems, words
     assert MP.validate(_kaiju(), str(tmp_path)) == []
     with pytest.raises(MP.ModeProjectError):
@@ -528,7 +528,7 @@ def test_a_display_priority_and_lit_shots_write_their_lines_and_nothing_at_the_d
     ("priority", 256, "display priority is 0 (none) to 255"),
     ("priority", -1, "display priority is 0 (none) to 255"),
     ("priority", "high", "display priority is 0 (none) to 255"),
-    ("light_shots", "orange", "not a colour like #ff6000"),
+    ("light_shots", "orange", "not a color like #ff6000"),
     ("light_shots_pattern", "strobe", "solid, blink, pulse or chase"),
 ])
 def test_a_bad_display_priority_or_lit_shots_value_is_named(field, value, words):

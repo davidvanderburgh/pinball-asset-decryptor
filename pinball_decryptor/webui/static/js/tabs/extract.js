@@ -242,7 +242,7 @@ function RunButton({ s, shell }) {
   if (mine) {
     const cancelling = !!shell.cancelling;
     return html`<${Button} kind="danger" size="big" disabled=${cancelling} title=${cancelling ? "" : CANCEL_TIP}
-        onClick=${() => call("extract.cancel")}>${cancelling ? "Cancelling…" : "Cancel"}<//>
+        onClick=${() => call("extract.cancel")}>${cancelling ? "Canceling…" : "Cancel"}<//>
       <span class="dim small grow">${cancelling ? "Stopping as soon as it's safe to." : CANCEL_TIP}</span>`;
   }
   const reason = running ? BUSY_TIP : (s.block_reason || "");

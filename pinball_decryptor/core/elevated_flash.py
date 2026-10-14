@@ -291,8 +291,8 @@ def _relay_until_done(run, ipc, *, log, progress, cancel, on_verify_start,
     if result.get("cancelled"):
         raise FlashCancelled(
             result.get("error")
-            or ("Read cancelled before completion." if reading
-                else "Flash cancelled before completion."))
+            or ("Read canceled before completion." if reading
+                else "Flash canceled before completion."))
     if not result.get("ok"):
         raise FlashError(
             result.get("error")
@@ -433,7 +433,7 @@ class _OsascriptRun(_ElevatedRun):
             low = self._captured.lower()
             self.declined = ("-128" in self._captured
                              or "user canceled" in low
-                             or "user cancelled" in low)
+                             or "user canceled" in low)
             self.stderr = "" if self.declined else self._captured
         return rc
 

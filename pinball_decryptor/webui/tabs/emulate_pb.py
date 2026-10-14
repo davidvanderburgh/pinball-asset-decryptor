@@ -228,8 +228,8 @@ class EmulatePBTab(RigTabMixin, TabService):
         if not self._starting or self._cancelling:
             return False
         self._cancelling = True
-        self._set_go("Cancelling…", False)
-        self._log("PB: cancelling the start…")
+        self._set_go("Canceling…", False)
+        self._log("PB: canceling the start…")
         kind = self._kind
 
         def work():
@@ -656,7 +656,7 @@ class EmulatePBTab(RigTabMixin, TabService):
                     timeout=3600, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
-                    self._log("PB: start cancelled.")
+                    self._log("PB: start canceled.")
                 elif rc not in (0, None):
                     self._log("PB: start failed (exit %d). %s"
                               % (rc, pb.exit_text(kind, rc)))

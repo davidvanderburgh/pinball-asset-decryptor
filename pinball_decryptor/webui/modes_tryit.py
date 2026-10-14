@@ -97,7 +97,7 @@ class TryItMixin:
                    "container cannot see the modes yet. Your modes are saved in the "
                    "project."),
     }
-    TRYIT_CANCELLED = "Try it was cancelled; nothing was started."
+    TRYIT_CANCELLED = "Try it was canceled; nothing was started."
     TRYIT_NOT_UP = "the emulator did not come up; the Emulate tab's log says why."
 
     START_TIP = ("Start the mode open on the left in the running game, without its starting "
@@ -501,7 +501,7 @@ class TryItMixin:
                                  "tab's now: stop it there if you do not want it.")
             else:
                 self._tryit_cancel = True
-                self._tryit_note("cancelling…")
+                self._tryit_note("canceling…")
             return False
         self._save_if_edited()
         project = self.project()

@@ -1922,7 +1922,7 @@ def profile_from_port(path):
             no("lights", "The app has not found how %(label)s runs its light shows, so a mode "
                          "cannot sweep the playfield yet.")
     elif not values.get("light_lts"):
-        no("lights", "The app does not know a light show of %(label)s's to sweep a colour "
+        no("lights", "The app does not know a light show of %(label)s's to sweep a color "
                      "with.")
     hud = scenes.get("hud", "")
     if "screens" not in runtime:
@@ -3964,10 +3964,10 @@ def validate(spec, folder=None):
             out.append("%s has no shot called %r." % (p.label, s))
     if int(spec.award) < 1:
         out.append("The first shot has to be worth something.")
-    for label, value in (("panel colour", spec.panel_color), ("title colour", spec.title_color),
-                         ("light colour", spec.light_color)):
+    for label, value in (("panel color", spec.panel_color), ("title color", spec.title_color),
+                         ("light color", spec.light_color)):
         if not _COLOR.match(value or ""):
-            out.append("The %s is not a colour like #00ff00." % label)
+            out.append("The %s is not a color like #00ff00." % label)
     if spec.clip not in CLIP_KINDS:
         out.append("The clip is none, a title card, or a video file.")
     if spec.clip_when not in CLIP_WHEN:
@@ -4696,7 +4696,7 @@ def validate_display_lights(spec):
         out.append("The display priority is 0 (none) to 255.")
     colour = spec.light_shots
     if colour and not (isinstance(colour, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", colour)):
-        out.append("The colour of the lit shots is not a colour like #ff6000.")
+        out.append("The color of the lit shots is not a color like #ff6000.")
     if spec.light_shots_pattern not in LIGHT_PATTERNS:
         out.append("The lit shots are solid, blink, pulse or chase.")
     return out

@@ -611,7 +611,7 @@ class RawDeviceFile:
         while written < total:
             if cancel is not None and cancel():
                 raise FlashCancelled(
-                    "Flash cancelled after %d of %d bytes." % (written, total))
+                    "Flash canceled after %d of %d bytes." % (written, total))
             want = min(step, total - written)
             buf = src.read(want)
             if not buf:
@@ -1288,7 +1288,7 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
             while read < dev_size:
                 if cancel is not None and cancel():
                     raise FlashCancelled(
-                        "Read cancelled after %d of %d bytes."
+                        "Read canceled after %d of %d bytes."
                         % (read, dev_size))
                 want = min(_VERIFY_CHUNK, dev_size - read)
                 buf = dev._aligned_read(read, want)
@@ -1688,7 +1688,7 @@ def read_device_menu_to_image(device_path, image_path, *, log=None, progress=Non
                 done = 0
                 while done < length:
                     if cancel is not None and cancel():
-                        raise FlashCancelled("Read cancelled after %d of %d bytes." % (read, total))
+                        raise FlashCancelled("Read canceled after %d of %d bytes." % (read, total))
                     want = min(_VERIFY_CHUNK, length - done)
                     buf = dev._aligned_read(off + done, want)
                     if not buf:
@@ -1766,7 +1766,7 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
                         "- /data and /dump (the machine's settings and "
                         "scores) are left as they are.", "info")
                 if cancel is not None and cancel():
-                    raise FlashCancelled("Cancelled before anything was "
+                    raise FlashCancelled("Canceled before anything was "
                                          "written.")
                 total = sum(length for _o, length, _w in plan["write"])
                 rate = []
@@ -1777,7 +1777,7 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
                     while done < length:
                         if cancel is not None and cancel():
                             raise FlashCancelled(
-                                "Menu write cancelled after %d of %d bytes - "
+                                "Menu write canceled after %d of %d bytes - "
                                 "the card's menu is half written and must be "
                                 "written again." % (written, total))
                         buf = src.read(min(_FLASH_CHUNK, length - done))
@@ -1821,7 +1821,7 @@ def _verify_menu_readback(device_path, image_path, plan, *, log=None,
             while done < length:
                 if cancel is not None and cancel():
                     raise FlashCancelled(
-                        "Verify cancelled after %d of %d bytes." % (checked,
+                        "Verify canceled after %d of %d bytes." % (checked,
                                                                     total))
                 exp = src.read(min(_VERIFY_CHUNK, length - done))
                 if not exp:
@@ -1859,7 +1859,7 @@ def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
         while checked < img_size:
             if cancel is not None and cancel():
                 raise FlashCancelled(
-                    "Verify cancelled after %d of %d bytes." % (
+                    "Verify canceled after %d of %d bytes." % (
                         checked, img_size))
             want = min(_VERIFY_CHUNK, img_size - checked)
             exp = src.read(want)

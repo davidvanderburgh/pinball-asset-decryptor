@@ -746,7 +746,7 @@ export function ShellxOverlays() {
       <div class="hd"><span class="h2">${job.title}</span></div>
       <div class="bd"><div class="msg">${job.text}</div>
         <${Progress} pct=${Math.round((job.frac || 0) * 100)} />
-        <div class="small muted ellip" title=${job.detail}>${job.cancelling ? "Cancelling…" : job.detail || " "}</div></div>
+        <div class="small muted ellip" title=${job.detail}>${job.cancelling ? "Canceling…" : job.detail || " "}</div></div>
       <div class="ft"><${Button} disabled=${job.cancelling} onClick=${() => call("shellx.job_cancel", job.id)}>Cancel<//></div>
     </div></div>` : null}
     ${dl ? html`<div class="scrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Downloading update">

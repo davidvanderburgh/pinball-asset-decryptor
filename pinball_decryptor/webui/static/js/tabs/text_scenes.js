@@ -308,11 +308,11 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
     let items = [];
     if (it.id.startsWith("txt::")) {
       items = [
-        { label: "Text colour…", onClick: () => startColor(it.text) },
-        it.picked ? { label: "Back to the original colour", onClick: () => call("text_scenes.reset_color", it.text) } : null,
+        { label: "Text color…", onClick: () => startColor(it.text) },
+        it.picked ? { label: "Back to the original color", onClick: () => call("text_scenes.reset_color", it.text) } : null,
         { sep: true },
         { label: "Move…", onClick: () => startLayout(it.text, "move") },
-        { label: "Alignment", submenu: [["left", "Left"], ["center", "Centre"], ["right", "Right"]].map(([n, l]) => ({
+        { label: "Alignment", submenu: [["left", "Left"], ["center", "Center"], ["right", "Right"]].map(([n, l]) => ({
           label: l, checked: it.align === n, onClick: () => call("text_scenes.align_text", it.text, n) })) },
         { label: "Font size…", onClick: () => startLayout(it.text, "size") },
         it.has_layout ? { label: "Back to the original layout", onClick: () => call("text_scenes.reset_layout", it.text) } : null,
@@ -556,7 +556,7 @@ function ColorDialog({ c, onClose }) {
   return html`<${Modal} title=${c.title} onClose=${onClose}
       footer=${html`<${Button} onClick=${onClose}>Cancel<//><${Button} kind="primary" onClick=${ok}>OK<//>`}>
     <div class="row" style="gap:14px">
-      <input type="color" class="scenes-color" value=${v} onInput=${(e) => setV(e.target.value)} aria-label="Colour" />
+      <input type="color" class="scenes-color" value=${v} onInput=${(e) => setV(e.target.value)} aria-label="Color" />
       <span class="mono">${v}</span>
     </div>
   <//>`;

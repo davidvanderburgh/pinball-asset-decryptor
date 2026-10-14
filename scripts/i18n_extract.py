@@ -462,6 +462,84 @@ def _add(seen, s, path):
         seen.setdefault(key, set()).add(rel)
 
 
+# ---------------------------------------------------------------- English
+# The app is written in American English (PAD-458); English (UK) is the same
+# strings spelled the British way, made by these tables, not by hand.  A word
+# that is the same in both, or whose British form depends on its sense
+# ("program", "license", "meter", "practice"), is left out: it stays as the
+# app writes it.
+US_TO_GB = {
+    "color": "colour", "colors": "colours", "colored": "coloured", "coloring": "colouring",
+    "colorful": "colourful", "colorless": "colourless", "discolored": "discoloured",
+    "gray": "grey", "grays": "greys", "grayed": "greyed", "graying": "greying",
+    "grayscale": "greyscale", "grayish": "greyish",
+    "center": "centre", "centers": "centres", "centered": "centred", "centering": "centring",
+    "behavior": "behaviour", "behaviors": "behaviours",
+    "favor": "favour", "favors": "favours", "favorite": "favourite", "favorites": "favourites",
+    "canceled": "cancelled", "canceling": "cancelling",
+    "labeled": "labelled", "labeling": "labelling", "modeled": "modelled",
+    "traveled": "travelled", "signaled": "signalled", "leveled": "levelled",
+    "analyze": "analyse", "analyzed": "analysed", "analyzes": "analyses", "analyzing": "analysing",
+    "catalog": "catalogue", "catalogs": "catalogues",
+    "defense": "defence", "offense": "offence", "judgment": "judgement",
+}
+#: -ize words: the British form ends -ise ("recognize" -> "recognise")
+IZE_STEMS = ("recogniz organiz realiz normaliz summariz prioritiz customiz finaliz initializ "
+             "optimiz synchroniz minimiz maximiz categoriz serializ randomiz standardiz visualiz "
+             "apologiz authoriz emphasiz centraliz characteriz utiliz specializ capitaliz "
+             "memoriz digitaliz localiz neutraliz stabiliz personaliz criticiz").split()
+_IZE_ENDS = ("e", "es", "ed", "ing", "ation", "ations", "er", "ers")
+GB_TO_US = {gb: us for us, gb in US_TO_GB.items()}
+_ENGLISH_WORD = re.compile(r"(?<![\w.$])(?<!--)[A-Za-z]+(?![\w])")
+
+
+def _respell(word, table, stems, frm, to):
+    low = word.lower()
+    rep = table.get(low)
+    if rep is None:
+        for un in ("", "un"):
+            for st in stems:
+                if low.startswith(un + st) and low[len(un + st):] in _IZE_ENDS:
+                    rep = un + st[:-1] + to + low[len(un + st):]
+                    break
+            if rep:
+                break
+    if rep is None:
+        return None
+    if word.isupper():
+        return rep.upper()
+    return rep[0].upper() + rep[1:] if word[0].isupper() else rep
+
+
+def british(text):
+    """*text* with its American spellings made British."""
+    return _ENGLISH_WORD.sub(lambda m: _respell(m.group(0), US_TO_GB, IZE_STEMS, "z", "s")
+                             or m.group(0), text)
+
+
+def british_words(text):
+    """The British spellings in *text* (the app writes American)."""
+    gb_stems = [st[:-1] + "s" for st in IZE_STEMS]
+    return [m.group(0) for m in _ENGLISH_WORD.finditer(text)
+            if _respell(m.group(0), GB_TO_US, gb_stems, "s", "z")]
+
+
+def write_british(seen):
+    """en-gb.json: every harvested string that spells a word the American
+    way, mapped to its British spelling."""
+    cat = {}
+    for key in seen:
+        gb = british(key)
+        if gb != key:
+            cat[key] = gb
+    path = os.path.join(I18N, "en-gb.json")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(dict(sorted(cat.items())), f, ensure_ascii=False, indent=0)
+        f.write("\n")
+    print("en-gb: %d entries -> %s" % (len(cat), path))
+    return 0
+
+
 def merge(folder):
     """Add every ``<name>.<lang>.json`` in *folder* to that language's
     catalog (a key already there takes the new translation)."""
@@ -492,10 +570,15 @@ def main():
                     help="a folder of <name>.<lang>.json translations to add "
                          "to the catalogs")
     ap.add_argument("--out", default=os.path.join(REPO, "i18n_strings.json"))
+    ap.add_argument("--british", action="store_true",
+                    help="write en-gb.json: every string with an American "
+                         "spelling, spelled the British way")
     args = ap.parse_args()
     if args.merge:
         return merge(args.merge)
     seen = harvest()
+    if args.british:
+        return write_british(seen)
     if args.missing:
         with open(os.path.join(I18N, args.missing + ".json"), encoding="utf-8") as f:
             cat = json.load(f)

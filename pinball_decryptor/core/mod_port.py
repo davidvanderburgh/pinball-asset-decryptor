@@ -127,7 +127,7 @@ def summarize(results):
         elif status == "skipped":
             lines.append("%s: skipped - %s" % (name, detail))
         elif status == "cancelled":
-            lines.append("%s: cancelled" % name)
+            lines.append("%s: canceled" % name)
         else:
             lines.append("%s: FAILED - %s" % (name, detail))
     n_ok = sum(1 for _j, s, _d in results if s == "ok")

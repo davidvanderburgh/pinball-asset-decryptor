@@ -1247,11 +1247,11 @@ class WebMultibootPanel(_Base):
                 "how loud the preview plays here."),
             "colors_note": (
                 "Make your own…: start from the theme shown, then "
-                "change any colour - type it (RRGGBB) or click its "
+                "change any color - type it (RRGGBB) or click its "
                 "swatch to pick one. The preview redraws as you go."
                 if roles else
                 "The themes file (%s) could not be read: the menu "
-                "keeps its default colours." % mt.THEMES_JSON),
+                "keeps its default colors." % mt.THEMES_JSON),
             "default_max": max(0, len(self._rows) - 1),
             "sound_words": list(mt.SOUND_CHOICES),
             "used": self._used(),

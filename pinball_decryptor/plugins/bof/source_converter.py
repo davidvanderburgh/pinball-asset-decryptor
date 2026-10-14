@@ -555,7 +555,7 @@ _EDITABLE_README = """\
 =====================================================================
 
 Every game asset from the .fun has been decoded into this folder
-in a player-friendly format, organised by what tool you use to edit:
+in a player-friendly format, organized by what tool you use to edit:
 
   audio/    *.wav  — voice clips, sound effects, music
                      (open in VLC, Audacity, your DAW)

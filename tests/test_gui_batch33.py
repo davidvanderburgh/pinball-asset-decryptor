@@ -125,7 +125,7 @@ def test_a_cancel_between_scans_still_reads_as_a_cancel():
     me.scan(True)
     me.scan(False)
     texts = _texts(me)
-    assert sum("cancelled after" in t for t in texts) == 1
+    assert sum("canceled after" in t for t in texts) == 1
     assert not any("replaced after" in t for t in texts)
     assert sum("started" in t for t in texts) == 2
 

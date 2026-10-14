@@ -654,7 +654,7 @@ class WebWindow:
 
     def set_cancelling(self):
         self.ctx.store.set("shell", cancelling=True)
-        self.set_status("Cancelling...")
+        self.set_status("Canceling...")
 
     def set_running(self, running, mode="extract"):
         self._running = bool(running)

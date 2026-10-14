@@ -26,10 +26,10 @@ import os
 RELDIR = "text"
 FILENAME = "colors.tsv"
 HEADER = (
-    "# Scene text colours. Each row recolours one line of on-screen text in one\n"
-    "# scene: the game multiplies the (white) font by this colour, so this is\n"
-    "# where a text colour actually lives - not in the font.\n"
-    "# Delete a row to leave that line the colour Stern shipped.\n"
+    "# Scene text colors. Each row recolours one line of on-screen text in one\n"
+    "# scene: the game multiplies the (white) font by this color, so this is\n"
+    "# where a text color actually lives - not in the font.\n"
+    "# Delete a row to leave that line the color Stern shipped.\n"
     "# radium card path\tstring\tfrom\tto\n")
 
 

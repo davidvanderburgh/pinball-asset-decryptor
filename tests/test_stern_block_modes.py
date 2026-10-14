@@ -77,7 +77,7 @@ def test_problems_name_what_is_missing():
                   "sets a variable that is not there",
                   "not a whole number",
                   "has an empty number slot",
-                  "lights a shot in no colour",
+                  "lights a shot in no color",
                   "a block this version does not know",
                   "which this card's game does not report",
                   "Script 3 starts with no When block",
@@ -865,7 +865,7 @@ def test_light_show_and_pace_problems():
            _step("burst", 100, "white", "#000000"), _step("burst", 100, "#ffffff", "#000000", at="moon"),
            _step("spin", 100, "#ffffff", "#000000", rate=9000), _step("spin", 100, "#ffffff", "#000000", gi="x")]
     said = " ".join(probs({"op": "show", "show": "own", "steps": bad}))
-    for words in ("step 1, has no pattern", "step 2, lasts 50 to 10000 ms", "step 3, has a colour missing",
+    for words in ("step 1, has no pattern", "step 2, lasts 50 to 10000 ms", "step 3, has a color missing",
                   "step 4, has no place", "step 5, has a pace of 0 to 2000", "step 6, says nothing"):
         assert words in said, words
     eleven = {"op": "show", "show": "own", "steps": [GHIDORAH_START[0]] * 11}
@@ -1347,7 +1347,7 @@ def test_light_the_mode_at_a_shot_is_checked():
         dict(LIT, insert=["A"]), dict(LIT, insert="X" * 40)]}])
     assert BM.problems(bad, SHOTS, GZ.events, inserts=["MASER READY"]) == [
         "Script 1's Light the mode at names Moon ramp, a shot this card does not have.",
-        "Script 1 lights the mode in no colour.",
+        "Script 1 lights the mode in no color.",
         "Script 1 lights the mode in no pattern.",
         "Script 1 lights the insert BLOFELD, which this card's game does not have.",
         "Script 1 lights an insert that is not one."]                       # both: said once
@@ -1392,7 +1392,7 @@ def test_a_lit_mode_cycles_several_inserts_and_holds_one_solid_as_the_games_own(
         "Script 1 lights more than 8 inserts.",
         "Script 1 holds an insert solid that is not one.",
         "Script 1 holds the insert NOPE solid, which this card's game does not have.",
-        "Script 1 holds an insert solid in no colour."]
+        "Script 1 holds an insert solid in no color."]
 
 
 def test_a_lit_mode_chases_its_inserts_and_holds_the_solid_one_on_the_harness(tmp_path):

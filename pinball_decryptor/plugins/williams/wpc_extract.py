@@ -146,7 +146,7 @@ def extract_dmd_assets(
         raise WpcDecodeError(
             "Could not find the WPC font-table signature in this "
             "ROM.  The game may use a layout this decoder doesn't "
-            "recognise.")
+            "recognize.")
     log(f"  font ptr      @ ROM 0x{tables.font_ptr_rom:06X}", "info")
     graphics_table = None
     if tables.graphics_ptr_rom is not None:

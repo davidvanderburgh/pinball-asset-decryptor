@@ -861,7 +861,7 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     for i, (rel, rep) in enumerate(items):
         if cancel_cb is not None and cancel_cb():
             if log_cb:
-                log_cb("Cancelled — skipping the remaining video "
+                log_cb("Canceled — skipping the remaining video "
                        "replacement(s).", "error")
             break
         slot = slots_by_rel[rel]
@@ -944,7 +944,7 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
             cache.forget(rel)
             failures.append((rel, detail))
             if log_cb and detail == "cancelled":
-                log_cb(f"  – {rel}: cancelled, left as it was", "warning")
+                log_cb(f"  – {rel}: canceled, left as it was", "warning")
             elif log_cb:
                 log_cb(f"  ✗ {rel}: {detail}", "error")
         cache.save()

@@ -204,7 +204,7 @@ class ExtractPipeline(BasePipeline):
             raise PipelineError("Detect",
                 f"Cannot identify CGC game from filename: "
                 f"{os.path.basename(self.img_path)}\n\n"
-                f"Recognised hints: MedievalMadness, AttackFromMars, "
+                f"Recognized hints: MedievalMadness, AttackFromMars, "
                 f"MonsterBash, PulpFiction, CactusCanyon (case-insensitive).")
         info = GAME_DB[game_key]
         self._log(f"Game detected: {info['display']}", "success")
@@ -450,7 +450,7 @@ class ExtractPipeline(BasePipeline):
             if cc_counts.get("art"):
                 dcs_help += (
                     f"\n\nDisplay art:    {cc_counts['art']}"
-                    f"\n  {ART_SUBDIR}/*.png — the colour LCD images from "
+                    f"\n  {ART_SUBDIR}/*.png — the color LCD images from "
                     f"cgc.so (RGB565). Edit a PNG (keep its dimensions) and "
                     f"Write re-packs cgc.so.")
             if cc_counts.get("videos"):
@@ -718,7 +718,7 @@ class ExtractPipeline(BasePipeline):
                       "skipping art decode.", "warning")
             return 0
         self._check_cancel()
-        self._log("Decoding colour display art (cgc.so)...", "info")
+        self._log("Decoding color display art (cgc.so)...", "info")
         out = os.path.join(self.output_dir, ART_SUBDIR)
         try:
             n = cc_art.extract_art(
@@ -1418,7 +1418,7 @@ class FlashImagePipeline(BasePipeline):
                 cancel=lambda: self._cancelled, verify=self.verify,
                 on_verify_start=lambda: self._set_phase(2))  # Verify card
         except FlashCancelled:
-            self._log("Flash cancelled -- the card is incomplete and must be "
+            self._log("Flash canceled -- the card is incomplete and must be "
                       "re-flashed before use.", "error")
             self._check_cancel()   # raises PipelineError("Cancelled", ...)
             return

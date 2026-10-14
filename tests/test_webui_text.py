@@ -206,7 +206,7 @@ def test_scan_cancel_and_no_folder(tmp_path):
         assert not st["scanning"]
         w.call("text.cancel_scan")
         assert w.state("text")["empty"] == \
-            "Scan cancelled — click Scan to try again."
+            "Scan canceled — click Scan to try again."
 
 
 def test_cancelling_a_rescan_says_so_over_the_emptied_list(tmp_path):
@@ -221,7 +221,7 @@ def test_cancelling_a_rescan_says_so_over_the_emptied_list(tmp_path):
         st = w.state("text")
         assert st["view"] == [] and not st["scanning"]
         assert st["total"] == 6                 # the rows are still held
-        assert st["empty"] == "Scan cancelled — click Scan to try again."
+        assert st["empty"] == "Scan canceled — click Scan to try again."
         w.call("text.set_show", "Changed")
         w.call("text.set_show", "All")
         st = w.state("text")
@@ -660,7 +660,7 @@ def test_scenes_recolour_move_and_preview(tmp_path):
         # a line with no recorded layout says why it can't be recoloured
         w.call("text_scenes.select", "/g/scene2")
         assert w.call("text_scenes.color_start", "BALL ONE") is None
-        assert w.asked[-1]["title"] == "Text colour"
+        assert w.asked[-1]["title"] == "Text color"
         assert w.state("text_scenes")["canvas_msg"] == \
             "no preview for this scene"
         w.call("text_scenes.close")

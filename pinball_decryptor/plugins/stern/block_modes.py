@@ -967,7 +967,7 @@ def _check_stack(stack, depth, where, ctx):
             _check_shot(b.get("shot"), where + "'s lights", ctx)
             if op == "light_shot":
                 if not COLOR_RE.match(str(b.get("color") or "")):
-                    ctx["out"].append("%s lights a shot in no colour." % where)
+                    ctx["out"].append("%s lights a shot in no color." % where)
                 if b.get("pattern") not in PATTERNS:
                     ctx["out"].append("%s lights a shot in no pattern." % where)
                 rate = b.get("rate")
@@ -1118,7 +1118,7 @@ def _check_stack(stack, depth, where, ctx):
         elif op == "light_mode":                        # PAD-503: lit at a shot, as the game's mini-wizards are
             _check_shot(b.get("shot"), where + "'s Light the mode at", ctx)
             if not COLOR_RE.match(str(b.get("color") or "")):
-                ctx["out"].append("%s lights the mode in no colour." % where)
+                ctx["out"].append("%s lights the mode in no color." % where)
             if b.get("pattern") not in LIT_PATTERNS:
                 ctx["out"].append("%s lights the mode in no pattern." % where)
             names = lit_inserts(b.get("insert"))
@@ -1137,7 +1137,7 @@ def _check_stack(stack, depth, where, ctx):
             elif solid and ctx["inserts"] and solid not in ctx["inserts"]:
                 ctx["out"].append("%s holds the insert %s solid, which this card's game does not have." % (where, solid))
             elif solid and not COLOR_RE.match(str(b.get("solid_color") or "#ffffff")):
-                ctx["out"].append("%s holds an insert solid in no colour." % where)
+                ctx["out"].append("%s holds an insert solid in no color." % where)
 
 
 def lit_inserts(value):
@@ -1189,7 +1189,7 @@ def _check_show(b, where, ctx):
         if not _int_ok(st.get("ms"), STEP_MS_MIN, STEP_MS_MAX):
             ctx["out"].append("%s lasts %d to %d ms." % (here, STEP_MS_MIN, STEP_MS_MAX))
         if not (COLOR_RE.match(str(st.get("a") or "")) and COLOR_RE.match(str(st.get("b") or ""))):
-            ctx["out"].append("%s has a colour missing." % here)
+            ctx["out"].append("%s has a color missing." % here)
         if st.get("at", "center") not in PLACES:
             ctx["out"].append("%s has no place." % here)
         if not _int_ok(st.get("rate", 0), 0, FX_RATE_MAX):
@@ -1745,7 +1745,7 @@ def to_c(program, slug):
     L.append("#define WORDS_ONLY       %d          /* PAD-521: its screen is words alone: shown a moment, not all along */"
              % (1 if words_only else 0))
     if has_bar:
-        L.append("#define BAR_RGB          0x%06xu   /* PAD-521: its colour in the game's own status bar */"
+        L.append("#define BAR_RGB          0x%06xu   /* PAD-521: its color in the game's own status bar */"
                  % int(program["bar"]["color"][1:], 16))
     L.append("#define UNUSED __attribute__((unused))   /* a helper the blocks may not call */")
     L.append("")
@@ -2605,7 +2605,7 @@ def _show_decls(shows):
     """The C of the light shows' steps (one table per Light show block) and their state."""
     out = ["/* ---- light shows (PAD-376): the kit's kit_show (intricate_kit.h). A show is a few STEPS,",
            " * each a pattern over the playfield's inserts by their PLACE (the port's \"at X,Y\": x 0-300",
-           " * across, y 0-600 down) for some ms, in its two colours; the GI strings follow each step. A",
+           " * across, y 0-600 down) for some ms, in its two colors; the GI strings follow each step. A",
            " * port with no placed inserts runs a show on the GI only. ---- */",
            "enum { %s };" % ", ".join(c for c, _w in FX.values()),
            "#define GI_KEEP   0                       /* the GI does what the game says */",
@@ -2658,7 +2658,7 @@ _SHOW_C = r"""static unsigned fx_mix(unsigned a, unsigned b, int f256)       /* 
 
 static unsigned fx_scale(unsigned c, int f256) { return fx_mix(0, c, f256); }
 
-static unsigned fx_hue(int h)             /* 0..1535 round the colour wheel, full brightness */
+static unsigned fx_hue(int h)             /* 0..1535 round the color wheel, full brightness */
 {
     int s = ((h % 1536) + 1536) % 1536, i = s / 256, f = s % 256;
     switch (i) {
@@ -2728,7 +2728,7 @@ static void show_start(const struct fx_step *steps, int n, const char *name)
     if (show.on) pm_log("show %s: %d step(s) over %d placed inserts, %d GI string(s)", name, n, show.placed, show.n_gi);
 }
 
-/* the colour of the insert at (x, y) for step st at `t` ms into it */
+/* the color of the insert at (x, y) for step st at `t` ms into it */
 static unsigned fx_colour(const struct fx_step *st, int x, int y, int idx, unsigned t)
 {
     int f = st->ms ? (int)((unsigned long)t * 256u / st->ms) : 256;     /* 0..256 through the step */
@@ -2855,7 +2855,7 @@ UNUSED static void game_wizard(const char *name, int start)
 """
 
 #: PAD-521: the game's own status bar (MODE_SDK.md "The game's status bar")
-_BAR_C = r"""/* PAD-521: its name in the game's own status bar (James Bond: the coloured bar under the TV), in BAR_RGB, the clock
+_BAR_C = r"""/* PAD-521: its name in the game's own status bar (James Bond: the colored bar under the TV), in BAR_RGB, the clock
  * draining along it as the game's own modes show theirs; full through its total, then given back. A game without
  * one shows nothing here. */
 static void bar_show(int clock)
@@ -2901,7 +2901,7 @@ static void info_show(int on)
 
 #: PAD-503: the mode lit at a shot, as the game lights one of its mini-wizards; %(n)d Light the mode at blocks
 _LIT_C = r"""/* ---- the mode lit at a shot (PAD-503), as the game lights one of its mini-wizards: for the player up, the shot's
- * inserts and one insert more held in its colour while the mode is not running, ball after ball, until that shot
+ * inserts and one insert more held in its color while the mode is not running, ball after ball, until that shot
  * starts it (as Start the mode does: it may wait, and stays lit). Starting, however it starts, puts the light out;
  * a new game too. Each player's is their own. ---- */
 #define N_LIT_AT %(n)d

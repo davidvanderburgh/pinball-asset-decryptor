@@ -1406,7 +1406,7 @@ class Spike2Emu:
                 "Spike 2 params: registration did not reach band-build "
                 "(cap=%r). The engine could not map this firmware build's audio "
                 "codec -- most likely a newer game update than this version of "
-                "the app recognises." % ({k: v for k, v in cap.items()
+                "the app recognizes." % ({k: v for k, v in cap.items()
                                           if k != "state"},))
         nrec = cap["nrec"]
         self._ensure_range(cap["mddst"], nrec * 24)

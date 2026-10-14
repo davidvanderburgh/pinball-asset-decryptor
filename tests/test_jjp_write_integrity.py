@@ -1008,11 +1008,11 @@ def test_clean_fsck_does_not_block_the_iso():
 
 def test_cancelled_fsck_is_reported_as_cancelled():
     """Exit 32 is 'the user stopped it', not 'the filesystem is broken'."""
-    pipe = _convert_pipe(32, "/var/tmp/jjp_raw.img: cancelled!")
+    pipe = _convert_pipe(32, "/var/tmp/jjp_raw.img: canceled!")
 
     with pytest.raises(P.PipelineError) as exc:
         pipe._phase_convert_standalone()
-    assert "cancelled" in str(exc.value).lower()
+    assert "canceled" in str(exc.value).lower()
     assert "could not repair" not in str(exc.value)
 
 

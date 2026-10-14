@@ -720,10 +720,10 @@ class SternFlashImagePipeline(BasePipeline):
             # menu write leaves the GAMES intact whatever happens: only p2 is
             # half written, and writing the menu again finishes the job.
             self._log(
-                "Menu write cancelled — the card's menu is half written; "
+                "Menu write canceled — the card's menu is half written; "
                 "write it again. The games on the card are untouched."
                 if self.menu_only else
-                "Flash cancelled — the card is incomplete and must be "
+                "Flash canceled — the card is incomplete and must be "
                 "re-flashed before use.", "error")
             self._check_cancel()   # raises PipelineError("Cancelled", ...)
             return

@@ -135,7 +135,7 @@ def test_the_tips_window_translates_a_block_whole():
 HOLE = re.compile(r"\{(\d*)\}")
 
 
-@pytest.mark.parametrize("code", [c for c in i18n.CODES if c != "en"])
+@pytest.mark.parametrize("code", ["es", "de", "fr"])
 def test_each_catalog_is_whole_and_well_formed(code):
     path = os.path.join(i18n.CATALOG_DIR, code + ".json")
     with open(path, encoding="utf-8") as f:
@@ -156,9 +156,66 @@ def test_each_catalog_is_whole_and_well_formed(code):
 
 
 def test_the_page_and_python_offer_the_same_languages():
-    assert [c for c, _ in i18n.LANGUAGES] == ["en", "es", "de", "fr"]
+    assert list(i18n.CODES) == ["en", "en-gb", "es", "de", "fr"]
+    assert [lang[2] for lang in i18n.LANGUAGES] == ["EN-US", "EN-GB", "ES", "DE", "FR"]
     for code in i18n.CODES[1:]:
         assert os.path.isfile(os.path.join(i18n.CATALOG_DIR, code + ".json"))
+    assert i18n.language("en-GB") == i18n.language("en_gb") == "en-gb"
+
+
+# ------------------------------------------------------------- English
+def _harvester():
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import i18n_extract
+    return i18n_extract
+
+
+_SEEN = []
+
+
+def _harvest():
+    """Every string the page can show (scripts/i18n_extract.py), read once."""
+    if not _SEEN:
+        _SEEN.append(_harvester().harvest())
+    return _SEEN[0]
+
+
+def test_english_uk_is_the_same_words_spelled_the_british_way():
+    X = _harvester()
+    with open(os.path.join(i18n.CATALOG_DIR, "en-gb.json"), encoding="utf-8") as f:
+        cat = json.load(f)
+    assert len(cat) > 400
+    for k, v in cat.items():
+        assert v == X.british(k) and v != k, (k, v)
+    c = i18n.catalog("en-gb")
+    assert c.tr("Color profile") == "Colour profile"
+    assert c.tr("Dark gray") == "Dark grey"
+    assert c.tr("Canceled") == "Cancelled"
+    assert c.tr("Scan") == "Scan"                       # the same in both: left alone
+    # and the words that depend on their sense stay as the app writes them
+    assert X.british("the game program's license meter") == "the game program's license meter"
+    assert X.british("Recognized, unrecognized, normalizing") == "Recognised, unrecognised, normalising"
+
+
+def test_the_apps_english_is_american_throughout():
+    """The app writes American English (PAD-458): a British spelling in what
+    the page shows would read wrong next to the rest, and English (UK) is made
+    from the American words."""
+    X = _harvester()
+    seen = _harvest()
+    british = {k: X.british_words(k) for k in seen if X.british_words(k)}
+    assert not british, list(british.items())[:10]
+
+
+def test_english_uk_covers_every_american_spelling():
+    """A string added later with "color" in it needs `--british` run again,
+    or English (UK) shows it the American way."""
+    X = _harvester()
+    with open(os.path.join(i18n.CATALOG_DIR, "en-gb.json"), encoding="utf-8") as f:
+        cat = json.load(f)
+    missing = [k for k in _harvest() if X.british(k) != k and k not in cat]
+    assert not missing, ("run python scripts/i18n_extract.py --british", missing[:10])
 
 
 # ------------------------------------------------------- the gear menu
@@ -167,7 +224,7 @@ def test_set_language_is_published_and_saved(tmp_path):
     with web_app(tmp_path) as w:
         sh = w.state("shell")
         assert sh["lang"] == "en"
-        assert [x[0] for x in sh["languages"]] == ["en", "es", "de", "fr"]
+        assert [x[0] for x in sh["languages"]] == ["en", "en-gb", "es", "de", "fr"]
         w.call("ui.set_language", "de")
         w.drain()
         assert w.state("shell")["lang"] == "de"

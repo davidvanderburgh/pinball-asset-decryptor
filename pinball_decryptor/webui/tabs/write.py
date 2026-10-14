@@ -915,7 +915,7 @@ class WriteTab(TabService):
             text = "Matches multiple manufacturers: %s" % ", ".join(
                 m.display for m, _ in hits)
         else:
-            text = "Not recognised as %s" % mfr.display
+            text = "Not recognized as %s" % mfr.display
         self.set(badge=text, badge_switch=switch)
         self._sync_badge()
 
@@ -1990,13 +1990,13 @@ class WriteTab(TabService):
     def _cancel_scan(self, text=None):
         self._scan_id += 1
         if self._scan_t0 is not None:
-            self._log_scan("Write change scan cancelled after %.1f s."
+            self._log_scan("Write change scan canceled after %.1f s."
                            % (time.monotonic() - self._scan_t0))
         self._scan_t0 = None
         self._scanning = False
         self._rows = []
         self.set(scanning=False, scan_msg="",
-                 empty=text or "Scan cancelled — click Refresh to try "
+                 empty=text or "Scan canceled — click Refresh to try "
                                "again.")
         self._publish_rows()
 

@@ -149,7 +149,7 @@ def mount_game_ssd(executor, device_path, read_only, log,
 def _mount_windows(executor, device_path, read_only, log, partition_override):
     disk_num = _disk_number(device_path)
     if disk_num is None:
-        raise RuntimeError(f"Unrecognised Windows device path: {device_path}")
+        raise RuntimeError(f"Unrecognized Windows device path: {device_path}")
 
     _run_host(["wsl", "--unmount", device_path], timeout=20)
     log("Taking disk offline so WSL can attach it...", "info")
@@ -260,7 +260,7 @@ def extract_from_ssd(device_path, output_dir, executor,
             with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
                 for m in tar:
                     if cancel_cb and cancel_cb():
-                        raise RuntimeError("Cancelled.")
+                        raise RuntimeError("Canceled.")
                     if not (m.isfile() or m.isdir()):
                         continue
                     safe = safe_member(m, output_dir)
@@ -316,7 +316,7 @@ def write_to_ssd(device_path, changed_files, executor,
         written = 0
         for i, (rel, abs_path) in enumerate(changed_files):
             if cancel_cb and cancel_cb():
-                raise RuntimeError("Cancelled.")
+                raise RuntimeError("Canceled.")
             rel_norm = rel.replace("\\", "/").lstrip("/")
             if ".." in rel_norm.split("/"):
                 log(f"  Skipping unsafe path: {rel}", "error")

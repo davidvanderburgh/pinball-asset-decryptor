@@ -635,7 +635,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                 if rank.get(st, 0) > rank.get(out.get(d), 0):
                     out[d] = st
         except Exception:                            # noqa: BLE001
-            log.exception("scene colour states")
+            log.exception("scene color states")
         return out
 
     def _restate_list(self):
@@ -1185,15 +1185,15 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         src = stock.get(text)
         if card is None or src is None:
             compat.messagebox.showinfo(
-                "Text colour",
-                "This line's colour isn't in the recorded scene layout, so "
+                "Text color",
+                "This line's color isn't in the recorded scene layout, so "
                 "there is nothing to change it from.\n\nRun \"Rebuild "
                 "previews…\" (or re-extract with Images enabled) and try "
                 "again.")
             return None
         return {"text": text, "start": text_colors.to_hex(
             picked.get(text, src)), "stock": text_colors.to_hex(src),
-            "title": "Colour for \"%s\"" % text[:40]}
+            "title": "Color for \"%s\"" % text[:40]}
 
     @rpc
     def set_color(self, text, hex_color=None):
@@ -1213,7 +1213,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         try:
             text_colors.set_color(self.assets_dir, card, text, src, new)
         except OSError as e:
-            compat.messagebox.showerror("Text colour", str(e))
+            compat.messagebox.showerror("Text color", str(e))
             return False
         self._folder_state_written()
         self._on_select()

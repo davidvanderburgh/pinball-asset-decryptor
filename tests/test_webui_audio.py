@@ -194,7 +194,7 @@ def test_cancel_scan(tmp_path):
         w.call("audio.scan")          # reads "Cancel scan" while scanning
         s = w.state("audio")
         assert not s["scanning"]
-        assert s["empty"] == "Scan cancelled — click Scan to try again."
+        assert s["empty"] == "Scan canceled — click Scan to try again."
 
 
 # ----------------------------------------------------------------- picking

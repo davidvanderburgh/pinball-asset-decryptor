@@ -2720,7 +2720,7 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             log("Audio couldn't be extracted from this card: the engine could "
                 "not map this firmware build's audio codec (%s). This is "
                 "usually a newer game update than this version of the app "
-                "recognises -- video, images and text extracted normally.%s"
+                "recognizes -- video, images and text extracted normally.%s"
                 % (e, (" The firmware was saved to %s -- send that file to the "
                        "developer to get this build's audio supported in a "
                        "future update." % saved) if saved else ""), "warning")
@@ -2852,7 +2852,7 @@ def _serial_decode(emu, params, audio_dir, log, progress, cancel, log_line=None,
 
     for i, p in enumerate(params):
         if cancel():
-            log("Cancelled after %d sounds." % ok, "info")
+            log("Canceled after %d sounds." % ok, "info")
             break
         if progress:
             progress(15 + int(i * 85 / max(total, 1)), 100,
@@ -2987,7 +2987,7 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
                 progress(15 + int(i * 85 / max(total, 1)), 100,
                          "Decoding sound %d/%d" % (i, total))
             if cancel():
-                log("Cancelled after %d sounds." % ok, "info")
+                log("Canceled after %d sounds." % ok, "info")
                 break
         pool.close()
     finally:
@@ -4560,7 +4560,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
                 n_strings += len(todo)
                 for original, replacement in todo.items():
                     log("Display text in %s: \"%s\" -> \"%s\" (%d occurrence(s); "
-                        "%s than the original, so the scene is re-serialised "
+                        "%s than the original, so the scene is re-serialized "
                         "at the new length and written whole)."
                         % (card_path, original, replacement,
                            len(occ_by_text[original]),
@@ -4637,7 +4637,7 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
                 got = radium_grow.regrow(bytes(buf), texts=edits or None,
                                          images=images or None)
             except ValueError as e:
-                log("Scene %s couldn't be re-serialised (%s); it is left "
+                log("Scene %s couldn't be re-serialized (%s); it is left "
                     "unchanged." % (card_path, e), "warning")
                 if ov:
                     radium_overlays[ib] = ov
@@ -4650,7 +4650,7 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
             new, n_tree = _apply_tree_ops(new, card_path, *tree_ops[card_path], log=log)
         if not occ and not got["images"] and not n_tree:
             log("Display text in %s: none of the longer lines were found when "
-                "re-serialising; the scene is left unchanged." % card_path,
+                "re-serializing; the scene is left unchanged." % card_path,
                 "warning")
             if ov:
                 radium_overlays[ib] = ov
@@ -4665,7 +4665,7 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
                 "bytes and is written whole. Proven in the PC emulator; not yet on a machine."
                 % (card_path, n_tree, len(buf), len(new)), "info")
         if occ:
-            log("Display text in %s: re-serialised %d line(s) at their new "
+            log("Display text in %s: re-serialized %d line(s) at their new "
                 "length (%d occurrence(s)); the scene grows %d -> %d bytes and "
                 "is written whole. Whether the game loads a longer scene this "
                 "way is proven in the PC emulator only." %
@@ -4945,7 +4945,7 @@ def _radium_color_writes(reader, assets_dir, log, cancel):
             break
         node = nodes.get(card_path)
         if node is None:
-            log("Text colour: radium %s wasn't found on the card; %d edit(s) "
+            log("Text color: radium %s wasn't found on the card; %d edit(s) "
                 "skipped." % (card_path, len(per_text)), "warning")
             continue
         ib = bytes(node["i_block"])
@@ -4966,12 +4966,12 @@ def _radium_color_writes(reader, assets_dir, log, cancel):
                 writes.extend(_place(reader, node, off, payload))
                 overlays.setdefault(ib, (node, {}))[1][off] = payload
             if not n_hit:
-                log("Text colour in %s: \"%s\" is no longer drawn in %s on the "
-                    "card, so its colour was left alone."
+                log("Text color in %s: \"%s\" is no longer drawn in %s on the "
+                    "card, so its color was left alone."
                     % (card_path, text, _hex_rgb(src)), "warning")
                 continue
             n_lines += 1
-            log("Text colour in %s: \"%s\" %s -> %s (%d keyframe(s))."
+            log("Text color in %s: \"%s\" %s -> %s (%d keyframe(s))."
                 % (card_path, text, _hex_rgb(src), _hex_rgb(dst), n_hit),
                 "info")
     return writes, n_lines, overlays
@@ -5499,7 +5499,7 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel, cache=None):
             stock = None
         arr, premult = _premultiply_like_stock(arr, stock)
         if premult:
-            log("Texture %s: colours premultiplied by alpha, the way the game "
+            log("Texture %s: colors premultiplied by alpha, the way the game "
                 "blends scene textures." % output, "info")
         payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
                    else _dds.encode_bc3(arr))
@@ -5964,7 +5964,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
             stock = None
         arr, changed = _premultiply_like_stock(arr, stock)
         if changed:
-            log("Radium image %s: colours premultiplied by alpha, the way the "
+            log("Radium image %s: colors premultiplied by alpha, the way the "
                 "game blends scene pictures." % output, "info")
         return arr
 
@@ -6064,7 +6064,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                         grown.setdefault(radium_path, (node, {}))[1][data_off] = got
                         patched_outputs.add(output)
                         log("Radium image %s is %dx%d, not the original %dx%d: "
-                            "the scene (%s) is re-serialised around its new "
+                            "the scene (%s) is re-serialized around its new "
                             "size." % (output, w, h, pad_w, pad_h, radium_path),
                             "info")
                         continue
@@ -6214,7 +6214,7 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
     sdata = reader.read_file_bytes(sidx_node)
     recs, _hdr_crc, sidx_fmt = sidx.parse_records(sdata)
     if not recs:
-        log("Unrecognised .sidx manifest format — skipping SD-validation refresh.",
+        log("Unrecognized .sidx manifest format — skipping SD-validation refresh.",
             "warning")
         return []
 
@@ -8560,7 +8560,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         n_color = 0
         if color_edits:
             if progress:
-                progress(90, 100, "Preparing text colours...")
+                progress(90, 100, "Preparing text colors...")
             color_writes, n_color, _c_ov = _radium_color_writes(
                 reader, assets_dir, log, cancel)
             _merge_radium_overlays(radium_overlays, _c_ov)
@@ -10831,7 +10831,7 @@ def _rebuilt_not_written(no_space=False, rels=(), switches=True):
     the build was for.  Otherwise it says to re-run the Write, and with
     *switches* names those switches as the size-neutral way out."""
     msg = ("A rebuilt game file (the game program with longer text or the "
-           "blip-free cave, a re-serialised scene, or a sound bank grown to "
+           "blip-free cave, a re-serialized scene, or a sound bank grown to "
            "hold a longer callout) could NOT be written to the card%s%s. Its "
            "SD-validation record was already updated to match, so this card "
            "will fail validation"
@@ -12584,7 +12584,7 @@ def _expand_card(original_path, output_path, parts, target, log, cancel):
                 "patches were placed by where it was" % moved)
     except _cs.Cancelled:
         _discard_output(output_path)
-        log("Cancelled while making the card a %s card; nothing was built."
+        log("Canceled while making the card a %s card; nothing was built."
             % _cs.words(target), "warning")
         return False
     except BaseException as e:
@@ -12678,7 +12678,7 @@ def _shrink_card(original_path, output_path, target, log, cancel, fit=False):
                                     "for that size")
     except _cs.Cancelled:
         _discard_output(output_path)
-        log("Cancelled while %s; nothing was built." % what, "warning")
+        log("Canceled while %s; nothing was built." % what, "warning")
         return False
     except BaseException as e:
         _discard_output(output_path)

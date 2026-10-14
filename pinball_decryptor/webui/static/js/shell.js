@@ -313,7 +313,7 @@ export function settingsMenuItems(shell) {
 }
 // PAD-458: each language by its own name, so it can be found from any of them
 export function languageItems(shell) {
-  return (shell.languages || [["en", "English"]]).map(([code, name]) => (
+  return (shell.languages || [["en", "English (US)", "EN-US"]]).map(([code, name]) => (
     { label: name, checked: (shell.lang || "en") === code, onClick: () => call("ui.set_language", code) }));
 }
 
@@ -322,7 +322,8 @@ export function languageItems(shell) {
 // since nothing else announces that the app speaks other languages.
 const LANG_SEEN = "pad.lang.seen";
 function LangBtn({ shell }) {
-  const code = (shell.lang || "en").toUpperCase();
+  const lang = shell.lang || "en";
+  const code = ((shell.languages || []).find((l) => l[0] === lang) || [lang, "", lang.toUpperCase()])[2];
   const [seen, setSeen] = useState(() => { try { return localStorage.getItem(LANG_SEEN) === "1"; } catch (e) { return true; } });
   const open = (e) => {
     if (!seen) { setSeen(true); try { localStorage.setItem(LANG_SEEN, "1"); } catch (err) { /* ignore */ } }
@@ -462,7 +463,7 @@ function StatusBar({ shell }) {
     || (shell.run_mode === "write" && shell.tab === "write");
   // an emulator on its own tab owns the footer: its chip says its state
   const emuLive = !running && f.mode === "emulate" && idx >= 0;
-  const chip = shell.cancelling ? html`<${Chip} kind="warn" dot>Cancelling<//>`
+  const chip = shell.cancelling ? html`<${Chip} kind="warn" dot>Canceling<//>`
     : emuLive ? html`<${Chip} kind=${idx >= phases.length - 1 ? "ok" : "acc"} dot>${idx >= phases.length - 1 ? (f.status || "Running") : "Starting"}<//>`
     : running ? html`<${Chip} kind="acc" dot>${f.mode === "write" ? "Building" : f.mode === "extract" ? "Working" : "Running"}<//>`
     : html`<${Chip} kind="ok" dot>Ready<//>`;
@@ -471,7 +472,7 @@ function StatusBar({ shell }) {
     ${phases.length ? html`<div class="phases">${phases.map((p, i) => html`<span class=${cx("phase", i < idx && "done", i === idx && "now", idx >= phases.length && "done")}>${p}</span>`)}</div>` : null}
     <span class="status" title=${f.status}>${f.status}</span>
     ${running && !ownCancel ? html`<${Button} kind="danger" size="sm" disabled=${shell.cancelling}
-      onClick=${() => call("ui.cancel")}>${shell.cancelling ? "Cancelling…" : "Cancel"}<//>` : null}
+      onClick=${() => call("ui.cancel")}>${shell.cancelling ? "Canceling…" : "Cancel"}<//>` : null}
   </div>`;
 }
 

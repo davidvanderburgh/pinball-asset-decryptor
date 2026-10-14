@@ -103,7 +103,7 @@ def test_to_text_round_trips_and_keeps_the_header(tmp_path):
                       lift=(.05, .05, .05), saturation=1.2)
     path = cp.save(prof, str(tmp_path / "m.txt"))
     text = open(path, encoding="utf-8").read()
-    assert text.startswith("# Pinball Asset Decryptor colour profile")
+    assert text.startswith("# Pinball Asset Decryptor color profile")
     back, problems = cp.read_file(path)
     assert problems == [] and back == prof
     assert cp.to_text(RECOMMENDED) == cp.DEFAULT_TEXT

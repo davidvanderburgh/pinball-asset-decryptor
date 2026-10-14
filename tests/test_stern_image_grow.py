@@ -237,7 +237,7 @@ def test_a_bigger_replacement_goes_to_growth(tmp_path, monkeypatch):
     w, h, payload = imgs[banner]
     assert (w, h) == (90, 22)
     assert len(payload) == radium_grow.image_block_len(90, 22, 5)
-    assert any("re-serialised around its new size" in m for _l, m in msgs)
+    assert any("re-serialized around its new size" in m for _l, m in msgs)
 
 
 def _assert_fitted(writes, n, grown, off, rgba=(255, 0, 255, 255)):

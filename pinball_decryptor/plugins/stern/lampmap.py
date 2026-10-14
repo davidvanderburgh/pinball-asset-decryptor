@@ -365,7 +365,7 @@ def shot_lamps(elf):
         if mask and not mask & (mask - 1) and lamp:
             out[mask] = lamp
     if not out:
-        return None, "the cshot initialiser at 0x%x ran but set no shot lamp" % fn
+        return None, "the cshot initializer at 0x%x ran but set no shot lamp" % fn
     return out, "read from %d cshot objects built by 0x%x" % (len(writes), fn)
 
 

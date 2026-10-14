@@ -72,8 +72,8 @@ HELP_CONTENT = {
          "copied: plug cards in one by one to sort a stack. Needs Administrator on "
          "Windows; the line says when it's missing."),
         ("Detection",
-         "The recognised game and firmware version show in the title bar.\n\n"
-         "- **Not recognised** usually means the wrong kind of file, or a copy still "
+         "The recognized game and firmware version show in the title bar.\n\n"
+         "- **Not recognized** usually means the wrong kind of file, or a copy still "
          "in progress.\n"
          "- A file from another manufacturer gets a one-click switch."),
         ("Save card as image",
@@ -124,7 +124,7 @@ HELP_CONTENT = {
             "and Write tell what you changed.\n"
             "- Into an **archived** project, your edits are set aside and put back "
             "over the fresh extract.\n"
-            "- After an extract, **Extract** stays grey until the card, folder or an "
+            "- After an extract, **Extract** stays gray until the card, folder or an "
             "option changes, so a second click can't redo it.",
         ]),
         ("\"The source image has changed\"",
@@ -162,7 +162,7 @@ HELP_CONTENT = {
                 {"icon": "wave", "tone": "ok", "title": "One clip",
                  "text": "**Loudness for this clip**, beside the Replacement preview. "
                          "Stacks on the build-wide offset; the Level column shows "
-                         "which clips you levelled."}]},
+                         "which clips you leveled."}]},
             "- **Apply to all shown** puts the same offset on every row the list "
             "shows: set Type to Music first to move only the songs (Stern mixes its "
             "music quietly, under the callouts).\n"
@@ -535,7 +535,7 @@ HELP_CONTENT = {
                 {"icon": "search", "title": "Find", "text": "minutes the first time"},
                 {"icon": "check", "title": "Use",
                  "text": "untick any, then **Use these files at best quality**"}]},
-            "- Colour is told from black-and-white, and of several copies the best wins.\n"
+            "- Color is told from black-and-white, and of several copies the best wins.\n"
             "- Check amber rows. \"already on the card untouched\" means a rebuild from "
             "that file won't improve the clip.",
         ]),
@@ -651,7 +651,7 @@ HELP_CONTENT = {
             "above or below (Shift+Up/Down in Layers takes a range).\n"
             "- Drag to move, drag a corner to resize, arrows to nudge (Shift: 10 px).\n"
             "- A resize keeps the layer's X and Y (its top-left stays put); **Resize from** "
-            "under **Keep its shape** switches it to **Middle** to grow and shrink from the centre.\n"
+            "under **Keep its shape** switches it to **Middle** to grow and shrink from the center.\n"
             "- Drag a row in **Layers** above or below another to re-order it; drop an "
             "added layer on a group's row to move it into that group. The game's own "
             "layers stay in their group.\n"
@@ -665,7 +665,7 @@ HELP_CONTENT = {
             "- Text: **Font controls** opens the **Font** bar on the right edge: "
             "the line's font and **Size** (the sizes the scene was made at draw sharpest), "
             "**Italic**, **Slant** and letter **Width**, letter and line **Spacing**, "
-            "**Across** (Left / Centre / Right) and **Up/down** "
+            "**Across** (Left / Center / Right) and **Up/down** "
             "(Top / Middle / Bottom) in its box, wrapping, shrink to fit and line breaks, "
             "**Fit box to text**, and **Add** / **Remove** a drop shadow, in "
             "the preview and in the game. **Font as shipped** puts the font and style back. "
@@ -680,7 +680,7 @@ HELP_CONTENT = {
             "instructions) always sit in the middle of their box and shrink to fit it; the "
             "preview shows them that way.\n"
             "- Text: most text is a font "
-            "with baked-in colours, so **Tint** recolours it.\n"
+            "with baked-in colors, so **Tint** recolours it.\n"
             "- Text the **game fills in** as it plays (a jackpot or award title, a "
             "battle's name) has a gear on its Layers row and a teal dotted outline when "
             "you hover or pick it; the "
@@ -692,7 +692,7 @@ HELP_CONTENT = {
             "brush on its Layers row and a violet dash-dot outline when you hover or pick "
             "it. The Selected panel's **Filled in by the game** and **Painted by the game** "
             "bars light up for the line you pick and say \"Not this one\" otherwise; "
-            "controls that don't apply to it are greyed. Until the project's card has been "
+            "controls that don't apply to it are grayed. Until the project's card has been "
             "read for the boxes the game program names, the Filled-in marks are guesses and "
             "the bar says so: **Re-read from card** there reads them.\n"
             "- A project extracted from a card a Write had already changed says **From a "
@@ -707,7 +707,7 @@ HELP_CONTENT = {
             "- A layer drawn in only some of a part's looks names them on its Layers row "
             "(the Planet X map's icons: Loop, Select, Destroyed, each in the same place). "
             "Select it and **Show this look** switches the part to that look.\n"
-            "- A greyed layer isn't drawn at this moment: click it to show and edit it. "
+            "- A grayed layer isn't drawn at this moment: click it to show and edit it. "
             "Edits hold at every moment.",
             "### Eyes and hiding",
             {"cards": [
@@ -825,7 +825,7 @@ HELP_CONTENT = {
                 {"icon": "check", "tone": "ok", "title": "Fits",
                  "text": "Drops straight in."},
                 {"icon": "minus", "tone": "warn", "title": "Too big",
-                 "text": "Re-compressed with fewer colours until it fits."},
+                 "text": "Re-compressed with fewer colors until it fits."},
                 {"icon": "x", "tone": "err", "title": "Still too big",
                  "text": "Skipped: the slot is left unchanged. Use a simpler picture."}]},
             "Font and sprite atlases in scenes are the exception: they are re-encoded "
@@ -893,7 +893,7 @@ HELP_CONTENT = {
             "disk with no pick left. Files inside an extract are copies off a card and "
             "are never offered.\n"
             "- Where the folder has the same picture twice, the biggest best copy is "
-            "used. A colour picture is never taken for its black-and-white twin.\n"
+            "used. A color picture is never taken for its black-and-white twin.\n"
             "- Each row shows the copy and the file found side by side. Glance down "
             "them: a look-alike (the next frame of an animation, the same letter "
             "from another font) can stand in when the real file isn't in the folder. "
@@ -937,7 +937,7 @@ HELP_CONTENT = {
                          "put back in its exact box."},
                 {"icon": "text", "tone": "info", "title": "A desktop font",
                  "text": "**Fonts…** > **Import font file…** fits a TTF or OTF: every "
-                         "letter fits its box, on the baseline, ink colour matched."}]},
+                         "letter fits its box, on the baseline, ink color matched."}]},
             "### The Fonts window\n"
             "- Type your own text to see it in the real letters and the game's "
             "spacing, pending edits included.\n"
@@ -954,7 +954,7 @@ HELP_CONTENT = {
             "asks first, and Revert font undoes it in one go.\n"
             "- **Behind** puts the preview on something other than black.\n"
             "- **Color** repaints the letters on Apply, no font file needed. The scene "
-            "multiplies it (the line under the controls names the scene colours): a "
+            "multiplies it (the line under the controls names the scene colors): a "
             "font a scene tints black stays black.\n"
             "- Fonts under 30px are marked \"tiny\": a desktop font rarely survives "
             "that small.",
@@ -982,10 +982,10 @@ HELP_CONTENT = {
          "scene draws it. The preview follows each change.\n\n"
          "| Item | What it does |\n"
          "|---|---|\n"
-         "| Text colour… | the line's real colour (the font is white so the scene "
+         "| Text color… | the line's real color (the font is white so the scene "
          "can tint it) |\n"
          "| Move… | shifts the line's box by the pixels you type |\n"
-         "| Alignment | Left, Centre or Right |\n"
+         "| Alignment | Left, Center or Right |\n"
          "| Font size… | a percentage of this scene's size; shrinking is lossless, "
          "past the master art it blurs |\n"
          "| Blank this font | in this scene, or everywhere (one atlas serves every "
@@ -1093,7 +1093,7 @@ HELP_CONTENT = {
          "everywhere that exact line appears (many lines repeat once per scene)."),
         ("Seeing the line in its scene",
          "**Show in Scenes…** (also on the right-click menu) opens the Scenes tab on "
-         "the scene that draws the line, with the line picked out: its font, colour "
+         "the scene that draws the line, with the line picked out: its font, color "
          "and the art behind it.\n\n"
          "- Your edits show there before anything is written (the Contents row says "
          "\"(not built yet)\"), so you can check a longer line fits its box.\n"
@@ -1225,7 +1225,7 @@ HELP_CONTENT = {
          "- Until you set one, it is the **Recommended** screen, tuned on a real "
          "Spike 2.\n"
          "- Extra controls: **Color ranges** (one band of hues: hue, width, soft "
-         "edge, hue shift, saturation, brightness; greys protected) and **Curves** "
+         "edge, hue shift, saturation, brightness; grays protected) and **Curves** "
          "(RGB, Red, Green, Blue; drag or type the points).\n"
          "- Every control has a number box and a reset. Save a copy keeps them; "
          "loaded as an overlay or files profile, they are left out."),
@@ -1880,7 +1880,7 @@ HELP_CONTENT = {
         ("Playing", [
             "The virtual playfield opens beside the game, as on the Stern Emulate tab: "
             "switches and lights on the playfield picture where there is one, lit in "
-            "the game's colours. A green dot is a switch the game sees made.",
+            "the game's colors. A green dot is a switch the game sees made.",
             {"flow": [
                 {"icon": "play", "title": "Start", "text": "serves a ball to the shooter lane"},
                 {"icon": "up", "title": "Plunge", "text": "puts it into play"},
@@ -2377,7 +2377,7 @@ HELP_CONTENT = {
             "on in software (a few percent slower) and says so in the log, and this "
             "puts the graphics card back.",
             {"note": "It closes **everything** running in WSL, not just the emulator, so "
-                     "it asks first and is greyed out while a run is up: stop the game "
+                     "it asks first and is grayed out while a run is up: stop the game "
                      "first. Nothing on disk is lost.", "kind": "warn"},
             "- A Stop that cannot finish offers the same restart by itself.\n"
             "- Afterwards the tab checks the PC again (the ARM handler only survives on "
@@ -2459,7 +2459,7 @@ HELP_CONTENT = {
                 {"icon": "extract", "title": "Card B", "text": "then the same"}]},
             "Use it when the report says WHAT changed and you want both versions' files "
             "side by side (and to see which sounds changed). Each sub-folder is named "
-            "after its card file. Cancelling, or saying no to an overwrite, stops the "
+            "after its card file. Canceling, or saying no to an overwrite, stops the "
             "pair there; card B is not left queued.",
         ]),
         ("Adjustments and high scores",
@@ -2574,7 +2574,7 @@ HELP_CONTENT = {
          "2. The card's pictures and sounds are copied out beside them.\n"
          "3. The rows point at those files, and the card now works like one you "
          "built.\n\n"
-         "It only reads the card. It is greyed when every image is already on this "
+         "It only reads the card. It is grayed when every image is already on this "
          "PC, and for a card read as its menu only (read the whole card)."),
         ("The images table",
          "One row per image, in menu order, each with its own title, subtitle, "
@@ -2905,7 +2905,7 @@ def _modes_which_games():
             "after": "- **Countdown no:** the game's voice never says a number on its own.\n"
                      "- **Ball save not yet:** found in the game, not yet seen working.\n"
                      "- **Lights:** *shots* lights just the scoring shots' inserts; *all* "
-                     "holds every insert in the mode's colour.\n"
+                     "holds every insert in the mode's color.\n"
                      "- **HUD:** counters, a timer and a gauge at the screen's edges.\n"
                      "- **Buttons:** the flipper and Action buttons count as shots.\n"
                      "- **Magnet, scoop, mechanisms:** what a mode may hold for a moment: the "
@@ -2982,19 +2982,19 @@ PREVIEW_HELP = {
                 "5. **Ends on** (if you like): a pick of shots, or any shot that "
                 "does not score, ends it sooner.\n\n"
                 "### Everything else is optional\n"
-                "- **Screen:** a panel in your colours or a picture of your own, "
+                "- **Screen:** a panel in your colors or a picture of your own, "
                 "showing what each shot paid and the total.\n"
                 "- **Clip:** a title card or a video of your own, full screen when "
                 "the mode starts or ends.\n"
                 "- **Sound:** the countdown, the sound when time is up, and sounds of "
                 "its own when it starts, on a scoring shot and underneath.\n"
-                "- **Lights:** a colour sweep, or the scoring shots lit on the playfield.\n"
+                "- **Lights:** a color sweep, or the scoring shots lit on the playfield.\n"
                 "- **Rules:** how often it can start, whether it runs during the "
                 "game's own modes, and an event that starts or ends it.",
                 {"note": "Every change saves itself in the project's modes folder about "
                          "half a second after you stop typing. The line at the bottom of "
                          "the form says whether the mode can be built, and a section this "
-                         "game can't do is greyed, with the reason."},
+                         "game can't do is grayed, with the reason."},
             ]),
             ("Try it", [
                 "**Try it** builds this project's modes exactly as Write puts them on "
@@ -3089,7 +3089,7 @@ PREVIEW_HELP = {
                     {"icon": "fit", "title": "Frame", "text": "keep its letterbox, or fill the frame"}]},
                 "The mode keeps only the cut (clip.mp4, end.wav, art.png), never the "
                 "video. A title that can't use a clip, a picture or a sound of the "
-                "mode's own greys that button, with the reason.",
+                "mode's own grays that button, with the reason.",
             ]),
             ("Copy and share",
              "- **Copy to…**, under the list, copies every mode here into another "

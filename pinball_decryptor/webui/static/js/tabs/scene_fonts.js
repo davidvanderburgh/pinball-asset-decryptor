@@ -263,7 +263,7 @@ function FontControls({ p, f }) {
       ${p.align ? html`<div class="row fnt-row">
         <span class="lbl">Across</span>
         <${Seg} value=${p.align} onChange=${(v) => call("text_scenes.tree_text_align", id, v, null)}
-          options=${[["left", "Left"], ["centre", "Centre"], ["right", "Right"]].map(([v, l]) => ({ value: v, label: l,
+          options=${[["left", "Left"], ["centre", "Center"], ["right", "Right"]].map(([v, l]) => ({ value: v, label: l,
             title: `The words sit on the ${v === "centre" ? "middle" : v + " edge"} of the box, here and in the game` }))} />
       </div>
       <div class="row fnt-row">

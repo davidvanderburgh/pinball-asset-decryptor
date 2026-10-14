@@ -434,7 +434,7 @@ def test_declining_the_newer_one_cancels_rather_than_installing_the_stale(
                         lambda *a, **k: False)
     version, installer = app._freshest_update("0.81.0", STALE)
     assert installer is None
-    assert any("cancelled" in m for m in app.window.lines)
+    assert any("canceled" in m for m in app.window.lines)
 
 
 def test_banner_already_current_installs_without_asking(monkeypatch):

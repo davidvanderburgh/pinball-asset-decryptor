@@ -265,7 +265,7 @@ def build_set(project, card, base=None, ffmpeg=None, log=None, progress=None, ca
     except MW.ModeWriteError as e:
         raise TryItError(str(e)) from None
     if ws is None:
-        raise TryItError("Try it was cancelled before its set was built.")
+        raise TryItError("Try it was canceled before its set was built.")
     return TrySet(set_dir=ws.set_dir, stage_dir=ws.stage_dir, game_dir=ws.game_dir or game_dir,
                   version=version or ws.version, reused=ws.reused, files=list(ws.files),
                   new_files=list(ws.new_files), mode_files=list(ws.mode_files),

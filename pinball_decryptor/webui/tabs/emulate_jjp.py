@@ -47,7 +47,7 @@ VOLUME_TIP = ("This PC's volume for the emulated game and its boot menu - not "
 #: The status grid, in the Tk panel's order (label, status.sh key).
 CELLS = (
     ("Security key", "dongle_present"),
-    ("Licence daemon", "hasp_port_1947"),
+    ("License daemon", "hasp_port_1947"),
     ("Image mounted", "image_mounted"),
     ("Game", "game"),
     ("Processes", "game_procs"),

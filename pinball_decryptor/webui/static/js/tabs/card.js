@@ -51,9 +51,9 @@ function WhatCard({ shell, s }) {
   const d = (s.project && s.project.details) || {};
   return html`<${Card} cls="c-what-card" title="What you can do with it">
     ${ps && d.card_kind === "other" ? html`<${OtherCardNote} ps=${ps} d=${d} />` : html`<div class="note"><${Icon} name=${anyLocked ? "lock" : "info"} /><div class="body-text">
-      ${!ps ? html`There is no project folder yet. Extract the card into one to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
-        : anyLocked && ps.archived ? html`Project ${project} is archived. Extract into it again to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
-        : anyLocked ? html`Project ${project} has no extract yet. Extract the card into it to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.`
+      ${!ps ? html`There is no project folder yet. Extract the card into one to unlock the tabs marked with a lock; until then they are grayed out in the list on the left.`
+        : anyLocked && ps.archived ? html`Project ${project} is archived. Extract into it again to unlock the tabs marked with a lock; until then they are grayed out in the list on the left.`
+        : anyLocked ? html`Project ${project} has no extract yet. Extract the card into it to unlock the tabs marked with a lock; until then they are grayed out in the list on the left.`
         : html`Project ${project} holds an extract, so every tab is ready.`}
     </div></div>`}
     ${direct.length ? html`<div class="stack c-sec">

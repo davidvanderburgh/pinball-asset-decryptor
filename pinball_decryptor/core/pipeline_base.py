@@ -51,7 +51,7 @@ class BasePipeline:
 
     def _check_cancel(self):
         if self._cancelled:
-            raise PipelineError("Cancelled", "Operation cancelled by user.")
+            raise PipelineError("Canceled", "Operation canceled by user.")
 
     def _set_phase(self, index):
         self._phase_cb(index)
@@ -142,7 +142,7 @@ class ReadCardPipeline(BasePipeline):
         except FlashCancelled:
             # Nothing was written to the card and the partial image was
             # deleted, so there is nothing for the user to clean up.
-            self._log("Read cancelled — the partial image was discarded. "
+            self._log("Read canceled — the partial image was discarded. "
                       "The card itself was not changed.", "info")
             self._check_cancel()   # raises PipelineError("Cancelled", ...)
             return

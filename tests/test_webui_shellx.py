@@ -391,7 +391,7 @@ def test_download_dialog_handle(tmp_path):
         assert w.state("shellx")["download"]["detail"] == "5 MB"
         w.call("shellx.download_cancel")
         assert cancelled == [1]
-        assert w.state("shellx")["download"]["detail"] == "Cancelling…"
+        assert w.state("shellx")["download"]["detail"] == "Canceling…"
         w.run(h.close)
         assert w.state("shellx")["download"] is None
 

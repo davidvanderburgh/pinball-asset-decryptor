@@ -947,7 +947,7 @@ class PartitionsTab(TabService):
                     tree_prog=_tree_prog, file_prog=_file_prog,
                     chunk_prog=lambda _w, _s: _check(), top_name=top_name)
             except _Cancelled:
-                msg = "Extract cancelled — partial files may remain."
+                msg = "Extract canceled — partial files may remain."
             except Exception as e:               # noqa: BLE001
                 msg = "Extract failed: %s" % e
             state["done"] = msg

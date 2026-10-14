@@ -2,7 +2,8 @@
 
 The **language button** in the top bar (a globe and the language's code,
 in the accent colour, on every screen including the manufacturer picker)
-lists English, Español, Deutsch, Français, each in its own name; a dot marks
+lists English (US), English (UK), Español, Deutsch, Français, each in its
+own name; a dot marks
 it until it is first opened, since nothing else announces the feature. Gear
 menu › **Language** has the same list. The choice is saved (`ui_language` in
 settings.json) and applies at once, no restart.
@@ -55,6 +56,19 @@ knowing about it, and a new tab or message needs nothing but a catalog entry.
   half-translated.
 - Native file pickers are the operating system's own, already in its
   language; their file-type names are translated (`webui/dialogs.py`).
+
+## English (US) and English (UK)
+
+The app is written in **American English**, all of it (PAD-458 made the few
+British spellings American: colour, grey, centre, cancelled, recognise...).
+`tests/test_pad458_languages.py` keeps it so: a British spelling in anything
+the page can show fails it. **English (UK)** is the same words spelled the
+British way, `static/i18n/en-gb.json`, made from the American strings by
+`python scripts/i18n_extract.py --british` (tables `US_TO_GB` and
+`IZE_STEMS` there). Words whose British spelling depends on their sense
+(program, license, meter, practice) are left as the app writes them. A test
+fails when a new string with an American spelling is not in en-gb.json yet:
+run `--british` again.
 
 ## The catalogs
 

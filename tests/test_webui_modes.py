@@ -335,7 +335,7 @@ def test_tryit_cancel_and_run_ended(tmp_path, preview_on):
         w.call("modes.tryit")
         # the same button is Cancel while it works
         assert w.call("modes.tryit") is False
-        assert w.state("modes")["tryit_line"] == "cancelling…"
+        assert w.state("modes")["tryit_line"] == "canceling…"
         assert svc._tryit_cancelled()
         # a launch that never came up: failed, with where to look
         w.run(lambda: svc.run_ended(1))

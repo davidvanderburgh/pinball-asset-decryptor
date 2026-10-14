@@ -256,7 +256,7 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
             for text, (src, dst) in per_text.items():
                 rows.append(("%s  —  %s → %s" % (text, text_colors.to_hex(src),
                                                   text_colors.to_hex(dst)),
-                             "text", "Pending (text colour)", "pending"))
+                             "text", "Pending (text color)", "pending"))
         try:
             from ..plugins.stern import text_layout
             relaid = text_layout.load(assets_path)

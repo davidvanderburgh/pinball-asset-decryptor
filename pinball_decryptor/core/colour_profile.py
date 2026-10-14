@@ -124,7 +124,7 @@ _LUMA = (0.299, 0.587, 0.114)
 #: so this is a starting point to tune against the test card, not a
 #: calibration.
 DEFAULT_TEXT = """\
-# Pinball Asset Decryptor colour profile
+# Pinball Asset Decryptor color profile
 #
 # Corrects colors for a pinball machine's screen.  Load it on a project's
 # Color profile tab and every build of that project applies it (on Spike 2,
@@ -133,9 +133,9 @@ DEFAULT_TEXT = """\
 # Edit the numbers, save, and Load it again.  Three numbers = red green blue.
 #
 #   gamma       above 1 darkens the mid tones, below 1 brightens them
-#   gain        multiplies the channel (0.9 = 10% less of that colour)
+#   gain        multiplies the channel (0.9 = 10% less of that color)
 #   lift        raises the darkest values (0.05 = black becomes 13 of 255)
-#   saturation  1 = unchanged, below 1 = less colour, above 1 = more
+#   saturation  1 = unchanged, below 1 = less color, above 1 = more
 #   brightness  1 = unchanged, 1.2 = 20% brighter, 0.8 = 20% darker
 #   contrast    1 = unchanged, above 1 = more, below 1 = less
 #
@@ -623,7 +623,7 @@ class Profile:
         return out
 
     def label(self):
-        return self.name or "colour profile"
+        return self.name or "color profile"
 
     # -- the maths ----------------------------------------------------------
     def matrix(self):
@@ -2237,8 +2237,8 @@ EXTRAS_HELP = """
 #   range = hue width soft shift saturation brightness protect
 #           one band of hues (degrees: 0 red, 120 green, 240 blue), its
 #           width and soft edge, the hue shift, saturation and brightness
-#           (1 = unchanged) and how much colour a pixel needs before it is
-#           touched (0.15 = greys and near-greys left alone)
+#           (1 = unchanged) and how much color a pixel needs before it is
+#           touched (0.15 = grays and near-grays left alone)
 #   curve_rgb / curve_red / curve_green / curve_blue = in out, in out, ...
 #           points 0..255; curve_rgb first, then each color's own
 """
@@ -2386,7 +2386,7 @@ SCREEN_PRESET_TIPS = {
         "turn richer, red sits a little low. A phone photo is not a color "
         "meter: nudge it until Scenes matches your machine."),
     "none": "The machine shows colors exactly as your PC does.",
-    "bw": "A screen that shows everything in greys, the game's own art too.",
+    "bw": "A screen that shows everything in grays, the game's own art too.",
     "follow": ("The individual files profile, undone: the screen that "
                "correction was made for."),
 }
@@ -2394,8 +2394,8 @@ SCREEN_PRESET_TIPS = {
 PRESET_TIPS = {
     "recommended": (
         "Made from photos of a display test card on a real Stern Spike 2 "
-        "machine (a Godzilla). The card's grey steps and color patches "
-        "were measured in the photos: a mid grey (128, 128, 128) came out "
+        "machine (a Godzilla). The card's gray steps and color patches "
+        "were measured in the photos: a mid gray (128, 128, 128) came out "
         "around (164, 187, 226), far too bright and most of all in blue, "
         "then green, while white stayed white. This profile darkens each "
         "color's middle shades to pull that back (red 10%, green 20%, blue "
@@ -2403,7 +2403,7 @@ PRESET_TIPS = {
         "photo is not a color meter, so treat it as a starting point and "
         "tune it against your own machine."),
     "none": "Leaves every color as you made it.",
-    "bw": ("Every picture and video in greys, for a black-and-white "
+    "bw": ("Every picture and video in grays, for a black-and-white "
            "playfield edition. Nothing else is changed."),
 }
 

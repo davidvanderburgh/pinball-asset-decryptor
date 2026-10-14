@@ -224,7 +224,7 @@ def render(rows, rules, shots, port_name=""):
     lines = ["# stock.cfg - the game's own rules take another shot for one of theirs (item 160)%s"
              % (", for %s" % port_name if port_name else ""),
              "# counts_as <rule id> <shot> -> <shot>   the runtime re-reads this file twice a second",
-             "# light <rule id> <colour> [pattern] [ms] [on ms]   the stand-in's inserts (yellow blink 500 300 when absent)"]
+             "# light <rule id> <color> [pattern] [ms] [on ms]   the stand-in's inserts (yellow blink 500 300 when absent)"]
     for r in rows:
         src, dst = shot_mask(shots, r["from"]), shot_mask(shots, r["to"])
         # the rule's label on a line of its own: a runtime older than 2026-09-23 read a trailing

@@ -54,7 +54,7 @@ TIPS = {
              "these controls says which colors this font is drawn in.",
     "stroke": "Outline drawn around each imported letter, in pixels. "
               "Set it to 0 for no outline at all — there is no "
-              "\"transparent\" colour to pick, the width is the switch.",
+              "\"transparent\" color to pick, the width is the switch.",
     "scale": "Shrinks the whole letter, height included. Use it to pull "
              "back from a fit that looks too heavy; use Letter width if "
              "you only want the letters to stop touching.",
@@ -460,13 +460,13 @@ class TextFontsService:
             for c, n in tints[:5])
         if white == total:
             msg = ("The scenes draw this font white (%d line%s), so the ink "
-                   "colour above is exactly what shows on the machine."
+                   "color above is exactly what shows on the machine."
                    % (total, "" if total == 1 else "s"))
             warn = False
         else:
-            msg = ("The scenes tint this font: %s. That colour MULTIPLIES the "
-                   "ink you import, so your colour only comes out as picked "
-                   "where the scene is white%s. To colour a line itself, "
+            msg = ("The scenes tint this font: %s. That color MULTIPLIES the "
+                   "ink you import, so your color only comes out as picked "
+                   "where the scene is white%s. To color a line itself, "
                    "right-click it in the Scenes tab."
                    % (listed,
                       " — and not at all on the %d line(s) tinted black"

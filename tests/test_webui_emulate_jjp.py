@@ -55,7 +55,7 @@ def test_jjp_shows_the_tab_with_its_idle_state(rig, tmp_path):
         assert s["state_label"] == "Checking…"
         assert s["fix_label"] == "Fix stuck state"
         assert [c["label"] for c in s["cells"]] == [
-            "Security key", "Licence daemon", "Image mounted", "Game",
+            "Security key", "License daemon", "Image mounted", "Game",
             "Processes", "Memory", "Uptime", "Display", "Boards",
             "Frames in / out", "LED writes"]
         assert s["intro"].startswith("Run a Jersey Jack game on this PC.")

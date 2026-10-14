@@ -530,7 +530,7 @@ def test_modes_tab_try_it_pressed_again_during_a_build_is_cancel(tmp_path, monke
         assert _tryit(w)["state"] == "preflight" and _tryit(w)["working"]   # the button: Cancel
         assert w.run(svc.on_try) is False                    # the second press: Cancel
         assert len(handed) == 1 and svc._tryit_cancel is True
-        assert _line(w) == "cancelling…"
+        assert _line(w) == "canceling…"
         assert _tryit(w)["working"]                          # until the worker lands it
         # the worker (a thread, as the Emulate tab's is) finds the flag at the engine's
         # checkpoint
@@ -541,8 +541,8 @@ def test_modes_tab_try_it_pressed_again_during_a_build_is_cancel(tmp_path, monke
         assert result == [None] and asked == [True]
         assert _wait(w, lambda: _tryit(w)["state"] == "failed", 5)
         assert _tryit(w)["reason"] == "cancelled"
-        assert _line(w) == "Try it was cancelled; nothing was started."
-        assert svc.tryit_prepare.last_reason == "Try it was cancelled; nothing was started."
+        assert _line(w) == "Try it was canceled; nothing was started."
+        assert svc.tryit_prepare.last_reason == "Try it was canceled; nothing was started."
         assert not _tryit(w)["working"]
         assert [c[2] for c in ran] == ["check"]              # nothing installed
         # a run that came up meanwhile is the Emulate tab's: Cancel at "starting" only says

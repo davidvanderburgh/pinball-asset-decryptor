@@ -1176,7 +1176,7 @@ def test_busy_turns_the_green_button_into_cancel(tmp_path):
         assert w.call("multiboot.build_flash") is True
         s = _st(w)
         assert s["build_mode"] == "cancelling"
-        assert s["message"] == "Cancelling…"
+        assert s["message"] == "Canceling…"
         w.run(lambda: panel._set_busy(False))
         panel._cancel_pending = False
         assert _st(w)["build_mode"] == "build"
@@ -1511,7 +1511,7 @@ def _colours_settled(w, panel):
             w.drain()
             return
         time.sleep(0.02)
-    raise AssertionError("the colour reads never finished")
+    raise AssertionError("the color reads never finished")
 
 
 def test_the_preview_draws_the_settings_card_where_the_card_will(tmp_path, monkeypatch):

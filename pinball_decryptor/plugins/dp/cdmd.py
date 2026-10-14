@@ -662,7 +662,7 @@ def convert_all_cdmd(input_dir, output_dir, progress_cb=None, log_cb=None,
     converted = failed = 0
     for i, path in enumerate(cdmd_files):
         if cancel_cb and cancel_cb():
-            log("cdmd decode cancelled.", "warning")
+            log("cdmd decode canceled.", "warning")
             break
         name = os.path.basename(path)
         if progress_cb:

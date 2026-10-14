@@ -506,6 +506,9 @@ def test_tmnt_shots_and_greying(tmp_path, preview_on):
         assert st["dis"]["end_game"] and "sound" not in st["reasons"]
         assert "no time-is-up line" in st["reasons"]["sound_limit"] and st["limits"]["sound_limit"] is True
         assert "My sound" in st["reasons"]["sound_limit"]
+        # PAD-475: its pizza magnet is used only inside a feature of the game's - a game limit, grey too
+        assert st["dis"]["magnet"] and "only inside a feature" in st["reasons"]["magnet"]
+        assert st["limits"]["magnet"] is True and "lights" not in st["limits"]
         assert not st["dis"]["film_clip"] and not st["dis"]["film_still"] and not st["dis"]["film_sound"]
         assert "film" not in st["reasons"]
 

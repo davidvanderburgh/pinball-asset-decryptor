@@ -1925,6 +1925,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             dis[part] = bool(why) or part in absent
             if why and part not in absent:
                 reasons[part] = "Not on this game: " + why
+                limits[part] = is_limit(part)          # PAD-475: Magnet where the game uses it itself
         sound, sound_limit = [], []
         dis["countdown"] = bool(p.why_not("countdown"))
         if dis["countdown"]:

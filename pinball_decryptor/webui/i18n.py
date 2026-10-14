@@ -50,7 +50,7 @@ _GRAMMAR = re.compile(r"^(?:s|es|ies|y|is|are|was|were|does|do|did|has|have|"
                       r"isn't|aren't|doesn't|don't)$", re.I)
 _HOLE = re.compile(r"\{(\d*)\}")
 _TWO_WORDS = re.compile(r"[A-Za-z]+\s+[A-Za-z]+")
-_SHAPE = re.compile(r"[()—:;,]")
+_SHAPE = re.compile(r"[()\u2014\u00b7:;,]")
 #: where one sentence ends and the next starts
 _SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"“(])")
 #: a path is a path in every language
@@ -122,6 +122,13 @@ class Catalog:
                 out = [p if not _LETTER.search(p) else self.lookup(p, 1) for p in parts]
                 if all(o is not None for o in out):
                     return " ".join(out)
+            # pieces set side by side ("6 games · .pkg"): each its own,
+            # the ones the catalog does not know left as they are
+            bits = s.split(" · ")
+            if len(bits) > 1:
+                out = [self.lookup(b, 1) for b in bits]
+                if any(o is not None for o in out):
+                    return " · ".join(o if o is not None else b for o, b in zip(out, bits))
         return None
 
     def _hole(self, g, depth):

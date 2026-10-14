@@ -42,7 +42,7 @@ const MIN_LETTERS = 4;
 // match is no match, and the text stays English, whole (webui/i18n.py _GRAMMAR)
 const GRAMMAR = /^(?:s|es|ies|y|is|are|was|were|does|do|did|has|have|it|its|they|them|their|this|these|that|those|one|isn't|aren't|doesn't|don't)$/i;
 const TWO_WORDS = /[A-Za-z]+\s+[A-Za-z]+/;
-const SHAPE = /[()—:;,]/;
+const SHAPE = /[()\u2014\u00b7:;,]/;
 // where one sentence ends and the next starts
 const SENTENCE = /(?<=[.!?])\s+(?=[A-Z"“(])/;
 // a path is a path in every language
@@ -126,6 +126,13 @@ export function lookup(c, text, depth = 0) {
     if (parts.length > 1) {
       const out = parts.map((p) => (/[A-Za-z]/.test(p) ? lookup(c, p, 1) : p));
       if (out.every((o) => o != null)) return out.join(" ");
+    }
+    // pieces set side by side ("6 games · .pkg"): each its own, the ones the
+    // catalog does not know left as they are
+    const bits = s.split(" · ");
+    if (bits.length > 1) {
+      const out = bits.map((b) => lookup(c, b, 1));
+      if (out.some((o) => o != null)) return out.map((o, i) => (o != null ? o : bits[i])).join(" · ");
     }
   }
   return null;

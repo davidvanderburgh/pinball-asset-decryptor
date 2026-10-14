@@ -71,6 +71,9 @@ CASES = [
     # sentences put together: each known, or the whole stays English
     ("The folder is new. Saved 3 files", "La carpeta es nueva. 3 archivos guardados"),
     ("The folder is new. Something else.", None),
+    # pieces set side by side: the known ones translated, the rest kept
+    ("Saved 6 files · .pkg", "6 archivos guardados · .pkg"),
+    ("Odd · .pkg", None),
     # a hole's own words, by a template, with its first letter as it was
     ("Nothing in proj yet, so the Audio tab is idle.",
      "Nada en proj aún, así que la pestaña Audio-ES está inactiva."),

@@ -199,13 +199,13 @@ function Options({ s, shell }) {
     ${s.capture_cap ? html`<div class="stack x-sec">
         <span class="lbl">Extract</span>
         ${capturePrimary ? null : html`<${Check} wrap ns="extract" k="static" checked=${s.static}
-          label="Basic extract (raw ROM asset bitmaps + animation MP4s)" />`}
+          label=${s.basic_label || "Basic extract (raw ROM asset bitmaps + animation MP4s)"} />`}
         <div class="row wrap x-checks">
           <${Check} wrap ns="extract" k="capture" checked=${s.capture}
             label="Use PinMAME runtime capture (composed cinematics + audio)" />
           <span class="row x-dur"><label class="small dim" for="x-dur">Duration (s):</label>
             <${Field} id="x-dur" ns="extract" k="capture_duration" value=${s.capture_duration} sm width=${72} /></span>
-          ${capturePrimary ? null : html`<${Check} ns="extract" k="capture_gameplay" checked=${s.capture_gameplay} label="Simulate gameplay" />`}
+          ${capturePrimary || s.gameplay_cap === false ? null : html`<${Check} ns="extract" k="capture_gameplay" checked=${s.capture_gameplay} label="Simulate gameplay" />`}
         </div>
         ${s.capture_help ? html`<div class=${cx("x-help", s.capture_help_kind)}>${s.capture_help}</div>` : null}
       </div>` : null}

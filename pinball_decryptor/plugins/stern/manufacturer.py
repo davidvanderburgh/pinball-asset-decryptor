@@ -31,7 +31,9 @@ from ..pinmame_classic.sam_games import SAM_GAME_DB as _SAM_DB
 from .formats import (detect_game, detect_spike1_game, display_for_key,
                       spike1_display_for_key)
 from .games import GAME_DB, SPIKE1_GAME_DB
-from .pipeline import (Spike1ExtractPipeline, Spike1RevertPipeline,
+from .pipeline import (SamExtractPipeline, SamExtractPlusCapturePipeline,
+                       SamRevertPipeline, SamWritePipeline,
+                       Spike1ExtractPipeline, Spike1RevertPipeline,
                        Spike1WritePipeline, SternDirectSsdExtractPipeline,
                        SternDirectSsdWritePipeline, SternExtractPipeline,
                        SternFlashImagePipeline, SternRevertPipeline,
@@ -138,8 +140,23 @@ _GAMES = _SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES + _SAM_GAMES
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD
 # — you can't repack a MAME ROM; extraction is a libpinmame attract capture).
 _WHITESTAR_CAPS = Capabilities(extract=False, capture=True)
-# SAM is the same libpinmame capture, so it shares the Whitestar surface.
+# SAM has the same libpinmame capture of the DMD animations...
 _CAPTURE_ERAS = ("whitestar", "sam")
+# ...and, from PAD-582, every sound read straight out of the code update and
+# written back: Extract (the Basic box) decodes the game's own sound table to
+# WAVs, Replace Audio + Write re-encode edits into their slots in a copy of
+# the .bin (sam_audio.py).  The DMD art stays capture-only for now.
+_SAM_CAPS = Capabilities(
+    extract=True,
+    capture=True,
+    write=True,
+    modpack=True,
+    replace_audio=True,
+    audio_level_offset=True,
+    transcribe=True,
+    music_id=True,
+    audio_duration_names=True,
+)
 
 # Spike 1: audio extract + write.  The master directory is plaintext and every
 # sound is raw PCM, so no emulator/codec prerequisites; the surface is audio-
@@ -521,7 +538,35 @@ class SternManufacturer(Manufacturer):
     # Mirror the destination radio so the action button names what it does
     # (the generic "Build update" / "Apply Modifications" don't connect to
     # the SD-card wording above them).
-    write_build_button = "Build SD-card image"
+    @property
+    def write_build_button(self):
+        # SAM builds the game's code update, not a card
+        return "Build game file" if self._era == "sam" \
+            else "Build SD-card image"
+
+    # The Extract tab's Basic box, for SAM (the only Stern era with both a
+    # basic extract and a capture): the sounds, and the capture runs attract
+    # mode only.
+    capture_basic_label = "Basic extract (every sound, as WAVs)"
+    capture_simulates_gameplay = False
+
+    def capture_help_text(self, basic, capture):
+        if self._era != "sam":
+            return None
+        if basic and capture:
+            return ("Both: decodes every sound in the game file to a WAV "
+                    "(audio/), then runs the game in attract mode under "
+                    "PinMAME and records its DMD animations + audio as MP4s, "
+                    "into the same project folder.  Capture requires "
+                    "libpinmame.")
+        if capture:
+            return ("Capture only: runs the game in attract mode under "
+                    "PinMAME and records its DMD animations + audio as MP4s.  "
+                    "Most SAM games play no sound in attract mode.  Requires "
+                    "libpinmame.")
+        return ("Basic only: decodes every sound in the game file to a WAV "
+                "(audio/), ready for Replace Audio.  Tick \"Use PinMAME\" too "
+                "to ALSO record the DMD animations.")
     write_direct_button = "Write to SD card"
     direct_medium_noun = "SD card"
     # The card is small removable media in a reader — bias the picker away
@@ -569,6 +614,8 @@ class SternManufacturer(Manufacturer):
 
     @property
     def capabilities(self):
+        if self._era == "sam":
+            return _SAM_CAPS
         if self._era in _CAPTURE_ERAS:
             return _WHITESTAR_CAPS
         if self._era == "spike1":
@@ -577,6 +624,9 @@ class SternManufacturer(Manufacturer):
 
     @property
     def prerequisites(self):
+        if self._era == "sam":
+            # Spike 1's audio set; its ffmpeg also renders the capture MP4s
+            return _SPIKE1_PREREQS
         if self._era in _CAPTURE_ERAS:
             return _WHITESTAR_PREREQS
         if self._era == "spike1":
@@ -585,6 +635,8 @@ class SternManufacturer(Manufacturer):
 
     @property
     def extract_phases(self):
+        if self._era == "sam":
+            return SamExtractPipeline.PHASES
         if self._era in _CAPTURE_ERAS:
             return _wscapture.PHASES
         if self._era == "spike1":
@@ -593,12 +645,21 @@ class SternManufacturer(Manufacturer):
 
     @property
     def write_phases(self):
+        if self._era == "sam":
+            return SamWritePipeline.PHASES
         return self._SPIKE1_WRITE_PHASES if self._era == "spike1" \
             else self._SPIKE2_WRITE_PHASES
 
     @property
     def capture_phases(self):
         return _wscapture.PHASES
+
+    @property
+    def combined_phases(self):
+        # SAM's Basic + Capture: the sounds, then the capture (Whitestar has
+        # no Basic box, so it never asks)
+        return SamExtractPlusCapturePipeline.PHASES \
+            if self._era == "sam" else ()
 
     @property
     def extract_input_label(self):
@@ -620,6 +681,9 @@ class SternManufacturer(Manufacturer):
         # build), so it pins nothing.
         if self._era == "spike1":
             return ".iso"
+        # SAM: the code update itself, which the machine's USB update reads
+        if self._era == "sam":
+            return ".bin"
         return ".raw" if self._era == "spike2" else ""
 
     def audio_forces_length_match(self, assets_dir=None):
@@ -641,6 +705,13 @@ class SternManufacturer(Manufacturer):
                     "sound is fit to its original slot length (longer is "
                     "trimmed, shorter padded with silence) and loudness-"
                     "matched to the original (soft-limited).")
+        if self._era == "sam":
+            return ("Replacements are re-encoded in place, in the game's own "
+                    "4-bit ADPCM at the original's rate (24 kHz, or 12 or "
+                    "8 kHz for most speech), mono: each sound is fit to its "
+                    "original slot length (longer is trimmed, shorter padded "
+                    "with silence) and loudness-matched to the original "
+                    "(soft-limited).")
         return ("Replacements are encoded size-neutral: each sound is fit to "
                 "its original slot length (longer is trimmed, shorter padded "
                 "with silence) and amplitude-limited into the codec's range. "
@@ -929,6 +1000,10 @@ class SternManufacturer(Manufacturer):
     def make_extract_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
                               extract_categories=None, duration_names=False):
+        if self._era == "sam":
+            return SamExtractPipeline(
+                input_path, output_dir, log_cb, phase_cb, progress_cb,
+                done_cb, duration_names=duration_names)
         if self._era == "spike1":
             return Spike1ExtractPipeline(
                 input_path, output_dir, log_cb, phase_cb, progress_cb,
@@ -945,11 +1020,17 @@ class SternManufacturer(Manufacturer):
         # Whitestar / SAM era: libpinmame attract-mode DMD capture (same as
         # the Data East / Sega entries).
         if self._era == "sam":
+            cap_kwargs = dict(
+                duration_seconds=kwargs.get("duration_seconds", 180.0),
+                frame_cb=kwargs.get("frame_cb"), capture_ready_cb=None)
+            # Basic ticked too: the sounds first, into the same folder
+            if kwargs.get("also_run_static"):
+                return SamExtractPlusCapturePipeline(
+                    input_path, output_dir, log_cb, phase_cb, progress_cb,
+                    done_cb, **cap_kwargs)
             return _wscapture.SamCapturePipeline(
                 input_path, output_dir, log_cb, phase_cb, progress_cb,
-                done_cb, duration_seconds=kwargs.get("duration_seconds",
-                                                     180.0),
-                frame_cb=kwargs.get("frame_cb"), capture_ready_cb=None)
+                done_cb, **cap_kwargs)
         return _wscapture.CapturePipeline(
             input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
             game_db=_WHITESTAR_DB,
@@ -960,6 +1041,10 @@ class SternManufacturer(Manufacturer):
     def make_write_pipeline(self, original_path, assets_dir, output_path,
                             log_cb, phase_cb, progress_cb, done_cb,
                             update=None):
+        if self._era == "sam":
+            return SamWritePipeline(
+                original_path, assets_dir, output_path,
+                log_cb, phase_cb, progress_cb, done_cb)
         if self._era == "spike1":
             return Spike1WritePipeline(
                 original_path, assets_dir, output_path,
@@ -1212,6 +1297,10 @@ class SternManufacturer(Manufacturer):
         """Build the fallback pipeline that re-derives pre-snapshot originals
         from the source card (the GUI calls this only for changed files with no
         ``.orig`` snapshot)."""
+        if self._era == "sam":
+            return SamRevertPipeline(
+                source, assets_dir, rels, log_cb, phase_cb, progress_cb,
+                done_cb)
         if self._era == "spike1":
             return Spike1RevertPipeline(
                 source, assets_dir, rels, log_cb, phase_cb, progress_cb,

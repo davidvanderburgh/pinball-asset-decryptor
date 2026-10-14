@@ -119,6 +119,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.engine" \
     --hidden-import "pinball_decryptor.plugins.stern.cards" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1" \
+    --hidden-import "pinball_decryptor.plugins.stern.sam_audio" \
+    --hidden-import "pinball_decryptor.plugins.pinmame_classic.sam_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_adjustments" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_emulate" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx" \

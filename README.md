@@ -45,7 +45,7 @@ macOS and Linux.
 | Spooky Pinball | 14 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate |
 | Stern Spike 2 | 26 | Extract, Write, Direct-SD, Replace Audio/Video/Images/Text, Scenes, Partition Explorer, Emulate, Multi-boot |
 | Stern Spike 1 | 6 | Extract, Write, Replace Audio, Emulate |
-| Stern SAM | 26 | Capture DMD animations + sound with PinMAME |
+| Stern SAM | 26 | Extract, Write, Replace Audio, Mod Pack; capture DMD animations with PinMAME |
 | Stern Whitestar | 17 | Capture DMD animations + sound with PinMAME |
 | Williams (WPC) | 41 | DMD scenes, animations, fonts and sound from the ROM; PinMAME capture |
 

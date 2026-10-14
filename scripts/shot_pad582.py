@@ -46,7 +46,7 @@ def main():
     launcher = os.path.join(scratch, "launch582.py")
     with open(launcher, "w", encoding="utf-8") as f:
         f.write(LAUNCHER % repo)
-    built = os.path.join(scratch, "tron_mod.bin")
+    built = scratch
     settings = os.path.join(scratch, "settings.json")
     with open(settings, "w", encoding="utf-8") as f:
         json.dump({"disclaimer_accepted": True, "last_manufacturer": "stern",

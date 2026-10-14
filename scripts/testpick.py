@@ -245,7 +245,10 @@ def main(argv):
         print("zones: %s -> %d test file(s)"
               % (", ".join(sorted(picked)) or "(changed tests only)",
                  len(files)))
-        cmd = [sys.executable, "-m", "pytest"] + files + extra
+        # relative to the repo it runs in: 300+ absolute paths overflow
+        # Windows' 32K command line (WinError 206)
+        cmd = [sys.executable, "-m", "pytest"] + [
+            os.path.relpath(f, REPO) for f in files] + extra
     print(" ".join(cmd[:6]) + (" ..." if len(cmd) > 6 else ""))
     if args.dry:
         return 0

@@ -290,6 +290,8 @@ export default function ImagesTab() {
   // so a profile is picked from the Saved profiles list with each picture's Color switch
   // in view.  It opens on Files the first time: the profile that column attaches.
   const colorNs = useNs("color");
+  // a display of shades of one color (Stern SAM's DMD) has no Colors bar
+  const colorsOn = !!colorNs.has_project && !s.shades_only;
   const [colors, setColorsState] = useState(() => barOpenAtStart("images"));
   const setColors = (v) => { setColorsState(v); rememberBarOpen(v, "images"); };
   // PAD-463: a name under Preview colors opens the bar on that profile
@@ -625,18 +627,18 @@ export default function ImagesTab() {
     const n = await call("images.compare_open", rels);
     if (!n) return;
     setCmpActive(null);
-    if (look.offered && colorNs.has_project && !colors) setColors(true);
+    if (look.offered && colorsOn && !colors) setColors(true);
   }
   const compareRels = () => {
     const pics = picked();
     return pics.length ? pics : prevRel ? [prevRel] : [];
   };
-  const bar = colorNs.has_project ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors}
+  const bar = colorsOn ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors}
     file=${colorFile} />` : null;
   if (cmpOpen) {
     return html`<div class="cpd-shell"><${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
       active=${activeTile ? activeTile.id : null} setActive=${setCmpActive}
-      onOpenColors=${colorNs.has_project ? openColors : undefined} unlock=${s.color_unlock} running=${running} />${bar}</div>`;
+      onOpenColors=${colorsOn ? openColors : undefined} unlock=${s.color_unlock} running=${running} />${bar}</div>`;
   }
   const views = look.offered ? look.views || {} : {};
   const keys = look.offered && look.on ? look.keys || {} : {};
@@ -650,7 +652,7 @@ export default function ImagesTab() {
       <${Button} icon="search" onClick=${() => call("images.originals_open")} disabled=${running} title=${ORIGINALS_TIP}>Find originals…<//>
       <${Button} icon="compare" cls="img-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!compareRels().length}
         title=${COMPARE_TIP}>Compare<//>
-      <${Button} kind="ghost" icon="text" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>
+      ${s.shades_only ? null : html`<${Button} kind="ghost" icon="text" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>`}
       <${Button} kind="ghost" icon="more" label="More" title=${MORE_TIP}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: CSV_TIP, onClick: () => call("images.export_csv") },
@@ -676,7 +678,7 @@ export default function ImagesTab() {
         <span class="img-seg" ...${tip(SHOW_TIP)}>
           <${Seg} value=${s.show || "All"} options=${s.shows || []} onChange=${(v) => call("images.set_show", v)} />
         </span>
-        <${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />
+        ${s.shades_only ? null : html`<${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />`}
         <span class="sp"></span>
         ${s.color_unlock && s.color_unlock.offered ? html`<span class="img-unlock">
           <span class="eyebrow">Advanced</span>
@@ -690,7 +692,7 @@ export default function ImagesTab() {
         resizable widths=${widths} onResize=${onResize} />
       <div class=${cx("ft img-prev", look.offered && "img-looks")}>
         ${look.offered ? html`<div class="img-lk"><${LookRow} look=${look} ns="images" note=${false}
-          onOpen=${colorNs.has_project ? openColors : undefined} /></div>` : null}
+          onOpen=${colorsOn ? openColors : undefined} /></div>` : null}
         <div class="row img-panehd img-oh">
           <span class="eyebrow nw">${p.hdr_main || "Original"}</span>
           ${prevRel ? html`<span class="mono small muted ellip" title=${prevRel}>— ${base(prevRel)}</span>` : null}

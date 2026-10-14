@@ -400,8 +400,10 @@ class WebWindow:
             "Replace Video": g("replace_video"),
             "Replace Images": g("replace_image"),
             "Replace Text": g("replace_text"),
-            "Scenes": g("replace_image"),
-            "Color Profile": g("replace_image") or g("replace_video"),
+            # not for a display of shades of one color (Stern SAM's DMD)
+            "Scenes": g("replace_image") and not g("dmd_shades"),
+            "Color Profile": ((g("replace_image") or g("replace_video"))
+                              and not g("dmd_shades")),
             "Write": g("write"),
             "Mod Pack": g("modpack"),
             "Partition Explorer": g("partition_explorer"),

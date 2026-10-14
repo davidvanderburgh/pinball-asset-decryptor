@@ -301,9 +301,7 @@ export function settingsMenuItems(shell) {
       { label: "Light", checked: theme === "light", onClick: () => call("ui.set_theme", "light") },
       { label: "Match the system", checked: theme === "system", onClick: () => call("ui.set_theme", "system") },
     ] },
-    // PAD-458: each language by its own name, so it can be found from any of them
-    { label: "Language", submenu: (shell.languages || [["en", "English"]]).map(([code, name]) => (
-      { label: name, checked: (shell.lang || "en") === code, onClick: () => call("ui.set_language", code) })) },
+    { label: "Language", submenu: languageItems(shell) },
     { label: "Zoom (" + Math.round(zoom * 100) + "%)", submenu: [
       { label: "Zoom in", kbd: MOD + " +", onClick: () => stepZoom(1) },
       { label: "Zoom out", kbd: MOD + " −", onClick: () => stepZoom(-1) },
@@ -313,6 +311,33 @@ export function settingsMenuItems(shell) {
     ...all.slice(i).map(item),
   ];
 }
+// PAD-458: each language by its own name, so it can be found from any of them
+export function languageItems(shell) {
+  return (shell.languages || [["en", "English"]]).map(([code, name]) => (
+    { label: name, checked: (shell.lang || "en") === code, onClick: () => call("ui.set_language", code) }));
+}
+
+// The top bar's language button: a globe and the language's code, so it can
+// be found without reading a word.  A dot marks it until it is first opened,
+// since nothing else announces that the app speaks other languages.
+const LANG_SEEN = "pad.lang.seen";
+function LangBtn({ shell }) {
+  const code = (shell.lang || "en").toUpperCase();
+  const [seen, setSeen] = useState(() => { try { return localStorage.getItem(LANG_SEEN) === "1"; } catch (e) { return true; } });
+  const open = (e) => {
+    if (!seen) { setSeen(true); try { localStorage.setItem(LANG_SEEN, "1"); } catch (err) { /* ignore */ } }
+    openShellMenu(e.currentTarget, languageItems(shell), { align: "right" });
+  };
+  // the tip in every language, so whoever needs it can read it
+  const names = "Language · Idioma · Sprache · Langue";
+  return html`<span class="sx-gear">
+    <button type="button" class="btn sm sx-lang notr" onClick=${open} ...${tip(names)} aria-label=${names}>
+      <${Icon} name="globe" /><span class="sx-lang-code">${code}</span>
+    </button>
+    ${seen ? null : html`<span class="sx-dot new" aria-hidden="true"></span>`}
+  </span>`;
+}
+
 function settingsMenu(anchor, shell) {
   openShellMenu(anchor, settingsMenuItems(shell), { align: "right" });
 }
@@ -362,6 +387,7 @@ function TopBar({ shell }) {
     ${upd && upd.available ? html`<${Chip} kind="info" dot onClick=${() => call("ui.settings_action", "install_update")}
         title=${"Pinball Asset Decryptor v" + upd.version + " is available — you're on v" + (shell.version || "") + "."}>${upd.label || ("v" + upd.version + " available")}<//>`
       : html`<span class="hide-narrow"><${Chip} kind="ok" dot title=${sx.update_state === "latest" ? "You're on the latest version." : "This version"}>v${shell.version || ""}${sx.update_state === "latest" ? ", latest" : ""}<//></span>`}
+    <${LangBtn} shell=${shell} />
     ${working ? html`<${IconBtn} icon="help" label="Tips for this tab" cls="sx-help" onClick=${() => openDialog("tips")} />` : null}
     <span class="sx-gear">
       <${IconBtn} icon="gear" label="Settings" onClick=${(e) => settingsMenu(e.currentTarget, shell)} />

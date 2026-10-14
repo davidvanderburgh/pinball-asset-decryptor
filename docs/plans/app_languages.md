@@ -1,7 +1,11 @@
 # The app in other languages (PAD-458)
 
-Gear menu › **Language**: English, Español, Deutsch, Français. The choice is
-saved (`ui_language` in settings.json) and applies at once, no restart.
+The **language button** in the top bar (a globe and the language's code,
+in the accent colour, on every screen including the manufacturer picker)
+lists English, Español, Deutsch, Français, each in its own name; a dot marks
+it until it is first opened, since nothing else announces the feature. Gear
+menu › **Language** has the same list. The choice is saved (`ui_language` in
+settings.json) and applies at once, no restart.
 
 ## How it works
 

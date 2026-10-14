@@ -195,6 +195,13 @@ def test_the_page_wires_it():
         shell = f.read()
     assert 'setLanguage(shell.lang || "en")' in shell
     assert 'call("ui.set_language", code)' in shell
+    # the top bar's own language button (a globe and the code), on every view,
+    # marked with a dot until first opened; the gear menu keeps its submenu
+    assert '<${LangBtn} shell=${shell} />' in shell
+    assert '<${Icon} name="globe" />' in shell and 'pad.lang.seen' in shell
+    assert '{ label: "Language", submenu: languageItems(shell) }' in shell
+    with open(os.path.join(STATIC, "js", "core", "ui.js"), encoding="utf-8") as f:
+        assert "  globe: " in f.read()
     assert '<div class="lines notr"' in shell                   # the log stays English
     # Preact sets translate="no" as the DOM property (it comes out "yes"):
     # the page marks what it never translates with the class instead

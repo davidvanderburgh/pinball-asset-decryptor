@@ -136,6 +136,12 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--bg-2); pointer-events: none; }
 .sx-dot.upd { top: 2px; right: 2px; background: var(--err); }
 .sx-dot.warn { bottom: 2px; right: 2px; background: var(--warn); }
+/* PAD-458: the language button - a globe in the accent colour and the code */
+.sx-lang { gap: 6px; padding: 0 9px; color: var(--accent); border-color: var(--accent-line); }
+.sx-lang .i { width: 17px; height: 17px; }
+.sx-lang-code { font-weight: 600; letter-spacing: .04em; font-size: 12px; }
+.sx-lang:hover { background: var(--accent-soft); }
+.sx-dot.new { top: -2px; right: -2px; background: var(--accent); }
 
 /* ------------------------------------------------------------ banners */
 .sx-bolt { font-size: 16px; line-height: 1; color: var(--warn); width: 16px; text-align: center; }

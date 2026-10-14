@@ -234,6 +234,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 
 - **Countdown no:** the game's voice never says a number on its own.
+- **When time is up:** the voice of The Beatles, Deadpool, Elvira, John Wick, Jurassic Park Pin, Led Zeppelin, Star Wars (LE, Pro and ELG), TMNT and Uncanny X-Men has no line saying the time is up, so the game's own call cannot end a mode there; a sound of your own can. The Beatles and Deadpool play every piece of their music themselves, so a mode cannot have music of its own there.
 - **Ball save not yet:** found in the game, not yet seen working.
 - **Lights:** *shots* lights just the scoring shots' inserts; *all* holds every insert in the mode's colour.
 - **HUD:** counters, a timer and a gauge at the screen's edges, like Godzilla's own battles.

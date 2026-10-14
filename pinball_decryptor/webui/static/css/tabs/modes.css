@@ -33,6 +33,7 @@
 .modes-sec-hd { display: flex; align-items: center; gap: 8px; min-height: 22px; }
 .modes-sec-hd .lbl { font-size: 13px; color: var(--ink-2); font-weight: 600; }
 .modes-reason { color: var(--warn); line-height: 1.4; overflow-wrap: anywhere; }
+.modes-reason.limit { color: var(--ink-3); }   /* PAD-479: the game's own limit, nothing left for the app to find */
 .modes-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; }
 .modes-kv.top { align-items: start; }
 .modes-kv.top > .lbl { padding-top: 6px; }

@@ -749,6 +749,34 @@ def test_a_title_with_no_spoken_numbers_says_so():
             continue                 # PAD-420: a new build's port ships with the integrator's merge
         prof = MP.profile_from_port(os.path.join(MP.PORTS_DIR, key + ".port"))
         assert "never says a number on its own" in prof.why_not("countdown"), key
+        assert prof.limit("countdown"), key             # PAD-479: the game's limit, said in grey
+
+
+def test_a_title_with_no_time_up_line_is_a_game_limit():
+    """PAD-479: every voice clip on these builds was transcribed (mono and stereo) and none says the time is up,
+    so no time-up callout is landed and the profile marks it as the game's limit (grey on the tab); a mode's own
+    end sound still rides a carrier there."""
+    import os
+    assert len(MP.TIME_UP_NONE) == 16
+    for key in MP.TIME_UP_NONE:
+        prof = MP.profile_from_port(os.path.join(MP.PORTS_DIR, key + ".port"))
+        assert prof.callout_time_up == 0 and prof.limit("end_game"), key
+        assert MP.end_sound_carried(*key.split("-")), key
+    gz = MP.profile_from_port(os.path.join(MP.PORTS_DIR, "godzilla_le-1.16.port"))
+    assert gz.callout_time_up and not gz.limit("end_game") and not gz.limits
+
+
+def test_no_spare_music_is_a_game_limit():
+    """PAD-479: The Beatles and Deadpool have no stereo music the game never plays (item 163's census) and no
+    free music bed, so a mode's own music cannot ride there: a game limit. Godzilla (beds) and Jaws (spare
+    music) are not."""
+    for game, version in (("beatles", "1.29"), ("deadpool_le", "1.16"), ("deadpool_pro", "1.16")):
+        assert MP.own_music_none(game, version), game
+    for game, version in (("godzilla_le", "1.16"), ("jaws_le", "1.02"), ("no_such_game", "1.00")):
+        assert not MP.own_music_none(game, version), game
+    import os
+    assert MP.profile_from_port(os.path.join(MP.PORTS_DIR, "beatles-1.29.port")).limit("own_music")
+    assert MP.profile_from_port(os.path.join(MP.PORTS_DIR, "beatles-1.29.port")).limit("stack")
 
 
 # ---- one title's builds share their sound numbers; copying modes to another card ----------

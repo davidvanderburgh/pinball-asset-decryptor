@@ -499,10 +499,13 @@ def test_tmnt_shots_and_greying(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert st["profile"]["label"] == "TMNT Pro 1.59" and len(st["profile"]["shots"]) == 17
-        # item 163: its countdown is heard (441); item 164: with no time-up call known, a mode's own
+        # item 163: its countdown is heard (441); item 164: with no time-up call, a mode's own
         # end sound rides a carrier (heard at time-up in the emulator), so nothing is greyed
         assert not st["dis"]["countdown"] and not st["dis"]["own_sound"]
-        assert st["dis"]["end_game"] and "time-up callout" in st["reasons"]["sound"]
+        # PAD-479: its voice has no time-is-up line at all - the game's limit, said in grey, not yellow
+        assert st["dis"]["end_game"] and "sound" not in st["reasons"]
+        assert "no time-is-up line" in st["reasons"]["sound_limit"] and st["limits"]["sound_limit"] is True
+        assert "My sound" in st["reasons"]["sound_limit"]
         assert not st["dis"]["film_clip"] and not st["dis"]["film_still"] and not st["dis"]["film_sound"]
         assert "film" not in st["reasons"]
 
@@ -1424,7 +1427,7 @@ def test_own_sounds_grey_where_no_carriers_were_measured(tmp_path, preview_on):
     start sound, shot sound and music are greyed with a plain reason, refused on the server, and
     the Try it words drop the "about a minute" sentence; on Godzilla Premium/LE 1.16 (measured)
     they stay live. Item 163: Jaws carries them now, and The Beatles greys only the music (no
-    stock tune to carry it)."""
+    spare music to carry it: PAD-479, a game limit)."""
     proj = _card_project(tmp_path / "tmnt", "turtles_pro-1_58_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
@@ -1451,7 +1454,11 @@ def test_own_sounds_grey_where_no_carriers_were_measured(tmp_path, preview_on):
         w.call("modes.new")
         st = w.state("modes")
         assert not st["dis"]["own_extra"] and st["dis"]["own_music"]
-        assert "stock tune" in st["reasons"]["own_music"] and "Beatles" in st["reasons"]["own_music"]
+        # PAD-479: every piece of its music is one the game plays - a game limit, said in grey
+        assert "none is spare" in st["reasons"]["own_music"] and "Beatles" in st["reasons"]["own_music"]
+        assert st["limits"].get("own_music") is True
+        # and its songs always run, so a mode waits for its multiballs only: the game's, grey too
+        assert "songs is always running" in st["reasons"]["stack"] and st["limits"].get("stack") is True
         asked = len(w.asked)
         assert w.call("modes.choose", "music") is None             # the server refuses the music
         assert len(w.asked) == asked

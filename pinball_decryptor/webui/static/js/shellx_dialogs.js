@@ -194,7 +194,7 @@ function TipsPanel({ close, tab, anchor }) {
     let live = true;
     call("shellx.tips", key).then((d) => { if (live && d) { setData(d); if (body.current) body.current.scrollTop = 0; } });
     return () => { live = false; };
-  }, [key]);
+  }, [key, shell.lang]);
   useEffect(() => {
     // Escape is the Tips window's only while nothing is above it: an open
     // menu, a modal window or message box (a scrim), or a floating window

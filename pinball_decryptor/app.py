@@ -487,6 +487,8 @@ class App:
             initial_flashed_images=s.get("flashed_images", []),
             on_flashed_images_change=self._on_flashed_images_change,
             on_ui_zoom_change=self._on_ui_zoom_change,
+            initial_language=s.get("ui_language"),
+            on_language_change=self._on_language_change,
         )
 
     def _start_session(self):
@@ -5746,6 +5748,12 @@ class App:
         x = int(m.group(3)) if m.group(3) is not None else None
         y = int(m.group(4)) if m.group(4) is not None else None
         return (w, h, x, y, bool(self._settings.get("window_maximized")))
+
+    def _on_language_change(self, code):
+        """The app's language (gear menu > Language, PAD-458), kept in
+        settings."""
+        self._settings["ui_language"] = code
+        self._save_settings()
 
     def _on_ui_zoom_change(self, zoom):
         """The page's zoom (Ctrl +/-), kept in settings."""

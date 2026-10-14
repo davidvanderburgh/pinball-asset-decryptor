@@ -22,7 +22,7 @@ if (typeof document !== "undefined" && !document.querySelector(`link[href="${CSS
 const SCENE_COLS = [
   { key: "label", label: "Scene", width: "minmax(0,1fr)", sort: "#0",
     titleOf: (r) => r.label + "\n" + r.d + (r.state ? "\n" + STATE_TIP[r.state] : ""),
-    render: (r) => html`<span class="sc-name"><span class=${"sc-dot " + (r.state || "same")}></span><span class="ellip">${r.label}</span></span>` },
+    render: (r) => html`<span class="sc-name"><span class=${"sc-dot " + (r.state || "same")}></span><span class="ellip notr">${r.label}</span></span>` },
   { key: "imgs", label: "Images", width: "60px", sort: "imgs", num: true },
   { key: "fonts", label: "Fonts", width: "50px", sort: "fonts", num: true },
   { key: "texts", label: "Text", width: "44px", sort: "texts", num: true },
@@ -527,7 +527,7 @@ function Contents({ s, onMenu }) {
             ...${tip({ head: it.text, lines: [it.info] })}>
           ${it.thumb ? html`<span class="sc-pic"><img src=${mediaUrl(it.thumb)} alt="" loading="lazy" decoding="async" /></span>`
             : it.swatch ? html`<span class="swatch sc-sw" style=${`background:${it.swatch}`}></span>` : html`<span></span>`}
-          <span class="sc-t ellip">${it.text}</span>
+          <span class="sc-t ellip notr">${it.text}</span>
         </div>`) : null}
       </div>`;
     })}

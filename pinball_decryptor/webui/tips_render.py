@@ -22,6 +22,7 @@ cells ``{"r", "chip"}``), ``note`` (kind, blocks), ``cards`` and ``flow``.  A ru
 """
 
 import re
+import threading
 
 # **bold**, `code`, [words](target), *italic* (a lone star with no space inside it)
 _INLINE = re.compile(r"\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)\s]*)\)"
@@ -43,10 +44,26 @@ def slug(words):
     return s.replace(" ", "-")
 
 
+#: PAD-458: the language the window is drawn in. render(body, tr=...) sets a
+#: translator for its own thread; each block's whole markdown is looked up
+#: BEFORE it is split into runs, so a sentence with a bold word in it is one
+#: catalog entry, not three.
+_lang = threading.local()
+
+
+def _tr(text):
+    fn = getattr(_lang, "tr", None)
+    if fn is None:
+        return text
+    if "\n" in text:
+        text = re.sub(r"[ \t]*\n[ \t]*", " ", text)
+    return fn(text)
+
+
 def runs(text):
     """*text*'s inline marks as runs."""
     out, at = [], 0
-    text = str(text or "")
+    text = _tr(str(text or ""))
     for m in _INLINE.finditer(text):
         if m.start() > at:
             out.append(["t", text[at:m.start()]])
@@ -84,7 +101,7 @@ def _cell(text, first):
             if m:
                 label = m.group(1).rstrip(".")
                 rest = re.sub(r"^[,;:]\s*", "", text[m.end():])     # "Yes, with ..." -> "with ..."
-                return {"chip": chip, "label": "" if label == "✓" else label,
+                return {"chip": chip, "label": "" if label == "✓" else _tr(label),
                         "r": runs(rest)}
     return {"chip": "", "label": "", "r": runs(text)}
 
@@ -155,11 +172,11 @@ def _picture(block):
     if "cards" in block:
         return {"t": "cards", "items": [
             {"icon": c.get("icon") or "info", "tone": c.get("tone") or "",
-             "title": c.get("title") or "", "r": runs(c.get("text") or "")}
+             "title": _tr(c.get("title") or ""), "r": runs(c.get("text") or "")}
             for c in block["cards"]]}
     if "flow" in block:
         return {"t": "flow", "items": [
-            {"icon": c.get("icon") or "", "title": c.get("title") or "",
+            {"icon": c.get("icon") or "", "title": _tr(c.get("title") or ""),
              "r": runs(c.get("text") or "")} for c in block["flow"]]}
     if "note" in block:
         return {"t": "note", "kind": block.get("kind") or "tip",
@@ -173,8 +190,16 @@ def _picture(block):
     return []
 
 
-def render(body):
-    """Blocks for a tip's *body*, whatever its shape (module docstring)."""
+def render(body, tr=None):
+    """Blocks for a tip's *body*, whatever its shape (module docstring); *tr*
+    (text -> text) translates every block's words (PAD-458)."""
+    if tr is not None:
+        prev = getattr(_lang, "tr", None)
+        _lang.tr = tr
+        try:
+            return render(body)
+        finally:
+            _lang.tr = prev
     try:
         if callable(body):
             body = body()

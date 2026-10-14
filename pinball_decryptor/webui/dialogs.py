@@ -106,6 +106,14 @@ class Dialogs:
         }
         native = self.native_file_dialog
         if native is not None:
+            # the OS draws this one: its file-type names in the app's
+            # language (PAD-458); the page's own picker is translated as shown
+            try:
+                from .i18n import translator
+                tr = translator(self._store.get("shell", "lang"))
+                spec = dict(spec, filetypes=[[tr(d), p] for d, p in spec["filetypes"]])
+            except Exception:                           # noqa: BLE001
+                pass
             result = self._run_native(native, spec)
             if result is not NotImplemented:
                 return self._normalise(result, spec)

@@ -799,11 +799,15 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
         its own sections, then the General ones, each [title, blocks, anchor]
         (webui/tips_render.py draws the words as blocks, PAD-386)."""
         key = tab_key or self.window.current_tab_key() or "Extract"
+        # PAD-458: the words are translated here, a block at a time, before
+        # bold and links split them (anchors stay the English headings')
+        from ..i18n import translator
+        tr = translator(self.ctx.store.get("shell", "lang"))
         try:
             from ..help_content import GENERAL_CONTENT, sections_for
             from ..tips_render import render, slug
-            sections = [(t, render(b), slug(t)) for t, b in sections_for(key)]
-            general = [(t, render(b), slug(t)) for t, b in GENERAL_CONTENT]
+            sections = [(tr(t), render(b, tr=tr), slug(t)) for t, b in sections_for(key)]
+            general = [(tr(t), render(b, tr=tr), slug(t)) for t, b in GENERAL_CONTENT]
         except Exception:                               # noqa: BLE001
             log.exception("tips content")
             sections, general = [], []
@@ -812,7 +816,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
             if getattr(svc, "_visible", False) and svc.key:
                 tabs.append({"key": svc.key, "label": svc.label,
                              "ns": svc.ns})
-        return {"tab": key, "title": ("Tips — %s" % key) if key else "Tips",
+        return {"tab": key, "title": tr(("Tips — %s" % key) if key else "Tips"),
                 "sections": [list(s) for s in sections],
                 "general": [list(s) for s in general],
                 "tabs": tabs}

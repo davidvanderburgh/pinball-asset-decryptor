@@ -17,6 +17,15 @@ Write tab's "Picture settings in the service menu" ticked does two things:
    :data:`CARD_MS` after a change the Color profile tab's test card is drawn on the game's
    screen (right of the menu's rows, under its "Set new value"), through the same step.
 
+PAD-575: THAT STEP COSTS THE MACHINE'S GPU ON EVERY PIXEL, even at 5. A tester's Godzilla card
+with all three at 5 drew 7-9 pictures a second in busy scenes on the machine; the same card
+written without picture settings played smoothly. So the runtime only adds the step when the game
+last ran with a value away from 5 (it keeps the values in ``/dump/pad_picture.state``, the
+shaders being compiled at boot before the game has read its settings): at 5, the default, the
+game draws exactly as it does without picture settings, and a value changed in the menu takes
+effect from the next start of the game (the help lines say so). Away from 5 the step is on, live,
+test card included, until a start that finds all three back at 5.
+
 The maths are the Color profile tab's (core/colour_profile.py ``Profile.curve``: brightness and
 contrast folded into a gain and a power about the middle grey, saturation toward the Rec.601 grey),
 the same the multi-boot menu's Color correction uses, on top of whatever the card was built with.
@@ -48,10 +57,11 @@ FACTORS = {
     _MS.SATURATION: (0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000),
 }
 #: each row's help line (the game's spare help strings hold 63 characters or more)
+#: (PAD-575: a change takes effect at the game's next start, so they say "after restart")
 HELP = {
-    _MS.BRIGHTNESS: "Screen brightness. 5 is normal, 1 darkest, 9 brightest.",
-    _MS.CONTRAST: "Screen contrast. 5 is normal, 1 softest, 9 strongest.",
-    _MS.SATURATION: "Screen color. 5 is normal, 1 black and white, 9 strongest.",
+    _MS.BRIGHTNESS: "Brightness after restart. 5 is normal, 1 darkest, 9 brightest.",
+    _MS.CONTRAST: "Contrast after restart. 5 is normal, 1 softest, 9 strongest.",
+    _MS.SATURATION: "Color after restart. 5 is normal, 1 black and white, 9 vivid.",
 }
 #: the four GL imports the runtime re-points (pad_mode_runtime.c PIC_SYMS)
 SYMBOLS = ("glShaderSource", "glLinkProgram", "glUseProgram", "eglSwapBuffers")

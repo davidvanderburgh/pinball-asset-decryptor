@@ -9423,6 +9423,16 @@ static void sndm_arm(void)
  * here. Nothing is touched unless picture.cfg names all four slots and each holds what an unbound or
  * bound import slot holds.
  *
+ * PAD-575: NOTHING IN THE DRAWING CHANGES WHILE ALL THREE ARE AT NORMAL. The step above costs the
+ * machine's GPU on every pixel of every layer, even when it changes nothing: a tester's Godzilla card
+ * with the settings at 5 dropped to 7-9 pictures a second in busy scenes on the machine, and the same
+ * card written without picture settings played smoothly. The shaders are compiled at boot, before the
+ * game has read the settings, so the decision is the last run's: PIC_STATE holds the values the
+ * game last ran with. All normal (or no file yet, the first boot after a Write), and only
+ * eglSwapBuffers is re-pointed, to note a change (pic_watch_swap): the shaders stay the game's own
+ * and a value set away from normal takes effect from the next start of the game. Away from normal,
+ * the whole step as above, live, and a return to normal takes the step off at the next start.
+ *
  * picture.cfg (/usr/local/padmode/picture.cfg on a card, /dump/picture.cfg in the rig), one
  * TAB-separated line each:
  *
@@ -9469,6 +9479,10 @@ static void (*pic_real_source)(unsigned, int, const char *const *, const int *);
 static void (*pic_real_link)(unsigned);
 static void (*pic_real_use)(unsigned);
 static unsigned (*pic_real_swap)(void *, void *);
+/* PAD-575: each setting's value as the game last ran with it (PIC_STATE; 0: none known) */
+static const char PIC_STATE[] = "/dump/pad_picture.state";
+static unsigned pic_ran[PIC_N];
+static int pic_watching;
 static int (*pic_get_loc)(unsigned, const char *);
 static void (*pic_uniform4f)(int, float, float, float, float);
 
@@ -9594,6 +9608,80 @@ static float pic_factor(unsigned w)
     return v >= 1 && v <= pic_set[w].n ? (float)pic_set[w].pm[v - 1] / 1000.0f : 1.0f;
 }
 
+/* PAD-575: is value v of setting w one that changes the picture? (0, a value past the setting's
+ * list and the normal one do not) */
+static int pic_away(unsigned w, unsigned v)
+{
+    return v >= 1 && v <= pic_set[w].n && pic_set[w].pm[v - 1] != 1000;
+}
+
+/* PIC_STATE into pic_ran: "<which> <value>" lines; a missing or unreadable file reads as all
+ * unknown, which is normal */
+static void pic_state_read(void)
+{
+    char b[256];
+    long n = pm_read_file(PIC_STATE, b, sizeof b - 1), i, start = 0;
+    unsigned w;
+    if (n <= 0) return;
+    b[n] = 0;
+    for (i = 0; i <= n; i++) {
+        char *s, *p;
+        int ok;
+        if (i < n && b[i] != '\n' && b[i] != '\r') continue;
+        b[i] = 0;
+        s = b + start;
+        start = i + 1;
+        for (p = s; *p && *p != ' ' && *p != '\t'; p++) {}
+        if (!*p) continue;
+        *p++ = 0;
+        for (w = 0; w < PIC_N && !str_eq(s, PIC_NAMES[w]); w++) {}
+        if (w == PIC_N) continue;
+        {
+            const char *q = p;
+            unsigned v = (unsigned)number(&q, &ok);
+            if (ok) pic_ran[w] = v;
+        }
+    }
+}
+
+/* pic_ran into PIC_STATE (a power cut half way leaves no file, which reads as normal) */
+static void pic_state_write(void)
+{
+    char b[256];
+    int n = pm_snprintf(b, sizeof b, "%s %u\n%s %u\n%s %u\n", PIC_NAMES[PIC_B], pic_ran[PIC_B],
+                        PIC_NAMES[PIC_C], pic_ran[PIC_C], PIC_NAMES[PIC_S], pic_ran[PIC_S]);
+    int fd;
+    if (n <= 0 || n >= (int)sizeof b) return;
+    unlink(PIC_STATE);
+    fd = open(PIC_STATE, O_WRONLY | O_CREAT, 0644);
+    if (fd < 0) { say("picture: %s cannot be written - the next start draws as this one", PIC_STATE); return; }
+    if (write(fd, b, (unsigned long)n) != n) say("picture: %s was not written whole", PIC_STATE);
+    close(fd);
+}
+
+/* once a frame: the settings' values as the game holds them now, kept in PIC_STATE when one of
+ * them changed (the game reading its store at boot included: 0 before it has, which is skipped) */
+static void pic_note(void)
+{
+    unsigned w, v, changed = 0;
+    for (w = 0; w < PIC_N; w++) {
+        v = pic_value(w);
+        if (v < 1 || v > pic_set[w].n || v == pic_ran[w]) continue;
+        if (pic_watching && (pic_away(w, v) || pic_away(w, pic_ran[w])))
+            say("picture: %s %u - the game draws it from its next start", PIC_NAMES[w], v);
+        pic_ran[w] = v;
+        changed = 1;
+    }
+    if (changed) pic_state_write();
+}
+
+/* PAD-575: eglSwapBuffers while every setting is at normal: the shaders are the game's own */
+static unsigned pic_watch_swap(void *dpy, void *surf)
+{
+    pic_note();
+    return pic_real_swap(dpy, surf);
+}
+
 /* the uniforms from the settings and the card's state; a new generation for every program */
 static void pic_compute(void)
 {
@@ -9658,6 +9746,7 @@ static void pic_tick(void)
         say("picture: brightness %.2f contrast %.2f saturation %.2f%s", (double)pic_u[0], (double)pic_u[1],
             (double)pic_u[2], pic_r[2] > 0.0f ? ", test card on" : "");
     }
+    pic_note();
     pic_ticks++;
 }
 
@@ -9816,6 +9905,11 @@ static void pic_arm(void)
         pic_set[w].last = 0xffffffffu;
     }
     if (!any) { say("picture: picture.cfg names no setting - nothing hooked"); return; }
+    /* PAD-575: the last run's values (a rig's forced one wins) decide whether the shaders change */
+    pic_state_read();
+    for (w = 0, any = 0; w < PIC_N; w++)
+        if (pic_away(w, pic_set[w].force ? pic_set[w].force : pic_ran[w])) any = 1;
+    pic_watching = !any;
     gles = dlopen("libGLESv2.so.2", PIC_RTLD_NOW | PIC_RTLD_NOLOAD);
     egl = dlopen("libEGL.so.1", PIC_RTLD_NOW | PIC_RTLD_NOLOAD);
     if (!gles || !egl) { say("picture: off - libGLESv2/libEGL are not loaded in the game"); return; }
@@ -9834,6 +9928,15 @@ static void pic_arm(void)
                 return;
             }
         }
+    }
+    if (pic_watching) {
+        pic_real_swap = (unsigned (*)(void *, void *))real[PIC_SWAP];
+        *(volatile unsigned *)(unsigned long)pic_got[PIC_SWAP] = (unsigned)(unsigned long)pic_watch_swap;
+        say("picture: every setting was at normal when the game last ran (brightness %u, contrast %u, "
+            "saturation %u) - the game's shaders are left as they are; %s is re-pointed to note a change, "
+            "which the game draws from its next start", pic_ran[PIC_B], pic_ran[PIC_C], pic_ran[PIC_S],
+            PIC_SYMS[PIC_SWAP]);
+        return;
     }
     pic_get_loc = (int (*)(unsigned, const char *))dlsym(gles, "glGetUniformLocation");
     pic_uniform4f = (void (*)(int, float, float, float, float))dlsym(gles, "glUniform4f");

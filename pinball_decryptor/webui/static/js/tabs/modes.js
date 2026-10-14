@@ -557,7 +557,7 @@ function ModePage({ s, f, off, dis, rs, lim }) {
         </div>
         ${f.multiball && !dis.ball_save ? html`<div class="small muted">A multiball has its own ball save, below.</div>` : null}
       <//>
-      ${hide.magnet ? null : html`<${Sec} title="Magnet" reason=${rs.magnet}>
+      ${hide.magnet ? null : html`<${Sec} title="Magnet" reason=${rs.magnet} limit=${lim.magnet}>
         <${Check} label=${`Hold the ball on the magnet when ${prof.magnet_shot ? `the ${prof.magnet_shot}` : "its shot"} is hit`} checked=${f.magnet} disabled=${magOff} title=${T.magnet} ns="modes" k="f:magnet" />
         <div class="row wrap" style="padding-left:26px">
           <span class="dim nw">for</span>

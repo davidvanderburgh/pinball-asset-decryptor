@@ -182,3 +182,48 @@ def test_the_runtime_grabs_with_the_port_s_magnet_coil():
     body = body[:body.index("\n}\n") + 3]
     assert 'pm_port_text("magnet_coil")' in body and 'return t && *t ? t : "magnet";' in body
     assert "int pm_magnet_grab(unsigned ms) { return pm_coil_hold(magnet_coil_name(), ms); }" in src
+
+
+def _newest_ports():
+    newest = {}
+    for path in (SDK / "ports").glob("*.port"):
+        game, version = path.stem.rsplit("-", 1)
+        v = tuple(int(x) for x in version.split("."))
+        if game not in newest or v > newest[game][0]:
+            newest[game] = (v, path)
+    return {path.stem: path for _v, path in newest.values()}
+
+
+def test_no_newest_build_reads_yellow_on_the_magnet():
+    """PAD-475: on every newest build the Magnet section is live, hidden (no ball magnet), or the GAME's own limit
+    (MAGNET_GAME_LIMIT: it drives the magnet itself at the shot, or uses it only inside a feature) - said in grey.
+    Nothing is left at "has not found" / "not yet seen"."""
+    for key, path in sorted(_newest_ports().items()):
+        p = MP.profile_from_port(str(path))
+        if "magnet" in p.absent or p.can("magnet"):
+            assert not p.limit("magnet"), key
+            continue
+        assert p.limit("magnet") and key in MP.MAGNET_GAME_LIMIT, (key, p.why_not("magnet"))
+
+
+def test_the_game_s_own_magnet_says_where_it_uses_it():
+    p = MP.profile_from_port(str(SDK / "ports" / "aerosmith_le-1.16.port"))
+    why = p.why_not("magnet")
+    assert "uses its toy box magnet itself at the shot it sits at (the toy box)" in why and p.limit("magnet")
+    p = MP.profile_from_port(str(SDK / "ports" / "turtles_le-1.59.port"))
+    assert "pizza magnet only inside a feature of its own" in p.why_not("magnet") and p.limit("magnet")
+    p = MP.profile_from_port(str(SDK / "ports" / "sword_of_rage_le-1.19.port"))
+    assert "gives its magna-save magnet to the player" in p.why_not("magnet") and p.limit("magnet")
+    p = MP.profile_from_port(str(SDK / "ports" / "foo_fighters_le-1.04.port"))
+    assert "Overlord magnet itself at the shot it sits at (the Overlord)" in p.why_not("magnet")
+    for key, (how, magnet, where) in MP.MAGNET_GAME_LIMIT.items():
+        assert how in ("shot", "feature", "player") and magnet and bool(where) == (how == "shot"), key
+        assert key not in MP.MAGNET_PROVEN, key            # a proven build is live, never a limit
+
+
+def test_metallica_has_no_ball_magnet():
+    """PAD-475: COFFIN MAGNET DOWN holds the coffin, the grave marker and electric chair fling the ball: no Magnet
+    section on Metallica Remastered (its loop up post stays under Other mechanisms)."""
+    assert "magnet" not in MP.MACHINE_HARDWARE["metallica_spike"]
+    p = MP.profile_from_port(str(SDK / "ports" / "metallica_spike-1.04.port"))
+    assert "magnet" in p.absent and "coils" not in p.absent and not p.limit("magnet")

@@ -346,7 +346,7 @@ MACHINE_HARDWARE = {
     "led_zeppelin_pro": ("scoop", "coils", "shaker"),
     "mando_le": ("magnet", "scoop", "coils", "shaker"),
     "mando_pro": ("scoop", "coils", "shaker"),
-    "metallica_spike": ("magnet", "scoop", "coils", "shaker"),
+    "metallica_spike": ("scoop", "coils", "shaker"),   # PAD-475: COFFIN MAGNET DOWN holds the coffin, not a ball
     "munsters_le": ("magnet", "scoop", "coils", "shaker"),
     "munsters_pro": ("magnet", "scoop", "coils", "shaker"),
     "rush_le": ("magnet", "scoop", "coils", "shaker"),
@@ -686,9 +686,60 @@ def _magnet_ports(port):
     return route0 or _drive_ok(port, "magnet")
 
 
+#: PAD-475: the newest builds whose magnet a mode cannot hold because of the GAME (PAD-420's magnet census, runs
+#: 18-22): key -> (how, the magnet, where). "shot": the game drives the magnet itself at the shot it sits at, so a
+#: mode's grab there always gives way to the game's ("the game wants it" / a command of the game's own on the coil
+#: while ours held) - safe, but never a clean hold. "feature": the game uses it only inside a feature of its own,
+#: never on a single switch press or at a ball's start, and it has no place on the playfield picture, so there is no
+#: shot to grab on. "player": the player's own magnet (a magna-save: the button fires it while it is lit). The tab
+#: says these in grey (TitleProfile.limits), not yellow.
+MAGNET_GAME_LIMIT = {
+    "aerosmith-1.16": ("shot", "toy box magnet", "the toy box"),
+    "aerosmith_le-1.16": ("shot", "toy box magnet", "the toy box"),
+    "avengers_infinity_le-1.10": ("shot", "tower magnet", "the tower optos"),
+    "avengers_infinity_pro-1.10": ("shot", "tower magnet", "the tower optos"),
+    "king_kong_le-0.97": ("shot", "spider magnet", "the pit targets"),      # 4 x 20 ms pulses on a pit target hit
+    "king_kong_pro-0.97": ("shot", "spider magnet", "the pit targets"),
+    "munsters_le-1.28": ("shot", "magnet", "the Herman opto"),             # census 2: the game pulses it there
+    "munsters_pro-1.28": ("shot", "magnet", "the Herman opto"),
+    "batman-1.14": ("shot", "magnet", "the Bat Phone Target"),             # and Joker target 1, nearest on the picture
+    "rush_pro-1.19": ("shot", "Time Machine magnet", "the Center ramp opto"),   # a retry 30 s into the ball met the same
+    "led_zeppelin_le-1.22": ("shot", "Electric Magic magnet", "the spinner"),   # an OFF 1 ms after our grab: it keeps
+    #                                                                             the magnet off outside its feature
+    # PAD-475 walk (8 rounds of every playfield switch, scoops held): the TOP MAGNET (9:6) only ever in the game's own
+    # center drop target sequence - drop target DOWN (8:7), magnet 255 for 1000 ms, drop target UP (8:6), magnet 20 ms
+    # - twice, seconds after an Orb standup hit (the LE the same, and a 10-on / 90-off pulse train with other coils
+    # after one); the magnet catches a ball only while the game has the target down
+    "guardians-1.15": ("feature", "top magnet", ""),
+    "guardians_le-1.15": ("feature", "top magnet", ""),
+    # PAD-475 walk: 255 for 3000 ms on 9:7 twice, each 0.4 s after the magna-save button (34) - the player's own
+    "sword_of_rage_le-1.19": ("player", "magna-save magnet", ""),          # magnet; only OFFs while it is not lit
+    "sword_of_rage_pro-1.19": ("player", "magna-save magnet", ""),
+    # a feature's process (0x129860). PAD-475 walk: on the Pro, an Upper lock hit started it - the PIZZA MOTOR (9:5) on
+    # for 30 s, the trough serving (8:1), the upper left flipper held, and the PIZZA MAGNET (9:6) 255 for 1200 / 2400 ms
+    # then 128 for 4 s; the LE's 8 rounds (~200 shots) never met it
+    "turtles_le-1.59": ("feature", "pizza magnet", ""),
+    "turtles_pro-1.59": ("feature", "pizza magnet", ""),
+    # PAD-475 walk: OVERLORD MAGNET (9:0; group 8 = node 9) 255 for 120 ms, OVERLORD HIT (9:1), then 90 ms, ~300 ms
+    # after an Overlord opto / hit target press (2 of 16) - the census's single presses never met it
+    "foo_fighters_le-1.04": ("shot", "Overlord magnet", "the Overlord"),
+}
+
+
 def _magnet_cannot(key, label, port=None):
     """The ``cannot`` entry for holding the ball on the magnet on build ``key``, or () when it can: the port
     names the magnet's calls, its device or its board address, and its shot, and the build is proven."""
+    if key in MAGNET_GAME_LIMIT and key not in MAGNET_PROVEN:       # PAD-475: the game's own limit
+        how, magnet, where = MAGNET_GAME_LIMIT[key]
+        if how == "shot":
+            return (("magnet", "%s uses its %s itself at the shot it sits at (%s), so a hold of a mode's there "
+                               "would always give way to the game's: a mode of yours cannot hold the ball on it."
+                     % (label, magnet, where)),)
+        if how == "player":
+            return (("magnet", "%s gives its %s to the player: the button fires it while it is lit, so a mode of yours "
+                               "cannot hold the ball on it." % (label, magnet)),)
+        return (("magnet", "%s uses its %s only inside a feature of its own, never at a shot of its own, so "
+                           "there is no shot where a mode of yours could hold the ball on it." % (label, magnet)),)
     if not port or not (_magnet_ports(port) and _magnet_shot_name(port)):
         return (("magnet", "The app has not found how %s drives its magnet, so a mode of yours cannot "
                            "hold the ball on it." % label),)
@@ -2040,7 +2091,8 @@ def profile_from_port(path):
         switch_shots_note=switch_note,
         stack_note=stack_note,
         limits=tuple(limits) + (("end_game",) if not callouts.get("time_up") and key in TIME_UP_NONE else ())
-        + (("own_music",) if own_music_none(game, version) else ()),
+        + (("own_music",) if own_music_none(game, version) else ())
+        + (("magnet",) if key in MAGNET_GAME_LIMIT and key not in MAGNET_PROVEN else ()),   # PAD-475
         game_modes=_game_modes(port),
         game_rules=_game_rules(port),                        # PAD-398
         lamps=_lit_inserts(port) if key in LAMPS_PROVEN else 0,

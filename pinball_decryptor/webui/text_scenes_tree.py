@@ -1008,6 +1008,10 @@ class TreeEditMixin:
             "can_undo": bool(ops or (self._tree_hist(card) or {}).get("undo")),
             "can_redo": bool((self._tree_hist(card) or {}).get("redo")),
             "all_edits": scene_edit.count(self.assets_dir),
+            # PAD-539: the Filled-in marks are guesses until the card is read for the boxes
+            # the game names; and a project off a written card can't go back to stock
+            "fills_proven": self._tree_fills_proven(card, man),
+            "base_note": self._tree_base_note(card),
             "built": _built_state(scene_edit.built_ops(self.assets_dir, card), ops)})
 
     def _tree_props(self, card, man, nid, ops):
@@ -1138,8 +1142,9 @@ class TreeEditMixin:
         words still find its line, and the screen's modes name when.  Memoised per scene until
         the text edits change."""
         memo = getattr(self, "_filled_memo", None)
-        if memo is None or memo[0] != self.assets_dir:
-            memo = self._filled_memo = (self.assets_dir, {}, None)
+        key = self._filled_key()
+        if memo is None or memo[0] != key:
+            memo = self._filled_memo = (key, {}, None)
         if card in memo[1]:
             return memo[1][card]
         from . import text_rules as R
@@ -1163,7 +1168,7 @@ class TreeEditMixin:
                          engine.program_node_paths(self.assets_dir))
             except Exception:                        # noqa: BLE001
                 index = ({}, {}, {}, None)
-            self._filled_memo = (self.assets_dir, memo[1], index)
+            self._filled_memo = (key, memo[1], index)
         lines, boxes, screens, known = index
         d = card.replace("\\", "/").rsplit("/", 1)[0]
         named, own = {}, set()
@@ -1214,6 +1219,50 @@ class TreeEditMixin:
                 out[n["id"]] = {"line": None, "modes": []}
         memo[1][card] = out
         return out
+
+    def _filled_key(self):
+        """The Filled-in marks' memo key: the project, and the stamp of the game program's
+        reading, so a re-read (here or the Text tab's own) shows at once (PAD-539)."""
+        from ..core import text_manifest
+        try:
+            stamp = os.stat(os.path.join(self.assets_dir or "", text_manifest.RELDIR,
+                                         "program_modes.json")).st_mtime_ns
+        except OSError:
+            stamp = None
+        return (self.assets_dir, stamp)
+
+    def _tree_fills_proven(self, card, man):
+        """Are the Filled-in marks the proven ones (PAD-539)?  Without the program's node paths
+        (a project whose card has not been read for them since) they are the old word guesses:
+        a box the game does write can say "Not this one"."""
+        self._tree_filled(card, man)
+        memo = getattr(self, "_filled_memo", None)
+        return bool(memo and memo[2] and memo[2][3] is not None)
+
+    def _tree_base_note(self, card):
+        """PAD-539 (DragonRR): the project came off a card a Write (PAD's or another) changed, so
+        As shipped and Reset go back to that card, not to stock.  From the project's lineage,
+        or, with none, from layers the card has hidden (PAD-535: no stock scene has one)."""
+        from ..core import lineage
+        try:
+            came = lineage.extracted_from(self.assets_dir)
+        except Exception:                            # noqa: BLE001
+            came = None
+        if came is None and self._tree_baked(card):
+            came = {"kind": "hidden"}
+        return lineage.extracted_from_note(came)
+
+    def _tree_base_line(self, card=None):
+        """The As shipped questions' word on a project off a written card (PAD-539), or ""."""
+        note = self._tree_base_note(card) if card else None
+        if note is None:
+            from ..core import lineage
+            try:
+                note = lineage.extracted_from_note(lineage.extracted_from(self.assets_dir))
+            except Exception:                        # noqa: BLE001
+                note = None
+        return ("\n\n%s %s %s" % (note["lines"][0], note["lines"][1], note["lines"][2])
+                if note else "")
 
     def _tree_words_of(self, card, man, n, ops):
         """A line of text's words for the Words box (DragonRR, PAD-468): ``{"text": the words
@@ -3440,8 +3489,8 @@ class TreeEditMixin:
         if not compat.messagebox.askyesno(
                 "Scene edits", "Put EVERY scene back the way the game shipped it? That drops "
                 "all %d edit(s) in %d scene(s): moves, resizes, tints, layer changes and added "
-                "pictures and text. Color profiles and replaced pictures stay (Reset… on the "
-                "top bar puts those back)." % (n, len(edits))):
+                "pictures and text. Color profiles and replaced pictures stay (Reset… in the "
+                "project menu puts those back).%s" % (n, len(edits), self._tree_base_line())):
             return False
         scene_edit.clear(self.assets_dir)
         self._tree_view_reset()
@@ -3868,7 +3917,8 @@ class TreeEditMixin:
         if not compat.messagebox.askyesno(
                 "Scene edits", "Put this scene back the way the game shipped it? Every move, "
                 "resize, tint, layer change and added picture or text in it is dropped. Its color "
-                "profiles and replaced pictures stay (Reset… on the top bar puts those back)."):
+                "profiles and replaced pictures stay (Reset… in the project menu puts those "
+                "back).%s" % self._tree_base_line(card)):
             return False
         scene_edit.clear(self.assets_dir, card)
         self._tree_view_reset(card)

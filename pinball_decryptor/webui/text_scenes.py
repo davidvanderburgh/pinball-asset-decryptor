@@ -327,6 +327,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         self._bulk = None
         self._vbulk = None            # "Export all videos…" running (PAD-365)
         self._rebuild = None
+        self._fill_read = None               # PAD-539: the Filled-in panel's re-read
         self._tmp = None
         self._raise_n = 0
         self._auto_tried = None
@@ -360,7 +361,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                  rebuild_msg="", layout_dialog=None, tips=TIPS,
                  tree=False, tree_view=None, tree_layers=None, tree_busy=False,
                  tree_loading=False, tree_img_rev=0, tree_see={}, preparing=None,
-                 tree_live=None,
+                 tree_live=None, fills_reading=False,
                  card_note="", pic_note="", tree_play=None, mode_layout=None,
                  resize_from=self._tree_resize_from())
 
@@ -2289,6 +2290,57 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
         threading.Thread(target=work, daemon=True,
                          name="scene-rebuild").start()
         return True
+
+    @rpc
+    def read_program(self):
+        """The Filled-in panel's Re-read from card (PAD-539): read the game program off the card
+        this project came from for the boxes it names, so the marks are the proven ones
+        (PAD-513) instead of word guesses.  The Text tab does it by itself when it opens with
+        the card at hand; this is for a project whose card was not there then."""
+        if self._fill_read is not None:
+            return False
+        card = self.card_image_path()
+        if card and os.path.isfile(card):
+            card = self._project_card(card, False)
+            if not card:
+                return False
+        else:
+            card = None                      # the card the extract recorded, if still there
+        assets = self.assets_dir
+        state = self._fill_read = {}
+        self.set(fills_reading=True, rebuild_msg="Reading the game program off the card…")
+
+        def work():
+            from ..plugins.stern import engine
+            msgs = []
+            try:
+                engine.refresh_program_text_flags(
+                    assets, log=lambda m, lvl="info": msgs.append(m), card=card)
+                ok, err = engine.program_node_paths(assets) is not None, None
+            except Exception as e:                   # noqa: BLE001
+                ok, err = False, e
+            self.ctx.loop.post(self._read_program_done, state, ok, err, msgs)
+
+        threading.Thread(target=work, daemon=True, name="scene-program-read").start()
+        return True
+
+    def _read_program_done(self, state, ok, err, msgs):
+        if state is not self._fill_read:
+            return
+        self._fill_read = None
+        self.set(fills_reading=False)
+        if ok:
+            self.set(rebuild_msg="Read the card: the boxes the game fills in are marked for sure.")
+            if self._alive:
+                self._tree_refresh()
+            return
+        self.set(rebuild_msg="")
+        why = msgs[-1] if msgs else str(err or "")
+        compat.messagebox.showwarning(
+            "Re-read from card",
+            "The card could not say which boxes the game fills in, so the marks stay guesses. "
+            "Set the Extract tab's Input to the card this project was extracted from, then try "
+            "again." + ("\n\n" + why if why else ""))
 
     def _project_card(self, card, quiet):
         """PAD-421: the card to re-read, or ``""`` to stop.  A scene re-read has to come off

@@ -220,6 +220,10 @@ export function projectMenuItems(shell) {
     { label: "Properties…", disabled: running || !have, onClick: () => call("ui.call_back", "on_project_properties") },
     { label: "Change history…", disabled: running || !have, onClick: () => call("shellx.change_history") },
     { label: "Relink moved files…", disabled: running || !have, onClick: () => call("ui.call_back", "on_relink_project") },
+    // PAD-576: here rather than a top-bar button, where it pulled the eye from the rest of the app
+    { sep: true },
+    { label: "Reset…", disabled: running || !have || shell.view !== "mfr", onClick: () => openDialog("reset"),
+      title: { head: "Reset this project", lines: [["Click", "put images, videos, sounds, text, fonts, scenes, colors or modes back as extracted, or everything at once"]] } },
   ];
 }
 function projectMenu(anchor, shell) {
@@ -347,9 +351,6 @@ function TopBar({ shell }) {
       ${proj.caption ? html`<span class="dim ellip hide-narrow">${proj.caption}</span>` : null}
       <span class="muted">▾</span>
     </button>
-    ${working && proj.folder ? html`<${Button} size="sm" kind="danger" cls="sx-reset-btn" icon="refresh" disabled=${!!shell.running}
-        onClick=${() => openDialog("reset")}
-        title=${{ head: "Reset this project", lines: [["Click", "put images, videos, sounds, text, fonts, scenes, colors or modes back as extracted, or everything at once"]] }}>Reset…<//>` : null}
     <span class="grow"></span>
     ${pyChanged.length ? html`<${Chip} kind="warn" dot onClick=${() => call("shell.dev_restart")}
         title=${"Python files changed since this app started:\n" + pyChanged.slice(0, 12).join("\n") + (pyChanged.length > 12 ? "\n…" : "") + "\n\nClick to restart the app with them (development checkout only)."}>Python changed · Restart<//>` : null}

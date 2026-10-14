@@ -9,7 +9,12 @@ settings). At 5, only eglSwapBuffers is re-pointed, to note a change, and the ga
 its own; a change shows from the next start. Emulator-proven on the tester's V1.99B Kaiju card
 (no state: shaders untouched, the store's 5s noted; BRIGHTNESS raised to 8 in the menu: noted,
 "from its next start"; the next boot with that state: the step armed, "first fragment shader
-carries the picture step"; the game back at 5: the state back to 5)."""
+carries the picture step"; the game back at 5: the state back to 5).
+
+Round 2: the tester asked for them to be switched off for now. picture_settings.OFFERED is False:
+the Write tab shows no tick, no build adds the rows or picture.cfg (a project that asked is told
+why in the build log), and the Tips leave them out. The runtime half above stays, so a card that
+still carries them never pays for them at 5."""
 
 import os
 import re
@@ -87,15 +92,57 @@ def test_a_change_is_noted_with_the_step_on_or_off():
     assert "pic_note();" in _body(src, "static void pic_tick(void)")
 
 
-def test_the_menu_tip_and_help_say_a_change_shows_from_the_next_start():
+def test_the_menu_lines_and_tip_say_a_change_shows_from_the_next_start():
     for key in PS.KEYS:
         assert "after restart" in PS.HELP[key] and "5 is normal" in PS.HELP[key]
         assert len(PS.HELP[key]) <= 63
     tip = write_tab.PICTURE_TIP
     assert "next start" in tip and "draws exactly as it does without them" in tip
     assert "at once" not in tip
-    page = "".join(t for t in _strings(help_content.HELP_CONTENT)
-                   if "### Picture settings in the service menu" in t)
-    assert page
-    assert "takes effect from the game's next start" in page
-    assert "the moment it is accepted" not in page
+
+
+# ---- round 2: the tester asked for them to be switched off for now --------------------------------
+def test_not_offered_a_saved_tick_is_kept_but_no_build_gets_them(tmp_path):
+    from pinball_decryptor.plugins.stern import engine as E
+    assert PS.OFFERED is False
+    PS.save(str(tmp_path), True)
+    assert PS.asked(str(tmp_path)) is True and PS.load(str(tmp_path)) is False
+    said = []
+    assert E._picture_for_build(str(tmp_path), False, lambda m, *a: said.append(m)) is None
+    assert said == [PS.SWITCHED_OFF]
+    # a project that never asked: not a word
+    said.clear()
+    assert E._picture_for_build(str(tmp_path / "other"), False, lambda m, *a: said.append(m)) is None
+    assert said == []
+
+
+def test_not_offered_the_write_tab_shows_no_tick_and_refuses_one(tmp_path, monkeypatch):
+    from pinball_decryptor.core import staged_changes
+
+    class Mfr:
+        key = "stern"
+        current_era = "spike2"
+
+    class Win:
+        _running = False
+        cb = {}
+
+    monkeypatch.setattr(write_tab.WriteTab, "mfr", property(lambda self: Mfr()))
+    svc = write_tab.WriteTab.__new__(write_tab.WriteTab)
+    svc.window = Win()
+    state = {}
+    monkeypatch.setattr(svc, "set", lambda **kw: state.update(kw), raising=False)
+    monkeypatch.setattr(svc, "cap", lambda n: True, raising=False)
+    monkeypatch.setattr(svc, "_is_direct", lambda: False, raising=False)
+    monkeypatch.setattr(svc, "_info_assets_dir", lambda: str(tmp_path), raising=False)
+    monkeypatch.setattr(svc, "log", lambda *a, **k: None, raising=False)
+    PS.save(str(tmp_path), True)
+    svc._publish_picture()
+    assert state == {"picture_cap": False}
+    assert svc.set_picture(False) is False
+    assert staged_changes.load(str(tmp_path))[PS.STAGED_KEY] == {"on": True}     # kept as it was
+
+
+def test_not_offered_the_tips_leave_them_out():
+    texts = list(_strings(help_content.HELP_CONTENT))
+    assert not any("### Picture settings in the service menu" in t for t in texts)

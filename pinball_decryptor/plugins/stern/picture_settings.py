@@ -79,6 +79,16 @@ NO_TITLE = ("The app cannot tell which game this project is for, so it cannot gi
 NOT_PROVEN = ("Picture settings have not been tried on %s yet, so they are not offered there. "
               "Godzilla Pro and Premium/LE 1.16 have them.")
 
+#: PAD-575 round 2: NOT OFFERED FOR NOW. The tester they were made for asked for them to be
+#: switched off ("not worth having something that might cause problems") after they slowed busy
+#: scenes on the machine. The Write tab shows no tick and no build adds the rows or picture.cfg,
+#: whatever a project's sidecar says (its choice is kept, for when they come back); a build from
+#: a card that carries them takes them off (mode_install removes a picture.cfg it does not bring).
+OFFERED = False
+#: what a build says when the project asked for them
+SWITCHED_OFF = ("Picture settings: BRIGHTNESS, CONTRAST and SATURATION are switched off for now "
+                "(on the machine they slowed busy scenes), so this build leaves them out.")
+
 _R_ARM_JUMP_SLOT = 22
 
 
@@ -87,7 +97,12 @@ class PictureError(ValueError):
 
 
 def load(project):
-    """Whether the project asks for the picture settings."""
+    """Whether a build of the project gets the picture settings: asked for, and offered."""
+    return OFFERED and asked(project)
+
+
+def asked(project):
+    """Whether the project's sidecar asks for the picture settings (offered or not)."""
     if not project:
         return False
     from ...core import staged_changes

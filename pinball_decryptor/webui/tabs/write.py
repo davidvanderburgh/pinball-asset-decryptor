@@ -1788,10 +1788,10 @@ class WriteTab(TabService):
     def _publish_picture(self):
         """The tick, and under it where the rows land, how many fit, or in red
         why this project's game cannot have them."""
-        if not self._editions_applies():
+        from ...plugins.stern import picture_settings as _PS
+        if not _PS.OFFERED or not self._editions_applies():      # PAD-575: not offered for now
             self.set(picture_cap=False)
             return
-        from ...plugins.stern import picture_settings as _PS
         assets = self._info_assets_dir()
         on = bool(assets) and _PS.load(assets)
         note, kind = "", ""
@@ -1821,7 +1821,7 @@ class WriteTab(TabService):
         """Tick or untick the picture settings for this project."""
         from ...core import history_log
         from ...plugins.stern import picture_settings as _PS
-        if self.window._running or not self._editions_applies():
+        if self.window._running or not _PS.OFFERED or not self._editions_applies():
             return False
         assets = self._info_assets_dir()
         if not assets:

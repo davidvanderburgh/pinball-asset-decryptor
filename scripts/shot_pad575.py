@@ -5,6 +5,8 @@
 Serves <repo> on the same scratch Godzilla Premium/LE 1.16 project as scripts/shot_pad537.py (its
 sidecar asks for the picture settings). Writes, under the same name before and after:
 
+- <before_|after_>write_tab.png   the Write tab where the tick sits (PAD-575 round 2: after, not
+                                  offered, so no tick)
 - <before_|after_>write_tip.png   the Write tab with "Picture settings in the service menu"'s tip
                                   open: after, a change shows from the game's next start and at 5
                                   the game draws as it does without them
@@ -52,7 +54,16 @@ def main():
             time.sleep(1)
             api("ui.select_tab", "write")
             time.sleep(6)
+            ed = page.locator(".wr-editions, button:has-text('Name the editions')").first
+            if ed.count():
+                ed.scroll_into_view_if_needed()
+                time.sleep(0.5)
+            page.screenshot(path=out("write_tab.png"))
             row = page.locator("label:has-text('%s')" % LABEL).first
+            if not row.count():                             # PAD-575 round 2: not offered
+                print("no picture settings tick on the Write tab", flush=True)
+                browser.close()
+                return
             row.scroll_into_view_if_needed()
             time.sleep(0.5)
             row.hover()

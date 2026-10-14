@@ -205,6 +205,7 @@ def test_the_write_tab_tick_asks_for_the_rows_and_says_how_many_fit(tmp_path, mo
     monkeypatch.setattr(svc, "_is_direct", lambda: False, raising=False)
     monkeypatch.setattr(svc, "_info_assets_dir", lambda: str(tmp_path), raising=False)
     monkeypatch.setattr(svc, "log", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(PS, "OFFERED", True)          # PAD-575: switched off for now; as it was
     monkeypatch.setattr(PS, "project_title", lambda project, probe=False: object())
     monkeypatch.setattr(PS, "title_refusal", lambda prof: "")
     staged_changes.save(str(tmp_path), {"audio": {"x": "y"}})
@@ -225,8 +226,9 @@ def test_the_write_tab_tick_asks_for_the_rows_and_says_how_many_fit(tmp_path, mo
     assert state["picture_on"] is False and state["picture_note"] == ""
 
 
-def test_a_title_never_tried_is_refused_and_says_so(tmp_path):
+def test_a_title_never_tried_is_refused_and_says_so(tmp_path, monkeypatch):
     from pinball_decryptor.plugins.stern import engine as E
+    monkeypatch.setattr(PS, "OFFERED", True)          # PAD-575: switched off for now; as it was
     PS.save(str(tmp_path), True)
     said = []
     assert E._picture_for_build(str(tmp_path), True, lambda m, *a: said.append(m)) is None

@@ -140,6 +140,7 @@ def test_layout_per_manufacturer(tmp_path, key):
     ("spike2", "Card image", 4, False),
     ("spike1", "Card image", 0, False),
     ("whitestar", "ROM zip", 0, True),
+    ("sam", "Game file", 0, True),
 ])
 def test_stern_eras(tmp_path, era, label, cats, capture):
     with web_app(tmp_path, mfr="stern", era=era) as w:

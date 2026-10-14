@@ -25,6 +25,9 @@ from ...core.musicid import MusicIdPipeline
 from ..pinmame_classic import capture as _wscapture
 from ..pinmame_classic.formats import detect_game as _ws_detect
 from ..pinmame_classic.games import GAME_DB as _PMC_GAME_DB
+from ..pinmame_classic import sam as _sam
+from ..pinmame_classic.sam import identify as _sam_identify
+from ..pinmame_classic.sam_games import SAM_GAME_DB as _SAM_DB
 from .formats import (detect_game, detect_spike1_game, display_for_key,
                       spike1_display_for_key)
 from .games import GAME_DB, SPIKE1_GAME_DB
@@ -34,7 +37,7 @@ from .pipeline import (Spike1ExtractPipeline, Spike1RevertPipeline,
                        SternFlashImagePipeline, SternRevertPipeline,
                        SternWritePipeline)
 
-# Stern handles three hardware eras under one picker entry:
+# Stern handles four hardware eras under one picker entry:
 #   * "spike2"    — the modern SD-card games (image.bin audio + ext4 assets),
 #                   the full extract / write / replace / Direct-SD surface.
 #   * "spike1"    — the 2015-2016 DMD generation (WrestleMania … Ghostbusters):
@@ -43,18 +46,58 @@ from .pipeline import (Spike1ExtractPipeline, Spike1RevertPipeline,
 #   * "whitestar" — the classic 1999-2006 MAME-ROM games (Monopoly, Elvis,
 #                   LOTR, Sopranos, etc.), shared with the PinMAME-capture
 #                   pipeline the Data East / Sega entries use; capture-only.
+#   * "sam"       — the 2006-2014 S.A.M. games (Mustang, Metallica, Tron,
+#                   AC/DC, ...): one .bin code update per game, which is also
+#                   the PinMAME ROM, so the same capture, the input matched by
+#                   checksum (pinmame_classic/sam.py); capture-only.
 # detect() reports the era of the loaded file; the GUI re-applies the
 # capability-dependent layout when it changes (default era = spike2, so the
 # Spike 2 flow is unchanged until a Spike 1 .iso / MAME .zip is loaded).
-# SAM (2006-2014) is a planned fourth era (sam.c).
 _WHITESTAR_DB = {k: v for k, v in _PMC_GAME_DB.items()
                  if v["manufacturer"] == "Stern"}
+
+
+def _rom_file(path):
+    """A PinMAME input (a Whitestar / SAM zip, or a SAM .bin / .ebi), not
+    an SD card: the card probes must never open one.  A SAM update is at
+    most 128 MB where a Spike card is gigabytes, so a size check tells a
+    SAM .bin from a card image named .bin without reading it."""
+    low = path.lower()
+    if low.endswith(".zip"):
+        return True
+    if not low.endswith(_sam.EXTENSIONS):
+        return False
+    try:
+        return os.path.getsize(path) <= _sam.MAX_BIN_SIZE
+    except OSError:
+        return False
+
+
+def _sam_info(path):
+    """Image-Info sections for a SAM game file: which version PinMAME
+    matched it to (a Whitestar zip gets none, like before)."""
+    m = _sam_identify(path)
+    if m is None:
+        return []
+    rows = [("System", "Stern S.A.M.")]
+    if m.runnable:
+        rows.append(("Version", m.title))
+        rows.append(("PinMAME romset", m.romset))
+        rows.append(("Match", "checksum matches PinMAME's copy" if m.exact
+                     else "not PinMAME's copy of any version; runs as the "
+                          "version of the same size"))
+    else:
+        rows.append(("Version", "one PinMAME doesn't have, so it can't "
+                                "be run"))
+    if m.member:
+        rows.append(("Game file", m.member))
+    return [("Firmware", rows)]
 
 
 def _spike2_print(path):
     """A Spike 2 card's fingerprint for project lineage (PAD-427); ``None``
     for anything else."""
-    if path.lower().endswith(".zip") or detect_spike1_game(path) is not None:
+    if _rom_file(path) or detect_spike1_game(path) is not None:
         return None
     from .stock_prints import card_print
     return card_print(path)
@@ -85,11 +128,18 @@ _WHITESTAR_GAMES = tuple(sorted(
           notes=f"Whitestar {v['year']}", era="whitestar")
      for k, v in _WHITESTAR_DB.items()),
     key=lambda g: g.display.lower()))
-_GAMES = _SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES
+_SAM_GAMES = tuple(sorted(
+    (Game(key=k, display=v["display"], manufacturer_key="stern",
+          notes=f"SAM {v['year']}", era="sam")
+     for k, v in _SAM_DB.items()),
+    key=lambda g: g.display.lower()))
+_GAMES = _SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES + _SAM_GAMES
 
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD
 # — you can't repack a MAME ROM; extraction is a libpinmame attract capture).
 _WHITESTAR_CAPS = Capabilities(extract=False, capture=True)
+# SAM is the same libpinmame capture, so it shares the Whitestar surface.
+_CAPTURE_ERAS = ("whitestar", "sam")
 
 # Spike 1: audio extract + write.  The master directory is plaintext and every
 # sound is raw PCM, so no emulator/codec prerequisites; the surface is audio-
@@ -377,12 +427,13 @@ class SternManufacturer(Manufacturer):
         extract_categories=(("audio", "Audio"), ("video", "Video"),
                             ("images", "Images"), ("text", "Text")),
     )
-    # Accepts Spike 2 / Spike 1 SD-card images AND classic Whitestar MAME ROM
-    # zips; detect() routes by signature + extension and reports the era.
+    # Accepts Spike 2 / Spike 1 SD-card images, SAM code updates (.bin, bare
+    # or zipped) AND classic Whitestar MAME ROM zips; detect() routes by
+    # signature + extension and reports the era.
     input_spec = InputSpec(
-        label="Stern SD-card image (Spike 2 / Spike 1) or MAME ROM zip "
-              "(Whitestar)",
-        extensions=(".img", ".bin", ".raw", ".iso", ".zip"),
+        label="Stern SD-card image (Spike 2 / Spike 1), SAM code update "
+              "(.bin or .zip) or MAME ROM zip (Whitestar)",
+        extensions=(".img", ".bin", ".raw", ".iso", ".zip", ".ebi"),
     )
     _SPIKE2_EXTRACT_PHASES = ("Detect", "Locate partitions", "Extract video",
                               "Extract images", "Decode audio", "Checksums")
@@ -466,7 +517,7 @@ class SternManufacturer(Manufacturer):
     # A 3rd tuple element is an optional corner badge on that pill (the GUI's
     # _build_era_badges renders it) — e.g. "BETA" to mark a preview era.
     eras = (("spike2", "SPIKE 2"), ("spike1", "SPIKE 1"),
-            ("whitestar", "WHITESTAR"))
+            ("sam", "SAM"), ("whitestar", "WHITESTAR"))
     # Mirror the destination radio so the action button names what it does
     # (the generic "Build update" / "Apply Modifications" don't connect to
     # the SD-card wording above them).
@@ -503,7 +554,7 @@ class SternManufacturer(Manufacturer):
         self._era = "spike2"
 
     def set_era(self, era):
-        self._era = era if era in ("whitestar", "spike1") \
+        self._era = era if era in ("whitestar", "sam", "spike1") \
             else "spike2"
 
     @property
@@ -518,7 +569,7 @@ class SternManufacturer(Manufacturer):
 
     @property
     def capabilities(self):
-        if self._era == "whitestar":
+        if self._era in _CAPTURE_ERAS:
             return _WHITESTAR_CAPS
         if self._era == "spike1":
             return _SPIKE1_CAPS
@@ -526,7 +577,7 @@ class SternManufacturer(Manufacturer):
 
     @property
     def prerequisites(self):
-        if self._era == "whitestar":
+        if self._era in _CAPTURE_ERAS:
             return _WHITESTAR_PREREQS
         if self._era == "spike1":
             return _SPIKE1_PREREQS
@@ -534,7 +585,7 @@ class SternManufacturer(Manufacturer):
 
     @property
     def extract_phases(self):
-        if self._era == "whitestar":
+        if self._era in _CAPTURE_ERAS:
             return _wscapture.PHASES
         if self._era == "spike1":
             return self._SPIKE1_EXTRACT_PHASES
@@ -555,6 +606,9 @@ class SternManufacturer(Manufacturer):
         # "Card image" universally: Spike 2 loads a raw SD-card image, Whitestar
         # loads a MAME ROM zip.  Reads better than the bare ".img:"/".zip:" the
         # raw extension would otherwise produce.
+        # SAM: Stern's .bin code update, bare or in a zip.
+        if self._era == "sam":
+            return "Game file"
         return "ROM zip" if self._era == "whitestar" else "Card image"
 
     def write_output_ext(self):
@@ -631,6 +685,18 @@ class SternManufacturer(Manufacturer):
         # has no side effects (it's also called to probe other manufacturers)
         # — the era it reports on the Game is applied to the live
         # manufacturer by the GUI.
+        # SAM first: matched by the .bin's checksum, it is certain where
+        # the Whitestar ROM-name score is a guess, and a .bin no bigger than
+        # SAM's 128 MB ROM can't be a Spike card.
+        sam = _sam_identify(path)
+        if sam is not None:
+            info = _SAM_DB[sam.key]
+            return Game(key=sam.key, display=info["display"],
+                        manufacturer_key="stern", era="sam",
+                        notes=f"SAM {info['year']}, " + (
+                            sam.title if sam.exact else
+                            f"{info['display']}, a version PinMAME "
+                            "doesn't have"))
         if path.lower().endswith(".zip"):
             key = _ws_detect(path, _WHITESTAR_DB)
             if key is None:
@@ -686,6 +752,12 @@ class SternManufacturer(Manufacturer):
                 em = re.search(r"_(le|pro|se)$", m.group(1).lower())
                 if em:
                     disp += " %s" % em.group(1).upper()
+        elif game.era == "sam" and ", " in game.notes:
+            # notes = "SAM 2014, Mustang Limited Edition (V1.45)": the
+            # version PinMAME matched names the game fully on its own.
+            disp = game.notes.split(", ", 1)[1]
+            if not disp.startswith(game.display):
+                disp = "%s (%s)" % (game.display, disp)
         elif game.era == "whitestar" and game.notes:
             disp += " (%s)" % game.notes
         return disp
@@ -702,7 +774,7 @@ class SternManufacturer(Manufacturer):
         # is the likeliest way to meet a multi-boot card in the first place.
         from ...core.rawdevice import is_device_path
         if not is_device_path(path) and (
-                path.lower().endswith(".zip") or detect_game(path) is None):
+                _rom_file(path) or detect_game(path) is None):
             return ""
         from .multiimage import note_for_path
         try:
@@ -743,8 +815,8 @@ class SternManufacturer(Manufacturer):
         # Spike 1 card's logical layout would only confuse).  Route on the
         # file, not the era pill, so the Info tab matches whatever image is
         # actually selected.
-        if path.lower().endswith(".zip"):
-            return []
+        if _rom_file(path):
+            return _sam_info(path)
         if detect_spike1_game(path) is not None:
             return []
         from .info import card_info
@@ -754,6 +826,8 @@ class SternManufacturer(Manufacturer):
         """``(version, exact)`` — the build a card image really is, read
         from its own update index (see info.card_version_probe).  Opens the
         image: call off the UI thread."""
+        if _rom_file(path):
+            return None, False
         from .info import card_version_probe
         return card_version_probe(path)
 
@@ -763,7 +837,7 @@ class SternManufacturer(Manufacturer):
         ``None`` for a card that has no official record to check against
         (Spike 1, Whitestar).  *deep* hashes every file's bytes (minutes on
         a spinning disk).  Opens the image: call off the UI thread."""
-        if path.lower().endswith(".zip") or detect_spike1_game(path)                 is not None:
+        if _rom_file(path) or detect_spike1_game(path) is not None:
             return None
         from .stock_prints import check_card
         got = check_card(path, deep=deep)
@@ -789,9 +863,10 @@ class SternManufacturer(Manufacturer):
         # Spike 2 cards only — a Whitestar MAME zip has no manifest/firmware
         # to diff, and the Spike 1 comparer isn't built yet, so refuse with a
         # plain explanation instead of a stack.
-        if path_a.lower().endswith(".zip") or path_b.lower().endswith(".zip"):
-            return [("Error", [("Compare", "Whitestar ROM zips can't be "
-                                "compared — pick two Spike 2 card images.")])]
+        if _rom_file(path_a) or _rom_file(path_b):
+            return [("Error", [("Compare", "ROM zips and SAM game files "
+                                "can't be compared — pick two Spike 2 card "
+                                "images.")])]
         if (detect_spike1_game(path_a) is not None
                 or detect_spike1_game(path_b) is not None):
             return [("Error", [("Compare", "Spike 1 cards can't be compared "
@@ -828,7 +903,7 @@ class SternManufacturer(Manufacturer):
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games
         # partition, which neither a Whitestar ROM zip nor a Spike 1 card has.
-        if path.lower().endswith(".zip"):
+        if _rom_file(path):
             return []
         if detect_spike1_game(path) is not None:
             return []
@@ -839,8 +914,7 @@ class SternManufacturer(Manufacturer):
                            cache_dir=None, log=None, progress=None,
                            cancel=None):
         for path in (card, stock):
-            if path.lower().endswith(".zip") or \
-                    detect_spike1_game(path) is not None:
+            if _rom_file(path) or detect_spike1_game(path) is not None:
                 raise ValueError("Pick Spike 2 card images: %s isn't one."
                                  % os.path.basename(path))
         from .source_find import find_video_sources
@@ -868,8 +942,14 @@ class SternManufacturer(Manufacturer):
     def make_capture_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
                               **kwargs):
-        # Whitestar era: libpinmame attract-mode DMD capture (same as the
-        # Data East / Sega entries).
+        # Whitestar / SAM era: libpinmame attract-mode DMD capture (same as
+        # the Data East / Sega entries).
+        if self._era == "sam":
+            return _wscapture.SamCapturePipeline(
+                input_path, output_dir, log_cb, phase_cb, progress_cb,
+                done_cb, duration_seconds=kwargs.get("duration_seconds",
+                                                     180.0),
+                frame_cb=kwargs.get("frame_cb"), capture_ready_cb=None)
         return _wscapture.CapturePipeline(
             input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
             game_db=_WHITESTAR_DB,

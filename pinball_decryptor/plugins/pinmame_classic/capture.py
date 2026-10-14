@@ -14,6 +14,9 @@ the Williams plugin itself is left untouched.
 """
 
 import os
+import shutil
+import tempfile
+import zipfile
 
 from ...core.checksums import generate_checksums
 from ...core.pipeline_base import PipelineError
@@ -55,20 +58,25 @@ class CapturePipeline(_WilliamsCapture):
         if cap is not None:
             cap.request_stop()
 
-    def _run(self):
-        ph = iter(range(len(PHASES)))
-
-        # ---- Detect ----
-        self._set_phase(next(ph))
-        self._log("Detecting game...", "info")
+    def _resolve(self):
+        """``(key, info, rom_zip, rom_name)``: the game, and the zip and
+        romset PinMAME is to run.  MAME romset zips run as picked, named
+        for their romset."""
         key = detect_game(self.zip_path, self.game_db)
         if key is None:
             raise PipelineError(
                 "Detect",
                 f"Cannot identify a supported game from "
                 f"{os.path.basename(self.zip_path)}.")
-        info = self.game_db[key]
-        rom_name = self._guess_rom_name()
+        return key, self.game_db[key], self.zip_path, self._guess_rom_name()
+
+    def _run(self):
+        ph = iter(range(len(PHASES)))
+
+        # ---- Detect ----
+        self._set_phase(next(ph))
+        self._log("Detecting game...", "info")
+        key, info, rom_zip, rom_name = self._resolve()
         self._log(f"Game: {info['display']} ({info['manufacturer']}, "
                   f"{info['year']}, {info['dmd']} DMD) — rom {rom_name}",
                   "success")
@@ -98,7 +106,7 @@ class CapturePipeline(_WilliamsCapture):
         self._cap = cap
         try:
             result = cap.run(pc.CaptureConfig(
-                rom_zip_path=self.zip_path, rom_name=rom_name,
+                rom_zip_path=rom_zip, rom_name=rom_name,
                 duration_seconds=self.duration_seconds, sample_rate=48000,
                 capture_audio=True, capture_dmd=True,
                 simulate_gameplay=False,
@@ -155,3 +163,49 @@ class CapturePipeline(_WilliamsCapture):
             "Attract-mode capture: each anim_*.mp4 is a decoded DMD "
             "animation with synced audio.  Tick Auto-transcribe to name "
             "the audio by spoken text.")
+
+
+class SamCapturePipeline(CapturePipeline):
+    """The same capture for a Stern S.A.M. game (2006-2014).
+
+    The input is the game's ``.bin`` code update (bare, or in any zip),
+    matched by checksum (:mod:`.sam`), so it needn't be named for its
+    romset: it is staged as ``<romset>.zip`` for PinMAME first."""
+
+    def _resolve(self):
+        from . import sam
+        name = os.path.basename(self.zip_path)
+        m = sam.identify(self.zip_path)
+        if m is None:
+            raise PipelineError(
+                "Detect", f"{name} is not a Stern SAM game file.")
+        info = sam.SAM_GAME_DB[m.key]
+        if not m.runnable:
+            raise PipelineError(
+                "Detect",
+                f"{name} is {info['display']}, but a version PinMAME "
+                "doesn't have, so it can't run it.  PinMAME runs these "
+                f"versions: {', '.join(sam.known_versions(m.key))}.")
+        if m.exact:
+            self._log(f"  {name}: {m.title}", "info")
+        else:
+            self._log(f"  {name} is a {info['display']} version PinMAME "
+                      f"has no copy of; running it as {m.title}, the "
+                      "version of the same size.", "warning")
+        # Not under the game's output folder: that is checksummed before
+        # _run's cleanup, and the staged copy is no part of the capture.
+        self._stage_dir = stage_dir = tempfile.mkdtemp(prefix="pad_sam_")
+        self._log("  staging the game file for PinMAME...", "info")
+        try:
+            rom_zip = sam.stage(self.zip_path, m, stage_dir)
+        except (OSError, zipfile.BadZipFile) as e:
+            raise PipelineError("Detect", f"Reading {name} failed: {e}")
+        return m.key, info, rom_zip, m.romset
+
+    def _run(self):
+        self._stage_dir = None
+        try:
+            super()._run()
+        finally:
+            if self._stage_dir:
+                shutil.rmtree(self._stage_dir, ignore_errors=True)

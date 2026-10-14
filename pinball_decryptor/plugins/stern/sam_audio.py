@@ -18,6 +18,7 @@ The input is the ``.bin`` (The Walking Dead 1.05: ``.ebi``) as Stern
 ships it, or any zip holding one (``pinmame_classic.sam.identify``).
 """
 
+import importlib
 import os
 import re
 import wave
@@ -36,6 +37,19 @@ class SamAudioError(Exception):
 
 class SamAudioCancelled(SamAudioError):
     pass
+
+
+# The art written alongside the sounds: stern modules with
+# ``patch(image, data, assets_dir, log, progress, cancel) -> (changes,
+# written, skipped)`` and ``revert(data, assets_dir, rels, log) ->
+# (reverted, failed)``, each owning a top folder of the project.
+_ART_PARTS = ("sam_anim_assets",)
+_REVERT_PARTS = {"animations": "sam_anim_assets"}
+_ART_KEYS = {"sam_anim_assets": "animations"}
+
+
+def _part(name):
+    return importlib.import_module("." + name, __package__)
 
 
 _IDX_RE = re.compile(r"idx(\d{4,5})(?![0-9])", re.IGNORECASE)
@@ -174,9 +188,6 @@ def write_image(original_path, assets_dir, output_path, log=None,
     changed = _select_changed_wavs(assets_dir, log)
     gains = _slot_gains(assets_dir)
     log("Changed sounds: %d" % len(changed))
-    if not changed:
-        log("  ! no changed audio WAVs vs the extract baseline - the build "
-            "will be an unmodified copy of the original", "warning")
     build_db = _s1._build_gain_db()
     match_on = _s1._match_loudness_enabled()
     if build_db:
@@ -226,6 +237,23 @@ def write_image(original_path, assets_dir, output_path, log=None,
         if progress:
             progress(n + 1, len(items), "Encoding audio")
 
+    counts = {"audio": len(changes)}
+    for name in _ART_PARTS:
+        try:
+            part_changes, written, part_skipped = _part(name).patch(
+                image, data, assets_dir, log=log, progress=progress,
+                cancel=check)
+        except Exception as e:
+            if check():
+                raise SamAudioCancelled("cancelled")
+            raise SamAudioError(str(e))
+        changes += part_changes
+        skipped += part_skipped
+        counts[_ART_KEYS[name]] = written
+    if not any(counts.values()):
+        log("  ! nothing changed vs the extract baseline - the build will "
+            "be an unmodified copy of the original", "warning")
+
     if phase:
         phase(3)
     try:
@@ -248,18 +276,33 @@ def write_image(original_path, assets_dir, output_path, log=None,
         except OSError:
             pass
         raise
-    return {"audio": len(changes), "skipped": skipped}
+    counts["skipped"] = skipped
+    return counts
 
 
 def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
                   cancel=None):
-    """Re-decode the original WAVs for *rels* (``audio/idxNNNN.wav``, renamed
-    forms too) from the source file.  Returns ``(reverted, failed)``."""
+    """Re-decode the originals for *rels* from the source file: WAVs
+    (``audio/idxNNNN.wav``, renamed forms too), and the art parts' files
+    by their top folder.  Returns ``(reverted, failed)``."""
     log = log or (lambda *a, **k: None)
     check = cancel or (lambda: False)
     data, _match = read_image(source_path)
-    bank = _bank(data)
     reverted, failed = [], []
+    art = {}
+    for rel in rels:
+        top = rel.replace("\\", "/").split("/", 1)[0]
+        if top in _REVERT_PARTS:
+            art.setdefault(_REVERT_PARTS[top], []).append(rel)
+    for name, part_rels in art.items():
+        done, bad = _part(name).revert(data, assets_dir, part_rels, log=log)
+        reverted += done
+        failed += bad
+    rels = [r for r in rels
+            if r.replace("\\", "/").split("/", 1)[0] not in _REVERT_PARTS]
+    if not rels:
+        return reverted, failed
+    bank = _bank(data)
     for n, rel in enumerate(rels):
         if check():
             break

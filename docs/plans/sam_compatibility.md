@@ -140,8 +140,8 @@ runner standing by.").
 | area | state | effort |
 |---|---|---|
 | DMD animations | captured as MP4 by PinMAME (PAD-577) | -- |
-| Fonts + still pictures | found: ~2,200 records on TRON, 12-byte header (id, width, height) + one byte per pixel (16 shades, 0xFF transparent).  Replaceable in place at the same size | medium |
-| DMD animations as data | the other ~5 MB of the art area, not decoded | large |
+| Fonts + still pictures | found: ~2,200 records on TRON, 13-byte header (id, flags, width, height, format) + one byte per pixel (16 shades, 0xFF transparent).  Replaceable in place at the same size | medium (PAD-583) |
+| DMD animations as data | **built** (PAD-584, below) | -- |
 | Text / messages | plain ASCII in the code area, 5 languages; same-length edits only | small |
 | Default settings | the adjustment names are plain; their defaults are in the code's tables, as on Spike 1 | medium |
 | Emulate | PinMAME runs every title PAD can identify; a play tab with switches would build on the capture | medium |
@@ -150,3 +150,110 @@ So SAM is now at Spike 1's level for audio (Extract, Replace, Write,
 Revert, Mod Pack).  To reach BoF / JJP completeness the next steps are, in
 order of value for effort: still pictures and fonts (Replace Images),
 text, then the animation format.
+
+## DMD animations (built, PAD-584)
+
+Worked out from TRON 1.74's renderer (`0x2b194`: it reads the record's
+format byte and calls through a 16-byte-per-format function table in RAM,
+`0x40d8638` = file `0xd8638`, four variants per format: opaque, and the
+transparent / coloured blits), then checked on every title.
+
+**The graphics table.**  Four code literals, `font count, font table,
+graphics count, graphics table`, with `graphics table = font table + 20 *
+font count` (TRON: `0x36f44`; one scan of the first 2 MB finds them on 23
+of 24 titles, all but WPT).  The graphics table is bank pointers to
+records:
+
+| bytes | what |
+|---|---|
+| u32 | id: the frame cache matches its low 16 bits; the high half is a group (not a reliable still/frame flag: Metallica 1.64 sets it on every still, 1.70 on none) |
+| u32 | flags: 4 = keep the decoded frame cached; 1 / 2 = more delta frames follow |
+| s16, s16 | width, height (87 x 32 next to the score panel, 128 x 32 full screen; a few are taller and scroll) |
+| u8 | format |
+
+Decoded, every pixel is one byte, row by row: 0-15 shades, 0xFF clear.
+
+| format | what |
+|---|---|
+| 0 | raw bytes |
+| 12 | raw 4-bit, low nibble first |
+| 1 / 7 | run-length, down the columns / along the rows: byte `c` (0 ends), `n = c >> 2`; `c & 3` = 0: `n` literal bytes, 1: `n` zeros, 2: `n` x 0x0F, 3: one byte repeated `n` times |
+| 3 / 9 | delta on the previous frame, columns / rows: signed byte (0 ends), negative = skip that many pixels, positive = that many literal bytes |
+
+The 2008-2010 engine (CSI, Indiana Jones, Shrek, 24) numbers the row-order
+formats 8 and 10; their code is byte for byte format 7's and 9's.  The
+2006-2008 titles (WPT, Pirates, Family Guy, Wheel of Fortune) have only raw
+pictures with a 5-byte header (w, h, format) and no animation data.
+
+**The frame cache.**  Formats 1 / 7 / 12 first drop any cached frame with
+id - 1 or id, decode into a fresh buffer, and cache it when flag 4 is set.
+A delta finds the cached frame with id - 1, patches it in place, re-ids it,
+and keeps it cached while flags 2 or 4 are set.  So an animation is a
+keyframe followed by deltas.  Which frames play when is in the game code
+(loops over record numbers: TRON's logo is `for n in 1440..1475: draw(n,
+x=41); wait(5)`), not in the data.
+
+**Proof.**  Every compressed record of every title run through that
+title's own decompressors under an ARM emulator (Unicorn; the dispatch
+table and decompressors found automatically per title): 88,143 records on
+19 titles, 0 differ.  In PinMAME, attract-mode screens match decoded frames
+pixel for pixel (TRON's logo animation: 37 frames, every format).
+
+| title | records | animation frames |
+|---|---|---|
+| TRON: Legacy 1.74 LE | 8,181 | 4,150 |
+| Indiana Jones 2.10 | 9,414 | 7,702 |
+| Star Trek 1.61 LE | 8,620 | 6,780 |
+| The Walking Dead 1.56 LE | 9,474 | 6,792 |
+| X-Men 1.50 LE | 7,116 | 5,585 |
+| Metallica 1.64 / 1.70 | 6,987 | 4,937 |
+| AC/DC 1.68 LE | 7,362 | 4,329 |
+| Iron Man 1.83 VE | 7,555 | 3,568 |
+| The Avengers 1.70 | 5,409 | 3,443 |
+| Mustang 1.45 LE | 4,802 | 3,059 |
+| Big Buck Hunter Pro 1.70 | 4,610 | 2,244 |
+| Spider-Man 2.61 | 5,643 | 2,217 |
+| 24 1.50 | 3,641 | 1,549 |
+| CSI 2.40 | 2,918 | 1,296 |
+| The Rolling Stones 1.10 | 2,630 | 1,192 |
+| Avatar 2.00 | 5,405 | 844 |
+| Shrek 1.41 | 2,632 | 172 (its fonts' glyphs) |
+| Batman 2.94 | 3,719 | 0 (all raw pictures) |
+
+**What the app does.**  Extract writes every frame that isn't a plain
+picture to `animations/imgNNNN.png` (8-bit grey + alpha, shade `v` as
+`v * 17`, clear as alpha 0): the run-length and delta records, and any raw
+keyframe a delta builds on.  The plain raw pictures (format 0 / 12, no
+delta after them) are Replace Images' stills and fonts (PAD-583,
+`images/`); both use the same numbers.
+
+Write re-encodes each changed PNG, and every delta after it (against the
+frame now under it), with exact optimal encoders (dynamic programs over
+the stream grammar; never longer than Stern's own data; 347 of the first 600 TRON
+frames come out smaller) in the shortest format the record's place allows
+without changing what the frame cache does: a run-length keyframe may be
+either order or 4-bit; a delta may be either delta order, or a whole frame
+when its flags let the cache end the same way (flag 4, or no 2 / 4); raw
+stays raw; only formats the file already uses.
+
+**Space.**  The art area is packed solid (records end to end with 0-3
+bytes of padding, ~100 bytes free before the sounds), and the file can't
+grow (PinMAME loads each romset at its fixed size, and the 2006-2008
+boards have 256 Mbit flash).  So a frame goes into its own bytes, or, for
+records that nothing but the table points at (glyph arrays point at font
+records; a chance match only pins a record), the frames of a run of
+adjacent records share the run's bytes and the table is repointed.  When
+the edits still don't fit, the largest edited frame steps down to fewer
+shades (8, 4, 2) and then to its original, one frame at a time, until they
+do; the log names each one.  On all 18 titles, inverting the three longest
+animations and mirroring a frame wrote 2,081 frames exactly and one with
+8 shades; the written files decode the same through each game's own code.
+Through the app, inverted / stamped / mirrored animations played exactly as
+written in PinMAME on TRON (formats 1/3/7/9/12), Indiana Jones (8/10) and
+Mustang (2014, 128 MB).  Checksums: the section sums move by what changed
+and the file's own sum is recomputed, as for the sounds.
+
+**Limits.**  A whole new animation as busy as the original fits; one much
+busier loses shades.  Frame sizes and counts are the game's (the code
+draws each record at its own place).  Which animation plays where is in the
+code, not editable.

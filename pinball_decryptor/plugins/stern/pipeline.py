@@ -936,9 +936,10 @@ def _sam_game_line(path):
 
 
 class SamExtractPipeline(BasePipeline):
-    """Decode every sound in a SAM code update to a per-sound WAV."""
+    """Decode every sound in a SAM code update to a per-sound WAV, and
+    every DMD animation frame to a PNG."""
 
-    PHASES = ("Detect", "Decode audio", "Checksums")
+    PHASES = ("Detect", "Decode audio", "Decode animations", "Checksums")
 
     def __init__(self, input_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
@@ -949,7 +950,8 @@ class SamExtractPipeline(BasePipeline):
         self.duration_names = duration_names
 
     def _extract(self):
-        """Phases 0-1; returns the engine's summary."""
+        """Phases 0-2; returns the engine's summary (plus the animation
+        frame count, ``"frames"``)."""
         from . import sam_audio
 
         self._set_phase(0)  # Detect
@@ -964,10 +966,13 @@ class SamExtractPipeline(BasePipeline):
 
         self._set_phase(1)  # Decode audio
         os.makedirs(self.output_dir, exist_ok=True)
+
+        def log(msg, level="info"):
+            self._log(msg, level)
+
         try:
-            return sam_audio.extract_all(
-                self.input_path, self.output_dir,
-                log=lambda msg, level="info": self._log(msg, level),
+            result = sam_audio.extract_all(
+                self.input_path, self.output_dir, log=log,
                 progress=self._progress,
                 cancel=lambda: self._cancelled,
                 duration_names=self.duration_names)
@@ -977,11 +982,24 @@ class SamExtractPipeline(BasePipeline):
             raise
         except sam_audio.SamAudioError as e:
             raise PipelineError("Decode audio", str(e))
+        self._check_cancel()
+
+        from . import sam_anim_assets
+        self._set_phase(2)  # Decode animations
+        try:
+            data, _match = sam_audio.read_image(self.input_path)
+            result["frames"] = sam_anim_assets.extract_all(
+                data, self.output_dir, log=log, progress=self._progress,
+                cancel=lambda: self._cancelled)
+        except Exception as e:
+            self._check_cancel()   # a cancel raises PipelineError itself
+            raise PipelineError("Decode animations", str(e))
+        return result
 
     def _run(self):
         result = self._extract()
         self._check_cancel()
-        self._set_phase(2)  # Checksums
+        self._set_phase(3)  # Checksums
         discard_snapshots(self.output_dir)
         self._log("Generating checksums...", "info")
         self._progress(0, 0, "Generating checksums...")
@@ -989,9 +1007,12 @@ class SamExtractPipeline(BasePipeline):
                            progress_cb=self._progress,
                            cancel=lambda: self._cancelled)
         self._check_cancel()
+        frames = ""
+        if result["frames"]:
+            frames = " and %d animation frame(s)" % result["frames"]
         self._done(True,
-                   "Extracted %d SAM sound(s) (%.1f minutes of audio) -> %s"
-                   % (result["samples"], result["seconds"] / 60.0,
+                   "Extracted %d SAM sound(s) (%.1f minutes of audio)%s -> %s"
+                   % (result["samples"], result["seconds"] / 60.0, frames,
                       self.output_dir))
 
 
@@ -1000,8 +1021,9 @@ class SamExtractPlusCapturePipeline(BasePipeline):
     same folder (the Extract tab's Basic + Capture boxes both ticked).  The
     capture's own last step checksums the whole folder, WAVs included."""
 
-    PHASES = ("Detect", "Decode audio", "Probe libpinmame",
-              "Capture (attract mode)", "Segment + render", "Cleanup")
+    PHASES = ("Detect", "Decode audio", "Decode animations",
+              "Probe libpinmame", "Capture (attract mode)", "Segment + render",
+              "Cleanup")
 
     def __init__(self, input_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb, **capture_kwargs):
@@ -1035,13 +1057,17 @@ class SamExtractPlusCapturePipeline(BasePipeline):
         result = sounds._extract()
         self._inner = None
         self._check_cancel()
-        head = ("Sounds: %d WAV(s), %.1f minutes of audio, in audio/.\n\n"
+        head = ("Sounds: %d WAV(s), %.1f minutes of audio, in audio/.\n"
                 % (result["samples"], result["seconds"] / 60.0))
+        if result["frames"]:
+            head += ("Animations: %d frame(s) as PNGs, in animations/.\n"
+                     % result["frames"])
+        head += "\n"
 
         def remap(i):
             # the capture's Detect is ours; its later phases follow ours
             if i:
-                self._set_phase(i + 1)
+                self._set_phase(i + 2)
 
         cap = _capture.SamCapturePipeline(
             self.input_path, self.output_dir, self._log, remap,
@@ -1093,14 +1119,23 @@ class SamWritePipeline(BasePipeline):
         skipped = ""
         if result["skipped"]:
             skipped = " (%d skipped - see log)" % len(result["skipped"])
-        if result["audio"]:
-            summary = ("Wrote %d replaced sound(s)%s to %s.  Copy it to a "
-                       "USB stick and update the game from its service menu, "
-                       "the same way as Stern's own file."
-                       % (result["audio"], skipped, self.output_path))
+        sounds, frames = result["audio"], result.get("animations", 0)
+        usb = ("  Copy it to a USB stick and update the game from its service "
+               "menu, the same way as Stern's own file.")
+        # whole sentences, each its own in the translations
+        if sounds and frames:
+            summary = ("Wrote %d replaced sound(s) and %d animation frame(s)"
+                       "%s to %s." % (sounds, frames, skipped,
+                                      self.output_path)) + usb
+        elif sounds:
+            summary = ("Wrote %d replaced sound(s)%s to %s."
+                       % (sounds, skipped, self.output_path)) + usb
+        elif frames:
+            summary = ("Wrote %d animation frame(s)%s to %s."
+                       % (frames, skipped, self.output_path)) + usb
         else:
-            summary = ("No changed audio found - %s is an unmodified copy of "
-                       "the original%s" % (self.output_path, skipped))
+            summary = ("No changes found - %s is an unmodified copy of the "
+                       "original%s" % (self.output_path, skipped))
         self._done(True, summary)
 
 

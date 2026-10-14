@@ -195,11 +195,14 @@ def test_stern_detects_sam_and_switches_surface(manufacturers_by_key,
     assert (g.key, g.era) == ("mustang", "sam")
     s.set_era(g.era)
     assert s.current_era == "sam"
-    # capture of the DMD animations, plus (PAD-582) the sounds read and
-    # written straight from the code update
+    # capture of the DMD animations, plus (PAD-582) the sounds and
+    # (PAD-584) the animation frames read and written straight from the
+    # code update
     assert s.capabilities.capture and s.capabilities.write
+    assert s.capabilities.replace_image
     assert s.extract_input_label == "Game file"
-    assert s.extract_phases == ("Detect", "Decode audio", "Checksums")
+    assert s.extract_phases == ("Detect", "Decode audio",
+                                "Decode animations", "Checksums")
     assert s.title_caption(z, g) == "Mustang Limited Edition (V9.99)"
     odd = _zip(tmp_path / "mt_998h.zip", "mt_998h.bin", b"\x01" + PAYLOAD[1:])
     assert s.title_caption(odd, s.detect(odd)) == \

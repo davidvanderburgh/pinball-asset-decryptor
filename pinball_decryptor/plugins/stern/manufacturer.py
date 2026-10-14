@@ -145,13 +145,16 @@ _CAPTURE_ERAS = ("whitestar", "sam")
 # ...and, from PAD-582, every sound read straight out of the code update and
 # written back: Extract (the Basic box) decodes the game's own sound table to
 # WAVs, Replace Audio + Write re-encode edits into their slots in a copy of
-# the .bin (sam_audio.py).  The DMD art stays capture-only for now.
+# the .bin (sam_audio.py).  From PAD-584 the DMD animation frames too: PNGs
+# under animations/, re-encoded into the game's own frame formats on Write
+# (sam_anim_assets.py).
 _SAM_CAPS = Capabilities(
     extract=True,
     capture=True,
     write=True,
     modpack=True,
     replace_audio=True,
+    replace_image=True,
     audio_level_offset=True,
     transcribe=True,
     music_id=True,
@@ -547,7 +550,7 @@ class SternManufacturer(Manufacturer):
     # The Extract tab's Basic box, for SAM (the only Stern era with both a
     # basic extract and a capture): the sounds, and the capture runs attract
     # mode only.
-    capture_basic_label = "Basic extract (every sound, as WAVs)"
+    capture_basic_label = "Basic extract (every sound and animation frame)"
     capture_simulates_gameplay = False
 
     def capture_help_text(self, basic, capture):
@@ -555,7 +558,8 @@ class SternManufacturer(Manufacturer):
             return None
         if basic and capture:
             return ("Both: decodes every sound in the game file to a WAV "
-                    "(audio/), then runs the game in attract mode under "
+                    "(audio/) and every DMD animation frame to a PNG "
+                    "(animations/), then runs the game in attract mode under "
                     "PinMAME and records its DMD animations + audio as MP4s, "
                     "into the same project folder.  Capture requires "
                     "libpinmame.")
@@ -565,8 +569,10 @@ class SternManufacturer(Manufacturer):
                     "Most SAM games play no sound in attract mode.  Requires "
                     "libpinmame.")
         return ("Basic only: decodes every sound in the game file to a WAV "
-                "(audio/), ready for Replace Audio.  Tick \"Use PinMAME\" too "
-                "to ALSO record the DMD animations.")
+                "(audio/), ready for Replace Audio, and every DMD animation "
+                "frame to a PNG (animations/), ready for Replace Images.  "
+                "Tick \"Use PinMAME\" too to ALSO record the animations as "
+                "they play, as MP4s.")
     write_direct_button = "Write to SD card"
     direct_medium_noun = "SD card"
     # The card is small removable media in a reader — bias the picker away

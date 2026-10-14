@@ -717,6 +717,31 @@ def info_screen(names, prof):
                 words_rgba=(1.0, 1.0, 1.0, 1.0))
 
 
+#: PAD-574: a words-alone mode's TOTAL as the game's own modes end (James Bond: "TOTAL" over the number, large, under
+#: the status bar, where the info line was): two clear strips centred this far under the title's info line place, the
+#: word at the first size and the number at the second (measured off the game's own TOTAL at 1360x768: the word 18 px
+#: high about y 522, the number 56 px about y 565, both about x 676)
+TOTAL_ART = (920, 80)
+TOTAL_NAME_DY, TOTAL_NAME_SCALE = 12.0, 0.9
+TOTAL_DY, TOTAL_SCALE = 55.0, 2.8
+
+
+def total_screens(names, prof):
+    """PAD-574: the two screens of a words-alone mode's TOTAL (``PadMode_<slug>_TotalName`` and ``_Total``), built
+    blank (a screen is built shown, and a mode that never finds them must show nothing): the mode writes "TOTAL" and its
+    number into them at its end and shows them for its moment."""
+    w, h = TOTAL_ART
+    cx, cy = getattr(prof, "info_at", ()) or INFO_AT_DEFAULT
+    out = []
+    for node, text, dy, scale in ((names["total_name_node"], names["total_name_text"], TOTAL_NAME_DY, TOTAL_NAME_SCALE),
+                                  (names["total_node"], names["total_text"], TOTAL_DY, TOTAL_SCALE)):
+        out.append(dict(name=node, art_rgba=np.zeros((h, w, 4), dtype=np.uint8), words=" ",
+                        words_name=text.split(".", 1)[1], x=cx - w / 2.0, y=cy + dy - h / 2.0,
+                        words_at=(w / 2.0 - w * scale / 2.0, h / 2.0 + 16.0 * scale), words_scale=scale,
+                        words_rgba=(1.0, 1.0, 1.0, 1.0)))
+    return out
+
+
 #: PAD-323: what a mode's ``screen_layout`` holds (MODE_PARAMETERS.md), all optional: the
 #: picture's top-left on the glass, the whole screen's size, the words' place on the picture and
 #: their own size, and the HUD scene's root child the screen is drawn under (0 = under all of it)
@@ -833,8 +858,12 @@ def _code_screens(project, code, prof):
     out = [with_layout(code_screen(project, slug, spec), getattr(spec, "screen_layout", None))
            for slug, spec in code or () if spec.screen and prof.can("screen")]
     # PAD-547: a mode's info line, a screen of its own wherever the title's port puts one
-    return out + [with_layout(info_screen(MP.asset_names(slug), prof), getattr(spec, "info_layout", None))
-                  for slug, spec in code or () if getattr(spec, "info_line", False) and prof.can("screen")]
+    out += [with_layout(info_screen(MP.asset_names(slug), prof), getattr(spec, "info_layout", None))
+            for slug, spec in code or () if getattr(spec, "info_line", False) and prof.can("screen")]
+    # PAD-574: a words-alone screen's TOTAL, where the game's own modes put theirs
+    return out + [s for slug, spec in code or ()
+                  if spec.screen and getattr(spec, "screen_style", "") == "words" and prof.can("screen")
+                  for s in total_screens(MP.asset_names(slug), prof)]
 
 
 def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None,

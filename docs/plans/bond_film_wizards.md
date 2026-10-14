@@ -206,7 +206,11 @@ Done in run 2 (all nine now):
   name in the bar under the TV in its colour, the clock as the wipe (the game's own modes show their clock this way;
   Goldfinger's three-digit countdown is that mode's own bomb counter, not a general timer), full through its total.
 - (2)/(9) a mode's own screen "as words over the video" (`screen_style` words): its name large and white over its intro
-  for 4 s, a Words block's line for 3 s, its TOTAL over its end clip for 3 s. The game's own TOTAL is a blocking end
+  for 4 s, a Words block's line for 3 s, its TOTAL over its end clip for 3 s. PAD-574: the TOTAL now as the game's own modes end:
+  two screens of its own (`PadMode_<slug>_TotalName` / `_Total`, built blank at the port's `info_line_at` + 12 / + 55 px,
+  the word at 0.9 and the number at 2.8, measured off the game's own TOTAL), "TOTAL" over the number under the bar for
+  3 s, its words screen hidden; an Award block with no HUD shows on its words screen, and an End the mode after one
+  waits out that Award (and one Award of When the mode ends after it) before the TOTAL. The game's own TOTAL is a blocking end
   sequence that draws its own frames (Goldfinger 0xc0b50: the score display, the total scene 16d675aa, a frame, until
   done), which a mode cannot borrow.
 - The loop takes the TV at once when asked or after a full-screen clip of the mode's, and back from the game's

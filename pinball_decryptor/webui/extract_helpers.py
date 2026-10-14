@@ -80,11 +80,18 @@ CAPTURE_BASIC_HELP = (
 CAPTURE_NEITHER_HELP = "Tick at least one box above to run an extract."
 
 
-def capture_help(caps, basic, capture):
+def capture_help(caps, basic, capture, mfr=None):
     """(text, kind) for the grey help paragraph under the capture rows
-    (``_update_capture_help_text``); kind "err" is the red variant."""
+    (``_update_capture_help_text``); kind "err" is the red variant.  A
+    plugin's own ``capture_help_text`` wins when it has words for the
+    combination."""
     if caps is not None and caps.capture and not caps.extract:
         return CAPTURE_PRIMARY_HELP, ""
+    own = getattr(mfr, "capture_help_text", None)
+    text = own(basic, capture) if callable(own) and (basic or capture) \
+        else None
+    if text:
+        return text, ""
     if basic and capture:
         return CAPTURE_COMBINED_HELP, ""
     if capture and not basic:

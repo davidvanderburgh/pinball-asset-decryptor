@@ -601,6 +601,17 @@ class Manufacturer(ABC):
     # Defaults match JJP's historical wording (mirrors the standalone JJP
     # decryptor); override per manufacturer to track the destination radio.
     write_build_button: str = "Build update"        # build-image / ISO mode
+    # Extract tab, for plugins with both a basic extract and a PinMAME
+    # capture (Williams): the Basic box's words, and whether the capture's
+    # "Simulate gameplay" box applies (it drives per-game shot scripts).
+    capture_basic_label: str = (
+        "Basic extract (raw ROM asset bitmaps + animation MP4s)")
+    capture_simulates_gameplay: bool = True
+
+    def capture_help_text(self, basic, capture):
+        """The grey help under the Extract tab's capture boxes for this
+        combination, or None for the shared wording."""
+        return None
     write_direct_button: str = "Apply Modifications"  # write-to-medium mode
 
     # Generic noun for the physical medium in Direct-from-device mode, used

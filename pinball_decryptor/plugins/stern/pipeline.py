@@ -916,3 +916,225 @@ class Spike1RevertPipeline(BasePipeline):
             msg += (" %d could not be restored (re-extract to reset those)."
                     % len(failed))
         self._done(True, msg)
+
+
+# --------------------------------------------------------------------------
+# SAM (2006-2014 DMD generation)
+# --------------------------------------------------------------------------
+# A SAM game is one .bin code update; its sounds are IMA ADPCM samples the
+# game's own script engine plays (sam_audio.py, pinmame_classic/sam_sound.py),
+# so Extract and Write need nothing but numpy.
+
+def _sam_game_line(path):
+    from ..pinmame_classic import sam
+    m = sam.identify(path)
+    if m is None:
+        return None
+    info = sam.SAM_GAME_DB[m.key]
+    return "%s (%s)" % (info["display"], m.title if m.exact
+                        else "a version PinMAME has no copy of")
+
+
+class SamExtractPipeline(BasePipeline):
+    """Decode every sound in a SAM code update to a per-sound WAV."""
+
+    PHASES = ("Detect", "Decode audio", "Checksums")
+
+    def __init__(self, input_path, output_dir,
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 extract_categories=None, duration_names=False):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.input_path = input_path
+        self.output_dir = output_dir
+        self.duration_names = duration_names
+
+    def _extract(self):
+        """Phases 0-1; returns the engine's summary."""
+        from . import sam_audio
+
+        self._set_phase(0)  # Detect
+        game = _sam_game_line(self.input_path)
+        if game is None:
+            raise PipelineError(
+                "Detect",
+                "Not a Stern SAM game file (the .bin code update, or a zip "
+                "holding one).")
+        self._log("Detected: SAM, %s" % game, "success")
+        self._check_cancel()
+
+        self._set_phase(1)  # Decode audio
+        os.makedirs(self.output_dir, exist_ok=True)
+        try:
+            return sam_audio.extract_all(
+                self.input_path, self.output_dir,
+                log=lambda msg, level="info": self._log(msg, level),
+                progress=self._progress,
+                cancel=lambda: self._cancelled,
+                duration_names=self.duration_names)
+        except sam_audio.SamAudioCancelled:
+            self._cancelled = True
+            self._check_cancel()   # raises PipelineError("Cancelled", ...)
+            raise
+        except sam_audio.SamAudioError as e:
+            raise PipelineError("Decode audio", str(e))
+
+    def _run(self):
+        result = self._extract()
+        self._check_cancel()
+        self._set_phase(2)  # Checksums
+        discard_snapshots(self.output_dir)
+        self._log("Generating checksums...", "info")
+        self._progress(0, 0, "Generating checksums...")
+        generate_checksums(self.output_dir, log_cb=self._log,
+                           progress_cb=self._progress,
+                           cancel=lambda: self._cancelled)
+        self._check_cancel()
+        self._done(True,
+                   "Extracted %d SAM sound(s) (%.1f minutes of audio) -> %s"
+                   % (result["samples"], result["seconds"] / 60.0,
+                      self.output_dir))
+
+
+class SamExtractPlusCapturePipeline(BasePipeline):
+    """The sounds, then the PinMAME capture of the DMD animations, into the
+    same folder (the Extract tab's Basic + Capture boxes both ticked).  The
+    capture's own last step checksums the whole folder, WAVs included."""
+
+    PHASES = ("Detect", "Decode audio", "Probe libpinmame",
+              "Capture (attract mode)", "Segment + render", "Cleanup")
+
+    def __init__(self, input_path, output_dir,
+                 log_cb, phase_cb, progress_cb, done_cb, **capture_kwargs):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.input_path = input_path
+        self.output_dir = output_dir
+        self.capture_kwargs = capture_kwargs
+        self._inner = None
+
+    def cancel(self):
+        super().cancel()
+        if self._inner is not None:
+            self._inner.cancel()
+
+    # run(), not _run(): the capture pipeline fires the one done_cb.
+    def run(self):
+        try:
+            self._do_work()
+        except PipelineError as e:
+            self._done(False, e.message)
+        except Exception as e:
+            self._done(False, "Unexpected error: %s" % e)
+
+    def _do_work(self):
+        from ..pinmame_classic import capture as _capture
+
+        sounds = SamExtractPipeline(
+            self.input_path, self.output_dir, self._log, self._set_phase,
+            self._progress, lambda ok, msg: None)
+        self._inner = sounds
+        result = sounds._extract()
+        self._inner = None
+        self._check_cancel()
+        head = ("Sounds: %d WAV(s), %.1f minutes of audio, in audio/.\n\n"
+                % (result["samples"], result["seconds"] / 60.0))
+
+        def remap(i):
+            # the capture's Detect is ours; its later phases follow ours
+            if i:
+                self._set_phase(i + 1)
+
+        cap = _capture.SamCapturePipeline(
+            self.input_path, self.output_dir, self._log, remap,
+            self._progress, lambda ok, msg: self._done(ok, head + msg),
+            **self.capture_kwargs)
+        self._inner = cap
+        cap.run()
+
+
+class SamWritePipeline(BasePipeline):
+    """Re-encode edited WAVs into a copy of a SAM code update: each fit to
+    its slot's rate and length and loudness-matched to the original, and
+    the file's checksums moved with it, so it updates a machine by USB."""
+
+    PHASES = ("Detect", "Stage", "Encode audio", "Write file")
+
+    def __init__(self, original_path, assets_dir, output_path,
+                 log_cb, phase_cb, progress_cb, done_cb):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.original_path = original_path
+        self.assets_dir = assets_dir
+        self.output_path = output_path
+
+    def _run(self):
+        from . import sam_audio
+
+        self._set_phase(0)  # Detect
+        game = _sam_game_line(self.original_path)
+        if game is None:
+            raise PipelineError(
+                "Detect", "Original is not a Stern SAM game file.")
+        self._log("Original: SAM, %s" % game, "info")
+        self._check_cancel()
+
+        self._set_phase(1)  # Stage (diff vs baseline happens inside)
+        try:
+            result = sam_audio.write_image(
+                self.original_path, self.assets_dir, self.output_path,
+                log=lambda msg, level="info": self._log(msg, level),
+                progress=self._progress,
+                cancel=lambda: self._cancelled,
+                phase=self._set_phase)
+        except sam_audio.SamAudioCancelled:
+            self._cancelled = True
+            self._check_cancel()   # raises PipelineError("Cancelled", ...)
+            return
+        except sam_audio.SamAudioError as e:
+            raise PipelineError("Write file", str(e))
+        skipped = ""
+        if result["skipped"]:
+            skipped = " (%d skipped - see log)" % len(result["skipped"])
+        if result["audio"]:
+            summary = ("Wrote %d replaced sound(s)%s to %s.  Copy it to a "
+                       "USB stick and update the game from its service menu, "
+                       "the same way as Stern's own file."
+                       % (result["audio"], skipped, self.output_path))
+        else:
+            summary = ("No changed audio found - %s is an unmodified copy of "
+                       "the original%s" % (self.output_path, skipped))
+        self._done(True, summary)
+
+
+class SamRevertPipeline(BasePipeline):
+    """Re-decode pristine WAVs for specific slots from the source file - the
+    no-``.orig``-snapshot Revert fallback."""
+
+    def __init__(self, source, assets_dir, rels,
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 is_device=False, partition_override=None):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.source = source
+        self.assets_dir = assets_dir
+        self.rels = list(rels)
+
+    def _run(self):
+        from . import sam_audio
+
+        self._set_phase(0)  # Read source
+        if not self.rels:
+            self._done(True, "Nothing to restore from the source file.")
+            return
+        try:
+            reverted, failed = sam_audio.revert_assets(
+                self.source, self.assets_dir, self.rels,
+                log=lambda msg, level="info": self._log(msg, level),
+                progress=self._progress,
+                cancel=lambda: self._cancelled)
+        except sam_audio.SamAudioError as e:
+            raise PipelineError("Read source", str(e))
+        self._set_phase(1)  # Restore
+        msg = "Restored %d original file(s) from the game file." \
+            % len(reverted)
+        if failed:
+            msg += (" %d could not be restored (re-extract to reset those)."
+                    % len(failed))
+        self._done(True, msg)

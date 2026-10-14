@@ -235,6 +235,7 @@ class ExtractTab(TabService):
                  badge=None, detected=None, extensions=[],
                  asset_filters=False, dongle_cap=False,
                  capture_cap=False, capture_primary=False,
+                 basic_label="", gameplay_cap=True,
                  capture_help="", capture_help_kind="",
                  decode_show=False, decode_label="",
                  deltas_show=False, deltas_help=H.DEFAULT_DELTAS_HELP,
@@ -290,6 +291,9 @@ class ExtractTab(TabService):
             capture_cap=bool(getattr(caps, "capture", False)),
             capture_primary=bool(getattr(caps, "capture", False)
                                  and not getattr(caps, "extract", False)),
+            basic_label=getattr(mfr, "capture_basic_label", "") or "",
+            gameplay_cap=bool(getattr(mfr, "capture_simulates_gameplay",
+                                      True)),
             badge=None, detected=None, card_line="",
             # game-aware rows wait for the input probe below
             decode_show=False, deltas_show=False,
@@ -402,7 +406,7 @@ class ExtractTab(TabService):
             self.set(capture_help="", capture_help_kind="")
             return
         text, kind = H.capture_help(caps, self.static_extract_var.get(),
-                                    self.capture_mode_var.get())
+                                    self.capture_mode_var.get(), self.mfr)
         self.set(capture_help=text, capture_help_kind=kind)
 
     def _update_option_visibility(self):

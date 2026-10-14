@@ -30,6 +30,10 @@ knowing about it, and a new tab or message needs nothing but a catalog entry.
   the Spanish. The catalogs carry each such key spelled out instead
   (`{} file` / `{} files`, `{} copy` / `{} copies`); the spelled-out entry
   has more words of its own, so it is tried first.
+- **Sentences put together** ("A." + " B.") that are not in the catalog
+  whole are looked up a sentence at a time, and translated only when every
+  sentence is known. A path is never translated, and the design's monospace
+  face (paths, file names, numbers, code) is left alone.
 - **The ? window** is laid out by Python (`tips_render.py`), and bold and
   links split its sentences into runs; so Python translates each block whole
   first, with the same lookup (`webui/i18n.py`). Heading anchors stay the
@@ -51,10 +55,14 @@ knowing about it, and a new tab or message needs nothing but a catalog entry.
 ## The catalogs
 
 `scripts/i18n_extract.py` harvests the strings: the page's JavaScript
-(template text and string literals) and the Python behind the tabs (webui/,
-app.py, core/) read with `ast`, f-strings and %-formats turned into
-templates; the ? window's words a block at a time, as the window looks them
-up. About 9,800 strings; each catalog translates about 9,200 of them (the
+(template text, label attributes and string literals, read by a small
+scanner that follows html`...` templates nested in each other's holes, and
+`"text " + value + " more"` chains joined into one template, either side of
+a `cond ? "a" : "b"` spelled out); the Python behind the tabs (webui/,
+app.py, core/) read with `ast`, f-strings, %-formats and `+` chains turned
+into templates; the manufacturer plugins (phases, notes, labels, the Modes
+tab's words) with log calls and anything code-like left out; and the ?
+window's words a block at a time, as the window looks them up. About 13,300 strings; each catalog translates about 12,000 of them (the
 rest are code, file patterns and names, left out on purpose).
 
 Adding strings later (a new tab, a new message):

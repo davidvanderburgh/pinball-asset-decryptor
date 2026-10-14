@@ -31,19 +31,39 @@ const CACHE_MAX = 20000;
 const own = new WeakMap();     // text node -> {src, out}: what we put there, and its English
 const ownAttr = new WeakMap(); // element -> {attr: {src, out}}
 const ATTRS = ["placeholder"];
-const SKIP = 'textarea, script, style, code, .notr, [translate="no"], [contenteditable="true"]';
+// .mono is the design's face for paths, file names, numbers and code
+const SKIP = 'textarea, script, style, code, .mono, .notr, [translate="no"], [contenteditable="true"]';
 
-const WS = /[\s ]+/g;
+const WS = /[\s\u00a0]+/g;
 // a template needs this many letters of its own (webui/i18n.py MIN_LETTERS)
 const MIN_LETTERS = 4;
 // an English grammar word or plural ending in a hole ("{} file{}" with "s",
 // "it {} not" with "does") would land in the translation as English: such a
 // match is no match, and the text stays English, whole (webui/i18n.py _GRAMMAR)
 const GRAMMAR = /^(?:s|es|ies|y|is|are|was|were|does|do|did|has|have|it|its|they|them|their|this|these|that|those|one|isn't|aren't|doesn't|don't)$/i;
+const TWO_WORDS = /[A-Za-z]+\s+[A-Za-z]+/;
+const SHAPE = /[()—:;,]/;
+// where one sentence ends and the next starts
+const SENTENCE = /(?<=[.!?])\s+(?=[A-Z"“(])/;
+// a path is a path in every language
+const PATH = /^(?:[A-Za-z]:[\\/]|\\\\|\/[\w.-]+\/)/;
 const norm = (s) => s.replace(WS, " ").trim();
 const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function currentLanguage() { return lang; }
+
+// Whether a template (its literal *parts* around the holes) has words enough
+// of its own: "{} of {}" would turn a game called "House of Horrors" into
+// "House de Horrors", "{} mode{}" a folder "heisei modes" into "heisei modos".
+function templateOk(parts) {
+  if ((parts.join("").match(/[A-Za-z]/g) || []).length < MIN_LETTERS) return false;
+  // open at both ends: two words side by side of its own, or a word with some
+  // shape around it ("{} file(s) — {}")
+  if (parts[0] === "" && parts[parts.length - 1] === "") {
+    return parts.some((p) => TWO_WORDS.test(p) || (/[A-Za-z]/.test(p) && SHAPE.test(p)));
+  }
+  return true;
+}
 
 export function compile(mapping) {
   const exact = new Map(), buckets = new Map(), general = [];
@@ -52,8 +72,7 @@ export function compile(mapping) {
     const k = norm(k0);
     if (!k.includes("{}")) { exact.set(k, v); continue; }
     const parts = k.split("{}");
-    // "{} of {}" would turn a game called "House of Horrors" into "House de Horrors"
-    if ((parts.join("").match(/[A-Za-z]/g) || []).length < MIN_LETTERS) continue;
+    if (!templateOk(parts)) continue;
     const lit = parts.reduce((n, p) => n + p.trim().length, 0);
     const entry = { lit, rx: new RegExp("^" + parts.map(escRe).join("(.*?)") + "$", "s"), v };
     let b = null;
@@ -62,12 +81,24 @@ export function compile(mapping) {
     if (b) { if (!buckets.has(b)) buckets.set(b, []); buckets.get(b).push(entry); }
     else general.push(entry);
   }
-  for (const list of [...buckets.values(), general]) list.sort((a, b) => b.lit - a.lit);
   return { exact, buckets, general };
 }
 
-function fill(c, v, groups) {
-  groups = groups.map((g) => { const t = c.exact.get(g.trim()); return t === undefined ? g : t; });
+// A hole's words, translated when they are words the catalog has ("the
+// Audio tab" by "The {} tab").
+function hole(c, g, depth) {
+  const w = g.trim();
+  if (depth > 1 || !/[A-Za-z]/.test(w)) return g;
+  let got = lookup(c, w, depth + 1);
+  if (got == null && /^[a-z]/.test(w)) {
+    got = lookup(c, w[0].toUpperCase() + w.slice(1), depth + 1);
+    if (got != null) got = got[0].toLowerCase() + got.slice(1);
+  }
+  return got == null ? g : g.replace(w, got);
+}
+
+function fill(c, v, groups, depth) {
+  groups = groups.map((g) => hole(c, g, depth));
   let i = 0;
   return v.replace(/\{(\d*)\}/g, (_, n) => {
     const at = n === "" ? i++ : Number(n);
@@ -76,16 +107,26 @@ function fill(c, v, groups) {
 }
 
 // The translation of one line of text in catalog *c*, or null.
-export function lookup(c, text) {
+export function lookup(c, text, depth = 0) {
   const s = norm(text);
-  if (!s || !c) return null;
+  if (!s || !c || PATH.test(s)) return null;
   const hit = c.exact.get(s);
   if (hit !== undefined) return hit;
+  // the most specific template first, whichever bucket it came from
   const cands = [...(c.buckets.get("p" + s.slice(0, 2)) || []),
-    ...(c.buckets.get("s" + s.slice(-2)) || []), ...c.general];
+    ...(c.buckets.get("s" + s.slice(-2)) || []), ...c.general].sort((a, b) => b.lit - a.lit);
   for (const e of cands) {
     const m = e.rx.exec(s);
-    if (m && !m.slice(1).some((g) => GRAMMAR.test(g))) return fill(c, e.v, m.slice(1));
+    if (m && !m.slice(1).some((g) => GRAMMAR.test(g))) return fill(c, e.v, m.slice(1), depth);
+  }
+  // sentences the app put together ("A." + " B."): each one the catalog
+  // knows, or none of them
+  if (depth === 0) {
+    const parts = s.split(SENTENCE);
+    if (parts.length > 1) {
+      const out = parts.map((p) => (/[A-Za-z]/.test(p) ? lookup(c, p, 1) : p));
+      if (out.every((o) => o != null)) return out.join(" ");
+    }
   }
   return null;
 }
@@ -101,7 +142,7 @@ export function t(text) {
   if (s.includes("\n")) {
     got = s.split("\n").map((ln) => t(ln)).join("\n");
   } else {
-    const lead = s.match(/^[\s ]*/)[0], tail = s.match(/[\s ]*$/)[0];
+    const lead = s.match(/^[\s\u00a0]*/)[0], tail = s.match(/[\s\u00a0]*$/)[0];
     const tr = lookup(cat, s);
     got = tr == null ? s : lead + tr + tail;
   }

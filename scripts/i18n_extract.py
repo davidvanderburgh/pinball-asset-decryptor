@@ -20,6 +20,7 @@ page never shows costs nothing but catalog space.
 
 import argparse
 import ast
+import itertools
 import json
 import os
 import re
@@ -33,6 +34,7 @@ I18N = os.path.join(WEBUI, "static", "i18n")
 #: Python sources whose strings reach the page
 PY_ROOTS = [WEBUI, os.path.join(PKG, "app.py"), os.path.join(PKG, "core")]
 JS_ROOT = os.path.join(WEBUI, "static", "js")
+PLUGINS = os.path.join(PKG, "plugins")
 
 #: calls whose string arguments never reach the page (or only the log,
 #: which stays English so support reports read the same everywhere)
@@ -146,9 +148,17 @@ class _PyVisitor(ast.NodeVisitor):
                     stack += [n.right, n.left]
                 else:
                     ops.append(n)
-            lits = [isinstance(o, ast.Constant) and isinstance(o.value, str) for o in ops]
-            if any(lits) and not all(lits):
-                self.out.append("".join(o.value if lit else "{}" for o, lit in zip(ops, lits)))
+            def texts(o):           # a literal, either side of a "a" if c else "b", or a hole
+                if isinstance(o, ast.Constant) and isinstance(o.value, str):
+                    return [o.value]
+                if (isinstance(o, ast.IfExp) and all(isinstance(x, ast.Constant) and isinstance(x.value, str)
+                                                     for x in (o.body, o.orelse))):
+                    return [o.body.value, o.orelse.value]
+                return None
+            alts = [texts(o) for o in ops]
+            if any(alts) and not all(a is not None and len(a) == 1 for a in alts):
+                for combo in itertools.islice(itertools.product(*[a or ["{}"] for a in alts]), 8):
+                    self.out.append("".join(combo))
         self.generic_visit(node)
 
     def visit_JoinedStr(self, node):
@@ -169,15 +179,41 @@ class _PyVisitor(ast.NodeVisitor):
         self.out.append(node.value)
 
 
-def py_strings(path):
+def py_strings(path, plugin=False):
     try:
         with open(path, encoding="utf-8") as f:
             tree = ast.parse(f.read(), path)
     except (SyntaxError, UnicodeDecodeError, OSError):
         return []
-    v = _PyVisitor()
+    v = _PluginVisitor() if plugin else _PyVisitor()
     v.visit(tree)
     return v.out
+
+
+#: a plugin call whose words only reach the log (which stays English)
+_LOGLIKE = re.compile(r"log|emit|print|warn|debug|status|progress|_cb$|^cb$|^say$", re.I)
+_CODEISH = re.compile(r"[;=#\\]|->|/\*|\*/|0x|\bx\{\}|\{\}x|\w_\w|\w\.\w+\(|\(\)|\[\{\}\]|&|\$"
+                      r"|^[a-z_]+\s*\(|\b(?:fn|obj|ctor|vtable|imm|mask|int|char|void|const|"
+                      r"struct|ptr|addr)\b")
+
+
+class _PluginVisitor(_PyVisitor):
+    def visit_Call(self, node):
+        f = node.func
+        name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+        if name and _LOGLIKE.search(name):
+            self._mark(node)
+            return
+        super().visit_Call(node)
+
+
+def plugin_words(key):
+    """A plugin string worth a catalog entry: words, not code or notes."""
+    if _CODEISH.search(key) or key.isupper():
+        return False
+    if not re.search(r"[A-Za-z]{3,}", key.replace("{}", "")):
+        return False
+    return len(key.split()) >= 2 or bool(re.fullmatch(r"[A-Z][a-z]+", key))
 
 
 def _js_unescape(s):
@@ -307,18 +343,33 @@ def js_strings(path):
             out.append(SHOWN + a.group(1))
     # "Nothing has been extracted into " + ps.name + " yet": one sentence
     for m in _JS_CHAIN.finditer(scan.code):
-        ops = re.split(r"\s*\+\s*", m.group(0))
-        if not any(o[:1] in "\"'" for o in ops) or all(o[:1] in "\"'" for o in ops):
+        ops = [o.strip() for o in _JS_PLUS.split(m.group(0))]
+        # each operand's possible texts: a literal, either side of a
+        # (cond ? "a" : "b"), or a hole
+        alts = []
+        for o in ops:
+            t = re.fullmatch(_JS_TERN, o)
+            if o[:1] in "\"'":
+                alts.append([_js_unescape(o[1:-1])])
+            elif t:
+                alts.append([_js_unescape(t.group(1)[1:-1]), _js_unescape(t.group(2)[1:-1])])
+            else:
+                alts.append(None)
+        if all(a is None for a in alts) or all(a is not None and len(a) == 1 for a in alts):
             continue
-        got = "".join(_js_unescape(o[1:-1]) if o[:1] in "\"'" else "{}" for o in ops)
-        if not re.search(r"[A-Za-z]\{\}[A-Za-z]", got):   # not a "Shift+Enter" inside a string
-            out.append(got)
+        for combo in itertools.islice(itertools.product(*[a or ["{}"] for a in alts]), 8):
+            got = "".join(combo)
+            if not re.search(r"[A-Za-z]\{\}[A-Za-z]", got):   # not a "Shift+Enter" inside a string
+                out.append(got)
     return out
 
 
 _JS_LIT = r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\''
 _JS_EXPR = r"[A-Za-z_$][\w$]*(?:\([^()\"'\n]*\))?(?:\.[A-Za-z_$][\w$]*(?:\([^()\"'\n]*\))?|\[[^\[\]\"'\n]*\])*"
-_JS_OPER = "(?:%s|%s)" % (_JS_LIT, _JS_EXPR)
+_JS_TERN = r"\(\s*[^()\"'\n?:]+\?\s*(%s)\s*:\s*(%s)\s*\)" % (_JS_LIT, _JS_LIT)
+_JS_OPER = "(?:%s|%s|%s)" % (_JS_LIT, _JS_TERN, _JS_EXPR)
+#: a + between operands (never one inside a string)
+_JS_PLUS = re.compile(r"\s*\+\s*(?=(?:[^\"']|\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')*$)")
 _JS_CHAIN = re.compile(r"%s(?:\s*\+\s*%s)+" % (_JS_OPER, _JS_OPER))
 
 
@@ -371,6 +422,18 @@ def harvest():
     for path in files:
         for s in py_strings(path):
             _add(seen, s, path)
+    # the manufacturer plugins: their phases, notes, field labels and the
+    # Modes tab's words, among a great deal of code and reverse-engineering
+    # notes, so only what reads like a sentence or a label is kept
+    for dp, dn, fn in os.walk(PLUGINS):
+        dn[:] = [d for d in dn if d != "__pycache__"]
+        for f in fn:
+            if f.endswith(".py"):
+                path = os.path.join(dp, f)
+                for s in py_strings(path, plugin=True):
+                    for line in str(s).split("\n"):
+                        if plugin_words(as_template(" ".join(line.split()))):
+                            _add(seen, line, path)
     for dp, dn, fn in os.walk(JS_ROOT):
         dn[:] = [d for d in dn if d != "vendor"]
         for f in fn:

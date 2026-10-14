@@ -49,6 +49,12 @@ _GRAMMAR = re.compile(r"^(?:s|es|ies|y|is|are|was|were|does|do|did|has|have|"
                       r"it|its|they|them|their|this|these|that|those|one|"
                       r"isn't|aren't|doesn't|don't)$", re.I)
 _HOLE = re.compile(r"\{(\d*)\}")
+_TWO_WORDS = re.compile(r"[A-Za-z]+\s+[A-Za-z]+")
+_SHAPE = re.compile(r"[()—:;,]")
+#: where one sentence ends and the next starts
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"“(])")
+#: a path is a path in every language
+_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/[\w.-]+/)")
 
 
 def normalize(text):
@@ -76,9 +82,9 @@ class Catalog:
                 self.exact[key] = value
                 continue
             parts = key.split("{}")
+            if not template_ok(parts):
+                continue
             lit = sum(len(p.strip()) for p in parts)
-            if len(_LETTER.findall("".join(parts))) < MIN_LETTERS:
-                continue                  # "{} of {}" would match a game's name
             rx = re.compile("^" + "(.*?)".join(re.escape(p) for p in parts) + "$",
                             re.S)
             entry = (lit, rx, value)
@@ -88,8 +94,6 @@ class Catalog:
                 self.buckets.setdefault("s" + parts[-1][-2:], []).append(entry)
             else:
                 self.general.append(entry)
-        for b in list(self.buckets.values()) + [self.general]:
-            b.sort(key=lambda e: -e[0])
 
     def __len__(self):
         return len(self.exact) + len(self.general) + sum(
@@ -98,22 +102,43 @@ class Catalog:
     def lookup(self, text, _depth=0):
         """The translation of *text*, or None."""
         s = normalize(text)
-        if not s:
+        if not s or _PATH.match(s):
             return None
         got = self.exact.get(s)
         if got is not None:
             return got
-        cands = (self.buckets.get("p" + s[:2], []) + self.buckets.get("s" + s[-2:], [])
-                 + self.general)
+        # the most specific template first, whichever bucket it came from
+        cands = sorted(self.buckets.get("p" + s[:2], []) + self.buckets.get("s" + s[-2:], [])
+                       + self.general, key=lambda e: -e[0])
         for _lit, rx, value in cands:
             m = rx.match(s)
             if m and not any(_GRAMMAR.match(g) for g in m.groups()):
                 return self._fill(value, m.groups(), _depth)
+        # sentences the app put together ("A." + " B."): each one the
+        # catalog knows, or none of them
+        if _depth == 0:
+            parts = _SENTENCE.split(s)
+            if len(parts) > 1:
+                out = [p if not _LETTER.search(p) else self.lookup(p, 1) for p in parts]
+                if all(o is not None for o in out):
+                    return " ".join(out)
         return None
 
+    def _hole(self, g, depth):
+        """A hole's words, translated when they are words the catalog has
+        ("the Audio tab" by "The {} tab")."""
+        w = g.strip()
+        if depth > 1 or not _LETTER.search(w):
+            return g
+        got = self.lookup(w, depth + 1)
+        if got is None and w[:1].islower():
+            got = self.lookup(w[:1].upper() + w[1:], depth + 1)
+            if got is not None:
+                got = got[:1].lower() + got[1:]
+        return g if got is None else g.replace(w, got)
+
     def _fill(self, value, groups, depth):
-        if depth == 0:
-            groups = [self.exact.get(g.strip(), g) for g in groups]
+        groups = [self._hole(g, depth) for g in groups]
         it = iter(range(len(groups)))
 
         def put(m):
@@ -128,6 +153,22 @@ class Catalog:
         """*text* translated, or *text* itself."""
         got = self.lookup(text)
         return text if got is None else got
+
+
+def template_ok(parts):
+    """Whether a template (its literal *parts* around the holes) has words
+    enough of its own to be trusted: "{} of {}" would turn a game called
+    "House of Horrors" into "House de Horrors", and "{} mode{}" a folder
+    called "heisei modes" into "heisei modos"."""
+    if len(_LETTER.findall("".join(parts))) < MIN_LETTERS:
+        return False
+    if parts[0] == "" and parts[-1] == "":
+        # open at both ends: it needs two words side by side of its own
+        # open at both ends: two words side by side of its own, or a word
+        # with some shape around it ("{} file(s) — {}")
+        return any(_TWO_WORDS.search(p) or (_LETTER.search(p) and _SHAPE.search(p))
+                   for p in parts)
+    return True
 
 
 _cache = {}

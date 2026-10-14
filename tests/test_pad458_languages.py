@@ -37,7 +37,44 @@ MAPPING = {
     "{} file{} replaced": "{} archivo{} reemplazado",
     "{} files replaced": "{} archivos reemplazados",
     "This scene {} not start with a picture.": "Esta escena no empieza con una imagen.",
+    "{} changed": "{} cambiado",
+    "{} of {} rows changed{}": "{0} de {1} filas cambiadas{2}",
+    "{} mode{}{}": "{} modo{}{}",
+    "The {} tab": "La pestaña {}",
+    "Nothing in {} yet, so {} is idle.": "Nada en {} aún, así que {} está inactiva.",
+    "{} file(s) — {}": "{} archivo(s) — {}",
+    "The folder is new.": "La carpeta es nueva.",
 }
+
+#: (text, what the lookup gives) through Python and the page alike
+CASES = [
+    ("Scan", "Escanear"),
+    ("Saved 12 files", "12 archivos guardados"),
+    ("69 of 69 slots changed", "69 de 69 ranuras cambiadas"),
+    ("Copy a to b", "Copiar a b desde a"),
+    ("Tips — Audio", "Consejos — Audio-ES"),
+    ("Not in the catalog", None),
+    ("a: b", None),
+    ("Elvira's House of Horrors", None),
+    ("3 slots changed", "3 ranuras cambiadas"),
+    ("2 files replaced", "2 archivos reemplazados"),
+    ("1 file replaced", "1 archivo reemplazado"),
+    ("This scene does not start with a picture.", None),
+    # the most specific template wins, whichever bucket it is in
+    ("69 of 70 rows changed", "69 de 70 filas cambiadas"),
+    # a path is never translated, nor a word inside it
+    (r"C:\Users\me\heisei modes\proj", None),
+    ("/home/me/heisei modes", None),
+    ("heisei modes", None),           # open at both ends, one word of its own
+    # open at both ends, but with a shape of its own
+    ("69 file(s) — 40.2 MB", "69 archivo(s) — 40.2 MB"),
+    # sentences put together: each known, or the whole stays English
+    ("The folder is new. Saved 3 files", "La carpeta es nueva. 3 archivos guardados"),
+    ("The folder is new. Something else.", None),
+    # a hole's own words, by a template, with its first letter as it was
+    ("Nothing in proj yet, so the Audio tab is idle.",
+     "Nada en proj aún, así que la pestaña Audio-ES está inactiva."),
+]
 
 
 # ------------------------------------------------------------ the lookup
@@ -60,6 +97,11 @@ def test_exact_and_template_lookups():
     assert c.tr("2 files replaced") == "2 archivos reemplazados"
     assert c.tr("1 file replaced") == "1 archivo reemplazado"
     assert c.lookup("This scene does not start with a picture.") is None
+
+
+def test_the_lookup_cases():
+    c = i18n.Catalog(MAPPING)
+    assert [(t, c.lookup(t)) for t, _ in CASES] == CASES
 
 
 def test_english_is_the_identity_and_unknown_codes_are_english():
@@ -161,7 +203,7 @@ def test_the_page_wires_it():
 
 # ------------------------------------------------- the page, in a browser
 _PAGE = """
-async ([src, mapping]) => {
+async ([src, mapping, cases]) => {
   const mod = await import("data:text/javascript;base64," + btoa(unescape(encodeURIComponent(src))));
   const tick = () => new Promise((r) => setTimeout(r, 30));
   document.body.innerHTML = `
@@ -199,10 +241,7 @@ async ([src, mapping]) => {
             txt("multi"), txt("mixed"), document.documentElement.lang];
   // and the parity cases through the page's own lookup
   const c = mod.compile(mapping);
-  out.parity = ["Scan", "Saved 12 files", "69 of 69 slots changed", "Copy a to b",
-                "Tips — Audio", "Not in the catalog", "a: b", "Elvira's House of Horrors",
-                "3 slots changed", "2 files replaced", "1 file replaced",
-                "This scene does not start with a picture."].map((s) => mod.lookup(c, s));
+  out.parity = cases.map((s) => mod.lookup(c, s));
   return out;
 }
 """
@@ -301,7 +340,7 @@ def test_the_page_translates_what_it_shows_in_a_real_browser():
             pytest.skip("no browser")
         page = browser.new_page()
         page.set_content("<html><body></body></html>")
-        out = page.evaluate(_PAGE, [src, MAPPING])
+        out = page.evaluate(_PAGE, [src, MAPPING, [t for t, _ in CASES]])
         browser.close()
     finally:
         pw.stop()
@@ -318,9 +357,4 @@ def test_the_page_translates_what_it_shows_in_a_real_browser():
     assert out["ph2"] == "Escanear"
     assert out["en"] == ["Pick a card", "Saved 7 files", "Saved 3 files", "Scan",
                          "Scan\nPick a card", "Scan Audio Scan", "en"]
-    c = i18n.Catalog(MAPPING)
-    assert out["parity"] == [c.lookup(s) for s in
-                             ["Scan", "Saved 12 files", "69 of 69 slots changed",
-                              "Copy a to b", "Tips — Audio", "Not in the catalog", "a: b",
-                              "Elvira's House of Horrors", "3 slots changed", "2 files replaced",
-                              "1 file replaced", "This scene does not start with a picture."]]
+    assert out["parity"] == [want for _, want in CASES]

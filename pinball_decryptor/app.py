@@ -4668,7 +4668,7 @@ class App:
             daemon=True).start()
 
     def _start_reset(self, assets_dir, kinds):
-        """PAD-569: the top bar's Reset… (asked in its own dialog): the kinds of change
+        """PAD-569: the project menu's Reset… (PAD-576) (asked in its own dialog): the kinds of change
         ticked (:mod:`core.project_reset`) back the way the project was extracted.  Every
         kind is Revert all changes plus the Scenes edits and the project's own modes."""
         from .core import history_log, project_reset

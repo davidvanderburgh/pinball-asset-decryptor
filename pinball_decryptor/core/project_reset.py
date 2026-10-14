@@ -1,4 +1,4 @@
-"""The top bar's Reset... (PAD-569, DragonRR): parts of a project back the way they were
+"""The project menu's Reset... (PAD-569, DragonRR; PAD-576 moved it off the top bar): parts of a project back the way they were
 extracted, picked by kind, for starting a heavily modded project over.
 
 Each kind is one :data:`KINDS` row: its records (the sidecar's keys, the files a tab keeps

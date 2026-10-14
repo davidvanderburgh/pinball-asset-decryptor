@@ -1,4 +1,4 @@
-"""The top bar's Reset... (PAD-569, DragonRR): the page dialog ``reset``, its state
+"""The project menu's Reset... (PAD-569, DragonRR; PAD-576 moved it off the top bar): the page dialog ``reset``, its state
 ``shellx.reset``.
 
 The dialog lists the kinds of change (:data:`core.project_reset.KINDS`) with how many each

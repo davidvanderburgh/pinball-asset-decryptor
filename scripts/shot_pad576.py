@@ -1,4 +1,4 @@
-"""PAD-576 proof shots: the top bar's Reset... at rest and under the mouse.
+"""PAD-576 proof shots: the top bar, and Reset... in the project menu.
 
     python scripts/shot_pad576.py <repo> <out_dir> [--after]
 
@@ -6,9 +6,9 @@ Serves <repo> on shot_pad312's scratch Godzilla project and writes, under the sa
 before and after:
 
 - top_bar.png        the Write tab under the top bar, nothing hovered
-- top_bar_hover.png  the same with the mouse on Reset...
+- project_menu.png   the project menu open (after: Reset... at its bottom, hovered)
 
-Nothing is reset: the button is only hovered.
+Nothing is reset: Reset... is only hovered.
 
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
@@ -57,16 +57,20 @@ def main():
             page.screenshot(path=out("top_bar.png"))
             top = page.query_selector("header.topbar button:has-text('Reset')")
             print("top bar reset:", bool(top), flush=True)
-            if top:
-                print("style:", page.evaluate(
-                    "b => { const s = getComputedStyle(b); return [s.color, s.borderColor,"
-                    " s.borderWidth, s.fontWeight]; }", top), flush=True)
-                top.hover()
+            page.click("header.topbar button[aria-label='Project menu']")
+            time.sleep(1)
+            rows = page.eval_on_selector_all(".menu button.mi", "bs => bs.map(b => [b.innerText.trim(), b.disabled])")
+            print("project menu:", rows, flush=True)
+            mi = page.query_selector(".menu button.mi:has-text('Reset')")
+            if mi:
+                mi.hover()
                 time.sleep(1.5)
-                page.screenshot(path=out("top_bar_hover.png"))
-                print("hover style:", page.evaluate(
-                    "b => { const s = getComputedStyle(b); return [s.color, s.backgroundColor,"
-                    " s.borderColor]; }", top), flush=True)
+            page.screenshot(path=out("project_menu.png"))
+            if mi:
+                mi.click()
+                time.sleep(3)
+                print("reset dialog open:", bool(page.query_selector(".modal .sx-reset-list")), flush=True)
+                page.click(".modal button:has-text('Cancel')")
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

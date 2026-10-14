@@ -188,6 +188,3 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-reset-list { padding: 2px 0; }
 .sx-reset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; }
 .sx-reset-detail { grid-column: 1 / -1; padding-left: 26px; line-height: 1.4; }
-/* the top bar's Reset… sits quiet like the other top-bar buttons (PAD-576: the bold red
-   border pulled the eye from the rest of the app) and only warns under the mouse */
-.topbar .btn.sx-reset-btn:hover:not(:disabled) { background: var(--err-soft); color: var(--err); }

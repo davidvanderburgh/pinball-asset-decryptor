@@ -730,8 +730,8 @@ HELP_CONTENT = {
             "- Edits are listed on **Write**. Moves, resizes, tints, hides and order can "
             "go straight to an SD card; an added picture or text needs an image build.\n"
             "- **Revert** puts a scene, or every scene, back to the last Write or as "
-            "shipped: its layout, not its color profiles or replaced pictures (the top "
-            "bar's **Reset…** puts those back). **Export picture…** only makes a picture for you.\n"
+            "shipped: its layout, not its color profiles or replaced pictures (**Reset…** in the "
+            "project menu puts those back). **Export picture…** only makes a picture for you.\n"
             "- On a running Emulate (**Apply my replaced assets on top**), edits reach the "
             "game live: most screens at their next showing, ones loaded at start (score "
             "display, Battle Select) after a restart. Untick **Include my Scenes tab "
@@ -1388,7 +1388,7 @@ HELP_CONTENT = {
          "- Click a column header to sort; again to flip; a third time for the scan's "
          "order.\n"
          "- **Export CSV** saves the rows, to compare two projects in a spreadsheet.\n"
-         "- **Revert all changes…** opens the top bar's **Reset…** with everything "
+         "- **Revert all changes…** opens the project menu's **Reset…** with everything "
          "ticked: the whole project back as extracted (not on any card)."),
         ("Build / flash an SD card", [
             "On Stern Spike 2 and CGC, **Build / flash SD card…** does both; tick "
@@ -3228,7 +3228,7 @@ GENERAL_CONTENT = [
      "that nothing is left: ffplay (for the audio Preview) is checked by none, and "
      "re-running the installer brings the full ffmpeg that has it."),
     ("Reset… (start a project over)",
-     "**Reset…** beside the project name puts parts of the project back the way "
+     "**Reset…** at the bottom of the project menu (the project name at the top) puts parts of the project back the way "
      "they were extracted. Tick what goes, or **Everything**:\n\n"
      "- **Scenes edits**: every scene as shipped, and the score panel's colors\n"
      "- **Color profiles**: the project's and every file's or line's own, switches off\n"

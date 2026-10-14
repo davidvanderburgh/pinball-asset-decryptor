@@ -235,7 +235,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **When time is up:** the voice of The Beatles, Deadpool, Elvira, John Wick, Jurassic Park Pin, Led Zeppelin, Star Wars (LE, Pro and ELG), TMNT and Uncanny X-Men has no line saying the time is up, so the game's own call cannot end a mode there; a sound of your own can. The Beatles and Deadpool play every piece of their music themselves, so a mode cannot have music of its own there.
-- **No magnet:** Aerosmith, Avengers, Batman 66, King Kong, Led Zeppelin LE, The Munsters and Rush Pro use their magnet themselves at the shot it sits at, so a mode's hold there would always give way to the game's; Guardians of the Galaxy, Sword of Rage, TMNT and Foo Fighters LE use theirs only inside a feature of their own. Metallica Remastered has no magnet that catches the ball.
+- **No magnet:** Aerosmith, Avengers, Batman 66, Foo Fighters LE, King Kong, Led Zeppelin LE, The Munsters and Rush Pro use their magnet themselves at the shot it sits at, so a mode's hold there would always give way to the game's; Guardians of the Galaxy and TMNT use theirs only inside a feature of their own, and Sword of Rage's is the player's magna-save. Metallica Remastered has no magnet that catches the ball.
 - **Ball save not yet:** found in the game, not yet seen working.
 - **Lights:** *shots* lights just the scoring shots' inserts; *all* holds every insert in the mode's colour.
 - **HUD:** counters, a timer and a gauge at the screen's edges, like Godzilla's own battles.

@@ -212,8 +212,12 @@ def test_the_game_s_own_magnet_says_where_it_uses_it():
     assert "uses its toy box magnet itself at the shot it sits at (the toy box)" in why and p.limit("magnet")
     p = MP.profile_from_port(str(SDK / "ports" / "turtles_le-1.59.port"))
     assert "pizza magnet only inside a feature of its own" in p.why_not("magnet") and p.limit("magnet")
+    p = MP.profile_from_port(str(SDK / "ports" / "sword_of_rage_le-1.19.port"))
+    assert "gives its magna-save magnet to the player" in p.why_not("magnet") and p.limit("magnet")
+    p = MP.profile_from_port(str(SDK / "ports" / "foo_fighters_le-1.04.port"))
+    assert "Overlord magnet itself at the shot it sits at (the Overlord)" in p.why_not("magnet")
     for key, (how, magnet, where) in MP.MAGNET_GAME_LIMIT.items():
-        assert how in ("shot", "feature") and magnet and bool(where) == (how == "shot"), key
+        assert how in ("shot", "feature", "player") and magnet and bool(where) == (how == "shot"), key
         assert key not in MP.MAGNET_PROVEN, key            # a proven build is live, never a limit
 
 

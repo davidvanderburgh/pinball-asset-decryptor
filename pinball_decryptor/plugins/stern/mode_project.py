@@ -691,7 +691,8 @@ def _magnet_ports(port):
 #: mode's grab there always gives way to the game's ("the game wants it" / a command of the game's own on the coil
 #: while ours held) - safe, but never a clean hold. "feature": the game uses it only inside a feature of its own,
 #: never on a single switch press or at a ball's start, and it has no place on the playfield picture, so there is no
-#: shot to grab on. The tab says these in grey (TitleProfile.limits), not yellow.
+#: shot to grab on. "player": the player's own magnet (a magna-save: the button fires it while it is lit). The tab
+#: says these in grey (TitleProfile.limits), not yellow.
 MAGNET_GAME_LIMIT = {
     "aerosmith-1.16": ("shot", "toy box magnet", "the toy box"),
     "aerosmith_le-1.16": ("shot", "toy box magnet", "the toy box"),
@@ -705,13 +706,23 @@ MAGNET_GAME_LIMIT = {
     "rush_pro-1.19": ("shot", "Time Machine magnet", "the Center ramp opto"),   # a retry 30 s into the ball met the same
     "led_zeppelin_le-1.22": ("shot", "Electric Magic magnet", "the spinner"),   # an OFF 1 ms after our grab: it keeps
     #                                                                             the magnet off outside its feature
-    "guardians-1.15": ("feature", "Orb magnet", ""),                       # only 255-for-60 ms pulses in a census
-    "guardians_le-1.15": ("feature", "Orb magnet", ""),
-    "sword_of_rage_le-1.19": ("feature", "magna-save magnet", ""),         # only OFFs while the magna-save is not lit
-    "sword_of_rage_pro-1.19": ("feature", "magna-save magnet", ""),
-    "turtles_le-1.59": ("feature", "pizza magnet", ""),                     # a feature's process (0x129860)
+    # PAD-475 walk (8 rounds of every playfield switch, scoops held): the TOP MAGNET (9:6) only ever in the game's own
+    # center drop target sequence - drop target DOWN (8:7), magnet 255 for 1000 ms, drop target UP (8:6), magnet 20 ms
+    # - twice, seconds after an Orb standup hit (the LE the same, and a 10-on / 90-off pulse train with other coils
+    # after one); the magnet catches a ball only while the game has the target down
+    "guardians-1.15": ("feature", "top magnet", ""),
+    "guardians_le-1.15": ("feature", "top magnet", ""),
+    # PAD-475 walk: 255 for 3000 ms on 9:7 twice, each 0.4 s after the magna-save button (34) - the player's own
+    "sword_of_rage_le-1.19": ("player", "magna-save magnet", ""),          # magnet; only OFFs while it is not lit
+    "sword_of_rage_pro-1.19": ("player", "magna-save magnet", ""),
+    # a feature's process (0x129860). PAD-475 walk: on the Pro, an Upper lock hit started it - the PIZZA MOTOR (9:5) on
+    # for 30 s, the trough serving (8:1), the upper left flipper held, and the PIZZA MAGNET (9:6) 255 for 1200 / 2400 ms
+    # then 128 for 4 s; the LE's 8 rounds (~200 shots) never met it
+    "turtles_le-1.59": ("feature", "pizza magnet", ""),
     "turtles_pro-1.59": ("feature", "pizza magnet", ""),
-    "foo_fighters_le-1.04": ("feature", "Overlord magnet", ""),             # no command at all in a game's census
+    # PAD-475 walk: OVERLORD MAGNET (9:0; group 8 = node 9) 255 for 120 ms, OVERLORD HIT (9:1), then 90 ms, ~300 ms
+    # after an Overlord opto / hit target press (2 of 16) - the census's single presses never met it
+    "foo_fighters_le-1.04": ("shot", "Overlord magnet", "the Overlord"),
 }
 
 
@@ -724,8 +735,11 @@ def _magnet_cannot(key, label, port=None):
             return (("magnet", "%s uses its %s itself at the shot it sits at (%s), so a hold of a mode's there "
                                "would always give way to the game's: a mode of yours cannot hold the ball on it."
                      % (label, magnet, where)),)
-        return (("magnet", "%s uses its %s only inside a feature of its own, never at a shot of its own, so a "
-                           "mode of yours has no shot to hold the ball on it at." % (label, magnet)),)
+        if how == "player":
+            return (("magnet", "%s gives its %s to the player: the button fires it while it is lit, so a mode of yours "
+                               "cannot hold the ball on it." % (label, magnet)),)
+        return (("magnet", "%s uses its %s only inside a feature of its own, never at a shot of its own, so "
+                           "there is no shot where a mode of yours could hold the ball on it." % (label, magnet)),)
     if not port or not (_magnet_ports(port) and _magnet_shot_name(port)):
         return (("magnet", "The app has not found how %s drives its magnet, so a mode of yours cannot "
                            "hold the ball on it." % label),)

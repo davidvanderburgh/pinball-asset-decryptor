@@ -157,7 +157,8 @@ def test_the_selected_panel_keeps_every_section_greyed_out_not_gone():
     side = src[src.index("function TreeSide("):]
     side = side[:side.index("\n}\n")]
     one = side[side.index(": p ? html`<div class=\"tree-props\">"):]
-    for part in ("<${GameFills} p=${p} />", "<${GameColors} g=${p.game_colors} />",
+    for part in ("<${GameFills} p=${p} proven=${t.fills_proven !== false} />",
+                 "<${GameColors} g=${p.game_colors} />",
                  "<${Words} p=${p} find=${find} searching=${searching} />"):
         assert part in one and ("? " + part) not in one and ("? html`" + part) not in one
     # the picture row, X / Y, W / H and Keep its shape are not left out either

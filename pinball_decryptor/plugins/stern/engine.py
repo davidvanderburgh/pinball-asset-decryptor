@@ -2140,7 +2140,7 @@ def program_text_needs_refresh(assets_dir, rows):
     return rev < text_modes.READ_REV or scenes_rev < SCENES_REV
 
 
-def refresh_program_text_flags(assets_dir, log=None, cancel=None):
+def refresh_program_text_flags(assets_dir, log=None, cancel=None, card=None):
     """Refresh the game-program rows of an existing ``text/strings.tsv`` from
     the card the project was extracted from, and return how many rows were
     updated (0 when there is nothing to do).
@@ -2160,7 +2160,9 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
     replacement the user has already typed are preserved -- so this is safe to
     run behind a Scan.  Best effort throughout: a project with no source card
     recorded, a card that has moved or changed size, an unreadable ELF or an
-    unwritable manifest all return 0 without raising."""
+    unwritable manifest all return 0 without raising.  *card*: read that
+    card image instead of the recorded one (the Scenes tab's Re-read from
+    card, PAD-539, with the card its caller resolved to this project's)."""
     import json
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
@@ -2182,10 +2184,12 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None):
         with open(_lp(os.path.join(assets_dir, SIDE_CAR)),
                   "r", encoding="utf-8") as f:
             src = json.load(f)
-        card = src.get("input_path") or ""
-        want = src.get("size")
+        want = None if card else src.get("size")
+        card = card or src.get("input_path") or ""
     except Exception:
-        return 0
+        if not card:
+            return 0
+        want = None
     try:
         ok = bool(card) and os.path.isfile(_lp(card)) and (
             not want or os.path.getsize(_lp(card)) == want)

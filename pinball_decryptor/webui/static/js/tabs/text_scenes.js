@@ -1493,12 +1493,21 @@ const FILLS_OFF_TIP = { head: "Filled in by the game", lines: [
 const PAINTS_OFF_TIP = { head: "Painted by the game", lines: [
   "Not this one: the game does not paint its colors as it plays, so its Tint and its color profile (or a line's own color, from the Font bar) are what the machine shows.",
   "A line the game paints (the score panel's) is lit here in violet, with the colors the machine shows it in. On the preview its outline is violet." ] };
-function GameFills({ p }) {
+// PAD-539: with no reading of the boxes the game program names (a project whose card was not at
+// hand when the Text tab would have read it), the marks are the old word guesses: a box the game
+// does write can say "Not this one".  The panel says so, and reads the card for the real ones.
+const GUESS_LINES = [
+  "These marks are guesses from the words in the box: this project's card has not been read for the boxes the game program names, so a box the game does write can say \"Not this one\", and words typed in it would never show.",
+  ["Re-read from card", "read the game program off the card this project came from; the marks are then the game's own"] ];
+const guessTip = (t) => ({ ...t, lines: [...t.lines, ...GUESS_LINES] });
+function GameFills({ p, proven = true }) {
+  const reading = !!useNs("text_scenes").fills_reading;
   const f = p.filled;
   const who = f ? (f.modes || []).join(", ") : "";
+  const tipOf = f ? filledTip(f) : FILLS_OFF_TIP;
   return html`<div class=${cx("tree-game fills", !f && "off")}>
     <div class="tree-row tg-head">
-      <span class="tg-name" ...${tip(f ? filledTip(f) : FILLS_OFF_TIP)}><${Icon} name="gear" /><span class="eyebrow">Filled in by the game</span></span>
+      <span class="tg-name" ...${tip(proven ? tipOf : guessTip(tipOf))}><${Icon} name="gear" /><span class="eyebrow">Filled in by the game</span></span>
       <span class="grow"></span>
       <${Button} size="xs" kind="ghost" icon="text" disabled=${!filledFinds(f)}
         title=${!f ? "Only a box the game fills in has a line of the game's"
@@ -1508,6 +1517,13 @@ function GameFills({ p }) {
     <div class="small ellip tg-what">${!f ? "Not this one"
       : f.line ? html`With <b>${f.line}</b>${who ? ` (${who})` : ""}` : who ? html`During <b>${who}</b>`
         : "With words of its own"}</div>
+    ${proven ? null : html`<div class="tree-row tg-guess">
+      <span class="small warn-ink grow" ...${tip({ head: "Guessed, not read off the card", lines: GUESS_LINES })}>
+        <${Icon} name="warn" /> A guess until the card is read</span>
+      <${Button} size="xs" kind="ghost" icon="refresh" disabled=${reading}
+        title="Read the game program off the card this project came from, for the boxes the game fills in"
+        onClick=${() => call("text_scenes.read_program")}>${reading ? "Reading…" : "Re-read from card"}<//>
+    </div>`}
   </div>`;
 }
 export function GameColors({ g }) {
@@ -1652,7 +1668,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
         : "Hidden in the game: Write leaves it out of the card."}${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
       : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
       <${LookNote} k=${p.look} />
-      <${GameFills} p=${p} />
+      <${GameFills} p=${p} proven=${t.fills_proven !== false} />
       <${GameColors} g=${p.game_colors} />
       <${Words} p=${p} find=${find} searching=${searching} />
       <div class=${cx("tree-row tree-pic", !p.pic && "tree-off")}>
@@ -1772,8 +1788,11 @@ function EditList({ list, t }) {
   </div>`;
 }
 
+// PAD-539 (DragonRR): a project extracted from a card a Write changed goes back to THAT card
+const baseWord = (t) => t.base_note ? " " + t.base_note.lines[1] : "";
+
 // The whole scene's actions, in the bar under the preview: add a picture or a line of text,
-// undo, put the scene back as shipped.
+// undo, put the scene back as shipped; and (PAD-539) the word that "as shipped" is that card.
 function TreeActions({ t }) {
   const [adding, setAdding] = useState(false);
   const [words, setWords] = useState("");
@@ -1799,10 +1818,10 @@ function TreeActions({ t }) {
           title: "Every eye back to what the game shows, as when the scene was first opened: shut on the layers hidden in the game, open on the rest. The card is not changed.",
           onClick: () => call("text_scenes.tree_view_reset") },
         { label: "As shipped (this scene)", icon: "refresh", disabled: !t.edits,
-          title: "Put this scene back the way the game shipped it. Its color profiles and replaced pictures stay: Reset… on the top bar puts those back.", onClick: () => call("text_scenes.tree_clear") },
+          title: "Put this scene back the way the game shipped it. Its color profiles and replaced pictures stay: Reset… in the project menu puts those back." + baseWord(t), onClick: () => call("text_scenes.tree_clear") },
         { sep: true },
         { label: "As shipped (every scene)…", icon: "trash", disabled: !t.all_edits,
-          title: "Put every scene in this project back the way the game shipped it. Color profiles and replaced pictures stay: Reset… on the top bar puts those back.",
+          title: "Put every scene in this project back the way the game shipped it. Color profiles and replaced pictures stay: Reset… in the project menu puts those back." + baseWord(t),
           onClick: () => call("text_scenes.tree_clear_all") },
       ])}>Revert<//>
     ${t.built === "same" && t.edits ? html`<button type="button" class="small nw ok-ink sc-edits-open"
@@ -1812,6 +1831,8 @@ function TreeActions({ t }) {
           onClick=${() => call("text_scenes.edit_list", true)} ...${tip({ head: "Edits are kept as you make them; there is nothing to save. The next Write puts them on the card.",
             lines: [["Click", "list every edit: go to one, or Revert it"]] })}>
           <span class="sc-dot edited"></span> ${t.edits ? `${t.edits} edit${t.edits === 1 ? "" : "s"}` : "Back as shipped"}, not written yet</button>` : null}
+    ${t.base_note ? html`<span class="small nw warn-ink sc-base-note" ...${tip({ head: t.base_note.head, lines: t.base_note.lines })}>
+        <${Icon} name="info" /> ${t.base_note.chip}</span>` : null}
     ${(t.hidden_names || []).length ? html`<span class="small nw warn-ink"
         title=${`Hidden in the game, so the machine never draws it: ${t.hidden_names.join(", ")}. Click the red stop sign at the end of its row in Layers to put it back.`}>
         <${Icon} name="eye-off" /> ${t.hidden_names.length} hidden in game</span>` : null}

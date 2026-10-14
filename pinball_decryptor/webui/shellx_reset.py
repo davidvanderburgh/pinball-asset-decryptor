@@ -72,10 +72,17 @@ class ResetMixin:
         self._reset_publish(folder, rows, busy=False, ok=True)
 
     def _reset_publish(self, folder, counts, busy, ok):
+        from ..core import lineage
         from ..core import project_reset as PR
+        try:
+            # PAD-539 (DragonRR): extracted from a card a Write changed, "as extracted" is that
+            # card, not the game as it shipped
+            base = lineage.extracted_from_note(lineage.extracted_from(folder), scenes=False)                 if ok else None
+        except Exception:                            # noqa: BLE001
+            base = None
         self.set(reset={
             "folder": folder, "name": os.path.basename(os.path.normpath(folder)) if folder else "",
-            "ok": ok, "busy": busy, "intro": INTRO, "warning": WARNING,
+            "ok": ok, "busy": busy, "intro": INTRO, "warning": WARNING, "base_note": base,
             "running": bool(getattr(self.window, "_running", False)),
             "rows": [{"key": k, "label": label, "detail": detail, "n": int(counts.get(k) or 0)}
                      for k, label, detail in PR.KINDS]})

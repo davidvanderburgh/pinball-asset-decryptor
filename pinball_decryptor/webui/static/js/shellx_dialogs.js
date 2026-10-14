@@ -415,7 +415,7 @@ function DiskSpaceDialog({ close }) {
 registerDialog("disk_space", DiskSpaceDialog);
 
 // ------------------------------------------------------- Reset…
-// PAD-569 (DragonRR): the top bar's Reset… — the kinds of change in the open project,
+// PAD-569 (DragonRR): the project menu's Reset… (PAD-576) — the kinds of change in the open project,
 // ticked, put back the way they were extracted (shellx_reset.py).  The Write tab's "Revert
 // all changes…" opens it with every kind ticked (`all`).
 function ResetDialog({ close, all = false }) {
@@ -447,6 +447,7 @@ function ResetDialog({ close, all = false }) {
       <${Button} kind="danger" disabled=${!ticked.size || !(r && r.ok) || (r && r.running)} onClick=${go}>${every ? "Reset everything…" : "Reset…"}<//>`}>
     <p class="sx-p muted">${r ? r.intro : ""}</p>
     <${Note} kind="warn">${r ? r.warning : ""}<//>
+    ${r && r.base_note ? html`<${Note} kind="info"><b>${r.base_note.head}.</b> ${r.base_note.lines.join(" ")}<//>` : null}
     ${r && !r.ok ? html`<${Note} kind="err">Open a project first: there is no project folder to reset.<//>` : null}
     <div class="stack sx-reset-list" style="gap:6px">
       <${Check} checked=${every} disabled=${!rows.length} onChange=${(v) => setTicked(new Set(v ? rows.map((x) => x.key) : []))}

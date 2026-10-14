@@ -311,6 +311,64 @@ def base_words(lin):
     return "official %s" % label
 
 
+def extracted_from(folder):
+    """What the project in *folder* was extracted from when it was NOT the
+    card the game shipped on (PAD-539, DragonRR: his project came off a card
+    PAD had written, so that Write's additions were its "original"):
+    ``{"kind": "written", "rev": n, "label"}`` for one of this project's own
+    revisions, ``{"kind": "modified", "label"}`` for a card the stock check
+    found modified; ``None`` for the official card or when nothing says."""
+    lin = read_lineage(folder)
+    src = (lin or {}).get("source") or {}
+    label = ((lin or {}).get("stock") or {}).get("label") or src.get("label") or ""
+    if src.get("rev"):
+        return {"kind": "written", "rev": int(src["rev"]), "label": label}
+    status = src.get("status")
+    if not status:
+        # a project extracted with no print taken still has the stock verdict
+        from .extract_source import read_extract_source
+        stock = (read_extract_source(folder) or {}).get("stock") or {}
+        status, label = stock.get("status"), label or stock.get("label") or ""
+    if status == "modified":
+        return {"kind": "modified", "label": label}
+    return None
+
+
+def extracted_from_note(came, scenes=True):
+    """``{"chip", "head", "lines"}``: what :func:`extracted_from`'s answer
+    *came* means for As shipped and Reset (PAD-539), or ``None``.  *came* may
+    also be ``{"kind": "hidden"}``: no record, but the scene has layers a
+    Write hid on the card (PAD-535), which only a written card has.
+    *scenes*: said on the Scenes tab (the Layers stop sign is right there)."""
+    if not came:
+        return None
+    kind, label = came.get("kind"), came.get("label") or ""
+    if kind == "written":
+        chip, head = "From a written card", "Extracted from a card PAD wrote"
+        first = ("This project was extracted from its own Rev %d: a card a Write built, "
+                 "with the edits of that Write on it." % came.get("rev", 0))
+    elif kind == "modified":
+        chip, head = "From a modified card", "Extracted from a modified card"
+        first = ("This project was extracted from a modified %s card, not the one the game "
+                 "shipped on: one a Write (or another tool) changed."
+                 % (label or "game"))
+    elif kind == "hidden":
+        chip, head = "From a written card", "Extracted from a card a Write changed"
+        first = ("This scene came off a card an earlier Write changed: it has layers that "
+                 "Write hid.")
+    else:
+        return None
+    shown = ("click the red stop sign at the end of their row in Layers" if scenes else
+             "the red stop sign at the end of their row in the Scenes tab's Layers")
+    return {"chip": chip, "head": head, "lines": [
+        first,
+        "As shipped and Reset put things back the way that card has them, not the way the "
+        "game shipped.",
+        "Pictures and text an earlier Write added are part of that card now, so they cannot "
+        "be taken back here. Layers it hid can: %s." % shown,
+        "To start from the game as it shipped, extract the official card into a new project."]}
+
+
 def describe(lin):
     """``(line, history)`` for the "This project" card, or ``("", [])``
     when the project has no built revision to name."""

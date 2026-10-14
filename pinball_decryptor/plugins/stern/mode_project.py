@@ -495,6 +495,7 @@ MULTIBALL_PROVEN = frozenset({
     "star_wars_le-1.31",                 # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "venom_pro-1.07",                    # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "batman-1.14",                       # PAD-420 2026-10-08 mb_job (stock card, hidden, muted; the port's 22 block lines in): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    "munsters_pro-1.28",                 # PAD-480 2026-10-14 mb_job (stock card, hidden, muted; pop bumpers tapped through the multiball, as balls in play hit them - its ball search wrote silent balls off): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
 })
 
 

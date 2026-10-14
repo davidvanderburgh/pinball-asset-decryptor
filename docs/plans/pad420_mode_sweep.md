@@ -158,6 +158,17 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   passed on the fourth: the same intermittent boot/Start crash the over-committed runs showed, not the port.
 - **Munsters Pro 1.28 multiball**: with KEEP (as Munsters LE needed) the drains went 3-4-3-2-0: the last two balls
   left together on the third drain. Look at its trough/drain switches (plunge.py drain) before trying again.
+  **PROVEN by PAD-480 (2026-10-14)**: the trough was never it (66-71 = Trough 6..1, 72 the jam, in the rig's tables and
+  the ball simulator alike; TAKE=2 was a wrong lead). It is the game's BALL SEARCH. The ticker at 0x2a1c68 runs a
+  timer (0x5fda60, reloaded to setting byte 0x553d79 x 62 = 5 s by a playfield switch) and counts tries (0x5fda64);
+  the try step 0x32f1c0, on try 0x55ec28 (5) with setting 123 on, WRITES OFF the balls in play: known balls (the
+  struct 0x603768 +60, checksum +61) = known - in play. Only scoring (0x30b0e0 -> 0x2a1d7c) or a serve clears the
+  tries, and our silent balls never score, so a switch every 9 s only delayed it: the 5th try fell ~2 s after the
+  second drain, known 4 -> 2 = the trough, 2 -> 0 in play, end of ball. A ball in play hits switches; the proof now
+  taps the pop bumpers (85, 86, 87, one every 1.5 s) through the multiball, the timer never runs out, no try happens,
+  and the drains go 3-4-3-2-1 (`C:/tmp/PAD-480`: mb_job.sh TAP_SW, ballpoll.py watching those words; addresses are
+  guest + 0x10000 in /proc/<pid>/mem, qemu's guest_base). The LE passed with KEEP alone. Also learned: a tapper in a
+  rigbatch job must source padpath.sh (HOME there is not the rig user's, so swpoke wrote a block no game reads).
 - **In flight at the end of run 6** (detached WSL chains in `C:/tmp/PAD-420`, logs `chainN.log`; each writes a
   rigbatch `results.tsv`; commit passes with `prove_set.py <SET> <results.tsv> "<evidence>"`, then
   `limits_table.py`, the tests, and a commit):

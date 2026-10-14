@@ -345,6 +345,7 @@ def test_the_turns_are_offered_on_one_build_per_game_its_latest():
     """David: "we don't need outdated versions, just the latest versions" - every one of them
     swept in the emulator (work/artifacts/PAD-565/emulator/sweep)."""
     games = [k.rsplit("-", 1)[0] for k in SMo.TURN_PROVEN]
-    assert len(games) == len(set(games)) == 52
+    assert len(games) == len(set(games)) == 53
     assert {"james_bond_pro-1.06", "james_bond_le-1.06", "godzilla_le-1.16"} <= SMo.TURN_PROVEN
-    assert "godzilla_pro-1.15" not in SMo.TURN_PROVEN and "avengers_infinity_pro-1.10" not in SMo.TURN_PROVEN
+    assert "godzilla_pro-1.15" not in SMo.TURN_PROVEN
+    assert {"avengers_infinity_le-1.10", "avengers_infinity_pro-1.10"} <= SMo.TURN_PROVEN     # PAD-481

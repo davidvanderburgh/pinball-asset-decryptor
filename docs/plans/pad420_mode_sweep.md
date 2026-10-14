@@ -138,6 +138,9 @@ Kits in `C:/tmp/PAD-420` (all rigbatch jobs, two rigs, hidden, muted, stock card
   `spike2/masterdir.py _crypto_sites` ("this game version's sound-bank directory cipher could not be located in its
   firmware"). Avengers LE 1.10 builds. So on the Pro a mode's own sounds, and likely anything that rewrites its bank
   (Replace Audio), fail; worth its own ticket. Its media proof runs without the mode's own sounds (`--no-sound`).
+  FIXED in PAD-481: the Pro loads the directory CRC's seed (0xf1483940) as `mov r0,#0x3940 ; movt r0,#0xf148`, and
+  `locate._decode_movw_movt` read only `movw` low halves; a 16-bit `mov` immediate now reads as one. A grown bank on
+  the Pro is emulator-proven (PAD-565's sounds-in-turn sweep: MATCH).
 - **D&D LE 1.10**: the proof mode's own sounds grow its bank past 2 GiB (2,166,683,134 bytes; PAD-176's limit), so
   its proof set is built without them too.
 - Retries still failing: Aerosmith Pro 1.16 stack (our multiball never started on the retry), Munsters Pro 1.28

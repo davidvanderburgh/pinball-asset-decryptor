@@ -30,6 +30,9 @@ CARDS = {
     # directory offset where an odd card ends 24n+16, and appending a record
     # flips it the other way.  Both parities ship; both must round-trip.
     "godzilla_115": "godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw",
+    # PAD-481: the CRC seed's low half is a rotated-immediate ``mov``, not a
+    # ``movw``, so the cipher search missed it and its bank could not be rewritten.
+    "avengers_pro_110": "avengers_infinity_pro-1_10_0.Release.8G.sdcard.raw",
 }
 
 
@@ -400,6 +403,43 @@ def test_grown_directory_still_packs_to_the_expected_size():
         assert len(blob) == MD.tail_len(count + 1)
         back = MD.unpack_tail(blob, count + 1, key, iv)
         assert back.records == grown.records
+
+
+# --------------------------------------------------------------------------
+# fast: locating the cipher's CRC seed
+# --------------------------------------------------------------------------
+class _Words(object):
+    """Just enough firmware view for ``locate._crc_init_arg``: words at VAs."""
+
+    def __init__(self, base, words):
+        self.secs = {".text": {"addr": base}}
+        self._w = {base + 4 * i: w for i, w in enumerate(words)}
+
+    def u32_va(self, va):
+        return self._w.get(va)
+
+
+# The five words before and at the CRC call, as each card has them.
+_LE_110 = (0xe30409d5, 0xe1a02006, 0xe34b0463, 0xe59d1140, 0xeb0bad49)
+_PRO_110 = (0xe3a00de5, 0xe1a02006, 0xe34f0148, 0xe59d1144, 0xeb05c701)
+
+
+def test_a_rotated_mov_low_half_reads_like_a_movw():
+    from pinball_decryptor.plugins.stern.spike2 import locate as L
+    assert L._decode_movw_movt(0xe30409d5) == ("movw", 0, 0x49d5)
+    assert L._decode_movw_movt(0xe3a00de5) == ("movw", 0, 0x3940)   # mov r0,#0x3940
+    assert L._decode_movw_movt(0xe3a00000) == ("movw", 0, 0)         # mov r0,#0
+    assert L._decode_movw_movt(0xe3a004ff) is None                   # mov r0,#0xff000000
+    assert L._decode_movw_movt(0xe3b00001) is None                   # movs: not a constant load
+    assert L._decode_movw_movt(0xe1a02006) is None                   # mov r2,r6 (register)
+
+
+@pytest.mark.parametrize("words, seed", [(_LE_110, 0xb46349d5), (_PRO_110, 0xf1483940)])
+def test_crc_seed_is_read_from_either_low_half_form(words, seed):
+    """Avengers LE 1.10 loads its CRC seed with movw/movt; the Pro with mov/movt."""
+    from pinball_decryptor.plugins.stern.spike2 import locate as L
+    fw = _Words(0x1000, words)
+    assert L._crc_init_arg(fw, 0x1000 + 4 * (len(words) - 1)) == seed
 
 
 # --------------------------------------------------------------------------

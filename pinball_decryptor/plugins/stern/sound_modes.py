@@ -91,11 +91,12 @@ TURN_BASE = 100
 #: LATEST build of every Stern Spike 2 game in the image library (David: "just the latest
 #: versions"), each swept in the emulator (an override set built by Write's own code, the slot's
 #: request fired six times, the files heard in the order the runtime picked them; work/artifacts/
-#: PAD-565/emulator/sweep). They need only the record lookup, not the resolver or the menu setting.
-#: Not here: Avengers Infinity Quest Pro 1.10, whose sound bank cannot be rewritten at all
-#: (PAD-481), and every build older than its game's latest.
+#: PAD-565/emulator/sweep; Avengers Infinity Quest Pro 1.10 by the same sweep once PAD-481 let its
+#: sound bank be rewritten). They need only the record lookup, not the resolver or the menu setting.
+#: Not here: every build older than its game's latest.
 TURN_PROVEN = frozenset({
-    "aerosmith-1.16", "aerosmith_le-1.16", "avengers_infinity_le-1.10", "batman-1.14",
+    "aerosmith-1.16", "aerosmith_le-1.16", "avengers_infinity_le-1.10",
+    "avengers_infinity_pro-1.10", "batman-1.14",
     "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.10",
     "dungeons_and_dragons_pro-1.10", "elvira3-1.13", "foo_fighters_le-1.04",
     "foo_fighters_pro-1.04", "godzilla_le-1.16", "godzilla_pro-1.16", "guardians-1.15",

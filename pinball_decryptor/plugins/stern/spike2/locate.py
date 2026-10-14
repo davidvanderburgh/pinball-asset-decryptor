@@ -81,11 +81,23 @@ class _FwView:
 # instruction / const primitives
 # --------------------------------------------------------------------------
 def _decode_movw_movt(w):
-    """ARM A1 MOVW/MOVT -> ('movw'|'movt', Rd, imm16), else None."""
+    """ARM A1 MOVW/MOVT -> ('movw'|'movt', Rd, imm16), else None.
+
+    A ``mov rd, #imm`` (rotated immediate, no S) whose value fits 16 bits
+    reads as a ``movw``: the compiler picks it for a low half it can encode
+    that way, and a ``movt`` after it builds the constant just the same
+    (Avengers Pro 1.10's sound-bank CRC seed: ``mov r0,#0x3940 ; movt
+    r0,#0xf148``)."""
     if (w & 0x0FF00000) == 0x03000000:
         return ("movw", (w >> 12) & 0xF, ((w >> 4) & 0xF000) | (w & 0xFFF))
     if (w & 0x0FF00000) == 0x03400000:
         return ("movt", (w >> 12) & 0xF, ((w >> 4) & 0xF000) | (w & 0xFFF))
+    if (w & 0x0FFF0000) == 0x03A00000:
+        rot = ((w >> 8) & 0xF) * 2
+        imm = w & 0xFF
+        v = ((imm >> rot) | (imm << (32 - rot))) & 0xFFFFFFFF if rot else imm
+        if v <= 0xFFFF:
+            return ("movw", (w >> 12) & 0xF, v)
     return None
 
 

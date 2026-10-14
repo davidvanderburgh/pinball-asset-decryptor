@@ -338,7 +338,7 @@ def test_write_with_nothing_changed_is_a_copy(art_file, tmp_path):
     out = str(tmp_path / "built.bin")
     res = _run(SamWritePipeline(path, out_dir, out, lambda *a, **k: None,
                                 lambda i: None, lambda *a: None, None))
-    assert res["ok"] and "No changed audio or pictures" in res["msg"]
+    assert res["ok"] and "No changed audio, pictures or animations found" in res["msg"]
     assert open(out, "rb").read() == data
 
 

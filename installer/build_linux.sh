@@ -123,6 +123,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.pinmame_classic.sam_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.sam_images" \
     --hidden-import "pinball_decryptor.plugins.pinmame_classic.sam_art" \
+    --hidden-import "pinball_decryptor.plugins.stern.sam_anim_assets" \
+    --hidden-import "pinball_decryptor.plugins.pinmame_classic.sam_anim" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_adjustments" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_emulate" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx" \

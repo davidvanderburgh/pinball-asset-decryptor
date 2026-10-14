@@ -53,9 +53,9 @@ SHADES = 16
 #: formats of the plain pictures: one byte a pixel, four bits a pixel
 RAW8 = 0
 RAW4 = 12
-#: formats that patch the picture before them (PAD-584; 8/10 are the
-#: 2008 titles' counterparts, kept off limits the same way)
-_DELTAS = (3, 9, 8, 10)
+#: formats that patch the picture before them (PAD-584: 10 is the
+#: 2008-2010 engine's 9; its 8 is a whole run-length frame, format 7)
+_DELTAS = (3, 9, 10)
 
 _VALID = np.zeros(256, bool)
 _VALID[:SHADES] = True

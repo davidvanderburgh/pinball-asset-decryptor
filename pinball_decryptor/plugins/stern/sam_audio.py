@@ -43,10 +43,10 @@ class SamAudioCancelled(SamAudioError):
 #: the game file's other parts Write takes edits for, after the sounds:
 #: modules here with ``patch(image, data, assets_dir, log, progress,
 #: cancel) -> (changes, written, skipped)``
-_ART_PARTS = ("sam_images",)
+_ART_PARTS = ("sam_images", "sam_anim_assets")
 #: project top folder -> the module whose ``revert(data, assets_dir, rels,
 #: log)`` restores its files
-_REVERT_PARTS = {"images": "sam_images"}
+_REVERT_PARTS = {"images": "sam_images", "animations": "sam_anim_assets"}
 
 
 def _part(name):
@@ -280,14 +280,15 @@ def write_image(original_path, assets_dir, output_path, log=None,
             pass
         raise
     return {"audio": n_audio, "images": written.get("sam_images", 0),
+            "animations": written.get("sam_anim_assets", 0),
             "skipped": skipped}
 
 
 def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
                   cancel=None):
     """Re-decode the original WAVs for *rels* (``audio/idxNNNN.wav``, renamed
-    forms too) -- and the original pictures (``images/...``) -- from the
-    source file.  Returns ``(reverted, failed)``."""
+    forms too) -- and the original pictures (``images/...``) and animation
+    frames (``animations/...``) -- from the source file.  Returns ``(reverted, failed)``."""
     log = log or (lambda *a, **k: None)
     check = cancel or (lambda: False)
     data, _match = read_image(source_path)

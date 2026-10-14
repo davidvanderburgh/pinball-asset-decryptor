@@ -347,7 +347,7 @@ function TopBar({ shell }) {
       ${proj.caption ? html`<span class="dim ellip hide-narrow">${proj.caption}</span>` : null}
       <span class="muted">▾</span>
     </button>
-    ${working && proj.folder ? html`<${Button} size="sm" kind="danger" cls="sx-reset-btn" icon="refresh" disabled=${!!shell.running}
+    ${working && proj.folder ? html`<${Button} size="sm" kind="ghost" cls="sx-reset-btn" icon="refresh" disabled=${!!shell.running}
         onClick=${() => openDialog("reset")}
         title=${{ head: "Reset this project", lines: [["Click", "put images, videos, sounds, text, fonts, scenes, colors or modes back as extracted, or everything at once"]] }}>Reset…<//>` : null}
     <span class="grow"></span>

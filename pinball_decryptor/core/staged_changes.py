@@ -27,6 +27,8 @@ import os
 import threading
 import time
 
+from .atomic_file import write_text_atomic
+
 # Sidecar written at the root of the assets folder.  Dotfile so the
 # audio/video/image slot scanners (which skip dot-entries) ignore it — same
 # rule the ``.extract_source.json`` / ``.checksums.md5`` sidecars rely on.
@@ -198,9 +200,7 @@ def save(assets_dir, payload):
     path = _cache_path(assets_dir)
     now = time.time_ns()
     try:
-        with open(os.path.join(assets_dir, SIDE_CAR), "w",
-                  encoding="utf-8") as f:
-            f.write(text)
+        write_text_atomic(os.path.join(assets_dir, SIDE_CAR), text)
         st = os.stat(path)
     except OSError:
         with _CACHE_LOCK:

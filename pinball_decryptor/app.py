@@ -11,6 +11,7 @@ import time
 
 from . import __version__
 from .core import build_output, desktop, modpack
+from .core.atomic_file import write_json_atomic
 from .core.config import APP_NAME, SETTINGS_FILE
 from .core.extract_source import write_extract_source
 from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
@@ -523,8 +524,7 @@ class App:
         self._settings["disclaimer_accepted"] = True
         try:
             os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._settings, f, indent=2)
+            write_json_atomic(SETTINGS_FILE, self._settings)
         except OSError:
             pass
         self._need_disclaimer = False
@@ -5874,8 +5874,7 @@ class App:
             pass
         try:
             os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._settings, f, indent=2)
+            write_json_atomic(SETTINGS_FILE, self._settings)
         except OSError:
             pass
 

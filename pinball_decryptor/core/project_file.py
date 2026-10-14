@@ -24,6 +24,8 @@ import json
 import os
 import sys
 
+from .atomic_file import write_json_atomic
+
 EXTENSION = ".pinproj"
 FILETYPES = [("Pinball Asset Decryptor project", "*" + EXTENSION),
              ("All files", "*.*")]
@@ -162,20 +164,23 @@ def project_build_dir(folder, data=None):
 
 
 def _write_maybe_hidden(path, data):
-    """Dump *data* as JSON to *path*, keeping/handing it the Windows hidden
+    """:func:`~.atomic_file.write_json_atomic`, keeping/handing the file the Windows hidden
     attribute when the name is the dotfile anchor.
 
-    TRAP: ``open(path, "w")`` on a FILE_ATTRIBUTE_HIDDEN file raises
-    PermissionError on Windows (CreateFile w/ TRUNCATE_EXISTING rejects the
-    attribute mismatch) — so an existing anchor is un-hidden first and
-    re-hidden after."""
+    TRAP: the rename hands the anchor the temp file's attributes, so it comes
+    out un-hidden and is re-hidden after.  The in-place fallback's
+    ``open(path, "w")`` on a FILE_ATTRIBUTE_HIDDEN file raises PermissionError
+    on Windows (CreateFile w/ TRUNCATE_EXISTING rejects the attribute
+    mismatch) — so an existing anchor is un-hidden first all the same, and
+    re-hidden even when the write fails."""
     hide = os.path.basename(path) == ANCHOR_NAME
     if hide and os.path.isfile(path):
         _set_hidden(path, False)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
-    if hide:
-        _set_hidden(path, True)
+    try:
+        write_json_atomic(path, data)
+    finally:
+        if hide and os.path.isfile(path):
+            _set_hidden(path, True)
 
 
 def _set_hidden(path, hidden):

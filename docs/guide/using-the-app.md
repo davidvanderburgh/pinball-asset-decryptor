@@ -630,6 +630,8 @@ keeps a per-manufacturer dropdown of your recent paths (handy when you
 bounce between games), and the **?** button in the top bar opens a tips
 page for whichever tab you're on.
 
+The app speaks English (US), English (UK), Spanish, German and French: the globe button in the top bar (or the gear menu > **Language**) switches every screen, the tips and the messages at once, and the choice is remembered.
+
 Working several game versions at once? Every extraction folder is a
 **project**: the folder you extract into carries a hidden project file
 recording the manufacturer, the stock image it came from, and every form

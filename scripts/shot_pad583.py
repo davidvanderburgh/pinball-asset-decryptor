@@ -80,6 +80,16 @@ def main():
                 except Exception as e:                      # noqa: BLE001
                     print(tab, "not selectable:", e, flush=True)
                 time.sleep(6)
+                if tab == "images" and after:
+                    # the stills, one of them (TRON's 1440) in the preview
+                    try:
+                        page.get_by_placeholder("Search").first.fill(
+                            "pictures/img14")
+                        time.sleep(2)
+                        api("images.select", "images/pictures/img1440.png")
+                        time.sleep(3)
+                    except Exception as e:                  # noqa: BLE001
+                        print("images: no picture picked:", e, flush=True)
                 page.mouse.move(5, 940)
                 time.sleep(0.5)
                 page.screenshot(path=out(name))

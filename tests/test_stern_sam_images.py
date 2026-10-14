@@ -411,3 +411,17 @@ def test_sam_era_offers_replace_images(stern, tmp_path):
     stern.set_era("spike2")
     assert stern.image_slot_dirs(str(tmp_path)) is None
     assert stern.image_note() == ""
+
+
+def test_sam_pages_leave_out_scenes_and_colors(stern):
+    from types import SimpleNamespace
+
+    from pinball_decryptor.webui.window import WebWindow
+    me = SimpleNamespace(modes_preview_on=lambda mfr=None: False)
+    stern.set_era("sam")
+    gates = WebWindow._gate(me, stern)
+    assert gates["Replace Images"] and gates["Replace Audio"]
+    assert not gates["Scenes"] and not gates["Color Profile"]
+    stern.set_era("spike2")
+    gates = WebWindow._gate(me, stern)
+    assert gates["Scenes"] and gates["Color Profile"]

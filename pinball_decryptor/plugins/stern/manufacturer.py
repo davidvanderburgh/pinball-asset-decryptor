@@ -155,6 +155,7 @@ _SAM_CAPS = Capabilities(
     modpack=True,
     replace_audio=True,
     replace_image=True,
+    dmd_shades=True,
     audio_level_offset=True,
     transcribe=True,
     music_id=True,

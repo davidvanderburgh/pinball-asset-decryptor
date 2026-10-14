@@ -190,8 +190,12 @@ def test_the_page_puts_them_after_mine(tmp_path):
             cap = w.state("text_scenes")["caption_full"]
             assert "start out" not in cap, cap
             assert "after your own edits" in cap, cap
-        report = sorted((b / "logs").glob("Load a scenes *.txt"))[-1].read_text(
-            encoding="utf-8")
+            if not _round:
+                # the first load's report (by mtime: the names are only to the
+                # second, and a later load's says it added nothing more)
+                report = max((b / "logs").glob("Load a scenes *.txt"),
+                             key=lambda p: p.stat().st_mtime_ns).read_text(
+                    encoding="utf-8")
         assert "added after your own 1 edit" in report, report
 
 

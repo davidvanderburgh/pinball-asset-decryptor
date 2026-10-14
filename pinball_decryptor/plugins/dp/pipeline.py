@@ -60,7 +60,7 @@ class TblExtractPipeline(BasePipeline):
         self._log("Detecting game...", "info")
         if detect_game(self.zip_path) != "tbl":
             raise PipelineError("Detect",
-                f"{os.path.basename(self.zip_path)} is not a recognised "
+                f"{os.path.basename(self.zip_path)} is not a recognized "
                 f"Big Lebowski update zip.")
         self._log("Game detected: The Big Lebowski", "success")
         os.makedirs(self.output_dir, exist_ok=True)
@@ -189,7 +189,7 @@ class AaiwExtractPipeline(BasePipeline):
         self._log("Detecting game...", "info")
         if detect_game(self.img_path) != "aaiw":
             raise PipelineError("Detect",
-                f"{os.path.basename(self.img_path)} is not a recognised "
+                f"{os.path.basename(self.img_path)} is not a recognized "
                 f"AAIW installer image.")
         self._log("Game detected: Alice's Adventures in Wonderland", "success")
 

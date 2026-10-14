@@ -139,7 +139,7 @@ def append_record(data, path, size, hmac_digest, md5_digest):
     """
     recs, _crc, fmt = sidx.parse_records(data)
     if not recs:
-        raise SidxAppendError("not a recognised .sidx manifest")
+        raise SidxAppendError("not a recognized .sidx manifest")
     if path in recs:
         raise SidxAppendError(
             "%s already has a record; refresh it instead of appending" % path)

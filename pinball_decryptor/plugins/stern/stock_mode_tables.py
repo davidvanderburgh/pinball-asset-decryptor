@@ -689,7 +689,7 @@ number 10 title_msg 3273 movw 0xbc690 e3003cc9 word  # when both tests (flags 40
 number 10 title_msg@3 3276 movw 0xbc694 e3002ccc word  # when its second test (flag 41) is true
 # --- hand read (item 144): scenes. A stock mode draws in SHARED template scenes plus a clip by name;
 # only a few modes load a scene of their own. Read from the display layers' base classes and the
-# unit (static initialiser) that loads each 40-hex id, and each scene's node names; not seen live. ---
+# unit (static initializer) that loads each 40-hex id, and each scene's node names; not seen live. ---
 scene 1 6b877640812fd0e512212950f109dd79d2ac33b7 movwt 0x458fc 0x45904 e3021d20,e3401062  # SHARED by 10 modes: their BDL<Mode>Start layer derives from BDLModeStart, whose unit loads it (tesla strike's is BDLPowerlineAttackStart, by name); holds: GenericMode: MODE TITLE
 scene 2 6b877640812fd0e512212950f109dd79d2ac33b7 movwt 0x458fc 0x45904 e3021d20,e3401062  # SHARED by 10 modes: their BDL<Mode>Start layer derives from BDLModeStart, whose unit loads it (tesla strike's is BDLPowerlineAttackStart, by name); holds: GenericMode: MODE TITLE
 scene 4 6b877640812fd0e512212950f109dd79d2ac33b7 movwt 0x458fc 0x45904 e3021d20,e3401062  # SHARED by 10 modes: their BDL<Mode>Start layer derives from BDLModeStart, whose unit loads it (tesla strike's is BDLPowerlineAttackStart, by name); holds: GenericMode: MODE TITLE
@@ -709,7 +709,7 @@ scene 12 a1a15be43fa0e14f26dd704b624aa46a3f36525a movwt 0x46c90 0x46c98 e3021ec0
 scene 13 a1a15be43fa0e14f26dd704b624aa46a3f36525a movwt 0x46c90 0x46c98 e3021ec0,e3401062  # SHARED by the tier-1 battles: BDLModeTotalBattleTier1's unit loads it (which battles use that layer: by its name); holds: MODE NAME TOTAL, X CONTROLS CURRENT CITY
 scene 14 a1a15be43fa0e14f26dd704b624aa46a3f36525a movwt 0x46c90 0x46c98 e3021ec0,e3401062  # SHARED by the tier-1 battles: BDLModeTotalBattleTier1's unit loads it (which battles use that layer: by its name); holds: MODE NAME TOTAL, X CONTROLS CURRENT CITY
 scene 15 a1a15be43fa0e14f26dd704b624aa46a3f36525a movwt 0x46c90 0x46c98 e3021ec0,e3401062  # SHARED by the tier-1 battles: BDLModeTotalBattleTier1's unit loads it (which battles use that layer: by its name); holds: MODE NAME TOTAL, X CONTROLS CURRENT CITY
-scene 25 56fadc8a1342be85b087009f71a01c31c120faf5 movwt 0xb5f44 0xb5f4c e30a1654,e3401062  # hedorah's own unit (static initialiser); holds: HEDORAH, SMOG MONSTER FRENZY, SHOOT GREEN ARROW TO COLLECT
+scene 25 56fadc8a1342be85b087009f71a01c31c120faf5 movwt 0xb5f44 0xb5f4c e30a1654,e3401062  # hedorah's own unit (static initializer); holds: HEDORAH, SMOG MONSTER FRENZY, SHOOT GREEN ARROW TO COLLECT
 scene 24 7949bb14a9a21abf5e2885a01eb5ed4f9c3a8eca movwt 0xe1658 0xe1660 e30413a0,e3401062  # monster rampage's unit; the global it builds is read by cmode_monster_rampage and BDLMonsterRampageBG; holds: BaseGame: AWARD TITLE / AWARD VALUE
 scene 26 4e0bf26631e0d64055ae92806c1a413634f6d72f movwt 0xe65ec 0xe65f0 e30e1404,e3401062  # BDLMonsterZeroStart::v[13] loads it; holds: Xilien console pop-up (Planet X voice lines)
 scene 1 4fb4bb55515739e701b3893a997391221a4b9a6b movwt 0xb1b04 0xb1b0c e30a10c4,e3401062  # godzilla multiball's unit (next to BDLGodzillaMultiballBG); holds: SuperJackpot_Start
@@ -1408,7 +1408,7 @@ number 10 title_msg 3273 movw 0xbe08c e3003cc9 word  # when both tests (flags 40
 number 10 title_msg@3 3276 movw 0xbe090 e3002ccc word  # when its second test (flag 41) is true
 # --- hand read (item 144): scenes. A stock mode draws in SHARED template scenes plus a clip by name;
 # only a few modes load a scene of their own. Read from the display layers' base classes and the
-# unit (static initialiser) that loads each 40-hex id, and each scene's node names; not seen live. ---
+# unit (static initializer) that loads each 40-hex id, and each scene's node names; not seen live. ---
 scene 1 6b877640812fd0e512212950f109dd79d2ac33b7 movwt 0x45a4c 0x45a54 e3031280,e3401063  # SHARED by 10 modes: their BDL<Mode>Start layer derives from BDLModeStart, whose unit loads it (tesla strike's is BDLPowerlineAttackStart, by name); holds: GenericMode: MODE TITLE
 scene 2 6b877640812fd0e512212950f109dd79d2ac33b7 movwt 0x45a4c 0x45a54 e3031280,e3401063  # SHARED by 10 modes: their BDL<Mode>Start layer derives from BDLModeStart, whose unit loads it (tesla strike's is BDLPowerlineAttackStart, by name); holds: GenericMode: MODE TITLE
 scene 4 6b877640812fd0e512212950f109dd79d2ac33b7 movwt 0x45a4c 0x45a54 e3031280,e3401063  # SHARED by 10 modes: their BDL<Mode>Start layer derives from BDLModeStart, whose unit loads it (tesla strike's is BDLPowerlineAttackStart, by name); holds: GenericMode: MODE TITLE
@@ -1425,7 +1425,7 @@ scene 11 6a22f74b53423c1dafb22964b3731bca02dbd56c movwt 0x465f8 0x46600 e3031338
 scene 20 6a22f74b53423c1dafb22964b3731bca02dbd56c movwt 0x465f8 0x46600 e3031338,e3401063  # SHARED by 5 modes: their BDL<Mode>Total layer derives from BDLModeTotal, whose unit loads it (planet X's total taken as the multiball's, by name); holds: MODE NAME TOTAL
 scene 26 6a22f74b53423c1dafb22964b3731bca02dbd56c movwt 0x465f8 0x46600 e3031338,e3401063  # SHARED by 5 modes: their BDL<Mode>Total layer derives from BDLModeTotal, whose unit loads it (planet X's total taken as the multiball's, by name); holds: MODE NAME TOTAL
 # scene a1a15be4 for 12,13,14,15: not located on this build (0x46c50 not located: not unique in the reference)
-scene 25 56fadc8a1342be85b087009f71a01c31c120faf5 movwt 0xb7940 0xb7948 e30a1d0c,e3401063  # hedorah's own unit (static initialiser); holds: HEDORAH, SMOG MONSTER FRENZY, SHOOT GREEN ARROW TO COLLECT
+scene 25 56fadc8a1342be85b087009f71a01c31c120faf5 movwt 0xb7940 0xb7948 e30a1d0c,e3401063  # hedorah's own unit (static initializer); holds: HEDORAH, SMOG MONSTER FRENZY, SHOOT GREEN ARROW TO COLLECT
 scene 24 7949bb14a9a21abf5e2885a01eb5ed4f9c3a8eca movwt 0xe3c78 0xe3c80 e30419d8,e3401063  # monster rampage's unit; the global it builds is read by cmode_monster_rampage and BDLMonsterRampageBG; holds: BaseGame: AWARD TITLE / AWARD VALUE
 scene 26 4e0bf26631e0d64055ae92806c1a413634f6d72f movwt 0xe8c68 0xe8c6c e30e1b0c,e3401063  # BDLMonsterZeroStart::v[13] loads it; holds: Xilien console pop-up (Planet X voice lines)
 # scene 4fb4bb55 for 1: not located on this build (0xb1ad4 not located: not unique in the reference)

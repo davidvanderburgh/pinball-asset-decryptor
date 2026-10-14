@@ -2322,14 +2322,14 @@ def test_the_theme_rides_every_command_line_and_the_preview_conf(tmp_path):
     assert lines[-15] == "theme=custom"
     assert lines[-1] == "color_countdown=00ff00"
     assert validate_form(form, sources=False) == []
-    form.colors["frame_hl"] = "not a colour"
+    form.colors["frame_hl"] = "not a color"
     errs = validate_form(form, sources=False)
-    assert any("card frame, highlighted colour must be six hex" in e
+    assert any("card frame, highlighted color must be six hex" in e
                for e in errs)
     assert "frame_hl=" not in " ".join(multiboot_core.theme_args(form))
     assert "color_frame_hl" not in write_preview_conf(form)
     form.colors = {"nosuch": "ffffff"}
-    assert any("not a colour the menu has" in e
+    assert any("not a color the menu has" in e
                for e in validate_form(form, sources=False))
     form = _form(tmp_path, 2, theme="nosuch")
     assert any("not one the selector has" in e

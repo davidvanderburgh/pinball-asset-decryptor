@@ -270,7 +270,7 @@ def _pack_via_directory(original_binary, pckdir, modified_pck_dir,
     with open(long_prefix + os.path.abspath(original_binary), "rb") as binf:
         for rel in candidates:
             if cancel_cb is not None and cancel_cb():
-                raise RuntimeError("pack cancelled by user")
+                raise RuntimeError("pack canceled by user")
             ext = os.path.splitext(rel)[1].lower()
             if ext not in _SUBSTITUTABLE_EXTS:
                 continue
@@ -486,7 +486,7 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
         replacements = []
         for idx, (fs, fe, ss, se, p, kind) in enumerate(all_items):
             if cancel_cb is not None and idx % 25 == 0 and cancel_cb():
-                raise RuntimeError("pack cancelled by user")
+                raise RuntimeError("pack canceled by user")
             rel = p[len("res://"):] if p.startswith("res://") else p
             local_path = os.path.abspath(
                 os.path.join(modified_pck_dir, rel.replace("/", os.sep)))

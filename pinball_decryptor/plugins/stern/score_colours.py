@@ -405,7 +405,7 @@ def set_pick(assets_dir, role, rgb):
     shows already: no pick)."""
     from ...core import staged_changes
     if role not in DEFAULTS:
-        raise ValueError("no score colour %r" % role)
+        raise ValueError("no score color %r" % role)
     data = staged_changes.load(assets_dir)
     m = data.get(KEY)
     m = dict(m) if isinstance(m, dict) else {}

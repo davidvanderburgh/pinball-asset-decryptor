@@ -92,7 +92,7 @@ def write_audio_ctl(gain, muted):
 #: The State word and the button from Cancel until the preparation has
 #: really stopped (PAD-489: a Cancel that went on "Applying your
 #: replacements..." read as a hang).
-CANCELLING = "Cancelling…"
+CANCELLING = "Canceling…"
 
 #: The State line's ⓘ while the staging converts videos and pictures before
 #: a run (PAD-489).
@@ -1144,7 +1144,7 @@ class EmulateTab(TabService):
         if proc.returncode == 0:
             return True
         if "-128" in err or "cancel" in err.lower():
-            self._log("[emulate] setup cancelled; nothing was changed.")
+            self._log("[emulate] setup canceled; nothing was changed.")
         else:
             self._log("[emulate] %s did not finish. %s"
                       % (label, err.strip() or "See the lines above."))
@@ -2015,7 +2015,7 @@ class EmulateTab(TabService):
             # the one button said "Cancel" for this; now it is "Starting…"
             self._post(self._paint_run_btn)
         if counts is None:
-            self._overrides_refuse("the preparation was cancelled")
+            self._overrides_refuse("the preparation was canceled")
             return None
         stern_engine.stamp_override_manifest(
             out, assets_fingerprint=rig.assets_fingerprint(assets))
@@ -2204,8 +2204,8 @@ class EmulateTab(TabService):
                 if callable(notify):
                     self._post(notify, assets)
             done = tracker[0].converted if tracker else 0
-            said = ("Cancelled: the game was not started."
-                    + (" The %d video%s converted before you cancelled %s "
+            said = ("Canceled: the game was not started."
+                    + (" The %d video%s converted before you canceled %s "
                        "kept, so the next Start goes on from there."
                        % (done, "" if done == 1 else "s",
                           "is" if done == 1 else "are") if done else ""))
@@ -2394,7 +2394,7 @@ class EmulateTab(TabService):
         if self._preparing is not None and not self._stopping:
             if not self._cancel_prepare:
                 self._cancel_prepare = True
-                self.log("[emulate] cancelling the preparation…")
+                self.log("[emulate] canceling the preparation…")
                 # PAD-489: said at once, and until the work has really
                 # stopped (the clip being converted, then nothing more)
                 self._preparing = CANCELLING
@@ -2668,7 +2668,7 @@ class EmulateTab(TabService):
                     self._post(down)
                     return
                 if self._cancel_prepare:
-                    self.prepare_refuse("the preparation was cancelled; "
+                    self.prepare_refuse("the preparation was canceled; "
                                         "nothing was started")
                     self._starting = False
                     self._post(down)

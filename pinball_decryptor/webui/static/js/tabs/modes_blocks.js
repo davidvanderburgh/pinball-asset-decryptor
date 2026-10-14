@@ -91,7 +91,7 @@ const TIP = {
   rate: "How fast it blinks, pulses or chases: one beat every this many ms (20 to 5000). Any value: a number, a variable, a sum. Empty = its usual pace.",
   hurry: "Blinks slowly with most of the time left, faster as the clock runs down, and flickers in the last three seconds.",
   show: "A light show over the playfield's inserts (the ones the game's port places), a few seconds long: the shots' own lights come back when it is over. A new show takes the place of one still running.",
-  ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colours, from a place on the playfield.",
+  ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colors, from a place on the playfield.",
   stepRate: "The pattern's pace, ms (a strobe's flash, a beam's turn, a chase's step). 0 = its usual.",
   gi: "The lights between the inserts (the general illumination) during this step: the game's, dark, or flashing white.",
   hold: "Holds the mechanism this many ms (100 to 5000) at its own power settings, then lets go. Only while the mode runs, never while the game uses it, 3 s apart and 6 a minute at most; the mode ending, the ball draining or a tilt lets go at once. Any value: a number, a variable, a sum.",
@@ -100,10 +100,10 @@ const TIP = {
   shake: "Shakes the cabinet's shaker motor for this long, the way the game shakes it: the operator's Shaker Motor setting still applies (switched off, or no shaker fitted: nothing). A strength the game itself shakes at (some games have one only), never longer than the game's own longest at that strength. One at a time, never over one of the game's own, 20 shakes and 15 seconds of shaking a minute at most; the mode, the ball or the game ending stops it, except a shake in When the mode ends, which runs out.",
   shakeGame: "Plays one of the game's own shakes, as the game does: on Godzilla its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble or its multiball start (five shakes over 4 seconds); on the other games the one it plays most of each length (a tap, a short, medium or long shake, a rumble). The same limits as Shake the cabinet.",
   gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds; a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
-  lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the inserts picked (a villain's; several take turns with Chase) shine in this colour while the mode is not running, ball after ball, and that shot made starts the mode. As the game's own do, it waits while the game says one of its modes is in the way (on James Bond: a henchman, villain or Q Branch mode, or one of its mini-wizards) and, as this mode is set, while another of the game's modes or a multiball runs; it stays lit for the next shot. While the game says one of its modes is in the way, only the insert held solid shows: the shot's lights and the inserts picked light once that mode is over, as the game's own wait to cycle their villains. Once it could start, its shot is its own: the game does not start one of its own modes on it (on James Bond's Right ramp, a henchman or villain), which waits for a later shot. It stays lit when a ball or one of the game's modes ends. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
+  lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the inserts picked (a villain's; several take turns with Chase) shine in this color while the mode is not running, ball after ball, and that shot made starts the mode. As the game's own do, it waits while the game says one of its modes is in the way (on James Bond: a henchman, villain or Q Branch mode, or one of its mini-wizards) and, as this mode is set, while another of the game's modes or a multiball runs; it stays lit for the next shot. While the game says one of its modes is in the way, only the insert held solid shows: the shot's lights and the inserts picked light once that mode is over, as the game's own wait to cycle their villains. Once it could start, its shot is its own: the game does not start one of its own modes on it (on James Bond's Right ramp, a henchman or villain), which waits for a later shot. It stays lit when a ball or one of the game's modes ends. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
   litMore: "Another insert lit with it. With more than one, Chase runs the light across them in turn, as James Bond cycles its villains on the Right ramp while one of its mini-wizards is lit; the other patterns light them all at once.",
-  litSolid: "One insert more, held solid in its own colour while the mode is lit and handed back with the rest: the film's insert (Y.O.L.T., DIAMONDS ARE FOREVER) as the game holds it for one of its own mini-wizards. It shows even while one of the game's modes is in the way.",
-  bar: "While it runs, its name goes in the game's own status bar under the screen, in this colour, with its clock draining along it, as the game shows its own modes (James Bond: Goldfinger's Jackpot in gold). At the end the bar stays full through its total, then the game has it back; a drain gives it back at once.",
+  litSolid: "One insert more, held solid in its own color while the mode is lit and handed back with the rest: the film's insert (Y.O.L.T., DIAMONDS ARE FOREVER) as the game holds it for one of its own mini-wizards. It shows even while one of the game's modes is in the way.",
+  bar: "While it runs, its name goes in the game's own status bar under the screen, in this color, with its clock draining along it, as the game shows its own modes (James Bond: Goldfinger's Jackpot in gold). At the end the bar stays full through its total, then the game has it back; a drain gives it back at once.",
   barOff: "This card's game has no status bar a mode can use: the mode runs the same without it.",
   info: "A line under its name while it runs: its words and a value as it changes, \"SUPER JACKPOT = 53,200,000\", as the game's own modes show one (James Bond: under the status bar). Out of the way of the game's own displays; gone at its end.",
   infoPlace: "The Scenes editor on the game's screen with the line (and its own screen, if it has one) where they will show: drag or size it there, and it is saved into the mode. Untouched, it goes where the game shows its own (James Bond: under the status bar).",
@@ -320,12 +320,12 @@ function StmtBody({ b, path, ed }) {
           onChange=${(v) => { const l = [...names]; if (v === "-") l.splice(i, 1); else l[i] = v; setNames(l); }} />`)}
         ${names.length && names.length < LIT_INSERTS_MAX && more ? html`<button type="button" class="bk-add" onClick=${() => setNames([...names, more])}
           ...${tip(TIP.litMore)}>+ insert</button>` : null}
-        <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The lights' colour")} />
+        <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The lights' color")} />
         <${Pick} value=${b.pattern} options=${LIT_PATTERNS} onChange=${(v) => set("pattern", v)} />
         <span class="bk-w" ...${tip(TIP.litSolid)}>and hold</span><${Pick} value=${b.solid || "-"} options=${opts} missing="(not on this game)" width=${200}
           title=${none} onChange=${(v) => set("solid", v === "-" ? "" : v)} />
         ${b.solid ? html`<input type="color" class="bk-color" value=${b.solid_color || "#ffffff"} onInput=${(e) => set("solid_color", e.target.value)}
-          ...${tip("That insert's colour")} />` : null}<span class="bk-w">solid</span>`;
+          ...${tip("That insert's color")} />` : null}<span class="bk-w">solid</span>`;
     }
     case "score": return html`<span class="bk-w">Score</span><${Slot} kind="num" value=${b.points} path=${[...path, "points"]} ed=${ed} /><span class="bk-w">points</span>`;
     case "set": return html`<span class="bk-w">Set</span><${Pick} value=${b.var} options=${ed.vars.map((v) => v.name)} missing="(no such variable)" onChange=${(v) => set("var", v)} />
@@ -342,7 +342,7 @@ function StmtBody({ b, path, ed }) {
     case "words": return html`<span class="bk-w">Show</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">on its screen</span>`;
     case "light_shot": return html`<span class="bk-w">Light</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
-      <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The insert's colour")} />
+      <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The insert's color")} />
       <${Pick} value=${b.pattern} options=${PATTERNS} title=${b.pattern === "hurry" ? TIP.hurry : undefined} onChange=${(v) => set("pattern", v)} />
       ${PACED.includes(b.pattern) ? html`<span class="bk-w" ...${tip(TIP.rate)}>every</span><${Slot} kind="num" optional empty="its usual pace"
         value=${b.rate} path=${[...path, "rate"]} ed=${ed} /><span class="bk-w">ms</span>` : null}`;
@@ -469,8 +469,8 @@ function ShowSteps({ steps, path, ed }) {
         <span class="bk-w">${i + 1}.</span>
         <${Pick} value=${st.fx} options=${light.fx || []} width=${140} onChange=${(v) => set("fx", v)} />
         <${Num} value=${st.ms} width=${52} title="How long this step lasts, ms" onChange=${(v) => set("ms", v)} /><span class="bk-w">ms</span>
-        <input type="color" class="bk-color" value=${st.a || "#ffffff"} onInput=${(e) => set("a", e.target.value)} ...${tip("Its first colour")} />
-        <input type="color" class="bk-color" value=${st.b || "#000000"} onInput=${(e) => set("b", e.target.value)} ...${tip("Its second colour")} />
+        <input type="color" class="bk-color" value=${st.a || "#ffffff"} onInput=${(e) => set("a", e.target.value)} ...${tip("Its first color")} />
+        <input type="color" class="bk-color" value=${st.b || "#000000"} onInput=${(e) => set("b", e.target.value)} ...${tip("Its second color")} />
         <span class="bk-w">at</span><${Pick} value=${st.at || "center"} options=${light.places || []} width=${104} onChange=${(v) => set("at", v)} />
         <span class="bk-w" ...${tip(TIP.stepRate)}>pace</span><${Num} value=${st.rate ?? 0} width=${44} title=${TIP.stepRate} onChange=${(v) => set("rate", v)} />
         <${Pick} value=${st.gi || "keep"} options=${light.gi || []} width=${118} title=${TIP.gi} onChange=${(v) => set("gi", v)} />
@@ -636,7 +636,7 @@ function Hud({ prog, ed }) {
       ${gauge.on ? html`<${Text} value=${gauge.label} max=${16} width=${110} onChange=${(v) => ed.set(at_("gauge", "label"), v)} placeholder="its label" />
         <span class="bk-w">of</span><${Num} value=${gauge.count} width=${40} onChange=${(v) => ed.set(at_("gauge", "count"), v)} />
         <${Pick} value=${gauge.kind} options=${GAUGES} onChange=${(v) => ed.set(at_("gauge", "kind"), v)} />
-        <input type="color" class="bk-color" value=${gauge.color || "#ff7800"} onInput=${(e) => ed.set(at_("gauge", "color"), e.target.value)} ...${tip("The lit pips' colour")} />
+        <input type="color" class="bk-color" value=${gauge.color || "#ff7800"} onInput=${(e) => ed.set(at_("gauge", "color"), e.target.value)} ...${tip("The lit pips' color")} />
         <span class="bk-w" ...${tip(TIP.gaugeFollows)}>lit to</span><${Slot} kind="num" value=${gauge.value} path=${at_("gauge", "value")} ed=${ed} empty="(set by a block)" />` : null}
     </div>
   </div>`;
@@ -962,7 +962,7 @@ export function BlocksEditor({ s, c }) {
         ${ed.ch.status_bar || (prog.bar || {}).on ? html`<${Check} checked=${!!(prog.bar || {}).on} label="its name in the game's bar"
           title=${ed.ch.status_bar ? TIP.bar : TIP.barOff} onChange=${(v) => ed.set(["bar", "on"], v)} />
           ${(prog.bar || {}).on ? html`<input type="color" class="bk-color" value=${(prog.bar || {}).color || "#00c040"}
-            onInput=${(e) => ed.set(["bar", "color"], e.target.value)} ...${tip("The bar's colour")} />` : null}` : null}
+            onInput=${(e) => ed.set(["bar", "color"], e.target.value)} ...${tip("The bar's color")} />` : null}` : null}
         <${Check} checked=${!!(prog.info || {}).on} label="a line under its name" title=${ed.ch.info_line === false ? TIP.infoOff : TIP.info}
           onChange=${(v) => ed.set(["info", "on"], v)} />
       </div>

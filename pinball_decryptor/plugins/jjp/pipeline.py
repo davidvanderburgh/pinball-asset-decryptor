@@ -1903,7 +1903,7 @@ class DecryptionPipeline:
 
     def _check_cancel(self):
         if self.cancelled:
-            raise PipelineError("Cancelled", "Operation cancelled by user.")
+            raise PipelineError("Canceled", "Operation canceled by user.")
 
     def _timed(self, label, phase_fn):
         """Run a phase and log its wall-clock duration — field reports of
@@ -2024,7 +2024,7 @@ class DecryptionPipeline:
                                 for f in futs:
                                     f.cancel()
                                 raise PipelineError(
-                                    "Cancelled", "Operation cancelled by user.")
+                                    "Canceled", "Operation canceled by user.")
         self.on_progress(total, total, "Checksums complete")
 
         # Consume the per-run sidecar so a later run can't merge a stale one.
@@ -2467,7 +2467,7 @@ class DecryptionPipeline:
             for line in self.executor.stream(cmd, timeout=config.EXTRACT_TIMEOUT):
                 if self.cancelled:
                     self.executor.kill()
-                    raise PipelineError("Extract", "Cancelled by user.")
+                    raise PipelineError("Extract", "Canceled by user.")
                 # partclone outputs progress with ANSI escapes like:
                 # "Elapsed: 00:00:08, Remaining: 00:01:17, Completed:   9.33%,   3.71GB/min,"
                 # Strip ANSI escape codes
@@ -2570,7 +2570,7 @@ class DecryptionPipeline:
             for line in self.executor.stream(cmd, timeout=config.EXTRACT_TIMEOUT):
                 if self.cancelled:
                     self.executor.kill()
-                    raise PipelineError("Extract", "Cancelled by user.")
+                    raise PipelineError("Extract", "Canceled by user.")
                 self.log(f"  {line.strip()}", "info")
                 if "Progress:" in line:
                     m = re.search(r'(\d+\.?\d*)%', line)
@@ -3327,7 +3327,7 @@ class DecryptionPipeline:
                 for line in self.executor.stream(cmd, timeout=config.DECRYPT_TIMEOUT):
                     if self.cancelled:
                         self.executor.kill()
-                        raise PipelineError("Decrypt", "Cancelled by user.")
+                        raise PipelineError("Decrypt", "Canceled by user.")
 
                     output_lines.append(line)
 
@@ -3948,7 +3948,7 @@ class DecryptionPipeline:
                     continue
                 raise PipelineError(
                     "Mount",
-                    "Admin password failed twice. Cancelling. "
+                    "Admin password failed twice. Canceling. "
                     "Re-run Extract / Apply to try again.")
             if result.returncode != 0:
                 raise CommandError(what, result.returncode, output)
@@ -4121,7 +4121,7 @@ class DecryptionPipeline:
             raise PipelineError(
                 "Mount",
                 "Admin password is required to read the SSD. "
-                "Cancelled.")
+                "Canceled.")
         # osascript prints: button returned:OK, text returned:<pw>
         # (with possible trailing fields).  We pull just the
         # text-returned value.
@@ -4415,7 +4415,7 @@ class ModPipeline(DecryptionPipeline):
         self.changed_files = []
         for i, (rel_path, full_path) in enumerate(all_files):
             if self.cancelled:
-                raise PipelineError("Scan", "Cancelled by user.")
+                raise PipelineError("Scan", "Canceled by user.")
 
             h = hashlib.md5()
             with open(full_path, 'rb') as fh:
@@ -4657,7 +4657,7 @@ class ModPipeline(DecryptionPipeline):
                 for line in self.executor.stream(cmd, timeout=config.DECRYPT_TIMEOUT):
                     if self.cancelled:
                         self.executor.kill()
-                        raise PipelineError("Encrypt", "Cancelled by user.")
+                        raise PipelineError("Encrypt", "Canceled by user.")
 
                     output_lines.append(line)
 
@@ -4970,7 +4970,7 @@ class ModPipeline(DecryptionPipeline):
             ):
                 if self.cancelled:
                     self.executor.kill()
-                    raise PipelineError("Convert", "Cancelled by user.")
+                    raise PipelineError("Convert", "Canceled by user.")
                 clean = line.strip()
                 if not clean:
                     continue
@@ -5383,7 +5383,7 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
             f"Decrypted 0 of {walked} encrypted asset(s).\n\n"
             f"{detail}"
             "This game build encrypts its assets in a way this version does "
-            "not recognise, so there is nothing to show for the run. Newer "
+            "not recognize, so there is nothing to show for the run. Newer "
             "game engines change the scheme and support has to be added for "
             "them.\n\n"
             "The unencrypted part of the image still extracts: tick "
@@ -5627,7 +5627,7 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
             for line in self.executor.stream(cmd, timeout=config.DECRYPT_TIMEOUT):
                 if self.cancelled:
                     self.executor.kill()
-                    raise PipelineError("Decrypt", "Cancelled by user.")
+                    raise PipelineError("Decrypt", "Canceled by user.")
 
                 level = "info"
                 if "[FAIL]" in line:
@@ -7409,7 +7409,7 @@ class StandaloneModPipeline(ModPipeline):
                 if clean.strip():
                     fsck_lines.append(clean.strip())
         if fsck_rc & 32:
-            raise PipelineError("Convert", "e2fsck was cancelled, so the "
+            raise PipelineError("Convert", "e2fsck was canceled, so the "
                                 "modified filesystem was left unchecked and "
                                 "no ISO was built.")
         if fsck_rc & 4 or fsck_rc & 8 or fsck_rc & 16:
@@ -7536,7 +7536,7 @@ class StandaloneModPipeline(ModPipeline):
             ):
                 if self.cancelled:
                     self.executor.kill()
-                    raise PipelineError("Convert", "Cancelled by user.")
+                    raise PipelineError("Convert", "Canceled by user.")
                 clean = line.strip()
                 if not clean:
                     continue
@@ -10417,7 +10417,7 @@ class RestoreToSSDPipeline:
 
     def _check_cancel(self):
         if self.cancelled:
-            raise PipelineError("Install", "Cancelled by user. The disk is half written: "
+            raise PipelineError("Install", "Canceled by user. The disk is half written: "
                                 "install again before it goes into a machine.")
 
     @property

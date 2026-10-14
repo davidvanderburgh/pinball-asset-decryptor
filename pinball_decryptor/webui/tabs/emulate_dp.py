@@ -55,7 +55,7 @@ SOUND_TIP = ("Play the game's sound on this PC. Applies when the game starts; "
              "the game's own volume is in its service menu.")
 
 SWITCHES_TIP = ("The machine's switches: the game's own machine view with every "
-                "switch on it, and a labelled list. Hold a switch with the "
+                "switch on it, and a labeled list. Hold a switch with the "
                 "mouse, right-click to latch it.")
 
 #: The status grid (label, key into the values _apply computes).
@@ -204,8 +204,8 @@ class EmulateDPTab(RigTabMixin, TabService):
         if not self._starting or self._cancelling:
             return False
         self._cancelling = True
-        self._set_go("Cancelling…", False)
-        self._log("DP: cancelling the start…")
+        self._set_go("Canceling…", False)
+        self._log("DP: canceling the start…")
 
         def work():
             try:
@@ -358,7 +358,7 @@ class EmulateDPTab(RigTabMixin, TabService):
                     timeout=3600, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
-                    self._log("DP: start cancelled.")
+                    self._log("DP: start canceled.")
                 elif rc not in (0, None):
                     self._log("DP: start failed (exit %d). %s"
                               % (rc, dp.EXIT_TEXT.get(rc, "")))

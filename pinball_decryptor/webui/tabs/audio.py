@@ -594,12 +594,12 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._scan_id += 1
         t0, self._scan_t0 = self._scan_t0, None
         if t0 is not None:
-            self.log("Audio scan cancelled after %.1f s."
+            self.log("Audio scan canceled after %.1f s."
                      % (time.monotonic() - t0), "info")
         self._scanning = False
         self._cancelled = True
         self.set(scanning=False, rows=[],
-                 empty="Scan cancelled — click Scan to try again.")
+                 empty="Scan canceled — click Scan to try again.")
         return True
 
     def _populate_after_scan(self, slots, scan_id, scan_dir, cats=None,
@@ -1268,7 +1268,7 @@ class AudioTab(FindOriginalsMixin, TabService):
 
     def _idle_hint(self):
         if self._cancelled:
-            return "Scan cancelled — click Scan to try again."
+            return "Scan canceled — click Scan to try again."
         if not self._scan_dir:
             return "Set the project folder on the Extract tab, then click Scan."
         return "No .wav / .ogg audio found in this folder."

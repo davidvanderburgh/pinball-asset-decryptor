@@ -33,9 +33,9 @@ const T = {
   clock: "The mode keeps running into the next ball until its time runs out.",
   endEvent: "The mode ends when the game does this, when its time runs out, or when the ball drains, whichever comes first.",
   award: "Points for the first scoring shot. The second pays twice this, the third three times, and so on. The game's own scoring is used, so its playfield multiplier applies. Advanced can change this: Award ladder Fixed pays every shot once, and Points per shot gives a shot its own points.",
-  raw: "Replace the colour sweep with light commands of your own, in the game's own light language. Leave both empty to use the colour above.",
+  raw: "Replace the color sweep with light commands of your own, in the game's own light language. Leave both empty to use the color above.",
   screenTitle: "The title on the panel. Empty uses the mode's name. Under it, the mode writes what each shot paid, and the total at the end.",
-  clipTitle: "The title card's words, over the panel colour with a sweep in the title colour. Empty uses the mode's name.",
+  clipTitle: "The title card's words, over the panel color with a sweep in the title color. Empty uses the mode's name.",
   cooldown: "0 = no wait. The wait runs from the moment the mode ends, and carries on through the end of a ball.",
   starts: "Counted for each player. Once a ball starts again on the player's next ball; once a game, and up to N times, start again in the next game.",
   stack: "On: the mode starts whenever its shot is made, even during one of the game's own battles or multiballs. Off: it waits until the game's own battle or multiball ends, and the next start shot after that starts it.",
@@ -55,7 +55,7 @@ const T = {
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
   wizard: "Make this mode the game's own mini-wizard: when it starts (on its shot, an event such as a film done, or shots in order), the player gets the game's mode itself, with its own shots, lights, screens, sounds and award. Lit (where the game lights that one for a start shot), it waits for the game's own start shot, as when the game lights one; started, it begins at once, or the moment none of the game's own modes is in its way, and if the ball ends first it is lit for the start shot where the game has one. On James Bond 007 it is the only one lit until it starts, so the game's own choosing cannot swap it for another, and the game no longer lights it by itself (its own way: a henchman, villain, Q Branch or gadget in all six films), so only this mode hands it out. On the other games the game's own rules still light and start it too. A mini-wizard the player has already played this game plays again.",
   gameShows: "One of the game's own playfield light shows as the mode starts, and another as it ends: flashy ones suit a start, subdued ones an end. Each plays for its own few seconds, one at a time (a new one takes the place of one still playing). The one at the end is skipped when the mode ends because the ball drained: the game stops its own shows then.",
-  lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this colour and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
+  lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this color and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
   priority: "Kept for modes made before it changed: it no longer holds the game's displays back. A mode never makes the game's screens wait (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off), so the game's awards, starts and jackpots always come through, and the mode's screen is back when they end. 0 = none.",
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
   rising: "The Nth scoring shot pays N times its points: 1x, 2x, 3x...",
@@ -639,13 +639,13 @@ function ShowPage({ s, f, off, dis, rs, labels, files, showClip }) {
         <${Field} ns="modes" k="f:screen_title" value=${f.screen_title} disabled=${scrOff} title=${T.screenTitle} placeholder=${f.name} />
         <span class="lbl">Picture</span>
         <div class="row wrap">
-          ${radio("m-art", "art_mode", "panel", "A panel in these colours", { disabled: scrOff })}
+          ${radio("m-art", "art_mode", "panel", "A panel in these colors", { disabled: scrOff })}
           ${radio("m-art", "art_mode", "file", "My picture…", { disabled: scrOff, choose: "art" })}
         </div>
-        <span class="lbl">Colours</span>
+        <span class="lbl">Colors</span>
         <div class="row">
-          <span class="dim">Panel</span><${Swatch} k="panel_color" value=${f.panel_color} disabled=${scrOff} title="Panel colour" />
-          <span class="dim" style="margin-left:10px">Title</span><${Swatch} k="title_color" value=${f.title_color} disabled=${scrOff} title="Title colour" />
+          <span class="dim">Panel</span><${Swatch} k="panel_color" value=${f.panel_color} disabled=${scrOff} title="Panel color" />
+          <span class="dim" style="margin-left:10px">Title</span><${Swatch} k="title_color" value=${f.title_color} disabled=${scrOff} title="Title color" />
         </div>
       </div>
       ${labels.art ? html`<div class="row small"><span class="dim">${labels.art}</span>
@@ -741,8 +741,8 @@ function LightsPage({ s, f, off, dis, rs }) {
   const sOff = off || dis.shows;
   return html`<div class="modes-grid2">
     <${Sec} title="Sweep the playfield" reason=${rs.lights}>
-      <${Check} label="Sweep the playfield in a colour while it runs" checked=${f.lights} disabled=${lOff} ns="modes" k="f:lights" />
-      <div class="row"><span class="lbl">Colour</span><${Swatch} k="light_color" value=${f.light_color} disabled=${lOff} title="Light colour" />
+      <${Check} label="Sweep the playfield in a color while it runs" checked=${f.lights} disabled=${lOff} ns="modes" k="f:lights" />
+      <div class="row"><span class="lbl">Color</span><${Swatch} k="light_color" value=${f.light_color} disabled=${lOff} title="Light color" />
         <span class="mono small muted">${f.light_color}</span></div>
       <${Check} label="Advanced" checked=${f.advanced} disabled=${lOff} title=${T.raw} ns="modes" k="f:advanced" />
       ${f.advanced ? html`<div class="modes-kv">
@@ -753,7 +753,7 @@ function LightsPage({ s, f, off, dis, rs }) {
     <${Sec} title="The shots that score" reason=${rs.lit_shots}>
       <div class="row wrap">
         <${Check} label="Light the shots that score" checked=${f.light_shots_on} disabled=${off || dis.lit_shots} title=${T.lit} ns="modes" k="f:light_shots_on" />
-        <${Swatch} k="light_shots_color" value=${f.light_shots_color} disabled=${off || dis.lit_shots} title="Colour of the lit shots" />
+        <${Swatch} k="light_shots_color" value=${f.light_shots_color} disabled=${off || dis.lit_shots} title="Color of the lit shots" />
         <${Select} value=${f.light_shots_pattern} options=${PATTERNS.includes(f.light_shots_pattern) ? PATTERNS : [f.light_shots_pattern, ...PATTERNS]}
           ns="modes" k="f:light_shots_pattern" disabled=${off || dis.lit_shots} width=${110} sm />
       </div>

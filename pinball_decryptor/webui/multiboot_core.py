@@ -1044,7 +1044,7 @@ def theme_about(name):
     """A built-in's one-line description; '' for the rest."""
     name = (name or "").strip().lower()
     if name == CUSTOM_THEME:
-        return ("Your own colours: start from the theme shown, then change "
+        return ("Your own colors: start from the theme shown, then change "
                 "any of them.")
     for t in (boot_themes() or {}).get("themes", []):
         if t["name"] == name:
@@ -1825,9 +1825,9 @@ def validate_form(form, sources=True):
         roles = theme_roles()
         for role, val in sorted((form.colors or {}).items()):
             if role not in roles:
-                errs.append("%r is not a colour the menu has." % role)
+                errs.append("%r is not a color the menu has." % role)
             elif not _COLOR_RE.match(str(val).strip()):
-                errs.append("The %s colour must be six hex digits (RRGGBB), "
+                errs.append("The %s color must be six hex digits (RRGGBB), "
                             "not %r." % (theme_label(role).lower(), val))
     if n and not 0 <= int(form.default) < n:
         errs.append("The default image must be one of 0..%d." % (n - 1))
@@ -6191,7 +6191,7 @@ MEDIA_NOTES = {
     "video": ("A video is the still too: the frame it starts on shows while "
               "the image is not highlighted. " + CLIP_NOTE),
     "none": ("Text only: the card shows its title and subtitle on the menu's "
-             "own colours."),
+             "own colors."),
     "card": ("Kept exactly as the card has it: the files the load read, "
              "never re-made from what made them."),
 }
@@ -6377,7 +6377,7 @@ class ImageEditorDialog(_PageDialog):
     ROLL_NOTE = ("The machine remembers across power-ups: a shuffle deals "
                  "every game once before any of them comes round again, and "
                  "picks up where it left off. It never gives you the one it "
-                 "just booted either, so the tick is greyed on for it.")
+                 "just booted either, so the tick is grayed on for it.")
 
     #: Under the Members box (PAD-239).  A change here is a REBUILD, not a
     #: menu edit: the games are what the card carries.
@@ -6537,7 +6537,7 @@ class MultibootPanel:
         "How big the update comes out - measured by the tool from the .fun "
         "files themselves. The primary's .fun goes in whole; every other build "
         "costs only what differs from it, measured file by file inside the "
-        "game. The grey band at the end is the menu and its scripts. A FAT32 "
+        "game. The gray band at the end is the menu and its scripts. A FAT32 "
         "stick holds at most 4 GB in one file, so the update has to stay under "
         "that; the line under the bar says when it does not.")
 
@@ -6562,7 +6562,7 @@ class MultibootPanel:
         "the two ISOs' partition pieces, not guessed from the ISO files. The "
         "bar is the stick you would have to buy: each band is one image's "
         "root as it goes onto the stick (the primary re-imaged with the "
-        "menu, the second verbatim), and the grey one at the end is what "
+        "menu, the second verbatim), and the gray one at the end is what "
         "the stick spends on itself (the installer's live system, the EFI, "
         "boot and perm pieces and the configs). The stick is FAT32, so every "
         "piece stays under 4 GB. It re-measures itself whenever the image "
@@ -7516,7 +7516,7 @@ class MultibootPanel:
         "guessed from the .raw files, which are all the same size whatever "
         "is inside them. The bar is the card you would have to buy: each "
         "band is one image's games, a hollow one is room the card keeps for "
-        "updating an image in place, and the grey one at the end is what the "
+        "updating an image in place, and the gray one at the end is what the "
         "card spends on itself (boot, rootfs, /data, /dump and the "
         "filesystems' own bookkeeping). It re-measures itself whenever the "
         "image list changes, and for a loaded card it also works out what an "
@@ -7620,7 +7620,7 @@ class MultibootPanel:
         def done(rc, failed, texts):
             if rc != 0:
                 if self.run_cancelled():
-                    self._ok("Recovering the images was cancelled; whatever "
+                    self._ok("Recovering the images was canceled; whatever "
                              "was written into %s is half a file." % out_dir)
                     return
                 why = parse_refusal(texts.get(failed, ""), card) or \
@@ -7909,7 +7909,7 @@ class MultibootPanel:
         "pictures and sounds are copied out beside them; the rows are then "
         "pointed at those files, so the card can be updated, rebuilt or "
         "given another image. Reads the card, writes only into the folder "
-        "you pick. Greyed while every image is already on this machine, "
+        "you pick. Grayed while every image is already on this machine, "
         "and for a card read from the reader as its menu only (read the "
         "whole card for this).")
 
@@ -7918,7 +7918,7 @@ class MultibootPanel:
     #: hit a second Cancel widget belonging to somebody else's run.
     BUILD_FLASH_TEXT = "Build / flash card\u2026"
     CANCEL_TEXT = "Cancel"
-    CANCELLING_TEXT = "Cancelling\u2026"
+    CANCELLING_TEXT = "Canceling\u2026"
 
     BUILD_FLASH_TIP = (
         "Write the card. The dialog decides for you whether that is a full "
@@ -7959,11 +7959,11 @@ class MultibootPanel:
         self._cancel_pending = True
         self._cancelled = True
         self._pending_run = None
-        self._write("[multi-boot] cancelling - stopping the tool now.")
-        self._ok("Cancelling\u2026")
+        self._write("[multi-boot] canceling - stopping the tool now.")
+        self._ok("Canceling\u2026")
         self._sync_build_button()
         try:
-            self._phase_fn(None, status="Cancelling\u2026")
+            self._phase_fn(None, status="Canceling\u2026")
         except Exception:                               # noqa: BLE001
             pass
         proc, mine = self._proc, not self._proc_preview
@@ -10344,7 +10344,7 @@ class MultibootPanel:
                 # The half-written file is NOT left unmentioned: it is the
                 # size of a card, it is at the path the box names, and the
                 # only thing to do with it is build over it.
-                self._ok("Build cancelled at %s. %s is unfinished - it is "
+                self._ok("Build canceled at %s. %s is unfinished - it is "
                          "not a card; building again writes over it."
                          % (failed or "the start", form.out))
             else:
@@ -10501,7 +10501,7 @@ class MultibootPanel:
                     # A load only READS the card, so there is nothing to
                     # warn about and nothing to clean up but the empty dir
                     # the branch below removes.
-                    self._ok("Reading %s was cancelled." % path)
+                    self._ok("Reading %s was canceled." % path)
                     return
                 why = parse_refusal(texts.get(failed, ""), path) or \
                     "%s failed (exit %d) - see the tool output." % (failed, rc)
@@ -10885,7 +10885,7 @@ class MultibootPanel:
         def done(rc, failed, texts):
             if rc != 0:
                 if self.run_cancelled():
-                    self._ok("The update was cancelled at %s. The card's "
+                    self._ok("The update was canceled at %s. The card's "
                              "menu may be half written - %s again to finish "
                              "it." % (failed or "the start", WRITE_BUTTON))
                 else:
@@ -10974,7 +10974,7 @@ class MultibootPanel:
         def done(rc, failed, texts):
             if rc != 0:
                 if self.run_cancelled():
-                    self._ok("The update was cancelled at %s. %s may be half "
+                    self._ok("The update was canceled at %s. %s may be half "
                              "updated - press %s again: it carries on from "
                              "what was already written, and the images that "
                              "were there still boot."
@@ -13116,7 +13116,7 @@ class MultibootPanel:
 
     def _phase_cancelled(self):
         try:
-            self._phase_fn(None, status="Cancelled")
+            self._phase_fn(None, status="Canceled")
         except Exception:                               # noqa: BLE001
             pass
 

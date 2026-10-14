@@ -1651,7 +1651,7 @@ def write_unmatched_text_report(notes, out_dir, modded_dir="", stock_dir=""):
            "Stock extract of the same version: %s" % (stock_dir or "?"),
            "Written %s" % time.strftime("%Y-%m-%d %H:%M:%S"), "",
            "No edit to any of these can be carried across. If you don't "
-           "recognise a line it is",
+           "recognize a line it is",
            "the factory's own; if you do, it is yours and worth a second "
            "look.", ""]
     for (path, side), texts in groups.items():

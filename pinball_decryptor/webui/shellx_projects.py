@@ -305,7 +305,7 @@ class ProjectsMixin:
             copied, nbytes, cancelled = result
             if cancelled:
                 shutil.rmtree(dest, ignore_errors=True)
-                win.append_log("Fork cancelled — nothing kept.", "info")
+                win.append_log("Fork canceled — nothing kept.", "info")
                 return
             project_file.update_anchor(dest, build_dir="")
             win.append_log("Project forked: %d file(s), %s → %s"
@@ -469,7 +469,7 @@ class ProjectsMixin:
             deleted, freed, cancelled = result
             self.window.append_log(
                 "Project archived%s: %d file(s) removed, %s freed — %s"
-                % (" (cancelled part-way; still safe)" if cancelled else "",
+                % (" (canceled part-way; still safe)" if cancelled else "",
                    deleted, human_size(freed), target),
                 "info" if cancelled else "success")
             if is_active:

@@ -495,7 +495,7 @@ def convert_all_vids(input_dir, output_dir, fps=DEFAULT_FPS,
 
     for i, rel_path in enumerate(vid_files):
         if cancel_event and cancel_event.is_set():
-            log("VID conversion cancelled", "warning")
+            log("VID conversion canceled", "warning")
             break
 
         vid_path = os.path.join(input_dir, rel_path)

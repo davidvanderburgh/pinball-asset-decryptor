@@ -122,7 +122,7 @@ class GameCheckMixin:
         if self._check_working():
             if self._check["state"] == "preparing":
                 self._check_cancel = True
-                self._check_line("cancelling…")
+                self._check_line("canceling…")
             else:
                 self._check_line("the check is playing its game in the emulator; stop the run "
                                  "on the Emulate tab to end it.")
@@ -206,7 +206,7 @@ class GameCheckMixin:
                             cancel=self._check_cancelled)
         if not ok:
             if out == "cancelled" or self._check_cancelled():
-                return self._check_refuse("the check was cancelled; nothing was started.")
+                return self._check_refuse("the check was canceled; nothing was started.")
             return self._check_refuse(self._rig_sentence(out)
                                       or "the emulator's rig did not answer.")
         stage = os.path.join(self._tryit_base, "check-stage")
@@ -224,11 +224,11 @@ class GameCheckMixin:
                             cancel=self._check_cancelled)
         if not ok:
             if out == "cancelled":
-                return self._check_refuse("the check was cancelled; nothing was started.")
+                return self._check_refuse("the check was canceled; nothing was started.")
             return self._check_refuse("could not put the check in the emulator: %s"
                                       % self._rig_sentence(out)[-400:])
         if self._check_cancelled():
-            return self._check_refuse("the check was cancelled; nothing was started.")
+            return self._check_refuse("the check was canceled; nothing was started.")
         self._check.update(game=game_dir, port=port, label=label, run=self._run_id_fn(),
                            as_root=as_root)
         self._check_set("starting", "starting %s in the emulator…" % label)

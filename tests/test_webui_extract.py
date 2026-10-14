@@ -330,7 +330,7 @@ def test_not_recognised_and_looks_like_switch(tmp_path, monkeypatch):
         w.call("ui.set", "extract", "input", str(f))
         _settle(w)
         assert w.state("extract")["badge"]["text"] == \
-            "Not recognised as %s" % jjp.display
+            "Not recognized as %s" % jjp.display
         monkeypatch.setattr(stern, "detect", lambda p: types.SimpleNamespace(
             display="Godzilla (Spike 2)", era=""))
         w.call("ui.set", "extract", "input", str(f))

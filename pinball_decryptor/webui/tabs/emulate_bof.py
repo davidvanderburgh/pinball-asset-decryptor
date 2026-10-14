@@ -42,7 +42,7 @@ SOUND_TIP = ("Play the game's sound on this PC. Applies when the game starts; "
              "the game's own volume is in its service menu.")
 
 SWITCHES_TIP = ("The machine's switches: the game's own playfield drawing with "
-                "every switch on it, and a labelled list. Hold a switch with "
+                "every switch on it, and a labeled list. Hold a switch with "
                 "the mouse, right-click to latch it.")
 
 #: The status grid (label, key into the values _apply computes).
@@ -176,8 +176,8 @@ class EmulateBoFTab(RigTabMixin, TabService):
         if not self._starting or self._cancelling:
             return False
         self._cancelling = True
-        self._set_go("Cancelling…", False)
-        self._log("BoF: cancelling the start…")
+        self._set_go("Canceling…", False)
+        self._log("BoF: canceling the start…")
 
         def work():
             try:
@@ -338,7 +338,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
                     timeout=1800, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
-                    self._log("BoF: start cancelled.")
+                    self._log("BoF: start canceled.")
                 elif rc not in (0, None):
                     self._log("BoF: start failed (exit %d). %s"
                               % (rc, bof.EXIT_TEXT.get(rc, "")))

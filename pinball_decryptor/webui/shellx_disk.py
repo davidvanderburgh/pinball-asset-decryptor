@@ -41,7 +41,7 @@ INTRO = ("The tools stage their work in WSL (Chicago Gaming, Dutch Pinball, "
          "None of them shrinks on its own — clean up here.")
 TREE_NOTE = ("Select rows to remove, or use “Clean all”. Finished runs clean "
              "up after themselves, so the staging rows here are from crashed "
-             "or cancelled runs. The emulators' files and cached cards are "
+             "or canceled runs. The emulators' files and cached cards are "
              "different: they are meant to be there, and deleting one costs "
              "time on the next Start (the game is unpacked again, the "
              "emulator's Python installed again). An emulator whose game is "

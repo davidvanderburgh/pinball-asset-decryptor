@@ -22,7 +22,7 @@ if (typeof document !== "undefined" && !document.querySelector(`link[href="${CSS
 const SCENE_COLS = [
   { key: "label", label: "Scene", width: "minmax(0,1fr)", sort: "#0",
     titleOf: (r) => r.label + "\n" + r.d + (r.state ? "\n" + STATE_TIP[r.state] : ""),
-    render: (r) => html`<span class="sc-name"><span class=${"sc-dot " + (r.state || "same")}></span><span class="ellip">${r.label}</span></span>` },
+    render: (r) => html`<span class="sc-name"><span class=${"sc-dot " + (r.state || "same")}></span><span class="ellip notr">${r.label}</span></span>` },
   { key: "imgs", label: "Images", width: "60px", sort: "imgs", num: true },
   { key: "fonts", label: "Fonts", width: "50px", sort: "fonts", num: true },
   { key: "texts", label: "Text", width: "44px", sort: "texts", num: true },
@@ -308,11 +308,11 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
     let items = [];
     if (it.id.startsWith("txt::")) {
       items = [
-        { label: "Text colour…", onClick: () => startColor(it.text) },
-        it.picked ? { label: "Back to the original colour", onClick: () => call("text_scenes.reset_color", it.text) } : null,
+        { label: "Text color…", onClick: () => startColor(it.text) },
+        it.picked ? { label: "Back to the original color", onClick: () => call("text_scenes.reset_color", it.text) } : null,
         { sep: true },
         { label: "Move…", onClick: () => startLayout(it.text, "move") },
-        { label: "Alignment", submenu: [["left", "Left"], ["center", "Centre"], ["right", "Right"]].map(([n, l]) => ({
+        { label: "Alignment", submenu: [["left", "Left"], ["center", "Center"], ["right", "Right"]].map(([n, l]) => ({
           label: l, checked: it.align === n, onClick: () => call("text_scenes.align_text", it.text, n) })) },
         { label: "Font size…", onClick: () => startLayout(it.text, "size") },
         it.has_layout ? { label: "Back to the original layout", onClick: () => call("text_scenes.reset_layout", it.text) } : null,
@@ -527,7 +527,7 @@ function Contents({ s, onMenu }) {
             ...${tip({ head: it.text, lines: [it.info] })}>
           ${it.thumb ? html`<span class="sc-pic"><img src=${mediaUrl(it.thumb)} alt="" loading="lazy" decoding="async" /></span>`
             : it.swatch ? html`<span class="swatch sc-sw" style=${`background:${it.swatch}`}></span>` : html`<span></span>`}
-          <span class="sc-t ellip">${it.text}</span>
+          <span class="sc-t ellip notr">${it.text}</span>
         </div>`) : null}
       </div>`;
     })}
@@ -556,7 +556,7 @@ function ColorDialog({ c, onClose }) {
   return html`<${Modal} title=${c.title} onClose=${onClose}
       footer=${html`<${Button} onClick=${onClose}>Cancel<//><${Button} kind="primary" onClick=${ok}>OK<//>`}>
     <div class="row" style="gap:14px">
-      <input type="color" class="scenes-color" value=${v} onInput=${(e) => setV(e.target.value)} aria-label="Colour" />
+      <input type="color" class="scenes-color" value=${v} onInput=${(e) => setV(e.target.value)} aria-label="Color" />
       <span class="mono">${v}</span>
     </div>
   <//>`;

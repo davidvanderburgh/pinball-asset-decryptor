@@ -215,7 +215,7 @@ def test_cancel_scan(scanned):
     w.call("images.cancel_scan")
     st = w.state("images")
     assert st["scanning"] is False and st["view"] == []
-    assert st["empty"]["text"] == "Scan cancelled — click Scan to try again."
+    assert st["empty"]["text"] == "Scan canceled — click Scan to try again."
 
 
 def test_on_show_rescans_when_the_folder_changed(tmp_path):

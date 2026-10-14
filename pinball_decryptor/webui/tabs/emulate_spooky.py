@@ -202,8 +202,8 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         if not self._starting or self._cancelling:
             return False
         self._cancelling = True
-        self._set_go("Cancelling…", False)
-        self._log("Spooky: cancelling the start…")
+        self._set_go("Canceling…", False)
+        self._log("Spooky: canceling the start…")
 
         def work():
             try:
@@ -516,7 +516,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                     timeout=1800, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
-                    self._log("Spooky: start cancelled.")
+                    self._log("Spooky: start canceled.")
                 elif rc not in (0, None):
                     self._log("Spooky: start failed (exit %d). %s"
                               % (rc, spk.EXIT_TEXT.get(rc, "")))

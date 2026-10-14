@@ -277,7 +277,7 @@ def test_while_starting_the_button_is_cancel(rig, monkeypatch, tmp_path):
         assert s["go_label"] == "Cancel" and s["go_enabled"] and s["starting"]
         assert not s["go_busy"]
         assert w.call(NS + ".toggle")
-        assert w.state(NS)["go_label"] == "Cancelling…"
+        assert w.state(NS)["go_label"] == "Canceling…"
         assert not w.state(NS)["go_enabled"]
         end = time.time() + 5
         while not ran and time.time() < end:

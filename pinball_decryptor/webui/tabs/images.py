@@ -56,7 +56,7 @@ SCAN_LABEL = "Images"
 EMPTY_NO_FOLDER = "Set the project folder on the Extract tab, then click Scan."
 EMPTY_SCANNING = "Scanning for image files…"
 EMPTY_NONE = "No replaceable image found in this folder."
-EMPTY_CANCELLED = "Scan cancelled — click Scan to try again."
+EMPTY_CANCELLED = "Scan canceled — click Scan to try again."
 
 _BLANK_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAEklEQVR42mNgGAWjYBSM"
@@ -550,7 +550,7 @@ class ImagesTab(FindOriginalsMixin, TabService):
         """Tk _cancel_scan."""
         self._scan_id += 1
         if self._scan_t0 is not None:
-            self.log("%s scan cancelled after %.1f s."
+            self.log("%s scan canceled after %.1f s."
                      % (SCAN_LABEL, time.monotonic() - self._scan_t0))
         self._scan_t0 = None
         self.set(scanning=False, view=[],
@@ -1158,7 +1158,7 @@ class ImagesTab(FindOriginalsMixin, TabService):
             name = cp.file_profile(self._assets_dir() or "", "images",
                                    rel).label()
         except Exception:                               # noqa: BLE001
-            name = "colour profile"
+            name = "color profile"
         row = {"on": on, "own": rel in self._color, "all": self._color_all,
                "name": name, "stock": not self._assignments.get(rel)
                and not self._is_built(rel)}
@@ -1197,7 +1197,7 @@ class ImagesTab(FindOriginalsMixin, TabService):
                 try:
                     fn()
                 except Exception:                       # noqa: BLE001
-                    log.exception("images colour %s.%s", ns, name)
+                    log.exception("images color %s.%s", ns, name)
 
     @rpc
     def set_color(self, rel, value):

@@ -143,10 +143,10 @@ _PROBLEM_PAGES = tuple((re.compile(rx), page) for rx, page in (
     (r"^The sound's time in the film|^A sound cut from a film", "sounds"),
     (r"(?i)callout", "sounds"),
     # Lights: the sweep's colour, the lit shots, the game's own light shows (PAD-418)
-    (r"^The light colour|lit shots", "lights"),
+    (r"^The light color|lit shots", "lights"),
     (r"(?i)light show", "lights"),
     # Show: the screen, its colours and picture, both clips, the screen's time, priority
-    (r"^The (panel|title) colour|^The screen art file|^The picture's", "show"),
+    (r"^The (panel|title) color|^The screen art file|^The picture's", "show"),
     (r"clip", "show"),
     (r"^The film .* is in the mode's folder", "show"),
     (r"^The screen stays up|^The display priority", "show"),
@@ -210,16 +210,16 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  "three times, and so on. The game's own scoring is used, so its playfield "
                  "multiplier applies. Advanced can change this: Award ladder Fixed pays every "
                  "shot once, and Points per shot gives a shot its own points.")
-    RAW_TIP = ("Replace the colour sweep with light commands of your own, in the game's own "
-               "light language. Leave both empty to use the colour above.")
+    RAW_TIP = ("Replace the color sweep with light commands of your own, in the game's own "
+               "light language. Leave both empty to use the color above.")
     START_EVENT_TIP = ("Something the game itself does: a ball starting, a multiball starting, "
                        "the skill shot being made. The mode starts the moment the game does it.")
     END_EVENT_TIP = ("The mode ends when the game does this, when its time runs out, or when "
                      "the ball drains, whichever comes first.")
     SCREEN_TITLE_TIP = ("The title on the panel. Empty uses the mode's name. Under it, the "
                         "mode writes what each shot paid, and the total at the end.")
-    CLIP_TITLE_TIP = ("The title card's words, over the panel colour with a sweep in the title "
-                      "colour. Empty uses the mode's name.")
+    CLIP_TITLE_TIP = ("The title card's words, over the panel color with a sweep in the title "
+                      "color. Empty uses the mode's name.")
     COOLDOWN_TIP = ("0 = no wait. The wait runs from the moment the mode ends, and carries on "
                     "through the end of a ball.")
     STARTS_TIP = ("Counted for each player. Once a ball starts again on the player's next "
@@ -228,7 +228,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  "game's own battles or multiballs. Off: it waits until the game's own battle "
                  "or multiball ends, and the next start shot after that starts it.")
     LIT_TIP = ("While the mode runs, the insert in front of every shot that scores (and every "
-               "shot with its own points) shows this colour and pattern, over the game's own "
+               "shot with its own points) shows this color and pattern, over the game's own "
                "light shows; every other insert keeps doing what the game wants. They go back "
                "to the game the moment the mode ends. Blink and Pulse repeat about twice a "
                "second and every 1.6 s; Chase lights one of them at a time.")

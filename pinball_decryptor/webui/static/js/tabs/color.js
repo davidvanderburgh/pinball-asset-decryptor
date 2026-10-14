@@ -468,18 +468,18 @@ export function Controls({ s, p, update }) {
         hint=${screen ? "How bright this screen shows everything." : "Every shade darker or brighter. Above 100% the brightest shades turn white."} />
       <${Slider} label="Contrast" value=${p.contrast} min=${clo} max=${chi} step="0.01" show=${pct}
         onInput=${(v) => update({ contrast: v })} left="flatter" right="punchier"
-        hint=${screen ? "How far apart this screen pulls dark and bright shades." : "Above 100% pulls dark shades darker and bright shades brighter; below 100% brings them closer. A middle grey stays where it is."} />
+        hint=${screen ? "How far apart this screen pulls dark and bright shades." : "Above 100% pulls dark shades darker and bright shades brighter; below 100% brings them closer. A middle gray stays where it is."} />
       <${Check} checked=${p.saturation === 0} label="Black and white"
-        title=${screen ? "A screen that shows everything in greys, the game's own art too. Untick for full color."
-          : "Every replaced picture and video in greys, for a black-and-white playfield. Your other settings still apply on top. Untick for full color."}
+        title=${screen ? "A screen that shows everything in grays, the game's own art too. Untick for full color."
+          : "Every replaced picture and video in grays, for a black-and-white playfield. Your other settings still apply on top. Untick for full color."}
         onChange=${(v) => update({ saturation: v ? 0 : 1 })} />
       <${Slider} label="Color strength" value=${p.saturation} min=${slo} max=${shi} step="0.01" show=${pct}
-        onInput=${(v) => update({ saturation: v })} left="grey" right="vivid"
+        onInput=${(v) => update({ saturation: v })} left="gray" right="vivid"
         hint="Below 100% calms colors that glow too much on the machine; above makes them stronger." />
       <${Slider} label="Lift the darkest shades" value=${p.lift} min=${llo} max=${lhi} step="0.005"
         show=${(v) => (v < 0.002 ? "off" : `black becomes ${Math.round(v * 255)} of 255`)}
         onInput=${(v) => update({ lift: v })} left="off" right="more"
-        hint="Raises the darkest shades so detail doesn't vanish into the machine's black. Black itself turns dark grey." />
+        hint="Raises the darkest shades so detail doesn't vanish into the machine's black. Black itself turns dark gray." />
     </div>
     ${(s.problems || []).length ? html`<${Note} kind="warn">Some lines of the profile file were skipped: ${(s.problems || []).join("; ")}<//>` : null}
   <//>`;
@@ -525,7 +525,7 @@ export function Ranges({ s, p, update }) {
   const extra = html`<${Button} size="sm" icon="undo" disabled=${!ranges.length} onClick=${() => update({ ranges: [] })}
     title="Remove every color range">Reset all<//>`;
   return html`<${Card} title="Color ranges" cls="cp-ranges" extra=${extra}>
-    <p class="small muted cp-note">Change one band of colors and leave the rest alone, e.g. a sea that comes out too teal. Greys and near-greys are protected, so portraits and metal keep their grey. Applied after the sliders under Adjust.</p>
+    <p class="small muted cp-note">Change one band of colors and leave the rest alone, e.g. a sea that comes out too teal. Grays and near-grays are protected, so portraits and metal keep their gray. Applied after the sliders under Adjust.</p>
     <div class="row wrap cp-range-add">
       <span class="small muted">Add a range:</span>
       ${RANGE_STARTS.map((st) => html`<${Button} size="sm" icon="plus" disabled=${full} onClick=${() => add(st.hue)}
@@ -550,12 +550,12 @@ export function Ranges({ s, p, update }) {
         onInput=${(v) => setR(i, "shift", v)} left="−180°" right="+180°"
         hint="Turns the colors in the range around the color wheel. A teal sea moves toward blue with a positive shift." />
       <${Slider} label="Saturation" value=${r[4]} min=${L("saturation", [0, 4])[0]} max=${L("saturation", [0, 4])[1]} step="0.01" show=${pct}
-        onInput=${(v) => setR(i, "saturation", v)} left="grey" right="vivid" hint="How strong the colors in the range are." />
+        onInput=${(v) => setR(i, "saturation", v)} left="gray" right="vivid" hint="How strong the colors in the range are." />
       <${Slider} label="Brightness" value=${r[5]} min=${L("brightness", [0, 4])[0]} max=${L("brightness", [0, 4])[1]} step="0.01" show=${pct}
         onInput=${(v) => setR(i, "brightness", v)} left="darker" right="brighter" hint="How bright the colors in the range are." />
-      <${Slider} label="Protect greys" value=${r[6]} min=${L("protect", [0, 1])[0]} max=${L("protect", [0, 1])[1]} step="0.01" show=${pct}
+      <${Slider} label="Protect grays" value=${r[6]} min=${L("protect", [0, 1])[0]} max=${L("protect", [0, 1])[1]} step="0.01" show=${pct}
         onInput=${(v) => setR(i, "protect", v)} left="off" right="more"
-        hint="How much color a pixel needs before the range touches it fully. Greys and pixels with less color than this are left alone or only partly changed." />
+        hint="How much color a pixel needs before the range touches it fully. Grays and pixels with less color than this are left alone or only partly changed." />
     </div>`)}
     ${!ranges.length ? html`<p class="small muted cp-note">No range yet: everything is as the sliders under Adjust leave it.</p>` : null}
   <//>`;
@@ -730,12 +730,12 @@ function Explainer({ s }) {
   const assets = s.per_file && s.mode === "assets";
   const screen = s.per_file && s.mode === "screen";
   return html`<${Card} title="What this does" cls="cp-explain">
-    <p>A pinball machine's screen doesn't show colors the way your PC monitor does. On a Stern Godzilla, for example, middle greys come out too bright and too blue, and the darkest shades all sink into the same black.</p>
+    <p>A pinball machine's screen doesn't show colors the way your PC monitor does. On a Stern Godzilla, for example, middle grays come out too bright and too blue, and the darkest shades all sink into the same black.</p>
     ${screen ? html`<p>This profile is that screen. With the Machine screen switched on under Preview colors, Scenes and the Video tab's players draw pictures and videos through it, after the whole screen overlay: the game's own art, your replaced files and the pictures you add. Lines of text in Scenes pass it by and get only the overlay. It is not a correction, and nothing is written to the card.</p>
     <ul class="cp-facts">
       <li><${Icon} name="check" />Until you set one, it is the Recommended screen, tuned on a real Spike 2. Same as individual files uses that profile, undone, instead.</li>
       <li><${Icon} name="check" />Scenes looks bluer than your PC, but not blue enough for your machine? Turn the middle shades brighter here, most of all blue.</li>
-      <li><${Icon} name="check" />One band of colors off, like a sea that comes out teal? Color ranges below the preview changes just that band and leaves greys alone. Curves bends the shades with points of your own, all three colors together or one at a time.</li>
+      <li><${Icon} name="check" />One band of colors off, like a sea that comes out teal? Color ranges below the preview changes just that band and leaves grays alone. Curves bends the shades with points of your own, all three colors together or one at a time.</li>
       <li><${Icon} name="check" />Saved with this project, so each machine has its own. Save a copy and Load move it between projects.</li>
       <li><${Icon} name="check" />Revert all and the Write tab leave it alone: it describes your machine, not a change to the card.</li>
     </ul>`

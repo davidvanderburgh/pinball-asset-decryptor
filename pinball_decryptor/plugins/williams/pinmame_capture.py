@@ -1387,7 +1387,7 @@ class PinmameCapture:
                 except Exception:
                     pass
                 raise RuntimeError(
-                    "Capture cancelled before the game finished booting.")
+                    "Capture canceled before the game finished booting.")
             if self._stopped_event.is_set():
                 raise RuntimeError(
                     "PinMAME stopped before reaching running state. "
@@ -1432,7 +1432,7 @@ class PinmameCapture:
                     break
                 if self._stop_requested.is_set():
                     self._emit_log(
-                        "Cancelled — stopping PinMAME capture.", "warning")
+                        "Canceled — stopping PinMAME capture.", "warning")
                     break
                 if self._stopped_event.is_set():
                     self._emit_log(

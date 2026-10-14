@@ -306,7 +306,7 @@ def download_installer(url, dest_path, *, expected_sha256=None,
                 open(dest_path, "wb") as out:
             while True:
                 if cancel_cb and cancel_cb():
-                    raise InterruptedError("download cancelled")
+                    raise InterruptedError("download canceled")
                 chunk = resp.read(_CHUNK)
                 if not chunk:
                     break

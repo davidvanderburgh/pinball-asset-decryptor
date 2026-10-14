@@ -8,6 +8,7 @@ import { useNs, useLog, useConnected, useEvent, state } from "./core/store.js";
 import { call, onCallError } from "./core/rpc.js";
 import { DialogHost, openDialog } from "./core/dialogs.js";
 import { tabLock } from "./core/locks.js";
+import { setLanguage } from "./core/i18n.js";
 // The app-wide windows (Tips, Preview features, disk space, the Project
 // menu's windows) register themselves on import; ShellxOverlays draws the
 // progress windows the shellx service drives (docs/plans/web_ui_tabs/shellx.md).
@@ -300,6 +301,7 @@ export function settingsMenuItems(shell) {
       { label: "Light", checked: theme === "light", onClick: () => call("ui.set_theme", "light") },
       { label: "Match the system", checked: theme === "system", onClick: () => call("ui.set_theme", "system") },
     ] },
+    { label: "Language", submenu: languageItems(shell) },
     { label: "Zoom (" + Math.round(zoom * 100) + "%)", submenu: [
       { label: "Zoom in", kbd: MOD + " +", onClick: () => stepZoom(1) },
       { label: "Zoom out", kbd: MOD + " −", onClick: () => stepZoom(-1) },
@@ -309,6 +311,34 @@ export function settingsMenuItems(shell) {
     ...all.slice(i).map(item),
   ];
 }
+// PAD-458: each language by its own name, so it can be found from any of them
+export function languageItems(shell) {
+  return (shell.languages || [["en", "English (US)", "EN-US"]]).map(([code, name]) => (
+    { label: name, checked: (shell.lang || "en") === code, onClick: () => call("ui.set_language", code) }));
+}
+
+// The top bar's language button: a globe and the language's code, so it can
+// be found without reading a word.  A dot marks it until it is first opened,
+// since nothing else announces that the app speaks other languages.
+const LANG_SEEN = "pad.lang.seen";
+function LangBtn({ shell }) {
+  const lang = shell.lang || "en";
+  const code = ((shell.languages || []).find((l) => l[0] === lang) || [lang, "", lang.toUpperCase()])[2];
+  const [seen, setSeen] = useState(() => { try { return localStorage.getItem(LANG_SEEN) === "1"; } catch (e) { return true; } });
+  const open = (e) => {
+    if (!seen) { setSeen(true); try { localStorage.setItem(LANG_SEEN, "1"); } catch (err) { /* ignore */ } }
+    openShellMenu(e.currentTarget, languageItems(shell), { align: "right" });
+  };
+  // the tip in every language, so whoever needs it can read it
+  const names = "Language · Idioma · Sprache · Langue";
+  return html`<span class="sx-gear">
+    <button type="button" class="btn sm sx-lang notr" onClick=${open} ...${tip(names)} aria-label=${names}>
+      <${Icon} name="globe" /><span class="sx-lang-code">${code}</span>
+    </button>
+    ${seen ? null : html`<span class="sx-dot new" aria-hidden="true"></span>`}
+  </span>`;
+}
+
 function settingsMenu(anchor, shell) {
   openShellMenu(anchor, settingsMenuItems(shell), { align: "right" });
 }
@@ -341,14 +371,14 @@ function TopBar({ shell }) {
     ${mfr && working ? html`<button type="button" class="btn sm" style="gap:8px" onClick=${(e) => eraMenu(e.currentTarget, shell)}
         ...${tip("Switch manufacturer" + (eraLabel ? " or era" : ""))}
         aria-label=${"Manufacturer " + mfr.display + (eraLabel ? ", era " + eraLabel : "")}>
-        <span class="ellip">${mfr.display}</span>${eraLabel ? html`<span class="chip acc sm">${eraLabel}</span>` : null}<span class="muted">▾</span>
+        <span class="ellip notr">${mfr.display}</span>${eraLabel ? html`<span class="chip acc sm">${eraLabel}</span>` : null}<span class="muted">▾</span>
       </button>
       <span class="crumb" aria-hidden="true">›</span>` : null}
     <button type="button" class="btn sm" style="gap:10px;max-width:420px" disabled=${!!shell.running && false}
       onClick=${(e) => projectMenu(e.currentTarget, shell)} ...${tip(proj.folder || "Project")} aria-label="Project menu">
       <${Icon} name="folder" />
-      <span class="mono ellip" style="color:var(--accent)">${proj.name || "No project"}</span>
-      ${proj.caption ? html`<span class="dim ellip hide-narrow">${proj.caption}</span>` : null}
+      <span class=${cx("mono ellip", proj.name && "notr")} style="color:var(--accent)">${proj.name || "No project"}</span>
+      ${proj.caption ? html`<span class="dim ellip hide-narrow notr">${proj.caption}</span>` : null}
       <span class="muted">▾</span>
     </button>
     <span class="grow"></span>
@@ -358,6 +388,7 @@ function TopBar({ shell }) {
     ${upd && upd.available ? html`<${Chip} kind="info" dot onClick=${() => call("ui.settings_action", "install_update")}
         title=${"Pinball Asset Decryptor v" + upd.version + " is available — you're on v" + (shell.version || "") + "."}>${upd.label || ("v" + upd.version + " available")}<//>`
       : html`<span class="hide-narrow"><${Chip} kind="ok" dot title=${sx.update_state === "latest" ? "You're on the latest version." : "This version"}>v${shell.version || ""}${sx.update_state === "latest" ? ", latest" : ""}<//></span>`}
+    <${LangBtn} shell=${shell} />
     ${working ? html`<${IconBtn} icon="help" label="Tips for this tab" cls="sx-help" onClick=${() => openDialog("tips")} />` : null}
     <span class="sx-gear">
       <${IconBtn} icon="gear" label="Settings" onClick=${(e) => settingsMenu(e.currentTarget, shell)} />
@@ -432,7 +463,7 @@ function StatusBar({ shell }) {
     || (shell.run_mode === "write" && shell.tab === "write");
   // an emulator on its own tab owns the footer: its chip says its state
   const emuLive = !running && f.mode === "emulate" && idx >= 0;
-  const chip = shell.cancelling ? html`<${Chip} kind="warn" dot>Cancelling<//>`
+  const chip = shell.cancelling ? html`<${Chip} kind="warn" dot>Canceling<//>`
     : emuLive ? html`<${Chip} kind=${idx >= phases.length - 1 ? "ok" : "acc"} dot>${idx >= phases.length - 1 ? (f.status || "Running") : "Starting"}<//>`
     : running ? html`<${Chip} kind="acc" dot>${f.mode === "write" ? "Building" : f.mode === "extract" ? "Working" : "Running"}<//>`
     : html`<${Chip} kind="ok" dot>Ready<//>`;
@@ -441,7 +472,7 @@ function StatusBar({ shell }) {
     ${phases.length ? html`<div class="phases">${phases.map((p, i) => html`<span class=${cx("phase", i < idx && "done", i === idx && "now", idx >= phases.length && "done")}>${p}</span>`)}</div>` : null}
     <span class="status" title=${f.status}>${f.status}</span>
     ${running && !ownCancel ? html`<${Button} kind="danger" size="sm" disabled=${shell.cancelling}
-      onClick=${() => call("ui.cancel")}>${shell.cancelling ? "Cancelling…" : "Cancel"}<//>` : null}
+      onClick=${() => call("ui.cancel")}>${shell.cancelling ? "Canceling…" : "Cancel"}<//>` : null}
   </div>`;
 }
 
@@ -716,7 +747,7 @@ function LogDrawer({ open, height, setHeight }) {
     ]);
   };
   return html`<div class="logdrawer" style=${`height:${Math.min(height, logMaxH())}px`}>
-    <div class="lines" ref=${ref} tabindex="0" aria-label="Log" onScroll=${onScroll} onContextMenu=${menu}
+    <div class="lines notr" ref=${ref} tabindex="0" aria-label="Log" onScroll=${onScroll} onContextMenu=${menu}
       onWheel=${wheel} onKeyDown=${key} onTouchMove=${touched}
       onMouseDown=${() => { user.current.drag = true; touched(); }} onTouchStart=${() => { user.current.drag = true; }}>
       ${seed ? html`<div class="sx-seed">${seed.lines.map((t, i) => html`<div key=${"h" + i} class="line history">${t}</div>`)}</div>
@@ -806,12 +837,12 @@ function Picker({ shell }) {
         <div class="row" style="align-items:flex-start">
           ${m.letter ? html`<span class=${cx("sx-logo", m.letter.length > 2 && "long")} style=${m.color ? "background:" + m.color : ""} aria-hidden="true">${m.letter}</span>` : null}
           <div class="stack grow" style="gap:2px">
-            <div class="row wrap" style="gap:4px 8px"><span class="t">${m.display}</span>
+            <div class="row wrap" style="gap:4px 8px"><span class="t notr">${m.display}</span>
               ${m.badge ? html`<span class=${cx("sx-badge", m.beta ? "beta" : "")}>${m.badge}</span>` : null}</div>
             ${m.stats ? html`<div class="muted small">${m.stats}</div>` : null}
           </div>
         </div>
-        <div class="games">${(m.games || []).slice(0, 14).map((g, i) => html`${i ? " · " : ""}<span class=${g.supported ? "" : "sx-unsup"} title=${g.supported ? undefined : (g.reason ? g.display + " — " + g.reason : g.display + " — not supported")}>${g.display}</span>`)}${(m.games || []).length > 14 ? html` · <span class="muted">+${m.games.length - 14} more</span>` : ""}</div>
+        <div class="games">${(m.games || []).slice(0, 14).map((g, i) => html`${i ? " · " : ""}<span class=${g.supported ? "notr" : "sx-unsup notr"} title=${g.supported ? undefined : (g.reason ? g.display + " — " + g.reason : g.display + " — not supported")}>${g.display}</span>`)}${(m.games || []).length > 14 ? html` · <span class="muted">+${m.games.length - 14} more</span>` : ""}</div>
       </button>`)}
     </div>
   </div></div>`;
@@ -864,6 +895,7 @@ export function Shell() {
   useEffect(() => { try { localStorage.setItem("pad.log.open", logOpen ? "1" : "0"); localStorage.setItem("pad.log.h", String(Math.round(logH))); } catch (e) {} }, [logOpen, logH]);
   useEffect(() => applyZoom(shell.zoom), [shell.zoom]);
   useEffect(() => applyTheme(shell.theme), [shell.theme]);
+  useEffect(() => { setLanguage(shell.lang || "en"); }, [shell.lang]);
   useEffect(() => { document.title = shell.title || "Pinball Asset Decryptor"; }, [shell.title]);
   useEvent("clipboard", (e) => { if (navigator.clipboard) navigator.clipboard.writeText(e.text).catch(() => {}); }, []);
   useEvent("open_url", (e) => window.open(e.url, "_blank"), []);

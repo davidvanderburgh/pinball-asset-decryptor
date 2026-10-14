@@ -53,16 +53,17 @@ const inTip = (r) => (r.pt
   : r.in);
 
 const COLUMNS = [
-  { key: "o", label: "On-Screen Text", width: "minmax(0,1.25fr)", sort: "#0", cls: "pre",
+  // PAD-458: the game's own words (and yours) are never translated: cls "notr"
+  { key: "o", label: "On-Screen Text", width: "minmax(0,1.25fr)", sort: "#0", cls: "pre notr",
     render: (r) => (r.pt ? html`<span class="text-pairrow"><span class="text-pairmark" aria-hidden="true">↳</span>${r.o}</span>`
       : r.o),
     titleOf: (r) => r.o },
-  { key: "n", label: "New Text", width: "minmax(0,1fr)", sort: "new", cls: "pre",
+  { key: "n", label: "New Text", width: "minmax(0,1fr)", sort: "new", cls: "pre notr",
     render: (r) => (r.ed ? html`<span class="acc-ink">${r.n}</span>` : r.n), titleOf: (r) => r.n || undefined },
   { key: "mx", label: "Max", width: "92px", sort: "max", cls: "mono small" },
   // wide enough for "49ac2…71dd/scene.radium" (Tk: 170 px of a smaller font)
   { key: "sc", label: "Scene", width: "212px", sort: "scene", cls: "mono small dim", titleOf: (r) => r.sc },
-  { key: "nm", label: "Name", width: "minmax(0,.7fr)", sort: "name", titleOf: (r) => r.nm || undefined },
+  { key: "nm", label: "Name", width: "minmax(0,.7fr)", sort: "name", cls: "notr", titleOf: (r) => r.nm || undefined },
 ];
 const IN_COLUMN = { key: "in", label: "Shown in", width: "minmax(0,.8fr)", sort: "in", title: TIP_IN,
   render: (r) => (r.in ? html`<span class=${cx("text-in-cell", r.pt && "pair")} ...${tip(inTip(r))}>${r.in}</span>` : "") };

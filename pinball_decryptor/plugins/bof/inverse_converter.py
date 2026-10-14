@@ -719,7 +719,7 @@ def apply_source_edits(pck_dir, baseline_mtime=0, *,
     skipped = []
     for i, (name, src_full) in enumerate(candidates):
         if cancel_cb is not None and cancel_cb():
-            raise RuntimeError("re-encode cancelled by user")
+            raise RuntimeError("re-encode canceled by user")
         stem, hash6, src_ext = parse_source_name(name)
         if stem is None:
             skipped.append((name, "filename doesn't match <stem>-<hash6>.<ext>"))

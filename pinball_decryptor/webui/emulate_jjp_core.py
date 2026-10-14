@@ -273,7 +273,7 @@ def key_failure(line):
         return ("Key not accepted",
                 "The key is visible in WSL but the game could not open it. "
                 "Either it is another JJP title's key — they are per-title — "
-                "or the licence daemon never picked it up, which no key swap "
+                "or the license daemon never picked it up, which no key swap "
                 "fixes. The log line below says how to tell the two apart.")
     # The pre-2026-08-20 wording, still understood so an older rig script in a
     # half-updated checkout does not silently stop being reported.

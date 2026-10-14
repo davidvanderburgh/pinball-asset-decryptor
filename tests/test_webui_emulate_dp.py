@@ -285,7 +285,7 @@ def test_while_starting_the_button_is_cancel(rig, monkeypatch, tmp_path):
         s = w.state(NS)
         assert s["go_label"] == "Cancel" and s["go_enabled"] and s["starting"]
         assert w.call(NS + ".toggle")
-        assert w.state(NS)["go_label"] == "Cancelling…"
+        assert w.state(NS)["go_label"] == "Canceling…"
         # the tab's own status poll may run too: look for the cancel
         end = time.time() + 5
         while not any(c[-1] == "cancel.sh" for c in ran) and time.time() < end:

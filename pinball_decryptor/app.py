@@ -487,6 +487,8 @@ class App:
             initial_flashed_images=s.get("flashed_images", []),
             on_flashed_images_change=self._on_flashed_images_change,
             on_ui_zoom_change=self._on_ui_zoom_change,
+            initial_language=s.get("ui_language"),
+            on_language_change=self._on_language_change,
         )
 
     def _start_session(self):
@@ -4114,7 +4116,7 @@ class App:
             # The user cancelled during staging — don't dress the partial
             # staging up as a failure, and don't start the pipeline just to
             # have it notice the cancel.  _on_done shows the Cancelled state.
-            self.msg_queue.put(DoneMsg(False, "Cancelled."))
+            self.msg_queue.put(DoneMsg(False, "Canceled."))
             return
 
         if pending and not staged:
@@ -4340,7 +4342,7 @@ class App:
                 f"Applied {staged} video replacement(s)."
                 + (f"  {len(bad)} could not be converted (see above)."
                    if bad else "")
-                + ("  Cancelled before the rest." if cut else ""),
+                + ("  Canceled before the rest." if cut else ""),
                 "error" if bad else "warning" if cut else "success"))
             from .core import history_log
             history_log.record(assets_dir,
@@ -4732,7 +4734,7 @@ class App:
                 "warning")
             remaining = []
         if self._cancel_requested:
-            self.msg_queue.put(DoneMsg(False, "Revert cancelled."))
+            self.msg_queue.put(DoneMsg(False, "Revert canceled."))
             return
         if not remaining:
             self.msg_queue.put(DoneMsg(
@@ -4787,7 +4789,7 @@ class App:
         if self._cancel_requested:
             return                       # one press is enough
         self._cancel_requested = True
-        self.window.append_log("Cancelling...", "error")
+        self.window.append_log("Canceling...", "error")
         # Disable the Cancel button + show feedback so the user knows the press
         # registered and doesn't have to keep mashing it; the action button is
         # re-enabled only when the (whole) job actually stops, via set_running.
@@ -4815,7 +4817,7 @@ class App:
             self.window.set_running(False, mode="write")
             if self._cancel_requested:
                 self._cancel_requested = False
-                self.window.set_status("Cancelled")
+                self.window.set_status("Canceled")
                 self.window.append_log(summary, "info")
             elif success:
                 self.window.set_status("Ported")
@@ -4836,8 +4838,8 @@ class App:
             self.window.set_running(False, mode="write")
             if self._cancel_requested:
                 self._cancel_requested = False
-                self.window.set_status("Cancelled")
-                self.window.append_log("Revert cancelled.", "info")
+                self.window.set_status("Canceled")
+                self.window.append_log("Revert canceled.", "info")
             elif success:
                 self.window.set_status("Reverted")
                 self.window.append_log(summary, "success")
@@ -4862,8 +4864,8 @@ class App:
             self.window.set_running(False, mode="extract")
             if self._cancel_requested:
                 self._cancel_requested = False
-                self.window.set_status("Cancelled")
-                self.window.append_log("Card read cancelled.", "info")
+                self.window.set_status("Canceled")
+                self.window.append_log("Card read canceled.", "info")
             elif success:
                 # Past the last chip, so every step shows green rather than
                 # leaving the final one stuck on "active" (same trick the
@@ -4894,8 +4896,8 @@ class App:
             self.window.invalidate_asset_scans()
             if self._cancel_requested:
                 self._cancel_requested = False
-                self.window.set_status("Cancelled")
-                self.window.append_log("Auto-name cancelled.", "info")
+                self.window.set_status("Canceled")
+                self.window.append_log("Auto-name canceled.", "info")
             elif success:
                 self.window.set_phase(
                     len(getattr(self.window, "_phases", {}).get(
@@ -5046,8 +5048,8 @@ class App:
             # User cancelled — don't dress it up as a failure with a scary
             # error modal; just note it and reset.
             self._cancel_requested = False
-            self.window.set_status("Cancelled")
-            self.window.append_log("Cancelled.", "info")
+            self.window.set_status("Canceled")
+            self.window.append_log("Canceled.", "info")
         elif success:
             # "Completed at 2:45 PM" beats a bare "Complete!" — the status
             # persists across tab switches, and a timestamp reads as a
@@ -5611,7 +5613,7 @@ class App:
             # Declining means "not that one" — installing the stale build over
             # the top would be the one thing he did not ask for.
             self.window.append_log(
-                "Update cancelled — %s was left in place." % __version__,
+                "Update canceled — %s was left in place." % __version__,
                 "info")
             return version, None
         return newest, newest_installer
@@ -5746,6 +5748,12 @@ class App:
         x = int(m.group(3)) if m.group(3) is not None else None
         y = int(m.group(4)) if m.group(4) is not None else None
         return (w, h, x, y, bool(self._settings.get("window_maximized")))
+
+    def _on_language_change(self, code):
+        """The app's language (gear menu > Language, PAD-458), kept in
+        settings."""
+        self._settings["ui_language"] = code
+        self._save_settings()
 
     def _on_ui_zoom_change(self, zoom):
         """The page's zoom (Ctrl +/-), kept in settings."""

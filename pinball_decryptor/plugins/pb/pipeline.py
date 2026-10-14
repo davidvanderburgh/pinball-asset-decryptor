@@ -113,7 +113,7 @@ class IsoExtractPipeline(BasePipeline):
             raise PipelineError("Detect",
                 f"Cannot identify game from ISO: "
                 f"{os.path.basename(self.iso_path)}\n\n"
-                f"Recognised filename hints: alien40, queen.")
+                f"Recognized filename hints: alien40, queen.")
         info = GAME_DB[game_key]
         iso_cfg = info.get("iso") or {}
         self._log(f"Game detected: {info['display']}", "success")

@@ -201,10 +201,10 @@ def test_cancel_logs_and_clears_the_start_stamp():
     me._set_scanning(False)
     texts = [t for t, _lv in me.logs]
     assert sum("Images scan started" in t for t in texts) == 2
-    assert sum("Images scan cancelled" in t for t in texts) == 1
+    assert sum("Images scan canceled" in t for t in texts) == 1
     assert sum("Images scan finished" in t for t in texts) == 1
     # Order: started, cancelled, started, finished.
-    assert "cancelled" in texts[1] and "finished" in texts[3]
+    assert "canceled" in texts[1] and "finished" in texts[3]
 
 
 def test_cancel_bumps_the_scan_id_so_results_drop():

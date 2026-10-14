@@ -144,7 +144,7 @@ class _BasePipeline:
 
     def _check_cancel(self):
         if self._cancelled:
-            raise PipelineError("Cancelled", "Operation cancelled by user.")
+            raise PipelineError("Canceled", "Operation canceled by user.")
 
     def _set_phase(self, index):
         self._phase_cb(index)
@@ -720,7 +720,7 @@ class DecryptPipeline(_BasePipeline):
         game_key = detect_game(self.fun_path)
         if game_key is None:
             raise PipelineError("Detect",
-                f"Unrecognised file: {os.path.basename(self.fun_path)}\n"
+                f"Unrecognized file: {os.path.basename(self.fun_path)}\n"
                 f"Expected one of: {', '.join(FUN_FILE_TO_GAME.keys())}")
         game_info = GAME_DB[game_key]
         self._log(f"Game detected: {game_info['display']}", "success")

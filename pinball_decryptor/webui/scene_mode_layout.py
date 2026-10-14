@@ -48,7 +48,7 @@ WORDS_RGBA = [1.0, 0.9, 0.0, 1.0]
 #: PAD-547: the info line's stand-in picture: its strip, faintly, so it can be seen and dragged
 INFO_BAND_RGBA = (255, 255, 255, 40)
 _ONLY = ("This is %s's own screen: here it can be moved, sized and put over or under the "
-         "HUD's pictures. Its picture, colours and words are on the Modes tab's Show page.")
+         "HUD's pictures. Its picture, colors and words are on the Modes tab's Show page.")
 
 
 def part_of(nid):

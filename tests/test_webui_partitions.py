@@ -269,7 +269,7 @@ def test_extract_cancel(tmp_path, card, monkeypatch):
         gate.set()
         _wait(w, lambda: not svc._busy)
         assert w.state("partitions")["status"] == \
-            "Extract cancelled — partial files may remain."
+            "Extract canceled — partial files may remain."
         assert w.state("partitions")["can_part"]
 
 

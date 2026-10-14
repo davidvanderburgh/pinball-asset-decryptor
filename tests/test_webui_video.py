@@ -148,7 +148,7 @@ def test_empty_folder_and_cancel(tmp_path):
         st = _wait(w, lambda s: not s["scanning"])
         assert st["empty"].startswith("Set the project folder")
         w.call("video.cancel_scan")
-        assert w.state("video")["empty"] == ("Scan cancelled — click Scan to "
+        assert w.state("video")["empty"] == ("Scan canceled — click Scan to "
                                              "try again.")
 
 

@@ -582,7 +582,7 @@ class ExtractTab(TabService):
                 badge = {"text": f"Matches multiple manufacturers: {names}",
                          "kind": "warn", "switch": False}
             else:
-                badge = {"text": f"Not recognised as {mfr.display}",
+                badge = {"text": f"Not recognized as {mfr.display}",
                          "kind": "warn", "switch": False}
         self.set(badge=badge, detected=detected)
 
@@ -780,7 +780,7 @@ class ExtractTab(TabService):
             self.set(card_line="Card: needs Administrator to read — see "
                                "below")
         else:
-            self.set(card_line="Card: not recognised as a %s card"
+            self.set(card_line="Card: not recognized as a %s card"
                                % mfr.display)
 
     # -- the red panels -------------------------------------------------

@@ -157,7 +157,7 @@ export default function PartitionsTab() {
   const extractBtn = (id, label, fn, enabled, kind = "") => {
     if (running && s.busy_btn === id) {
       return html`<${Button} kind="danger" disabled=${s.cancelling} onClick=${() => call("partitions.cancel_extract")}>
-        ${s.cancelling ? "Cancelling…" : "Cancel"}<//>`;
+        ${s.cancelling ? "Canceling…" : "Cancel"}<//>`;
     }
     return html`<${Button} kind=${kind} icon="download" disabled=${running || !enabled} onClick=${fn}>${label}<//>`;
   };

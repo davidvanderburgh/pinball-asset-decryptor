@@ -88,7 +88,7 @@ class _WriteWrapper(ModifyPipeline):
             # Defer the friendly error to run() — done_cb is the only way to
             # surface it through the unified GUI flow.
             self._init_failed = (
-                f"Unrecognised .fun file: {os.path.basename(original_path)}\n"
+                f"Unrecognized .fun file: {os.path.basename(original_path)}\n"
                 f"Expected one of: {', '.join(FUN_FILE_TO_GAME.keys())}")
             # Use any valid game_key just to satisfy the parent ctor; run()
             # will short-circuit before touching it.

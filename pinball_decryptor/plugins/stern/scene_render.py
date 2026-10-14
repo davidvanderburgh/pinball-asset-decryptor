@@ -52,8 +52,8 @@ SCENE_LAYOUT_MANIFEST = os.path.join("images", "scene_textures",
 # at all?".
 BACKGROUNDS = (
     ("Black", (0, 0, 0)),
-    ("Dark grey", (46, 46, 52)),
-    ("Mid grey", (128, 128, 128)),
+    ("Dark gray", (46, 46, 52)),
+    ("Mid gray", (128, 128, 128)),
     ("White", (255, 255, 255)),
     ("Checkerboard", "checker"),
     ("Magenta", (255, 0, 255)),

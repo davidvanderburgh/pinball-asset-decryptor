@@ -577,7 +577,7 @@ class CardImage:
         if not found_any:
             raise FileNotFoundError("game firmware not found on this card")
         raise ValueError("no game firmware on this card exposes an adjustment "
-                         "table (%s)" % (last_err or "unrecognised build"))
+                         "table (%s)" % (last_err or "unrecognized build"))
 
     def write_adjustment_defaults(self, part_index, path, table, overrides,
                                   high_scores=None, name_overrides=None,

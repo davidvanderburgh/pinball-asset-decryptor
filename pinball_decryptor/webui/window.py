@@ -28,6 +28,7 @@ import time
 from .. import __version__
 from ..core import session_log
 from . import compat
+from .i18n import LANGUAGES as _LANGUAGES, language as _language
 from .rpc import RpcError, rpc
 from .tabs import load_tab_classes
 
@@ -121,7 +122,9 @@ class WebWindow:
             run_mode=None, footer=self._footer_idle("extract"),
             prereqs=[], banners=[], toasts=[], title="",
             theme=self.cb.get("initial_theme") or _system_theme(),
-            zoom=1.0, back_enabled=True)
+            zoom=1.0, back_enabled=True,
+            lang=_language(self.cb.get("initial_language")),
+            languages=[list(x) for x in _LANGUAGES])
 
     # ------------------------------------------------------------------
     # attribute delegation to the tab services
@@ -276,6 +279,17 @@ class WebWindow:
         fn = self.cb.get("on_theme_change")
         if fn is not None:
             fn(theme)
+        return True
+
+    @rpc
+    def set_language(self, code):
+        """The gear menu's Language (PAD-458): the page translates itself
+        (static/js/core/i18n.js); the app keeps the choice in settings."""
+        code = _language(code)
+        self.ctx.store.set("shell", lang=code)
+        fn = self.cb.get("on_language_change")
+        if fn is not None:
+            fn(code)
         return True
 
     @rpc
@@ -640,7 +654,7 @@ class WebWindow:
 
     def set_cancelling(self):
         self.ctx.store.set("shell", cancelling=True)
-        self.set_status("Cancelling...")
+        self.set_status("Canceling...")
 
     def set_running(self, running, mode="extract"):
         self._running = bool(running)

@@ -446,7 +446,7 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
             try:
                 colour_profile.build_look_lut(steps)
             except Exception:                           # noqa: BLE001
-                log.exception("video colour table")
+                log.exception("video color table")
                 continue
             self.ctx.loop.post(self.publish_look)
 
@@ -687,10 +687,10 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         self._scan_id += 1
         t0, self._scan_t0 = self._scan_t0, None
         if t0 is not None:
-            self.log("%s scan cancelled after %.1f s."
+            self.log("%s scan canceled after %.1f s."
                      % (_SCAN_LABEL, time.monotonic() - t0), "info")
         self.set(scanning=False, rows=[], view=[],
-                 empty="Scan cancelled — click Scan to try again.")
+                 empty="Scan canceled — click Scan to try again.")
         self._rows = []
         self._index = {}
         return True
@@ -1349,7 +1349,7 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
                 try:
                     fn()
                 except Exception:                       # noqa: BLE001
-                    log.exception("video colour %s.%s", ns, name)
+                    log.exception("video color %s.%s", ns, name)
 
     @rpc
     @undoable("the colors of %s")

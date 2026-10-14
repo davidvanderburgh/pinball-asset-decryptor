@@ -104,7 +104,7 @@ def test_cancel_during_staging_skips_build_and_error_dialog(monkeypatch):
     dones = [m for m in _drain(a.msg_queue) if isinstance(m, DoneMsg)]
     assert dones and dones[0].success is False
     assert "NOT built" not in dones[0].summary
-    assert "Cancelled" in dones[0].summary
+    assert "Canceled" in dones[0].summary
 
 
 def test_mixed_surfaces_some_staged_runs(monkeypatch):

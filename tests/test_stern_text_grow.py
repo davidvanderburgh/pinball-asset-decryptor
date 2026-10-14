@@ -576,7 +576,7 @@ def test_write_grows_a_radium_and_the_firmware_goes_last(tmp_path,
     rec = _sidx_record(blob, writes, "gz/assets/a/scene.radium",
                        reader.SIDX_DISK)
     assert rec["size"] == rec["size2"] == len(shipped)
-    assert any("re-serialised" in m for _l, m in msgs)
+    assert any("re-serialized" in m for _l, m in msgs)
 
 
 def test_grown_radium_folds_in_its_colour_edit(tmp_path, monkeypatch):

@@ -187,8 +187,8 @@ class EmulateAPTab(RigTabMixin, TabService):
         if not self._starting or self._cancelling:
             return False
         self._cancelling = True
-        self._set_go("Cancelling…", False)
-        self._log("AP: cancelling the start…")
+        self._set_go("Canceling…", False)
+        self._log("AP: canceling the start…")
 
         def work():
             try:
@@ -619,7 +619,7 @@ class EmulateAPTab(RigTabMixin, TabService):
                     timeout=3600, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
-                    self._log("AP: start cancelled.")
+                    self._log("AP: start canceled.")
                 elif rc not in (0, None):
                     self._log("AP: start failed (exit %d). %s"
                               % (rc, ap.EXIT_TEXT.get(rc, "")))

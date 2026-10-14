@@ -119,7 +119,7 @@ def _extract_via_7z(sevenzip, img_path, output_dir, log, progress, cancel_cb):
         if not os.path.isfile(part_img):
             raise RuntimeError("7-Zip could not extract the carrier partition.")
         if cancel_cb and cancel_cb():
-            raise RuntimeError("Cancelled.")
+            raise RuntimeError("Canceled.")
 
         # 2. Pull the ext4 partclone image out of the carrier partition.
         #    Extract by wildcard rather than listing the ext4 first — 7-Zip's
@@ -135,7 +135,7 @@ def _extract_via_7z(sevenzip, img_path, output_dir, log, progress, cancel_cb):
         zst_path = zsts[0]
         log(f"  Found {os.path.basename(zst_path)}.", "info")
         if cancel_cb and cancel_cb():
-            raise RuntimeError("Cancelled.")
+            raise RuntimeError("Canceled.")
 
         # 3. Reconstruct the raw ext4 partition (pure-Python partclone+zstd).
         progress(1, 4, "Reconstructing SSD image...")
@@ -149,7 +149,7 @@ def _extract_via_7z(sevenzip, img_path, output_dir, log, progress, cancel_cb):
                               cancel_cb=cancel_cb, log_cb=log)
         os.remove(zst_path)
         if cancel_cb and cancel_cb():
-            raise RuntimeError("Cancelled.")
+            raise RuntimeError("Canceled.")
 
         # 4. Extract the asset subtree from the reconstructed ext4.
         progress(2, 4, "Extracting assets...")
@@ -269,7 +269,7 @@ def _extract_via_wsl(img_path, output_dir, executor, log, progress, cancel_cb):
             with tarfile.open(fileobj=tar_proc.stdout, mode="r|") as tar:
                 for member in tar:
                     if cancel_cb and cancel_cb():
-                        raise RuntimeError("Cancelled.")
+                        raise RuntimeError("Canceled.")
                     if not (member.isfile() or member.isdir()):
                         continue
                     safe = safe_member(member, output_dir)
@@ -333,7 +333,7 @@ def convert_movs_to_mp4(output_dir, log_cb=None, progress_cb=None,
     ok = fail = 0
     for i, mov in enumerate(movs):
         if cancel_cb and cancel_cb():
-            log("ProRes conversion cancelled.", "warning")
+            log("ProRes conversion canceled.", "warning")
             break
         out = os.path.splitext(mov)[0] + ".mp4"
         cmd = [ffmpeg, "-y", "-loglevel", "error", "-nostats", "-i", mov,

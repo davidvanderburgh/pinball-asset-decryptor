@@ -24,6 +24,7 @@ import json
 import os
 
 from . import config, extract_source
+from .atomic_file import write_json_atomic
 
 # One shared file alongside settings.json, keyed {machine_key: {group_key: name}}.
 LIBRARY_FILE = os.path.join(os.path.dirname(config.SETTINGS_FILE),
@@ -78,8 +79,7 @@ def _save(data):
     root = os.path.dirname(LIBRARY_FILE)
     try:
         os.makedirs(root, exist_ok=True)
-        with open(LIBRARY_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
+        write_json_atomic(LIBRARY_FILE, data, sort_keys=True)
     except OSError:
         pass
 

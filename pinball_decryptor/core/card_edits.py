@@ -36,6 +36,7 @@ import os
 import time
 
 from . import config
+from .atomic_file import write_json_atomic
 
 #: One shared file alongside settings.json: {image key: {...}}.
 CARD_EDITS_FILE = os.path.join(os.path.dirname(config.SETTINGS_FILE),
@@ -78,8 +79,7 @@ def _load():
 def _save(data):
     try:
         os.makedirs(os.path.dirname(CARD_EDITS_FILE), exist_ok=True)
-        with open(CARD_EDITS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
+        write_json_atomic(CARD_EDITS_FILE, data, sort_keys=True)
     except OSError:
         pass
 

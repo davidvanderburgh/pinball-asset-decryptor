@@ -1852,6 +1852,17 @@ arrival), a second move 1.5 s later refused (busy), floor 2 (+2500), floor 9 ref
 the mode's end it was put back on floor 0 (+5000). When the ball drained mid-test, the game sent it to floor
 0 itself and the put-back stood aside. Not machine-tested.
 
+**In a mode file, and on the Modes tab (PAD-589).** `building <floor>` moves it 1.5 s after the mode starts (the
+ball that started it clear first); `building <floor> <mask>` moves it on every hit of those shots while the mode
+runs. The tab's Mode page has it as *The building > Move the building to* (a floor, then *when it starts* or *on every
+hit of* a shot), and blocks have *Move the building to* (floor 1-3, or back where the game keeps it). Both go
+through `pm_building` with all of its limits, and the runtime's put-back. The app offers it only while the game's
+modes cannot start and its own Building Locks rule sees no shots. Measured on the
+stock Premium/LE 1.16 card (emulator, rigs 1-2, muted): `building 3` went 0 -> 3 1.5 s in, stayed 18 s and was put
+back on 0 when the mode's clock ran out; `building 2 0x08000000` went 0 -> 2 on the Maser target's hit and back to
+0 at the end. A hit on the Building Hit Opto itself had the game send it home 2.3 s after a move, and the runtime
+stood aside, as it does for any move of the game's.
+
 ## The shaker (Godzilla Premium/LE, PAD-414; every latest title with one, PAD-474)
 
 A Godzilla Premium may have the optional shaker motor in its cabinet (an LE has it fitted), and so may the other
@@ -3432,6 +3443,17 @@ In a mode file, one line: `roster_slot 0`. A mode with a roster slot needs `seco
 `trigger`; it can have both. The value must be a slot number: `roster_slot -1`, a word, or a number
 above 15 is logged and ignored (a slot the game does not have, 7-15, is logged as out of range).
 `trigger <shots> 0` still starts nothing, as it did before the key existed: only the pick does.
+
+**On the Modes tab (PAD-589).** *Starts on: the player picking* <battle> *on the battle selection screen* writes
+`roster_slot <n>` in the trigger's place, so only the pick starts the mode. Offered where the build is proven
+(`ROSTER_PROVEN`): Pro 1.15, Premium/LE 1.16 and Pro 1.16. Measured on the stock Pro 1.16 card (emulator, rig 1,
+muted): the claim silenced slot 0's callout (1888 -> 0); the ramps lit RAID BATTLE READY, a ball held in the
+scoop opened the selection screen, and the pick started the mode 3017 ms later (`claimed - the game's battle does
+not start`); at its clock's end `battle over for player 1` and the pick counted for the player's city (mask
+0 -> 2). Seven files the tab wrote, one per battle, all claimed at boot; the cursor rested on Megalon and its
+mode started 3000 ms after the pick, with the same end. The cursor's starting place varies from game to game, and
+a battle picked that no mode holds starts the game's own battle as before. The slot's picture and name are the
+Scenes tab's (Kaiju Battle Select), like any other screen.
 
 Slots on Godzilla (Pro 1.15 and Premium 1.16): 0 Ebirah, 1 Titanosaurus, 2 Gigan, 3 Megalon,
 4 King Ghidorah, 5 Megalon & Gigan, 6 King Ghidorah & Gigan. At the start of a game only some are

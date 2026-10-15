@@ -60,7 +60,8 @@ one of its own sounds (with a callout of the game's when the card could not carr
 a shot at a pace of its own (any value, in ms) or blinking faster as the clock runs down, and (PAD-395)
 hold one of the game's mechanisms (Godzilla's magnet, and on a Premium/LE the Mechagodzilla magnet
 and the bridge) for a time, hold the next ball (or every ball) in the scoop, and let go, and (PAD-392)
-turn Godzilla Premium/LE's shield targets toward the player or away, kept there while it runs, (PAD-418)
+turn Godzilla Premium/LE's shield targets toward the player or away, kept there while it runs, (PAD-589)
+move its building to one of the game's own floors, put back when it ends, (PAD-418)
 play one of the game's own light shows by its port's name (Godzilla Premium/LE's ten), and (PAD-414)
 shake the cabinet's shaker for N ms at a strength, or with one of the game's own shakes (its jackpot shake...) -
 one in When the mode ends runs out after the mode, and (PAD-436) hand the player one of the game's own
@@ -196,7 +197,7 @@ SHARED_RESETS = ("ball", "game")
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
-              "hold", "scoop_hold", "let_go", "shield", "game_show", "shake", "shake_game", "game_wizard",
+              "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "light_mode")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
@@ -207,6 +208,9 @@ SCOOP_WHICH = {"next": "the next ball", "every": "every ball"}
 #: PAD-392: where a block turns the shield targets (Godzilla Premium/LE's platform), kept there while the mode runs;
 #: "leave" stops keeping them (they stay where they are). The runtime turns them back when the mode ends.
 SHIELD_WHERE = {"toward": "toward the player", "away": "away", "leave": "where they are"}
+#: PAD-589: the floors a block sends Godzilla Premium/LE's building to (the game's own; 0 is where it rests). The runtime
+#: puts it back where it was when the mode ends.
+BUILDING_FLOOR = {"1": "floor 1", "2": "floor 2", "3": "floor 3", "0": "back where the game keeps it"}
 #: PAD-414: a shake's strength (the game's own power steps, mode_project.SHAKE_STRENGTHS), and its length: at least
 #: SHAKE_MIN_MS, at most the game's own longest at that strength (the runtime clamps a value worked out while it runs)
 SHAKE_STRENGTH = {v: k for k, v in MP.SHAKE_STRENGTHS.items()}
@@ -688,7 +692,7 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
-             game_wizards=None, inserts=None):
+             game_wizards=None, inserts=None, building=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -743,6 +747,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds,
            "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield,
+           "building": building,
            "game_shows": list(game_shows) if game_shows is not None else None,
            "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None,
            "inserts": list(inserts) if inserts is not None else None}
@@ -773,6 +778,13 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
         elif shield and shield in (program.get("keep_rules") or []):
             out.append("The shield targets stay turned only while %s does not keep counting: it turns them "
                        "back." % shield)
+    moves = [b for s in program["scripts"] for b in _walk(s.get("do") or []) if b.get("op") == "building"]
+    if moves and building not in (None, False):        # PAD-589: never while the game's building locks count
+        if program.get("game_modes", "block") != "block":
+            out.append("The building moves only while the game's modes cannot start: otherwise the game's own %s "
+                       "may want it." % (building or "building locks"))
+        elif building and building in (program.get("keep_rules") or []):
+            out.append("The building moves only while %s does not keep counting." % building)
     return _unique(out)
 
 
@@ -849,7 +861,7 @@ def notes(program):
     idle = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") in ("mode_end", "ball_end")
             or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "event")
                 and (s.get("hat") or {}).get("when") == "idle")]
-    if any(b.get("op") in ("hold", "scoop_hold", "shield") for s in idle for b in _walk(s.get("do") or [])):
+    if any(b.get("op") in ("hold", "scoop_hold", "shield", "building") for s in idle for b in _walk(s.get("do") or [])):
         out.append("A mechanism is held only while the mode runs: a hold in When the mode ends, When the "
                    "ball drains or a script for while it is not running does nothing.")
     idle_show = [s for s in idle if (s.get("hat") or {}).get("kind") != "mode_end"]
@@ -1071,6 +1083,12 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["shield"] is False:
                 ctx["out"].append("%s turns the shield targets, which a mode cannot do on this card's game."
                                   % where)
+        elif op == "building":                                                       # PAD-589
+            if str(b.get("floor")) not in BUILDING_FLOOR:
+                ctx["out"].append("%s moves the building: to floor 1, 2 or 3, or back where the game keeps it."
+                                  % where)
+            elif ctx["building"] is False:
+                ctx["out"].append("%s moves the building, which a mode cannot do on this card's game." % where)
         elif op in ("shake", "shake_game"):                                          # PAD-414
             shaker = ctx["shaker"]
             if shaker is False:
@@ -1574,6 +1592,11 @@ class _Gen:
                 if where:
                     self.mech = True
                     out.append(pad + "shield(%s);" % where)
+            elif op == "building":                                                    # PAD-589
+                floor = str(b.get("floor"))
+                if floor in BUILDING_FLOOR:
+                    self.mech = True
+                    out.append(pad + "building(%d);" % int(floor))
             elif op == "shake":                                                       # PAD-414
                 strength = SHAKE_STRENGTH.get(b.get("strength"))
                 if strength is not None:
@@ -3052,6 +3075,14 @@ UNUSED static void shield(int where)
 {
     if (!run.on) return;
     if (!pm_shield_keep(where)) pm_log("shield: no platform on this game");
+}
+
+/* PAD-589: the building to one of the game's own floors (0 = where it rests); the runtime puts it back where it was
+ * when the mode ends and keeps every limit of its own */
+UNUSED static void building(int floor)
+{
+    if (!run.on) return;
+    if (!pm_building(floor)) pm_log("building: no move to floor %%d (the runtime's line says why)", floor);
 }
 
 /* PAD-414: shake the cabinet this many ms at a strength (0 hard .. 3 soft), or with one of the game's own shakes; the

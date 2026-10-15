@@ -85,6 +85,10 @@ class TitleProfile:
     #                                  longest command on it is shorter than COIL_MAX_MS (its `_drive` line's last word)
     shield_rule: str = ""            # PAD-392: the game's own shield feature (the port's `text shield_rule`, one of
     #                                  game_rules): it turns the platform back while it counts shots
+    roster: tuple = ()               # PAD-589: the battle selection's slots a mode may take (their names, slot order);
+    #                                  () where the title has no roster a mode can take
+    building_rule: str = ""          # PAD-589: the game's own building locks (one of game_rules, BUILDING_RULES): a
+    #                                  mode moves the building only while it sees no shots
     shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
     shake_max_ms: tuple = ()         # PAD-414: the game's own longest shake at strength 0..3 (`text shake_max_ms`)
     game_shows: tuple = ()           # PAD-418: ((name, kind, secs), ...) the game's own light shows a mode can play
@@ -291,10 +295,10 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop", "coils", "shield", "shaker", "shows", "wizard")
+         "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster")
 
 #: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
-HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "shaker")
+HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "building", "shaker")
 
 #: PAD-420: which of HARDWARE_PARTS each model's machine has, by its game directory (the same machine on every
 #: version), from the coil names in each newest build's device table: a magnet that catches the ball (not
@@ -324,7 +328,7 @@ MACHINE_HARDWARE = {
     "elvira3": ("scoop", "coils", "shaker"),
     "foo_fighters_le": ("magnet", "coils", "shaker"),
     "foo_fighters_pro": ("coils", "shaker"),       # run 21: its device table (the names resolve now) has no OVERLORD MAGNET - the LE's only
-    "godzilla_le": ("magnet", "scoop", "coils", "shield", "shaker"),   # its shaker drive is no coil name: PAD-414 shakes it
+    "godzilla_le": ("magnet", "scoop", "coils", "shield", "building", "shaker"),   # its shaker drive is no coil name: PAD-414 shakes it
     "godzilla_pro": ("magnet", "scoop", "shaker"),   # the shaker kit is optional; the game's own shake call is the LE's
     "guardians": ("magnet", "scoop", "coils", "shaker"),
     "guardians_le": ("magnet", "scoop", "coils", "shaker"),
@@ -596,6 +600,8 @@ BALL_SAVE_PROVEN = frozenset({
     "batman-1.14",                       # PAD-420 2026-10-08 bs_job (stock card, hidden, muted; jackpot presses only, NOPF - its VUK and eject switches left alone): the save taken, the drain inside it served back (auto-launched), shots scored on it, the next drain ended the ball: END (ball ended): 14 shots, awarded 105000000
     "elvira3-1.13",                      # PAD-420 2026-10-08 bs_job (stock card, hidden, muted; fresh NVRAM, coins one at a time): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
     "jaws_pro-1.02",                     # PAD-420 2026-10-08 bs_job2 (stock card, hidden, muted; past Guided Setup, coins one at a time after the tech alerts): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 3 shots, awarded 6000000
+    "deadpool_le-1.14",                  # PAD-589 2026-10-15 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 2 shots, awarded 3000000
+    "iron_maiden_le-1.16",               # PAD-589 2026-10-15 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
     "turtles_le-1.59",                   # PAD-420 2026-10-08 bs_job3 (stock card, hidden, muted, fresh NVRAM; the rig's van stocked with two balls - PAD_BALL_VAN_STOCK=2: the TMNT LE has 8, and the game serves a saved ball from the van): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
 })
 
@@ -813,6 +819,76 @@ SHIELD_NEEDS = (("shield_move",), ("shield_motor",),
 SHIELD_PROVEN = frozenset({
     "godzilla_le-1.16",                # PAD-392 2026-10-06 rig 1, the stock Premium/LE card: turned 1.5 s after the start, kept toward 18.5 s through six shield-target hits (all scored), put back AWAY at the mode's end; a blocks mode's turn, keep after the ball search and put-back the same run; no abort
 })
+
+
+#: PAD-589: a mode that takes the place of one of the game's battles on its selection screen (item 146: the port's
+#: ``roster_slot`` line). What mode_file.c's roster claim needs - (sites, data, values): the battle's start and the
+#: "battle over" the runtime calls at the mode's end, the battle rule, and how many slots there are.
+ROSTER_NEEDS = (("roster_start", "roster_done"), ("rule_battle",), ("roster_slots",))
+#: The slots' names, by game directory, in slot order (MODE_SDK.md "A monster in the roster")
+ROSTER_NAMES = {
+    "godzilla_pro": ("Ebirah", "Titanosaurus", "Gigan", "Megalon", "King Ghidorah", "Megalon & Gigan",
+                     "King Ghidorah & Gigan"),
+    "godzilla_le": ("Ebirah", "Titanosaurus", "Gigan", "Megalon", "King Ghidorah", "Megalon & Gigan",
+                    "King Ghidorah & Gigan"),
+}
+#: The builds where a mode holding a slot was seen in the emulator: picked on the selection screen, it started instead
+#: of the game's battle and, at its end, the game was told the battle was over (the ramps lit again).
+ROSTER_PROVEN = frozenset({
+    "godzilla_pro-1.15",               # item 146 runs 3, 4, 6, 8: MOTHRA START (roster pick) ~3000 ms after the pick, battle over at its end
+    "godzilla_le-1.16",                # item 146 runs 5, 7: the same on the stock Premium/LE card
+    "godzilla_pro-1.16",               # PAD-589 2026-10-15 rig 1, the stock card, hidden, muted: slot 0 claimed (its callout 1888 -> 0); ramps lit, the scoop held, BATTLE SELECTION, Action: START (roster pick) 3017 ms after the pick, the game's battle not started; END (time ran out), battle over for player 1, the pick counted for city 0; the tab's own seven files (one per battle) all claimed, Megalon picked: its mode started 3000 ms later, the same end
+})
+
+
+def _roster_cannot(key, label, port=None):
+    """The ``cannot`` entry for taking a battle slot on build ``key``, or () when it can."""
+    sites, data, values = ROSTER_NEEDS
+    if not port or not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+                        and all(n in port["value"] for n in values)):
+        return (("roster", "%s has no battle selection a mode of yours can take a place on." % label),)
+    if key in ROSTER_PROVEN:
+        return ()
+    return (("roster", "The app has found %s's battle selection but has not yet seen a mode of yours start from "
+                       "it in the emulator, so it cannot here yet." % label),)
+
+
+def _roster(game, port):
+    """The names of the port's battle slots, in slot order ("Slot n" past the names known for ``game``)."""
+    n = int(port["value"].get("roster_slots", 0) or 0) if port else 0
+    names = ROSTER_NAMES.get(game, ())
+    return tuple(names[i] if i < len(names) else "Slot %d" % i for i in range(min(n, 16)))
+
+
+#: PAD-589: Godzilla Premium/LE's building on its stepper (a Pro has none). What pad_mode_runtime.c's building_arm
+#: needs - (sites, data, values): the game's own move by floor and its "not now", the stepper object, its vtable
+#: word, where it keeps the floor it is at and the one it is going to, and how many floors there are.
+BUILDING_NEEDS = (("building_move", "building_busy"), ("building_stepper",),
+                  ("building_vptr", "building_at", "building_target_at", "building_floors"))
+#: The floors a mode may send the building to: the game's own 1-3 (0 is where it rests, and where the runtime puts it
+#: back), as the tab names them.
+#: The game's own feature that locks balls in the building (its port's `text block_rule_name_<n>`): a mode moves the
+#: building only while it sees no shots, so no lock of the game's is lit or made while the building is off its floor.
+BUILDING_RULES = ("Building Locks",)
+BUILDING_FLOORS = {1: "Floor 1", 2: "Floor 2", 3: "Floor 3 (the furthest)"}
+#: The builds where a mode file's ``building`` line was seen in the emulator: the building went to the floor as the
+#: mode started (or on its shot) and was put back where it was when the mode ended.
+BUILDING_PROVEN = frozenset({
+    "godzilla_le-1.16",                # PAD-589 2026-10-15 rigs 1-2, the stock Premium/LE card, hidden, muted: `building 3` - floor 0 -> 3 1.5 s after the start (the stepper -150 -> -7650, 1.5 s), kept there 18 s, put back on floor 0 at the mode's end; `building 2 0x08000000` - floor 0 -> 2 on the Maser target's hit, kept to the end, put back on 0. A hit on the Building Hit Opto itself had the game send it home 2.3 s later (the runtime then stood aside)
+})
+
+
+def _building_cannot(key, label, port=None):
+    """The ``cannot`` entry for moving the building on build ``key``, or () when it can."""
+    sites, data, values = BUILDING_NEEDS
+    if not port or not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+                        and all(n in port["value"] for n in values)):
+        return (("building", "The app has not found a building that moves on %s, so a mode of yours cannot "
+                             "move it." % label),)
+    if key in BUILDING_PROVEN:
+        return ()
+    return (("building", "The app has found how %s moves its building but has not yet seen a mode of yours "
+                         "move it in the emulator, so it cannot here yet." % label),)
 
 
 def _shield_cannot(key, label, port=None):
@@ -1347,6 +1423,8 @@ GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzill
                             + _scoop_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _coils_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _shield_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _building_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _roster_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _shaker_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _shows_cannot("Godzilla Pro 1.15")
                             + _wizards_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
@@ -2045,6 +2123,8 @@ def profile_from_port(path):
     cannot += list(_scoop_cannot(key, label, port))          # PAD-381
     cannot += list(_coils_cannot(key, label, port))          # PAD-381
     cannot += list(_shield_cannot(key, label, port))         # PAD-392
+    cannot += list(_building_cannot(key, label, port))       # PAD-589
+    cannot += list(_roster_cannot(key, label, port))         # PAD-589
     cannot += list(_shaker_cannot(key, label, port))         # PAD-414
     cannot += list(_shows_cannot(label, port))               # PAD-418
     cannot += list(_wizards_cannot(key, label, port))        # PAD-436
@@ -2104,6 +2184,8 @@ def profile_from_port(path):
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
         coil_caps=_coil_caps(port, [n for n, _l in _held_coils(port) if (key, n) in HELD_COILS_PROVEN]),   # PAD-420
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
+        building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
+        roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589
         shakes=_shakes(port),                                                # PAD-414
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
@@ -2349,11 +2431,14 @@ try:
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),
+        roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
-                     if c[0] not in ("magnet", "scoop", "coils", "shield", "shaker", "shows"))
+                     if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
         + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
+        + _building_cannot(_key_115, _label_115, _port_115)
+        + _roster_cannot(_key_115, _label_115, _port_115)
         + _shows_cannot(_label_115, _port_115)
         + _shaker_cannot(_key_115, _label_115, _port_115),
         shakes=_shakes(_port_115), shake_max_ms=_shake_max_ms(_port_115))
@@ -2829,6 +2914,13 @@ class ModeSpec:
     # PAD-392: while it runs the shield targets face the player (Godzilla Premium/LE's platform turns 1.5 s after it
     # starts, is kept there, and turns back when it ends) - only while the game's own shield feature sees no shots
     shield: bool = False
+    # PAD-589: Godzilla Premium/LE's building to one of the game's own floors (BUILDING_FLOORS: 1-3; 0 = left alone),
+    # as it starts or on every hit of building_shot; the runtime puts it back where it was when the mode ends
+    building_floor: int = 0
+    building_shot: str = ""
+    # PAD-589: with starts_on "battle", the slot of the game's battle selection (the profile's roster) the mode takes:
+    # picking it there starts the mode instead of that battle; -1 = none
+    roster_slot: int = -1
     # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
     # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
     # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
@@ -3018,6 +3110,10 @@ def _switch_off_what_it_cannot(spec, p):
         spec.coil_holds = []
     if not p.can("shield"):
         spec.shield = False
+    if not p.can("building"):
+        spec.building_floor, spec.building_shot = 0, ""
+    if not p.can("roster") and starts_on_battle(spec):
+        spec.starts_on, spec.roster_slot = "shot", -1
     if not p.can("shaker"):
         spec.shakes = []
     if not p.can("shows"):
@@ -3142,7 +3238,7 @@ def retarget(spec, p):
 #: lights - is the same mode on every model.
 MODEL_FIELDS = ("start_shot", "start_or", "start_also", "start_sequence", "scoring_shots", "shot_award", "end_shot",
                 "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds",
-                "shield", "shakes", "show_start", "show_end", "game_wizard")
+                "shield", "building_floor", "building_shot", "shakes", "show_start", "show_end", "game_wizard")
 #: what each model word is called in the words
 MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "Premium"}
 
@@ -3223,6 +3319,7 @@ def _map_shots(spec, fn):
     if isinstance(spec.shakes, list):                  # PAD-414
         spec.shakes = [[r[0], r[1], r[2], one(r[3])] if isinstance(r, (list, tuple)) and len(r) == 4 else r
                        for r in spec.shakes]
+    spec.building_shot = one(spec.building_shot)       # PAD-589
 
 
 def _port_model(out, old_key, p):
@@ -3261,6 +3358,8 @@ def _port_model(out, old_key, p):
             out.scoop_hold_ms = 0
         if not p.can("shield"):
             out.shield = False
+        if not p.can("building"):
+            out.building_floor, out.building_shot = 0, ""
         if not p.can("shaker"):
             out.shakes = []
     return port
@@ -3302,6 +3401,8 @@ def port_words(old, new, p):
         gone.append("the scoop")
     if old.shield is True and not new.shield:
         gone.append("the shield platform")
+    if _int_or_none(old.building_floor) and not _int_or_none(new.building_floor):
+        gone.append("the building")
     if old.shakes and not new.shakes:
         gone.append("the shaker")
     shows = [s for s in (old.show_start, old.show_end)
@@ -4047,6 +4148,7 @@ def validate(spec, folder=None):
     out += validate_scoop(spec, p)                     # PAD-381
     out += validate_coils(spec, p)                     # PAD-381
     out += validate_shield(spec, p)                    # PAD-392
+    out += validate_building(spec, p)                  # PAD-589
     out += validate_shakes(spec, p)                    # PAD-414
     out += validate_shows(spec, p)                     # PAD-418
     out += validate_more_to_start(spec, p)
@@ -4289,6 +4391,40 @@ def shield_lines(spec, p):
     return ["shield         toward"] if spec.shield is True and p.can("shield") else []
 
 
+# ---- PAD-589: the building to a floor -----------------------------------------------------
+def validate_building(spec, p):
+    """Every reason the building part cannot be built; nothing when the mode leaves the building alone. The
+    building moves only while the game's modes cannot start (``game_modes`` block) and its own building locks see
+    no shots, so the game never lights or makes a lock while the building is off the floor it keeps it on."""
+    floor = _int_or_none(spec.building_floor)
+    if floor is None or floor not in (0,) + tuple(BUILDING_FLOORS):
+        return ["The building goes to floor 1, 2 or 3 (0 leaves it where it is)."]
+    if not floor:
+        return []
+    if not p.can("building"):
+        return ["Moving the building is not on %s yet (Mode says why)." % p.label]
+    out = []
+    shot = spec.building_shot or ""
+    if shot and shot not in dict(p.shots):
+        out.append("%s has no shot called %r to move the building on." % (p.label, shot))
+    feature = p.building_rule or "building locks"
+    if (spec.game_modes or "block") != "block":
+        out.append("The building moves only while the game's modes cannot start: otherwise the game's own %s "
+                   "may want it." % feature)
+    elif p.building_rule and p.building_rule in (spec.keep_rules or []):
+        out.append("The building moves only while %s does not keep counting." % p.building_rule)
+    return out
+
+
+def building_lines(spec, p):
+    """The runtime line of the building: ``building <floor> [mask]``, only where the title can."""
+    floor = _int_or_none(spec.building_floor)
+    if not floor or floor not in BUILDING_FLOORS or not p.can("building"):
+        return []
+    shot = spec.building_shot or ""
+    return ["building       %d%s" % (floor, " 0x%08x" % p.mask([shot]) if shot else "")]
+
+
 # ---- PAD-414: the cabinet's shaker -----------------------------------------------------------
 def shake_max_ms(p, strength):
     """The longest shake title ``p``'s game itself runs at ``strength`` (0 when it never uses it)."""
@@ -4454,6 +4590,12 @@ def starts_on_event(spec):
     return words[1] if len(words) >= 2 and words[0] == "event" else None
 
 
+def starts_on_battle(spec):
+    """True when the mode starts when the player picks its battle slot (``roster_slot``, PAD-589)."""
+    words = (spec.starts_on or "shot").split()
+    return bool(words) and words[0] == "battle"
+
+
 def starts_on_sequence(spec):
     """True when the mode starts on its ``start_sequence`` made in order (PAD-314)."""
     words = (spec.starts_on or "shot").split()
@@ -4499,8 +4641,16 @@ def _validate_starts_ends(spec, p, ends=True):
     out = []
     words = (spec.starts_on or "shot").split()
     events = tuple(getattr(p, "events", ()) or ())
-    if words[0] not in ("shot", "event", "sequence"):
-        out.append("A mode starts on a shot, on shots made in order, or on one of the game's events.")
+    if words[0] not in ("shot", "event", "sequence", "battle"):
+        out.append("A mode starts on a shot, on shots made in order, on one of the game's events, or on a battle "
+                   "picked on the game's selection screen.")
+    elif words[0] == "battle":                      # PAD-589
+        slot = _int_or_none(spec.roster_slot)
+        if not p.can("roster"):
+            out.append("Starting on a battle picked on the selection screen is not on %s yet (Mode says why)."
+                       % p.label)
+        elif slot is None or not 0 <= slot < len(p.roster):
+            out.append("Pick the battle on the selection screen that starts the mode.")
     elif words[0] == "sequence":                    # PAD-314
         seq = spec.start_sequence
         names = dict(p.shots)
@@ -4592,6 +4742,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += scoop_lines(spec, p)           # PAD-381: nothing unless it holds a ball in the scoop
     lines += coil_lines(spec, p)            # PAD-381: the other mechanisms it holds
     lines += shield_lines(spec, p)          # PAD-392: the shield targets toward the player while it runs
+    lines += building_lines(spec, p)        # PAD-589: the building to a floor as it starts or on a shot
     lines += shake_lines(spec, p)           # PAD-414: the cabinet's shaker
     lines += show_lines(spec, p)            # PAD-418: the game's own light shows at its start and end
     if spec.screen and p.can("screen"):
@@ -5076,6 +5227,9 @@ def _starts_ends_lines(spec, lines, p, ends=True):
     if event:
         out = [line for line in out if not line.startswith("trigger ")]
         out.insert(2, "starts_on      event %s" % event)
+    elif starts_on_battle(spec) and p.can("roster"):   # PAD-589: only the pick starts it (no trigger line)
+        out = [line for line in out if not line.startswith("trigger ")]
+        out.insert(2, "roster_slot    %d" % int(spec.roster_slot))
     elif starts_on_sequence(spec):
         out = [line for line in out if not line.startswith("trigger ")]
         seq = ["%-14s 0x%08x" % ("trigger_seq", p.mask([s])) for s in spec.start_sequence]

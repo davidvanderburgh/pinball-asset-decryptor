@@ -2871,7 +2871,8 @@ def modes_games_rows(ports=None):
         if any("button" in n.lower() for n, _m in p.shots):
             also.append("buttons")
         also += [w for k, w in (("magnet", "magnet"), ("scoop", "scoop"), ("coils", "mechanisms"),
-                                ("shield", "shield"), ("shaker", "shaker"), ("shows", "light shows"), ("wizard", "mini-wizards"))
+                                ("shield", "shield"), ("building", "building"), ("shaker", "shaker"),
+                                ("shows", "light shows"), ("wizard", "mini-wizards"), ("roster", "battle slot"))
                  if p.can(k)]                                       # PAD-381: what a mode may hold; PAD-392
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
@@ -2882,7 +2883,7 @@ def modes_games_rows(ports=None):
         if not p.proven:
             also.append("never run")
         rows.append((p.label, media, yes if p.can("countdown") else "no",
-                     yes if p.can("ball_save") else "not yet", lights, ", ".join(also)))
+                     yes if p.can("ball_save") else "no", lights, ", ".join(also)))   # PAD-589: no "not yet"
     return rows
 
 
@@ -2904,13 +2905,17 @@ def _modes_which_games():
                            "modes work on all of them; the columns are what differs.",
             "table": {"head": list(MODES_GAMES_HEAD), "rows": [list(r) for r in rows]},
             "after": "- **Countdown no:** the game's voice never says a number on its own.\n"
-                     "- **Ball save not yet:** found in the game, not yet seen working.\n"
                      "- **Lights:** *shots* lights just the scoring shots' inserts; *all* "
                      "holds every insert in the mode's color.\n"
                      "- **HUD:** counters, a timer and a gauge at the screen's edges.\n"
                      "- **Buttons:** the flipper and Action buttons count as shots.\n"
                      "- **Magnet, scoop, mechanisms:** what a mode may hold for a moment: the "
                      "magnet, a ball in the scoop, the Mechagodzilla magnet and the bridge.\n"
+                     "- **Shield:** a mode may turn the shield targets toward the player while it runs.\n"
+                     "- **Building:** a mode may move the building to one of the game's own floors.\n"
+                     "- **Shaker:** a mode may shake the cabinet (when the machine has a shaker fitted).\n"
+                     "- **Battle slot:** a mode may take one of the game's battles' places on its selection "
+                     "screen.\n"
                      "- **Light shows:** the game's own light shows, which a mode can play as it "
                      "starts or ends.\n"
                      "- **Never waits:** a mode can't be set to wait for the game's modes.\n\n"
@@ -2976,7 +2981,9 @@ PREVIEW_HELP = {
                 "999); the two *or* lists add up to two more shots whose hits count "
                 "together with it. It can also ask for up to three more shots in the same ball, in any order or "
                 "in order (any other shot starts the sequence over). *Only after* "
-                "holds it until another mode has run this ball or game.\n"
+                "holds it until another mode has run this ball or game. On Godzilla it can "
+                "instead start when the player picks one of the game's battles on the battle "
+                "selection screen: your mode runs in that battle's place.\n"
                 "3. **Runs for:** how long it runs.\n"
                 "4. **Points per shot:** which shots score and what the first one "
                 "pays. A minus number takes that much away on each hit.\n"

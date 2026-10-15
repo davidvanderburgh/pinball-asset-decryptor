@@ -87,6 +87,8 @@ struct mode_cfg {
     uint64_t magnet_bits;
     unsigned scoop_ms;                /* PAD-381 `scoop_hold <ms>`: a ball landing in the scoop is held; 0 = none */
     int shield;                       /* PAD-392 `shield toward`: the shield targets face the player while it runs */
+    unsigned building_1;              /* PAD-589 `building <floor> [mask]`: the floor + 1; 0 = the building is left alone */
+    uint64_t building_bits;           /* ... moved on each hit of these shots; 0 = once, as it starts */
     char show_start[40], show_end[40];   /* PAD-418 `show_start <name>` / `show_end <name>`: the game's own light
                                        * show (the port's `text show_name_<n>`) at its start / its end; "" = none */
     char wizard[40];                  /* PAD-436 `game_wizard light|start <name>`: when it starts, the game's own
@@ -153,6 +155,7 @@ static struct {
     unsigned add_balls_left;
     int mball_wait;                   /* PAD-228: `multiball_on` - the balls are not served until its shot */
     unsigned long shield_due;         /* PAD-392: when the shield platform turns (0 = turned, or not asked) */
+    unsigned long building_due;       /* PAD-589: when the building moves as it starts (0 = moved, or not asked) */
 } run;
 
 static int running(const struct slot *M) { return run.active && run.slot == M; }
@@ -304,6 +307,33 @@ static int shield_line(struct slot *M, const char *line)
     return 1;
 }
 
+/* PAD-589: the building (MODE_SDK.md "The building")
+ *   building <floor> [mask]   Godzilla Premium/LE's building to a floor of the game's own, 1-3 (0 is where the
+ *                             game rests it): once as the mode starts, SHIELD_DELAY_MS in (the ball that started
+ *                             it clear first), or on every hit of <mask> while it runs. Through pm_building, with
+ *                             all of its limits; the runtime puts it back when the mode, the ball or the game ends. */
+static int building_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "building");
+    unsigned long f;
+    if (!a) return 0;
+    if (*a < '0' || *a > '9') {
+        pm_log("building takes a floor - \"%.40s\" ignored", a);
+        return 1;
+    }
+    f = num(&a);
+    cfg.building_1 = f < 16 ? (unsigned)f + 1 : 0;
+    cfg.building_bits = (*a >= '0' && *a <= '9') ? num(&a) : 0;
+    return 1;
+}
+
+static void building_at(struct slot *M, uint64_t mask)   /* mask 0: as it starts (from the tick, after the delay) */
+{
+    if (!cfg.building_1 || (mask ? !(mask & cfg.building_bits) : cfg.building_bits != 0)) return;
+    pm_log("%s: the building to floor %u %s - %s", cfg.name, cfg.building_1 - 1, mask ? "on its shot" : "as it starts",
+           pm_building((int)cfg.building_1 - 1) ? "moving" : "no move (the runtime's line says why)");
+}
+
 /* PAD-381: held coils (MODE_SDK.md "Held coils")
  *   coil_hold <name> <ms> [mask]   the port's held coil <name> (magnet, mg_magnet, bridge on a Godzilla
  *                                  Premium) held <ms> through pm_coil_hold, with all of its limits: on every
@@ -344,6 +374,7 @@ static int shakes_at(struct slot *M, unsigned when, uint64_t mask);   /* PAD-414
 static void magnet_shot(struct slot *M, uint64_t mask)
 {
     coils_at(M, mask);                       /* PAD-381: the held coils on their shots, too */
+    building_at(M, mask);                    /* PAD-589: the building on its shots */
     shakes_at(M, SHAKE_AT_SHOT, mask);       /* PAD-414: the shaker on its shots */
     if (!cfg.magnet_ms || !(mask & cfg.magnet_bits)) return;
     pm_log("%s: magnet shot %08x_%08x - %s", cfg.name, (unsigned)(mask >> 32), (unsigned)mask,
@@ -1905,6 +1936,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (scoop_line(M, line)) return;         /* PAD-381 */
     if (coil_line(M, line)) return;          /* PAD-381 */
     if (shield_line(M, line)) return;        /* PAD-392 */
+    if (building_line(M, line)) return;      /* PAD-589 */
     if (shake_line(M, line)) return;         /* PAD-414 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
@@ -1973,6 +2005,10 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.shield)                          /* PAD-392 */
         pm_log("\"%s\": the shield targets face the player while it runs%s", cfg.name,
                pm_can(PM_CAN_SHIELD) ? "" : " - this game has no shield platform: nothing turns");
+    if (cfg.building_1)                      /* PAD-589 */
+        pm_log("\"%s\": the building to floor %u %s%s", cfg.name, cfg.building_1 - 1,
+               cfg.building_bits ? "on its shot" : "as it starts",
+               pm_can(PM_CAN_BUILDING) ? "" : " - this game has no building to move: nothing moves");
     if (cfg.n_shake)                         /* PAD-414 */
         pm_log("\"%s\": %u shake line(s)%s", cfg.name, cfg.n_shake,
                pm_can(PM_CAN_SHAKER) ? "" : " - this game's port has no shaker: no shake");
@@ -2194,6 +2230,7 @@ static void mode_start(struct slot *M, const char *why)
     coils_at(M, 0);                                      /* PAD-381: held coils with no shot hold as it starts */
     shakes_at(M, SHAKE_AT_START, 0);                     /* PAD-414 */
     run.shield_due = cfg.shield ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-392 */
+    run.building_due = cfg.building_1 && !cfg.building_bits ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-589 */
     run.no_clock = cfg.seconds == 0;
     run.active = 1;
     run.slot = M;
@@ -2750,6 +2787,10 @@ static void on_tick(void)
         run.shield_due = 0;
         pm_log("%s: the shield targets turn toward the player - %s", cfg.name,
                pm_shield_keep(cfg.shield) ? "kept there while it runs" : "no platform on this machine");
+    }
+    if (run.building_due && pm_ms() >= run.building_due) {  /* PAD-589: the runtime puts it back at the end */
+        run.building_due = 0;
+        building_at(M, 0);
     }
     if (run.mball_on) {
         multiball_tick(M);

@@ -2655,6 +2655,23 @@ def test_the_rig_is_handed_pads_own_python_on_windows(monkeypatch, tmp_path):
     assert cmd[-1] == "120", cmd
 
 
+def test_a_run_started_here_has_no_time_limit(monkeypatch, tmp_path):
+    """PAD-585: the emulator does not stop itself after so many minutes.
+
+    The tab hands watch.sh 0, and watch.sh reads 0 as no wall-clock cap at
+    all - both launches, the checkpointable one and the plain one."""
+    assert emulate_web.EmulateTab.BACKSTOP_MIN == 0
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_core.watch_cmd(emulate_web.EmulateTab.BACKSTOP_MIN, [])
+    assert cmd[-2:] == [cmd[-2], "0"] and cmd[-2].endswith("watch.sh"), cmd
+    cmd = _cmd_on(monkeypatch, "linux", tmp_path, "watch.sh",
+                  emulate_web.EmulateTab.BACKSTOP_MIN)
+    assert cmd[-1] == "0", cmd
+    watch = _rig_text("watch.sh")
+    assert '[ "$MINS" != 0 ] && END=' in watch
+    assert 'if [ "$END" != 0 ] && [ "$(date +%s)" -ge "$END" ]' in watch
+
+
 def test_nothing_of_the_sort_off_windows(monkeypatch, tmp_path):
     """There is no interop boundary to hand a Windows .exe across, and the
     container forwards its own variables - so this must not appear at all."""

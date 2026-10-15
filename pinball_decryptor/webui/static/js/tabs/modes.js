@@ -49,6 +49,8 @@ const T = {
   coils: "Holds this mechanism the same way as the magnet: one command at the power the game itself uses for it, for this long (0.1 to 5 seconds), then it is let go. As the mode starts, or on every hit of a shot while it runs. The same limits as the magnet: one hold at a time, 3 seconds between holds, at most 6 a minute, never while the game is using it, and let go when the mode or the ball ends or the game tilts.",
   shaker: "Shakes the cabinet's shaker motor: as the mode starts, on every hit of a shot while it runs, or as it ends (that one runs out after the mode). A shake is one of the game's own (on Godzilla its jackpot shake, its multiball start...; on the other games the one it plays most of each length) or one of the mode's own at a strength the game itself shakes at (some games have one only), never longer than the game's own longest at that strength (shown beside the time). It goes the way the game shakes, so the operator's Shaker Motor setting always applies: switched off (or no shaker fitted), nothing shakes. The limits are the app's and cannot be changed: one shake at a time, never over one of the game's own, at most 20 shakes and 15 seconds of shaking a minute, stopped when the mode, the ball or the game ends.",
   shield: "While the mode runs, the shield targets face the player: the platform turns 1.5 seconds after the mode starts (once the ball that started it is clear of it) and turns back when the mode ends, the ball drains, or the game ends or tilts. The game's ball search swings the platform when no switch closes for a while; it is turned back after that. The limits are the app's and cannot be changed: never while one of the game's own modes or multiballs runs, 1.5 seconds between moves, at most 12 a minute. It stays turned only while the game's modes cannot start and its own shield feature does not keep counting: that feature turns the platform back about 2 seconds after every move. An operator who switched the shield motor off in the game's settings keeps it where it is.",
+  battle: "The mode takes the place of one of the game's battles on its selection screen: when the player picks that battle (its ramps lit, then the scoop), this mode starts instead, once the screen has closed, and the game's own battle never runs. It counts toward the player's city as the battle would, and when the mode ends the ramps light a battle again. One mode per battle. The screen keeps the battle's picture and name, and the battle's own callout is silent. King of the Monsters, the operator menu and the audits still name the old battle.",
+  building: "Moves the building to one of the game's own floors (the ones the game itself uses; floor 3 is the furthest it ever goes), 1.5 seconds after the mode starts or on every hit of a shot while it runs, at the speed the operator set. When the mode ends, the ball drains, or the game ends or tilts, it goes back to the floor it was on, unless the game has moved it since. The limits are the app's and cannot be changed: never while the building is already moving or the game is using it, 3 seconds between moves, at most 6 a minute. It moves only while the game's modes cannot start and its own building locks do not keep counting. An operator who switched the building off in the game's settings keeps it where it is.",
   scoop: "While the mode runs, a ball that lands in the scoop stays there this long once the game is done with it (its own awards and screens always come first), then the game kicks it out the way it always does, at the kick power the operator set. Your mode never fires the scoop itself. 0.1 to 10 seconds; the ball goes at once when the mode ends or the game tilts.",
   magnet: "While the mode runs, every hit of the shot the magnet sits at (the one that starts the mode too) holds the ball on the magnet for this long, then lets it go. The magnet runs at the power the operator set for it in the game's settings. To keep the coil safe, the app always holds the same limits: 0.1 to 5 seconds a grab, one grab at a time, 3 seconds between grabs, at most 6 a minute, never while the game is using the magnet itself, and it lets go when the mode or the ball ends or the game tilts. A grab it refuses is skipped and the mode carries on.",
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
@@ -381,6 +383,11 @@ function ModePage({ s, f, off, dis, rs, lim }) {
   const shieldFeature = prof.shield_rule || "shield";
   const shieldLive = (f.game_modes || "block") !== "block" || (!!prof.shield_rule && (s.keep_on || []).includes(prof.shield_rule));
   const shieldOff = off || dis.shield || (shieldLive && !f.shield);
+  // PAD-589: the building moves only while the game's own building locks see no shots
+  const BUILDING_NONE = "(leave it where it is)";
+  const buildingLive = (f.game_modes || "block") !== "block" || (!!prof.building_rule && (s.keep_on || []).includes(prof.building_rule));
+  const buildingSet = !!f.building_floor && f.building_floor !== BUILDING_NONE;
+  const buildingOff = off || dis.building || (buildingLive && !buildingSet);
   // PAD-414: the shaker - a shake of the mode's own at a strength, or one of the game's
   const shakeOff = off || dis.shaker;
   const shakeWhat = (v) => withValue(prof.shakes || [], v);
@@ -409,6 +416,10 @@ function ModePage({ s, f, off, dis, rs, lim }) {
   const seqSet = Array.from({ length: SEQ_MAX }, (_, i) => !!f["seq_shot_" + i] && f["seq_shot_" + i] !== SEQ_NONE);
   const seqRows = Math.min(SEQ_MAX, Math.max(2, seqSet.lastIndexOf(true) + 2));
   const seqOn = f.starts_kind === "sequence";
+  const battleOn = f.starts_kind === "battle";                                  // PAD-589
+  const roster = prof.roster || [];
+  const battleOff = off || dis.roster || !roster.length;
+  const rosterOpts = withValue([{ value: "", label: "(choose a battle)", disabled: true }, ...roster.map((x) => ({ value: x, label: x }))], f.roster_slot);
   const END_PICK = "(these shots)";
   const endOpts = withValue((prof.end_shots || ["(no shot)"]).map((x) => ({ value: x, label: x })), f.end_shot);
   const endOn = new Set(s.end_shots_on || []);
@@ -443,7 +454,7 @@ function ModePage({ s, f, off, dis, rs, lim }) {
       <//>`;
   const startsSec = html`<${Sec} title="Starts on" reason=${rs.events}>
         <div class="row wrap">
-          <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event" && !seqOn} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
+          <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event" && !seqOn && !battleOn} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_shot} options=${shotOpts} ns="modes" k="f:start_shot" disabled=${off || !shots.length} width=${180} title=${T.startShot} />
         </div>
         <div class="row wrap" style="padding-left:26px">
@@ -465,6 +476,13 @@ function ModePage({ s, f, off, dis, rs, lim }) {
         <div class="row wrap" style="padding-left:26px">
           <${Check} label="any other shot starts the sequence over" checked=${f.seq_reset_any} disabled=${off || !seqOn} title=${T.seqReset} ns="modes" k="f:seq_reset_any" />
         </div>
+        ${!prof.roster_found ? null : html`<div class="row wrap">
+          <${Radio} name="m-starts" value="battle" label="the player picking" checked=${battleOn} disabled=${battleOff && !battleOn} title=${T.battle} onChange=${(v) => setF("starts_kind", v, true)} />
+          <${Select} value=${f.roster_slot || ""} options=${rosterOpts} ns="modes" k="f:roster_slot" disabled=${battleOff || !battleOn} width=${220} title=${T.battle} />
+          <span class="dim nw">on the battle selection screen</span>
+        </div>
+        ${battleOn && !dis.roster ? html`<div class="small muted wrap" style="padding-left:26px">Picking it starts this mode instead of that battle, 3 seconds later once the screen has closed. It counts toward the player's city as the battle would, and when the mode ends the ramps light a battle again. The screen shows the battle's own picture and name until you change them on the Scenes tab.</div>` : null}
+        ${rs.roster ? html`<div class="small muted wrap" style="padding-left:26px">${rs.roster}</div>` : null}`}
         ${[0, 1].map((i) => html`<div class="row wrap">
           <span class="dim nw">and also</span>
           <${Select} value=${f["also_shot_" + i]} options=${alsoOpts(f["also_shot_" + i])} ns="modes" k=${"f:also_shot_" + i} disabled=${off || !shots.length} width=${180} title=${T.alsoShot} />
@@ -584,6 +602,17 @@ function ModePage({ s, f, off, dis, rs, lim }) {
       ${hide.shield ? null : html`<${Sec} title="Shield targets" reason=${rs.shield}>
         <${Check} label="Turn the shield targets toward the player while it runs" checked=${f.shield} disabled=${shieldOff} title=${T.shield} ns="modes" k="f:shield" />
         ${!dis.shield && shieldLive ? html`<div class="small muted" style="padding-left:26px">Only while the game's modes cannot start and ${shieldFeature} does not keep counting: otherwise the game turns them back.</div>` : null}
+      <//>`}
+      ${hide.building ? null : html`<${Sec} title="The building" reason=${rs.building}>
+        <div class="row wrap">
+          <span class="dim nw">Move the building to</span>
+          <${Select} value=${f.building_floor || BUILDING_NONE} options=${withValue((prof.building_floors || [BUILDING_NONE]).map((x) => ({ value: x, label: x })), f.building_floor)} ns="modes" k="f:building_floor" disabled=${buildingOff} width=${280} title=${T.building} />
+        </div>
+        <div class="row wrap" style="padding-left:26px">
+          <${Select} value=${f.building_shot || "(when it starts)"} options=${withValue((prof.mb_on_shots || ["(when it starts)"]).map((x) => ({ value: x, label: x === "(when it starts)" ? x : "on every hit of " + x })), f.building_shot)} ns="modes" k="f:building_shot" disabled=${buildingOff || !buildingSet} width=${240} title=${T.building} />
+        </div>
+        ${!dis.building ? html`<div class="small muted">It goes back where it was when the mode ends.</div>` : null}
+        ${!dis.building && buildingLive ? html`<div class="small muted">Only while the game's modes cannot start and ${prof.building_rule || "the building locks"} does not keep counting: otherwise it stays where it is.</div>` : null}
       <//>`}
       ${hide.shaker ? null : html`<${Sec} title="Shaker" reason=${rs.shaker}>
         ${shakeRow("start", "Shake the cabinet as it starts")}

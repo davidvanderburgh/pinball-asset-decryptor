@@ -36,6 +36,7 @@ const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
 const SCOOP_WHICH = [["next", "the next ball"], ["every", "every ball"]];   // PAD-395
 const SHIELD_WHERE = [["toward", "toward the player"], ["away", "away"], ["leave", "where they are"]];   // PAD-392
+const BUILDING_FLOOR = [["1", "floor 1"], ["2", "floor 2"], ["3", "floor 3"], ["0", "back where the game keeps it"]];   // PAD-589
 const SHAKE_STRENGTH = [["hard", "a hard"], ["strong", "a strong"], ["medium", "a medium"], ["soft", "a soft"]];   // PAD-414
 // PAD-474: only the strengths the card's game shakes at (a one-power shaker: hard alone)
 const shakeStrengths = (ch) => { const m = ch.shake_max || []; return m.some((v) => v) ? SHAKE_STRENGTH.filter((_s, i) => m[i]) : SHAKE_STRENGTH; };
@@ -110,6 +111,7 @@ const TIP = {
   infoOff: "This card's game cannot take a mode's screens, so the line would not show: the mode runs the same without it.",
   screenStyle: "As a panel: its name on a panel in the middle of the screen, there all the time it runs, its TOTAL on it at the end. As words over the video: no panel, its words alone, large and white over the game's video as the game letters its own - its name over its intro for 4 s, a Words block's line for 3 s, its TOTAL over its end for 3 s.",
   gameWizard: "Hands the player one of the game's own mini-wizards, the game's mode itself with its own shots, lights, screens, sounds and award. Light it (where the game lights that one for a start shot): it waits for the game's own start shot, as when the game lights one. Start it: it begins at once, or the moment none of the game's own modes is in its way (nor this mode holding the game's modes off), that ball. On James Bond 007, until it starts it is the only one lit, so the game's own choosing cannot swap it for another, and the game no longer lights one named here by itself; on the other games the game's own rules still light and start their mini-wizards too. Works whether this mode runs or not: in When the game does an event it is a mini-wizard for that event. One the player has played this game plays again.",
+  building: "Moves Godzilla Premium/LE's building to one of the game's own floors (floor 3 is the furthest it ever goes), at the speed the operator set; back where the game keeps it puts it on floor 0. When the mode ends, the ball drains or the game tilts, it goes back where it was, unless the game has moved it since. Only while the mode runs, never while the building is already moving or the game is using it, 3 s between moves, 6 a minute at most, and only while the game's modes cannot start and its own building locks do not keep counting.",
   shield: "Turns the platform the shield targets sit on (about a second) and keeps it there while the mode runs: the game's ball search swings it, and it is turned back after. Where they are: stop keeping them. Only while the mode runs, never while one of the game's own modes runs, 1.5 s between moves, 12 a minute at most; the mode ending, the ball draining or a tilt turns them back where they were. They stay turned only while the game's modes cannot start and its own shield feature does not keep counting.",
 };
 
@@ -152,7 +154,7 @@ function stmtTemplates(ch, vars, prog = {}) {
     // PAD-395: the mechanisms the form's Magnet, Scoop and Other mechanisms hold (greyed where the game cannot)
     ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
       { op: "scoop_hold", ms: num(3000), which: "next" }, { op: "let_go", what: "*" },
-      { op: "shield", where: "toward" }, { op: "shake", ms: num(500), strength: "hard" },
+      { op: "shield", where: "toward" }, { op: "building", floor: "3" }, { op: "shake", ms: num(500), strength: "hard" },
       { op: "shake_game", shake: ((ch.shakes || [])[0] || {}).name || "jackpot" }].filter((t) => !machineLacks(t, ch))],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
       { op: "change", var: v, by: num(1) }]],
@@ -186,7 +188,7 @@ const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: 
 const STMT_CLASS = { start_mode: "mode", light_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
-  hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech",
+  hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
@@ -416,6 +418,7 @@ function StmtBody({ b, path, ed }) {
         options=${(ed.ch.game_wizards || []).map((w) => [w.name, w.film ? `${w.name} (${w.film})` : w.name])} missing="(not on this game)" width=${260}
         onChange=${(v) => set("name", v)} />${how === "light" ? html`<span class="bk-w">: ${shotWord}</span>` : null}`;
     }
+    case "building": return html`<span class="bk-w" ...${tip(TIP.building)}>Move the building to</span><${Pick} value=${String(b.floor ?? "3")} options=${BUILDING_FLOOR} onChange=${(v) => set("floor", v)} />`;
     case "shield": return html`<span class="bk-w" ...${tip(TIP.shield)}>Turn the shield targets</span><${Pick} value=${b.where || "toward"} options=${SHIELD_WHERE} onChange=${(v) => set("where", v)} />`;
     case "shake": return html`<span class="bk-w" ...${tip(TIP.shake)}>Shake the cabinet:</span><${Pick} value=${b.strength || "hard"} options=${shakeStrengths(ed.ch)} missing="(not on this game)" onChange=${(v) => set("strength", v)} />
       <span class="bk-w">shake for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
@@ -557,7 +560,7 @@ function stmtLabel(b) {
     clip: "Play a clip", sound: "Play a sound",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
-    hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets",
+    hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", building: "Move the building to",
     shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
@@ -570,6 +573,7 @@ function machineLacks(t, ch) {
   if (t.op === "scoop_hold") return no.has("scoop");
   if (t.op === "let_go") return no.has("magnet") && no.has("coils") && no.has("scoop");
   if (t.op === "shield") return no.has("shield");
+  if (t.op === "building") return no.has("building");
   if (t.op === "shake" || t.op === "shake_game") return no.has("shaker");
   if (t.op === "game_wizard") return no.has("wizard");   // PAD-473: a game with no mini-wizards of its own
   return false;
@@ -581,6 +585,7 @@ function whyOff(t, ch) {
   if (t.op === "scoop_hold") return ch.scoop_off || "";
   if (t.op === "let_go") return ch.mechs_off && ch.scoop_off ? ch.mechs_off : "";
   if (t.op === "shield") return ch.shield_off || "";
+  if (t.op === "building") return ch.building_off || "";   // PAD-589
   if (t.op === "shake" || t.op === "shake_game") return ch.shaker_off || "";   // PAD-414
   if (t.op === "game_show") return ch.game_shows_off || "";   // PAD-418
   if (t.op === "game_wizard") return ch.game_wizards_off || "";   // PAD-436

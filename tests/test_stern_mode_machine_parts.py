@@ -18,17 +18,17 @@ def test_the_inventory_only_names_hardware_parts():
 
 
 def test_absent_is_what_the_machine_lacks():
-    assert MP.machine_absent("godzilla_pro") == ("coils", "shield")
+    assert MP.machine_absent("godzilla_pro") == ("coils", "shield", "building")
     assert MP.machine_absent("godzilla_le") == ()       # its shaker is no coil name, but PAD-414 shakes it
-    assert MP.machine_absent("jaws_le") == ("magnet", "scoop", "shield")    # PAD-474: its shaker is the test menu's
-    assert MP.machine_absent("jurassic_park_the_pin") == ("magnet", "scoop", "shield", "shaker")   # a Home Edition
+    assert MP.machine_absent("jaws_le") == ("magnet", "scoop", "shield", "building")    # PAD-474: its shaker is the test menu's
+    assert MP.machine_absent("jurassic_park_the_pin") == ("magnet", "scoop", "shield", "building", "shaker")   # a Home Edition
     assert MP.machine_absent("no_such_game") == ()
 
 
 def test_profiles_carry_it():
     p = MP.profile_from_port(os.path.join(MP.PORTS_DIR, "jaws_le-1.02.port"))
     assert "magnet" in p.absent and "coils" not in p.absent
-    assert MP.GODZILLA_PRO_1_15.absent == ("coils", "shield")
+    assert MP.GODZILLA_PRO_1_15.absent == ("coils", "shield", "building")
 
 
 def test_a_part_a_build_can_do_is_never_hidden():
@@ -40,3 +40,8 @@ def test_a_part_a_build_can_do_is_never_hidden():
 
 def test_only_the_premium_has_the_shield_platform():
     assert [g for g, parts in MP.MACHINE_HARDWARE.items() if "shield" in parts] == ["godzilla_le"]
+
+
+def test_only_the_premium_has_the_building_that_moves():
+    """PAD-589: the building on its stepper is Godzilla Premium/LE's alone; every other machine leaves the section out."""
+    assert [g for g, parts in MP.MACHINE_HARDWARE.items() if "building" in parts] == ["godzilla_le"]

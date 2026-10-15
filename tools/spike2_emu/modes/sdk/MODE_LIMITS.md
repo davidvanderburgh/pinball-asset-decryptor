@@ -20,6 +20,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Start it on shots, a timer or a game event (ball start, skill shot, multiball...) | Yes. Events vary by game. |
 | Start it on a flipper or Action button | Godzilla only |
 | Start it after another of my modes | Yes, with "Only after" |
+| Start it when the player picks one of the game's battles | Godzilla: yes, in that battle's place. [Example 1](#1-add-mothra-to-godzillas-battle-selection) |
 | Start it when the player beats one of the game's battles | No. No game reports a win. |
 | Run two of mine at once | No. One at a time. |
 | Take points away | Form modes only (a minus number under Points per shot) |
@@ -49,7 +50,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Turn the shield targets toward the player | Godzilla Premium/LE 1.16: while the mode runs, then back where they were. Only while the game's modes can't start. Tested in the emulator so far |
 | Play one of the game's own light shows as it starts or ends | Godzilla Premium/LE 1.16: ten shows by name (flashy, subdued, accent), a few seconds each; none as the ball drains. Every build marked *light shows* in "Which games" below: up to twelve of its own, found by playing every show process of the game's in the emulator and named from what it lit; a Pro offers its LE's by the same names where they are the same show (Godzilla Pro has eight of the Premium/LE's). Tested in the emulator so far |
 | Start the game's own mini-wizard from a film (or any start) | James Bond 007 LE / Pro 1.06: Chaos at Crab Key, Ahoy Mr. Bond, Goldfinger's Jackpot, Duel on the Disco Volante - lit for the Right ramp (the only one lit until it starts), or started at once or the moment the game would start one; the game's own lighting no longer lights one a mode hands out. The other games marked *mini-wizards* below (their own, by name: Godzilla's Monster Zero, King Kong's Crash the Gate, ...): started at once, or the moment none of the game's own modes is in the way, that ball; lit for the start shot only where the game lights it through a mode of its own (Star Wars' Lightsaber Duel, TMNT's Team-Up); Rush's Cygnus X-1 Books, when the ball is not in the Time Machine, wait for it to drain before their intro plays; Aerosmith's Medley Tour and Guardians' Cherry Bomb Multiball start only while none of the game's own songs or modes runs (the game's rule), so they wait for one to end or the next ball's launch; the game's own rules still start them too. One handed over never starts while another of the game's own mini-wizards runs. The Munsters, Star Wars Home and Bond 60th have none of their own. The game's own mode runs, nothing of yours |
-| Move the building | Not yet |
+| Move the building | Godzilla Premium/LE 1.16: to one of the game's own floors (floor 3 is the furthest it ever goes), as the mode starts or on a shot, and back where it was when the mode ends. Only while the game's modes can't start. A ball hitting the building has the game move it back itself. Tested in the emulator so far |
 | Shake the cabinet | Every build marked *shaker* in "Which games" below, with a shaker fitted (an optional kit on most models, fitted on many LEs): as the mode starts, on a shot or as it ends - a shake of its own, at a strength the game itself uses and never longer than its own longest (Godzilla: up to 1 s hard, 5 s soft; most others one strength, 1 to 2 s), or one of the game's (Godzilla's jackpot shake, its multiball start; another game's short, medium or long shake). Tested in the emulator so far |
 | Fire a flipper, slingshot, pop bumper, kickback, lock, the trough or any other coil | No |
 | Add a switch or a shot | No. A mode sees the shots the game reports. |
@@ -64,21 +65,22 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 
 **No.** The screen has seven slots: Ebirah, Titanosaurus, Gigan, Megalon, King Ghidorah, Megalon & Gigan, King Ghidorah & Gigan. Seven is baked into the game's code in more than a dozen places, and the artwork has exactly seven pictures.
 
-**You can take over a slot instead.** Take Ebirah's, and:
+**You can take over a slot instead.** On the Mode page, set *Starts on* to *the player picking* Ebirah on the battle selection screen, and:
 
 - picking Ebirah starts your mode, 3 seconds later so the screen has closed. Ebirah's battle never runs.
 - the ramps stay dark until your mode ends, as in a real battle.
 - it counts toward the player's city, as the battle would.
-- the slot can show your picture and name (no longer than EBIRAH). The old callout is silenced, or replaced with yours.
+- the old callout is silenced.
+- the slot can show your picture and name: change them on the Scenes tab (Kaiju Battle Select), like any other screen.
 
 The catches:
 
-- **Not in the Modes tab yet.** It takes `roster_slot 0` in a mode file or one call in C, and `roster_entry.py` for the picture and name.
+- One mode per slot, and a slot the game shows as locked can't be picked until the player opens it.
 - The slot still shows Ebirah's 0/4 and never says Completed. Anything unlocked by finishing Ebirah may stay locked.
 - King of the Monsters still runs the real Ebirah.
 - A drain ends your mode. The game would have resumed its battle.
 - The operator menu, audits and champion still say Ebirah. Rename them on the Text tab.
-- Godzilla only.
+- Godzilla only (Pro and Premium/LE). Tested in the emulator so far.
 
 ### 2. "A Mothra mode of my own"
 
@@ -171,7 +173,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
 | Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Deadpool LE 1.14 | ✓ | ✓ | not yet | all |  |
+| Deadpool LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
@@ -180,13 +182,13 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, shaker, light shows, mini-wizards |
-| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop |
-| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot |
+| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, battle slot |
+| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards, battle slot |
 | Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Iron Maiden LE 1.16 | ✓ | ✓ | not yet | all |  |
+| Iron Maiden LE 1.16 | ✓ | ✓ | ✓ | all |  |
 | Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards |
@@ -236,13 +238,14 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 - **Countdown no:** the game's voice never says a number on its own.
 - **When time is up:** the voice of The Beatles, Deadpool, Elvira, John Wick, Jurassic Park Pin, Led Zeppelin, Star Wars (LE, Pro and ELG), TMNT and Uncanny X-Men has no line saying the time is up, so the game's own call cannot end a mode there; a sound of your own can. The Beatles and Deadpool play every piece of their music themselves, so a mode cannot have music of its own there.
 - **No magnet:** Aerosmith, Avengers, Batman 66, Foo Fighters LE, King Kong, Led Zeppelin LE, The Munsters and Rush Pro use their magnet themselves at the shot it sits at, so a mode's hold there would always give way to the game's; Guardians of the Galaxy and TMNT use theirs only inside a feature of their own, and Sword of Rage's is the player's magna-save. Metallica Remastered has no magnet that catches the ball.
-- **Ball save not yet:** found in the game, not yet seen working.
 - **Lights:** *shots* lights just the scoring shots' inserts; *all* holds every insert in the mode's colour.
 - **HUD:** counters, a timer and a gauge at the screen's edges, like Godzilla's own battles.
 - **Buttons:** the flipper and Action buttons count as shots.
 - **Magnet, scoop, mechanisms:** what a mode may hold for a moment: the magnet, a ball in the scoop, the Mechagodzilla magnet and the bridge.
 - **Shield:** a mode may turn the shield targets toward the player while it runs.
+- **Building:** a mode may move the building to one of the game's own floors.
 - **Shaker:** a mode may shake the cabinet (when the machine has a shaker fitted).
+- **Battle slot:** a mode may take one of the game's battles' places on its selection screen.
 - **Never waits:** a mode can't be set to wait for the game's modes.
 - **Not listed?** Pick the card anyway. The app works out its hooks; press Check this game (about two minutes) before trusting them.
 
@@ -276,4 +279,4 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 ## Asking for more
 
-Hit a wall that isn't here, or think one shouldn't be? Post in the preview channel with the game and version, what you wanted, and what happened. Some of these noes are "not yet" (the battle slot in the tab, for one). The ones that come from Stern's compiled code are much harder to move.
+Hit a wall that isn't here, or think one shouldn't be? Post in the preview channel with the game and version, what you wanted, and what happened. Some of these noes can move as the app learns more of a game. The ones that come from Stern's compiled code are much harder to move.

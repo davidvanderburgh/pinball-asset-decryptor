@@ -19,8 +19,8 @@ checks, then attract mode (it skips to attract on its own by default,
 or untick that and drive the boot yourself). The panel is a control
 surface, not a second copy of the emulator: it shows the state,
 process count, CPU and memory live, stops by killing every part and
-then *verifying* nothing survived, and caps a forgotten session at
-two hours. Video plays as well now: the Spike 2 decoder is an i.MX6
+then *verifying* nothing survived, and runs until you stop it (no
+time limit). Video plays as well now: the Spike 2 decoder is an i.MX6
 hardware block a PC doesn't have, so the host decodes each clip with
 ffmpeg and publishes the frames into a shared ring the game draws
 from. Scenes, text, lamps, switches and sound all work. A long

@@ -43,9 +43,11 @@ from .emulate_core import (  # noqa: F401  (re-exported)
 )
 from .emulate_core import _wsl_path as wsl_path  # noqa: F401
 
-#: Wall-clock cap handed to ``watch.sh``.  A forgotten window must not be
-#: able to burn a core all night; the rig enforces it, this only chooses it.
-BACKSTOP_MIN = 120
+#: Wall-clock cap handed to ``watch.sh``: 0 is none.  A run started here
+#: goes on until it is stopped or its window is closed (PAD-585: David does
+#: not want the emulator stopping itself after so many minutes).  Runs
+#: started by hand or by a rig job keep ``watch.sh``'s own default cap.
+BACKSTOP_MIN = 0
 
 #: Status poll period.  Each poll is one ``wsl.exe`` round trip, so this is
 #: slow enough to cost nothing and fast enough to feel live.

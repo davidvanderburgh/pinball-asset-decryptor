@@ -2286,8 +2286,8 @@ HELP_CONTENT = {
          "| Game running | Up. It does not guess between attract, the menu and a game |\n\n"
          "- **What it costs:** about 15% of one CPU core waiting, about a third of a "
          "core running, plus 1–2 GB of memory, shown live in the status line.\n"
-         "- **Two-hour cap:** it stops by itself, so a forgotten window cannot run all "
-         "night."),
+         "- **No time limit:** it runs until you press Stop emulator or close its "
+         "window."),
         ("Sound and video",
          "- **Volume** and **Mute** set the emulator's own sound, live, and are "
          "remembered. They are not the game's volume (the coin door's -/+), which "

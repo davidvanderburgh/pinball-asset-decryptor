@@ -537,6 +537,10 @@ def test_the_page_draws_the_sounds_part_of_the_callout():
                 "vid-sound-play", "vid-sound-go", 'call("video.open_sound", it.rel)',
                 "mediaUrl(it.path)"):
         assert bit in js, bit
+    # the Audio tab brings the row it was sent to into sight
+    audio = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui",
+                              "static", "js", "tabs", "audio.js"), encoding="utf-8").read()
+    assert "indexRef.current.get(next[0])" in audio
 
 
 def test_a_card_reading_keeps_its_sounds_in_its_cache():

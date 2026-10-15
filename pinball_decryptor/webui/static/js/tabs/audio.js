@@ -441,8 +441,22 @@ export default function AudioTab() {
     // a selection Python made (sequential play, a pick, a rename) moves the
     // focus row to it; the echo of the page's own selection leaves it be
     if (selKey !== sentSel.current && next.length) { cursor.current = next[0]; anchor.current = next[0]; }
+    // PAD-592: a row sent here from another tab (the Video tab's clip sounds) comes to the
+    // middle of the list when it is out of sight or at its very edge (under the header)
+    if (selKey !== sentSel.current && next.length === 1) {
+      requestAnimationFrame(() => {
+        const el = wrapRef.current && wrapRef.current.querySelector(".scroller");
+        const i = indexRef.current.get(next[0]);
+        if (!el || i == null) return;
+        const y = i * ROW_H;
+        if (y < el.scrollTop + ROW_H || y + ROW_H * 3 > el.scrollTop + el.clientHeight) {
+          el.scrollTop = Math.max(0, y - Math.floor(el.clientHeight / 2));
+        }
+      });
+    }
   }, [selKey]);
   const index = useMemo(() => new Map(rows.map((r, i) => [r.k, i])), [rows]);
+  const indexRef = useRef(index); indexRef.current = index;
 
   // keep the players on what the panes hold
   useEffect(() => { syncPlayer("orig", panes.orig); }, [panes.orig && panes.orig.v, panes.orig && panes.orig.limit, panes.orig && panes.orig.gain]);

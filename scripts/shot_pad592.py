@@ -110,6 +110,14 @@ def _shot(repo, out, after):
             # the sound's link to the Audio tab (the first clip's first sound)
             page.locator(".vid-tbl .tr:has-text('%s')" % SCREENS["video_clip_sounds"]).first.click()
             time.sleep(3)
+            play = page.locator(".vid-sound-play").first
+            if play.count():
+                play.click()
+                time.sleep(1)
+                print("play button after a click:", play.get_attribute("aria-label"), flush=True)
+                play.click()
+                time.sleep(0.5)
+                print("and after another:", play.get_attribute("aria-label"), flush=True)
             go = page.locator(".vid-sound-go").first
             if go.count():
                 go.click()

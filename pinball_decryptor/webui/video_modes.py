@@ -25,9 +25,12 @@ Store keys (namespace ``video``):
   rows[i]      + modes (labels), pair (a row of a shared clip), follow (the lead mode's label: a
                follower), copy (a mode's own clip), unplayed, other
   preview      + modes: {rel, kind: lead|follow|copy|unplayed, text, back} or None
-               + sounds: {rel, head, items: [{text, how, tip}], more, foot} or None - the
-               sounds the game plays with the clip (:mod:`..plugins.stern.clip_sounds`),
-               named by the extract's ``sound_requests.tsv`` and audio files
+               + sounds: {rel, head, items: [{text, how, tip, rel, path}], more, maybe_head,
+               maybe: [...], maybe_more, none, foot} or None - the sounds the game plays
+               with the clip (:mod:`..plugins.stern.clip_sounds`), named by the extract's
+               ``sound_requests.tsv`` and audio files; each item's ``rel`` is its Audio row
+               (``open_sound`` shows it there) and ``path`` the file the page plays. A clip
+               with no sure sound lists the ones that MAY be its (PAD-592)
 """
 
 import os
@@ -69,6 +72,15 @@ SOUNDS_HOW = {"record": "kept with the clip", "next": "asked for right after it"
               "name": "named after it"}
 SOUNDS_FOOT = ("Extract the card again to see which sound files these are: the extract writes "
                "sound_requests.tsv.")
+#: PAD-592: a clip with none of those - the sounds that MAY be its, each kind in words
+MAYBE_HEAD = "No sound is sure for this clip. These may be its:"
+MAYBE_MAX = 12
+MAYBE_HOW = {"function": "asked for in the same part of the program",
+             "names": "named like it", "part": "named like part of its name"}
+NONE_TEXT = ("No sound found for this clip in the game's program. It may have none (a loop or a "
+             "backdrop), or the game picks its sound in a way the program does not show.")
+#: a sound's link and play button (the page's words, here for the tests)
+OPEN_TIP = "Show this sound on the Audio tab"
 
 
 def _and(words):
@@ -99,7 +111,8 @@ class ModesMixin:
         self._m_other = set()
         self._m_of = {}               # follower / copy rel -> the shared clip's rel
         self._m_sr = None             # clip_sounds.SoundReading of the card, read once
-        self._m_names = None          # (sound_requests.tsv rows, {idx: audio file}) of the project
+        self._m_names = None          # (sound_requests.tsv rows, {idx: audio file}, {name: audio
+        #                               file}) of the project
 
     def _m_reset(self):
         self._m_run += 1
@@ -388,21 +401,27 @@ class ModesMixin:
         return self._m_sr
 
     def _m_sound_names(self):
-        """``(sound_requests.tsv rows, {idx: "audio/<file>"})`` of the project, read once."""
+        """``(sound_requests.tsv rows, {idx: "audio/<file>"}, {Sound Test name: "audio/<file>"})``
+        of the project, read once."""
         if self._m_names is None:
             from ..plugins.stern import clip_sounds as CS
             project = self._scan_dir or ""
-            self._m_names = (CS.read_requests(project), CS.audio_files(project))
+            audio = CS.audio_files(project)
+            self._m_names = (CS.read_requests(project), audio, CS.audio_names(audio))
         return self._m_names
 
     def _m_sound_words(self, snd):
-        """``(text, tip)`` for one of a clip's sounds: its audio file where the extract mapped
-        its request, else its Sound Test name, else its request number."""
-        req, audio = self._m_sound_names()
+        """``(text, tip, files)`` for one of a clip's sounds: its audio file where the extract
+        mapped its request (or, before it did, the one file named after its Sound Test name),
+        else its Sound Test name, else its request number."""
+        from ..plugins.stern import clip_sounds as CS
+        req, audio, by_name = self._m_sound_names()
         r = snd["request"]
         row = req.get(r) or {}
         files = [audio[i] for i in row.get("idx", ()) if i in audio]
         name = snd["name"] or row.get("name", "")
+        if not files and name and CS.name_key(name) in by_name:
+            files = [by_name[CS.name_key(name)]]
         if files:
             text = os.path.basename(files[0])
             if len(files) > 1:
@@ -415,7 +434,13 @@ class ModesMixin:
         lines += [os.path.basename(f) for f in files]
         if not files and row.get("idx"):
             lines.append("idx " + ", ".join("%04d" % i for i in row["idx"]))
-        return text, {"head": text, "lines": lines}
+        return text, {"head": text, "lines": lines}, files
+
+    def _m_sound_item(self, snd, how):
+        text, tip, files = self._m_sound_words(snd)
+        rel = files[0] if files else ""
+        path = os.path.join(self._scan_dir, *rel.split("/")) if rel and self._scan_dir else ""
+        return {"text": text, "how": how, "tip": tip, "rel": rel, "path": path}
 
     def _m_sounds(self, rel):
         """The callout's sounds part for the row on show, or None."""
@@ -426,25 +451,44 @@ class ModesMixin:
         name = names.get(rel) or names.get(self._m_of.get(rel) or "")
         if not name:
             return None
+        out = {"rel": rel, "head": SOUNDS_HEAD, "items": [], "more": "", "maybe_head": "",
+               "maybe": [], "maybe_more": "", "none": "", "foot": ""}
         sounds = reading.sounds_of(name)
         if not sounds:
             if reading.note and not reading.pairs and rel not in self._m_unplayed:
-                return {"rel": rel, "head": SOUNDS_HEAD, "items": [], "more": "",
-                        "foot": "None found: %s." % reading.note}
-            return None
-        # "function" (a call elsewhere in the code naming the clip) was right 6 times in 28
+                out["foot"] = "None found: %s." % reading.note
+                return out
+            if rel in self._m_unplayed:
+                return None
+            out["none"] = NONE_TEXT
+            return out
+        # "function" (a call elsewhere in the code naming the clip) was right 6 times in 28:
+        # with nothing surer it is one that MAY be the clip's (PAD-592)
         shown = [snd for snd in sounds if snd["how"] in SOUNDS_HOW]
-        if not shown:
-            return None
-        items = []
-        for snd in shown[:SOUNDS_MAX]:
-            text, tip = self._m_sound_words(snd)
-            items.append({"text": text, "how": SOUNDS_HOW[snd["how"]], "tip": tip})
+        maybe = [] if shown else [snd for snd in sounds if snd["how"] in MAYBE_HOW]
+        out["items"] = [self._m_sound_item(snd, SOUNDS_HOW[snd["how"]])
+                        for snd in shown[:SOUNDS_MAX]]
+        out["maybe"] = [self._m_sound_item(snd, MAYBE_HOW[snd["how"]])
+                        for snd in maybe[:MAYBE_MAX]]
         more = len(shown) - SOUNDS_MAX
-        req, _audio = self._m_sound_names()
-        return {"rel": rel, "head": SOUNDS_HEAD, "items": items,
-                "more": "And %d more." % more if more > 0 else "",
-                "foot": "" if req else SOUNDS_FOOT}
+        out["more"] = "And %d more." % more if more > 0 else ""
+        more = len(maybe) - MAYBE_MAX
+        out["maybe_more"] = "And %d more." % more if more > 0 else ""
+        if not shown:
+            out["head"] = ""
+            out["maybe_head"] = MAYBE_HEAD if maybe else ""
+            out["none"] = "" if maybe else NONE_TEXT
+        if rel in self._m_unplayed and not shown and not maybe:
+            return None
+        if any(not it["rel"] for it in out["items"] + out["maybe"]) and not self._m_sound_names()[0]:
+            out["foot"] = SOUNDS_FOOT
+        return out
+
+    @rpc
+    def open_sound(self, rel):
+        """PAD-592: a clip sound's link - its row on the Audio tab."""
+        fn = getattr(self.window, "reveal_audio_slot", None)
+        return bool(fn and rel and fn(str(rel)))
 
     # -- the filter ------------------------------------------------------------------------
     @rpc

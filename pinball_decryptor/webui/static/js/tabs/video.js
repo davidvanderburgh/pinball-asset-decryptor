@@ -38,6 +38,7 @@ const T = {
   // PAD-453 (DragonRR)
   undoNone: "Nothing to undo yet: choosing or clearing a replacement, Replace from folder, a clip's conversion, length, colors or random clips, and the boxes over the list each make a step.",
   redoNone: "Nothing to redo: Redo does again what Undo just took back, until the next change.",
+  soundGo: "Show this sound on the Audio tab",
   qTitle: "Check the videos already on a card",
   qIntro: "Measures every clip on a built card image and lists the ones whose bitrate is low enough to look blocky — the same test a Write applies to a replacement, applied after the fact to what is actually on the card. This reads the card image only; nothing is written and nothing is extracted.",
 };
@@ -58,6 +59,34 @@ function pauseAll() {
     const v = players[side];
     if (v && !v.paused) v.pause();
   }
+}
+
+// PAD-592: the clip sounds' own player (one at a time; the panes keep theirs)
+let soundEl = null;
+function stopSound() {
+  if (soundEl) { soundEl.pause(); soundEl = null; }
+}
+
+// One of the sounds the game plays with a clip: ▷ plays its file here, its name shows it on the
+// Audio tab. A sound the extract has no file for is its words alone.
+function SoundItem({ it }) {
+  const [on, setOn] = useState(false);
+  useEffect(() => () => { if (on) stopSound(); }, [on]);
+  const play = () => {
+    if (on) { stopSound(); setOn(false); return; }
+    stopSound();
+    const a = new Audio(mediaUrl(it.path));
+    soundEl = a;
+    const off = () => { if (soundEl === a) soundEl = null; setOn(false); };
+    a.onended = off; a.onerror = off; a.onpause = off;
+    a.play().then(() => setOn(true), off);
+  };
+  return html`<li ...${tip(it.tip)}>
+    ${it.path ? html`<button type="button" class="vid-sound-play" aria-label=${on ? "Stop" : "Play this sound"}
+      onClick=${play}><${Icon} name=${on ? "stop" : "play"} /></button>` : null}
+    ${it.rel ? html`<a href="#" class="vid-sound-go" title=${T.soundGo}
+      onClick=${(e) => { e.preventDefault(); stopSound(); call("video.open_sound", it.rel); }}><b>${it.text}</b></a>`
+      : html`<b>${it.text}</b>`} <span class="muted">${it.how}</span></li>`;
 }
 
 const probe = typeof document !== "undefined" ? document.createElement("video") : null;
@@ -795,7 +824,7 @@ export default function VideoTab() {
     anchor.current = first || r[0] || null;
     if (first) loadRow(first);
   }, [s.select && s.select.seq]);
-  useEffect(() => () => { clearTimeout(selectJob.current); pauseAll(); }, []);
+  useEffect(() => () => { clearTimeout(selectJob.current); pauseAll(); stopSound(); }, []);
   // PAD-453: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere on the tab undo or redo a change to the
   // picks.  A text box keeps its own undo, the Colors bar its profile's, and a dialog or
   // another tab is left alone.
@@ -850,6 +879,7 @@ export default function VideoTab() {
   };
   // the row the panes' buttons act on: the highlighted one, as Tk's did
   const currentRel = firstSel || pv.rel || null;
+  useEffect(() => { stopSound(); }, [currentRel]);
   // PAD-440: the selected rows, in list order, side by side; the Colors bar opens beside them
   const openCompare = async (rels) => {
     clearTimeout(selectJob.current);
@@ -1167,11 +1197,17 @@ export default function VideoTab() {
             disabled=${running}>Use the same clip as ${pv.modes.back} again…<//>` : null}>${pv.modes.text}<//>
         </div>` : null}
         ${pv.sounds && pv.sounds.rel === currentRel ? html`<div class="vid-sounds">
-          <${Note} kind="info"><span>${pv.sounds.head}</span>
+          <${Note} kind="info"><div>
+            ${pv.sounds.head ? html`<span>${pv.sounds.head}</span>` : null}
             ${(pv.sounds.items || []).length ? html`<ul class="vid-sound-list">${pv.sounds.items.map((it) => html`
-              <li ...${tip(it.tip)}><b>${it.text}</b> <span class="muted">${it.how}</span></li>`)}</ul>` : null}
+              <${SoundItem} key=${it.rel || it.text} it=${it} />`)}</ul>` : null}
             ${pv.sounds.more ? html`<div class="small muted">${pv.sounds.more}</div>` : null}
-            ${pv.sounds.foot ? html`<div class="small muted">${pv.sounds.foot}</div>` : null}<//>
+            ${pv.sounds.maybe_head ? html`<span>${pv.sounds.maybe_head}</span>` : null}
+            ${(pv.sounds.maybe || []).length ? html`<ul class="vid-sound-list maybe">${pv.sounds.maybe.map((it) => html`
+              <${SoundItem} key=${it.rel || it.text} it=${it} />`)}</ul>` : null}
+            ${pv.sounds.maybe_more ? html`<div class="small muted">${pv.sounds.maybe_more}</div>` : null}
+            ${pv.sounds.none ? html`<span>${pv.sounds.none}</span>` : null}
+            ${pv.sounds.foot ? html`<div class="small muted">${pv.sounds.foot}</div>` : null}</div><//>
         </div>` : null}
         ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
         <div class="vid-panes">

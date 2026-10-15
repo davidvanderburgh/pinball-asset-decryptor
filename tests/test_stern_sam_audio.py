@@ -40,14 +40,28 @@ def _script(engine, voice, ptr, extra=b""):
             + bytes([play, voice]) + struct.pack("<I", ptr) + b"\x00")
 
 
-def make_image(engine="v18", n_sounds=20, trailer=True, kinds=None):
-    """``(bytes, [pcm per sample])`` of a synthetic SAM image."""
+def _song_script(engine, ptrs):
+    """One script that PLAYs every sample in *ptrs* in turn (a song stored
+    in pieces, PAD-587)."""
+    args, play = sam_sound.ENGINES[engine]
+    return (bytes([5, 1, 1]) + struct.pack("<I", 1)
+            + b"".join(bytes([play, 0]) + struct.pack("<I", p) for p in ptrs)
+            + b"\x00")
+
+
+def make_image(engine="v18", n_sounds=20, trailer=True, kinds=None,
+               songs=()):
+    """``(bytes, [pcm per sample])`` of a synthetic SAM image.  *songs*:
+    lists of sample indices, each one more sound whose script plays them
+    back to back."""
     kinds = kinds or [1, 2, 3]
     code = bytes((i * 7 + 3) & 0xFF for i in range(BASE))
     table_at = BASE + 0x48
-    scripts_at = table_at + 4 * n_sounds * 2          # 2 languages each
+    n_entries = n_sounds + len(songs)
+    scripts_at = table_at + 4 * n_entries * 2         # 2 languages each
+    song_room = [(7 + 6 * len(s) + 1 + 15) & ~15 for s in songs]
     # scripts first, so their size is known before the samples
-    samples_at = scripts_at + 64 * n_sounds
+    samples_at = scripts_at + 64 * n_sounds + sum(song_room)
     samples_at = (samples_at + 15) & ~15
     pcms, sample_offs, blobs = [], [], b""
     for i in range(n_sounds):
@@ -79,6 +93,11 @@ def make_image(engine="v18", n_sounds=20, trailer=True, kinds=None):
                     extra)
         script_offs.append(scripts_at + len(scripts))
         scripts += s + b"\xff" * (64 - len(s))
+    for song, room in zip(songs, song_room):
+        s = _song_script(engine, [sam_sound.bank_pointer(sample_offs[k])
+                                  for k in song])
+        script_offs.append(scripts_at + len(scripts))
+        scripts += s + b"\xff" * (room - len(s))
     table = b"".join(struct.pack("<I", sam_sound.bank_pointer(o)) * 2
                      for o in script_offs)
     body = bytearray(code + bytes(0x48) + table)
@@ -110,7 +129,10 @@ def _sums_ok(data):
 @pytest.fixture
 def sam_file(tmp_path, monkeypatch):
     """A synthetic image registered as Mustang romset 'mt_999h'."""
-    data, pcms = make_image()
+    return _register(tmp_path, monkeypatch, *make_image())
+
+
+def _register(tmp_path, monkeypatch, data, pcms):
     crc = zlib.crc32(data) & M32
     db = {k: dict(v) for k, v in SAM_GAME_DB.items()}
     db["mustang"]["romsets"] = dict(
@@ -439,6 +461,160 @@ def test_revert_restores_the_original(sam_file, tmp_path):
                                  lambda *a: None, None))
     assert res["ok"] and "Restored 1 original file(s)" in res["msg"]
     assert "1 could not be restored" in res["msg"]
+    assert open(wav, "rb").read() == before
+
+
+# ---------------------------------------------------------------------------
+# Songs stored in pieces (PAD-587)
+# ---------------------------------------------------------------------------
+# 40 plain sounds, all 24 kHz; sound 40 plays samples 5-34 back to back (the
+# whole song) and sound 41 plays 12-34 (a later start point of the same one).
+SONG = list(range(5, 35))
+
+
+@pytest.fixture
+def song_file(tmp_path, monkeypatch):
+    return _register(tmp_path, monkeypatch,
+                     *make_image(n_sounds=40, kinds=[1],
+                                 songs=[SONG, SONG[7:]]))
+
+
+def _song_wav(out_dir):
+    return os.path.join(out_dir, "music", "song01 - sound0080.wav")
+
+
+def test_songs_are_found_and_grouped():
+    data, _ = make_image(n_sounds=40, kinds=[1], songs=[SONG[7:], SONG])
+    bank = sam_sound.read_bank(data)
+    (song,) = sam_sound.songs(data, bank)
+    # 2 languages per sound: the whole song is table entry 82, not 80
+    assert song.pieces == tuple(SONG) and song.sound == 82
+    assert song.frames(bank) == sum(bank.samples[k].count for k in SONG)
+    # a title whose music is whole samples has none
+    plain, _ = make_image()
+    assert sam_sound.songs(plain, sam_sound.read_bank(plain)) == []
+
+
+def test_extract_stitches_the_song_whole(song_file, tmp_path):
+    path, data, _ = song_file
+    out_dir = str(tmp_path / "proj")
+    res = _run(SamExtractPipeline(path, out_dir, lambda *a, **k: None,
+                                  lambda i: None, lambda *a: None, None))
+    assert res["ok"], res
+    assert "1 whole song(s), stitched from their pieces, in music/" \
+        in res["msg"]
+    assert os.listdir(os.path.join(out_dir, "music")) == \
+        ["song01 - sound0080.wav"]
+    bank = sam_sound.read_bank(data)
+    rate, ch, a = _read_wav(_song_wav(out_dir))
+    want = np.concatenate([np.asarray(sam_sound.decode(data, bank.samples[k]))
+                           for k in SONG])
+    assert (rate, ch) == (24000, 1) and np.array_equal(a, want)
+    # every piece is still there on its own too
+    assert len(os.listdir(os.path.join(out_dir, "audio"))) == 40
+
+
+def test_song_stem_survives_music_id():
+    assert sam_audio.parse_song_stem(
+        "song01 - sound0080 - AC_DC - Thunderstruck") == 80
+    assert sam_audio.parse_song_stem("idx0005") is None
+
+
+def test_write_splits_an_edited_song_into_its_pieces(song_file, tmp_path):
+    path, data, _ = song_file
+    out_dir = _extract(path, tmp_path)
+    bank = sam_sound.read_bank(data)
+    frames = sum(bank.samples[k].count for k in SONG)
+    # stereo 44.1 kHz, the song's own length
+    _write_wav(_song_wav(out_dir),
+               _tone(int(frames * 44100 / 24000), 1000, 44100), 44100, ch=2)
+    out = str(tmp_path / "built.bin")
+    lines, log = _log()
+    res = _run(SamWritePipeline(path, out_dir, out, log, lambda i: None,
+                                lambda *a: None, None))
+    assert res["ok"], res
+    assert "Wrote 1 replaced sound(s)" in res["msg"]
+    built = open(out, "rb").read()
+    assert len(built) == len(data) and all(_sums_ok(built))
+    assert sam_sound.has_trailer(built)
+    # every piece changed, nothing outside them
+    for k, s in enumerate(bank.samples):
+        same = built[s.data_offset:s.data_offset + s.data_size] == \
+            data[s.data_offset:s.data_offset + s.data_size]
+        assert same == (k not in SONG), k
+    # played back to back, the pieces are the 1 kHz tone, continuous
+    got = np.concatenate([np.asarray(sam_sound.decode(built, bank.samples[k]),
+                                     float) for k in SONG])
+    spec = np.abs(np.fft.rfft(got))
+    assert abs(np.fft.rfftfreq(len(got), 1 / 24000)[int(np.argmax(spec))]
+               - 1000) < 5
+    assert any("30 piece(s)" in x for x in lines)
+
+
+def test_a_piece_edited_on_its_own_wins_over_the_song(song_file, tmp_path):
+    path, data, _ = song_file
+    out_dir = _extract(path, tmp_path)
+    bank = sam_sound.read_bank(data)
+    frames = sum(bank.samples[k].count for k in SONG)
+    _write_wav(_song_wav(out_dir), _tone(frames // 2, 1000, 24000), 24000)
+    s10 = bank.samples[10]
+    _write_wav(os.path.join(out_dir, "audio", "idx0010.wav"),
+               _tone(s10.count, 3000, 24000), 24000)
+    out = str(tmp_path / "built.bin")
+    lines, log = _log()
+    res = _run(SamWritePipeline(path, out_dir, out, log, lambda i: None,
+                                lambda *a: None, None))
+    assert res["ok"], res
+    assert "Wrote 2 replaced sound(s)" in res["msg"]
+    assert any("1 piece(s) of song01 - sound0080.wav were edited on their "
+               "own" in x for x in lines)
+    assert any("the rest is silence" in x for x in lines)
+    built = open(out, "rb").read()
+    got = np.asarray(sam_sound.decode(built, s10), float)
+    spec = np.abs(np.fft.rfft(got))
+    assert abs(np.fft.rfftfreq(len(got), 1 / 24000)[int(np.argmax(spec))]
+               - 3000) < 60
+    # the song's second half was padded with silence
+    last = np.asarray(sam_sound.decode(built, bank.samples[SONG[-1]]), float)
+    assert np.abs(last).max() < 200
+
+
+def test_a_short_song_is_matched_on_what_plays(song_file, tmp_path):
+    # half the song's length: the padding must not count as quiet audio
+    path, data, _ = song_file
+    out_dir = _extract(path, tmp_path)
+    bank = sam_sound.read_bank(data)
+    frames = sum(bank.samples[k].count for k in SONG)
+    _write_wav(_song_wav(out_dir), _tone(frames // 2, 1000, 24000, amp=2000),
+               24000)
+    out = str(tmp_path / "built.bin")
+    res = _run(SamWritePipeline(path, out_dir, out, lambda *a, **k: None,
+                                lambda i: None, lambda *a: None, None))
+    assert res["ok"], res
+    built = open(out, "rb").read()
+
+    def song(img):
+        return np.concatenate([np.asarray(sam_sound.decode(
+            img, bank.samples[k]), float) for k in SONG])
+
+    got, orig = song(built), song(data)
+    rms = lambda a: np.sqrt(np.mean(a ** 2))          # noqa: E731
+    assert 0.8 < rms(got[:frames // 2]) / rms(orig) < 1.2
+    assert np.abs(got[frames // 2 + 50:]).max() < 200
+
+
+def test_revert_restores_a_song(song_file, tmp_path):
+    path, _data, _ = song_file
+    out_dir = _extract(path, tmp_path)
+    wav = _song_wav(out_dir)
+    before = open(wav, "rb").read()
+    _write_wav(wav, [0] * 100, 8000)
+    res = _run(SamRevertPipeline(path, out_dir,
+                                 ["music/song01 - sound0080.wav",
+                                  "music/song02 - sound0999.wav"],
+                                 lambda *a, **k: None, lambda i: None,
+                                 lambda *a: None, None))
+    assert res["ok"] and "Restored 1 original file(s)" in res["msg"]
     assert open(wav, "rb").read() == before
 
 

@@ -14,6 +14,11 @@ Extract / Write / Revert contract the Spike 1 engine has, over it:
   does, re-encodes it into the slot and fixes the image's checksums.  The
   output is the same size as the input, so it updates a machine by USB
   like Stern's own file.
+* Songs stored in pieces (PAD-587: AC/DC, Metallica - a few hundred
+  bar-length samples one script plays back to back) are also stitched
+  whole into ``music/songNN - soundNNNN.wav``.  An edited song is split
+  back across its pieces on Write, loudness-matched as one; a piece
+  edited on its own in ``audio/`` wins over the song for that piece.
 
 The input is the ``.bin`` (The Walking Dead 1.05: ``.ebi``) as Stern
 ships it, or any zip holding one (``pinmame_classic.sam.identify``).
@@ -54,6 +59,10 @@ def _part(name):
 
 
 _IDX_RE = re.compile(r"idx(\d{4,5})(?![0-9])", re.IGNORECASE)
+#: the whole songs' folder, and the sound number in a song's file name
+#: (Music ID appends " - Artist - Title" and keeps it)
+SONG_DIR = "music"
+_SONG_RE = re.compile(r"^song\d+ - sound(\d{4,5})(?![0-9])", re.IGNORECASE)
 
 
 def wav_name(idx, sample, duration_names=False):
@@ -71,6 +80,22 @@ def parse_wav_stem(stem):
     transcribe / Music ID keep the ``idxNNNN`` token), or None."""
     m = _IDX_RE.search(stem)
     return int(m.group(1)) if m else None
+
+
+def song_name(n, song):
+    return "song%02d - sound%04d.wav" % (n, song.sound)
+
+
+def parse_song_stem(stem):
+    """The sound number in a whole-song WAV's stem, or None."""
+    m = _SONG_RE.match(stem)
+    return int(m.group(1)) if m else None
+
+
+def _song_pcm(data, bank, song):
+    import numpy as np
+    return np.concatenate([np.asarray(sam_sound.decode(data, bank.samples[k]),
+                                      dtype=np.int16) for k in song.pieces])
 
 
 def read_image(path):
@@ -98,21 +123,46 @@ def _bank(data):
         raise SamAudioError("this file's sound table can't be read (%s)" % e)
 
 
-def _write_wav(path, data, sample):
-    pcm = sam_sound.decode(data, sample)
+def _write_pcm(path, pcm, rate):
     tmp = path + ".part"
     with wave.open(_lp(tmp), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
-        w.setframerate(sample.rate)
+        w.setframerate(rate)
         w.writeframes(pcm.tobytes())
     os.replace(_lp(tmp), _lp(path))
 
 
+def _write_wav(path, data, sample):
+    _write_pcm(path, sam_sound.decode(data, sample), sample.rate)
+
+
+def _write_songs(data, bank, output_dir, log, check):
+    """Stitch every song stored in pieces into ``music/``; returns them."""
+    found = sam_sound.songs(data, bank)
+    if not found:
+        return []
+    song_dir = os.path.join(output_dir, SONG_DIR)
+    os.makedirs(song_dir, exist_ok=True)
+    for n, song in enumerate(found, 1):
+        if check():
+            raise SamAudioCancelled("cancelled")
+        _write_pcm(os.path.join(song_dir, song_name(n, song)),
+                   _song_pcm(data, bank, song),
+                   bank.samples[song.pieces[0]].rate)
+    log("Music: %d song(s) stored as short pieces, %.1f minutes - each "
+        "stitched whole into %s/ (an edited song is split back into its "
+        "pieces on Write)" % (len(found),
+                              sum(s.seconds(bank) for s in found) / 60.0,
+                              SONG_DIR))
+    return found
+
+
 def extract_all(path, output_dir, log=None, progress=None, cancel=None,
                 duration_names=False):
-    """Decode every sample to ``output_dir/audio``.  Returns
-    ``{"samples", "sounds", "seconds", "engine"}``."""
+    """Decode every sample to ``output_dir/audio``, and every song stored
+    in pieces whole to ``output_dir/music``.  Returns ``{"samples",
+    "sounds", "seconds", "engine", "songs"}``."""
     log = log or (lambda *a, **k: None)
     check = cancel or (lambda: False)
     data, _match = read_image(path)
@@ -131,8 +181,9 @@ def extract_all(path, output_dir, log=None, progress=None, cancel=None,
         if progress and (i % 16 == 0 or i == n - 1):
             progress(i + 1, n, "Decoding audio (%d/%d)" % (i + 1, n))
     log("Decoded %d WAVs" % n)
+    found = _write_songs(data, bank, output_dir, log, check)
     return {"samples": n, "sounds": bank.entries, "seconds": bank.seconds,
-            "engine": bank.engine}
+            "engine": bank.engine, "songs": len(found)}
 
 
 def _select_changed_wavs(assets_dir, log):
@@ -160,18 +211,124 @@ def _select_changed_wavs(assets_dir, log):
     return out
 
 
-def _slot_gains(assets_dir):
+def _select_changed_songs(assets_dir, log):
+    """``{sound number: path}`` for every whole-song WAV changed vs
+    baseline."""
+    baseline = checksums.read_checksums(assets_dir)
     out = {}
+    song_dir = os.path.join(assets_dir, SONG_DIR)
+    if not os.path.isdir(song_dir):
+        return out
+    for fn in sorted(os.listdir(song_dir)):
+        if not fn.lower().endswith(".wav") or ".stage." in fn:
+            continue
+        sound = parse_song_stem(os.path.splitext(fn)[0])
+        if sound is None:
+            continue
+        p = os.path.join(song_dir, fn)
+        base = baseline.get(SONG_DIR + "/" + fn)
+        if base is None or checksums.md5_file(p) != base:
+            if sound in out:
+                log("  note: %s and %s are the same song; using %s"
+                    % (os.path.basename(out[sound]), fn,
+                       os.path.basename(out[sound])))
+            else:
+                out[sound] = p
+    return out
+
+
+def _level_gains(assets_dir):
+    """``({sample index: dB}, {song sound number: dB})`` from the staged
+    per-file level offsets."""
+    pieces, songs = {}, {}
     for rel, db in (staged_changes.load(assets_dir).get("audio_levels")
                     or {}).items():
-        idx = parse_wav_stem(os.path.splitext(os.path.basename(rel))[0])
-        if idx is None:
+        stem = os.path.splitext(os.path.basename(rel))[0]
+        top = rel.replace("\\", "/").split("/", 1)[0]
+        key = parse_song_stem(stem) if top == SONG_DIR \
+            else parse_wav_stem(stem)
+        if key is None:
             continue
         try:
-            out[idx] = float(db)
+            (songs if top == SONG_DIR else pieces)[key] = float(db)
         except (TypeError, ValueError):
             pass
-    return out
+    return pieces, songs
+
+
+def _fit_and_level(rep, orig, frames, db, match_on, name, log):
+    """*rep* cut to *frames* (with an edge fade), level-matched to *orig*,
+    then padded with silence to *frames*.  The match measures only what
+    plays: padding measured with it would read a short replacement as
+    quiet and boost it (half the length = +3 dB too loud)."""
+    if len(rep) > frames:
+        rep = _s1._fit_frames(rep, frames)
+    if match_on and not orig.any():
+        log("  note: %s replaces a silent slot - the original gives no level "
+            "reference, keeping the replacement's own level" % name)
+    db = max(min(db, _s1._MATCH_GAIN_DB_MAX), -_s1._MATCH_GAIN_DB_MAX)
+    rep = _s1._match_level(rep, orig, db, match=match_on)
+    return _s1._fit_frames(rep, frames)
+
+
+def _split_songs(data, bank, edits, pieces_edited, gains, build_db, match_on,
+                 log, check):
+    """Cut each edited whole song back into its pieces.  Returns
+    ``({sample index: (pcm float [n, 1], song file name)}, n_songs,
+    skipped)``: the song is fit to its own length and level-matched to the
+    original song as ONE clip, so its pieces keep their balance."""
+    import numpy as np
+
+    by_sound = {s.sound: s for s in sam_sound.songs(data, bank)}
+    out, skipped, n_songs = {}, [], 0
+    for sound, wav_path in sorted(edits.items()):
+        if check():
+            raise SamAudioCancelled("cancelled")
+        name = os.path.basename(wav_path)
+        song = by_sound.get(sound)
+        if song is None:
+            skipped.append(name)
+            log("  ! %s: no song in pieces with that sound number in this "
+                "file - skipped" % name)
+            continue
+        rate = bank.samples[song.pieces[0]].rate
+        frames = song.frames(bank)
+        try:
+            rep, rep_rate = _s1._load_wav(wav_path)
+            rep = _s1._mix_channels(_s1._resample(rep, rep_rate, rate), 1)
+            if len(rep) != frames:
+                log("  note: %s is %.1f s, the song's slots hold %.1f s - "
+                    "%s" % (name, len(rep) / rate, frames / rate,
+                            "cut to fit" if len(rep) > frames
+                            else "the rest is silence"))
+            orig = np.asarray(_song_pcm(data, bank, song),
+                              dtype=np.float32).reshape(-1, 1)
+            rep = _fit_and_level(rep, orig, frames,
+                                 build_db + gains.get(sound, 0.0),
+                                 match_on, name, log)
+        except Exception as e:                          # noqa: BLE001
+            skipped.append(name)
+            log("  ! %s could not be encoded (%s) - skipped, the song keeps "
+                "its original pieces" % (name, e), "warning")
+            continue
+        at, own = 0, 0
+        for k in song.pieces:
+            cnt = bank.samples[k].count
+            part = rep[at:at + cnt]
+            at += cnt
+            if k in pieces_edited:
+                own += 1
+                continue
+            # a piece the song plays twice keeps its first place's audio
+            out.setdefault(k, (part, name))
+        if own:
+            log("  note: %d piece(s) of %s were edited on their own in "
+                "audio/ - those keep that edit" % (own, name))
+        n_songs += 1
+        log("  %s -> %d piece(s), idx%04d-idx%04d (%.1f s)"
+            % (name, len(song.pieces), min(song.pieces), max(song.pieces),
+               frames / rate))
+    return out, n_songs, skipped
 
 
 def write_image(original_path, assets_dir, output_path, log=None,
@@ -187,8 +344,11 @@ def write_image(original_path, assets_dir, output_path, log=None,
     data, _match = read_image(original_path)
     bank = _bank(data)
     changed = _select_changed_wavs(assets_dir, log)
-    gains = _slot_gains(assets_dir)
+    song_edits = _select_changed_songs(assets_dir, log)
+    gains, song_gains = _level_gains(assets_dir)
     log("Changed sounds: %d" % len(changed))
+    if song_edits:
+        log("Changed whole songs: %d" % len(song_edits))
     build_db = _s1._build_gain_db()
     match_on = _s1._match_loudness_enabled()
     if build_db:
@@ -202,43 +362,52 @@ def write_image(original_path, assets_dir, output_path, log=None,
     trailer = sam_sound.has_trailer(data)
     changes = []
     skipped = []
-    items = sorted(changed.items())
-    for n, (idx, wav_path) in enumerate(items):
+    from_songs, n_songs = {}, 0
+    if song_edits:
+        from_songs, n_songs, skipped = _split_songs(
+            data, bank, song_edits, set(changed), song_gains, build_db,
+            match_on, log, check)
+    items = sorted(set(changed) | set(from_songs))
+    for n, idx in enumerate(items):
         if check():
             raise SamAudioCancelled("cancelled")
-        name = os.path.basename(wav_path)
-        if idx >= len(bank.samples):
-            skipped.append(name)
-            log("  ! %s: no such sound in this file - skipped" % name)
-            continue
-        s = bank.samples[idx]
-        try:
-            rep, rep_rate = _s1._load_wav(wav_path)
-            rep = _s1._mix_channels(_s1._resample(rep, rep_rate, s.rate), 1)
-            rep = _s1._fit_frames(rep, s.count)
-            orig = np.asarray(sam_sound.decode(data, s),
-                              dtype=np.float32).reshape(-1, 1)
-            if match_on and not orig.any():
-                log("  note: %s replaces a silent slot - the original "
-                    "gives no level reference, keeping the replacement's "
-                    "own level" % name)
-            db = max(min(build_db + gains.get(idx, 0.0),
-                         _s1._MATCH_GAIN_DB_MAX), -_s1._MATCH_GAIN_DB_MAX)
-            rep = _s1._match_level(rep, orig, db, match=match_on)
-        except Exception as e:
-            skipped.append(name)
-            log("  ! %s could not be encoded (%s) - skipped, the slot keeps "
-                "its original sound" % (name, e), "warning")
-            continue
+        if idx in from_songs:
+            rep, name = from_songs[idx]
+            s = bank.samples[idx]
+        else:
+            wav_path = changed[idx]
+            name = os.path.basename(wav_path)
+            if idx >= len(bank.samples):
+                skipped.append(name)
+                log("  ! %s: no such sound in this file - skipped" % name)
+                continue
+            s = bank.samples[idx]
+            try:
+                rep, rep_rate = _s1._load_wav(wav_path)
+                rep = _s1._mix_channels(_s1._resample(rep, rep_rate, s.rate),
+                                        1)
+                orig = np.asarray(sam_sound.decode(data, s),
+                                  dtype=np.float32).reshape(-1, 1)
+                rep = _fit_and_level(rep, orig, s.count,
+                                     build_db + gains.get(idx, 0.0),
+                                     match_on, name, log)
+            except Exception as e:
+                skipped.append(name)
+                log("  ! %s could not be encoded (%s) - skipped, the slot "
+                    "keeps its original sound" % (name, e), "warning")
+                continue
         pcm = np.rint(rep[:, 0]).astype(np.int16).tolist()
         delta = sam_sound.replace(image, s, pcm)
         changes.append((s.data_offset, s.data_offset + s.data_size, delta))
-        log("  idx%04d <- %s (%.2f s, %d Hz)" % (idx, name, s.seconds,
-                                                 s.rate))
+        if idx not in from_songs:
+            log("  idx%04d <- %s (%.2f s, %d Hz)" % (idx, name, s.seconds,
+                                                     s.rate))
         if progress:
             progress(n + 1, len(items), "Encoding audio")
 
-    n_audio = len(changes)
+    # a song counts once, not as the hundreds of pieces it went into
+    n_audio = len(changes) - sum(1 for k in items if k in from_songs) \
+        + n_songs
     written = {}
     for name in _ART_PARTS:
         part = _part(name)
@@ -279,7 +448,8 @@ def write_image(original_path, assets_dir, output_path, log=None,
         except OSError:
             pass
         raise
-    return {"audio": n_audio, "images": written.get("sam_images", 0),
+    return {"audio": n_audio, "songs": n_songs,
+            "images": written.get("sam_images", 0),
             "animations": written.get("sam_anim_assets", 0),
             "skipped": skipped}
 
@@ -287,7 +457,7 @@ def write_image(original_path, assets_dir, output_path, log=None,
 def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
                   cancel=None):
     """Re-decode the original WAVs for *rels* (``audio/idxNNNN.wav``, renamed
-    forms too) -- and the original pictures (``images/...``) and animation
+    forms too, and whole songs under ``music/``) -- and the original pictures (``images/...``) and animation
     frames (``animations/...``) -- from the source file.  Returns ``(reverted, failed)``."""
     log = log or (lambda *a, **k: None)
     check = cancel or (lambda: False)
@@ -312,10 +482,26 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
     if not sounds:
         return reverted, failed
     bank = _bank(data)
+    by_sound = None
     for n, rel in enumerate(sounds):
         if check():
             break
-        idx = parse_wav_stem(os.path.splitext(os.path.basename(rel))[0])
+        stem = os.path.splitext(os.path.basename(rel))[0]
+        if rel.replace("\\", "/").split("/", 1)[0] == SONG_DIR:
+            if by_sound is None:
+                by_sound = {s.sound: s for s in sam_sound.songs(data, bank)}
+            song = by_sound.get(parse_song_stem(stem))
+            if song is None:
+                failed.append(rel)
+                log("  ! %s: no matching song in the source file" % rel)
+                continue
+            _write_pcm(os.path.join(assets_dir, rel.replace("/", os.sep)),
+                       _song_pcm(data, bank, song),
+                       bank.samples[song.pieces[0]].rate)
+            reverted.append(rel)
+            log("  restored %s" % rel)
+            continue
+        idx = parse_wav_stem(stem)
         if idx is None or idx >= len(bank.samples):
             failed.append(rel)
             log("  ! %s: no matching sound in the source file" % rel)

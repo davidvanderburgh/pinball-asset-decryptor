@@ -243,6 +243,69 @@ def read_bank(data):
                      {k: sorted(v) for k, v in played.items()})
 
 
+# ---------------------------------------------------------------------------
+# Songs stored in pieces (PAD-587)
+# ---------------------------------------------------------------------------
+# The band titles (AC/DC, Metallica) don't store a song as one sample: it is
+# a run of a few hundred bar-length samples (1-2.5 s) that ONE script PLAYs
+# back to back, so the game can change section on a bar line.  A song has
+# several such scripts -- the whole song, a later start point, one with an
+# intro lead-in -- that share pieces; the longest stands for the song.
+# Other titles' music is whole samples, and their longest script plays a
+# handful, so the threshold finds nothing there.
+
+#: a script that plays at least this many samples is a song in pieces
+SONG_MIN_PIECES = 20
+
+
+@dataclass(frozen=True)
+class Song:
+    sound: int           # sound-table index of the script that plays it
+    pieces: tuple        # indices into bank.samples, in play order
+
+    def frames(self, bank):
+        return sum(bank.samples[k].count for k in self.pieces)
+
+    def seconds(self, bank):
+        return sum(bank.samples[k].seconds for k in self.pieces)
+
+
+def songs(data, bank, min_pieces=SONG_MIN_PIECES):
+    """The :class:`Song` s of *bank* (in file order of their pieces): every
+    group of scripts that PLAY *min_pieces* or more samples and share any of
+    them, represented by the group's longest script.  Empty on a title whose
+    music is whole samples."""
+    idx_of = {s.offset: i for i, s in enumerate(bank.samples)}
+    ptrs = struct.unpack_from(f"<{bank.entries}I", data, bank.table)
+    seqs = {}                                    # record -> (sound, pieces)
+    for sound, p in enumerate(ptrs):
+        if not p:
+            continue
+        rec = file_offset(p)
+        if rec in seqs or rec >= len(data) or data[rec] != SCRIPT_MAGIC:
+            continue
+        played = _walk(data, rec, bank.engine) or []
+        pieces = tuple(idx_of[o] for o in map(file_offset, played)
+                       if o in idx_of)
+        seqs[rec] = (sound, pieces)
+    groups = []                                  # [set of pieces, best]
+    for sound, pieces in seqs.values():
+        if len(pieces) < min_pieces:
+            continue
+        if len({bank.samples[k].rate for k in pieces}) != 1:
+            continue
+        mine = set(pieces)
+        best = (sound, pieces)
+        for g in [g for g in groups if g[0] & mine]:
+            groups.remove(g)
+            mine |= g[0]
+            if (len(g[1][1]), -g[1][0]) > (len(best[1]), -best[0]):
+                best = g[1]
+        groups.append([mine, best])
+    groups.sort(key=lambda g: min(g[0]))
+    return [Song(sound, pieces) for _set, (sound, pieces) in groups]
+
+
 def decode_adpcm(raw, count):
     """``count`` 16-bit samples from IMA ADPCM *raw* -- bit-exact with the
     game's own decoder."""

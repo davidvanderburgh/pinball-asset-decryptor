@@ -951,6 +951,9 @@ def _sam_extracted(result, output_dir):
     if result.get("frames"):
         line += ("\nAnd %d DMD animation frame(s), in animations/."
                  % result["frames"])
+    if result.get("songs"):
+        line += ("\nAnd %d whole song(s), stitched from their pieces, in "
+                 "music/." % result["songs"])
     return line
 
 
@@ -1089,6 +1092,9 @@ class SamExtractPlusCapturePipeline(BasePipeline):
         self._check_cancel()
         head = ("Sounds: %d WAV(s), %.1f minutes of audio, in audio/.\n"
                 % (result["samples"], result["seconds"] / 60.0))
+        if result.get("songs"):
+            head += ("Music: %d whole song(s), stitched from their pieces, "
+                     "in music/.\n" % result["songs"])
         pics = result.get("pictures")
         if pics:
             head += ("Pictures: %d, and %d font glyph(s) in %d font(s), in "

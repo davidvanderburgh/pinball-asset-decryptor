@@ -317,6 +317,22 @@ int pm_shield_keep(int where)
     if (where == PM_SHIELD_TOWARD || where == PM_SHIELD_AWAY) pm_shield(where);
     return 1;
 }
+/* PAD-589: the building (Godzilla Premium/LE) - a BUILDING line for each floor asked for, there at once (the stepper's
+ * travel and the runtime's limits are not modelled here); HARNESS_BUILDING=none is a Pro (no building) */
+static int building_at;
+static int building_none(void)
+{
+    const char *e = getenv("HARNESS_BUILDING");
+    return e && !strcmp(e, "none");
+}
+int pm_building(int floor)
+{
+    if (building_none() || floor < 0 || floor > 3) return 0;
+    printf("%6lu BUILDING floor %d\n", now_ms, floor);
+    building_at = floor;
+    return 1;
+}
+int pm_building_floor(void) { return building_none() ? -1 : building_at; }
 /* PAD-414: the shaker - a SHAKE line for each one asked for (the runtime's limits are not modelled here, but one at a
  * time is: a shake asked for while one runs is refused); HARNESS_SHAKER=none: a game without one */
 static unsigned long shake_until;

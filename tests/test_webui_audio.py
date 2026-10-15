@@ -85,6 +85,7 @@ def test_state_after_manufacturer(tmp_path, mfr, era):
         assert s["col"] == want_col
         assert s["level_cap"] == bool(caps.audio_level_offset)
         assert s["adv_cap"] == (mfr == "stern")
+        assert s["adv_full"] == (era == "spike2")
         assert s["dups_cap"] == (mfr == "cgc")
         forced = mfr in ("jjp", "stern")
         assert s["trim_visible"] == (not forced)
@@ -398,6 +399,23 @@ def test_stern_advanced_dialog(tmp_path):
         assert saved["experiment_idxs"] == "231,258"
         assert w.state("audio")["adv_marker"] is True
         assert w.window._audio_grow_active() is True
+
+
+@pytest.mark.parametrize("era", ["sam", "spike1"])
+def test_advanced_dialog_is_loudness_only_off_spike2(tmp_path, era):
+    """SAM and Spike 1 builds read only the loudness row (PAD-588): the
+    Spike 2 encoder levers neither show nor mark the button."""
+    with web_app(tmp_path, mfr="stern", era=era) as w:
+        assert w.state("audio")["adv_full"] is False
+        data = w.call("audio.advanced_get")
+        assert data["full"] is False
+        assert [c["label"] for c in data["loudness"]][1] == \
+            "Keep each replacement's own level"
+        # a Spike 2-only lever left on from a Spike 2 card: no marker here
+        w.call("audio.advanced_set", dict(data["cfg"], audio_grow=True))
+        assert w.state("audio")["adv_marker"] is False
+        w.call("audio.advanced_set", dict(data["cfg"], loudness_db=3))
+        assert w.state("audio")["adv_marker"] is True
 
 
 def test_stern_keep_whole_menu(tmp_path):

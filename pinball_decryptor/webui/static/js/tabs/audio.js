@@ -362,20 +362,26 @@ function AdvancedModal({ data, onClose }) {
   const plat = (state.write || {}).platform;
   const mac = plat ? plat === "darwin" : /Mac/.test(navigator.platform || "");
   const ok = () => { onClose(); call("audio.advanced_set", cfg); };
-  const defaults = () => setCfg((c) => ({ ...c, head_mode: "encode", leadout: "silence", previews: false,
-    experiment_idxs: "", slot_seed: false, slot_seed_db: 65, loudness: "match", loudness_db: 0 }));
+  // SAM and Spike 1 builds read only the loudness row (PAD-588): the rest
+  // are Spike 2 encoder levers, left as they are when restoring from here
+  const full = data.full !== false;
+  const defaults = () => setCfg((c) => ({ ...c, loudness: "match", loudness_db: 0,
+    ...(full ? { head_mode: "encode", leadout: "silence", previews: false,
+      experiment_idxs: "", slot_seed: false, slot_seed_db: 65 } : {}) }));
   const num = (k, lo, hi, step) => html`<span class="field sm aud-num"><input type="number" min=${lo} max=${hi} step=${step}
     value=${cfg[k]} onInput=${(e) => put(k)(e.target.value)} /></span>`;
   return html`<${Modal} title="Advanced Audio Options" icon="gear" wide onClose=${onClose}
     footer=${html`<${Button} onClick=${defaults}>Restore defaults<//><span class="grow"></span>
       <${Button} onClick=${onClose}>Cancel<//><${Button} kind="primary" onClick=${ok}>OK<//>`}>
     <div class="stack aud-adv" style="gap:10px" onKeyDown=${(e) => { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); ok(); } }}>
-      <p class="aud-p">How Stern Spike 2 audio replacements are encoded. The loudness setting below is an everyday one; the rest are experiment levers. Defaults match the standard behavior; change one thing at a time when chasing a click on the real machine.</p>
-      <hr />
+      ${full ? html`<p class="aud-p">How Stern Spike 2 audio replacements are encoded. The loudness setting below is an everyday one; the rest are experiment levers. Defaults match the standard behavior; change one thing at a time when chasing a click on the real machine.</p>
+      <hr />` : null}
       <div class="row wrap"><span class="lbl nw">Replacement loudness:</span>
         <${Select} value=${cfg.loudness} options=${data.loudness} onChange=${put("loudness")} width=${340} />
         <span class="lbl">then</span>${num("loudness_db", -12, 12, 1)}<span class="lbl">dB</span></div>
-      <p class="aud-expl">This row is the setting for the WHOLE build: it moves every replacement together. For one clip on its own, use the "Loudness for this clip" box beside the Replacement preview on the Audio tab (its dB stacks on top of this one).
+      ${full ? null : html`<p class="aud-expl">This row is the setting for the WHOLE build: it moves every replacement together. For one clip on its own, use the "Loudness for this clip" box beside the Replacement preview (its dB stacks on top of this one).
+By default every replacement is gained to the same loudness as the sound it replaces, so it sits with its neighbours instead of jumping out; the level you mixed your own file at does not change the build. Use the dB box to sit deliberately above or below stock. "Keep each replacement's own level" turns the match off: your file plays at the level you mixed it, plus the dB box. Boosts are soft-limited, never hard-clipped.</p>`}
+      ${full ? html`<p class="aud-expl">This row is the setting for the WHOLE build: it moves every replacement together. For one clip on its own, use the "Loudness for this clip" box beside the Replacement preview on the Audio tab (its dB stacks on top of this one).
 By default every replacement is gained to the same loudness as the sound it replaces, so it sits with its neighbours instead of jumping out. That match ignores the level you mixed your own file at: exporting the same track louder and rebuilding produces exactly the same card. Use the dB box to sit deliberately above or below stock — handy for music, which Stern mixes as a bed under the callouts. "Normalize to full scale" ignores the stock level instead and pushes each replacement as loud as the codec will carry. Boosts are soft-limited, never hard-clipped. The build log records whichever setting built the card.</p>
       <hr />
       <div class="kv aud-kv">
@@ -397,7 +403,7 @@ By default every replacement is gained to the same loudness as the sound it repl
       <p class="aud-expl">What it does. A replacement that runs longer than the sound it replaces is trimmed to fit, because the card's sound bank records where every sound starts and how long it is, and making one longer in place would strand every sound after it. Ticking this appends instead: your audio goes into new space at the end of the bank, and a copy of that sound's record is added pointing at it. Nothing that already exists moves, so every other sound on the card is untouched, and the game's play tables are re-pointed at the copy so it is the one that plays. The file gets bigger, so this needs the Linux filesystem driver, the same as full-size video replacement, and it is skipped for a direct-SD write. Why it is opt-in. This has been confirmed on a real machine (longer cues play, do not loop, and cut off correctly), so it is safe to use; it is left as a choice because it needs an image build. There are two limits. The game can only open a sound bank up to about 2 GB, and every lengthened sound is added on top of the original bank at its whole length, not just the extra (on Godzilla 1.16 that is room for about 45 minutes of lengthened stereo sound). Anything over that is trimmed and named in the log. The lengthened sounds also need room on the card's games partition, which they share with full-size replacement videos, and a stock 8 GB card can have only a few hundred MB free. When that room runs short, longer sounds are trimmed to fit it and named in the log. ${mac ? "A build for a bigger SD card, which this app can make on Windows and Linux, gives" : "SD card size on the Write tab gives"} the games partition more room, but it does not raise the 2 GB limit. Leaving this off trims longer clips exactly as before.</p>
       <hr />
       <${Check} wrap checked=${cfg.previews} onChange=${put("previews")} label="On Build, export machine-render WAVs of every changed sound (hear exactly what the card will play)" />
-      <p class="aud-expl">Previews land in a ${"<build name>"}_machine_previews folder next to the built image. Note: they show what our decoder renders — an artifact the real machine adds on its own cannot appear in a preview.</p>
+      <p class="aud-expl">Previews land in a ${"<build name>"}_machine_previews folder next to the built image. Note: they show what our decoder renders — an artifact the real machine adds on its own cannot appear in a preview.</p>` : null}
     </div>
   <//>`;
 }
@@ -650,7 +656,7 @@ export default function AudioTab() {
       <${Button} icon="search" disabled=${s.running} title=${T.originals} onClick=${() => call("audio.originals_open")}>Find originals…<//>
       ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
       <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
-        title=${"More: Export CSV, Clear replacements…, Save / load settings" + (s.modes_share ? ", Save / load music modes" : "") + (s.adv_cap ? ", Profile vs stock" : "")}
+        title=${"More: Export CSV, Clear replacements…, Save / load settings" + (s.modes_share ? ", Save / load music modes" : "") + (s.adv_full ? ", Profile vs stock" : "")}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("audio.export_csv") },
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || s.running,
@@ -668,8 +674,8 @@ export default function AudioTab() {
           s.modes_share ? { label: "Load music modes from a file…", icon: "upload", disabled: s.running,
             title: "Give this project's sounds the music modes in a file saved here or on another PC. A sound this card names otherwise is found by what it is.",
             onClick: () => call("audio.modes_load") } : null,
-          s.adv_cap ? { sep: true } : null,
-          s.adv_cap ? { label: s.profile_busy ? "Profiling…" : "Profile vs stock", icon: "wave", title: T.profile,
+          s.adv_full ? { sep: true } : null,
+          s.adv_full ? { label: s.profile_busy ? "Profiling…" : "Profile vs stock", icon: "wave", title: T.profile,
             disabled: s.profile_busy, onClick: () => call("audio.profile") } : null,
         ], { align: "right" })} />
     <//>

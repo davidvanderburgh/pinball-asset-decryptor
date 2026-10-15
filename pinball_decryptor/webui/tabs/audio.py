@@ -81,6 +81,13 @@ LOUDNESS_CHOICES = (
     ("match", "Match the sound being replaced (default)"),
     ("full", "Normalize each replacement to full scale"),
 )
+#: the only Advanced settings a SAM or Spike 1 build reads (PAD-588); their
+#: "full" turns the match off and keeps the replacement's own level
+ADV_LOUDNESS_KEYS = ("loudness", "loudness_db")
+LOUDNESS_CHOICES_OWN = (
+    ("match", "Match the sound being replaced (default)"),
+    ("full", "Keep each replacement's own level"),
+)
 HEAD_CHOICES = (
     ("encode", "Re-encode from the first sample (default)"),
     ("stock", "Keep the stock head block (experimental, first 4.5 ms)"),
@@ -318,11 +325,17 @@ class AudioTab(FindOriginalsMixin, TabService):
             col = "lvl"
         else:
             col = None
+        # Spike 2's encoder reads every Advanced lever; SAM and Spike 1 only
+        # the loudness row (PAD-588), so they get that row alone
+        self._adv_full = (mfr.key == "stern"
+                          and getattr(mfr, "current_era", "spike2")
+                          == "spike2")
         self.set(col=col,
                  level_cap=bool(getattr(caps, "audio_level_offset", False)),
                  dups_cap=getattr(mfr, "find_duplicate_sounds", None)
                  is not None,
-                 adv_cap=(mfr.key == "stern"), sel=[],
+                 adv_cap=(mfr.key == "stern"), adv_full=self._adv_full,
+                 sel=[],
                  pex=bool(getattr(caps, "partition_explorer", False)),
                  profile_busy=False)
         self._audio_profile_btn._state = "normal"
@@ -1051,10 +1064,12 @@ class AudioTab(FindOriginalsMixin, TabService):
         return forces
 
     def _refresh_adv_marker(self):
-        d = dict(ADV_DEFAULTS)
+        keys = ADV_DEFAULTS if getattr(self, "_adv_full", True) \
+            else ADV_LOUDNESS_KEYS
+        d = {k: ADV_DEFAULTS[k] for k in keys}
         d.update({k: v for k, v in self._advanced.items()
-                  if k in ADV_DEFAULTS and v is not None})
-        self.set(adv_marker=d != ADV_DEFAULTS)
+                  if k in d and v is not None})
+        self.set(adv_marker=d != {k: ADV_DEFAULTS[k] for k in keys})
 
     # ------------------------------------------------------------------
     # the list
@@ -3278,9 +3293,11 @@ class AudioTab(FindOriginalsMixin, TabService):
         cfg["loudness_db"] = cfg.get("loudness_db") or 0
         cfg["slot_seed_db"] = cfg.get("slot_seed_db") or 65
         cfg["experiment_idxs"] = str(cfg.get("experiment_idxs") or "")
-        return {"cfg": cfg, "defaults": dict(ADV_DEFAULTS),
+        full = getattr(self, "_adv_full", True)
+        return {"cfg": cfg, "defaults": dict(ADV_DEFAULTS), "full": full,
                 "loudness": [{"value": k, "label": v}
-                             for k, v in LOUDNESS_CHOICES],
+                             for k, v in (LOUDNESS_CHOICES if full
+                                          else LOUDNESS_CHOICES_OWN)],
                 "head": [{"value": k, "label": v} for k, v in HEAD_CHOICES],
                 "leadout": [{"value": k, "label": v}
                             for k, v in LEADOUT_CHOICES]}

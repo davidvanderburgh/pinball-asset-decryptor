@@ -632,8 +632,10 @@ HELP_CONTENT = {
             "shows it; a replacement there changes nothing.",
             "**Sounds with a clip** (Spike 2): under the panes, the sounds the game plays "
             "with the clip, read from its program: kept with the clip, asked for right after "
-            "it, or named after it. Each is named by its file in the project's audio folder "
-            "once the card is extracted with this version. A sound the game picks at random, "
+            "it, or named after it. Each is named by its file in the project's audio folder; "
+            "its play button plays it there, and its name shows it on the **Audio** tab. A "
+            "clip with none of those lists the sounds that may be its (named like it, or "
+            "asked for in the same part of the program). A sound the game picks at random, "
             "or a clip's own audio track, is not listed.",
         ]),
         ("Save and load settings",

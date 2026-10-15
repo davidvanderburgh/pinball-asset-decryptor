@@ -12,6 +12,7 @@ are checked where they are on this machine (skipped elsewhere, as on CI)."""
 import json
 import os
 import struct
+import time
 
 import pytest
 
@@ -289,6 +290,63 @@ def test_a_sound_named_after_a_clip_is_its_sound():
                     menu) == {"BridgeAttack_1": [12], "bountyhunt_loop_1": [16]}
 
 
+def test_the_sounds_that_may_be_a_clips_are_named_like_it_or_hold_its_name():
+    """PAD-592: a clip no sure kind pairs lists the sounds that MAY be its."""
+    menu = {12: "SE GZ FX DE SHOOT AGAIN", 13: "SE GZ VO GAME SHOOT AGAIN",
+            14: "SE GZ VO GAME SHOOT AGAIN NEW", 15: "SE GZ FX DE INTRO 3",
+            16: "SE GZ VO MONSTER ZERO INTRO 3", 17: "SE GZ FX DE BRIDGEATTACK 1",
+            18: "SE GZ FX DE BRIDGEATTACK 10", 19: "SE GZ FX MATCH", 20: "SE GZ FX REMATCH NOW"}
+    got = CS.maybe(["shoot_again", "intro_3", "BridgeAttack_1", "match", "attack_1"], menu)
+    # two names end with "shoot again" (one holding it elsewhere is not one: 0 of 6 played);
+    # "intro 3" ends two names; BridgeAttack_1 ends one (that is "name", sure); "match" is too
+    # short, "attack_1" no whole word ("BRIDGEATTACK 1")
+    assert got == {"shoot_again": [(12, "names"), (13, "names")],
+                   "intro_3": [(15, "names"), (16, "names")]}
+    # the clip's name less its first parts: a long rest naming a few sounds
+    menu = {30: "SE GZ FX DE MONSTER ZERO JACKPOTBUILD1", 31: "SE GZ FX DE EBIRAH ATTACK 2",
+            32: "SE GZ VO READY TO ATTACK 2", 33: "SE GZ FX DE MECHAGODZILLA SHIELD ENGAGED",
+            34: "SE GZ FX DE MECHA SHIELD ENGAGED LOOP"}
+    got = CS.maybe(["m0_jackpotbuild1", "kotm_gigan_attack2", "mecha_shield_engaged",
+                    "nothing_like_it_at_all"], menu)
+    # "attack2" is too short a rest to say anything; mecha_shield_engaged is held whole by
+    # another name, so its rest says nothing either
+    assert got == {"m0_jackpotbuild1": [(30, "part")]}
+    del menu[34]
+    assert CS.maybe(["mecha_shield_engaged"], menu) == {"mecha_shield_engaged": [(33, "part")]}
+    many = {40 + i: "SE GZ FX TUNE %d SHIELD ENGAGED" % i for i in range(CS.PART_MAX + 1)}
+    assert CS.maybe(["mecha_shield_engaged"], many) == {}      # names too many to mean it
+
+
+def test_a_clip_with_a_sure_sound_gets_no_maybes_and_a_random_copy_gets_its_clips():
+    raw, _clip = program()
+    prog = S.Program(raw)
+    refs = CM.clip_refs(prog, raw, CLIPS)
+    maybes = {"clipC": [(1, "part")], "clipD": [(2, "names"), (4, "part")]}
+    got = CS.pair(prog, refs, [], 0, None, {}, maybes)
+    # clipD's table loader is no lead: what may be its is all it has
+    assert [p[:2] for p in got["clipD"]] == [[2, "names"], [4, "part"]]
+    out = CS.analyse(raw, CLIPS + ("clipC__PadVar2", "clipE__PadVar3", "gone__PadVar2"),
+                     FRAGMENTS)
+    # clipC's "next" is sure: no maybes beside it, whatever the names say
+    assert [p[1] for p in out.pairs["clipC"]] == ["next"]
+    # a PAD build's random copy plays in its clip's place, so it gets that clip's sounds
+    assert out.pairs["clipC__PadVar2"] == out.pairs["clipC"]
+    assert out.pairs["clipE__PadVar3"] == out.pairs["clipE"]
+    assert "gone__PadVar2" not in out.pairs
+    assert CS.base_clip("game_over__PadVar12") == "game_over"
+    assert CS.base_clip("game_over") is None and CS.base_clip("__PadVar2") is None
+
+
+def test_an_older_extract_finds_a_sounds_file_by_its_sound_test_name():
+    files = {491: "audio/idx0491 - SE GZ FX DE BUILDINGSMASH BREATH NEW.wav",
+             12: "audio/idx0012.wav", 30: "audio/idx0030 - SE GZ FX ROAR.wav",
+             31: "audio/idx0031 - SE GZ FX ROAR.wav", 7: "audio/00m01s200 - idx0007.wav"}
+    got = CS.audio_names(files)
+    # a name two files share names neither
+    assert got == {CS.name_key("SE GZ FX DE BUILDINGSMASH BREATH NEW"): files[491]}
+    assert CS.name_key("se gz fx de buildingsmash breath new") in got
+
+
 def test_a_clips_record_names_the_sound_played_with_it_and_a_flag_column_names_none():
     raw, prog = _prog()
     refs = CM.clip_refs(prog, raw, CLIPS)
@@ -364,7 +422,7 @@ def test_the_fragment_count_is_read_off_the_cards_image_bin_header():
 
 
 # ---- the Video tab ---------------------------------------------------------------------------
-INTRO, BOSS = "video/intro.mp4", "video/boss.mp4"
+INTRO, BOSS, QUIET = "video/intro.mp4", "video/boss.mp4", "video/quiet.mp4"
 GIGAN = "cmode_battle_vs_gigan"
 
 
@@ -372,7 +430,7 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
     from pinball_decryptor.webui import video_modes as VM
     from tests.test_webui_video import _project, _scan, _wait
     from tests.webui_harness import web_app
-    proj = _project(tmp_path, names=(INTRO, BOSS))
+    proj = _project(tmp_path, names=(INTRO, BOSS, QUIET))
     card = tmp_path / "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw"
     card.write_bytes(b"\0" * 16)
     (proj / ".extract_source.json").write_text(json.dumps(
@@ -389,17 +447,19 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
 
     def fake(card_path, rows, cancel=None):
         return CM.CardClips(card=card_path, game="godzilla_pro", version="1.16.0",
-                            reading=reading, name_of={INTRO: "intro", BOSS: "boss"},
+                            reading=reading,
+                            name_of={INTRO: "intro", BOSS: "boss", QUIET: "quiet"},
                             bank_of={"intro": ["/g/b", "2.asset/0.asset"],
-                                     "boss": ["/g/b", "2.asset/1.asset"]},
+                                     "boss": ["/g/b", "2.asset/1.asset"],
+                                     "quiet": ["/g/b", "2.asset/2.asset"]},
                             sounds=sounds.to_json())
     monkeypatch.setattr(CM, "read_card", fake)
 
     def shown(w, rel):
         w.call("video.select", rel)
         return _wait(w, lambda st: st["modes"]["ready"] and (st.get("preview") or {}).get(
-            "rel") == rel and ((st["preview"].get("sounds") or {}).get("rel") == rel
-                               or rel == BOSS))["preview"]["sounds"]
+            "rel") == rel and (st["preview"].get("sounds") or {}).get("rel") == rel
+                     )["preview"]["sounds"]
 
     with web_app(tmp_path, mfr="stern") as w:
         _scan(w, proj)
@@ -410,15 +470,33 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
             ("sound request 5", "kept with the clip"), ("SE GZ VO ROAR", "asked for right after it"),
             ("SE GZ FX DE INTRO", "named after it")]
         assert snd["items"][1]["tip"]["lines"] == ["Sound request 3", "Sound Test: SE GZ VO ROAR"]
-        assert snd["more"] == ""
+        assert snd["more"] == "" and snd["maybe"] == [] and snd["none"] == ""
+        assert [i["rel"] for i in snd["items"]] == ["", "", ""]   # no files: words alone
         assert snd["foot"] == VM.SOUNDS_FOOT              # no request map from the extract yet
-        assert shown(w, BOSS) is None                      # only a "function" lead
-        # an extract that wrote the request map: the files themselves
-        CS.write_requests(str(proj / CS.REQUESTS_TSV), [[]] * 10, {3: [12], 5: [13, 14]},
-                          {3: "SE GZ VO ROAR"})
+        # PAD-592: only a "function" lead (6 in 28) - a sound that MAY be its, said so
+        snd = shown(w, BOSS)
+        assert snd["head"] == "" and snd["items"] == [] and snd["maybe_head"] == VM.MAYBE_HEAD
+        assert [(i["text"], i["how"]) for i in snd["maybe"]] == [
+            ("sound request 9", VM.MAYBE_HOW["function"])]
+        # a clip the game plays that no sound is found for says so
+        snd = shown(w, QUIET)
+        assert snd["none"] == VM.NONE_TEXT and not snd["items"] and not snd["maybe"]
+        # an older extract (no request map): a file named after the sound's Sound Test name
         (proj / "audio").mkdir()
         for n in ("idx0012 - SE GZ VO ROAR.wav", "idx0013.wav", "idx0014.wav"):
             (proj / "audio" / n).write_bytes(b"")
+        _scan(w, proj)
+        snd = shown(w, INTRO)
+        assert [i["text"] for i in snd["items"]] == ["sound request 5",
+                                                     "idx0012 - SE GZ VO ROAR.wav",
+                                                     "SE GZ FX DE INTRO"]
+        roar = snd["items"][1]
+        assert roar["rel"] == "audio/idx0012 - SE GZ VO ROAR.wav"
+        assert roar["path"] == str(proj / "audio" / "idx0012 - SE GZ VO ROAR.wav")
+        assert snd["foot"] == VM.SOUNDS_FOOT              # the others still want it
+        # an extract that wrote the request map: the files themselves
+        CS.write_requests(str(proj / CS.REQUESTS_TSV), [[]] * 10, {3: [12], 5: [13, 14]},
+                          {3: "SE GZ VO ROAR"})
         _scan(w, proj)
         snd = shown(w, INTRO)
         assert [i["text"] for i in snd["items"]] == ["idx0013.wav (+1)",
@@ -426,14 +504,38 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
                                                      "SE GZ FX DE INTRO"]
         assert snd["items"][0]["tip"]["lines"] == ["Sound request 5", "idx0013.wav",
                                                    "idx0014.wav"]
+        assert snd["items"][0]["rel"] == "audio/idx0013.wav"
         assert snd["foot"] == ""
+        # its link: the Audio tab, that row selected and in its panes
+        assert w.call("video.open_sound", "audio/idx0013.wav")
+        end = time.time() + 20
+        while time.time() < end:
+            w.drain()
+            a = w.state("audio")
+            if a.get("sel") == ["audio/idx0013.wav"] and not a.get("scanning"):
+                break
+            time.sleep(0.05)
+        assert w.state("shell")["tab"] == "audio"
+        assert w.state("audio")["sel"] == ["audio/idx0013.wav"]
+        assert w.state("audio")["cur"]["rel"] == "audio/idx0013.wav"
+        # a search that hides it is cleared
+        audio = w.window._by_ns["audio"]
+        w.run(lambda: audio.audio_search_var.set("roar"))
+        assert "audio/idx0014.wav" not in audio._visible_rels
+        assert w.call("video.open_sound", "audio/idx0014.wav")
+        w.drain()
+        assert w.state("audio")["sel"] == ["audio/idx0014.wav"]
+        assert audio.audio_search_var.get() == ""
+        assert not w.call("video.open_sound", "audio/nothing.wav")
 
 
 def test_the_page_draws_the_sounds_part_of_the_callout():
     js = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui",
                            "static", "js", "tabs", "video.js"), encoding="utf-8").read()
     for bit in ("pv.sounds.rel === currentRel", "vid-sound-list", "pv.sounds.more",
-                "pv.sounds.foot"):
+                "pv.sounds.foot", "pv.sounds.maybe_head", "pv.sounds.maybe", "pv.sounds.none",
+                "vid-sound-play", "vid-sound-go", 'call("video.open_sound", it.rel)',
+                "mediaUrl(it.path)"):
         assert bit in js, bit
 
 

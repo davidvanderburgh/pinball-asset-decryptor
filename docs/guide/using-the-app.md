@@ -348,12 +348,20 @@ panes the tab lists the sounds the game plays with the selected clip:
 together), *asked for right after it* (the code that shows the clip
 asks for the sound next to it), or *named after it* (the sound's Sound
 Test name is the clip's name). Each sound is named by its file in the
-project's `audio` folder once the card has been extracted with this
-version (the extract writes `sound_requests.tsv`); before that, by its
-Sound Test name or its request number. Played in the emulator, 110 of
-115 of these sounds played with their clip. Not every clip gets one:
-a sound the game picks at random or works out while it plays, or one
-a clip carries in its own audio track, is not listed.
+project's `audio` folder (the extract writes `sound_requests.tsv`; an
+older extract finds a file named after the sound's Sound Test name),
+else by its Sound Test name or its request number. A sound with a file
+has a play button that plays it right there, and its name is a link
+that shows it on the **Audio** tab, ready to replace. Played in the
+emulator, 110 of 115 of these sounds played with their clip. A clip
+with none of these lists the sounds that *may* be its: several Sound
+Test names end with its name (6 of 16 played with their clip), the
+end of its name names a sound ("MONSTER ZERO JACKPOTBUILD1" for
+m0_jackpotbuild1, 5 of 5), or the code that shows it asks for a sound
+in the same function (6 of 28). A clip a mod pack added as
+one of a slot's random clips gets that slot's sounds. Not every clip
+gets one: a sound the game picks at random or works out while it
+plays, or one a clip carries in its own audio track, is not listed.
 **Undo and Redo.** The *Undo* and *Redo* buttons at the top of the
 tab (Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z) take back, or make again, your
 last changes one step at a time: a pick, a clear, Replace from

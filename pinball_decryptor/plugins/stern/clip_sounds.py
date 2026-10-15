@@ -23,8 +23,14 @@ The links are in the game program, three ways:
 * ``name`` - the one sound whose Sound Test name ends with the clip's name (:func:`named`: "SE
   GZ FX DE BRIDGEATTACK 1" for BridgeAttack_1);
 
-and ``function`` (the call is in that function, nearer another clip's name) is kept for the
-tools only. EMULATOR-PROVEN on Godzilla Premium/LE 1.16 (``docs/architecture/stern.md``):
+and ``function`` (the call is in that function, nearer another clip's name). A clip with none of
+the first three gets the sounds that MAY be its (PAD-592, the Video tab lists them as such):
+``function``, ``names`` (several Sound Test names end with the clip's name: 6 of 16 played with
+it) and ``part`` (the clip's name less its first parts names a few sounds: 5 of 5, :func:`maybe`).
+A name holding the clip's name elsewhere was tried and dropped: 0 of 6 (a Japanese twin, a radio
+line the game picks at random). A
+clip a PAD build added as a random copy of another (``<name>__PadVar<k>``,
+:mod:`.clip_variants`) plays in that clip's place, so it gets that clip's sounds. EMULATOR-PROVEN on Godzilla Premium/LE 1.16 (``docs/architecture/stern.md``):
 pairs whose clip showed and whose request fired within a second of it, record 38 of 38, next 16
 of 18, name 56 of 59; function 6 of 28, and the two kinds dropped here, a table's loader 1 of 23
 and the same mode's code 17 of 478.
@@ -49,7 +55,7 @@ from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes (a cached :class:`.clip_modes.CardClips` is
 #: read again)
-READ_REV = 2
+READ_REV = 5
 #: the port sites that play a sound by request, its id in r0 (MODE_API.md)
 SOUND_SITES = ("sound_worker", "sound_play", "sound_nth", "callout", "callout_nth")
 #: how many wrappers deep the entries are followed past the seeds: a port names the game's own
@@ -73,13 +79,21 @@ REC_OFF = 4
 REC_GAP = 64
 #: the fewest letters and digits of a clip's name :func:`named` matches to a Sound Test name
 NAME_MIN = 6
+#: :func:`maybe`'s ``part``: the fewest letters and digits of what is left of a clip's name, and
+#: the most sounds it may name
+PART_MIN = 11
+PART_MAX = 3
 #: how many vtable slots either side of a clip's name getter are tried for its sound's
 GETTER_SLOTS = 4
-HOWS = ("record", "next", "name", "function")
+HOWS = ("record", "next", "name", "function", "names", "part")
+#: the kinds the emulator proved; a clip with one of them gets no ``names`` / ``part``
+SURE = ("record", "next", "name")
 _RANK = {h: i for i, h in enumerate(HOWS)}
 #: Extract's sidecar: every request, the ``idx`` records it plays, its sound ids and Sound Test name
 REQUESTS_TSV = "sound_requests.tsv"
 _IDX_RE = re.compile(r"\bidx(\d{4,})\b")
+#: a clip a PAD build added as a random copy of another (:data:`.clip_variants.NAME_FORMAT`)
+_VARIANT_RE = re.compile(r"^(?P<base>.+)__PadVar\d+$")
 
 
 # ---- the request table -----------------------------------------------------------------------
@@ -644,17 +658,62 @@ def named(names, menu):
     return out
 
 
+def maybe(names, menu):
+    """``{clip: [(request, how)]}``, the sounds that MAY be a clip's (the Video tab says so):
+    ``names`` where several Sound Test names end with the clip's name (:func:`named` takes only
+    one: "SE GZ FX DE SHOOT AGAIN" and "SE GZ VO GAME SHOOT AGAIN" for shoot_again), letters and
+    digits only and none shorter than :data:`NAME_MIN`; and, for a clip whose whole name no
+    Sound Test name holds, ``part``: the clip's name less its first parts names at most
+    :data:`PART_MAX` sounds, as whole words of at least :data:`PART_MIN` letters ("SE GZ FX DE
+    MONSTER ZERO JACKPOTBUILD1" for m0_jackpotbuild1; a short rest such as "attack2" names
+    sounds of every mode)."""
+    ends, runs = {}, {}
+    for r, n in menu.items():
+        words = re.findall(r"[A-Za-z0-9]+", n)
+        for i in range(len(words)):
+            for j in range(i + 1, len(words) + 1):
+                key = _norm("".join(words[i:j]))
+                if len(key) >= NAME_MIN:
+                    (ends if j == len(words) else runs).setdefault(key, set()).add(r)
+    out = {}
+    for c in names:
+        key = _norm(c)
+        end = ends.get(key) or set()
+        got = [(r, "names") for r in sorted(end)] if len(end) > 1 else []
+        if not end and not runs.get(key):
+            parts = [p for p in re.split(r"[^A-Za-z0-9]+", c) if p]
+            for k in range(1, len(parts)):
+                rest = _norm("".join(parts[k:]))
+                if len(rest) < PART_MIN:
+                    break
+                hit = (ends.get(rest) or set()) | (runs.get(rest) or set())
+                if hit:
+                    if len(hit) <= PART_MAX:
+                        got = [(r, "part") for r in sorted(hit)]
+                    break
+        if got:
+            out[c] = got
+    return out
+
+
+def base_clip(name):
+    """The clip a PAD build's random copy ``<name>__PadVar<k>`` stands in for, else None."""
+    m = _VARIANT_RE.match(name or "")
+    return m.group("base") if m else None
+
+
 def _norm(s):
     return re.sub(r"[^A-Z0-9]", "", s.upper())
 
 
-def pair(prog, refs, calls, count=0, raw=None, extra=None):
+def pair(prog, refs, calls, count=0, raw=None, extra=None, maybes=None):
     """``{clip name: [[request, how, gap, VA], ...]}``, best first (:data:`HOWS`; *gap* in
     instructions, -1 where there is none; VA = the call's, the record's or the getter's, 0 for
     ``name``). *refs* is :func:`.clip_modes.clip_refs`' reading, *calls* :func:`sound_calls`';
     *count* (the build's requests) adds ``record``: the clip's data records (:func:`records`)
     and, with the program's bytes *raw*, its class's sound getter (:func:`getters`); *extra*
-    (``{clip: [request]}``, :func:`named`'s) adds ``name``."""
+    (``{clip: [request]}``, :func:`named`'s) adds ``name``; *maybes* (:func:`maybe`'s) adds
+    ``names`` and ``part`` to a clip with none of :data:`SURE`."""
     by_fn = {}
     for c in calls:
         by_fn.setdefault(c.fn, []).append(c)
@@ -680,8 +739,9 @@ def pair(prog, refs, calls, count=0, raw=None, extra=None):
         for clip, got in getters(prog, raw, refs, count).items():
             recs.setdefault(clip, []).extend(got)
     extra = extra or {}
+    maybes = maybes or {}
     out = {}
-    for clip in sorted(set(places) | set(recs) | set(extra)):
+    for clip in sorted(set(places) | set(recs) | set(extra) | set(maybes)):
         got = {}
 
         def keep(req, how, gap, at):
@@ -698,6 +758,9 @@ def pair(prog, refs, calls, count=0, raw=None, extra=None):
                      abs(c.at - va) // 4, c.at)
         for req in extra.get(clip, ()):
             keep(req, "name", -1, 0)
+        if not any(p[1] in SURE for p in got.values()):
+            for req, how in maybes.get(clip, ()):
+                keep(req, how, -1, 0)
         if got:
             out[clip] = sorted(got.values(), key=lambda p: (
                 _RANK[p[1]], p[2] if p[2] >= 0 else 1 << 30, p[0]))
@@ -780,7 +843,12 @@ def analyse(elf, names, fragments, game="", version="", refs=None, ctx=None):
     if refs is None:
         refs = CM.clip_refs(prog, raw, names)
     menu = menu_names(raw, lists)
-    out.pairs = pair(prog, refs, calls, count, raw, named(names, menu))
+    out.pairs = pair(prog, refs, calls, count, raw, named(names, menu), maybe(names, menu))
+    # a PAD build's random copy plays in its clip's place (:func:`base_clip`)
+    for clip in names:
+        base = base_clip(clip)
+        if base in out.pairs and not any(p[1] in SURE for p in out.pairs.get(clip, ())):
+            out.pairs[clip] = [list(p) for p in out.pairs[base]]
     paired = sorted({p[0] for ps in out.pairs.values() for p in ps})
     out.names = {r: menu[r] for r in paired if r in menu}
     out.sids = {r: list(lists[r]) for r in paired}
@@ -869,6 +937,33 @@ def audio_files(project):
         m = _IDX_RE.search(n)
         if m:
             out.setdefault(int(m.group(1)), "audio/" + n)
+    return out
+
+
+def name_key(name):
+    """A Sound Test name as :func:`audio_names` keys it (letters and digits only)."""
+    return _norm(name or "")
+
+
+def audio_names(files):
+    """``{name_key(Sound Test name): "audio/<file>"}`` from :func:`audio_files`' *files*, for
+    the files Extract named after their sound (``idx0491 - SE GZ FX DE BUILDINGSMASH BREATH
+    NEW.wav``): an extract made before :data:`REQUESTS_TSV` still finds a sound's file by its
+    name (PAD-592). A name two files share names neither."""
+    out, twice = {}, set()
+    for _i, rel in sorted(files.items()):
+        stem = os.path.splitext(rel.rsplit("/", 1)[-1])[0]
+        m = re.match(r"^idx\d{4,} - (.+)$", stem)
+        if not m:
+            continue
+        k = name_key(m.group(1))
+        if not k:
+            continue
+        if k in out:
+            twice.add(k)
+        out[k] = rel
+    for k in twice:
+        out.pop(k, None)
     return out
 
 

@@ -144,7 +144,7 @@ class AudioTab(FindOriginalsMixin, TabService):
     exports = (
         "pending_audio_assignments", "audio_keep_full_rels",
         "audio_loop_basenames", "audio_trim_var", "_audio_grow_active",
-        "_audio_profile_btn",
+        "_audio_profile_btn", "reveal_audio_slot",
     )
     _orig_kind = "sound"
     _orig_label = "Replace Audio"
@@ -169,6 +169,7 @@ class AudioTab(FindOriginalsMixin, TabService):
 
         self._slots = []
         self._by_rel = {}
+        self._reveal_rel = None     # a slot to show once the scan lands (reveal_audio_slot)
         self._assign = {}           # rel -> replacement path
         self._loop = {}             # rel -> bool (BOF)
         self._keep = {}             # rel -> bool (JJP)
@@ -710,7 +711,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         if self.audio_group_dups_var.get():
             self._ensure_dup_groups(quiet=True)
         self._refresh_list()
-        self._select_first_row()
+        rel, self._reveal_rel = self._reveal_rel, None
+        if rel not in self._by_rel or not self._reveal_now(rel):
+            self._select_first_row()
         self._start_change_scan()
         self._probe_metadata_async(scan_id)
 
@@ -727,6 +730,33 @@ class AudioTab(FindOriginalsMixin, TabService):
         if not d or n * 2 < len(self._slots):
             return ""
         return d + "/"
+
+    def reveal_audio_slot(self, rel):
+        """PAD-592: MainWindow.reveal_audio_slot (the Video tab's clip sounds): show one slot on
+        this tab, clearing any filter that would hide it. A scan the tab makes on showing lands
+        on it."""
+        self.window.select_tab(self.ns)
+        if rel in self._by_rel and not self._scanning:
+            return self._reveal_now(rel)
+        self._reveal_rel = rel if self._scanning else None
+        return self._scanning
+
+    def _reveal_now(self, rel):
+        if rel not in (self._visible_rels or ()) or self.audio_group_dups_var.get():
+            self.audio_search_var.set("")
+            self.audio_type_var.set("All types")
+            self.audio_change_filter_var.set("All")
+            self.audio_group_dups_var.set(False)
+            self._refresh_list()
+        if rel not in (self._visible_rels or ()):
+            return False
+        self._sel = [rel]
+        self.set(sel=[rel])
+        self._cancel_select_job()
+        self._level_sync()
+        self._publish_cur()
+        self._load_track(rel)
+        return True
 
     def _select_first_row(self):
         if not self._visible_rels:

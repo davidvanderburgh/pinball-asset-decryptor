@@ -365,7 +365,7 @@
 "**Show:** filters the tree to All, Changed (opened out) or Unchanged.": "**Afficher :** filtre l'arbre sur Tout, Modifié (déplié) ou Non modifié.",
 "**Some:** select rows (Shift-click a range, Ctrl-click one more) and right-click. Sort by Replacement to bring your picks together.": "**Quelques-unes :** sélectionnez des lignes (Maj-clic pour une plage, Ctrl-clic pour une de plus) et faites un clic droit. Triez par Remplacement pour regrouper vos choix.",
 "**Sound** (off at first) plays the image's music loop and the move sound, at the Menu settings volume. Ticking it also makes the move and confirm sounds, which arrive when that run finishes.": "**Son** (désactivé au début) joue la boucle musicale de l'image et le son de déplacement, au volume des paramètres du menu. Le cocher crée aussi les sons de déplacement et de validation, qui arrivent à la fin de cette exécution.",
-"**Sounds with a clip** (Spike {}): under the panes, the sounds the game plays with the clip, read from its program: kept with the clip, asked for right after it, or named after it. Each is named by its file in the project's audio folder once the card is extracted with this version. A sound the game picks at random, or a clip's own audio track, is not listed.": "**Sons avec un clip** (Spike {}) : sous les volets, les sons que le jeu joue avec le clip, lus dans son programme : gardés avec le clip, demandés juste après, ou nommés d'après lui. Chacun est nommé par son fichier dans le dossier audio du projet une fois la carte extraite avec cette version. Un son que le jeu choisit au hasard, ou la piste audio propre d'un clip, n'est pas listé.",
+"**Sounds with a clip** (Spike {}): under the panes, the sounds the game plays with the clip, read from its program: kept with the clip, asked for right after it, or named after it. Each is named by its file in the project's audio folder; its play button plays it there, and its name shows it on the **Audio** tab. A clip with none of those lists the sounds that may be its (named like it, or asked for in the same part of the program). A sound the game picks at random, or a clip's own audio track, is not listed.": "**Sons d'un clip** (Spike {}) : sous les volets, les sons que le jeu lit avec le clip, lus depuis son programme : rangé avec le clip, demandé juste après ou nommé d'après lui. Chacun est nommé par son fichier dans le dossier audio du projet ; son bouton de lecture le joue sur place, et son nom le montre dans l'onglet **Audio**. Un clip sans aucun de ceux-ci liste les sons qui peuvent être les siens (nommés comme lui, ou demandés dans la même partie du programme). Un son que le jeu choisit au hasard, ou la piste audio propre d'un clip, n'est pas listé.",
 "**Start Docker** starts the engine you have: Docker Desktop, OrbStack, Rancher Desktop or Colima.": "**Démarrer Docker** démarre le moteur que vous avez : Docker Desktop, OrbStack, Rancher Desktop ou Colima.",
 "**Start emulator**": "**Démarrer l'émulateur**",
 "**Stock bitrate.** Fits where the old clip was.": "**Débit d'origine.** Tient là où tenait l'ancien clip.",
@@ -12112,5 +12112,12 @@
 "✗ WRONG FORMAT — {}. As-is it will play its sound over a black picture on the machine. Right-click the row → This clip's conversion → Always convert this clip, untick \"Use my files as-is\" for the lot, or pick a game-ready file.": "✗ FORMAT INCORRECT — {}. Tel quel, il jouera son son sur une image noire sur la machine. Clic droit sur la ligne → Conversion de ce clip → Toujours convertir ce clip, décochez « Utiliser mes fichiers tels quels » pour tous, ou choisissez un fichier prêt pour le jeu.",
 "✗ needs .mov": "✗ nécessite .mov",
 "✗ needs {}": "✗ nécessite {}",
-"✗ wrong format": "✗ mauvais format"
+"✗ wrong format": "✗ mauvais format",
+"No sound found for this clip in the game's program. It may have none (a loop or a backdrop), or the game picks its sound in a way the program does not show.": "Aucun son trouvé pour ce clip dans le programme du jeu. Il n'en a peut-être aucun (une boucle ou un fond), ou le jeu choisit son son d'une façon que le programme ne montre pas.",
+"No sound is sure for this clip. These may be its:": "Aucun son n'est sûr pour ce clip. Ceux-ci peuvent être les siens :",
+"Play this sound": "Lire ce son",
+"Show this sound on the Audio tab": "Montrer ce son dans l'onglet Audio",
+"asked for in the same part of the program": "demandé dans la même partie du programme",
+"named like it": "nommé comme lui",
+"named like part of its name": "nommé comme une partie de son nom"
 }

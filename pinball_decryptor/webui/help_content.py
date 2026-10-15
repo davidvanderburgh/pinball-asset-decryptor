@@ -157,8 +157,9 @@ HELP_CONTENT = {
             {"cards": [
                 {"icon": "gear", "tone": "info", "title": "Whole build",
                  "text": "**Replacement loudness** in Advanced Audio Options: match "
-                         "(default) or full scale, plus a ±12 dB offset. Moves every "
-                         "replacement together."},
+                         "(default) or full scale (on SAM and Spike 1: keep each "
+                         "replacement's own level), plus a ±12 dB offset. Moves "
+                         "every replacement together."},
                 {"icon": "wave", "tone": "ok", "title": "One clip",
                  "text": "**Loudness for this clip**, beside the Replacement preview. "
                          "Stacks on the build-wide offset; the Level column shows "

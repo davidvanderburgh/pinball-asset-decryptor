@@ -90,7 +90,7 @@ The catches:
 
 | | What a mode of yours can do |
 |---|---|
-| Start | a shot made N times, several shots in one ball (any order or in order), after another mode, a game event, a block |
+| Start | a shot made N times, several shots in one ball (any order or in order), after another mode, a game event, a battle picked on Godzilla's selection screen, a block |
 | Score | any shot, with variables, conditions and timers for hurry-ups, combos, boss health or phases |
 | End | its clock, chosen shots, a block, a drain if ticked; always at game over or the next player |
 | Show | its own screen (a panel or your picture), full-screen clips, a countdown. On Godzilla, a HUD and clips behind the score; on James Bond LE, a clip that loops in the TV and comes back after the others, its name and clock in the game's own bar under the TV, and its words alone over the video. |

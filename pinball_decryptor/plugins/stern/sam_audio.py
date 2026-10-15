@@ -256,12 +256,19 @@ def _level_gains(assets_dir):
     return pieces, songs
 
 
-def _level(rep, orig, db, match_on, name, log):
+def _fit_and_level(rep, orig, frames, db, match_on, name, log):
+    """*rep* cut to *frames* (with an edge fade), level-matched to *orig*,
+    then padded with silence to *frames*.  The match measures only what
+    plays: padding measured with it would read a short replacement as
+    quiet and boost it (half the length = +3 dB too loud)."""
+    if len(rep) > frames:
+        rep = _s1._fit_frames(rep, frames)
     if match_on and not orig.any():
         log("  note: %s replaces a silent slot - the original gives no level "
             "reference, keeping the replacement's own level" % name)
     db = max(min(db, _s1._MATCH_GAIN_DB_MAX), -_s1._MATCH_GAIN_DB_MAX)
-    return _s1._match_level(rep, orig, db, match=match_on)
+    rep = _s1._match_level(rep, orig, db, match=match_on)
+    return _s1._fit_frames(rep, frames)
 
 
 def _split_songs(data, bank, edits, pieces_edited, gains, build_db, match_on,
@@ -294,11 +301,11 @@ def _split_songs(data, bank, edits, pieces_edited, gains, build_db, match_on,
                     "%s" % (name, len(rep) / rate, frames / rate,
                             "cut to fit" if len(rep) > frames
                             else "the rest is silence"))
-            rep = _s1._fit_frames(rep, frames)
             orig = np.asarray(_song_pcm(data, bank, song),
                               dtype=np.float32).reshape(-1, 1)
-            rep = _level(rep, orig, build_db + gains.get(sound, 0.0),
-                         match_on, name, log)
+            rep = _fit_and_level(rep, orig, frames,
+                                 build_db + gains.get(sound, 0.0),
+                                 match_on, name, log)
         except Exception as e:                          # noqa: BLE001
             skipped.append(name)
             log("  ! %s could not be encoded (%s) - skipped, the song keeps "
@@ -379,11 +386,11 @@ def write_image(original_path, assets_dir, output_path, log=None,
                 rep, rep_rate = _s1._load_wav(wav_path)
                 rep = _s1._mix_channels(_s1._resample(rep, rep_rate, s.rate),
                                         1)
-                rep = _s1._fit_frames(rep, s.count)
                 orig = np.asarray(sam_sound.decode(data, s),
                                   dtype=np.float32).reshape(-1, 1)
-                rep = _level(rep, orig, build_db + gains.get(idx, 0.0),
-                             match_on, name, log)
+                rep = _fit_and_level(rep, orig, s.count,
+                                     build_db + gains.get(idx, 0.0),
+                                     match_on, name, log)
             except Exception as e:
                 skipped.append(name)
                 log("  ! %s could not be encoded (%s) - skipped, the slot "

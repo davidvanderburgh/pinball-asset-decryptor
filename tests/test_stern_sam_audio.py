@@ -579,6 +579,30 @@ def test_a_piece_edited_on_its_own_wins_over_the_song(song_file, tmp_path):
     assert np.abs(last).max() < 200
 
 
+def test_a_short_song_is_matched_on_what_plays(song_file, tmp_path):
+    # half the song's length: the padding must not count as quiet audio
+    path, data, _ = song_file
+    out_dir = _extract(path, tmp_path)
+    bank = sam_sound.read_bank(data)
+    frames = sum(bank.samples[k].count for k in SONG)
+    _write_wav(_song_wav(out_dir), _tone(frames // 2, 1000, 24000, amp=2000),
+               24000)
+    out = str(tmp_path / "built.bin")
+    res = _run(SamWritePipeline(path, out_dir, out, lambda *a, **k: None,
+                                lambda i: None, lambda *a: None, None))
+    assert res["ok"], res
+    built = open(out, "rb").read()
+
+    def song(img):
+        return np.concatenate([np.asarray(sam_sound.decode(
+            img, bank.samples[k]), float) for k in SONG])
+
+    got, orig = song(built), song(data)
+    rms = lambda a: np.sqrt(np.mean(a ** 2))          # noqa: E731
+    assert 0.8 < rms(got[:frames // 2]) / rms(orig) < 1.2
+    assert np.abs(got[frames // 2 + 50:]).max() < 200
+
+
 def test_revert_restores_a_song(song_file, tmp_path):
     path, _data, _ = song_file
     out_dir = _extract(path, tmp_path)

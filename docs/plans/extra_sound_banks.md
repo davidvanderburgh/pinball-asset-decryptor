@@ -257,3 +257,26 @@ un2s\game.out`, `stracecheck.py`).
   "played (sound id N, its own in a sound bank)") match their WAVs at
   0.85-0.95 in the capture: a short bank sound, read through the bank's
   mapping rather than streamed, plays too.
+
+## Every Spike 2 title (David, 2026-10-16: "Need it to work on all spike 2 games")
+
+Headless sweep over the 49 current builds on hand (`sweep_lib.py`, results
+in `docs/plans/pad595/library_headless.tsv`): per build, image.bin's
+category slots and stride read, a two-record scaffold bank staged, the
+firmware's own loader and directory decode asked to register it
+(`derive_bank`: both records registered with keys), the resolver found and
+its keystream rule measured (`resolver_rule`), the play tables written and
+every bank sid resolved through the game's own resolver on the finished
+file (`verify_tables`). **49 of 49 pass.** Every build has its own rule
+(`(off ^ X) & M`: Aerosmith `^0x880 &0xcc0`, Jaws Pro `^0x6 &0xf8e`, X-Men
+Pro `^0x4 &0x64` ...), so a hard-coded one would have failed all but one
+title; the stride is 5 everywhere; the music titles take the first id past
+their own banks (Deadpool 2, Metallica 25, D&D 30). Godzilla LE 1.16 is
+proven separately on the rig above.
+
+Rig sweep (`rig/bankboot.sh` through `rigbatch.sh`, `rig/prep_ovr.py`): each
+title boots its stock card with an override set holding image.bin with the
+header naming the bank, the bypassed game program, the scaffold bank, and a
+CONTROL bank under an id the header does not name; an inotify watch on each
+staged file says what the game opened. Aerosmith 1.16 dry run: the named
+bank OPENED 8 s into the boot, the control never.

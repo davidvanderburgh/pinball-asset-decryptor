@@ -249,3 +249,11 @@ un2s\game.out`, `stracecheck.py`).
   their WAVs at 0.97 in the capture, the same as the six beds left in
   image.bin; JET JAGUAR and ZILLA did not reach theirs for the same gameplay
   reasons as on the stock card.
+- run6, CALLS (rig 1, 2026-10-16, `tryit4`, ceiling 1.5 GB): every one of the
+  modes' 69 own sounds in `image-sc01.bin` (251 MB), nothing of theirs in
+  image.bin (the path where image.bin grows nothing of its own). 0 segv;
+  all nine beds that played match at 0.97; the four bank calls the drive
+  triggered (each mode's lost call, `sid <request> <bank sid> call:lost`,
+  "played (sound id N, its own in a sound bank)") match their WAVs at
+  0.85-0.95 in the capture: a short bank sound, read through the bank's
+  mapping rather than streamed, plays too.

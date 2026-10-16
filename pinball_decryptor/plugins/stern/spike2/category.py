@@ -48,6 +48,7 @@ from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
 from . import locate as L
 from .elf import parse_elf
 from .emulator import DESC_BASE, MAX_RECORDS, PAGE, Spike2Emu, _R, _algn, _u32
+from unicorn import UC_PROT_ALL
 
 # Fallback 2nd offset-identity window.  The real one is computed per card in
 # :class:`CatEmu.__init__` so it always sits clear of the image.bin window —
@@ -203,6 +204,10 @@ class CatEmu(Spike2Emu):
         self._catf = None
         self._mm_cat = None
         self.cat2size = 0
+        # PAD-595: the bank window backed in ONE piece (a private copy-on-write
+        # view), as the image.bin window is; (lo, hi) of the region, else (0, 0)
+        self._catcow = self._catbuf = None
+        self._cat_lo = self._cat_hi = 0
         self._serving_cat = False
         self._revalidate = None      # selected once per card
         raw = open(game_real_path, "rb").read()
@@ -227,6 +232,8 @@ class CatEmu(Spike2Emu):
 
     def _ensure_page(self, addr):
         base = addr & ~(PAGE - 1)
+        if self._card_lo <= base < self._card_hi or self._cat_lo <= base < self._cat_hi:
+            return True            # backed by a one-piece region already
         if base in self.mapped_pages:
             return True
         try:
@@ -263,9 +270,17 @@ class CatEmu(Spike2Emu):
     # ---- category file in the 2nd window ------------------------------------
     def set_category_file(self, sc_path):
         """Map ``image-scNN.bin`` into the DESC2 window (replacing any previous
-        one — its window pages are invalidated so they re-fill)."""
+        one — its window pages are invalidated so they re-fill).
+
+        The window is backed in ONE piece where it can be (PAD-595), the way
+        :meth:`Spike2Emu._map_card_window` backs image.bin's: a bank this app
+        builds has whole bodies written into the window by the chain encode,
+        and paging those in 4 KiB at a time left every later guest access
+        searching thousands of tiny regions (the three first beds of a nine-bed
+        bank took 136, 355 and 816 s).  Any failure keeps the paging path."""
         if self._mm_cat is not None:
             d2 = self.DESC2
+            self._unmap_cat_region()
             for base in [p for p in self.mapped_pages
                          if d2 <= p < d2 + self.cat2size + 0x20000]:
                 try:
@@ -284,6 +299,58 @@ class CatEmu(Spike2Emu):
         self._catf = open(sc_path, "rb")
         self._mm_cat = mmap.mmap(self._catf.fileno(), 0, access=mmap.ACCESS_READ)
         self.cat2size = self._mm_cat.size()
+        self._map_cat_region()
+
+    def _map_cat_region(self):
+        span = self.cat2size & ~(PAGE - 1)
+        d2 = self.DESC2
+        if span <= 0 or d2 + span > 0x1_0000_0000:
+            return
+        try:
+            import ctypes
+            self._catcow = mmap.mmap(self._catf.fileno(), 0, access=mmap.ACCESS_COPY)
+            self._catbuf = (ctypes.c_char * span).from_buffer(self._catcow)
+            self.mu.mem_map_ptr(d2, span, UC_PROT_ALL, ctypes.addressof(self._catbuf))
+        except Exception as e:                                       # noqa: BLE001
+            self.log.append(("cat_map_ptr", str(e)))
+            self._catbuf = None
+            if self._catcow is not None:
+                try:
+                    self._catcow.close()
+                except Exception:
+                    pass
+                self._catcow = None
+            return
+        self._cat_lo, self._cat_hi = d2, d2 + span
+
+    def _unmap_cat_region(self):
+        if self._cat_hi > self._cat_lo:
+            try:
+                self.mu.mem_unmap(self._cat_lo, self._cat_hi - self._cat_lo)
+            except UcError:
+                pass
+        self._cat_lo = self._cat_hi = 0
+        self._catbuf = None
+        if self._catcow is not None:
+            try:
+                self._catcow.close()
+            except Exception:
+                pass
+            self._catcow = None
+
+    def close(self):
+        try:
+            self._unmap_cat_region()
+        except Exception:                                            # noqa: BLE001
+            pass
+        for f in (self._mm_cat, self._catf):
+            try:
+                if f is not None:
+                    f.close()
+            except Exception:
+                pass
+        self._mm_cat = self._catf = None
+        super().close()
 
     # ---- snprintf stub (filename irrelevant — window chosen by the flag) -----
     def _snprintf_stub(self, eng):
@@ -301,7 +368,7 @@ class CatEmu(Spike2Emu):
 
     # ---- derive one category's params --------------------------------------
     def _derive_cat(self, cat, revalidate, load_limit=80_000_000,
-                    md_limit=600_000_000):
+                    md_limit=600_000_000, after_step=None):
         """Drive ``load_category_assets(cat)`` + ``MASTERDIR_DECODE(cat)`` with
         the two stubs; return the per-sound params (mirrors
         :meth:`Spike2Emu.derive_params`) or ``None`` if the category didn't
@@ -360,15 +427,23 @@ class CatEmu(Spike2Emu):
             # alone still lets a misaligned hit straddle two records (see
             # emulator._record_write_addr).
             self._md_range = (cap["mddst"], cap["mddst"] + n * 24)
-            return self._chain_records(md, n, cap["state"])
+            return self._chain_records(md, n, cap["state"], after_step)
         finally:
             self.del_hook(snp)
             self.del_hook(revalidate)
             self._serving_cat = False
 
-    def _chain_records(self, md, n, state):
+    def _chain_records(self, md, n, state, after_step=None):
         """Replay each master-dir record's band-build in isolation (identical to
-        :meth:`Spike2Emu.derive_params`'s chain), reading the raw obj verbatim."""
+        :meth:`Spike2Emu.derive_params`'s chain), reading the raw obj verbatim.
+
+        Each row also carries the record's ``identity`` bytes and the container
+        key it registered under (``findkey`` / ``key0``, generic builds), as
+        :meth:`Spike2Emu.derive_params` reports them.  *after_step* ``(idx, row,
+        redo)`` is that method's chain-aware hook (PAD-595: a bank this app
+        builds is encoded along its own chain): it may change the bank's bytes
+        in this emulator's memory and call ``redo()`` for the same record's
+        step again, returning the new ``(obj, next)`` to carry the chain on."""
         def _stub(eng):
             eng.mu.reg_write(UC_ARM_REG_R0, 0)
             eng.mu.reg_write(UC_ARM_REG_PC, eng.mu.reg_read(UC_ARM_REG_LR))
@@ -392,9 +467,30 @@ class CatEmu(Spike2Emu):
                 obj, nxt = self._drive_step(cur, rec, rec_idx=idx)
                 if obj is None:
                     break
-                rows.append(dict(idx=idx, body_off=_u32(obj, 0x00),
-                                 length=_u32(obj, 0x10), scale=obj[0x1d],
-                                 chan=obj[0x1b], _rawobj=obj))
+                fk = getattr(self, "_last_find_key", None)
+                row = dict(idx=idx, body_off=_u32(obj, 0x00),
+                           length=_u32(obj, 0x10), scale=obj[0x1d],
+                           chan=obj[0x1b], _rawobj=obj,
+                           identity=rec[4:16] + rec[20:24],
+                           key0=_u32(fk, 0) if fk and len(fk) >= 4 else None,
+                           findkey=bytes(fk) if fk and len(fk) >= 8 else None)
+                if after_step is not None:
+                    def redo(_cur=cur, _rec=rec, _idx=idx):
+                        return self._drive_step(_cur, _rec, rec_idx=_idx)
+                    got = after_step(idx, row, redo)
+                    if got is not None:
+                        obj2, nxt2 = got
+                        if obj2 is None or obj2[:0x20] != obj[:0x20]:
+                            raise RuntimeError(
+                                "bank record %d built a different codec object when its "
+                                "own body changed; a record's windows set only the records "
+                                "after it" % idx)
+                        nxt = nxt2
+                        fk2 = getattr(self, "_last_find_key", None)
+                        if fk2 and len(fk2) >= 8:
+                            row["key0"] = _u32(fk2, 0)
+                            row["findkey"] = bytes(fk2)
+                rows.append(row)
                 if nxt is None:
                     break
                 cur = dict(regs=nxt[0], sp=nxt[1], frame=nxt[2])
@@ -403,6 +499,38 @@ class CatEmu(Spike2Emu):
             for a in self.CHAIN_STUBS:
                 self.extra.pop(a, None)
         return rows
+
+    # ---- a bank this app built (PAD-595) ------------------------------------
+    def derive_bank(self, cat, sc_path, after_step=None, revalidate=None):
+        """Derive the records of the bank *sc_path* as category *cat*, through the
+        firmware's own loader and directory decode, each row with the container
+        key it registers under.  *revalidate* is the map-revalidation stub
+        (:meth:`pick_revalidate`); None tries the build's candidates in turn.
+        *after_step* is :meth:`_chain_records`'s.  Returns the rows, or raises
+        when the firmware does not register the bank -- a file the game would
+        not load either.  Use a FRESH emulator per call: a second derive on one
+        booted emulator finds the category already registered."""
+        if not self.categories_supported:
+            raise RuntimeError("this game program's category loader cannot be driven")
+        self.set_category_file(sc_path)
+        cands = [revalidate] if revalidate is not None else \
+            list(self._cat_locs["REVALIDATE_CANDIDATES"])
+        if self._revalidate is not None and revalidate is None:
+            cands = [self._revalidate]
+        last = None
+        for rev in cands:
+            try:
+                rows = self._derive_cat(cat, rev, after_step=after_step)
+            except RuntimeError:
+                raise
+            except Exception as e:                                  # noqa: BLE001
+                rows, last = None, e
+            if rows:
+                self._revalidate = rev
+                return rows
+        raise RuntimeError("the firmware did not register sound bank %s as category %d%s"
+                           % (os.path.basename(sc_path), cat,
+                              " (%s)" % last if last is not None else ""))
 
     # ---- decode a category sound (body from the category file) --------------
     def decode_cat(self, p, max_secs=None, cancel=None, progress=None):

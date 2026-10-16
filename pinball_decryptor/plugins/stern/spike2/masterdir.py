@@ -606,6 +606,15 @@ def write_directory(directory, emu):
     permutation of the seed word, so the seed is whatever maps to the checksum
     of the records being written."""
     session = _session(emu)
+    if session.keylen is None:
+        # The key length is confirmed only by a directory that passes the
+        # firmware's checksum (read_directory); the shape guess keygen falls
+        # back on picked 32 bytes on Godzilla LE 1.16 (its AES-192 key's spare
+        # words were not zero), and the bank packed under it was one the game
+        # refused (PAD-595).  Read one of this card's directories first.
+        raise MasterDirError(
+            "the sound-bank cipher's key length is not settled: read a directory "
+            "of this card before writing one")
     n = directory.count
     want = crc(session.crc_init, directory.records + directory.padded_plain)
     seed = session.seed_map().invert(want)

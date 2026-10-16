@@ -231,7 +231,7 @@ un2s\game.out`, `stracecheck.py`).
   resolver afterwards (sid 1 and bank sids alike ran off into data at
   0x43c78c), where the scaffold banks of `bank_e3.py`/`bank_e4.py` and a
   stock image padded to 1.9 GB did not; reproduced offline on the kept Try
-  it inputs (`C:	mp\PAD-595\keep`, `repro_keep.py`, `bisect*.py`). The
+  it inputs (`C:/tmp/PAD-595/keep`, `repro_keep.py`, `bisect*.py`). The
   check now registers the bank through the game's loader alone
   (`CatEmu.register_bank`: `load_category_assets` and the count, no
   directory replay) and resolves every bank sid on that; the records are

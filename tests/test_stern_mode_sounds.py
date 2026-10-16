@@ -205,12 +205,12 @@ def test_mode_file_c_stops_a_call_after_its_own_length():
                   "S->end_ms = (unsigned)num(&a)"):
         assert field in text
     # every call goes through own_call (item 150 follow-up), which arms the stop when it plays
-    for call in ("own_call(S->start, own_swap_of(S, S->start), S->start_ms,",
-                 "own_call(S->shot, own_swap_of(S, S->shot), S->shot_ms,",
-                 "own_call(S->end, own_swap_of(S, S->end), S->end_ms,"):
+    for call in ("own_call(S->start, own_swap_of(S, S->start), own_sid_of(S, S->start), S->start_ms,",
+                 "own_call(S->shot, own_swap_of(S, S->shot), own_sid_of(S, S->shot), S->shot_ms,",
+                 "own_call(S->end, own_swap_of(S, S->end), own_sid_of(S, S->end), S->end_ms,"):
         assert call in text
     body = text[text.index("static void own_call("):text.index("static void own_calls_tick(")]
-    assert "own_sounds_stop_after(request, ms);" in body
+    assert "own_sounds_stop_after(request, ms, sid != 0);" in body
     tick = text[text.index("static void on_tick(void)"):]
     assert tick.index("own_sounds_stops_tick();") < tick.index("if (!run.active || !(M = run.slot)) return;")
 

@@ -280,3 +280,32 @@ header naming the bank, the bypassed game program, the scaffold bank, and a
 CONTROL bank under an id the header does not name; an inotify watch on each
 staged file says what the game opened. Aerosmith 1.16 dry run: the named
 bank OPENED 8 s into the boot, the control never.
+
+Full rig sweep, 2026-10-16 15:00-16:20, four rigs
+(`docs/plans/pad595/library_rig.tsv`): **49 of 49 titles opened the named
+bank at boot (8-24 s in) and none opened the CONTROL bank.** 36 of 49 came
+up (attract, or Tech Alerts a stock boot does not leave on a rig either:
+Aerosmith, Batman, D&D, Guardians, Iron Maiden, Jurassic Park, Mando Pro,
+Munsters Pro, Sword of Rage, X-Men, King Kong Pro). 13 runs died 40-180 s
+into the boot, after the bank was opened and released: Avengers LE,
+Elvira 3, Foo Fighters Pro, Bond Pro, Jaws Pro, John Wick Pro, King Kong
+LE, Munsters LE, Rush LE and Pro, Star Wars LE, Stranger Things LE, Venom
+LE; eight by a segv, five by the game's own watchdog (GAME EXIT DISPATCH
+TIMEOUT). Their siblings (Venom Pro, Bond LE, John Wick LE, Foo LE ...)
+passed, so it is not a code path. Venom LE's segv (rig 3's log survived):
+pc 0x4ae5d8 inside a 64-byte-block hash routine (`0x4ae3a4` compress,
+`0x4af25c` update, called from `0x4af4fc` out of the 0x376d20 code), the
+data pointer in a thread mapping, right after the audio device opened.
+Prime suspect is the sweep's scaffold, not the feature: `sweep_lib.py`
+copied only the first 256 KB of each picked record but kept the record's
+real length in the directory (Avengers LE's picks are 258 MB each), so a
+boot-time read of a bank body past the file's end faults. The Write
+pipeline copies whole bodies, and the three Godzilla LE rig runs above,
+with real banks, had 0 segv. Elvira 3 passed on a second run with the same
+set, so some of the 13 are rig flakes too. Started and not finished (both
+jobs were stopped by the host for memory): `sweep_lib2.py` rebuilds the
+scaffold banks with whole bodies (Avengers LE done, 500 MB bank, its sids
+resolve), and `rig/bankboot_ctl.sh` reboots the 13 with the rebuilt banks.
+Side finding from the control attempt: Avengers LE and Elvira 3 opened
+`image-sc01.bin` even with image.bin's header left stock (count 0), so the
+game looks for bank files by name as well as by the header's id list.

@@ -6589,8 +6589,8 @@ def _grown_bank_size(img_path, byidx, grows):
     has appended every sound in *grows*, read off the bank's header before
     anything is staged."""
     from .spike2 import masterdir as MD
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     return _grown_bank_bytes(md_off, count,
                              [_grown_body_bytes(byidx[i], grows[i][1])
                               for i in sorted(grows)])
@@ -10349,8 +10349,8 @@ def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
     from . import sound_modes as _SMo
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     start = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(grows.items()) if i not in sm_grows]
     kept, cut, _bodies = _fit_grows(sorted(sm_grows), sm_grows, byidx, md_off, count,
                                     MAX_IMAGE_BYTES, start)
@@ -16662,8 +16662,8 @@ def _grows_kept_at(grows, byidx, img_path, limit, priority=None,
         return {}
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     reserved = reserved or {}
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
              for i in sorted(reserved)]
@@ -16708,8 +16708,8 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
     from . import card_size as _cs
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     order = _grow_order(grows, priority)
     reserved = reserved or {}
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
@@ -16822,9 +16822,16 @@ def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
         for idx in sorted(grows):
             _room, want = grows[idx]
             p = byidx[idx]
+            # PAD-593: a sound an earlier build grew plays its appended
+            # record (``shadows``), whose length *p* carries; that is the
+            # record to copy.
             edits.append(MD.GrowEdit(idx, int(p["length"]), int(want) + BLOCK,
-                                     _grown_body_bytes(p, want)))
-        grown, places = MD.plan_grow_records(d, edits)
+                                     _grown_body_bytes(p, want),
+                                     p.get("shadows")))
+        # the file size lets a bank an earlier build grew keep that build's
+        # bodies where they are (PAD-593, plan_grow_records)
+        grown, places = MD.plan_grow_records(
+            d, edits, file_size=os.path.getsize(_lp(img_path)))
         writes = MD.write_directory(grown, emu)
     finally:
         emu.close()

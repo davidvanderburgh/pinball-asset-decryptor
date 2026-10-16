@@ -319,6 +319,29 @@ def header_geometry(header):
     return _u32(header, HDR_MD_OFF), _u32(header, HDR_COUNT)
 
 
+def grow_md_off(md_off, count, file_size):
+    """Where a grow puts the record array of a bank whose header says
+    ``(md_off, count)`` and whose file is *file_size* bytes.
+
+    A stock bank ends at its record array's tail, so the array grows in place.
+    One an earlier build grew carries that build's bodies past the tail
+    (PAD-593): growing the array in place would run over them, so it moves to
+    the end of the file instead (:func:`plan_grow_records`)."""
+    if file_size is not None and int(file_size) > md_off + tail_len(count):
+        return align16(int(file_size))
+    return md_off
+
+
+def image_grow_geometry(image_path):
+    """``(md_off, count)`` a grow of *image_path* works from: the header's,
+    with the array moved past an earlier build's bodies (:func:`grow_md_off`)."""
+    with open(image_path, "rb") as f:
+        md_off, count = header_geometry(f.read(0x100))
+        f.seek(0, 2)
+        size = f.tell()
+    return grow_md_off(md_off, count, size), count
+
+
 # --------------------------------------------------------------------------
 # the cipher layer, with the key supplied
 # --------------------------------------------------------------------------
@@ -352,13 +375,16 @@ def unpack_tail(blob, count, key, iv, md_off=0):
 # --------------------------------------------------------------------------
 # appending records
 # --------------------------------------------------------------------------
+#: ``src`` is the record the appended copy is made from when it is not ``idx``
+#: itself: a sound an earlier build already grew plays its appended record, so
+#: growing it again copies that one (PAD-593).
 GrowEdit = collections.namedtuple(
-    "GrowEdit", "idx old_length new_length body_bytes")
+    "GrowEdit", "idx old_length new_length body_bytes src", defaults=(None,))
 Placement = collections.namedtuple(
     "Placement", "idx new_idx body_off length body_bytes")
 
 
-def plan_grow_records(directory, edits, body_pad=BODY_PAD):
+def plan_grow_records(directory, edits, body_pad=BODY_PAD, file_size=None):
     """Append one record per edit, each pointing at a body past the old tail.
 
     ``edits`` are :class:`GrowEdit` tuples: the record to grow, its current
@@ -371,12 +397,22 @@ def plan_grow_records(directory, edits, body_pad=BODY_PAD):
     Editing a record in place is deliberately not offered.  Changing one
     record's length word shifts every later record's decode parameters --
     including its sound-container identity key -- with its body untouched, so
-    there is no arrangement of restored bytes that makes it safe."""
+    there is no arrangement of restored bytes that makes it safe.
+
+    A bank an earlier build already grew (PAD-593) has that build's bodies
+    right after its record array, so one more record would run over the first
+    of them and the new bodies over the rest.  Given the image's *file_size*,
+    such a bank keeps every body where it is and gets its record array moved
+    past the end of the file instead (``hdr[0x40]`` follows it, see
+    :func:`write_directory`); the old array is left behind as dead bytes."""
     edits = [GrowEdit(*e) for e in edits]
     if not edits:
         raise MasterDirError("plan_grow_records called with no edits")
     seen = set()
     for e in edits:
+        if e.src is not None and not 0 <= e.src < directory.count:
+            raise MasterDirError("record %d is not in this directory (%d records)"
+                                 % (e.src, directory.count))
         if not 0 <= e.idx < directory.count:
             raise MasterDirError("record %d is not in this directory (%d records)"
                                  % (e.idx, directory.count))
@@ -394,7 +430,10 @@ def plan_grow_records(directory, edits, body_pad=BODY_PAD):
     # The length word and the decoded length differ by one constant per build.
     # Every edit must agree on it, which catches a caller passing the wrong
     # "old" length far more cheaply than a failed Write does.
-    xors = {(directory.length_word(e.idx) ^ (e.old_length & 0xffffffff))
+    def src(e):
+        return e.idx if e.src is None else e.src
+
+    xors = {(directory.length_word(src(e)) ^ (e.old_length & 0xffffffff))
             for e in edits}
     if len(xors) > 1:
         raise MasterDirError(
@@ -404,19 +443,21 @@ def plan_grow_records(directory, edits, body_pad=BODY_PAD):
             % ", ".join("0x%08x" % v for v in sorted(xors)))
 
     new_count = directory.count + len(edits)
-    off = directory.md_off + tail_len(new_count) + body_pad
+    md_off = grow_md_off(directory.md_off, directory.count, file_size)
+    off = md_off + tail_len(new_count) + body_pad
     appended = []
     places = []
     for n, e in enumerate(edits):
-        word = directory.length_word(e.idx) ^ (e.old_length & 0xffffffff) \
+        word = directory.length_word(src(e)) ^ (e.old_length & 0xffffffff) \
             ^ (e.new_length & 0xffffffff)
-        appended.append(set_geometry(directory.record(e.idx), body_off=off,
+        appended.append(set_geometry(directory.record(src(e)), body_off=off,
                                      length_word=word))
         places.append(Placement(e.idx, directory.count + n, off, e.new_length,
                                 e.body_bytes))
         off += e.body_bytes + body_pad
     grown = directory.with_records(
         directory.records + b"".join(appended), new_count)
+    grown.md_off = md_off
     return grown, places
 
 
@@ -600,7 +641,8 @@ def read_directory(image_path, emu):
 def write_directory(directory, emu):
     """``{file_offset: bytes}`` that turn an image into one carrying
     ``directory``: the rebuilt tail at its directory offset, and the record
-    count in the header.  ``hdr[0x40]`` never moves.
+    count in the header.  ``hdr[0x40]`` names the tail's offset; it changes
+    only when :func:`plan_grow_records` moved the array (PAD-593).
 
     The seed is chosen, not kept: the firmware demands a checksum that is a
     permutation of the seed word, so the seed is whatever maps to the checksum
@@ -613,4 +655,5 @@ def write_directory(directory, emu):
         raise MasterDirError("no seed word produces checksum 0x%08x" % want)
     key, iv = keygen(emu, seed)
     return {directory.md_off: pack_tail(directory, key, iv, seed),
+            HDR_MD_OFF: _p32(directory.md_off),
             HDR_COUNT: _p32(n)}

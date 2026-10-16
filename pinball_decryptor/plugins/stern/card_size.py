@@ -354,6 +354,22 @@ def read_layout(f, size=None, any_size=False):
     return Layout(int(size), laid_out, c3, s4, c4, logicals)
 
 
+def read_growing_layout(f, target):
+    """:func:`read_layout`, and also a card laid out like Stern's at no Stern size when a
+    build GROWS it to *target* (PAD-593): a card this app made as small as it can be
+    (:func:`fit_image`; a custom image someone shared after building it that way) is
+    Stern's table with a shorter games partition, and growing it is the same move of the
+    extended partition and the same ``resize2fs``.  Anything else about the table is still
+    checked, and a card at no Stern size is still refused when it would not grow."""
+    try:
+        return read_layout(f)
+    except CardSizeError:
+        layout = read_layout(f, any_size=True)
+        if not target or LAYOUT_SIZES.get(target, 0) <= layout.laid_out:
+            raise
+        return layout
+
+
 def plan(layout, target):
     """``(delta_sectors, new_layout)`` for growing *layout* to the *target*
     class; ``(0, layout)`` when the card is that size or bigger already.
@@ -401,7 +417,7 @@ def target_for(original_path, target=None):
         return None
     with open(_lp(original_path), "rb") as f:
         try:
-            layout = read_layout(f)
+            layout = read_growing_layout(f, target)
         except CardSizeError as e:
             raise CardSizeError(
                 "This card can't be built for a %s SD card: %s."
@@ -494,7 +510,7 @@ def output_parts(original_path, parts, target):
     if not target:
         return [(int(o), int(s)) for o, s in parts]
     with open(_lp(original_path), "rb") as f:
-        layout = read_layout(f)
+        layout = read_growing_layout(f, target)
     return linux_parts(plan(layout, target)[1])
 
 
@@ -898,7 +914,7 @@ def room_gained(path, target, route=ROUTE_MOUNT):
     when the card is grown to *target* (0 when it is that big already)."""
     from .ext4 import Ext4Reader
     with open(_lp(path), "rb") as f:
-        layout = read_layout(f)
+        layout = read_growing_layout(f, target)
         f.seek(0, os.SEEK_END)
         size = f.tell()
         space = p3_space(Ext4Reader(f, P3_START * SECTOR,
@@ -1374,7 +1390,7 @@ def expand_image(path, target, log=None, cancel=None, epoch=None):
     t0 = time.monotonic()
     e2 = _E2fs()
     with open(_lp(path), "r+b") as f:
-        old = read_layout(f)
+        old = read_growing_layout(f, target)
         delta, new = plan(old, target)
         if delta <= 0:
             return False
@@ -1764,9 +1780,11 @@ def check_blocks_unmoved(original_path, path, parts, log=None):
             got = after.get(p)
             if got is None or got.get("size") != node.get("size"):
                 return p
-            sz = int(node.get("size") or 0)
-            if sz and (list(ra.disk_ranges(node, 0, sz))
-                       != list(rb.disk_ranges(got, 0, sz))):
+            # mapped, not disk_ranges of the whole file: a file with a hole
+            # (a custom card's game program, PAD-491) has nothing to move
+            # there, and disk_ranges would refuse it (PAD-593)
+            if int(node.get("size") or 0) and (ra.mapped_ranges(node)
+                                               != rb.mapped_ranges(got)):
                 return p
     if log:
         log("All %d files on the games partition are in the blocks they had "

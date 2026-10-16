@@ -365,3 +365,27 @@ def test_a_failed_fit_discards_the_build(tmp_path, monkeypatch):
         engine._shrink_card(str(orig), str(out), None, lambda *a: None,
                             lambda: False, fit=True)
     assert gone == [str(out)]
+
+
+def test_a_card_made_as_small_as_it_can_be_grows_to_a_bigger_card(tmp_path, fit_reads,
+                                                                  monkeypatch):
+    """PAD-593: a custom image a tester built small with this app (a Heisei Godzilla card,
+    9.69 GB) was refused for a 32 GB card ("not one of Stern's card sizes"). Its table is
+    Stern's with a shorter games partition, so it grows the way an 8 GB card does, to
+    Stern's own 32 GB table; one that would not grow is still refused."""
+    monkeypatch.setattr("pinball_decryptor.plugins.stern.multiimage.images_for_path",
+                        lambda p: [p])
+    path = make_card(tmp_path / "c.raw", "8G")
+    assert cs.fit_image(str(path), epoch=9) is True
+    with open(path, "rb") as f:
+        small = cs.read_layout(f, any_size=True)
+        grows = cs.read_growing_layout(f, "32G")
+        with pytest.raises(cs.CardSizeError, match="not one of Stern's"):
+            cs.read_growing_layout(f, None)
+    assert grows == small
+    assert cs.target_for(str(path), "32G") == "32G"
+    delta, new = cs.plan(small, "32G")
+    assert delta > 0 and new.laid_out == cs.LAYOUT_SIZES["32G"]
+    assert new.p4_start + new.p4_count + 2 == new.laid_out // 512
+    assert cs.output_parts(str(path), [], "32G")[0] == (cs.P3_START * 512,
+                                                        new.p3_count * 512)

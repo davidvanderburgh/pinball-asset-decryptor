@@ -6596,8 +6596,8 @@ def _grown_bank_size(img_path, byidx, grows):
     has appended every sound in *grows*, read off the bank's header before
     anything is staged."""
     from .spike2 import masterdir as MD
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     return _grown_bank_bytes(md_off, count,
                              [_grown_body_bytes(byidx[i], grows[i][1])
                               for i in sorted(grows)])
@@ -6725,7 +6725,8 @@ class _SpaceCard:
             self.by_block[bytes(node["i_block"])] = rel
         try:
             with open(_lp(path), "rb") as f:
-                layout = cs.read_layout(f)
+                # (a card made as small as it can be grows too: PAD-593)
+                layout = cs.read_growing_layout(f, grow_to)
         except (cs.CardSizeError, OSError):
             layout = None            # not Stern-shaped: measured as it is
         self.at = grow_to if layout is not None else None
@@ -6737,8 +6738,9 @@ class _SpaceCard:
             # (a card built for the smaller 16 GB card is that size: PAD-465)
             own = cs.layout_class(layout.laid_out)
             self.current = grow_to or own
-            self.room = cs.room_by_class(layout, self.space,
-                                         [own] + list(sizes or ()), route)
+            self.room = cs.room_by_class(
+                layout, self.space,
+                [c for c in [own] + list(sizes or ()) if c], route)
 
     def held(self, node):
         """Blocks *node* holds on the partition now (its extent tree too)."""
@@ -10410,8 +10412,8 @@ def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
     from . import sound_modes as _SMo
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     start = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(grows.items()) if i not in sm_grows]
     kept, cut, _bodies = _fit_grows(sorted(sm_grows), sm_grows, byidx, md_off, count,
                                     MAX_IMAGE_BYTES, start)
@@ -16723,8 +16725,8 @@ def _grows_kept_at(grows, byidx, img_path, limit, priority=None,
         return {}
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     reserved = reserved or {}
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
              for i in sorted(reserved)]
@@ -16769,8 +16771,8 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
     from . import card_size as _cs
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     order = _grow_order(grows, priority)
     reserved = reserved or {}
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
@@ -16883,9 +16885,16 @@ def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
         for idx in sorted(grows):
             _room, want = grows[idx]
             p = byidx[idx]
+            # PAD-593: a sound an earlier build grew plays its appended
+            # record (``shadows``), whose length *p* carries; that is the
+            # record to copy.
             edits.append(MD.GrowEdit(idx, int(p["length"]), int(want) + BLOCK,
-                                     _grown_body_bytes(p, want)))
-        grown, places = MD.plan_grow_records(d, edits)
+                                     _grown_body_bytes(p, want),
+                                     p.get("shadows")))
+        # the file size lets a bank an earlier build grew keep that build's
+        # bodies where they are (PAD-593, plan_grow_records)
+        grown, places = MD.plan_grow_records(
+            d, edits, file_size=os.path.getsize(_lp(img_path)))
         writes = MD.write_directory(grown, emu)
     finally:
         emu.close()
@@ -16948,16 +16957,25 @@ def _derive_grown(gr_path, staged, params_stock, log, progress=None):
     params = collapse_shadowed(rows)
     grown_idx = {p["idx"] for p in params if p.get("shadows") is not None}
     raw_by_idx = {r.get("idx"): r for r in rows}
+    stock_by_idx = {p["idx"]: p for p in params_stock}
     for p in params:
         p["grown"] = p["idx"] in grown_idx
         if p["grown"]:
             # The key the STOCK record registered under, from the row the
             # collapse retired.  The play tables name the sound by it, and
             # the re-point matches on it exactly (all eight bytes).
-            p["stock_findkey"] = (raw_by_idx.get(p["idx"]) or {}).get("findkey")
+            src = raw_by_idx.get(p["idx"]) or {}
+            base = stock_by_idx.get(p["idx"]) or {}
+            if base.get("shadows") is not None:
+                # PAD-593: the card came in with this sound already grown (a
+                # custom image built with longer sounds).  Its play tables
+                # name the appended record that card plays, not the dead stock
+                # one, so that is the key to re-point from.
+                src = base
+            p["stock_findkey"] = src.get("findkey")
             # and its length, which is what the descriptor's declared
             # duration was written from.
-            p["stock_length"] = (raw_by_idx.get(p["idx"]) or {}).get("length")
+            p["stock_length"] = src.get("length")
     stock = {p["idx"]: (p["scale"], p["pred16"], p["body_off"], p["length"])
              for p in params_stock}
     moved = [p["idx"] for p in params
@@ -18077,6 +18095,10 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=(),
                 "idx %d: the staged bank's decode reported no container key "
                 "for the sound, so its play tables can't be re-pointed."
                 % p["idx"])
+        if bytes(old) == bytes(new):
+            # PAD-593: grown on the card this build started from and not
+            # touched by it; its descriptors already name this record.
+            continue
         grew = 0
         if p.get("stock_length") is not None:
             # The declared duration is what the voice PLAYS, and the codec emits
@@ -18258,7 +18280,10 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, ke
     finally:
         emu.close()
     keep = {int(i) for i in keep or ()}
-    n_grown = sum(1 for p in params if p.get("grown") and p["idx"] not in keep)
+    # (PAD-593: one the incoming card already had grown, and this build left
+    # alone, is not counted: its descriptors were not touched)
+    n_grown = sum(1 for p in params if p.get("grown") and p["idx"] not in keep
+                  and bytes(p.get("stock_findkey") or b"") != bytes(p.get("findkey") or b""))
     log("Play tables re-pointed: %d descriptor(s) now name the longer copy "
         "of %d sound(s) and declare the new length, confirmed through the "
         "game's own resolver." % (len(expect), n_grown), "info")

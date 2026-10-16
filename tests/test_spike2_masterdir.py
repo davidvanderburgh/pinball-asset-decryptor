@@ -360,6 +360,39 @@ def test_plan_grow_places_bodies_past_the_new_tail_and_apart():
         assert p.body_off > d.file_size()
 
 
+def test_plan_grow_on_a_bank_grown_before_keeps_its_bodies_and_moves_the_array():
+    """PAD-593: a custom image built with longer sounds has those bodies right after its record
+    array. Growing it again used to put the longer array over the first of them and the new
+    bodies over the rest, then cut the file where the new ones ended: the game read the earlier
+    sounds' records into nothing and crashed after boot. Now every body stays where it is, the
+    array moves past the end of the file, and a sound grown before is copied from the record
+    it plays."""
+    from pinball_decryptor.plugins.stern.spike2 import masterdir as MD
+    stock = _fake_directory(4, md_off=0x40000)
+    # an earlier build grew record 1: record 4 is its appended copy, past the old tail
+    old_body = stock.file_size() + MD.BODY_PAD
+    rec4 = MD.set_geometry(stock.record(1), body_off=old_body,
+                           length_word=(_fake_length(1) + 5000) ^ _FAKE_LENGTH_XOR)
+    d = stock.with_records(stock.records + rec4, 5)
+    file_size = old_body + 6000
+    grown, places = MD.plan_grow_records(
+        d, [_edit(2, _fake_length(2), _fake_length(2) + 4410, 4096),
+            MD.GrowEdit(1, _fake_length(1) + 5000, _fake_length(1) + 9000, 9000, 4)],
+        file_size=file_size)
+    assert grown.records[:24 * 5] == d.records                 # nothing existing moves
+    assert grown.md_off >= file_size and grown.md_off % 16 == 0
+    for p in places:
+        assert p.body_off - MD.BODY_PAD >= grown.md_off + MD.tail_len(grown.count)
+    # the re-grown sound is a copy of its appended record, at the length asked for
+    assert grown.identity(6) == d.identity(4)
+    assert grown.length_word(6) ^ _FAKE_LENGTH_XOR == _fake_length(1) + 9000
+    # a stock bank is grown in place, as before, with or without the file size
+    again, _ = MD.plan_grow_records(
+        stock, [_edit(2, _fake_length(2), _fake_length(2) + 4410, 4096)],
+        file_size=stock.file_size())
+    assert again.md_off == stock.md_off
+
+
 def test_plan_grow_refuses_edits_it_cannot_honour():
     from pinball_decryptor.plugins.stern.spike2 import masterdir as MD
     d = _fake_directory(5)

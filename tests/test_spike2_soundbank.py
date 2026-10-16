@@ -76,10 +76,15 @@ def test_plan_bank_lays_each_body_behind_its_pad_and_the_directory_last():
         SB.BankEdit(1147, rec_b, 0x20, 0x50, 500),
     ])
     assert [(p.idx, p.new_idx) for p in places] == [(1898, 0), (1147, 1)]
-    assert places[0].body_off == SB.HDR_LEN + MD.BODY_PAD
+    # the fragment table (2 fragments of 5 slots) and the 16-byte data block come first
+    tables = 2 * SB.DEFAULT_STRIDE * SB.FRAG_SLOT + 16
+    assert places[0].body_off == MD.align16(SB.HDR_LEN + tables) + MD.BODY_PAD
     assert places[1].body_off == places[0].body_off + 1000 + MD.BODY_PAD
     assert d.count == 2
-    assert d.md_off == MD.align16(places[1].body_off + 500 + MD.BODY_PAD)
+    # then the descriptor block, one slot a sound, then the directory
+    desc0 = MD.align16(places[1].body_off + 500 + MD.BODY_PAD)
+    assert [p.desc_off for p in places] == [desc0, desc0 + SB.DESC_SLOT]
+    assert d.md_off == MD.align16(desc0 + 2 * SB.DESC_SLOT)
     assert d.trailer == SB.PAD_TRAILER
     # a copy of the host record with only its geometry replaced
     assert d.body_off(0) == places[0].body_off
@@ -105,6 +110,46 @@ def test_split_banks_fills_each_bank_to_the_limit_in_order():
     assert SB.split_banks(edits) == [edits]
     with pytest.raises(SB.SoundBankError):
         SB.split_banks(edits, limit=one - 1)
+
+
+def test_write_tables_whitens_each_slot_and_descriptor_as_the_resolver_reads_them(tmp_path):
+    """The resolver (read off Deadpool LE 1.16 and Godzilla LE 1.16) takes slot
+    ``n * stride + k``, de-whitens its low word with four vf2 bytes at
+    ``((slot >> 6) & 0x3f) << 8 | (slot & 0x7f)`` to the descriptor's offset,
+    and de-whitens the descriptor with vf2 at a rule of that offset."""
+    import random
+    rnd = random.Random(595)
+    vf2 = bytes(rnd.getrandbits(8) for _ in range(SB.VF2_WINDOW + SB.DESC_SLOT))
+    places = [SB.BankPlacement(7, 0, 0x100, 10, 20, 0x2000), SB.BankPlacement(9, 1, 0x200, 10, 20, 0x2050)]
+    path = tmp_path / "image-sc03.bin"
+    path.write_bytes(b"\0" * 0x2200)
+    descs = {0: b"\x05\x01\x01" + b"A" * 30, 1: b"\x05\x1c\x01" + b"B" * 20}
+    ks = SB.write_tables(str(path), places, descs, vf2, lambda off: off & 0x2a6, stride=5)
+    assert ks == {0: 0x2000 & 0x2a6, 1: 0x2050 & 0x2a6}
+    data = path.read_bytes()
+    for pl in places:
+        for k in range(5):
+            slot = pl.new_idx * 5 + k
+            word, hi = struct.unpack_from("<II", data, SB.HDR_LEN + slot * SB.FRAG_SLOT)
+            assert hi == 0
+            o = SB.slot_vf2_offset(slot)
+            assert word ^ struct.unpack_from("<I", vf2, o)[0] == pl.desc_off
+        plain = descs[pl.new_idx]
+        raw = data[pl.desc_off:pl.desc_off + len(plain)]
+        assert bytes(a ^ b for a, b in zip(raw, vf2[ks[pl.new_idx]:])) == plain
+    assert SB.slot_vf2_offset(5) == 5 and SB.slot_vf2_offset(64) == 0x140 and SB.slot_vf2_offset(0x7f) == 0x17f
+    assert SB.bank_sid(1, 0) == 0x10000 and SB.bank_sid(55, 2) == 0x370002
+    with pytest.raises(SB.SoundBankError):
+        SB.write_tables(str(path), places, {0: b"x" * (SB.DESC_SLOT + 1), 1: b"y"}, vf2, lambda o: 0)
+
+
+def test_fragment_stride_is_read_off_image_bins_own_tables():
+    h = bytearray(0x100)
+    struct.pack_into("<I", h, 0x28, 0xF8)
+    struct.pack_into("<I", h, 0x48, 0xF8 + 2599 * 40)
+    struct.pack_into("<I", h, 0x5C, 2599)
+    assert SB.fragment_stride(bytes(h)) == 5
+    assert SB.fragment_stride(bytes(0x100)) == SB.DEFAULT_STRIDE
 
 
 def test_bank_header_has_no_fragment_table_and_points_at_the_directory():
@@ -322,8 +367,12 @@ def test_build_sound_banks_gives_each_bank_sound_its_keys_and_names_the_bank_in_
              SB.BankEdit(1251, b"\0" * 24, 500, 2000, 4000)]
     plan = E._BankPlan([(1, edits)], {618: "a.wav", 1251: "b.wav"},
                        {618: (1000, 5000), 1251: (500, 2000)}, "godzilla_le")
-    places = [SB.BankPlacement(618, 0, 0x78, 5000, 20000), SB.BankPlacement(1251, 1, 0x4F00, 2000, 4000)]
+    places = [SB.BankPlacement(618, 0, 0x78, 5000, 20000, 0x6000),
+              SB.BankPlacement(1251, 1, 0x4F00, 2000, 4000, 0x6050)]
     bank = str(tmp_path / "image-sc01.bin")
+    (tmp_path / "game").write_bytes(b"\0" * 64)
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    monkeypatch.setattr(MW, "request_sids", lambda elf, head, r: {125: [73], 1251: [900]}[int(r)])
 
     class FakeEmu(object):
         def __init__(self, *a, **k):
@@ -345,13 +394,24 @@ def test_build_sound_banks_gives_each_bank_sound_its_keys_and_names_the_bank_in_
     # the check hands back rows derived afresh, which carry no host
     monkeypatch.setattr(BB, "verify_bank",
                         lambda *a, **k: verified.append(a[3]) or [dict(r, host=None) for r in rows])
-    beds = E._build_sound_banks("game", str(img), params, [], plan, used, {618}, {}, str(tmp_path),
-                                None, lambda *a, **k: None)
-    assert verified == [1]
-    assert used[0]["stock_key"] == "01" * 8 and used[0]["our_key"] == "aa" * 8
-    assert used[0]["bank"] == 1 and used[0]["bank_idx"] == 0
-    assert used[1]["stock_key"] == "02" * 8 and used[1]["our_key"] == "bb" * 8
-    assert beds == {618: (b"\x01" * 8, 1000, 5000)}
+    tables = {}
+
+    def write_tables(gr, im, path, cat, pl, rws, carriers, durations, music_idx, log):
+        tables.update(carriers=carriers, durations=durations, music=set(music_idx))
+        return {r["idx"]: (SB.bank_sid(cat, r["idx"]), b"\x05", 0) for r in rws}
+
+    monkeypatch.setattr(BB, "write_bank_tables", write_tables)
+    monkeypatch.setattr(BB, "verify_tables", lambda *a, **k: verified.append(("tables", a[3])))
+    beds = E._build_sound_banks(str(tmp_path / "game"), str(img), params, [], plan, used, {618}, {},
+                                str(tmp_path), None, lambda *a, **k: None)
+    assert verified == [1, ("tables", 1)]
+    # each sound's carrier sid gives its descriptor; the bed is the looping one
+    assert tables["carriers"] == {618: 73, 1251: 900} and tables["music"] == {618}
+    assert set(tables["durations"]) == {618, 1251}
+    # the mode file points the carrier at the bank's sid: no key swap
+    assert used[0]["bank"] == 1 and used[0]["bank_idx"] == 0 and used[0]["bank_sid"] == 0x10000
+    assert used[1]["bank_sid"] == 0x10001 and "stock_key" not in used[1] and "our_key" not in used[1]
+    assert beds == {}
     assert plan.files == [(1, bank)]
     h = img.read_bytes()
     assert struct.unpack_from("<I", h, 0x68)[0] == 1

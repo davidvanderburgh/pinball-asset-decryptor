@@ -18,12 +18,20 @@ The pieces (``spike2/soundbank.py`` has the file's geometry and the why):
   every key is the one the finished bank registers.
 * :func:`verify_bank` -- the finished file derived again on a fresh
   emulator: the same codec objects and the same keys, or the Write stops.
+* :func:`write_bank_tables` / :func:`verify_tables` -- the play tables that
+  make the bank's sounds PLAYABLE by a sid of its category (``soundbank``
+  has the why): one fragment a sound and a descriptor copied from the
+  sound's carrier with the bank record's key and length, whitened as the
+  game's resolver expects (:func:`resolver_rule` measures the rule off the
+  card's own cat-0 sids), then every bank sid resolved through the game's
+  own resolver on the finished file.
 
 Everything here is driven through :class:`.spike2.category.CatEmu`, the
 emulator that serves a bank at a second window exactly as the game's loader
 maps it.
 """
 import os
+import struct
 
 from ...core.longpath import ext as _lp
 from .spike2 import masterdir as MD
@@ -96,13 +104,16 @@ def bank_edits(spilled, byidx, directory):
 # --------------------------------------------------------------------------
 # staging
 # --------------------------------------------------------------------------
-def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None):
+def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None, stride=None):
     """Write the bank for category *cat* holding *edits* into *work* and return
     ``(path, places)``.  Each body starts as the host's stock audio repeated
     to fill; *emu* is a booted emulator on the card's program (one is made
     when None)."""
     from .spike2.emulator import Spike2Emu
-    directory, places = SB.plan_bank(edits)
+    if stride is None:
+        with open(_lp(img_path), "rb") as f:
+            stride = SB.fragment_stride(f.read(0x100))
+    directory, places = SB.plan_bank(edits, stride)
     scaffold = {}
     with open(_lp(img_path), "rb") as f:
         for pl in places:
@@ -123,7 +134,7 @@ def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None):
         # guess packs a directory the game rejects (found building the first
         # bank of a Write, whose emulator had read nothing)
         MD.read_directory(_lp(img_path), emu)
-        size = SB.write_bank(_lp(path), directory, places, scaffold, emu)
+        size = SB.write_bank(_lp(path), directory, places, scaffold, emu, stride)
     finally:
         if own:
             emu.close()
@@ -295,3 +306,165 @@ def category_ids_free(img_path, bank_names, n):
         _count, ids, _room = SB.category_slots(f.read(0x200))
     return SB.next_category_ids(ids, bank_names, n)
 
+
+
+# --------------------------------------------------------------------------
+# the play tables: a sid of the bank's category for every sound
+# --------------------------------------------------------------------------
+#: How many cat-0 sids :func:`resolver_rule` reads to measure the keystream
+#: rule; the mask's bits all show within a few hundred.
+RULE_SIDS = 1200
+
+
+def resolver_rule(emu, resolver, out, img_path, limit=RULE_SIDS):
+    """``(mask, xor)``: the game's rule for a descriptor's keystream offset,
+    ``ks = (desc_off ^ xor) & mask``, measured on this build's own cat-0 sids
+    through its resolver (*emu* booted, *resolver*/*out* from
+    :func:`.sfx_names._find_resolver`).  Godzilla LE 1.16 has ``off & 0x2a6``,
+    Deadpool LE 1.16 ``(off ^ 0xb8162db5) & 0xb95``; read off the resolver
+    rather than its code so a build with other constants measures its own.
+    Raises when the sids do not agree on one rule."""
+    from .spike2 import sfx_names as SN
+    pairs = []
+    ceiling = min(SN.sid_ceiling(_lp(img_path)), limit)
+    for sid in range(ceiling):
+        emu.mu.mem_write(out, b"\x00" * 0x40)
+        st = emu.call(resolver, (sid, out), limit=5_000_000)
+        if st[0] != "ok" or not (SN.IMG_BASE <= st[1] < SN.IMG_BASE + emu.imgsize):
+            continue
+        ks = struct.unpack("<I", bytes(emu.mu.mem_read(out, 4)))[0] - emu.VF2_VA
+        if not 0 <= ks < SB.VF2_WINDOW:
+            continue
+        pairs.append((st[1] - SN.IMG_BASE, ks))
+    if len(pairs) < 50:
+        raise RuntimeError("the game's resolver answered for %d sound id(s), too few to measure "
+                           "its keystream rule" % len(pairs))
+    mask = 0
+    for _off, ks in pairs:
+        mask |= ks
+    xors = {(off ^ ks) & mask for off, ks in pairs}
+    if len(xors) != 1:
+        raise RuntimeError("the game's resolver does not derive a descriptor's keystream offset "
+                           "from its offset by one rule (%d seen over %d sound ids)"
+                           % (len(xors), len(pairs)))
+    xor = xors.pop()
+    bad = [off for off, ks in pairs if ((off ^ xor) & mask) != ks]
+    if bad:
+        raise RuntimeError("keystream rule mismatch on %d sound id(s)" % len(bad))
+    return mask, xor
+
+
+def compose_descriptor(template, key8, duration, music):
+    """A bank descriptor: *template* (a carrier's de-whitened descriptor
+    bytes) with its first op11 record key replaced by *key8* (the bank
+    record's own key) and its declared duration by *duration* (1/4000 s
+    units).  A music bed's template must be a looping music descriptor, as
+    :func:`engine._music_template_writes` demands of a bed's carrier."""
+    from . import engine as E
+    t = bytes(template)
+    ops = E._op11_payloads(t)
+    if not ops:
+        raise RuntimeError("the carrier's descriptor names no record (%s)" % t[:24].hex())
+    p = ops[0][0]
+    if music and t[p + 8:p + 12] != E._MUSIC_LOOP_TAIL:
+        raise RuntimeError("the music carrier's descriptor is not a looping music one (%s)"
+                           % t[:40].hex())
+    plain = bytearray(t)
+    plain[p:p + 8] = bytes(key8)
+    plain[E._DESC_DUR_OFF:E._DESC_DUR_OFF + 4] = struct.pack("<I", int(duration) & 0xFFFFFFFF)
+    return bytes(plain)
+
+
+def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers, durations,
+                      music_idx, log, stride=None):
+    """Write the fragment table and the descriptors into the staged bank for
+    the records *rows* (the chain's, with ``host`` and ``findkey``):
+    placement *n*'s descriptor is a copy of its carrier's (*carriers*
+    ``{host idx: carrier sid}``, resolved through the game's resolver) naming
+    the bank record's key and declaring *durations[host idx]*; hosts in
+    *music_idx* are looping beds.  Returns ``{new_idx: (sid, plain, ks)}``
+    for :func:`verify_tables`."""
+    from .spike2 import sfx_names as SN
+    from .spike2.emulator import Spike2Emu
+    if stride is None:
+        with open(_lp(img_path), "rb") as f:
+            stride = SB.fragment_stride(f.read(0x100))
+    by_new = {r["idx"]: r for r in rows}
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        resolver, out = SN._find_resolver(emu)
+        if resolver is None:
+            raise RuntimeError("the game's descriptor resolver could not be located, so the sound "
+                               "bank's play tables cannot be written")
+        mask, xor = resolver_rule(emu, resolver, out, img_path)
+        vf2 = bytes(emu.mu.mem_read(emu.VF2_VA, SB.VF2_WINDOW + SB.DESC_SLOT))
+        descs = {}
+        for pl in places:
+            r = by_new[pl.new_idx]
+            csid = carriers[pl.idx]
+            got = SN.resolve_descriptor(emu, resolver, out, csid)
+            if got is None:
+                raise RuntimeError("sound id %d (the carrier of the sound in bank record %d) has no "
+                                   "descriptor to copy" % (csid, pl.new_idx))
+            descs[pl.new_idx] = compose_descriptor(got[2], r["findkey"], durations[pl.idx],
+                                                   pl.idx in music_idx)
+    finally:
+        emu.close()
+    ks_by = SB.write_tables(_lp(bank_path), places, descs, vf2,
+                            lambda off: (off ^ xor) & mask, stride)
+    log("Sound bank %s: %d fragment(s) and descriptor(s) written (keystream rule mask %#x xor "
+        "%#x, %d slot(s) a fragment)." % (SB.bank_name(cat), len(places), mask, xor, stride), "info")
+    return {pl.new_idx: (SB.bank_sid(cat, pl.new_idx), descs[pl.new_idx], ks_by[pl.new_idx])
+            for pl in places}
+
+
+def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, revalidate=None):
+    """Resolve every bank sid through the game's own resolver with the
+    finished bank registered (a fresh :class:`CatEmu`): the descriptor must
+    be ours, at our offset, whitened at the keystream offset we derived, and
+    its key the record's.  Raises otherwise."""
+    from .spike2 import sfx_names as SN
+    from .spike2.category import CatEmu
+    from . import engine as E
+    by_new = {r["idx"]: r for r in rows}
+    emu = CatEmu(gr_path, img_path)
+    try:
+        emu.boot()
+        got_rows = emu.derive_bank(cat, bank_path, revalidate=revalidate)
+        if len(got_rows) != len(places):
+            raise RuntimeError("bank %s registers %d record(s), not %d" % (
+                SB.bank_name(cat), len(got_rows), len(places)))
+        resolver, out = SN._find_resolver(emu)
+        if resolver is None:
+            raise RuntimeError("the game's descriptor resolver could not be located on the finished "
+                               "bank")
+        d2 = emu.DESC2
+        for pl in places:
+            sid, plain, ks = expect[pl.new_idx]
+            emu.mu.mem_write(out, b"\x00" * 0x40)
+            st = emu.call(resolver, (sid, out), limit=5_000_000)
+            d = st[1] if st[0] == "ok" else None
+            if d != d2 + pl.desc_off:
+                raise RuntimeError("sound id %#x does not resolve to its descriptor in bank %s "
+                                   "(got %s, wanted bank+%#x)" % (
+                                       sid, SB.bank_name(cat), hex(d) if d else st[0], pl.desc_off))
+            got_ks = struct.unpack("<I", bytes(emu.mu.mem_read(out, 4)))[0] - emu.VF2_VA
+            if got_ks != ks:
+                raise RuntimeError("sound id %#x: the resolver whitens its descriptor at %#x, not "
+                                   "the %#x it was written with" % (sid, got_ks, ks))
+            with open(_lp(bank_path), "rb") as f:
+                f.seek(pl.desc_off)
+                raw = f.read(len(plain))
+            vf2 = bytes(emu.mu.mem_read(emu.VF2_VA + ks, len(plain)))
+            back = bytes(a ^ b for a, b in zip(raw, vf2))
+            if back != plain:
+                raise RuntimeError("sound id %#x: its descriptor does not read back as written" % sid)
+            ops = E._op11_payloads(back)
+            if not ops or bytes(ops[0][1]) != bytes(by_new[pl.new_idx]["findkey"]):
+                raise RuntimeError("sound id %#x: its descriptor names key %s, the record's is %s" % (
+                    sid, ops[0][1].hex() if ops else "none", bytes(by_new[pl.new_idx]["findkey"]).hex()))
+    finally:
+        emu.close()
+    log("Sound bank %s: every one of its %d sound id(s) resolves through the game's own resolver "
+        "to its descriptor and its record." % (SB.bank_name(cat), len(places)), "success")

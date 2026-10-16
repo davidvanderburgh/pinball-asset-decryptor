@@ -96,25 +96,42 @@ song's sid is `cat << 16 | n`), not by the record the lookup found. A swap
 that hands the lookup a bank record under a cat-0 sid therefore streams the
 wrong file. Short sounds read through the cat-0 mapping the same way.
 
-So a bank sound has to be played the vendor's way: a sid of the bank's own
-category, resolved through the bank's FRAGMENT TABLE (`hdr[0x28]`, 40
-whitened bytes a fragment, `hdr[0x5c]` of them) to a descriptor in the bank's
-data block (`hdr[0x48]`; Deadpool's banks put the first body at data +
-0x2004, the block between holding the descriptors and a text block), whose
-key names the bank record. The mode runtime already carries a 32-bit sid on
-its `music <request> <sid>` line (`pm_sound_sid`, `mode_file.c`), so
-`music 125 65536` points the carrier at bank sid 0x10000; a call's swap
-would become a swap of the request's sid as well. NEXT RUN: (1) read the
-fragment and descriptor formats off Deadpool LE 1.16's banks (2 and 3
-fragments) by driving `get_asset_descriptor(cat_sid)` in `CatEmu` with the
-bank mapped, capturing the fragment bytes read and the descriptor bytes
-decoded (the cat-0 walk `_card_descriptor_sites` already captures descriptor
-keystreams); (2) write one fragment + descriptor per bank sound in
-`soundbank.plan_bank` / `write_bank` and prove the resolver returns the bank
-record's key for sid `cat << 16 | n` in the emulator; (3) `mode_write` emits
-`music <request> <cat sid>` for a bank bed (no swap) and the call route for
-bank calls; (4) rig proof again (run1's recipe, `bedcheck.py` on the
-capture), then the real case (`tryit2`: 5 beds spill on the V1.99D card).
+So a bank sound is played the vendor's way: a sid of the bank's own
+category. **How the game resolves a bank sid** (`get_asset_descriptor`,
+Deadpool LE 1.16 `0x3c928c`, Godzilla LE 1.16 `0x43c104`, driven in `CatEmu`
+with the bank registered, `frag_probe*.py` in scratch):
+
+    cat = sid >> 16; table = container_ptr(cat, 5)            # hdr[0x28]
+    stride = byte 7 of container_ptr(0, 2)                     # 5 on every card seen
+    variant = a global (random 0..4 when it is 5)              # fn 0x2e4bf8
+    slot = (sid & 0xffff) * stride + variant                   # 8 bytes each
+    off = slot.lo ^ vf2[((slot >> 6) & 0x3f) << 8 | (slot & 0x7f) .. +4]
+    out[0] = VF2 + ((off ^ X) & M)        # Godzilla: off & 0x2a6; Deadpool: (off ^ 0xb8162db5) & 0xb95
+    return bank base + off                 # the descriptor, whitened with vf2 at out[0]
+
+So a fragment is `stride` 8-byte slots (the game picks one at random: all
+five name the same descriptor), the descriptor can lie anywhere in the bank
+(the vendor keeps them just before the directory; so do we), and its
+keystream offset follows from its offset by a per-build rule that
+`bank_build.resolver_rule` measures off the card's own cat-0 sids. The
+descriptor is a copy of the sound's carrier's (a bed's carrier is a looping
+tune, a call's the call it rides in on) with the declared duration set to the
+bank record's and the op11 key the bank record's own key VERBATIM: on the
+vendor pairs (Deadpool bank 55 sid 0x370000, bank 1 sids 0x10000/0x10001)
+the record key equals the payload with a few bits cleared and the category's
+bits set, and a key the band build registered already has both.
+
+**How the mode plays it.** A bed: `music <request> <bank sid>` (the line the
+runtime already had; `pm_sound_sid` points the carrier's request at a 32-bit
+sid). A call: a new line, `sid <request> <bank sid> [call:<cue>]`
+(`mode_file.c`, `pad_mode_assets.h`): the carrier is pointed at the bank sid
+before the play and its own list put back when the call's stop fires. No
+swap line for a bank sound. Proven on the desk harness
+(`test_a_call_in_a_sound_bank_points_its_carrier_at_the_banks_sid_for_that_play`)
+and headless (`bank_e3.py`: a two-record bank on stock Godzilla LE 1.16,
+both sids resolved through the game's own resolver to our descriptors and
+records, `verify_tables`).
+
 The committed bank build (records, chain encode, verify, header ids) stands:
 the game registered every record and found it by key.
 
@@ -188,7 +205,10 @@ Headless, 2026-10-16, all on stock Godzilla LE 1.16 (`C:\tmp\PAD-595`, scratch):
   music; ZILLA never started). `bedcheck.py` on `audio.raw`: the two
   image.bin beds 0.95/0.94, every bank bed <= 0.09 -- white noise in their
   windows. run2s: the same boot under `QEMU_STRACE=1`, one bed: the trace
-  above (`C:	mp\PAD-595igunsun2s\game.out`, `stracecheck.py`).
+  above (`C:	mp\PAD-595
+ig
+uns
+un2s\game.out`, `stracecheck.py`).
 - The real case (`tryit595b.py`, the tester's V1.99D card + the eleven
   modes, no proof knob) needs PAD-593's branch (merged here): main itself
   stops on that card with "idx 31: no descriptor ... names this sound's

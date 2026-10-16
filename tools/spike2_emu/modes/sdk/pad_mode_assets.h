@@ -21,6 +21,12 @@
  *     music  125 618                              the music carrier, and this mode's own bed (a sid)
  *     call   sever 1251 1850 4                    a call of its own: cue, carrier request, its own
  *     call   spike 1249 700 3                     length in ms, and its priority on the voice bus
+ *     sid    1251 65537 call:sever                 (PAD-595) the build put the sound in a sound bank
+ *                                                 of the mode's own: while the call plays on its
+ *                                                 carrier request, the request is pointed at that
+ *                                                 bank's sound id (pm_sound_sid) and its own list
+ *                                                 put back once the call is over; the music's bed
+ *                                                 in a bank is the `music` line's sid
  *     swap   927 a20a51102c1c0020 d1eaa8b4ae100000 call:sever
  *                                                 item 163: the build appended the sound as a record
  *                                                 NO descriptor names; while it plays on request 927
@@ -103,6 +109,8 @@ struct pa_assets {
     unsigned n_calls;
     struct { unsigned request; unsigned char keys[16]; char tag[PA_SWAP_TAG]; } swaps[PA_SWAPS_MAX];   /* item 163 */
     unsigned n_swaps;
+    struct { unsigned request, sid; char tag[PA_SWAP_TAG]; } points[PA_SWAPS_MAX];   /* PAD-595: bank sids */
+    unsigned n_points;
     int give_way;                         /* PAD-347: `game_modes give_way` - it does not block the game's modes */
     unsigned char block_ids[PA_BLOCK_MAX];   /* PAD-363: `block_modes <id> ...` - which of the game's modes it holds off */
     int block_n;                          /* ... how many (0 = every one the port names) */
@@ -112,8 +120,8 @@ struct pa_assets {
     int running;                          /* between pa_start and pa_end */
     unsigned long clip_due;               /* pm_ms() the start clip plays at; 0 = none */
     unsigned long shot_until[PA_CALLS_MAX];   /* a priority-3 call still sounds until then */
-    struct { unsigned request, prio, ms, holder; const unsigned char *swap; unsigned long due, deadline; const char *cue; } waiting[PA_WAITING_MAX];
-    struct { unsigned request; unsigned long due; } stops[PA_STOPS_MAX];
+    struct { unsigned request, prio, ms, holder, sid; const unsigned char *swap; unsigned long due, deadline; const char *cue; } waiting[PA_WAITING_MAX];
+    struct { unsigned request; unsigned long due; int pointed; } stops[PA_STOPS_MAX];
     unsigned long next_poll;
     unsigned music_restarts;
 };
@@ -194,6 +202,27 @@ static PA_UNUSED const unsigned char *pa_swap_of(struct pa_assets *a, unsigned r
     return 0;
 }
 
+/* PAD-595: the bank sound id `request` is pointed at while this mode's sound plays on it, or 0 */
+static PA_UNUSED unsigned pa_sid_of(struct pa_assets *a, unsigned request, const char *tag)
+{
+    unsigned i;
+    for (i = 0; request && i < a->n_points; i++)
+        if (a->points[i].request == request && (!tag || !a->points[i].tag[0] || pa_is(a->points[i].tag, tag)))
+            return a->points[i].sid;
+    return 0;
+}
+
+static PA_UNUSED unsigned pa_sid_of_call(struct pa_assets *a, const struct pa_call *c)
+{
+    char tag[PA_SWAP_TAG];
+    unsigned i = 0, j;
+    const char *p = "call:";
+    while (*p && i + 1 < sizeof tag) tag[i++] = *p++;
+    for (j = 0; c->cue[j] && i + 1 < sizeof tag; j++) tag[i++] = c->cue[j];
+    tag[i] = 0;
+    return pa_sid_of(a, c->request, tag);
+}
+
 /* the swap of the call `cue` */
 static PA_UNUSED const unsigned char *pa_swap_of_call(struct pa_assets *a, const struct pa_call *c)
 {
@@ -244,6 +273,16 @@ static PA_UNUSED void pa_parse_line(struct pa_assets *a, const char *s)
     } else if (pa_is(key, "music")) {
         if (pa_word(&s, w, sizeof w)) a->music = pa_num(w);
         if (pa_word(&s, w, sizeof w)) a->music_sid = pa_num(w);
+    } else if (pa_is(key, "sid") && a->n_points < PA_SWAPS_MAX) {     /* PAD-595 */
+        unsigned r, v, i;
+        if (!pa_word(&s, w, sizeof w) || !(r = pa_num(w))) return;
+        if (!pa_word(&s, w, sizeof w) || !(v = pa_num(w))) return;
+        a->points[a->n_points].tag[0] = 0;
+        if (pa_word(&s, w, sizeof w))                            /* whose: "call:<cue>" */
+            for (i = 0; w[i] && i + 1 < PA_SWAP_TAG; i++) a->points[a->n_points].tag[i] = w[i], a->points[a->n_points].tag[i + 1] = 0;
+        a->points[a->n_points].request = r;
+        a->points[a->n_points].sid = v;
+        a->n_points++;
     } else if (pa_is(key, "swap") && a->n_swaps < PA_SWAPS_MAX) {
         unsigned r, n = 0, i;
         if (!pa_word(&s, w, sizeof w) || !(r = pa_num(w))) return;
@@ -340,17 +379,18 @@ static PA_UNUSED int pa_request_prio(unsigned request)
 }
 
 /* stop <request> once its own <ms> have played (faded, never cut); a new play moves the time */
-static PA_UNUSED void pa_stop_after(struct pa_assets *a, unsigned request, unsigned ms)
+static PA_UNUSED void pa_stop_after(struct pa_assets *a, unsigned request, unsigned ms, int pointed)
 {
     unsigned long due;
     int i, free_i = -1;
-    if (!request || !ms) return;
+    if (!request) return;
+    if (!ms) { if (!pointed) return; ms = 3000; }   /* PAD-595: a pointed carrier gets its list back */
     due = pm_ms() + ms + ms / 8 + 120;
     for (i = 0; i < PA_STOPS_MAX; i++) {
-        if (a->stops[i].request == request) { a->stops[i].due = due; return; }
+        if (a->stops[i].request == request) { a->stops[i].due = due; a->stops[i].pointed |= pointed; return; }
         if (!a->stops[i].request && free_i < 0) free_i = i;
     }
-    if (free_i >= 0) { a->stops[free_i].request = request; a->stops[free_i].due = due; }
+    if (free_i >= 0) { a->stops[free_i].request = request; a->stops[free_i].due = due; a->stops[free_i].pointed = pointed; }
 }
 
 /* 1 if <request> is one of this mode's own calls */
@@ -408,7 +448,7 @@ static PA_UNUSED int pa_try(struct pa_assets *a, unsigned request, unsigned prio
 static PA_UNUSED int pa_call(struct pa_assets *a, const char *cue)
 {
     int k, i, free_i = -1;
-    unsigned holder = 0;
+    unsigned holder = 0, sid;
     struct pa_call *c;
     const unsigned char *swap;
     pa_load(a);
@@ -425,10 +465,17 @@ static PA_UNUSED int pa_call(struct pa_assets *a, const char *cue)
                cue, c->request);
         return 0;
     }
+    sid = pa_sid_of_call(a, c);
+    if (sid && !pm_sound_sid(c->request, sid)) {    /* PAD-595: a call in a sound bank of its own */
+        pm_log("own sound: call %s (%u) NOT played - its carrier could not be pointed at sound id %u (no request table in the port)",
+               cue, c->request, sid);
+        return 0;
+    }
     a->shot_until[k] = pm_ms() + c->ms;
     if (pa_try(a, c->request, c->prio, cue, 1, &holder)) {
-        pm_log("own sound: call %s (%u) played", cue, c->request);
-        pa_stop_after(a, c->request, c->ms);
+        if (sid) pm_log("own sound: call %s (%u) played (sound id %u, its own in a sound bank)", cue, c->request, sid);
+        else pm_log("own sound: call %s (%u) played", cue, c->request);
+        pa_stop_after(a, c->request, c->ms, sid != 0);
         return 1;
     }
     for (i = 0; i < PA_WAITING_MAX; i++) {
@@ -444,6 +491,7 @@ static PA_UNUSED int pa_call(struct pa_assets *a, const char *cue)
     a->waiting[free_i].ms = c->ms;
     a->waiting[free_i].cue = c->cue;
     a->waiting[free_i].swap = swap;
+    a->waiting[free_i].sid = sid;
     a->waiting[free_i].holder = holder;
     a->waiting[free_i].due = pm_ms() + 70;
     a->waiting[free_i].deadline = pm_ms() + (c->prio <= 3 ? 800u : 1500u);
@@ -692,7 +740,9 @@ static PA_UNUSED void pa_tick(struct pa_assets *a)
         if (pm_sound_fade(a->stops[i].request, 40))
             pm_log("own sound: call %u stopped - its own sound is over, the rest of the record is silence",
                    a->stops[i].request);
+        if (a->stops[i].pointed) pm_sound_sid(a->stops[i].request, 0);   /* PAD-595: its own list back */
         a->stops[i].request = 0;
+        a->stops[i].pointed = 0;
     }
     for (i = 0; i < PA_WAITING_MAX; i++) {
         unsigned holder = 0;
@@ -703,7 +753,7 @@ static PA_UNUSED void pa_tick(struct pa_assets *a)
         if (pa_try(a, a->waiting[i].request, a->waiting[i].prio, a->waiting[i].cue, 0, &holder)) {
             pm_log("own sound: call %s (%u) played (after waiting for the voice bus)", a->waiting[i].cue,
                    a->waiting[i].request);
-            pa_stop_after(a, a->waiting[i].request, a->waiting[i].ms);
+            pa_stop_after(a, a->waiting[i].request, a->waiting[i].ms, a->waiting[i].sid != 0);
             a->waiting[i].request = 0;
             continue;
         }
@@ -715,6 +765,7 @@ static PA_UNUSED void pa_tick(struct pa_assets *a)
             else
                 pm_log("own sound: call %s (%u) NOT played - the voice bus did not come free in time",
                        a->waiting[i].cue, a->waiting[i].request);
+            if (a->waiting[i].sid) pm_sound_sid(a->waiting[i].request, 0);   /* PAD-595 */
             a->waiting[i].request = 0;
         } else {
             a->waiting[i].due = now + 70;

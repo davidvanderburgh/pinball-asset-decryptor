@@ -9097,7 +9097,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                     **({"sid": u["sid"]} if u.get("sid") else {}),
                                     **({k: u.get(k) for k in ("swap", "stock_key", "our_key")}
                                        if u.get("swap") or u.get("bank") is not None else {}),
-                                    **({"bank": u["bank"]} if u.get("bank") is not None else {}))
+                                    **({"bank": u["bank"], "bank_sid": u.get("bank_sid")}
+                                       if u.get("bank") is not None else {}))
                                for u in mode_own_used],
                 "p2_offset": _p2_off,
                 "p2_epoch": _p2_epoch,
@@ -17553,7 +17554,8 @@ def _mode_bed_templates(gr_path, img_path, used, log):
     """``{bed sid: music carrier's sid}`` for the modes' music beds in this build (item 150
     follow-up): each bed's descriptor is rewritten as a copy of its carrier's looping-music one
     (:func:`_music_template_writes`), so the bed plays on the music bus and loops."""
-    beds = [u for u in (used or ()) if u.get("music") and u.get("sid")]
+    beds = [u for u in (used or ()) if u.get("music") and u.get("sid")
+            and u.get("bank") is None]           # PAD-595: a bank bed has its own descriptor
     if not beds:
         return {}
     from . import mode_write as _MW
@@ -17968,17 +17970,25 @@ def _read_stock_directory(gr_path, img_path):
 
 def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, gains,
                        work, np, log, progress=None, cancel=None):
-    """Stage, encode and verify every bank of *plan* (PAD-595), name them in
+    """Stage, encode and verify every bank of *plan* (PAD-595), write each
+    one's play tables (a sid of the bank's category per sound, its descriptor
+    a copy of the carrier's naming the bank record), name the banks in
     ``image.bin``'s header (*img_path*, the staged copy), and give each bank
-    sound's *used* entry the keys its mode file swaps (``stock_key`` the host
-    record's, ``our_key`` the bank record's).  Returns the bank beds for
-    :func:`_repoint_descriptors` ``{bed sid: (stock key, stock length, new
-    length)}``."""
+    sound's *used* entry its ``bank_sid``: the mode file points the sound's
+    carrier request at it (``music <request> <sid>`` for a bed, ``sid
+    <request> <sid>`` for a call).  Returns ``{}`` (nothing of a bank sound's
+    is re-pointed in ``image.bin``)."""
     from . import bank_build as BB
+    from . import mode_write as _MW
     from .spike2 import soundbank as SB
     from .spike2.emulator import Spike2Emu, BLOCK
     byidx = {p["idx"]: p for p in params}
     by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
+    family = _mode_family_on()
+    with open(_lp(gr_path), "rb") as f:
+        elf = f.read()
+    with open(_lp(img_path), "rb") as f:
+        head = f.read(1 << 16)
     refs = _mode_music_level_refs(gr_path, img_path, params, sites,
                                   set(loop_idx) & set(plan.grows), log, used=used)
     emu = Spike2Emu(gr_path, img_path)
@@ -18006,26 +18016,42 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
         # chain's, which carry each record's host sound
         BB.verify_bank(gr_path, img_path, path, cat, rows, log, revalidate=rev)
         plan.rows[cat] = (places, rows)
+        # the play tables: each sound's carrier request names the sid whose
+        # descriptor is copied (a bed's carrier is a looping tune, a call's
+        # the call it rides in on); the length is the bank record's
+        carriers, durations, music_idx = {}, {}, set()
         for r in rows:
             idx = r.get("host")
             u = by_idx_used.get(idx)
-            if u is None:
-                continue
-            host = byidx[idx]
-            skey = host.get("findkey")
-            if not skey or not r.get("findkey"):
+            if u is None or not r.get("findkey"):
                 raise RuntimeError(
-                    "Modes: %s's own %s: no container key for its carrier's record or its "
-                    "sound bank record, so the mode could not swap it in." % (
-                        u.get("name"), _MW_sound_words(u.get("key"))))
-            u["stock_key"], u["our_key"] = bytes(skey).hex(), BB.key_hex(r)
-            u["bank"], u["bank_idx"] = int(cat), int(r["idx"])
-            if u.get("music") and u.get("sid"):
-                beds[int(u["sid"])] = (bytes(skey), int(host["length"]), int(r["length"]))
-            log("Modes: %s's own %s plays from sound bank %s record %d (%.2f s); the mode "
-                "swaps its key %s in for its carrier's %s." % (
+                    "Modes: sound bank %s record %d: no mode sound or no container key for it, "
+                    "so no sound id could play it." % (SB.bank_name(cat), r["idx"]))
+            sids = _MW.request_sids(elf, head, int(u["request"]))
+            if not sids:
+                raise RuntimeError(
+                    "Modes: %s's own %s: its carrier, request %d, plays no sound id whose "
+                    "descriptor a sound bank copy could take." % (
+                        u.get("name"), _MW_sound_words(u.get("key")), int(u["request"])))
+            carriers[idx] = int(sids[0])
+            durations[idx] = (_duration_units_emitted(int(r["length"])) if family
+                              else _duration_units(int(r["length"])))
+            if u.get("music"):
+                music_idx.add(idx)
+        expect = BB.write_bank_tables(gr_path, img_path, path, cat, places, rows, carriers,
+                                      durations, music_idx, log)
+        BB.verify_tables(gr_path, img_path, path, cat, places, expect, rows, log, revalidate=rev)
+        for r in rows:
+            idx = r["host"]
+            u = by_idx_used[idx]
+            sid = expect[r["idx"]][0]
+            u["bank"], u["bank_idx"], u["bank_sid"] = int(cat), int(r["idx"]), int(sid)
+            u.pop("stock_key", None)
+            u.pop("our_key", None)
+            log("Modes: %s's own %s plays from sound bank %s record %d (%.2f s) as sound id "
+                "%#x; the mode points its carrier, request %d, at it." % (
                     u.get("name"), _MW_sound_words(u.get("key")), SB.bank_name(cat), r["idx"],
-                    (int(r["length"]) - BLOCK) / 44100.0, u["our_key"], u["stock_key"]), "info")
+                    (int(r["length"]) - BLOCK) / 44100.0, sid, int(u["request"])), "info")
     writes = BB.image_header_writes(img_path, [c for c, _p in plan.files])
     with open(_lp(img_path), "r+b") as f:
         for off, data in sorted(writes.items()):

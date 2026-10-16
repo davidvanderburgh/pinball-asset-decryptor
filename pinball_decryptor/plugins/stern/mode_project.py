@@ -4953,6 +4953,9 @@ def own_sound_lines(spec, own_sounds, ms=None):
     # item 163: the carriers whose own record key the mode swaps for its appended record's
     lines += ["swap           %d %s %s" % (int(r), stock, ours)
               for r, stock, ours in own_sounds.get("swaps") or () if int(r) in carried]
+    # PAD-595: the carriers pointed at a sound id of a sound bank of the mode's own, per play
+    lines += ["sid            %d %d" % (int(r), int(sid))
+              for r, sid in own_sounds.get("sids") or () if int(r) in carried]
     return lines
 
 

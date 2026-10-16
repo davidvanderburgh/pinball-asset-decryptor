@@ -354,9 +354,15 @@ def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
     prio = {cue: p for cue, _w, p in spec.call_list()}
     for u in mine:
         if u.get("key") == "music":
-            lines.append("music  %d%s" % (int(u["request"]), " %d" % int(u["sid"]) if u.get("sid") else ""))
+            # PAD-595: a bed in a sound bank of its own is played by that bank's sound id
+            bed = u.get("bank_sid") or u.get("sid")
+            lines.append("music  %d%s" % (int(u["request"]), " %d" % int(bed) if bed else ""))
     for u in mine:
-        if u.get("stock_key") and u.get("our_key"):     # item 163: swapped in at run time
+        if u.get("bank_sid") and u.get("key") != "music":
+            # PAD-595: a call in a sound bank of its own: the carrier is pointed at the bank's
+            # sound id for that play (whose, as a swap's tag)
+            lines.append("sid    %d %d %s" % (int(u["request"]), int(u["bank_sid"]), u["key"]))
+        elif u.get("stock_key") and u.get("our_key"):     # item 163: swapped in at run time
             # hud-layers: and whose ("music" or "call:<cue>"): a carrier can take several of the
             # mode's sounds' neighbours in other modes, so the mode picks its own swap by cue
             lines.append("swap   %d %s %s %s" % (int(u["request"]), u["stock_key"], u["our_key"], u["key"]))

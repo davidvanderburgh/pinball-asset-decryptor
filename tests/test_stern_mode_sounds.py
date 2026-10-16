@@ -524,6 +524,29 @@ def test_a_swapped_sound_writes_a_swap_line_for_its_carrier(tmp_path):
     assert lines == ["sound_start    901 1200", "swap           901 a20a51102c1c0020 d1eaa8b4ae100000"]
 
 
+def test_a_sound_in_a_bank_of_the_modes_own_points_its_carrier_at_the_banks_sid(tmp_path):
+    """PAD-595: a call the build put in a sound bank of its own is played by that bank's sound id:
+    ``sid <request> <sound id>`` (pointed for that play, by mode_file.c and pad_mode_assets.h), and
+    a bed in a bank is the ``music`` line's sid.  Only for a sound the mode has."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    spec = MP.example("KAIJU RUSH")
+    spec.sound_start, spec.sound_shot, spec.end_sound, spec.music = "s.wav", "", "", "m.wav"
+    carried = {"sound_start": 901, "music": 125, "music_sid": 0x10000,
+               "sids": [(901, 0x10001), (70, 0x10002)]}
+    lines = MP.own_sound_lines(spec, carried, {"sound_start": 1200})
+    assert lines == ["sound_start    901 1200", "music          125 65536", "sid            901 65537"]
+    # the build's carried list -> the lines' arguments: a bank bed and a bank call
+    used = [{"slug": "kaiju_rush", "key": "music", "request": 125, "sid": 618, "bank": 1, "bank_sid": 0x10000},
+            {"slug": "kaiju_rush", "key": "sound_start", "request": 901, "ms": 1200, "swap": True,
+             "bank": 1, "bank_sid": 0x10001},
+            {"slug": "kaiju_rush", "key": "sound_shot", "request": 70, "ms": 900, "swap": True,
+             "stock_key": "11" * 8, "our_key": "22" * 8}]
+    requests, ms = MW.own_cfg_args(None, "kaiju_rush", spec, used)
+    assert requests["music_sid"] == 0x10000 and requests["sids"] == [(901, 0x10001)]
+    assert requests["swaps"] == [(70, "11" * 8, "22" * 8)] and ms == {"sound_start": 1200, "sound_shot": 900}
+
+
 def test_mode_file_c_and_code_modes_swap_the_carrier_key_right_before_playing():
     """Item 163: a call with a swap arms pm_sound_swap right before pm_sound and is NOT played when
     it cannot be armed; the music keeps its swap armed while the mode runs and lets it lapse after

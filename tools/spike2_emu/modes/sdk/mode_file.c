@@ -628,6 +628,10 @@ static void display_start(struct slot *M)
  * carrier's own record key takes ours (pm_sound_swap), so no stock sound id changes at all. A call
  * swaps for that play only; the music for as long as the mode runs. A swap that cannot be armed
  * (no sound_lookup site) is not played.
+ *   sid <request> <sound id>              (PAD-595) the build put the sound in a sound bank of the
+ * mode's own, played by a sound id of that bank's category: while the call plays on <request>, the
+ * request is pointed at that sound id (pm_sound_sid, as `music <request> <sid>` points the bed's),
+ * and its own list is put back once the call is over.
  *
  * Item 150 follow-up, NO CLICKS (David's run of the film pack, 2026-09-18): nothing of ours is
  * ever cut while it sounds, and nothing of the game's is cut by ours - every such cut was a
@@ -644,31 +648,36 @@ struct own_sounds {
     unsigned music_sid;                 /* item 150 follow-up: the mode's own bed, 0 = none */
     struct { unsigned request; unsigned char keys[16]; } swap[4];   /* item 163: stock, ours */
     unsigned n_swap;
+    struct { unsigned request, sid; } point[8];   /* PAD-595: a call in a sound bank: its bank sid */
+    unsigned n_point;
     unsigned long shot_until;           /* the previous shot call still sounds until then */
 };
 
 #define OWN_STOPS_MAX 8
-static struct { unsigned request; unsigned long due; } own_stops[OWN_STOPS_MAX];
+static struct { unsigned request; unsigned long due; int pointed; } own_stops[OWN_STOPS_MAX];
 
-/* stop <request> once its own <ms> have played; a new play of the same request moves the time */
-static void own_sounds_stop_after(unsigned request, unsigned ms)
+/* stop <request> once its own <ms> have played; a new play of the same request moves the time.
+ * `pointed` (PAD-595): the request was pointed at a bank sound id for this play; its own list
+ * goes back at the stop. */
+static void own_sounds_stop_after(unsigned request, unsigned ms, int pointed)
 {
     unsigned long due;
     int i, free_i = -1;
-    if (!request || !ms) return;
+    if (!request) return;
+    if (!ms) { if (!pointed) return; ms = 3000; }
     due = pm_ms() + ms + ms / 8 + 120;
     for (i = 0; i < OWN_STOPS_MAX; i++) {
-        if (own_stops[i].request == request) { own_stops[i].due = due; return; }
+        if (own_stops[i].request == request) { own_stops[i].due = due; own_stops[i].pointed |= pointed; return; }
         if (!own_stops[i].request && free_i < 0) free_i = i;
     }
-    if (free_i >= 0) { own_stops[free_i].request = request; own_stops[free_i].due = due; }
+    if (free_i >= 0) { own_stops[free_i].request = request; own_stops[free_i].due = due; own_stops[free_i].pointed = pointed; }
 }
 
 /* ---- calls wait for a clean voice bus (item 150 follow-up) ----------------------------- */
 #define BUS_MUSIC 0x01u                 /* the channel bus bits measured on Godzilla (item 150) */
 #define BUS_VOICE 0x02u
 #define OWN_CALLS_MAX 6
-static struct { unsigned request, prio, ms; const unsigned char *swap; unsigned long due, deadline; const char *what; } own_calls[OWN_CALLS_MAX];
+static struct { unsigned request, prio, ms, sid; const unsigned char *swap; unsigned long due, deadline; const char *what; } own_calls[OWN_CALLS_MAX];
 
 static int request_prio(unsigned request)
 {
@@ -678,7 +687,7 @@ static int request_prio(unsigned request)
 
 /* 1 = played now; 0 = not yet (a lower-priority sound of the game's is being faded, or the bus
  * is held by one ours cannot take); -1 = never (its own record cannot be swapped in) */
-static int own_call_try(unsigned request, const unsigned char *swap, unsigned prio, unsigned ms, const char *what)
+static int own_call_try(unsigned request, const unsigned char *swap, unsigned sid, unsigned prio, unsigned ms, const char *what)
 {
     unsigned reqs[8], buses[8];
     int n = pm_sound_playing(reqs, buses, 8), i, faded = 0;
@@ -698,20 +707,26 @@ static int own_call_try(unsigned request, const unsigned char *swap, unsigned pr
                what, request);
         return -1;
     }
+    if (sid && !pm_sound_sid(request, sid)) {       /* PAD-595: a call in a sound bank of its own */
+        pm_log("own sound: %s %u NOT played - its carrier could not be pointed at sound id %u (no request table in the port)",
+               what, request, sid);
+        return -1;
+    }
     return pm_sound(request);
 }
 
-static void own_call(unsigned request, const unsigned char *swap, unsigned ms, unsigned prio,
+static void own_call(unsigned request, const unsigned char *swap, unsigned sid, unsigned ms, unsigned prio,
                      unsigned long wait_ms, const char *what)
 {
     int i, free_i = -1, got;
     if (!request) return;
-    got = own_call_try(request, swap, prio, ms, what);
+    got = own_call_try(request, swap, sid, prio, ms, what);
     if (got < 0) return;
     if (got) {
         if (swap) pm_log("own sound: %s %u played (its own record, swapped in)", what, request);
+        else if (sid) pm_log("own sound: %s %u played (sound id %u, its own in a sound bank)", what, request, sid);
         else pm_log("own sound: %s %u played", what, request);
-        own_sounds_stop_after(request, ms);
+        own_sounds_stop_after(request, ms, sid != 0);
         return;
     }
     for (i = 0; i < OWN_CALLS_MAX; i++) {
@@ -724,6 +739,7 @@ static void own_call(unsigned request, const unsigned char *swap, unsigned ms, u
     }
     own_calls[free_i].request = request;
     own_calls[free_i].swap = swap;
+    own_calls[free_i].sid = sid;
     own_calls[free_i].prio = prio;
     own_calls[free_i].ms = ms;
     own_calls[free_i].what = what;
@@ -737,11 +753,11 @@ static void own_calls_tick(void)
     int i, got;
     for (i = 0; i < OWN_CALLS_MAX; i++) {
         if (!own_calls[i].request || now < own_calls[i].due) continue;
-        got = own_call_try(own_calls[i].request, own_calls[i].swap, own_calls[i].prio, own_calls[i].ms,
-                           own_calls[i].what);
+        got = own_call_try(own_calls[i].request, own_calls[i].swap, own_calls[i].sid, own_calls[i].prio,
+                           own_calls[i].ms, own_calls[i].what);
         if (got > 0) {
             pm_log("own sound: %s %u played (after waiting for the voice bus)", own_calls[i].what, own_calls[i].request);
-            own_sounds_stop_after(own_calls[i].request, own_calls[i].ms);
+            own_sounds_stop_after(own_calls[i].request, own_calls[i].ms, own_calls[i].sid != 0);
             own_calls[i].request = 0;
         } else if (got < 0) {
             own_calls[i].request = 0;
@@ -793,7 +809,9 @@ static void own_sounds_stops_tick(void)
         /* faded (40 ms) to silence, not cut: a voice's end is never heard (item 150 follow-up) */
         if (pm_sound_fade(own_stops[i].request, 40))
             pm_log("own sound: call %u stopped - its own sound is over, the rest of the record is silence", own_stops[i].request);
+        if (own_stops[i].pointed) pm_sound_sid(own_stops[i].request, 0);   /* PAD-595: its own list back */
         own_stops[i].request = 0;
+        own_stops[i].pointed = 0;
     }
     own_calls_tick();
     own_music_after_tick();
@@ -813,6 +831,12 @@ static int own_sounds_key(struct slot *M, const char *line)
     }
     if ((a = key_is(line, "sound_end")) != 0) { S->end = (unsigned)num(&a); S->end_ms = (unsigned)num(&a); return 1; }
     if ((a = key_is(line, "music")) != 0) { S->music = (unsigned)num(&a); S->music_sid = (unsigned)num(&a); return 1; }
+    if ((a = key_is(line, "sid")) != 0) {           /* PAD-595: a call in a sound bank of the mode's own */
+        unsigned r = (unsigned)num(&a), v = (unsigned)num(&a);
+        if (!r || !v || S->n_point >= 8) pm_log("sid needs <request> <sound id> (at most 8) - ignored");
+        else { S->point[S->n_point].request = r; S->point[S->n_point].sid = v; S->n_point++; }
+        return 1;
+    }
     if ((a = key_is(line, "swap")) != 0) {
         unsigned r = (unsigned)num(&a), n = 0;
         unsigned char k[16];
@@ -843,6 +867,15 @@ static const unsigned char *own_swap_of(struct own_sounds *S, unsigned request)
     unsigned i;
     for (i = 0; request && i < S->n_swap; i++)
         if (S->swap[i].request == request) return S->swap[i].keys;
+    return 0;
+}
+
+/* PAD-595: the bank sound id <request> is pointed at while this mode's call plays on it, or 0 */
+static unsigned own_sid_of(struct own_sounds *S, unsigned request)
+{
+    unsigned i;
+    for (i = 0; request && i < S->n_point; i++)
+        if (S->point[i].request == request) return S->point[i].sid;
     return 0;
 }
 
@@ -915,7 +948,7 @@ static void own_sounds_start(struct slot *M)
     S->music_restarts = 0;
     S->shot_until = 0;
     own_sounds_priorities(S);
-    if (S->start) own_call(S->start, own_swap_of(S, S->start), S->start_ms, own_prio[0], 1500, "start call");
+    if (S->start) own_call(S->start, own_swap_of(S, S->start), own_sid_of(S, S->start), S->start_ms, own_prio[0], 1500, "start call");
     if (!S->music) return;
     carry = music.after_game;           /* the last mode's music still fading: the game's music */
     music.after_request = music.after_game = 0;         /* a new start: nothing to put back yet */
@@ -953,7 +986,7 @@ static void own_sounds_shot(struct slot *M, unsigned hits)
         return;
     }
     S->shot_until = pm_ms() + S->shot_ms;
-    own_call(S->shot, own_swap_of(S, S->shot), S->shot_ms, own_prio[1], 800, "shot call");
+    own_call(S->shot, own_swap_of(S, S->shot), own_sid_of(S, S->shot), S->shot_ms, own_prio[1], 800, "shot call");
 }
 
 /* 1 if the mode has its own end call (callout_end is then not played) */
@@ -962,7 +995,7 @@ static int own_sounds_time_up(struct slot *M)
     struct own_sounds *S = &own_sounds[M->index];
     if (!S->end) return 0;
     if (S->shot && S->shot != S->end && pm_sound_active(S->shot)) pm_sound_fade(S->shot, 60);
-    own_call(S->end, own_swap_of(S, S->end), S->end_ms, own_prio[2], 1500, "end call");
+    own_call(S->end, own_swap_of(S, S->end), own_sid_of(S, S->end), S->end_ms, own_prio[2], 1500, "end call");
     return 1;
 }
 

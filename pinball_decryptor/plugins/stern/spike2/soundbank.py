@@ -28,13 +28,25 @@ What the game needs of a bank, read off Godzilla LE 1.16's program (the plan
   (``masterdir``), under the firmware's cipher -- the key comes from the seed
   word alone, so one firmware packs any bank.
 
-A record in a bank registers with the game's sound container under a key that
-carries its category in bits 13..28 of the second word (measured on Deadpool
-LE 1.16), so no play table of a cat-0 sound can be re-pointed at it: a bank
-sound is reached by the mode runtime's key swap at the game's record lookup
-(``pm_sound_swap``), which hands the game the bank record's eight-byte key.
-That is why a bank carries no fragment table: nothing resolves a sid of its
-category.
+A bank sound is PLAYED by a sid of the bank's own category, ``cat << 16 | n``,
+the vendor's way (a rig run of the first design, a key swap at the game's
+record lookup, played every bank sound as white noise: the game streams a
+sound from the file of the SID's category, so a bank record reached under a
+cat-0 sid was read out of image.bin).  The game's resolver
+(``get_asset_descriptor``, read off Deadpool LE 1.16 and Godzilla LE 1.16)
+takes the sid's low half as a FRAGMENT index into the bank's fragment table
+(``hdr[0x28]``): a fragment is ``stride`` (5 on every card seen) 8-byte slots,
+one per random variant the game may pick, each slot's low word the
+descriptor's offset in the bank whitened with four bytes of the firmware's
+vf2 keystream at :func:`slot_vf2_offset` (slot index); the high word is
+zero.  The DESCRIPTOR (the same script a cat-0 sid has: bus, declared
+duration, the op11 record key, the loop tail) lies in the bank, whitened
+with the vf2 keystream at an offset the resolver derives from the
+descriptor's offset (``(off ^ X) & M``, per build:
+:func:`.bank_build.resolver_rule` measures X and M off cat-0 sids).  Its op11
+key is the bank record's own key, verbatim: the game masks out the bits it
+fills from the sid's category and a registered key already carries them.
+The vendor keeps its descriptors just before the directory; so does this.
 
 The file is pure geometry here; the cipher half is :mod:`masterdir`'s and the
 derive is :meth:`.category.CatEmu.derive_bank`.
@@ -64,6 +76,15 @@ PAD_TRAILER = b"PADB"
 MAX_BANK_BYTES = MAX_IMAGE_BYTES
 #: Category ids the loader can name: ``image-sc%02d.bin``.
 MIN_CATEGORY, MAX_CATEGORY = 1, 99
+#: A fragment's slot: 8 bytes (the descriptor offset, whitened, and a zero word).
+FRAG_SLOT = 8
+#: Slots a fragment has on every card seen (the game reads the count off
+#: image.bin's own tables: :func:`fragment_stride`).
+DEFAULT_STRIDE = 5
+#: Room a bank descriptor gets: the window the resolver's callers read.
+DESC_SLOT = 0x50
+#: The vf2 keystream window the resolver can point into.
+VF2_WINDOW = 0x3F00
 
 
 class SoundBankError(MD.MasterDirError):
@@ -143,26 +164,62 @@ def header_writes_new_categories(image_header, cats):
 #: length the bank's record declares and how many bytes its body takes.
 BankEdit = collections.namedtuple("BankEdit", "idx record old_length new_length body_bytes")
 #: Where a sound landed: its host idx, its record number in the bank, its body.
-BankPlacement = collections.namedtuple("BankPlacement", "idx new_idx body_off length body_bytes")
+BankPlacement = collections.namedtuple("BankPlacement",
+                                       "idx new_idx body_off length body_bytes desc_off")
 
 
-def bank_bytes(bodies):
+def fragment_stride(image_header):
+    """Slots per fragment, read off ``image.bin``'s own tables: the fragment
+    table (``hdr[0x28]``) runs to the data block (``hdr[0x48]``), 8 bytes a
+    slot, ``hdr[0x5c]`` fragments.  :data:`DEFAULT_STRIDE` when the header
+    does not say."""
+    h = bytes(image_header)
+    table, data, nfrag = (struct.unpack_from("<I", h, o)[0]
+                          for o in (HDR_FRAG_TABLE, HDR_DATA, HDR_FRAGMENTS))
+    if nfrag and data > table and (data - table) % (nfrag * FRAG_SLOT) == 0:
+        stride = (data - table) // (nfrag * FRAG_SLOT)
+        if 1 <= stride <= 16:
+            return stride
+    return DEFAULT_STRIDE
+
+
+def slot_vf2_offset(slot):
+    """Where in the vf2 keystream the four bytes whitening fragment slot
+    *slot* (fragment * stride + variant) are: ``((slot >> 6) & 0x3f) << 8 |
+    (slot & 0x7f)``, as the resolver computes it on every build read."""
+    return (((slot >> 6) & 0x3F) << 8) | (slot & 0x7F)
+
+
+def bank_sid(cat, n):
+    """The sound id the game plays bank *cat*'s fragment *n* by."""
+    return (int(cat) << 16) | int(n)
+
+
+def _tables_len(n, stride):
+    """The fragment table and the 16-byte data block after the header."""
+    return n * stride * FRAG_SLOT + 16
+
+
+def bank_bytes(bodies, stride=DEFAULT_STRIDE):
     """What a bank with the appended *bodies* (byte sizes) measures: the
-    header, each body behind its zero pad, then the directory and its trailer."""
+    header, the fragment table, each body behind its zero pad, the
+    descriptor block, then the directory and its trailer."""
     bodies = list(bodies)
-    return (MD.align16(HDR_LEN + sum(MD.BODY_PAD + b for b in bodies) + MD.BODY_PAD)
-            + MD.tail_len(len(bodies)))
+    n = len(bodies)
+    body_end = (MD.align16(HDR_LEN + _tables_len(n, stride))
+                + sum(MD.BODY_PAD + b for b in bodies))
+    return MD.align16(MD.align16(body_end + MD.BODY_PAD) + n * DESC_SLOT) + MD.tail_len(n)
 
 
-def split_banks(edits, limit=MAX_BANK_BYTES):
+def split_banks(edits, limit=MAX_BANK_BYTES, stride=DEFAULT_STRIDE):
     """*edits* (:class:`BankEdit`) split into banks in order, each as full as
     *limit* allows.  Raises when one sound alone is bigger than a bank."""
     banks, cur = [], []
     for e in edits:
-        if bank_bytes([e.body_bytes]) > limit:
+        if bank_bytes([e.body_bytes], stride) > limit:
             raise SoundBankError("sound idx %d alone (%d MB) is bigger than a sound bank can be"
                                  % (e.idx, e.body_bytes // 10**6))
-        if cur and bank_bytes([x.body_bytes for x in cur] + [e.body_bytes]) > limit:
+        if cur and bank_bytes([x.body_bytes for x in cur] + [e.body_bytes], stride) > limit:
             banks.append(cur)
             cur = []
         cur.append(e)
@@ -171,12 +228,16 @@ def split_banks(edits, limit=MAX_BANK_BYTES):
     return banks
 
 
-def plan_bank(edits):
+def plan_bank(edits, stride=DEFAULT_STRIDE):
     """``(directory, placements)`` for a bank holding *edits*: record *n* is a
     copy of edit *n*'s host record with only its body offset and length word
-    replaced (as :func:`masterdir.plan_grow_records` appends to ``image.bin``),
-    the bodies follow the header each behind a zero pad, and the directory
-    comes after the last body.  The directory carries :data:`PAD_TRAILER`."""
+    replaced (as :func:`masterdir.plan_grow_records` appends to ``image.bin``).
+    After the header come the fragment table (one fragment of *stride* slots
+    a sound) and a 16-byte data block, then the bodies each behind a zero
+    pad, then the descriptor block (:data:`DESC_SLOT` a sound) and the
+    directory, which carries :data:`PAD_TRAILER`.  Each placement names its
+    descriptor's offset; the tables themselves are written by
+    :func:`write_tables` once the records' keys are known."""
     edits = [BankEdit(*e) for e in edits]
     if not edits:
         raise SoundBankError("plan_bank called with no sounds")
@@ -191,44 +252,47 @@ def plan_bank(edits):
         raise SoundBankError(
             "the bank's records disagree about this build's length constant (%s)"
             % ", ".join("0x%08x" % v for v in sorted(xors)))
-    off = HDR_LEN + MD.BODY_PAD
+    off = MD.align16(HDR_LEN + _tables_len(len(edits), stride)) + MD.BODY_PAD
     records, places = [], []
     for n, e in enumerate(edits):
         word = MD._u32(e.record, 16) ^ (e.old_length & 0xffffffff) ^ (e.new_length & 0xffffffff)
         records.append(MD.set_geometry(e.record, body_off=off, length_word=word))
-        places.append(BankPlacement(e.idx, n, off, e.new_length, e.body_bytes))
+        places.append([e.idx, n, off, e.new_length, e.body_bytes])
         off += e.body_bytes + MD.BODY_PAD
-    md_off = MD.align16(off)
+    desc0 = MD.align16(off)
+    places = [BankPlacement(*pl, desc_off=desc0 + DESC_SLOT * pl[1]) for pl in places]
+    md_off = MD.align16(desc0 + DESC_SLOT * len(edits))
     directory = MD.Directory(b"".join(records), len(records), md_off, 0,
                              trailer=PAD_TRAILER)
     return directory, places
 
 
-def bank_header(size, md_off, count):
+def bank_header(size, md_off, count, nfrag=0, stride=DEFAULT_STRIDE):
     """The 0x68-byte header of a bank *size* bytes long whose directory of
-    *count* records is at *md_off*: no fragment table and no data block (both
-    begin and end at the header's end), as nothing resolves a sid of ours."""
+    *count* records is at *md_off*: the fragment table of *nfrag* fragments
+    right after the header, the data block after that."""
     h = bytearray(HDR_LEN)
     struct.pack_into("<I", h, HDR_FRAG_TABLE, HDR_LEN)
     struct.pack_into("<I", h, HDR_END_WORD, (size - 4) & 0xffffffff)
     struct.pack_into("<I", h, HDR_MD_OFF, md_off)
-    struct.pack_into("<I", h, HDR_DATA, HDR_LEN)
-    struct.pack_into("<I", h, HDR_FRAGMENTS, 0)
+    struct.pack_into("<I", h, HDR_DATA, HDR_LEN + nfrag * stride * FRAG_SLOT)
+    struct.pack_into("<I", h, HDR_FRAGMENTS, nfrag)
     struct.pack_into("<I", h, HDR_COUNT, count)
     return bytes(h)
 
 
-def write_bank(path, directory, places, scaffold, emu):
+def write_bank(path, directory, places, scaffold, emu, stride=DEFAULT_STRIDE):
     """Write the bank file: the header, each body's zero pad and its scaffold
     (*scaffold* ``{new_idx: bytes}``, real card audio repeated to fill -- the
     encoder overwrites it, but the chain derive runs over these bytes first and
     a degenerate body gives a degenerate chain), then the directory packed
     under the firmware's cipher (*emu*, a booted emulator on the card's
-    program).  Returns the file size."""
+    program).  The fragment table and the descriptor block are left zero for
+    :func:`write_tables`.  Returns the file size."""
     tail = MD.write_directory(directory, emu)[directory.md_off]
     size = directory.md_off + len(tail)
     with open(path, "wb") as f:
-        f.write(bank_header(size, directory.md_off, directory.count))
+        f.write(bank_header(size, directory.md_off, directory.count, len(places), stride))
         for pl in places:
             src = scaffold[pl.new_idx] or b"\x00"
             reps = -(-pl.body_bytes // len(src))
@@ -240,6 +304,40 @@ def write_bank(path, directory, places, scaffold, emu):
     if os.path.getsize(path) != size:
         raise SoundBankError("the bank came to %d bytes, not %d" % (os.path.getsize(path), size))
     return size
+
+
+def write_tables(path, places, descs, vf2, ks_of, stride=DEFAULT_STRIDE):
+    """Put the play tables into a staged bank: for placement *n*, *stride*
+    fragment slots each naming its descriptor's offset (whitened with four
+    bytes of *vf2*, the firmware's keystream window, at
+    :func:`slot_vf2_offset`), and the descriptor *descs[new_idx]* (plain
+    bytes, at most :data:`DESC_SLOT`) at ``desc_off`` whitened with *vf2* at
+    ``ks_of(desc_off)``, the offset the resolver will derive.  Returns
+    ``{new_idx: keystream offset}``."""
+    vf2 = bytes(vf2)
+    out = {}
+    with open(path, "r+b") as f:
+        for pl in places:
+            plain = bytes(descs[pl.new_idx])
+            if not 0 < len(plain) <= DESC_SLOT:
+                raise SoundBankError("record %d: a descriptor of %d bytes does not fit its "
+                                     "%d-byte slot" % (pl.new_idx, len(plain), DESC_SLOT))
+            for k in range(stride):
+                slot = pl.new_idx * stride + k
+                o = slot_vf2_offset(slot)
+                if o + 4 > len(vf2):
+                    raise SoundBankError("fragment slot %d whitens past the keystream window" % slot)
+                word = pl.desc_off ^ struct.unpack_from("<I", vf2, o)[0]
+                f.seek(HDR_LEN + slot * FRAG_SLOT)
+                f.write(struct.pack("<II", word & 0xffffffff, 0))
+            ks = int(ks_of(pl.desc_off))
+            if ks < 0 or ks + len(plain) > len(vf2):
+                raise SoundBankError("record %d: descriptor keystream offset %#x is past the window"
+                                     % (pl.new_idx, ks))
+            f.seek(pl.desc_off)
+            f.write(bytes(a ^ b for a, b in zip(plain, vf2[ks:ks + len(plain)])))
+            out[pl.new_idx] = ks
+    return out
 
 
 def read_bank_header(path):

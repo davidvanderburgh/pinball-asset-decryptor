@@ -117,3 +117,41 @@ line silent, a reboot when one plays), the bank's own header says how far
 past it is: Image Info shows both counts. The fix would then be the room
 `fragments - sounds` per title, held at the moment a Write's grows are
 settled (`_compute_patches`, beside `_grows_within_bank_limit`).
+
+## The Heisei card's four calls (PAD-594, 2026-10-15)
+
+The first card built with all 11 modes (the Heisei V1.96A + Modes card, the
+same evening as the failure above) went out before this ticket landed. To fit
+under the old 65 it dropped four calls from the project by hand: MELTDOWN's
+`heat` and `add`, and ZILLA's (the re-themed SPACEGODZILLA) `lit` and `add`.
+Their WAVs stayed in the mode folders; only the `calls` entries in
+`assets.json` were taken out. Nothing in the app has refused past the line
+since then. The four calls are back in that build record
+(`C:\tmp\heisei196a\proj`).
+
+A tester's own card can already be past the line before any mode goes on:
+Heisei V1.99D's `image.bin` reads 2643 sounds over 2599 fragments (the tester's tool
+appends records the same way a grow does). So a title's
+`fragments - sounds` is no budget at all, and
+`test_a_bank_with_no_room_left_still_takes_every_new_sound` now pins a base
+bank already past its fragments as well as one at exactly zero room.
+
+Proof on today's code (main at v1.201.0): David's 11 Heisei modes with the
+four calls back, built into a Try it set on stock Godzilla LE 1.16 by
+`mode_write.build_tryit_set`. 69 own sounds, no refusal, `image.bin`
+2599 fragments / 2603 sounds, integrity check passed (30 min). Rig 1, hidden,
+muted, three runs; the game's PCM matched against each WAV:
+
+| sound | record | peak | (WAVs no mode played) |
+|---|---|---|---|
+| ZILLA lit (a powerline) | 2550 | 0.93 | 0.10-0.13 |
+| MELTDOWN heat (core past 40%) | 2598 | 0.91 | |
+| MELTDOWN add (captive ball after 4 jackpots) | 2545 | 0.85 | |
+| ZILLA add (the super adds a ball) | 2567 | 0.83 | |
+| SUPER X2 ready (past the line) | 2599 | 0.92 | 0.05 |
+| GODZILLA ANGRY music bed (past the line) | 2601 | 0.97 | |
+| SUPER X2 fire (past the line) | 2602 | 0.95 | |
+
+No segv, no fatal signal, the stock 6 throws, on every run. The one rig
+order to keep: ZILLA's multiball before MELTDOWN's add-a-ball, or the game
+refuses the second multiball while the first one's ball drains.

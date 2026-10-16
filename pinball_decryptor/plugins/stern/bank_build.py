@@ -415,8 +415,13 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
                             lambda off: (off ^ xor) & mask, stride)
     log("Sound bank %s: %d fragment(s) and descriptor(s) written (keystream rule mask %#x xor "
         "%#x, %d slot(s) a fragment)." % (SB.bank_name(cat), len(places), mask, xor, stride), "info")
-    return {pl.new_idx: (SB.bank_sid(cat, pl.new_idx), descs[pl.new_idx], ks_by[pl.new_idx])
-            for pl in places}
+    out_map = {pl.new_idx: (SB.bank_sid(cat, pl.new_idx), descs[pl.new_idx], ks_by[pl.new_idx])
+               for pl in places}
+    # the resolver's address and its answer buffer, for verify_tables: found
+    # here on the plain emulator (the probe that finds it can fail on the bank
+    # emulator after a big derive, where the resolver itself still runs)
+    out_map["resolver"] = (resolver, out)
+    return out_map
 
 
 def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, revalidate=None):
@@ -428,6 +433,7 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
     from .spike2.category import CatEmu
     from . import engine as E
     by_new = {r["idx"]: r for r in rows}
+    resolver, out = expect.get("resolver", (None, None))
     emu = CatEmu(gr_path, img_path)
     try:
         emu.boot()
@@ -435,10 +441,12 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
         if len(got_rows) != len(places):
             raise RuntimeError("bank %s registers %d record(s), not %d" % (
                 SB.bank_name(cat), len(got_rows), len(places)))
-        resolver, out = SN._find_resolver(emu)
+        if resolver is None:
+            resolver, out = SN._find_resolver(emu)
         if resolver is None:
             raise RuntimeError("the game's descriptor resolver could not be located on the finished "
                                "bank")
+        emu._ensure_range(out, 0x40)
         d2 = emu.DESC2
         for pl in places:
             sid, plain, ks = expect[pl.new_idx]

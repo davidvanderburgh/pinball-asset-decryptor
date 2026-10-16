@@ -331,12 +331,16 @@ def test_the_music_carrier_is_found_on_a_bank_grown_past_its_fragments():
     assert MW.request_sids(elf, _bank_head(2599, 2603), 125) == stock
 
 
-def test_a_bank_with_no_room_left_still_takes_every_new_sound(monkeypatch, tmp_path):
-    """PAD-445, no limit: a bank whose header has as many sounds as fragments still takes the
-    mode's own sound - nothing in a Write counts the records it appends."""
+@pytest.mark.parametrize("fragments,sounds", [
+    (4, 4),     # room 0
+    (2, 4),     # already past its fragments, as a tester's own card can be (PAD-594: Heisei V1.99D, 2643 over 2599)
+])
+def test_a_bank_with_no_room_left_still_takes_every_new_sound(monkeypatch, tmp_path, fragments, sounds):
+    """PAD-445, no limit: a bank whose header has no room left - or is past it already - still
+    takes the mode's own sound: nothing in a Write counts the records it appends."""
     card, staged, project, encoded, _h = _mode_card(monkeypatch, tmp_path)
     img = bytearray(card.data["img"])
-    img[:0xB0] = _bank_head(4, 4)                  # the card's 4 sounds, 4 fragments: room 0
+    img[:0xB0] = _bank_head(fragments, sounds)
     card.data["img"] = card.img_node["_data"] = bytes(img)
     msgs, log = _capture()
     _writes, _counts, plan, _m, _v = _compute(project, log)

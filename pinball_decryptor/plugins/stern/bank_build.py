@@ -426,7 +426,8 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
 
 def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, revalidate=None):
     """Resolve every bank sid through the game's own resolver with the
-    finished bank registered (a fresh :class:`CatEmu`): the descriptor must
+    finished bank loaded and registered by the game's own loader (a fresh
+    :class:`CatEmu`, :meth:`~.category.CatEmu.register_bank`): the descriptor must
     be ours, at our offset, whitened at the keystream offset we derived, and
     its key the record's.  Raises otherwise."""
     from .spike2 import sfx_names as SN
@@ -437,10 +438,13 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
     emu = CatEmu(gr_path, img_path)
     try:
         emu.boot()
-        got_rows = emu.derive_bank(cat, bank_path, revalidate=revalidate)
-        if len(got_rows) != len(places):
+        # the game's loader alone (the records were derived by verify_bank):
+        # a full derive of a bank with real audio left the emulator unable
+        # to run the resolver afterwards
+        n = emu.register_bank(cat, bank_path, revalidate=revalidate)
+        if n != len(places):
             raise RuntimeError("bank %s registers %d record(s), not %d" % (
-                SB.bank_name(cat), len(got_rows), len(places)))
+                SB.bank_name(cat), n, len(places)))
         if resolver is None:
             resolver, out = SN._find_resolver(emu)
         if resolver is None:

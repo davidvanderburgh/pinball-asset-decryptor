@@ -532,6 +532,37 @@ class CatEmu(Spike2Emu):
                            % (os.path.basename(sc_path), cat,
                               " (%s)" % last if last is not None else ""))
 
+    def register_bank(self, cat, sc_path, revalidate=None, load_limit=80_000_000):
+        """Load the bank *sc_path* as category *cat* through the firmware's own
+        loader (``load_category_assets``: open, fstat, mmap, the header copied,
+        the container registered) WITHOUT decoding its directory, and return
+        the record count the firmware then reports for it (PAD-595).  The
+        game's resolver can then be driven for the bank's sids: it needs only
+        the container's base and header.  (A full :meth:`derive_bank` of a
+        bank with real audio left this emulator unable to run the resolver
+        afterwards, where the records had derived correctly.)"""
+        if not self.categories_supported:
+            raise RuntimeError("this game program's category loader cannot be driven")
+        self.set_category_file(sc_path)
+        rev = revalidate if revalidate is not None else self._revalidate
+        if rev is None:
+            rev = list(self._cat_locs["REVALIDATE_CANDIDATES"])[0]
+        snp = self._cat_locs["SNPRINTF"]
+        self.add_hook(snp, self._snprintf_stub)
+        self.add_hook(rev, self._ret_stub)
+        try:
+            self._serving_cat = True
+            st = self.call(self.CAT0_REGISTER, (cat,), limit=load_limit)
+            if st[0] != "ok":
+                raise RuntimeError("the firmware's bank loader did not return for %s (%s)"
+                                   % (os.path.basename(sc_path), st[1]))
+            cnt = self.call(self._count_fn, (cat, 4), limit=20_000_000)
+            return cnt[1] if cnt[0] == "ok" else 0
+        finally:
+            self.del_hook(snp)
+            self.del_hook(rev)
+            self._serving_cat = False
+
     # ---- decode a category sound (body from the category file) --------------
     def decode_cat(self, p, max_secs=None, cancel=None, progress=None):
         prev = self.mm

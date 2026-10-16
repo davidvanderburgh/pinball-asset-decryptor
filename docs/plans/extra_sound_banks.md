@@ -238,3 +238,14 @@ un2s\game.out`, `stracecheck.py`).
   `verify_bank`'s business. The emulator maps a bank right after image.bin's
   window, so a bank is split at the room left under 4 GiB
   (`soundbank.emulator_bank_room`, about 400 MB beside a 2 GB image.bin).
+- run5, THE REAL CASE (rig 1, 2026-10-16): the tester's Godzilla Premium 1.16
+  Heisei Custom V1.99D Kaiju Edition card (image.bin 2.01 GB, 2643 records)
+  with David's eleven modes, no proof knob (`tryit595b.py`, `tryit2`): five
+  beds spilled into `image-sc01.bin` (135.9 MB; "image.bin would come to
+  2260 MB, past the 2147 MB the game can open"), 60 sounds stayed in
+  image.bin, all five bank sids resolved through the game's resolver, the
+  card booted on the rig and started a game (0 segv), and the three bank
+  beds whose modes reached them (KAMACURAS, GODZILLA ANGRY, MELTDOWN) match
+  their WAVs at 0.97 in the capture, the same as the six beds left in
+  image.bin; JET JAGUAR and ZILLA did not reach theirs for the same gameplay
+  reasons as on the stock card.

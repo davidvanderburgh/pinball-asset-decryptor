@@ -152,6 +152,12 @@ MAX_RECORDS = 1 << 16
 # a 32-bit program maps the whole file into a ~3 GB address space shared with
 # its code, libraries and buffers, so the practical ceiling is roughly
 # 2.5-2.8 GB (about 1.5-2 h of lengthened stereo), never "no limit".
+#
+# DONE FOR GODZILLA'S LOADER SHAPE (PAD-593): bank_largefile patches the loader
+# (open with O_LARGEFILE, the size through __xstat64, read unsigned) and gives
+# such a program bank_largefile.LARGE_BANK_BYTES; a Write applies it only to a
+# bank past this value, and engine._bank_cap is the per-Write ceiling the budget
+# reads.  This value stays the ceiling of every unpatched program.
 MAX_IMAGE_BYTES = (1 << 31) - 1
 
 
@@ -1002,7 +1008,7 @@ class Spike2Emu:
             # 64-bit variants matter for the per-category banks (the loader reads
             # the fstat size for the mmap length); cat-0 is offset-identity and
             # doesn't depend on it, but routing them is harmless there.
-            self._fstat(); return
+            self._fstat(nm.endswith("64")); return
         if nm in ("mmap", "mmap64"):
             self._mmap(); return
         if nm in ("munmap", "close", "read", "pread", "lseek", "lseek64"):
@@ -1047,13 +1053,18 @@ class Spike2Emu:
         self.fds[fd] = fn
         self._ret(fd)
 
-    def _fstat(self):
+    def _fstat(self, large=False):
         mu = self.mu; fd = mu.reg_read(UC_ARM_REG_R1); sb = mu.reg_read(UC_ARM_REG_R2)
         # cat-0 only needs image.bin; any fd reports the image size (offset
         # identity makes that the correct backing for every served file).
+        # The 64-bit calls fill a ``struct stat64``, whose st_size is the
+        # 64-bit word at +0x30: the bank loader a large-file patch rewires
+        # reads it there (PAD-593, bank_largefile).  The game's other callers
+        # of those read only st_mode, which stays zero either way.
         try:
-            mu.mem_write(sb, b"\x00" * 0x60)
-            mu.mem_write(sb + 0x2c, struct.pack("<Q", self.imgsize))
+            mu.mem_write(sb, b"\x00" * (0x68 if large else 0x60))
+            mu.mem_write(sb + (0x30 if large else 0x2c),
+                         struct.pack("<Q", self.imgsize))
         except UcError:
             pass
         self._ret(0)
@@ -1397,7 +1408,9 @@ class Spike2Emu:
         if cap["state"] is None or cap["mddst"] is None or not cap["nrec"]:
             if self.imgsize > MAX_IMAGE_BYTES:
                 # Not an unmapped build: the firmware read no records because
-                # the file is too big for it to open (see MAX_IMAGE_BYTES).
+                # the file is too big for it to open (see MAX_IMAGE_BYTES; a
+                # program taught the large-file calls opens up to
+                # bank_largefile.LARGE_BANK_BYTES, PAD-593).
                 raise RuntimeError(
                     "Spike 2 params: the sound bank (image.bin) is %d bytes, "
                     "past the %d the game can open, so the firmware read no "

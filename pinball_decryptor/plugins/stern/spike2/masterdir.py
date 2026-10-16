@@ -326,10 +326,19 @@ def grow_md_off(md_off, count, file_size):
     A stock bank ends at its record array's tail, so the array grows in place.
     One an earlier build grew carries that build's bodies past the tail
     (PAD-593): growing the array in place would run over them, so it moves to
-    the end of the file instead (:func:`plan_grow_records`)."""
-    if file_size is not None and int(file_size) > md_off + tail_len(count):
+    the end of the file instead (:func:`plan_grow_records`).  Only a whole
+    appended body past the tail counts (:data:`GROWN_TAIL_MIN`): a few bytes of
+    padding after it are not one."""
+    if file_size is not None and \
+            int(file_size) >= md_off + tail_len(count) + GROWN_TAIL_MIN:
         return align16(int(file_size))
     return md_off
+
+
+#: The least an earlier build leaves past the record array's tail: one appended
+#: body behind its pad, and every appended body is at least 4096 bytes
+#: (``engine._grown_body_bytes``).
+GROWN_TAIL_MIN = BODY_PAD + 4096
 
 
 def image_grow_geometry(image_path):

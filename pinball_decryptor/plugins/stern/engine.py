@@ -29,7 +29,6 @@ import sys
 import tempfile
 import threading
 import time
-import contextvars
 import wave
 from collections import namedtuple
 
@@ -39,19 +38,6 @@ from collections import namedtuple
 # build failed until he shortened the path).  _lp() opts each call out of it.
 from ...core.longpath import ext as _lp
 from ...core.checksums import is_other_extract
-
-#: The largest sound bank this Write's game program can open (PAD-593): the 32-bit calls'
-#: 2 GiB - 1 (``spike2.emulator.MAX_IMAGE_BYTES``), or more for a program whose bank loader
-#: takes the large-file patch (``spike2.bank_largefile``).  Set per Write once the program is
-#: read; None (the default) is the 32-bit ceiling.
-_BANK_CAP = contextvars.ContextVar("pad_stern_bank_cap", default=None)
-
-
-def _bank_cap():
-    """The bank ceiling the budget, the trims and their messages use (:data:`_BANK_CAP`)."""
-    from .spike2.emulator import MAX_IMAGE_BYTES
-    v = _BANK_CAP.get()
-    return MAX_IMAGE_BYTES if v is None else v
 
 # The engine is wired; a missing unicorn/numpy is surfaced via the plugin's
 # prerequisite probe + a lazy import error, not by hiding the tabs.
@@ -7004,10 +6990,11 @@ class _SpaceCheck:
         the build is made from the original, so an update never trims a song
         a whole build keeps, and never copies the whole card again to trim
         the same ones."""
+        from .spike2.emulator import MAX_IMAGE_BYTES
         room = self._bank_room(self.card)
         if (room is not None and self.card is self.update
                 and want is not None
-                and room.limit < min(want, _bank_cap())):
+                and room.limit < min(want, MAX_IMAGE_BYTES)):
             wroom = self._bank_room(self.whole)
             if (wroom is not None and wroom.limit > room.limit
                     and (kept_at is None
@@ -7169,7 +7156,6 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     try:
         for _round in range(_HOST_ROUNDS + 1):
             _HOST_EXCLUDE.last = _round == _HOST_ROUNDS     # the last round leaves them out
-            _BANK_CAP.set(None)     # PAD-593: until this round reads the program
             try:
                 got = _compute_patches_inner(
                     disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
@@ -7760,9 +7746,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # goes on the card whole through the ext4 driver and its in-place
         # writes are never emitted.
         grow_places = None
-        # PAD-593: the grown bank passes 2 GiB, so the card's game program
-        # carries the large-file patch (_large_bank_program)
-        _bank_large = False
         reader = None
         gr_path = img_path = None
         # Which request a mode's own end sound rode in on, once it has.
@@ -7781,13 +7764,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 disk_f, parts, work, log, _read_prog)
             _stage_done(log, "reading the firmware and audio image out of "
                         "the card", t0)
-            # PAD-593: how big a bank this program can open, once patched
-            try:
-                from .spike2 import bank_largefile as _BL
-                with open(_lp(gr_path), "rb") as _f:
-                    _BANK_CAP.set(_BL.bank_limit(_f.read()))
-            except Exception:                              # noqa: BLE001
-                _BANK_CAP.set(None)
             if cancel():
                 return None, None, None, None, None
             if not audio_decode_supported(gr_path):
@@ -8027,8 +8003,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         img_path, grow_places = _stage_grown_image(
                             gr_path, img_path, grow_work,
                             {p["idx"]: p for p in params}, grows, log)
-                        gr_path, _bank_large = _large_bank_program(
-                            gr_path, img_path, grow_work, log)
                         for idx in sorted(grows):
                             room, want = grows[idx]
                             log("idx %d: the replacement runs %.2f s where the "
@@ -8523,12 +8497,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     for _o, _b in _vp.sound_count_overlay(bytes(_gbuf),
                                                           log).items():
                         _gbuf[_o:_o + len(_b)] = _b
-                    if _bank_large:
-                        # PAD-593: and the large-file patch (nothing when the
-                        # program it was grown from already carries it)
-                        from .spike2 import bank_largefile as _BL
-                        for _o, _b in _BL.overlay(bytes(_gbuf)).items():
-                            _gbuf[_o:_o + len(_b)] = _b
                     with open(_lp(patched_gr), "wb") as _f:
                         _f.write(bytes(_gbuf))
                     del _gbuf
@@ -8964,14 +8932,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # already baked into that image (and its .sidx record refreshed above),
         # and an in-place write here would be undone by the whole-file copy.
         if patched_gr is None:
-            if _bank_large and fw_node is not None:
-                # PAD-593: a bank past 2 GiB needs the large-file patch on the
-                # card's program, in place; unlike the bypass this is never
-                # optional (the game would read no sounds), so it raises.
-                _lw, _lov = _largefile_writes(reader, fw_node, log)
-                writes += _lw
-                fw_text_overlay = dict(fw_text_overlay)
-                fw_text_overlay.update(_lov)
             try:
                 from . import valpatch
                 if grow_places is not None and fw_node is not None:
@@ -10390,11 +10350,12 @@ def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
     plays its own sound in that mode. Returns ``(grows, audio_edits, used)``."""
     from . import sound_modes as _SMo
     from .spike2 import masterdir as MD
+    from .spike2.emulator import MAX_IMAGE_BYTES
     # PAD-593: past an earlier build's bodies, as the grow lays it out
     md_off, count = MD.image_grow_geometry(_lp(img_path))
     start = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(grows.items()) if i not in sm_grows]
     kept, cut, _bodies = _fit_grows(sorted(sm_grows), sm_grows, byidx, md_off, count,
-                                    _bank_cap(), start)
+                                    MAX_IMAGE_BYTES, start)
     if not cut:
         return grows, audio_edits, used
     grows = {i: g for i, g in grows.items() if i not in cut}
@@ -10405,7 +10366,7 @@ def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
             log("%s: %s is left out: the sound bank would pass the %d MB the game can open. That "
                 "slot plays its own sound %s." % (
                     _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u["name"]),
-                    _bank_cap() // 10**6, _SMo.when(u["mode"]).replace("at its turn", "in its turn")
+                    MAX_IMAGE_BYTES // 10**6, _SMo.when(u["mode"]).replace("at its turn", "in its turn")
                     ), "warning")
             continue
         out.append(u)
@@ -16635,52 +16596,6 @@ def _grown_body_bytes(p, want):
     return step * (int(want) + BLOCK) + 4096
 
 
-def _large_bank_program(gr_path, img_path, work, log):
-    """``(game program path, large?)`` for the rest of a Write whose staged bank is
-    *img_path* (PAD-593).
-
-    A bank of at most 2 GiB - 1 leaves the program as it is.  Past that the game's
-    32-bit calls cannot open it, so a copy of the program taught the large-file calls
-    (:mod:`.spike2.bank_largefile`) is written into *work* and returned: the derive,
-    the encode and the integrity check run it, and the program the card gets is built
-    from it.  The budget only lets a bank past 2 GiB when the program takes the patch
-    (:func:`_bank_cap`), so a refusal here is a bug, and raises."""
-    from .spike2 import bank_largefile as BL
-    from .spike2.emulator import MAX_IMAGE_BYTES
-    size = os.path.getsize(_lp(img_path))
-    if size <= MAX_IMAGE_BYTES:
-        return gr_path, False
-    with open(_lp(gr_path), "rb") as f:
-        raw = bytearray(f.read())
-    ov = BL.overlay(bytes(raw))
-    for o, b in ov.items():
-        raw[o:o + len(b)] = b
-    out = os.path.join(work, "game_real_largefile")
-    with open(_lp(out), "wb") as f:
-        f.write(bytes(raw))
-    os.chmod(_lp(out), 0o755)
-    log("Sound bank: %d MB, past the 2 GB the game's own file calls can open, so its "
-        "bank loader is patched to open it with the large-file calls (%d word(s) in "
-        "the game program); the game can then open a bank of up to %d MB."
-        % (size // 10**6, len(ov), BL.LARGE_BANK_BYTES // 10**6), "info")
-    return out, True
-
-
-def _largefile_writes(reader, fw_node, log):
-    """``([(disk offset, bytes)], {file offset: bytes})``: the large-file patch
-    (:func:`_large_bank_program`) as in-place writes on the card's game program at
-    *fw_node*, and as the overlay its ``.sidx`` digest is computed over.  Raises when
-    the program does not take it."""
-    from .spike2 import bank_largefile as BL
-    overlay = BL.overlay(bytes(reader.read_file_bytes(fw_node)))
-    writes = []
-    for off, b in sorted(overlay.items()):
-        for disk, n in reader.disk_ranges(fw_node, off, len(b)):
-            writes.append((disk, b[:n]))
-            b = b[n:]
-    return writes, overlay
-
-
 def _grown_bank_bytes(md_off, count, bodies):
     """What ``image.bin`` measures once :func:`_stage_grown_image` has appended
     one record per entry of *bodies* (appended body sizes in bytes): the record
@@ -16704,7 +16619,8 @@ def _grow_budget_minutes(md_off, count, bodies, limit=None):
     :data:`~.spike2.emulator.MAX_IMAGE_BYTES`).  Conservative: it leaves room
     for one more body's own header overhead, so a clip of that length really
     fits."""
-    spare = max(0, (_bank_cap() if limit is None else limit)
+    from .spike2.emulator import MAX_IMAGE_BYTES
+    spare = max(0, (MAX_IMAGE_BYTES if limit is None else limit)
                 - _grown_bank_bytes(md_off, count,
                                     list(bodies) + [_grown_body_bytes({}, 0)]))
     return spare / float(_STEREO_BYTES_PER_MIN)
@@ -16747,13 +16663,14 @@ def _grows_kept_at(grows, byidx, img_path, limit, priority=None,
     if not grows:
         return {}
     from .spike2 import masterdir as MD
+    from .spike2.emulator import MAX_IMAGE_BYTES
     # PAD-593: past an earlier build's bodies, as the grow lays it out
     md_off, count = MD.image_grow_geometry(_lp(img_path))
     reserved = reserved or {}
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
              for i in sorted(reserved)]
     return _fit_grows(_grow_order(grows, priority), grows, byidx, md_off,
-                      count, min(int(limit), _bank_cap()), start)[0]
+                      count, min(int(limit), MAX_IMAGE_BYTES), start)[0]
 
 
 def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
@@ -16792,14 +16709,15 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
         return grows
     from . import card_size as _cs
     from .spike2 import masterdir as MD
+    from .spike2.emulator import MAX_IMAGE_BYTES
     # PAD-593: past an earlier build's bodies, as the grow lays it out
     md_off, count = MD.image_grow_geometry(_lp(img_path))
     order = _grow_order(grows, priority)
     reserved = reserved or {}
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
              for i in sorted(reserved)]
-    limit = _bank_cap()
-    card_binds = room is not None and room.limit < _bank_cap()
+    limit = MAX_IMAGE_BYTES
+    card_binds = room is not None and room.limit < MAX_IMAGE_BYTES
     if card_binds:
         limit = room.limit
     kept, cut, bodies = _fit_grows(order, grows, byidx, md_off, count, limit,
@@ -16820,7 +16738,7 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
            "SD card doesn't raise)"
            % (len(kept), " beside %d other sound(s) this build adds whole"
               % len(reserved) if reserved else "", now // 10**6,
-              _bank_cap() // 10**6))
+              MAX_IMAGE_BYTES // 10**6))
     if card_binds:
         msg += (", but the card's games partition has room for it to come to "
                 "only %d MB (%s), which leaves room for about %.1f more "
@@ -16837,7 +16755,7 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
             # what the bank would come to at the game's limit alone: the
             # size a bigger card has to have room for
             _k, _c, whole = _fit_grows(order, grows, byidx, md_off, count,
-                                       _bank_cap(), start)
+                                       MAX_IMAGE_BYTES, start)
             bigger = room.suggest(_grown_bank_bytes(md_off, count, whole))
             why = ("the card's games partition has room for the sound bank to "
                    "come to only %d MB (%s)%s, which leaves room for about "
@@ -16857,7 +16775,7 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
                    "keeping them whole as well would pass that (the bank comes "
                    "to %d MB%s, which leaves room for about %.1f more "
                    "minute(s) of stereo sound or twice that in mono)"
-                   % (_bank_cap() // 10**6, now // 10**6,
+                   % (MAX_IMAGE_BYTES // 10**6, now // 10**6,
                       " with the %d other longer sound(s) kept whole"
                       % len(kept) if kept else "", left_min))
         log(*_trimmed_notice(cut, why))

@@ -217,3 +217,24 @@ un2s\game.out`, `stracecheck.py`).
   where the file would come to 2.26 GB. With both: "5 of the modes' own
   sound(s) go into image-sc01.bin (135.9 MB): image.bin would come to
   2260 MB, past the 2147 MB the game can open; 60 stay in image.bin."
+- run3 (rig 1, 2026-10-16, the same nine-bed set rebuilt with the play
+  tables; `rig/bankcheck.py`): the game booted and started a game (0 segv);
+  every mode that reached its bed pointed request 125 at its bank sid
+  (`plays its own bed, sound id 65540` ...), and in the capture all seven
+  of those bank beds match their WAVs at 0.97-0.98, the same as the two
+  beds left in image.bin (run1 had the bank beds at 0.09: noise). JET
+  JAGUAR ended the instant it started (its entrance waits for the game's
+  battle screen) and ZILLA was refused (no multiball ready), in run1 too:
+  drive conditions, not bank ones.
+- The finished-bank check: a full `derive_bank` of the real nine-bed bank
+  (211 MB of encoded audio) left the bank emulator unable to run the
+  resolver afterwards (sid 1 and bank sids alike ran off into data at
+  0x43c78c), where the scaffold banks of `bank_e3.py`/`bank_e4.py` and a
+  stock image padded to 1.9 GB did not; reproduced offline on the kept Try
+  it inputs (`C:	mp\PAD-595\keep`, `repro_keep.py`, `bisect*.py`). The
+  check now registers the bank through the game's loader alone
+  (`CatEmu.register_bank`: `load_category_assets` and the count, no
+  directory replay) and resolves every bank sid on that; the records are
+  `verify_bank`'s business. The emulator maps a bank right after image.bin's
+  window, so a bank is split at the room left under 4 GiB
+  (`soundbank.emulator_bank_room`, about 400 MB beside a 2 GB image.bin).

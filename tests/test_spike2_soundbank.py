@@ -457,3 +457,11 @@ def test_bank_edits_copy_the_record_a_pre_grown_host_plays():
     assert [e.idx for e in edits] == [1, 2]
     assert edits[0].record == d.record(5)        # the appended record it plays
     assert edits[1].record == d.record(2)
+
+
+def test_a_bank_is_kept_within_the_emulators_window_beside_image_bin():
+    from pinball_decryptor.plugins.stern.spike2.emulator import DESC_BASE
+    room = SB.emulator_bank_room(2_010_400_998)       # the tester's image.bin
+    assert room == 0x1_0000_0000 - DESC_BASE - 2_010_400_998 - 0x120000
+    assert 390 * 10**6 < room < 410 * 10**6
+    assert SB.emulator_bank_room(0x1_0000_0000) == 0

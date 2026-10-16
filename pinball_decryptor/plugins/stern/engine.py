@@ -17917,7 +17917,16 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         pass
     _c, ids, _room = SB.category_slots(head)
     edits = BB.bank_edits(spilled, byidx, _read_stock_directory(gr_path, img_path))
-    groups = SB.split_banks(edits)
+    # a bank the emulator can serve beside the staged image.bin (its window
+    # follows image.bin's in the game's 32-bit address space)
+    staged = _grown_bank_bytes(md_off, count, start + [
+        _grown_body_bytes(byidx[i], g[1]) for i, g in sorted(kept.items())])
+    limit = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged))
+    groups = SB.split_banks(edits, limit=limit, stride=SB.fragment_stride(head))
+    if len(groups) > 1:
+        log("Modes: the modes' own sounds take %d sound banks: each is kept under %d MB, the "
+            "most the emulator can serve beside this image.bin while it builds and checks "
+            "them." % (len(groups), limit // 10**6), "info")
     cats = SB.next_category_ids(ids, on_card, len(groups))
     banks = list(zip(cats, groups))
     wavs = {i: audio_edits[i] for i in spilled}

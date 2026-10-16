@@ -190,6 +190,17 @@ def slot_vf2_offset(slot):
     return (((slot >> 6) & 0x3F) << 8) | (slot & 0x7F)
 
 
+def emulator_bank_room(image_size):
+    """The biggest bank the emulator can serve beside an ``image.bin`` of
+    *image_size* bytes: it maps the bank in the game's own 32-bit address
+    space right after image.bin's window (:data:`.emulator.DESC_BASE`), so
+    both have to end under 4 GiB.  The game itself takes a bank up to
+    :data:`MAX_BANK_BYTES`; a build splits its sounds over more banks when
+    this is the smaller."""
+    from .emulator import DESC_BASE
+    return max(0, 0x1_0000_0000 - DESC_BASE - int(image_size) - 0x120000)
+
+
 def bank_sid(cat, n):
     """The sound id the game plays bank *cat*'s fragment *n* by."""
     return (int(cat) << 16) | int(n)

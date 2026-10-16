@@ -446,7 +446,7 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
         if resolver is None:
             raise RuntimeError("the game's descriptor resolver could not be located on the finished "
                                "bank")
-        emu._ensure_range(out, 0x40)
+        out = emu.alloc(0x40)        # this emulator's own answer buffer
         d2 = emu.DESC2
         for pl in places:
             sid, plain, ks = expect[pl.new_idx]
@@ -455,8 +455,9 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
             d = st[1] if st[0] == "ok" else None
             if d != d2 + pl.desc_off:
                 raise RuntimeError("sound id %#x does not resolve to its descriptor in bank %s "
-                                   "(got %s, wanted bank+%#x)" % (
-                                       sid, SB.bank_name(cat), hex(d) if d else st[0], pl.desc_off))
+                                   "(got %s, wanted bank+%#x; %s)" % (
+                                       sid, SB.bank_name(cat), hex(d) if d else st[0], pl.desc_off,
+                                       st[1:] if st[0] != "ok" else ""))
             got_ks = struct.unpack("<I", bytes(emu.mu.mem_read(out, 4)))[0] - emu.VF2_VA
             if got_ks != ks:
                 raise RuntimeError("sound id %#x: the resolver whitens its descriptor at %#x, not "

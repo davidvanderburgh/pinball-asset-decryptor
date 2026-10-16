@@ -306,6 +306,31 @@ set, so some of the 13 are rig flakes too. Started and not finished (both
 jobs were stopped by the host for memory): `sweep_lib2.py` rebuilds the
 scaffold banks with whole bodies (Avengers LE done, 500 MB bank, its sids
 resolve), and `rig/bankboot_ctl.sh` reboots the 13 with the rebuilt banks.
-Side finding from the control attempt: Avengers LE and Elvira 3 opened
-`image-sc01.bin` even with image.bin's header left stock (count 0), so the
-game looks for bank files by name as well as by the header's id list.
+The "control" attempt was no control: the env var that was to leave the
+header stock never reached `python.exe` (WSL passes nothing to a Windows
+process without WSLENV), so it was a plain second run of the same sets.
+As such it says the failures are mostly reproducible per title (Avengers
+LE, Foo Fighters Pro, Bond Pro, Jaws Pro, John Wick Pro, King Kong LE died
+the same way again) and partly flaky (Elvira 3 and Rush LE passed the
+second time).
+
+Resolution, 2026-10-16 18:31-18:55 (`docs/plans/pad595/library_rig_rerun.tsv`):
+the scaffold banks rebuilt with whole record bodies (`sweep_lib3.py`: the
+body sized by the gap to the next record's body; the record's +16 word is
+an encoded length word, not a byte count, so the first rebuild attempt
+with it was wrong), and **all 13 titles boot with the named bank: 11 to
+attract, Foo Fighters Pro and Munsters LE alive in Tech Alerts at the
+deadline, 0 died.** The six that had died twice the same way (Avengers LE,
+Foo Fighters Pro, Bond Pro, Jaws Pro, John Wick Pro, King Kong LE) all
+come up. Together with the first sweep: **49 of 49 titles open a sound
+bank of the app's own at boot and come up.** The crash was the test
+scaffold's: Venom LE's segv site (`0x4af4fc` out of the 0x376a40 routine,
+std::map + mlock + a 0x200-byte hash window placed from the record's
+length over the mapped body) reads body windows the record's length
+promises, and a 256 KB scaffold body under a longer record left those
+windows past the file's end: a fault on a machine, zeros in the emulator
+(whose mapping covers the whole window), which is why `derive_bank`
+registered those banks without complaint. The Write pipeline copies whole
+bodies, as the Godzilla LE runs did. Second run of the first sets
+(`library_rig_second_run.tsv`): 6 died again, 7 passed, so the shorter
+records sat near the boundary.

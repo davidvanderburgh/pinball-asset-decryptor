@@ -1,0 +1,13 @@
+avengers_infinity_le-1.10	1	fail	38	VERDICT avengers_infinity_le-1.10 fail 38 opened=yes state=off the run ended by itself: [watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here.
+elvira3-1.13	3	pass	56	VERDICT elvira3-1.13 pass 55 opened=yes state=attract 
+foo_fighters_pro-1.04	4	fail	68	VERDICT foo_fighters_pro-1.04 fail 68 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+james_bond_pro-1.06	2	fail	57	VERDICT james_bond_pro-1.06 fail 55 opened=yes state=off the run ended by itself: [watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here.
+jaws_pro-1.02	1	fail	116	VERDICT jaws_pro-1.02 fail 114 opened=yes state=off the run ended by itself: [watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here.
+john_wick_pro-1.02	3	fail	114	VERDICT john_wick_pro-1.02 fail 113 opened=yes state=off the run ended by itself: [watch]   (hidden run: that window is on the private display and never reaches the desktop - by design)
+king_kong_le-0.97	4	fail	55	VERDICT king_kong_le-0.97 fail 54 opened=yes state=off the run ended by itself: [watch]   (hidden run: that window is on the private display and never reaches the desktop - by design)
+rush_le-1.19	1	pass	84	VERDICT rush_le-1.19 pass 84 opened=yes state=attract 
+rush_pro-1.19	3	pass	86	VERDICT rush_pro-1.19 pass 84 opened=yes state=attract 
+star_wars_le-1.31	4	pass	53	VERDICT star_wars_le-1.31 pass 50 opened=yes state=attract 
+munsters_le-1.28	2	pass	428	VERDICT munsters_le-1.28 pass 426 opened=yes state=techalerts alive at the deadline, state techalerts
+stranger_things_le-1.13	1	pass	34	VERDICT stranger_things_le-1.13 pass 32 opened=yes state=attract 
+venom_le-1.07	3	pass	44	VERDICT venom_le-1.07 pass 43 opened=yes state=attract 

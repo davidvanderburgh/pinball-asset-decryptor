@@ -16887,16 +16887,25 @@ def _derive_grown(gr_path, staged, params_stock, log, progress=None):
     params = collapse_shadowed(rows)
     grown_idx = {p["idx"] for p in params if p.get("shadows") is not None}
     raw_by_idx = {r.get("idx"): r for r in rows}
+    stock_by_idx = {p["idx"]: p for p in params_stock}
     for p in params:
         p["grown"] = p["idx"] in grown_idx
         if p["grown"]:
             # The key the STOCK record registered under, from the row the
             # collapse retired.  The play tables name the sound by it, and
             # the re-point matches on it exactly (all eight bytes).
-            p["stock_findkey"] = (raw_by_idx.get(p["idx"]) or {}).get("findkey")
+            src = raw_by_idx.get(p["idx"]) or {}
+            base = stock_by_idx.get(p["idx"]) or {}
+            if base.get("shadows") is not None:
+                # PAD-593: the card came in with this sound already grown (a
+                # custom image built with longer sounds).  Its play tables
+                # name the appended record that card plays, not the dead stock
+                # one, so that is the key to re-point from.
+                src = base
+            p["stock_findkey"] = src.get("findkey")
             # and its length, which is what the descriptor's declared
             # duration was written from.
-            p["stock_length"] = (raw_by_idx.get(p["idx"]) or {}).get("length")
+            p["stock_length"] = src.get("length")
     stock = {p["idx"]: (p["scale"], p["pred16"], p["body_off"], p["length"])
              for p in params_stock}
     moved = [p["idx"] for p in params
@@ -17795,6 +17804,10 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=()):
                 "idx %d: the staged bank's decode reported no container key "
                 "for the sound, so its play tables can't be re-pointed."
                 % p["idx"])
+        if bytes(old) == bytes(new):
+            # PAD-593: grown on the card this build started from and not
+            # touched by it; its descriptors already name this record.
+            continue
         grew = 0
         if p.get("stock_length") is not None:
             # The declared duration is what the voice PLAYS, and the codec emits
@@ -17973,7 +17986,10 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, ke
     finally:
         emu.close()
     keep = {int(i) for i in keep or ()}
-    n_grown = sum(1 for p in params if p.get("grown") and p["idx"] not in keep)
+    # (PAD-593: one the incoming card already had grown, and this build left
+    # alone, is not counted: its descriptors were not touched)
+    n_grown = sum(1 for p in params if p.get("grown") and p["idx"] not in keep
+                  and bytes(p.get("stock_findkey") or b"") != bytes(p.get("findkey") or b""))
     log("Play tables re-pointed: %d descriptor(s) now name the longer copy "
         "of %d sound(s) and declare the new length, confirmed through the "
         "game's own resolver." % (len(expect), n_grown), "info")

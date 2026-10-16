@@ -356,3 +356,44 @@ def test_build_sound_banks_gives_each_bank_sound_its_keys_and_names_the_bank_in_
     h = img.read_bytes()
     assert struct.unpack_from("<I", h, 0x68)[0] == 1
     assert struct.unpack_from("<I", h, 0x6C)[0] == 1
+
+
+# --------------------------------------------------------------------------
+# a card an earlier build already grew (PAD-593's layout)
+# --------------------------------------------------------------------------
+def test_plan_spill_measures_an_already_grown_image_bin_from_its_file_end(tmp_path):
+    """The tester's Heisei card keeps its record array at 1.65 GB with the card
+    builder's bodies behind it: measured from the header alone, 250 MB of beds
+    looked like they fit (1.9 GB) where the file would come to 2.26 GB."""
+    from pinball_decryptor.plugins.stern import bank_build as BB
+    img = tmp_path / "image.bin"
+    md_off, count = 1000, 10
+    data = bytearray(_image_header(md_off=md_off, count=count))
+    # an earlier build's bodies past the record array's tail
+    data += b"\0" * (md_off + MD.tail_len(count) + MD.GROWN_TAIL_MIN + 50000 - len(data))
+    img.write_bytes(bytes(data))
+    params = [{"idx": i, "chan": 2, "length": 100} for i in (1, 2)]
+    byidx = {p["idx"]: p for p in params}
+    grows = {1: (100, 3000), 2: (100, 2000)}
+    from pinball_decryptor.plugins.stern import engine as E
+    bodies = {i: E._grown_body_bytes(byidx[i], g[1]) for i, g in grows.items()}
+    grow_off, _c = MD.image_grow_geometry(str(img))
+    assert grow_off >= len(data) - 15                   # past the earlier bodies
+    # a limit with room for the smaller body past the FILE END: the header's
+    # geometry alone would have said both fit
+    limit = E._grown_bank_bytes(grow_off, count, [bodies[2]]) + 10
+    assert E._grown_bank_bytes(md_off, count, list(bodies.values())) < limit
+    kept, spilled = BB.plan_spill(grows, {1, 2}, byidx, str(img), limit=limit)
+    assert sorted(spilled) == [1] and sorted(kept) == [2]
+
+
+def test_bank_edits_copy_the_record_a_pre_grown_host_plays():
+    from pinball_decryptor.plugins.stern import bank_build as BB
+    recs = b"".join(_record(0x100 ^ 0xDEADBEEF, body_off=0x1000 * i) for i in range(6))
+    d = MD.Directory(recs, 6, 0x9000, 0)
+    byidx = {1: {"idx": 1, "chan": 1, "length": 0x100, "shadows": 5},
+             2: {"idx": 2, "chan": 1, "length": 0x100}}
+    edits = BB.bank_edits({1: (0x100, 4000), 2: (0x100, 4000)}, byidx, d)
+    assert [e.idx for e in edits] == [1, 2]
+    assert edits[0].record == d.record(5)        # the appended record it plays
+    assert edits[1].record == d.record(2)

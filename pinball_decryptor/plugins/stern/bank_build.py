@@ -58,8 +58,10 @@ def plan_spill(grows, bankable, byidx, img_path, limit=None, start=()):
     record through a re-pointed play table, which cannot name a bank)."""
     from . import engine as E
     limit = image_cap() if limit is None else int(limit)
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # past an earlier build's bodies, as the grow lays it out (PAD-593): the
+    # tester's card keeps its record array at 1.65 GB and 360 MB of bodies
+    # behind it, and the header alone said 1.9 GB where the file would be 2.26
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     kept = dict(grows)
     spilled = {}
     bodies = {i: E._grown_body_bytes(byidx[i], g[1]) for i, g in grows.items()}
@@ -76,14 +78,17 @@ def plan_spill(grows, bankable, byidx, img_path, limit=None, start=()):
 def bank_edits(spilled, byidx, directory):
     """The :class:`.soundbank.BankEdit` list for *spilled* grows (``{idx:
     (room, want)}``) in idx order: each sound's host record out of *directory*
-    (``image.bin``'s), its length and the body its longer copy takes."""
+    (``image.bin``'s), its length and the body its longer copy takes.  A host
+    an earlier build already grew plays its appended record (``shadows``), the
+    one *byidx* describes, so that is the record copied (PAD-593)."""
     from . import engine as E
     from .spike2.emulator import BLOCK
     out = []
     for idx in sorted(spilled):
         _room, want = spilled[idx]
         p = byidx[idx]
-        out.append(SB.BankEdit(idx, directory.record(idx), int(p["length"]),
+        src = idx if p.get("shadows") is None else int(p["shadows"])
+        out.append(SB.BankEdit(idx, directory.record(src), int(p["length"]),
                                int(want) + BLOCK, E._grown_body_bytes(p, want)))
     return out
 

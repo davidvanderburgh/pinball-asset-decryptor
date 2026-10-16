@@ -17895,7 +17895,8 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         return None, audio_edits, grows
     with open(_lp(img_path), "rb") as f:
         head = f.read(0x200)
-    md_off, count = MD.header_geometry(head)
+    # (past an earlier build's bodies, as the grow lays it out: PAD-593)
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     cap = BB.image_cap()
     with_all = _grown_bank_bytes(md_off, count, start + [
         _grown_body_bytes(byidx[i], g[1])

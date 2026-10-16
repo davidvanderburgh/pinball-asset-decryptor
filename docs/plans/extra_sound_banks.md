@@ -81,7 +81,44 @@ and the music modes' files still need a re-pointed descriptor, so they stay in
 `image.bin` and are trimmed as before when it is full; the budget's words say
 what went where.
 
-**How a bank sound is played.** Every bank sound is a SWAP: the mode file's
+**How a bank sound is played -- the swap route FAILED on the rig (2026-10-16,
+run1/run2s below).** The game's record lookup took the bank record's key for
+seven of nine spilled beds, and every one of them played as white noise
+(spectral flatness 0.56, no left/right correlation; the two beds left in
+`image.bin` matched their WAVs at 0.95). A qemu syscall trace of one bed
+(`QEMU_STRACE=1`, run2s) shows why: the game `munmap`s the bank after its
+boot-time decode and never opens it again; while the bed played it streamed
+with `pread64` from `image.bin`'s own fd at the BANK record's body offsets
+(99.38 MB..100.4 MB, 44800 bytes a call), so it decoded `image.bin`'s bytes
+there. The file a long sound streams from is chosen by the CATEGORY OF THE
+SID being played (the key's category bits come from `sid >> 16`, so a bank
+song's sid is `cat << 16 | n`), not by the record the lookup found. A swap
+that hands the lookup a bank record under a cat-0 sid therefore streams the
+wrong file. Short sounds read through the cat-0 mapping the same way.
+
+So a bank sound has to be played the vendor's way: a sid of the bank's own
+category, resolved through the bank's FRAGMENT TABLE (`hdr[0x28]`, 40
+whitened bytes a fragment, `hdr[0x5c]` of them) to a descriptor in the bank's
+data block (`hdr[0x48]`; Deadpool's banks put the first body at data +
+0x2004, the block between holding the descriptors and a text block), whose
+key names the bank record. The mode runtime already carries a 32-bit sid on
+its `music <request> <sid>` line (`pm_sound_sid`, `mode_file.c`), so
+`music 125 65536` points the carrier at bank sid 0x10000; a call's swap
+would become a swap of the request's sid as well. NEXT RUN: (1) read the
+fragment and descriptor formats off Deadpool LE 1.16's banks (2 and 3
+fragments) by driving `get_asset_descriptor(cat_sid)` in `CatEmu` with the
+bank mapped, capturing the fragment bytes read and the descriptor bytes
+decoded (the cat-0 walk `_card_descriptor_sites` already captures descriptor
+keystreams); (2) write one fragment + descriptor per bank sound in
+`soundbank.plan_bank` / `write_bank` and prove the resolver returns the bank
+record's key for sid `cat << 16 | n` in the emulator; (3) `mode_write` emits
+`music <request> <cat sid>` for a bank bed (no swap) and the call route for
+bank calls; (4) rig proof again (run1's recipe, `bedcheck.py` on the
+capture), then the real case (`tryit2`: 5 beds spill on the V1.99D card).
+The committed bank build (records, chain encode, verify, header ids) stands:
+the game registered every record and found it by key.
+
+(The original design, kept for the record.) Every bank sound was a SWAP: the mode file's
 `swap <request> <stock key> <our key>` names the carrier's stock record key
 and the bank record's. A call already swaps on every title. A music bed keeps
 its `music <request> <sid>` line (the carrier is pointed at the bed sid) AND
@@ -146,3 +183,17 @@ Headless, 2026-10-16, all on stock Godzilla LE 1.16 (`C:\tmp\PAD-595`, scratch):
   `Spike2Emu._map_card_window` documents for `image.bin`. The bank window is
   now backed in one piece the same way (a private copy-on-write view); the
   same nine beds then took 106, 87, 84 s each.
+- run1 (rig 1, Try it set of the nine spilled beds): booted, 0 segv, the
+  lookup took the bank key for 7 beds (JET JAGUAR's bus was held by the game's
+  music; ZILLA never started). `bedcheck.py` on `audio.raw`: the two
+  image.bin beds 0.95/0.94, every bank bed <= 0.09 -- white noise in their
+  windows. run2s: the same boot under `QEMU_STRACE=1`, one bed: the trace
+  above (`C:	mp\PAD-595igunsun2s\game.out`, `stracecheck.py`).
+- The real case (`tryit595b.py`, the tester's V1.99D card + the eleven
+  modes, no proof knob) needs PAD-593's branch (merged here): main itself
+  stops on that card with "idx 31: no descriptor ... names this sound's
+  record" (a card builder's longer sound), and the spill has to be measured
+  from the FILE END (`image_grow_geometry`): the header alone said 1.9 GB
+  where the file would come to 2.26 GB. With both: "5 of the modes' own
+  sound(s) go into image-sc01.bin (135.9 MB): image.bin would come to
+  2260 MB, past the 2147 MB the game can open; 60 stay in image.bin."

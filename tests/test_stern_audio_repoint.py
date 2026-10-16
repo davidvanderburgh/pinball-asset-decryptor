@@ -470,3 +470,56 @@ def test_a_measured_layout_naming_every_record_wins_over_a_known_one_naming_some
     assert _said(msgs, "measured on this build")
     known = len({engine._play_key(s.payload, s.sid, MASK) for s in sites} & stock)
     assert 0 < known * 10 >= len(stock)                    # the old rule would not have measured
+
+
+# --------------------------------------------------------------------------
+# PAD-593: a card that came in with sounds already grown
+# --------------------------------------------------------------------------
+def _row(idx, ident, findkey, length, body_off):
+    return {"idx": idx, "identity": ident, "findkey": findkey, "length": length,
+            "scale": 1, "pred16": 0, "body_off": body_off}
+
+
+def test_a_sound_grown_on_the_incoming_card_is_re_pointed_from_the_record_it_plays(monkeypatch):
+    """PAD-593: a custom Godzilla image built with 98 longer sounds stopped the next Write at
+    "idx 31: no descriptor ... names this sound's record". Its play tables name each such
+    sound's APPENDED record, so the stock record the derive retired is named by nothing: the
+    key to re-point from is the incoming card's live one, and a sound this build leaves alone
+    is skipped."""
+    from pinball_decryptor.plugins.stern.spike2 import emulator as EM
+    k_a, k_live, k_c, k_c_new = (_key(0x11, 0x101), _key(0x12, 0x102), _key(0x13, 0x103),
+                                 _key(0x14, 0x104))
+    # the incoming card: idx 1 already grown (its appended record is raw idx 3)
+    card = [_row(0, "x", _key(0x10, 0x100), 1000, 0),
+            dict(_row(1, "y", k_live, 9000, 5000), shadows=3),
+            _row(2, "z", k_c, 1000, 2000)]
+    # the staged bank: the card's records, then this build grows idx 2
+    staged = [_row(0, "x", _key(0x10, 0x100), 1000, 0), _row(1, "y", k_a, 1000, 1000),
+              _row(2, "z", k_c, 1000, 2000), _row(3, "y", k_live, 9000, 5000),
+              _row(4, "z", k_c_new, 5000, 14000)]
+
+    class _Emu:
+        def __init__(self, *a):
+            pass
+
+        def boot(self):
+            pass
+
+        def derive_params(self, progress=None):
+            return [dict(r) for r in staged]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(EM, "Spike2Emu", _Emu)
+    monkeypatch.setattr(engine, "_install_consumed_hook", lambda emu: (None, None))
+    msgs, log = _capture()
+    params, _reads = engine._derive_grown("gr", "staged", card, log)
+    by = {p["idx"]: p for p in params}
+    assert by[1]["grown"] and by[1]["stock_findkey"] == k_live and by[1]["stock_length"] == 9000
+    assert by[2]["grown"] and by[2]["stock_findkey"] == k_c and by[2]["stock_length"] == 1000
+
+    sites = [_site(31, 0x100, k_live), _site(40, 0x200, k_c)]
+    writes, expect = engine._plan_descriptor_repoint(params, sites, mask=MASK, family=True)
+    assert sorted(writes) == [0x200 - 7, 0x200]
+    assert set(expect) == {40} and expect[40][0] == {k_c_new}

@@ -1,0 +1,49 @@
+aerosmith_le-1.16	1	pass	38	VERDICT aerosmith_le-1.16 pass 37 opened=yes state=attract 
+avengers_infinity_le-1.10	2	fail	50	VERDICT avengers_infinity_le-1.10 fail 49 opened=yes state=off the run ended by itself: [watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here.
+avengers_infinity_pro-1.10	3	pass	44	VERDICT avengers_infinity_pro-1.10 pass 42 opened=yes state=attract 
+beatles-1.29	2	pass	55	VERDICT beatles-1.29 pass 53 opened=yes state=attract 
+deadpool_le-1.16	3	pass	44	VERDICT deadpool_le-1.16 pass 43 opened=yes state=attract 
+aerosmith-1.16	4	pass	428	VERDICT aerosmith-1.16 pass 427 opened=yes state=techalerts alive at the deadline, state techalerts
+deadpool_pro-1.16	2	pass	71	VERDICT deadpool_pro-1.16 pass 70 opened=yes state=attract 
+batman-1.14	1	pass	429	VERDICT batman-1.14 pass 428 opened=yes state=techalerts alive at the deadline, state techalerts
+elvira3-1.13	2	fail	61	VERDICT elvira3-1.13 fail 59 opened=yes state=off the run ended by itself: [watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here.
+dungeons_and_dragons_le-1.10	3	pass	430	VERDICT dungeons_and_dragons_le-1.10 pass 426 opened=yes state=techalerts alive at the deadline, state techalerts
+foo_fighters_le-1.04	1	pass	60	VERDICT foo_fighters_le-1.04 pass 59 opened=yes state=attract 
+dungeons_and_dragons_pro-1.10	4	pass	427	VERDICT dungeons_and_dragons_pro-1.10 pass 427 opened=yes state=techalerts alive at the deadline, state techalerts
+foo_fighters_pro-1.04	2	fail	68	VERDICT foo_fighters_pro-1.04 fail 67 opened=yes state=off the run ended by itself: [watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here.
+godzilla_pro-1.16	3	pass	44	VERDICT godzilla_pro-1.16 pass 42 opened=yes state=attract 
+guardians-1.15	1	pass	431	VERDICT guardians-1.15 pass 430 opened=yes state=techalerts alive at the deadline, state techalerts
+guardians_le-1.15	4	pass	431	VERDICT guardians_le-1.15 pass 429 opened=yes state=techalerts alive at the deadline, state techalerts
+iron_maiden_le-1.18	2	pass	428	VERDICT iron_maiden_le-1.18 pass 427 opened=yes state=techalerts alive at the deadline, state techalerts
+james_bond_le-1.06	1	pass	50	VERDICT james_bond_le-1.06 pass 49 opened=yes state=attract 
+iron_maiden_pro-1.18	3	pass	429	VERDICT iron_maiden_pro-1.18 pass 428 opened=yes state=techalerts alive at the deadline, state techalerts
+james_bond_pro-1.06	4	fail	61	VERDICT james_bond_pro-1.06 fail 58 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+jaws_le-1.02	2	pass	50	VERDICT jaws_le-1.02 pass 49 opened=yes state=attract 
+jaws_pro-1.02	1	fail	57	VERDICT jaws_pro-1.02 fail 55 opened=yes state=off the run ended by itself: [watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here.
+john_wick_le-1.02	3	pass	42	VERDICT john_wick_le-1.02 pass 41 opened=yes state=attract 
+john_wick_pro-1.02	4	fail	57	VERDICT john_wick_pro-1.02 fail 56 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+king_kong_le-0.97	3	fail	74	VERDICT king_kong_le-0.97 fail 72 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+jurassic_park_le-1.16	2	pass	429	VERDICT jurassic_park_le-1.16 pass 427 opened=yes state=techalerts alive at the deadline, state techalerts
+led_zeppelin_le-1.22	3	pass	53	VERDICT led_zeppelin_le-1.22 pass 51 opened=yes state=attract 
+jurassic_park_pro-1.16	1	pass	430	VERDICT jurassic_park_pro-1.16 pass 428 opened=yes state=techalerts alive at the deadline, state techalerts
+led_zeppelin_pro-1.22	2	pass	48	VERDICT led_zeppelin_pro-1.22 pass 47 opened=yes state=attract 
+mando_le-1.45	3	pass	66	VERDICT mando_le-1.45 pass 66 opened=yes state=attract 
+king_kong_pro-0.97	4	pass	427	VERDICT king_kong_pro-0.97 pass 427 opened=yes state=techalerts alive at the deadline, state techalerts
+metallica_spike-1.04	2	pass	82	VERDICT metallica_spike-1.04 pass 82 opened=yes state=attract 
+munsters_le-1.28	3	fail	52	VERDICT munsters_le-1.28 fail 50 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+mando_pro-1.45	1	pass	426	VERDICT mando_pro-1.45 pass 426 opened=yes state=techalerts alive at the deadline, state techalerts
+rush_le-1.19	2	fail	181	VERDICT rush_le-1.19 fail 180 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+star_wars_le-1.31	1	fail	60	VERDICT star_wars_le-1.31 fail 59 opened=yes state=off the run ended by itself: [watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here.
+munsters_pro-1.28	4	pass	429	VERDICT munsters_pro-1.28 pass 427 opened=yes state=techalerts alive at the deadline, state techalerts
+rush_pro-1.19	3	fail	180	VERDICT rush_pro-1.19 fail 180 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+star_wars_pro-1.31	2	pass	50	VERDICT star_wars_pro-1.31 pass 50 opened=yes state=attract 
+stranger_things-1.13	1	pass	37	VERDICT stranger_things-1.13 pass 36 opened=yes state=attract 
+stranger_things_le-1.13	4	fail	40	VERDICT stranger_things_le-1.13 fail 40 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+turtles_le-1.59	1	pass	58	VERDICT turtles_le-1.59 pass 57 opened=yes state=attract 
+turtles_pro-1.59	4	pass	66	VERDICT turtles_pro-1.59 pass 64 opened=yes state=attract 
+sword_of_rage_le-1.19	3	pass	428	VERDICT sword_of_rage_le-1.19 pass 428 opened=yes state=techalerts alive at the deadline, state techalerts
+sword_of_rage_pro-1.19	2	pass	429	VERDICT sword_of_rage_pro-1.19 pass 428 opened=yes state=techalerts alive at the deadline, state techalerts
+venom_le-1.07	3	fail	60	VERDICT venom_le-1.07 fail 58 opened=yes state=off the run ended by itself: [segv] mixer/loader dump skipped: those addresses were read out of godzilla_pro 1.15.0 and hold for no other build (PAD_GZ_ADDRS=1 if you have checked they fit)
+venom_pro-1.07	2	pass	54	VERDICT venom_pro-1.07 pass 52 opened=yes state=attract 
+uncanny_xmen_le-0.98	1	pass	428	VERDICT uncanny_xmen_le-0.98 pass 427 opened=yes state=techalerts alive at the deadline, state techalerts
+uncanny_xmen_pro-0.98	4	pass	428	VERDICT uncanny_xmen_pro-0.98 pass 426 opened=yes state=techalerts alive at the deadline, state techalerts

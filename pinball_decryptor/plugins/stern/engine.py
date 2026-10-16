@@ -2808,6 +2808,13 @@ def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
         if base.startswith("image-sc") and base.endswith(".bin"):
             op = os.path.join(work, base)
             reader.extract_file(node, op)
+            from .spike2 import soundbank as _SB
+            if _SB.is_pad_bank(op):
+                # PAD-595: a bank this app built for the modes' own sounds;
+                # its records are the modes' calls and music, not songs
+                log("%s is a sound bank this app added for the modes' own sounds; "
+                    "it holds no songs and is left alone." % base, "info")
+                continue
             sc_paths.append(op)
     if not sc_paths:
         return 0
@@ -6589,8 +6596,8 @@ def _grown_bank_size(img_path, byidx, grows):
     has appended every sound in *grows*, read off the bank's header before
     anything is staged."""
     from .spike2 import masterdir as MD
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     return _grown_bank_bytes(md_off, count,
                              [_grown_body_bytes(byidx[i], grows[i][1])
                               for i in sorted(grows)])
@@ -6718,7 +6725,8 @@ class _SpaceCard:
             self.by_block[bytes(node["i_block"])] = rel
         try:
             with open(_lp(path), "rb") as f:
-                layout = cs.read_layout(f)
+                # (a card made as small as it can be grows too: PAD-593)
+                layout = cs.read_growing_layout(f, grow_to)
         except (cs.CardSizeError, OSError):
             layout = None            # not Stern-shaped: measured as it is
         self.at = grow_to if layout is not None else None
@@ -6730,8 +6738,9 @@ class _SpaceCard:
             # (a card built for the smaller 16 GB card is that size: PAD-465)
             own = cs.layout_class(layout.laid_out)
             self.current = grow_to or own
-            self.room = cs.room_by_class(layout, self.space,
-                                         [own] + list(sizes or ()), route)
+            self.room = cs.room_by_class(
+                layout, self.space,
+                [c for c in [own] + list(sizes or ()) if c], route)
 
     def held(self, node):
         """Blocks *node* holds on the partition now (its extent tree too)."""
@@ -7744,6 +7753,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # goes on the card whole through the ext4 driver and its in-place
         # writes are never emitted.
         grow_places = None
+        # PAD-595: the sound banks of the modes' own sounds, when image.bin
+        # has no room for them (_plan_sound_banks)
+        bank_plan = None
         reader = None
         gr_path = img_path = None
         # Which request a mode's own end sound rode in on, once it has.
@@ -7885,6 +7897,15 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites, audio_edits,
                             grows, mode_own, os.path.join(grow_work, "own_sounds"),
                             log)
+                    # PAD-595: the modes' own sounds image.bin cannot take
+                    # beside the user's longer sounds go into a sound bank of
+                    # their own (bank_build); they leave grows and audio_edits
+                    bank_plan = None
+                    if mode_own_used:
+                        bank_plan, audio_edits, grows = _plan_sound_banks(
+                            gr_path, img_path, params, audio_edits, grows,
+                            _user_grows, mode_own_used, reader, img_node,
+                            space_chk, log)
                     _sm_grows = {}
                     if sound_modes:
                         # PAD-494: each file for another music mode, a grown copy
@@ -7972,7 +7993,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     # taken the hit path and booted.
                     grown_cache = grown_key = grown_hit = None
                     if (grows and assets_dir and sound_ok is not False
-                            and _family
+                            and _family and bank_plan is None
                             and not _pathA_enabled()
                             and os.environ.get(
                                 "PAD_STERN_SKIP_MASTERDIR_FIX") != "1"
@@ -8134,26 +8155,53 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             level_refs=_sm_level_refs(sound_mode_used))
                     if audio_patches is None:
                         return None, None, None, None, None
-                    if _chain_edits:
-                        _cp, params = _chain_encode_appended(
-                            gr_path, img_path, params, _chain_edits, np, log,
-                            loops=_loop_idx,
-                            gains=_sm_gains(slot_gains, sound_mode_used),
-                            level_refs=dict(_mode_music_level_refs(
-                                gr_path, img_path, params, desc_sites,
-                                _loop_idx, log, used=mode_own_used),
-                                **_sm_level_refs(sound_mode_used)),
-                            progress=_span(progress, 45, 75),
-                            cancel=cancel)
-                        audio_patches.update(_cp)
+                    bank_beds = {}
+                    if bank_plan is not None:
+                        # PAD-595: the sound banks of the modes' own sounds
+                        # image.bin had no room for.  image.bin's header
+                        # names them, so it is staged and copied whole even
+                        # when nothing of its own was appended.
+                        t0 = time.monotonic()
+                        grow_work = grow_work or _work_dir(
+                            label, base="spike2_grow_")
+                        if grow_places is None:
+                            _st = os.path.join(grow_work, "image.bin")
+                            os.replace(_lp(img_path), _lp(_st))
+                            img_path, grow_places = _st, []
+                        bank_beds = _build_sound_banks(
+                            gr_path, img_path, params, desc_sites, bank_plan,
+                            mode_own_used, _loop_idx,
+                            _sm_gains(slot_gains, sound_mode_used),
+                            os.path.join(grow_work, "banks"), np, log,
+                            _span(progress, 40, 45), cancel)
+                        if cancel():
+                            return None, None, None, None, None
+                        _stage_done(log, "building %d sound bank(s) for the modes' "
+                                    "own sounds" % len(bank_plan.banks), t0)
+                    if _chain_edits or bank_beds:
+                        if _chain_edits:
+                            _cp, params = _chain_encode_appended(
+                                gr_path, img_path, params, _chain_edits, np, log,
+                                loops=_loop_idx,
+                                gains=_sm_gains(slot_gains, sound_mode_used),
+                                level_refs=dict(_mode_music_level_refs(
+                                    gr_path, img_path, params, desc_sites,
+                                    _loop_idx, log, used=mode_own_used),
+                                    **_sm_level_refs(sound_mode_used)),
+                                progress=_span(progress, 45, 75),
+                                cancel=cancel)
+                            audio_patches.update(_cp)
                         # an appended record's container key comes out of the chain,
                         # so the play tables are re-pointed again at the keys the
-                        # finished bank registers (descriptors are no record's window)
+                        # finished bank registers (descriptors are no record's window);
+                        # a bed in a sound bank of the modes' own (PAD-595) keeps its
+                        # stock key and takes the bank record's length
                         _repoint_descriptors(
                             gr_path, img_path, params, desc_sites, log,
                             templates=_mode_bed_templates(gr_path, img_path,
                                                           mode_own_used, log),
-                            keep=_mode_swap_idx(mode_own_used) | _sm_hosts(sound_mode_used))
+                            keep=_mode_swap_idx(mode_own_used) | _sm_hosts(sound_mode_used),
+                            **({"bank_beds": bank_beds} if bank_beds else {}))
                         _mode_swap_keys(mode_own_used, params, log)
                         # The re-point may move a key inside the region the
                         # fingerprint covers: file the map under the bank as
@@ -8656,6 +8704,19 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     "than shipping a card whose sounds don't match its "
                     "manifest.")
 
+        # PAD-595: the sound banks of the modes' own sounds are new files in
+        # the game's directory, beside image.bin, copied whole and indexed
+        bank_new = []
+        if bank_plan is not None and bank_plan.files:
+            if image_grow_job is None:
+                raise RuntimeError(
+                    "Couldn't resolve the sound bank's path on the card, so the "
+                    "modes' own sound banks could not be written; aborting.")
+            _gdir = os.path.dirname(image_grow_job[0])
+            bank_new = [("%s/%s" % (_gdir, os.path.basename(_bp)) if _gdir
+                         else os.path.basename(_bp), _bp)
+                        for _cat, _bp in bank_plan.files]
+
         # Item 149: the modes' screens and clips, built from this card's STOCK
         # HUD and bank scenes (never on top of an earlier build), plus the
         # files the system partition gets.  The rewritten scenes and the new
@@ -8958,7 +9019,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # PAD-444: an own copy is a new file too, and its bank is rewritten
         _c_replaced = list((clip_files or {}).get("replaced", ()))
         _c_new = list((clip_files or {}).get("new", ()))
-        if mode_plan is not None or _c_replaced or _c_new:
+        if mode_plan is not None or _c_replaced or _c_new or bank_new:
             from . import sidx as _sidx
             # the modes' (or PAD-446's random clips') plan carries the manifest when
             # there is one; a build of own clips alone composes it here
@@ -8981,7 +9042,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     bytes(reader.read_file_bytes(_man_node)), inplace=_folded,
                     refreshed=_m_replaced + [r for r in _c_replaced
                                              if r[0] not in _m_rels],
-                    new=_m_new + _c_new)
+                    new=_m_new + _c_new + bank_new)
                 _man_src = os.path.join(
                     grow_work, "modes" if mode_plan is not None else "own_clips",
                     os.path.basename(_man_path))
@@ -8996,7 +9057,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             except _MW.ModeWriteError as e:
                 raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
-            _added = [r for r, _s in _m_new + _c_new]
+            _added = [r for r, _s in _m_new + _c_new + bank_new]
             log("%s: the SD-validation manifest gains %d record(s) (%s) "
                 "and %d in-place record refresh(es) are folded into it; it is "
                 "copied onto the card whole."
@@ -9017,7 +9078,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                              if m.ok and m.setting is not None]
                             if getattr(mode_plan, "picture_file", "") else []),
                 "lines": list(mode_plan.lines),
-                "added": [r for r, _s in mode_plan.new],
+                "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
                               + [manifest_job[0]]),
                 "port": os.path.basename(mode_plan.port),
@@ -9034,8 +9095,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "own_sounds": [dict({k: u.get(k) for k in ("slug", "name", "key",
                                                            "request", "idx", "ms")},
                                     **({"sid": u["sid"]} if u.get("sid") else {}),
-                                    **({k: u[k] for k in ("swap", "stock_key", "our_key")}
-                                       if u.get("swap") else {}))
+                                    **({k: u.get(k) for k in ("swap", "stock_key", "our_key")}
+                                       if u.get("swap") or u.get("bank") is not None else {}),
+                                    **({"bank": u["bank"], "bank_sid": u.get("bank_sid")}
+                                       if u.get("bank") is not None else {}))
                                for u in mode_own_used],
                 "p2_offset": _p2_off,
                 "p2_epoch": _p2_epoch,
@@ -9060,6 +9123,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             _mj = {r for r, _s in (mode_plan.jobs if mode_plan else ())}
             grow_jobs += [j for j in _c_replaced if j[0] not in _mj]
             grow_jobs += _c_new
+        grow_jobs += bank_new                     # PAD-595: before the manifest
         if manifest_job is not None:
             grow_jobs.append(manifest_job)
         if patched_gr is not None and fw_node is not None:
@@ -10349,8 +10413,8 @@ def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
     from . import sound_modes as _SMo
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     start = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(grows.items()) if i not in sm_grows]
     kept, cut, _bodies = _fit_grows(sorted(sm_grows), sm_grows, byidx, md_off, count,
                                     MAX_IMAGE_BYTES, start)
@@ -16662,8 +16726,8 @@ def _grows_kept_at(grows, byidx, img_path, limit, priority=None,
         return {}
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     reserved = reserved or {}
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
              for i in sorted(reserved)]
@@ -16708,8 +16772,8 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
     from . import card_size as _cs
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
-    with open(_lp(img_path), "rb") as f:
-        md_off, count = MD.header_geometry(f.read(0x100))
+    # PAD-593: past an earlier build's bodies, as the grow lays it out
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
     order = _grow_order(grows, priority)
     reserved = reserved or {}
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
@@ -16822,9 +16886,16 @@ def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
         for idx in sorted(grows):
             _room, want = grows[idx]
             p = byidx[idx]
+            # PAD-593: a sound an earlier build grew plays its appended
+            # record (``shadows``), whose length *p* carries; that is the
+            # record to copy.
             edits.append(MD.GrowEdit(idx, int(p["length"]), int(want) + BLOCK,
-                                     _grown_body_bytes(p, want)))
-        grown, places = MD.plan_grow_records(d, edits)
+                                     _grown_body_bytes(p, want),
+                                     p.get("shadows")))
+        # the file size lets a bank an earlier build grew keep that build's
+        # bodies where they are (PAD-593, plan_grow_records)
+        grown, places = MD.plan_grow_records(
+            d, edits, file_size=os.path.getsize(_lp(img_path)))
         writes = MD.write_directory(grown, emu)
     finally:
         emu.close()
@@ -16887,16 +16958,25 @@ def _derive_grown(gr_path, staged, params_stock, log, progress=None):
     params = collapse_shadowed(rows)
     grown_idx = {p["idx"] for p in params if p.get("shadows") is not None}
     raw_by_idx = {r.get("idx"): r for r in rows}
+    stock_by_idx = {p["idx"]: p for p in params_stock}
     for p in params:
         p["grown"] = p["idx"] in grown_idx
         if p["grown"]:
             # The key the STOCK record registered under, from the row the
             # collapse retired.  The play tables name the sound by it, and
             # the re-point matches on it exactly (all eight bytes).
-            p["stock_findkey"] = (raw_by_idx.get(p["idx"]) or {}).get("findkey")
+            src = raw_by_idx.get(p["idx"]) or {}
+            base = stock_by_idx.get(p["idx"]) or {}
+            if base.get("shadows") is not None:
+                # PAD-593: the card came in with this sound already grown (a
+                # custom image built with longer sounds).  Its play tables
+                # name the appended record that card plays, not the dead stock
+                # one, so that is the key to re-point from.
+                src = base
+            p["stock_findkey"] = src.get("findkey")
             # and its length, which is what the descriptor's declared
             # duration was written from.
-            p["stock_length"] = (raw_by_idx.get(p["idx"]) or {}).get("length")
+            p["stock_length"] = src.get("length")
     stock = {p["idx"]: (p["scale"], p["pred16"], p["body_off"], p["length"])
              for p in params_stock}
     moved = [p["idx"] for p in params
@@ -17454,7 +17534,7 @@ def _mode_swap_keys(used, params, log):
     An entry whose keys are not there is taken out and logged (the mode then plays the game's own)."""
     byidx = {p["idx"]: p for p in params}
     for u in list(used or ()):
-        if not u.get("swap"):
+        if not u.get("swap") or u.get("bank") is not None:
             continue
         p = byidx.get(int(u["idx"]), {})
         old, new = p.get("stock_findkey"), p.get("findkey")
@@ -17474,7 +17554,8 @@ def _mode_bed_templates(gr_path, img_path, used, log):
     """``{bed sid: music carrier's sid}`` for the modes' music beds in this build (item 150
     follow-up): each bed's descriptor is rewritten as a copy of its carrier's looping-music one
     (:func:`_music_template_writes`), so the bed plays on the music bus and loops."""
-    beds = [u for u in (used or ()) if u.get("music") and u.get("sid")]
+    beds = [u for u in (used or ()) if u.get("music") and u.get("sid")
+            and u.get("bank") is None]           # PAD-595: a bank bed has its own descriptor
     if not beds:
         return {}
     from . import mode_write as _MW
@@ -17761,7 +17842,238 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
     return audio_edits, grows, used
 
 
-def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=()):
+
+# --------------------------------------------------------------------------
+# PAD-595: the modes' own sounds in a sound bank of their own
+# --------------------------------------------------------------------------
+class _BankPlan(object):
+    """What a Write puts into sound banks of the modes' own (:mod:`.bank_build`):
+    ``banks`` ``[(category id, [BankEdit])]``, ``wavs`` ``{host idx: wav}``,
+    ``grows`` the spilled ``{idx: (room, want)}``, ``dir_rel`` the game's
+    directory on the card, and once built ``files`` ``[(cat, path)]`` and
+    ``rows`` ``{cat: (places, rows)}``."""
+
+    def __init__(self, banks, wavs, grows, dir_rel):
+        self.banks = banks
+        self.wavs = wavs
+        self.grows = grows
+        self.dir_rel = dir_rel
+        self.files = []
+        self.rows = {}
+
+
+def _bankable_idx(used):
+    """The host idx of the modes' own sounds a sound bank can hold (PAD-595):
+    a sound SWAPPED in at run time (the game is handed the bank record's
+    key), and a music bed (its carrier is pointed at the bed's sid and the
+    bed's stock key swapped for the bank record's)."""
+    return {int(u["idx"]) for u in used or ()
+            if u.get("idx") is not None and (u.get("swap") or (u.get("music") and u.get("sid")))}
+
+
+def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows, used,
+                      reader, img_node, space_chk, log):
+    """Decide which of the modes' own sounds leave ``image.bin`` for a sound
+    bank of their own (PAD-595), and take them out of *grows* and
+    *audio_edits*.  Returns ``(plan or None, audio_edits, grows)``.
+
+    The user's longer sounds and the modes' sounds a bank cannot hold (the
+    end sound on a re-pointed request) are placed first; the bankable ones
+    take what ``image.bin`` has left under the game's limit, largest first out
+    when it is full (:func:`.bank_build.plan_spill`), so the fewest move.  A
+    build whose sounds all fit is exactly the build it was."""
+    from . import bank_build as BB
+    from .spike2 import masterdir as MD
+    from .spike2 import soundbank as SB
+    byidx = {p["idx"]: p for p in params}
+    bankable = (_bankable_idx(used) & set(grows)) - set(user_grows)
+    if not bankable:
+        return None, audio_edits, grows
+    fixed = {i: g for i, g in grows.items() if i not in bankable}
+    start = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(fixed.items())]
+    kept, spilled = BB.plan_spill({i: grows[i] for i in bankable}, bankable, byidx,
+                                  img_path, start=start)
+    if not spilled:
+        return None, audio_edits, grows
+    with open(_lp(img_path), "rb") as f:
+        head = f.read(0x200)
+    # (past an earlier build's bodies, as the grow lays it out: PAD-593)
+    md_off, count = MD.image_grow_geometry(_lp(img_path))
+    cap = BB.image_cap()
+    with_all = _grown_bank_bytes(md_off, count, start + [
+        _grown_body_bytes(byidx[i], g[1])
+        for i, g in sorted(kept.items()) + sorted(spilled.items())])
+    # the bank files: one per 2 GiB, the lowest category ids the card lacks
+    on_card = []
+    dir_rel = ""
+    try:
+        for path, _ino, _node in reader.iter_regular_files(min_size=1):
+            base = path.rsplit("/", 1)[-1]
+            if base.startswith("image-sc") and base.endswith(".bin"):
+                on_card.append(base)
+        if img_node is not None:
+            dir_rel = os.path.dirname(_card_rel_path(reader, img_node) or "")
+    except Exception:  # noqa: BLE001 - the ids then avoid image.bin's list alone
+        pass
+    _c, ids, _room = SB.category_slots(head)
+    edits = BB.bank_edits(spilled, byidx, _read_stock_directory(gr_path, img_path))
+    # a bank the emulator can serve beside the staged image.bin (its window
+    # follows image.bin's in the game's 32-bit address space)
+    staged = _grown_bank_bytes(md_off, count, start + [
+        _grown_body_bytes(byidx[i], g[1]) for i, g in sorted(kept.items())])
+    limit = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged))
+    groups = SB.split_banks(edits, limit=limit, stride=SB.fragment_stride(head))
+    if len(groups) > 1:
+        log("Modes: the modes' own sounds take %d sound banks: each is kept under %d MB, the "
+            "most the emulator can serve beside this image.bin while it builds and checks "
+            "them." % (len(groups), limit // 10**6), "info")
+    cats = SB.next_category_ids(ids, on_card, len(groups))
+    banks = list(zip(cats, groups))
+    wavs = {i: audio_edits[i] for i in spilled}
+    audio_edits = {i: w for i, w in audio_edits.items() if i not in spilled}
+    grows = {i: g for i, g in grows.items() if i not in spilled}
+    by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
+    for cat, group in banks:
+        for e in group:
+            u = by_idx_used.get(e.idx)
+            if u is not None:
+                u["bank"] = int(cat)
+        size = SB.bank_bytes([e.body_bytes for e in group])
+        if space_chk is not None:
+            try:
+                space_chk.clips.append((SB.bank_name(cat), "%s/%s" % (dir_rel, SB.bank_name(cat))
+                                        if dir_rel else SB.bank_name(cat), size))
+            except Exception:  # noqa: BLE001 - the copy at the end checks the room
+                pass
+        log("Modes: %d of the modes' own sound(s) go into a sound bank of their own, %s "
+            "(%.1f MB): with them image.bin would come to %d MB, past the %d MB the game can "
+            "open; %d stay in image.bin. In the bank: %s."
+            % (len(group), SB.bank_name(cat), size / 1e6, with_all // 10**6, cap // 10**6,
+               len(kept), ", ".join(
+                   "%s's %s" % (by_idx_used[e.idx].get("name"),
+                                _MW_sound_words(by_idx_used[e.idx].get("key")))
+                   if e.idx in by_idx_used else "idx %d" % e.idx for e in group)), "info")
+    return _BankPlan(banks, wavs, spilled, dir_rel), audio_edits, grows
+
+
+def _MW_sound_words(key):
+    from . import mode_write as _MW
+    try:
+        return _MW.sound_words(key)
+    except Exception:  # noqa: BLE001
+        return str(key)
+
+
+def _read_stock_directory(gr_path, img_path):
+    """``image.bin``'s master directory, read with an emulator on this card's
+    program."""
+    from .spike2 import masterdir as MD
+    from .spike2.emulator import Spike2Emu
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        return MD.read_directory(img_path, emu)
+    finally:
+        emu.close()
+
+
+def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, gains,
+                       work, np, log, progress=None, cancel=None):
+    """Stage, encode and verify every bank of *plan* (PAD-595), write each
+    one's play tables (a sid of the bank's category per sound, its descriptor
+    a copy of the carrier's naming the bank record), name the banks in
+    ``image.bin``'s header (*img_path*, the staged copy), and give each bank
+    sound's *used* entry its ``bank_sid``: the mode file points the sound's
+    carrier request at it (``music <request> <sid>`` for a bed, ``sid
+    <request> <sid>`` for a call).  Returns ``{}`` (nothing of a bank sound's
+    is re-pointed in ``image.bin``)."""
+    from . import bank_build as BB
+    from . import mode_write as _MW
+    from .spike2 import soundbank as SB
+    from .spike2.emulator import Spike2Emu, BLOCK
+    byidx = {p["idx"]: p for p in params}
+    by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
+    family = _mode_family_on()
+    with open(_lp(gr_path), "rb") as f:
+        elf = f.read()
+    with open(_lp(img_path), "rb") as f:
+        head = f.read(1 << 16)
+    refs = _mode_music_level_refs(gr_path, img_path, params, sites,
+                                  set(loop_idx) & set(plan.grows), log, used=used)
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        for cat, edits in plan.banks:
+            path, places = BB.stage_bank(gr_path, img_path, work, byidx, edits, cat, log,
+                                         emu=emu)
+            plan.files.append((cat, path))
+            plan.rows[cat] = (places, None)
+    finally:
+        emu.close()
+    beds = {}
+    rev = None
+    for n, (cat, path) in enumerate(plan.files):
+        places, _r = plan.rows[cat]
+        wavs = {pl.idx: plan.wavs[pl.idx] for pl in places}
+        rows, _patches, rev = BB.chain_encode(
+            gr_path, img_path, path, cat, params, places, wavs, np, log,
+            loops=set(loop_idx) & set(wavs), gains=gains, level_refs=refs,
+            progress=_span(progress, int(100 * n / len(plan.files)),
+                           int(100 * (n + 1) / len(plan.files))),
+            cancel=cancel, revalidate=rev)
+        # the check derives the finished file afresh; the rows kept are the
+        # chain's, which carry each record's host sound
+        BB.verify_bank(gr_path, img_path, path, cat, rows, log, revalidate=rev)
+        plan.rows[cat] = (places, rows)
+        # the play tables: each sound's carrier request names the sid whose
+        # descriptor is copied (a bed's carrier is a looping tune, a call's
+        # the call it rides in on); the length is the bank record's
+        carriers, durations, music_idx = {}, {}, set()
+        for r in rows:
+            idx = r.get("host")
+            u = by_idx_used.get(idx)
+            if u is None or not r.get("findkey"):
+                raise RuntimeError(
+                    "Modes: sound bank %s record %d: no mode sound or no container key for it, "
+                    "so no sound id could play it." % (SB.bank_name(cat), r["idx"]))
+            sids = _MW.request_sids(elf, head, int(u["request"]))
+            if not sids:
+                raise RuntimeError(
+                    "Modes: %s's own %s: its carrier, request %d, plays no sound id whose "
+                    "descriptor a sound bank copy could take." % (
+                        u.get("name"), _MW_sound_words(u.get("key")), int(u["request"])))
+            carriers[idx] = int(sids[0])
+            durations[idx] = (_duration_units_emitted(int(r["length"])) if family
+                              else _duration_units(int(r["length"])))
+            if u.get("music"):
+                music_idx.add(idx)
+        expect = BB.write_bank_tables(gr_path, img_path, path, cat, places, rows, carriers,
+                                      durations, music_idx, log)
+        BB.verify_tables(gr_path, img_path, path, cat, places, expect, rows, log, revalidate=rev)
+        for r in rows:
+            idx = r["host"]
+            u = by_idx_used[idx]
+            sid = expect[r["idx"]][0]
+            u["bank"], u["bank_idx"], u["bank_sid"] = int(cat), int(r["idx"]), int(sid)
+            u.pop("stock_key", None)
+            u.pop("our_key", None)
+            log("Modes: %s's own %s plays from sound bank %s record %d (%.2f s) as sound id "
+                "%#x; the mode points its carrier, request %d, at it." % (
+                    u.get("name"), _MW_sound_words(u.get("key")), SB.bank_name(cat), r["idx"],
+                    (int(r["length"]) - BLOCK) / 44100.0, sid, int(u["request"])), "info")
+    writes = BB.image_header_writes(img_path, [c for c, _p in plan.files])
+    with open(_lp(img_path), "r+b") as f:
+        for off, data in sorted(writes.items()):
+            f.seek(off)
+            f.write(data)
+    log("image.bin's header now names %d sound bank(s) of the modes' own (%s); the game "
+        "loads them at boot after image.bin." % (
+            len(plan.files), ", ".join(SB.bank_name(c) for c, _p in plan.files)), "info")
+    return beds
+
+
+def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=(),
+                             bank_beds=None):
     """``({off: bytes}, {sid: ({key8}, duration)})`` -- the writes that
     re-point every descriptor naming a grown sound's stock record at its
     appended record and move its declared duration by the growth, and what
@@ -17777,6 +18089,11 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=()):
     family does: the one key mask it knew and the declared duration rounded
     UP from the header length.
 
+    *bank_beds* ``{bed sid: (stock key, stock length, new length)}`` are the
+    modes' music beds in a sound bank of their own (PAD-595): the bed's
+    descriptor keeps its STOCK key (the mode's swap hands the game the bank
+    record's) and only its declared duration moves to the bank record's.
+
     Raises when a grown sound's appended key has bits no descriptor can
     carry, or when no descriptor names its stock record: either would ship
     a card that plays the original, the very thing this exists to prevent."""
@@ -17786,6 +18103,25 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=()):
         mask = _desc_key_mask(params, sites) if family else _DESC_KEY2_MASK
     writes, expect = {}, {}
     keep = {int(i) for i in keep or ()}
+    for sid, (skey, stock_len, new_len) in sorted((bank_beds or {}).items()):
+        skey = bytes(skey)
+        grew = ((_duration_units_emitted(new_len) if family else _duration_units(new_len))
+                - _duration_units(stock_len))
+        hits = 0
+        for s in sites:
+            if s.sid != sid or _play_key(s.payload, s.sid, mask) != skey:
+                continue
+            keys, dur = expect.get(s.sid, (set(), s.duration))
+            keys.add(skey)
+            dur = (dur + grew) & 0xFFFFFFFF
+            expect[s.sid] = (keys, dur)
+            writes[s.dur_off] = bytes(
+                a ^ b for a, b in zip(struct.pack("<I", dur), s.dur_keystream))
+            hits += 1
+        if not hits:
+            raise RuntimeError(
+                "sid %d: no descriptor of the game's play tables names this music "
+                "bed's record, so its sound bank copy could never be played." % sid)
     for p in params:
         if not p.get("grown") or p["idx"] in keep:
             continue
@@ -17795,6 +18131,10 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=()):
                 "idx %d: the staged bank's decode reported no container key "
                 "for the sound, so its play tables can't be re-pointed."
                 % p["idx"])
+        if bytes(old) == bytes(new):
+            # PAD-593: grown on the card this build started from and not
+            # touched by it; its descriptors already name this record.
+            continue
         grew = 0
         if p.get("stock_length") is not None:
             # The declared duration is what the voice PLAYS, and the codec emits
@@ -17908,13 +18248,15 @@ def _music_template_writes(gr_path, staged, templates, expect, mask, log):
     return out, want
 
 
-def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, keep=()):
+def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, keep=(),
+                         bank_beds=None):
     """Rewrite the play tables in the staged bank so every descriptor that
     named a grown sound's stock record names its appended record instead,
     then prove it through the game's own resolver on the file as written.
     *templates* ``{bed sid: carrier sid}`` also makes each of those a looping music
     descriptor (:func:`_music_template_writes`). *keep* are grown records left
-    un-pointed (:func:`_plan_descriptor_repoint`). Returns the ``{off: bytes}`` written."""
+    un-pointed, *bank_beds* the beds in a sound bank of the modes' own
+    (:func:`_plan_descriptor_repoint`). Returns the ``{off: bytes}`` written."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
     # the key mask measured per build, and durations that end where the audio
@@ -17922,7 +18264,8 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, ke
     # one mask and the rounding a build without it uses (_mode_family_on)
     family = _mode_family_on()
     mask = _desc_key_mask(params, sites, log) if family else _DESC_KEY2_MASK
-    writes, expect = _plan_descriptor_repoint(params, sites, mask, family=family, keep=keep)
+    writes, expect = _plan_descriptor_repoint(params, sites, mask, family=family, keep=keep,
+                                              bank_beds=bank_beds)
     t_writes, t_want = ({}, {})
     if templates:
         t_writes, t_want = _music_template_writes(gr_path, staged, templates, expect, mask, log)
@@ -17973,7 +18316,10 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, ke
     finally:
         emu.close()
     keep = {int(i) for i in keep or ()}
-    n_grown = sum(1 for p in params if p.get("grown") and p["idx"] not in keep)
+    # (PAD-593: one the incoming card already had grown, and this build left
+    # alone, is not counted: its descriptors were not touched)
+    n_grown = sum(1 for p in params if p.get("grown") and p["idx"] not in keep
+                  and bytes(p.get("stock_findkey") or b"") != bytes(p.get("findkey") or b""))
     log("Play tables re-pointed: %d descriptor(s) now name the longer copy "
         "of %d sound(s) and declare the new length, confirmed through the "
         "game's own resolver." % (len(expect), n_grown), "info")

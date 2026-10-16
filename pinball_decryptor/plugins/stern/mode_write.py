@@ -745,9 +745,15 @@ def own_cfg_args(project, slug, spec, own_sounds):
         return None, None
     requests = {u["key"]: int(u["request"]) for u in mine}
     for u in mine:
-        if u["key"] == "music" and u.get("sid"):
+        if u["key"] == "music" and u.get("bank_sid"):
+            # PAD-595: its bed in a sound bank of its own, played by that bank's sound id
+            requests["music_sid"] = int(u["bank_sid"])
+        elif u["key"] == "music" and u.get("sid"):
             requests["music_sid"] = int(u["sid"])     # item 150 follow-up: the mode's own bed
-        if u.get("stock_key") and u.get("our_key"):
+        if u.get("bank_sid") and u["key"] != "music":
+            # PAD-595: a call in a sound bank: its carrier is pointed at the bank's sound id
+            requests.setdefault("sids", []).append((int(u["request"]), int(u["bank_sid"])))
+        elif u.get("stock_key") and u.get("our_key"):
             # item 163: the mode swaps its own record in on this carrier
             requests.setdefault("swaps", []).append((int(u["request"]), u["stock_key"], u["our_key"]))
     ms = {u["key"]: int(u["ms"]) for u in mine if u.get("ms") and u["key"] != "music"}

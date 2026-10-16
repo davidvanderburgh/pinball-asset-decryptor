@@ -787,6 +787,28 @@ def test_a_swap_is_picked_by_its_cue_and_an_untagged_one_still_reads(harness, tm
     assert re.search(r"SWAP %d p\d+ \d+ %s$" % (lost, _key(0x22)), out, re.M)
 
 
+def test_a_call_in_a_sound_bank_points_its_carrier_at_the_banks_sid_for_that_play(harness, tmp_path):
+    """PAD-595: ``sid <request> <sound id> call:<cue>``: the call's carrier is pointed at the bank's
+    sound id (pm_sound_sid) before it plays and its own list put back once the call is over; a
+    swap line is not needed for it."""
+    name, bed, calls = ASSETS["meltdown"]
+    lit, lost = calls["lit"], calls["critical"]
+    lines = ["name   %s" % name, "music  125 %d" % 0x10000,                  # a bed in the bank too
+             "sid    %d %d call:heat" % (lit, 0x10005),                       # another cue's, same request
+             "sid    %d %d call:lit" % (lit, 0x10001),
+             "sid    %d %d" % (lost, 0x10002),                                # untagged: its one sound
+             "call   lit %d 1500 4" % lit, "call   critical %d 1500 4" % lost]
+    out = _swaps_run(harness, tmp_path / "sids", lines)
+    assert _at(out, "SID 125 65536") is not None, out[-2000:]
+    t_lit = _at(out, "SID %d %d" % (lit, 0x10001))
+    assert t_lit is not None and not re.search(r"SID %d %d$" % (lit, 0x10005), out, re.M), out[-2000:]
+    assert _at(out, "SOUND %d" % lit) is not None and _at(out, "SOUND %d" % lit) >= t_lit
+    back = _at(out, "SID %d 0" % lit)
+    assert back is not None and back > t_lit + 1500          # its own list back once the call is over
+    assert re.search(r"SID %d %d$" % (lost, 0x10002), out, re.M)
+    assert "played (sound id %d, its own in a sound bank)" % 0x10001 in out
+
+
 def test_ghidorah_plays_its_music_clip_and_calls_and_gives_the_music_back(harness, dump):
     out = play_own(harness, dump, *POWERLINES, "secs", 1,
                    "shot", "Left ramp", "shot", "Powerline left", "secs", 12,

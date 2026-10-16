@@ -1780,9 +1780,11 @@ def check_blocks_unmoved(original_path, path, parts, log=None):
             got = after.get(p)
             if got is None or got.get("size") != node.get("size"):
                 return p
-            sz = int(node.get("size") or 0)
-            if sz and (list(ra.disk_ranges(node, 0, sz))
-                       != list(rb.disk_ranges(got, 0, sz))):
+            # mapped, not disk_ranges of the whole file: a file with a hole
+            # (a custom card's game program, PAD-491) has nothing to move
+            # there, and disk_ranges would refuse it (PAD-593)
+            if int(node.get("size") or 0) and (ra.mapped_ranges(node)
+                                               != rb.mapped_ranges(got)):
                 return p
     if log:
         log("All %d files on the games partition are in the blocks they had "

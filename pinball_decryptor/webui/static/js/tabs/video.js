@@ -18,6 +18,8 @@ const T = {
   intro: "Assign a replacement clip to any slot — a matching clip is used as-is, anything else is auto-re-encoded — then build the update on the Write tab.",
   ffmpeg: "ffmpeg not found — replacing video needs ffmpeg to re-encode + preview clips. Install it with “Install Missing” above the tabs.",
   project: "The project folder — shared by every tab. It is set on the Extract tab. Click to open it.",
+  csave: "Save a copy of each clip, its replacement if it has one, with its color profile baked in, into a folder you pick. Same size, frame rate and sound; the project and the card are not changed.",
+  csaveAll: "Save a copy of every clip with a color profile attached (green palette), with that profile baked in, into a folder you pick. To save others, select them, right-click and save them. The project and the card are not changed.",
   csv: "Save the whole video table (every slot, not just the filtered view) as a CSV — name, length, resolution, format, audio, replacement and changed-on-disk status — for tracking a big replacement project in a spreadsheet.",
   check: "Measure every clip already written to a card image and list the ones low enough in bitrate to look blocky — the Write-time \"it will look very blocky\" check, asked of a finished card. Reads the image only; nothing is written.",
   folder: "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.",
@@ -915,6 +917,8 @@ export default function VideoTab() {
         info.targets
           ? { label: `Clear ${info.targets} replacement${info.targets === 1 ? "" : "s"} in this selection`, onClick: () => call("video.clear", rels) }
           : { label: "No replacements in this selection", disabled: true },
+        info.csave && { sep: true },
+        info.csave && { label: info.csave, title: T.csave, onClick: () => call("video.colour_save", rels) },
       ]);
       return;
     }
@@ -960,6 +964,7 @@ export default function VideoTab() {
       ] },
       { sep: true },
       { label: "What this slot needs…", onClick: async () => { const d = await call("video.target_spec", rel); if (d) setSpec(d); } },
+      info.csave && { label: info.csave, title: T.csave, onClick: () => call("video.colour_save", [rel]) },
       { label: "Open in default app", onClick: () => call("video.open_default", rel, "orig") },
       info.open_rep && { label: "Open replacement in default app", onClick: () => call("video.open_default", rel, "rep") },
       { label: info.reveal, onClick: () => call("video.reveal", rel) },
@@ -1126,6 +1131,8 @@ export default function VideoTab() {
         <button type="button" class=${cx("vid-link", !s.project && "none")} onClick=${() => call("video.open_project_folder")}
           ...${tip(T.project)}>${s.project_text}</button></span>`}>
       ${s.status ? html`<${Chip} kind="acc">${s.status}<//>` : null}
+      ${s.csave ? html`<${Chip} kind="acc">${s.csave.text}<//>
+        <${Button} kind="ghost" icon="x" onClick=${() => call("video.colour_save_cancel")}>Cancel save<//>` : null}
       <${Button} kind="ghost" icon="undo" cls="vid-undo" disabled=${!undo.undo || running} onClick=${() => call("video.undo")}
         title=${{ head: "Undo", lines: [["Ctrl+Z", undo.undo ? "Undo " + undo.undo : T.undoNone]] }}>Undo<//>
       <${Button} kind="ghost" icon="redo" cls="vid-redo" disabled=${!undo.redo || running} onClick=${() => call("video.undo", true)}
@@ -1136,9 +1143,11 @@ export default function VideoTab() {
       <${Button} icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
       ${s.best_supported ? html`<${Button} kind="ghost" icon="star" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
       <${Button} kind="ghost" icon="more" label="More"
-        title=${"More: Export CSV, Clear replacements…, Save / load settings" + (s.var_share ? ", Save / load random clips" : "") + (s.quality_report ? ", Check card…" : "")}
+        title=${"More: Export CSV, " + (s.color_offered ? "Save clips with their color profiles…, " : "") + "Clear replacements…, Save / load settings" + (s.var_share ? ", Save / load random clips" : "") + (s.quality_report ? ", Check card…" : "")}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("video.export_csv") },
+          s.color_offered ? { label: "Save clips with their color profiles…", icon: "download", title: T.csaveAll,
+            onClick: () => call("video.colour_save") } : null,
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || running,
             onClick: () => call("video.clear_all") },
           { sep: true },

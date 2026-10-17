@@ -288,19 +288,51 @@ def test_video_saves_clips_with_their_profiles(tmp_path):
         _i, px0 = _frame(mine)
         want = _through(RED, px0)
         assert all(abs(x - y) <= 4 for x, y in zip(px, want)), (px0, px, want)
-        # the game's own clip, selected: the individual files profile (Recommended here)
-        files = cp.asset_active(d)
-        assert files is not None
+        # the game's own clip, selected: the individual files profile is still its default,
+        # Recommended (the machine screen undone): that is not a file color profile, so
+        # nothing is saved (DragonRR: "only file color profiles should ever be saved")
+        assert not cp.asset_stored(d) and cp.asset_active(d) is not None
+        assert w.call("video.colour_save", ["video/attract.mp4"], str(out)) is False
+        assert "no color profile is set for it" in w.asked[-1]["message"]
+        # one set, with a whole screen overlay and a machine screen as well: the file
+        # color profile alone is baked in
+        files = cp.Profile(name="Blue down", gain=(1.0, 1.0, 0.5))
+        cp.store_asset_profile(d, files)
+        cp.store(d, cp.Profile(name="Overlay", gain=(0.5, 1.0, 1.0)))
+        cp.store_screen_profile(d, cp.Profile(name="Screen", gain=(1.0, 0.5, 1.0)))
         assert w.call("video.colour_save", ["video/attract.mp4"], str(out)) is True
         _done(w, "video", timeout=120)
         assert sorted(os.listdir(out)) == ["attract.mp4", "my_boss.mp4"]
         _i, px = _frame(str(out / "attract.mp4"))
         _i, px0 = _frame(a)
-        want = cp.run_steps([("apply", files)], __import__("numpy").array([[px0]], "uint8"))[0, 0]
-        assert all(abs(int(x) - int(y)) <= 4 for x, y in zip(px, want)), (px0, px, want)
+        want = _through(files, px0)
+        assert all(abs(x - y) <= 4 for x, y in zip(px, want)), (px0, px, want)
+        log = [l["text"] for l in w.run(w.window.log_history)]
+        assert any("Saved 1 clip with its color profile into" in t for t in log)
         # one whose profile changes nothing is left out
         cp.store_asset_profile(d, cp.Profile(name="No change"))
         assert w.call("video.colour_save", ["video/attract.mp4"], str(out)) is False
         assert "changes nothing" in w.asked[-1]["message"]
-        log = [l["text"] for l in w.run(w.window.log_history)]
-        assert any("Saved 1 clip with its color profile into" in t for t in log)
+
+
+def test_only_the_file_profile_is_saved_never_overlay_or_screen(scanned, tmp_path):
+    """DragonRR: the whole screen overlay and the machine screen are the whole screen's,
+    never a file's: a saved picture carries its file color profile alone."""
+    w, assets, _reps = scanned
+    cp.store(assets, cp.Profile(name="Overlay", gain=(0.5, 1.0, 1.0)))
+    cp.store_screen_profile(assets, cp.Profile(name="Screen", gain=(1.0, 0.5, 1.0)))
+    cp.store_own_profile(assets, "images", PLAIN, RED)
+    out = tmp_path / "saved"
+    out.mkdir()
+    assert w.call("images.colour_save", [PLAIN, SPRITE], str(out)) is True
+    _done(w, "images")
+    assert os.listdir(out) == ["backglass.png"]
+    with Image.open(out / "backglass.png") as im:
+        assert im.getpixel((3, 3)) == _through(RED, (0, 0, 255))
+    # SPRITE has no profile set: the default individual files profile is Recommended,
+    # the machine screen undone, and is not saved
+    assert "no color profile is set for it" in w.asked[-1]["message"]
+    # a file's own profile that is Recommended, following the screen: not saved either
+    cp.store_own_profile(assets, "images", SPRITE, None, follow=True)
+    assert w.call("images.colour_save", [SPRITE], str(tmp_path)) is False
+    assert "no color profile is set for it" in w.asked[-1]["message"]

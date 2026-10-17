@@ -37,16 +37,37 @@ class ColourSaveMixin:
         self.set(csave=None)
 
     def _cs_profile_of(self, rels):
-        """``{rel: Profile or None}``: what a build bakes into each file (its
-        own profile, else the project's individual files one; where the files
-        have none of their own, the project's whole profile)."""
+        """``{rel: Profile or None}``: the file color profile each file is
+        saved with: its own, else the individual files profile the user set.
+        Never the overlay or the machine screen, which are the whole screen's
+        (PAD-604, DragonRR: "only file color profiles should ever be saved").
+        So not the individual files profile's default either, Recommended,
+        which is the machine screen undone: a file with neither is ``None``
+        and named in :meth:`_cs_unset`."""
         from ..core import colour_profile as cp
         folder = self._cs_project()
-        if self._per_file_colour():
-            resolve = cp.asset_resolver(folder)
-            return {rel: resolve(self._cs_kind, rel) for rel in rels}
-        prof = cp.active(folder) if folder else None
-        return {rel: prof for rel in rels}
+        if not self._per_file_colour():
+            prof = cp.active(folder) if folder else None
+            return {rel: prof for rel in rels}
+        resolve = cp.asset_resolver(folder)
+        unset = set(self._cs_unset(rels))
+        return {rel: None if rel in unset else resolve(self._cs_kind, rel)
+                for rel in rels}
+
+    def _cs_unset(self, rels):
+        """The *rels* with no file color profile set: an own profile that is
+        Recommended following the screen, or none while the individual files
+        profile is its default (Recommended, following the screen too)."""
+        from ..core import colour_profile as cp
+        folder = self._cs_project()
+        if not (folder and self._per_file_colour()):
+            return []
+        kind = self._cs_kind
+        own = cp.own_profile_names(folder).get(kind) or {}
+        shared = cp.asset_stored(folder)
+        return [rel for rel in rels
+                if cp.own_follows_screen(folder, kind, rel)
+                or (rel not in own and not shared)]
 
     def _cs_menu_label(self, n):
         one, many = self._cs_noun
@@ -72,12 +93,16 @@ class ColourSaveMixin:
                     "right-click and save them." % (one, many))
                 return False
         profs = self._cs_profile_of(rels)
+        unset = set(self._cs_unset(rels))
         items, left = [], []
         for rel in rels:
             prof = profs.get(rel)
             src = self._cs_source(rel)
             if src is None or not os.path.isfile(src):
                 left.append((rel, "its file is not on this PC"))
+            elif rel in unset:
+                left.append((rel, "no color profile is set for it (give it "
+                                  "one in the Colors bar)"))
             elif prof is None:
                 left.append((rel, "its color profile changes nothing"))
             else:

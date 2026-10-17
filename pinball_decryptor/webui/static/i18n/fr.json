@@ -12123,5 +12123,15 @@
 "Show this sound on the Audio tab": "Montrer ce son dans l'onglet Audio",
 "asked for in the same part of the program": "demandé dans la même partie du programme",
 "named like it": "nommé comme lui",
-"named like part of its name": "nommé comme une partie de son nom"
+"named like part of its name": "nommé comme une partie de son nom",
+"Put out the light of": "Éteindre la lumière de",
+"Put out the light": "Éteindre la lumière",
+"(no such mode)": "(aucun mode de ce nom)",
+"Set the hits of": "Fixer les touches de",
+"Set the hits of a shot": "Fixer les touches d'un tir",
+"{}'s Set the hits of": "Fixer les touches de, de {}",
+"{} puts out the light of a mode that is not one.": "{} éteint la lumière d'un mode qui n'en est pas un.",
+"{} puts out the light of a mode that is not in this project ({}): pick it again.": "{} éteint la lumière d'un mode qui n'est pas dans ce projet ({}) : choisissez-le à nouveau.",
+"Puts out a Light the mode at for the player up: this mode's, or another mode of yours on the card (another target's when this one is qualified, so only one is ready at a time). It lights again only when a Light the mode at block runs again.": "Éteint un Allumer le mode sur pour le joueur en cours : celui de ce mode, ou d'un autre de vos modes sur la carte (celui d'une autre cible quand celle-ci est qualifiée, pour qu'un seul soit prêt à la fois). Il ne se rallume que lorsqu'un bloc Allumer le mode sur s'exécute à nouveau.",
+"Sets a shot's hits this ball for the player up. The hits are one count for every mode of yours on the card, so setting another target's hits back below what qualifies it takes it back for its own mode too. A ball ending or a new game puts every count back to 0.": "Fixe les touches d'un tir pour cette bille et le joueur en cours. Les touches sont un seul compte pour tous vos modes sur la carte : ramener celles d'une autre cible sous ce qui la qualifie la déqualifie aussi pour son propre mode. La fin d'une bille ou une nouvelle partie remet chaque compte à 0."
 }

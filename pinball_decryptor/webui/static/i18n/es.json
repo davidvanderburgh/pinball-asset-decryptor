@@ -12123,5 +12123,15 @@
 "Show this sound on the Audio tab": "Mostrar este sonido en la pestaña Audio",
 "asked for in the same part of the program": "pedido en la misma parte del programa",
 "named like it": "con un nombre parecido",
-"named like part of its name": "con un nombre como parte del suyo"
+"named like part of its name": "con un nombre como parte del suyo",
+"Put out the light of": "Apagar la luz de",
+"Put out the light": "Apagar la luz",
+"(no such mode)": "(no existe ese modo)",
+"Set the hits of": "Fijar los impactos de",
+"Set the hits of a shot": "Fijar los impactos de un tiro",
+"{}'s Set the hits of": "Fijar los impactos de, de {}",
+"{} puts out the light of a mode that is not one.": "{} apaga la luz de un modo que no lo es.",
+"{} puts out the light of a mode that is not in this project ({}): pick it again.": "{} apaga la luz de un modo que no está en este proyecto ({}): vuelve a elegirlo.",
+"Puts out a Light the mode at for the player up: this mode's, or another mode of yours on the card (another target's when this one is qualified, so only one is ready at a time). It lights again only when a Light the mode at block runs again.": "Apaga un Encender el modo en para el jugador actual: el de este modo u otro de tus modos en la tarjeta (el de otro objetivo cuando este se califica, para que solo uno esté listo a la vez). Solo vuelve a encenderse cuando un bloque Encender el modo en se ejecuta de nuevo.",
+"Sets a shot's hits this ball for the player up. The hits are one count for every mode of yours on the card, so setting another target's hits back below what qualifies it takes it back for its own mode too. A ball ending or a new game puts every count back to 0.": "Fija los impactos de un tiro en esta bola para el jugador actual. Los impactos son una sola cuenta para todos tus modos en la tarjeta, así que bajar los de otro objetivo por debajo de lo que lo califica también lo descalifica para su propio modo. El fin de una bola o una partida nueva devuelve cada cuenta a 0."
 }

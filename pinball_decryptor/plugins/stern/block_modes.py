@@ -103,6 +103,17 @@ own lights instead (``insert``: an insert, a GI string or a flasher, the port's 
 ``shot``; it is held by name as a shot's lights are (a slot of LIT after the shots), and the lit light going out at the
 start leaves it the mode's.
 
+ONE QUALIFIED AT A TIME (PAD-600). A Beatles owner made four modes, one per target (Target 1-4), each qualified and
+lit by three hits of its target, and wanted only one ready at a time, as Batman's villains are: the target that
+qualifies takes the other targets' hits back below three and puts their lights out. So (1) Set the hits of
+(``{"op": "set_hits", "shot": ..., "value": <num>}``) sets a shot's hits this ball for the player up, and a shot's
+hits are ONE count for every blocks mode on the card: each mode still counts them itself (each sees every shot, and
+every one clears them when the ball ends or a game begins, so their counts agree), and the block keeps the
+difference from the count in a weak global per shot (``pad_hits_<shot>``, as a shared variable is kept) that every
+mode adds in (never below 0); (2) Put out the light of (``{"op": "unlight_mode", "mode": ""}``, "" = this mode, else
+another mode's slug) puts out a Light the mode at for the player up: a mode's light (its ``lit_as``) is a weak global
+too (``pad_lit_<mode>``), so another mode can clear it and that mode's next tick takes its lights down.
+
 What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 gives the blocks:
 
 - A SHARED variable is one value per player that every mode naming it reads and writes - the
@@ -203,7 +214,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
-              "light_mode")
+              "light_mode", "unlight_mode", "set_hits")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
@@ -327,6 +338,7 @@ VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
 VAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _]{0,23}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 HOLD_RE = re.compile(r"^[a-z][a-z0-9_]{0,23}$")   # a held coil's name in the port (`text held_coils`)
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")  # PAD-600: another mode a Put out the light of block names
 
 
 class BlocksError(ValueError):
@@ -697,7 +709,7 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
-             game_wizards=None, inserts=None, building=None):
+             game_wizards=None, inserts=None, building=None, modes=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -709,7 +721,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     shaker a mode may shake, else ``{"shakes": names of the game's own, "max": its longest per strength}``; so is
     ``game_wizards`` (PAD-436): the names of the game's own mini-wizards ([] = none a mode may hand over on this game);
     so is ``inserts`` (PAD-503): the names of the inserts a mode may light ([] = none on this game: a mode lit at a
-    shot is lit without them).
+    shot is lit without them); so is ``modes`` (PAD-600): the slugs of the project's blocks modes another mode's
+    light may be put out in.
     The C is written anyway (a missing shot is 0 to the game, which never matches),
     so a half-made program always saves."""
     program = normalize(program)
@@ -755,7 +768,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "building": building,
            "game_shows": list(game_shows) if game_shows is not None else None,
            "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None,
-           "inserts": list(inserts) if inserts is not None else None}
+           "inserts": list(inserts) if inserts is not None else None,
+           "modes": set(modes) if modes is not None else None}
     hud = program["hud"]
     if hud["on"]:
         for k, c in enumerate(hud["counters"]):
@@ -1150,6 +1164,16 @@ def _check_stack(stack, depth, where, ctx):
                                   "have." % (where, name))
             if b.get("how", "light") not in MP.WIZARD_HOW:
                 ctx["out"].append("%s lights the game's mini-wizard or starts it." % where)
+        elif op == "set_hits":                          # PAD-600: one qualified at a time
+            _check_shot(b.get("shot"), where + "'s Set the hits of", ctx)
+            _check_num(b.get("value"), where, ctx)
+        elif op == "unlight_mode":                      # PAD-600: this mode's light, or another blocks mode's
+            mode = b.get("mode") or ""
+            if not isinstance(mode, str) or (mode and not SLUG_RE.match(mode)):
+                ctx["out"].append("%s puts out the light of a mode that is not one." % where)
+            elif mode and ctx["modes"] is not None and mode not in ctx["modes"]:
+                ctx["out"].append("%s puts out the light of a mode that is not in this project (%s): pick it "
+                                  "again." % (where, mode))
         elif op == "light_mode":                        # PAD-503: lit at a shot, as the game's mini-wizards are
             _check_shot(b.get("shot"), where + "'s Light the mode at", ctx)
             if not COLOR_RE.match(str(b.get("color") or "")):
@@ -1361,6 +1385,8 @@ class _Gen:
         self.lit = []                   # PAD-503: each Light the mode at's (shot index, inserts, rgb, pattern, ms,
                                         # PAD-521: the insert held solid and its rgb)
         self.lit_asked = False          # PAD-503: a condition asks whether the mode is lit
+        self.unlit = []                 # PAD-600: the other modes whose light a block puts out, by slug
+        self.unlight_own = False        # PAD-600: a block puts out this mode's own light
 
     def var(self, i, p="P()"):
         """Variable ``i`` of player ``p``, as C: its own row, or the shared global."""
@@ -1403,6 +1429,12 @@ class _Gen:
             self.hits.append(name)
         return "H[%d][P()]" % self.hits.index(name), idx
 
+    def hits_of(self, name):
+        """PAD-600: a shot's hits this ball for the player up, as every blocks mode on the card sees them: this
+        mode's own count and what a Set the hits of block (in any of them) moved it by."""
+        h, _idx = self.hit(name)
+        return "hits_of(%s, %s[P()])" % (h, hits_ident(name))
+
     # values
     def num(self, e):
         if not isinstance(e, dict):
@@ -1421,7 +1453,7 @@ class _Gen:
             i = self.timer(e.get("timer"))
             return "timer_left(%d)" % i if i is not None else "0LL"
         if k == "hits":
-            return "(long long)" + self.hit(e.get("shot"))[0]
+            return self.hits_of(e.get("shot"))
         if k == "scored":
             return "(long long)run.shots"
         if k == "total":
@@ -1662,6 +1694,22 @@ class _Gen:
                 if spec not in self.lit:
                     self.lit.append(spec)
                 out.append(pad + "light_mode(%d);" % self.lit.index(spec))
+            elif op == "set_hits":                                                    # PAD-600
+                name = b.get("shot")
+                h, _idx = self.hit(name)
+                out.append(pad + "%s[P()] = %s - (long long)%s;" % (hits_ident(name), self.num(b.get("value")), h))
+            elif op == "unlight_mode":                                                # PAD-600
+                mode = b.get("mode") or ""
+                if not isinstance(mode, str) or (mode and not SLUG_RE.match(mode)):
+                    continue
+                if not mode or lit_ident(mode) == lit_ident(self.slug):
+                    self.unlight_own = True
+                    out.append(pad + "unlight_mode();")
+                else:
+                    if mode not in self.unlit:
+                        self.unlit.append(mode)
+                    out.append(pad + "unlight_other(%s, %s);   /* the mode %s's light out */"
+                               % (lit_ident(mode), _c_str(mode), _comment(mode)))
         return out
 
     @staticmethod
@@ -1680,6 +1728,18 @@ class _Gen:
 def c_ident(slug):
     from . import mode_tryit as MT
     return MT._c_ident(slug)
+
+
+def hits_ident(shot):
+    """PAD-600: the C global that moves a shot's hits this ball in every blocks mode that reads them (a Set the hits
+    of block's difference from the count): ``"Target 1"`` -> ``pad_hits_target_1``."""
+    return "pad_hits_" + re.sub(r"[^a-z0-9]", "_", str(shot or "").lower())
+
+
+def lit_ident(slug):
+    """PAD-600: the C global a blocks mode's Light the mode at is held in, per player (its ``lit_as``), so another
+    mode can put it out: ``target_1`` -> ``pad_lit_target_1``."""
+    return "pad_lit_" + re.sub(r"[^a-z0-9]", "_", str(slug or "").lower())
 
 
 def shared_ident(name):
@@ -1859,6 +1919,26 @@ def to_c(program, slug):
     L.append("UNUSED static unsigned H[%d][5];             /* hits this ball, per player */" % nhits)
     L.append("UNUSED static const char HIT_OF[%d] = {%s};" % (
         nhits, ", ".join(str(g.shots.index(n)) for n in g.hits) or "0"))
+    hit_moves = []
+    for n in g.hits:
+        if hits_ident(n) not in hit_moves:
+            hit_moves.append(hits_ident(n))
+    if hit_moves:
+        L.append("/* PAD-600: a shot's hits are one count for every blocks mode on the card. Each counts them itself (and")
+        L.append(" * clears them when the ball ends or a game begins, so the counts agree); a Set the hits of block keeps")
+        L.append(" * its difference from the count here, one weak line per shot the linker keeps once, every mode adds it */")
+        for hm in hit_moves:
+            L.append('__attribute__((weak, visibility("hidden"))) long long %s[5];' % hm)
+        L.append("UNUSED static long long hits_of(unsigned h, long long moved)")
+        L.append("{")
+        L.append("    long long n = (long long)h + moved;")
+        L.append("    return n < 0 ? 0 : n;")
+        L.append("}")
+    lit_moves = [lit_ident(m) for m in g.unlit]
+    if lit_moves:
+        L.append("/* PAD-600: the other modes whose light a block puts out: each one's Light the mode at, per player */")
+        for lm in lit_moves:
+            L.append('__attribute__((weak, visibility("hidden"))) int %s[5];' % lm)
     L.append("")
     L.append("static struct {")
     L.append("    int on;")
@@ -1911,6 +1991,16 @@ def to_c(program, slug):
     L.append("    return p <= 4 ? p : 0;")
     L.append("}")
     L.append("")
+    if lit_moves:
+        L.append("/* PAD-600: Put out the light of another mode, for the player up */")
+        L.append("static void unlight_other(int *lit, const char *mode)")
+        L.append("{")
+        L.append("    unsigned p = P();")
+        L.append("    if (!p || !lit[p]) return;")
+        L.append('    pm_log("put out the light of %s for player %u", mode, p);')
+        L.append("    lit[p] = 0;")
+        L.append("}")
+        L.append("")
     L.extend(_NEW_GAME_C.split("\n"))
     L.append("UNUSED static long long div0(long long a, long long b)")
     L.append("{")
@@ -2170,6 +2260,8 @@ def to_c(program, slug):
         L.extend(_lit_c(g).rstrip("\n").split("\n"))
     elif g.lit_asked:
         L.append("UNUSED static int lit_now(void) { return 0; }   /* no Light the mode at block: never lit */")
+    if g.unlight_own and not g.lit:
+        L.append("UNUSED static void unlight_mode(void) { }   /* no Light the mode at block: never lit */")
     L.append("")
     L.append("static void on_mode_start(void)")
     L.append("{")
@@ -2432,6 +2524,8 @@ def to_c(program, slug):
     L.append("        unsigned p, v;")
     L.append("        for (p = 0; p < 5; p++) {")
     L.append("            for (v = 0; v < %d; v++) H[v][p] = 0;" % nhits)
+    for hm in hit_moves:
+        L.append("            %s[p] = 0;" % hm)
     for i, (_n, reset) in enumerate(g.var_names):
         L.append("            %s = 0;" % g.var(i, "p"))
     if g.lit:
@@ -2531,6 +2625,8 @@ def to_c(program, slug):
     L.append("    {")
     L.append("        unsigned p = P(), v;")
     L.append("        for (v = 0; v < %d; v++) H[v][p] = 0;" % nhits)
+    for hm in hit_moves:
+        L.append("        %s[p] = 0;" % hm)
     L.append('        reset_ball();')
     if g.lit:
         L.append("        lit_player = 0;               /* PAD-503: the next ball holds its light again */")
@@ -2973,7 +3069,10 @@ static const struct {
     unsigned solid_rgb;
 } LIT_AT[N_LIT_AT] = {
 %(rows)s};
-static int lit_as[5];                   /* per player: 1 + the LIT_AT it is lit as; 0 = not lit */
+/* per player: 1 + the LIT_AT it is lit as; 0 = not lit. PAD-600: a weak global, so another mode's Put out the light
+ * of block can clear it (the linker keeps one) */
+__attribute__((weak, visibility("hidden"))) int %(lit)s[5];
+#define lit_as %(lit)s
 static unsigned lit_player;             /* whose light lit_shown is; 0 = hold it again */
 static int lit_waiting;                 /* PAD-556: lit_shown's shot and inserts wait out the game's own mode (only the
                                          * solid one is held) */
@@ -2990,6 +3089,15 @@ UNUSED static void light_mode(int k)
     if (!p || !pm_in_game() || k < 0 || k >= N_LIT_AT) return;
     if (lit_as[p] != k + 1) pm_log("lit at %%s for player %%u", SHOT_NAMES[LIT_AT[k].shot], p);
     lit_as[p] = k + 1;
+}
+
+/* PAD-600: Put out the light of (this mode): the player up's light out; the next tick takes it down */
+UNUSED static void unlight_mode(void)
+{
+    unsigned p = P();
+    if (!p || !lit_as[p]) return;
+    pm_log("light put out for player %%u", p);
+    lit_as[p] = 0;
 }
 
 /* the light taken down: its inserts back to the game (a shot the blocks light themselves stays theirs) */
@@ -3066,7 +3174,7 @@ def _lit_c(g):
     for shot, insert, rgb, pat, ms, solid, srgb in g.lit:
         rows.append("    { %d, %s, 0x%06xu, %s, %du, %s, 0x%06xu },   /* %s */" % (
             shot, _c_str(insert), rgb, pat, ms, _c_str(solid), srgb, _comment(g.shots[shot] or "no shot")))
-    return _LIT_C % {"n": len(g.lit), "rows": "\n".join(rows) + "\n"}
+    return _LIT_C % {"n": len(g.lit), "rows": "\n".join(rows) + "\n", "lit": lit_ident(g.slug)}
 
 _MECH_C = """/* ---- the mechanisms (PAD-395; MODE_SDK.md "The magnet", "The scoop") ---- */
 static int scoop_next;                  /* 1 = the next ball only, 2 = it is held now: then no more */

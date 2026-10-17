@@ -1788,6 +1788,115 @@ def test_the_info_line_reaches_the_assets_and_goes_where_the_port_says(tmp_path)
     assert not [s for s in MA._code_screens(project, [(slug, spec)], bond) if s["name"] == names["info_node"]]
 
 
+# ---- PAD-600: one target qualified at a time - Set the hits of, Put out the light of ---------------------------------
+TARGETS = ["Powerline left", "Powerline center", "Powerline right", "Big loop"]
+
+
+def _say_hits(shot, most):
+    """Blocks that write "hits N" in the log: a shot's hits as this mode sees them, 0 to ``most``."""
+    return [{"op": "if", "cond": {"k": "cmp", "op": "=", "a": {"k": "hits", "shot": shot}, "b": num(k)},
+             "then": [{"op": "log", "text": "hits %d" % k}], "else": None} for k in range(most + 1)]
+
+
+def _target_mode(n):
+    """The Beatles owner's (PAD-600): mode n lit at its target by 3 hits of it; the other targets' hits back to 0 and
+    their modes' lights out, so only one is ready at a time (Batman's villains). In TARGET 2 the Building writes the
+    hits of the first target as it sees them, so a test can read the count across modes."""
+    me = TARGETS[n - 1]
+    others = [t for t in TARGETS if t != me]
+    then = [{"op": "light_mode", "shot": me, "insert": "", "color": "#00c040", "pattern": "pulse"}]
+    then += [{"op": "set_hits", "shot": t, "value": num(0)} for t in others]
+    then += [{"op": "unlight_mode", "mode": "t%d" % (TARGETS.index(t) + 1)} for t in others]
+    scripts = [{"hat": {"kind": "shot", "shot": me, "when": "idle"}, "do": [
+        {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "hits", "shot": me}, "b": num(3)}, "then": then}]}]
+    if n == 2:
+        scripts.append({"hat": {"kind": "shot", "shot": "Building", "when": "any"}, "do": _say_hits(TARGETS[0], 4)})
+    return prog(scripts, name="TARGET %d" % n, seconds=5)
+
+
+def test_set_the_hits_and_put_out_the_light_are_checked():
+    p = _target_mode(1)
+    assert BM.problems(p, SHOTS, GZ.events, modes=["t1", "t2", "t3", "t4"]) == []
+    assert BM.problems(p, SHOTS, GZ.events) == []                  # no project known: any slug is taken
+    bad = prog([{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "set_hits", "shot": "Moon ramp", "value": num(0)}, {"op": "set_hits", "shot": "Building", "value": None},
+        {"op": "unlight_mode", "mode": "Not A Slug"}, {"op": "unlight_mode", "mode": "gone"},
+        {"op": "unlight_mode", "mode": ""}]}])
+    assert BM.problems(bad, SHOTS, GZ.events, modes=["t1"]) == [
+        "Script 1's Set the hits of names Moon ramp, a shot this card does not have.",
+        "Script 1 has an empty number slot.",
+        "Script 1 puts out the light of a mode that is not one.",
+        "Script 1 puts out the light of a mode that is not in this project (gone): pick it again."]
+    src = BM.to_c(p, "t1")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    assert '__attribute__((weak, visibility("hidden"))) long long pad_hits_powerline_center[5];' in src
+    assert '__attribute__((weak, visibility("hidden"))) int pad_lit_t1[5];' in src           # its own light
+    assert '__attribute__((weak, visibility("hidden"))) int pad_lit_t2[5];' in src           # another's
+    assert "static const struct pm_mode t1_mode" in src or "PM_REGISTER(" in src
+    assert "pad_hits_" not in re.search(r"static const struct pm_mode (\w+)", src).group(1)
+    # this mode's own light put out with no Light the mode at block: nothing to put out
+    own = prog([{"hat": {"kind": "mode_start"}, "do": [{"op": "unlight_mode", "mode": ""}]}])
+    assert "static void unlight_mode(void) { }" in BM.to_c(own, "own")
+    # a mode that never sets or reads hits makes the C it always made
+    assert "pad_hits_" not in BM.to_c(_lit_prog(), "lit") and "hits_of" not in BM.to_c(_lit_prog(), "lit")
+
+
+def test_only_one_target_is_qualified_at_a_time_across_modes(tmp_path):
+    """Four modes built together as a card's are: the target that qualifies takes the others' hits back and puts
+    their lights out; a target hit after that counts from 0 again, for its own mode too."""
+    modes = {"t%d" % n: _target_mode(n) for n in (1, 2, 3, 4)}
+    hit = lambda t, k=1: ["shot", t] * k + ["secs", 0.1]                 # noqa: E731
+    out = play_many(tmp_path, modes,
+                    *hit("Powerline left", 3), "lamps",                 # TARGET 1 lit
+                    *hit("Powerline center", 2), *hit("Building"),      # hits of target 1 as TARGET 2 sees them: 3
+                    *hit("Powerline center"), "lamps",                  # TARGET 2 lit, TARGET 1 out, its hits 0
+                    *hit("Building"),                                   # ... as TARGET 2 sees them: 0
+                    *hit("Powerline left"), *hit("Building"),           # 1: not lit again, not started
+                    *hit("Powerline left", 2), "lamps",                 # 3: TARGET 1 lit again, TARGET 2 out
+                    *hit("Powerline left"))                             # its lit shot starts it
+    assert re.findall(r"\[TARGET 2\] (hits \d)", out) == ["hits 3", "hits 0", "hits 1"]
+    held = re.findall(r"HELD (POWERLINE LEFT|POWERLINE CENTER|none)", out)
+    assert held == ["POWERLINE LEFT", "POWERLINE CENTER", "POWERLINE LEFT"], held
+    assert out.count("[TARGET 1] START (its lit shot)") == 1
+    assert "[TARGET 2] START" not in out
+    assert "[TARGET 2] put out the light of t1 for player 1" in out          # mode.log says who put it out
+    assert "[TARGET 1] put out the light of t2 for player 1" in out
+    assert "LAMP OFF POWERLINE LEFT TARGET 1" in out and "LAMP OFF POWERLINE CENTER TARGET 2" in out
+
+
+def test_set_hits_counts_from_the_value_and_a_new_ball_clears_it(tmp_path):
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "any"}, "do": [
+                  {"op": "set_hits", "shot": "Right ramp", "value": num(5)}]},
+              {"hat": {"kind": "shot", "shot": "Building", "when": "any"}, "do": _say_hits("Right ramp", 6) + [
+                  {"op": "set_hits", "shot": "Right ramp", "value": num(-4)}]}])
+    out = play(tmp_path, p, "shot", "Right ramp", "shot", "Left ramp", "shot", "Right ramp", "shot", "Building",
+               "shot", "Building", "shot", "Left ramp", "ball_end", "shot", "Right ramp", "shot", "Building")
+    # 5 set, one more hit: 6; then -4 reads as 0 (never below); a ball ending puts it back to its own count: 1
+    assert re.findall(r"\[TEST MODE\] (hits \d)", out) == ["hits 6", "hits 0", "hits 1"]
+
+
+def test_the_four_target_modes_build_into_one_object_with_one_count_and_one_light_each(tmp_path):
+    if os.name == "nt":
+        pytest.skip("build_mode.sh runs under bash with arm-linux-gnueabihf-gcc (WSL or Linux)")
+    if not shutil.which("bash") or not shutil.which("arm-linux-gnueabihf-gcc"):
+        pytest.skip("no arm-linux-gnueabihf-gcc here")
+    srcs = []
+    for n in (1, 2, 3, 4):
+        srcs.append(tmp_path / ("t%d.c" % n))
+        srcs[-1].write_text(BM.to_c(_target_mode(n), "t%d" % n), encoding="utf-8")
+    out = tmp_path / "mode.so"
+    r = subprocess.run(["bash", os.path.join(SDK, "build_mode.sh"), "-o", str(out)] + [str(s) for s in srcs]
+                       + [os.path.join(SDK, "mode_file.c")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "warning" not in (r.stdout + r.stderr).lower()
+    nm = shutil.which("arm-linux-gnueabihf-nm")
+    if nm:
+        syms = subprocess.run([nm, str(out)], capture_output=True, text=True).stdout
+        for sym in ("pad_hits_powerline_left", "pad_hits_big_loop", "pad_lit_t1", "pad_lit_t4"):
+            assert len(re.findall(r"\b%s$" % sym, syms, re.M)) == 1, sym     # one for all four modes
+
+
 # ---- PAD-598: a Light block lights one of the game's own lights by name (an insert, a GI string, a flasher) --------
 # An owner lit their mode at Target 4 with RINGO SPINNER pulsing, and wanted that insert to change as the mode started;
 # the Light block could only pick a shot. It picks a shot's lights or one of the game's lights (the port's lamp lines).

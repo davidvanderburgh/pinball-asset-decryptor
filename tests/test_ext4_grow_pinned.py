@@ -224,3 +224,72 @@ def test_a_file_written_twice_keeps_the_last_copy(tmp_path):
                          capture_output=True).stdout
     assert got == b.read_bytes()
     assert "Mode:  0664" in _stat(ref, "/g/bank/scene.radium")
+
+
+def _run_native(card, jobs, native):
+    script = ext4_grow._pinned_script(OFF, jobs, str(card), EPOCH, native=native)
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr + r.stdout
+    ext4_grow._write_native(str(card), OFF, jobs, native, r.stdout)
+    return r.stdout
+
+
+@needs_e2fs
+def test_a_big_file_written_natively_lands_whole_and_the_same_both_times(tmp_path):
+    """PAD-599: debugfs only allocates a big file's blocks (fallocate's way, marked
+    written) and the bytes go straight into the image - the same file contents,
+    attributes and a clean filesystem, and still the same card both times."""
+    base = _card(tmp_path)
+    jobs = _jobs(tmp_path)
+    big = tmp_path / "new" / "big"
+    big.write_bytes(os.urandom(3 * 1024 * 1024 + 123))       # a part block at the end
+    jobs.append(("g/bank/599.asset", str(big)))
+    native = (0, 4)                                            # the grown game, the new file
+    a, b = tmp_path / "a.raw", tmp_path / "b.raw"
+    shutil.copyfile(base, a)
+    shutil.copyfile(base, b)
+    out = _run_native(a, jobs, native)
+    assert out.count("PAD_GROW_OK ") == 5 and "PAD_GROW_EXT 4 0 " in out
+    _run_native(b, jobs, native)
+    assert a.read_bytes() == b.read_bytes()
+    ref = "%s?offset=%d" % (a, OFF)
+    assert subprocess.run(["e2fsck", "-fn", ref], capture_output=True).returncode == 0
+    for rel, src in jobs:
+        got = subprocess.run(["debugfs", "-R", "cat \"/%s\"" % rel, ref], capture_output=True).stdout
+        assert got == open(src, "rb").read(), rel
+    assert "Uninit" not in subprocess.run(["debugfs", "-R", "ex /g/bank/599.asset", ref],
+                                          capture_output=True, text=True).stdout
+    assert "Mode:  0775" in _stat(ref, "/g/game")
+    assert "Mode:  0664" in _stat(ref, "/g/bank/599.asset")
+
+
+def test_extents_that_miss_a_block_are_refused(tmp_path):
+    src = tmp_path / "s"
+    src.write_bytes(b"x" * 10000)                              # 3 blocks of 4096
+    img = tmp_path / "img"
+    img.write_bytes(b"\0" * 65536)
+    out = "PAD_GROW_BS 4096\nPAD_GROW_EXT 0 0 2 5\n"
+    with pytest.raises(ext4_grow.Ext4GrowError, match="cover 2 of its 3"):
+        ext4_grow._write_native(str(img), 0, [("g/x", str(src))], (0,), out)
+    out += "PAD_GROW_EXT 0 2 1 9\n"
+    ext4_grow._write_native(str(img), 0, [("g/x", str(src))], (0,), out)
+    data = img.read_bytes()
+    assert data[5 * 4096:7 * 4096] == b"x" * 8192
+    assert data[9 * 4096:10 * 4096] == b"x" * (10000 - 8192) + b"\0" * (3 * 4096 - 10000)
+
+
+def test_only_big_files_on_windows_go_native(tmp_path, monkeypatch):
+    img = tmp_path / "card.raw"
+    img.write_bytes(b"\0")
+    small, big = tmp_path / "small", tmp_path / "big"
+    small.write_bytes(b"x")
+    with open(big, "wb") as f:
+        f.truncate(ext4_grow.NATIVE_MIN)
+    jobs = [("a", str(small)), ("b", str(big)), ("c", str(big)), ("c", str(big))]
+    monkeypatch.setattr(ext4_grow.sys, "platform", "win32")
+    assert ext4_grow._native_jobs(str(img), jobs) == (1,)     # "c" is written twice
+    monkeypatch.setenv("PAD_PINNED_NATIVE", "0")
+    assert ext4_grow._native_jobs(str(img), jobs) == ()
+    monkeypatch.delenv("PAD_PINNED_NATIVE")
+    monkeypatch.setattr(ext4_grow.sys, "platform", "darwin")
+    assert ext4_grow._native_jobs(str(img), jobs) == ()

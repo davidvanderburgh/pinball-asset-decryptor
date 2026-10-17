@@ -93,7 +93,7 @@ int main(void)
     /* the bus fd alone: reported ready although nothing was written */
     FD_ZERO(&r); FD_SET(bus[0], &r);
     k = nb_select_ready(1024, &r, 0, 0, real_select, &done);
-    printf("bus select done=%%d ret=%%d set=%%d\n", done, k, FD_ISSET(bus[0], &r));
+    printf("bus select done=%%d ret=%%d set=%%d\n", done, k, !!FD_ISSET(bus[0], &r));
     /* bus + an idle other fd: the other stays clear */
     FD_ZERO(&r); FD_SET(bus[0], &r); FD_SET(other[0], &r);
     k = nb_select_ready(1024, &r, 0, 0, real_select, &done);

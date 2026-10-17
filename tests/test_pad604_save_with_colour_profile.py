@@ -230,7 +230,8 @@ def test_images_more_menu_saves_every_attached_picture(scanned, tmp_path):
     assert w.call("images.set_color", PLAIN, False)
     w.drain()
     assert _by_rel(w.state("images"))[BANNER]["c"] is True
-    w.answers = [str(out)]
+    # one picture: a Save As box, its own name filled in
+    w.answers = [str(out / "SpaceGodzilla.png")]
     assert w.call("images.colour_save", folder=None) is True
     _done(w, "images")
     assert os.listdir(out) == ["SpaceGodzilla.png"]
@@ -280,7 +281,7 @@ def test_video_saves_clips_with_their_profiles(tmp_path):
         out = tmp_path / "saved"
         out.mkdir()
         # More > every clip with a profile attached: the replaced one only
-        w.answers = [str(out)]
+        w.answers = [str(out / "my_boss.mp4")]
         assert w.call("video.colour_save") is True
         _done(w, "video", timeout=120)
         assert os.listdir(out) == ["my_boss.mp4"]
@@ -308,7 +309,7 @@ def test_video_saves_clips_with_their_profiles(tmp_path):
         want = _through(files, px0)
         assert all(abs(x - y) <= 4 for x, y in zip(px, want)), (px0, px, want)
         log = [l["text"] for l in w.run(w.window.log_history)]
-        assert any("Saved 1 clip with its color profile into" in t for t in log)
+        assert any("Saved attract.mp4 with its color profile as" in t for t in log)
         # one whose profile changes nothing is left out
         cp.store_asset_profile(d, cp.Profile(name="No change"))
         assert w.call("video.colour_save", ["video/attract.mp4"], str(out)) is False
@@ -336,3 +337,43 @@ def test_only_the_file_profile_is_saved_never_overlay_or_screen(scanned, tmp_pat
     cp.store_own_profile(assets, "images", SPRITE, None, follow=True)
     assert w.call("images.colour_save", [SPRITE], str(tmp_path)) is False
     assert "no color profile is set for it" in w.asked[-1]["message"]
+
+
+def test_one_picture_is_saved_as_a_name_the_user_picks(scanned, tmp_path, monkeypatch):
+    """DragonRR: a file is saved under its own name or one the user chooses (a Save As
+    box, its own name filled in); the closing question shows it in its folder, never
+    hands the folder to a default app ("Couldn't open file ... The file isn't there")."""
+    w, assets, _reps = scanned
+    cp.store_own_profile(assets, "images", PLAIN, RED)
+    out = tmp_path / "saved"
+    out.mkdir()
+    from pinball_decryptor.webui import video_helpers as vh
+    shown = []
+    monkeypatch.setattr(vh, "reveal_in_file_manager", lambda p: shown.append(p))
+    w.answers = [str(out / "my backglass.jpg"), "yes"]
+    assert w.call("images.colour_save", [PLAIN]) is True
+    _done(w, "images")
+    ask = next(q for q in w.asked if q.get("kind") == "file")
+    assert ask["initialfile"] == "backglass.png" and ask["mode"] == "save"
+    assert os.listdir(out) == ["my backglass.jpg"]
+    with Image.open(out / "my backglass.jpg") as im:
+        assert im.format == "JPEG"
+    assert "%s?" % vh.reveal_menu_label() in w.asked[-1]["message"]
+    assert shown == [str(out / "my backglass.jpg")]
+    # a name with no extension gets the picture's own
+    w.answers = [str(out / "plain")]
+    assert w.call("images.colour_save", [PLAIN]) is True
+    _done(w, "images")
+    assert sorted(os.listdir(out)) == ["my backglass.jpg", "plain.png"]
+    # never into the project, and never over the file itself (a replacement of the user's)
+    w.answers = [os.path.join(assets, *PLAIN.split("/"))]
+    assert w.call("images.colour_save", [PLAIN]) is False
+    assert "outside the project folder" in w.asked[-1]["message"]
+    mine = os.path.join(_reps, "SpaceGodzilla.png")
+    w.answers = [mine]
+    assert w.call("images.choose", BANNER) == BANNER
+    w.drain()
+    cp.store_own_profile(assets, "images", BANNER, RED)
+    w.answers = [mine]
+    assert w.call("images.colour_save", [BANNER]) is False
+    assert "That is the picture itself" in w.asked[-1]["message"]

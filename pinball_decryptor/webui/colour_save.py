@@ -75,10 +75,13 @@ class ColourSaveMixin:
                 else "Save %d %s with their color profiles…" % (n, many))
 
     @rpc
-    def colour_save(self, rels=None, folder=None):
+    def colour_save(self, rels=None, folder=None, path=None):
         """Save *rels* (``None``: every file with a color profile attached)
         with their color profiles baked in, into *folder* (asked for when not
-        given).  Runs off the loop; returns True once started."""
+        given) under their own names.  One file alone is saved as *path*
+        instead: a Save As box with its own name filled in, which the user
+        may change (DragonRR).  Runs off the loop; returns True once
+        started."""
         one, many = self._cs_noun
         if self._cs_cancel is not None:
             compat.messagebox.showinfo(TITLE, "A save is still running.")
@@ -111,6 +114,9 @@ class ColourSaveMixin:
             compat.messagebox.showinfo(
                 TITLE, "Nothing to save:\n\n" + _lines(left))
             return False
+        from ..core import colour_export as ce
+        if len(items) == 1 and not folder:
+            return self._cs_save_one(items[0], left, path, project)
         if not folder:
             folder = self.window.ask_folder(
                 "colour_save_" + self._cs_kind,
@@ -126,7 +132,6 @@ class ColourSaveMixin:
                 TITLE, "Pick a folder outside the project folder: the files "
                 "in it are the ones the card is built from.")
             return False
-        from ..core import colour_export as ce
         srcs = [src for _r, src, _p in items]
         clash = ce.existing(self._cs_kind, srcs, folder)
         replace = False
@@ -144,6 +149,49 @@ class ColourSaveMixin:
         dsts = ce.plan_names(self._cs_kind, srcs, folder, replace=replace)
         work = [(rel, src, dst, prof)
                 for (rel, src, prof), dst in zip(items, dsts)]
+        return self._cs_start(work, folder, left)
+
+    def _cs_save_one(self, item, left, path, project):
+        """One file: saved as *path*, asked for with its own name filled
+        in (the box asks before it replaces a file of that name)."""
+        from ..core import colour_export as ce
+        rel, src, prof = item
+        one = self._cs_noun[0]
+        ext = ce.out_ext(self._cs_kind, src)
+        name = os.path.splitext(os.path.basename(src))[0] + ext
+        if not path:
+            path = self.window.ask_save(
+                "colour_save_" + self._cs_kind,
+                "Save this %s with its color profile as…" % one,
+                initialfile=name,
+                filetypes=[("%s file" % ext[1:].upper(), "*" + ext),
+                           ("All files", "*.*")],
+                defaultextension=ext)
+        if not path:
+            return False
+        path = os.path.normpath(path)
+        if os.path.isdir(path):
+            # a folder named: the file goes in it under its own name
+            path = ce.plan_names(self._cs_kind, [src], path)[0]
+        path = ce.fixed_ext(self._cs_kind, path, src)
+        folder = os.path.dirname(path)
+        if project and _inside(folder, project):
+            compat.messagebox.showinfo(
+                TITLE, "Pick a folder outside the project folder: the files "
+                "in it are the ones the card is built from.")
+            return False
+        if os.path.normcase(os.path.abspath(path)) == os.path.normcase(
+                os.path.abspath(src)):
+            compat.messagebox.showinfo(
+                TITLE, "That is the %s itself: pick another name or folder, "
+                "so it is kept as it is." % one)
+            return False
+        return self._cs_start([(rel, src, path, prof)], folder, left)
+
+    def _cs_start(self, work, folder, left):
+        """Save *work* (``(rel, src, dst, prof)``) off the loop."""
+        from ..core import colour_export as ce
+        one, many = self._cs_noun
         stop = threading.Event()
         self._cs_cancel = stop
         noun = many if len(work) > 1 else one
@@ -201,9 +249,14 @@ class ColourSaveMixin:
         one, many = self._cs_noun
         saved, failed = res["saved"], list(res["failed"]) + list(left)
         n = len(saved)
-        head = ("Saved %d %s with %s color profile%s into %s." % (
-            n, one if n == 1 else many, "its" if n == 1 else "their",
-            "" if n == 1 else "s", folder)) if n else "Nothing was saved."
+        if n == 1:
+            head = "Saved %s with its color profile as %s." % (
+                os.path.basename(saved[0][0]), os.path.normpath(saved[0][1]))
+        elif n:
+            head = "Saved %d %s with their color profiles into %s." % (
+                n, many, folder)
+        else:
+            head = "Nothing was saved."
         if res["cancelled"]:
             head = "Canceled. " + head
         self.log(head, "success" if n and not failed else "warn")
@@ -211,9 +264,16 @@ class ColourSaveMixin:
         if failed:
             body += "\n\nNot saved:\n" + _lines(failed)
         if n:
-            if compat.messagebox.askyesno(TITLE, body + "\n\nOpen the folder?"):
-                from .shellx_common import open_in_default_app_or_warn
-                open_in_default_app_or_warn(folder)
+            # DragonRR: the folder it is in, the file picked out there, never
+            # the file (or the folder) handed to a default app
+            from . import video_helpers as vh
+            if compat.messagebox.askyesno(
+                    TITLE, body + "\n\n%s?" % vh.reveal_menu_label()):
+                err = vh.reveal_in_file_manager(saved[0][1])
+                if err:
+                    compat.messagebox.showwarning(
+                        "Couldn't open file manager",
+                        "Couldn't show %s:\n\n%s" % (folder, err))
         else:
             compat.messagebox.showinfo(TITLE, body)
 

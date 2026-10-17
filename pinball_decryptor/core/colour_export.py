@@ -35,6 +35,20 @@ def out_ext(kind, src):
     return image_ext(src) if kind == "images" else video_ext(src)
 
 
+def fixed_ext(kind, path, src):
+    """*path* as the user named a saved copy of *src*: kept where its
+    extension is one the copy can be written as (a picture as PNG, JPEG,
+    ...; a clip in a container ffmpeg encodes), else with the copy's own
+    extension added."""
+    ext = os.path.splitext(path)[1].lower()
+    if kind == "images":
+        ok = ext in IMAGE_FORMATS
+    else:
+        from . import video
+        ok = bool(ext) and video.encoder_codec(ext) is not None
+    return path if ok else path + out_ext(kind, src)
+
+
 def plan_names(kind, sources, folder, replace=False):
     """``[dst path, ...]`` for *sources* saved into *folder*, in order: each
     under its own file name, a second file of the same name numbered

@@ -17895,6 +17895,12 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                                   img_path, start=start)
     if not spilled:
         return None, audio_edits, grows
+    # PAD-593: the game maps image.bin and the bank playing whole, side by side, so
+    # once any sound needs a bank they ALL go to banks, kept as small as Stern's own
+    # (soundbank.BANK_SLICE): image.bin stays as small as it can and the bank playing
+    # adds little beside it (soundbank.MAPPED_MAX).
+    spilled.update(kept)
+    kept = {}
     with open(_lp(img_path), "rb") as f:
         head = f.read(0x200)
     # (past an earlier build's bodies, as the grow lays it out: PAD-593)
@@ -17921,12 +17927,22 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # follows image.bin's in the game's 32-bit address space)
     staged = _grown_bank_bytes(md_off, count, start + [
         _grown_body_bytes(byidx[i], g[1]) for i, g in sorted(kept.items())])
-    limit = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged))
+    limit = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged), SB.BANK_SLICE)
     groups = SB.split_banks(edits, limit=limit, stride=SB.fragment_stride(head))
-    if len(groups) > 1:
-        log("Modes: the modes' own sounds take %d sound banks: each is kept under %d MB, the "
-            "most the emulator can serve beside this image.bin while it builds and checks "
-            "them." % (len(groups), limit // 10**6), "info")
+    biggest = max(SB.bank_bytes([e.body_bytes for e in g]) for g in groups)
+    if staged + biggest > SB.MAPPED_MAX:
+        raise RuntimeError(
+            "The game holds image.bin and the sound bank it is playing in memory at once, and "
+            "here they would come to %d MB (image.bin %d MB with the card's own sounds, a bank "
+            "%d MB), past the %d MB a machine has been seen to hold (Stern's own largest). "
+            "Fewer or shorter sounds of the modes' own have to stay in image.bin."
+            % ((staged + biggest) // 10**6, staged // 10**6, biggest // 10**6,
+               SB.MAPPED_MAX // 10**6))
+    log("Modes: the modes' own sounds go into %d sound bank(s) of up to %d MB each, the size "
+        "of Stern's own: the game holds image.bin (%d MB) and the bank it is playing in "
+        "memory at once, and together they come to at most %d MB (Stern's largest is %d MB)."
+        % (len(groups), limit // 10**6, staged // 10**6, (staged + biggest) // 10**6,
+           SB.MAPPED_MAX // 10**6), "info")
     cats = SB.next_category_ids(ids, on_card, len(groups))
     banks = list(zip(cats, groups))
     wavs = {i: audio_edits[i] for i in spilled}
@@ -17947,9 +17963,9 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                 pass
         log("Modes: %d of the modes' own sound(s) go into a sound bank of their own, %s "
             "(%.1f MB): with them image.bin would come to %d MB, past the %d MB the game can "
-            "open; %d stay in image.bin. In the bank: %s."
+            "open. In the bank: %s."
             % (len(group), SB.bank_name(cat), size / 1e6, with_all // 10**6, cap // 10**6,
-               len(kept), ", ".join(
+               ", ".join(
                    "%s's %s" % (by_idx_used[e.idx].get("name"),
                                 _MW_sound_words(by_idx_used[e.idx].get("key")))
                    if e.idx in by_idx_used else "idx %d" % e.idx for e in group)), "info")

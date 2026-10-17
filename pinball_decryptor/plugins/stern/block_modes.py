@@ -97,6 +97,11 @@ that order), and ``solid`` / ``solid_color`` one insert more held solid while it
 Then (PAD-556): Blofeld, the game's villain mode, won the film's last part and the villains began to rove at once,
 though the mode could not start until Blofeld was over; the game's own rove only then. So while the game's own check
 says one of its modes is in the way, only the solid insert is held: the shot and the chase come once it is clear.
+Then (PAD-598) a Beatles owner lit their mode at Target 4 with RINGO SPINNER pulsing and wanted that insert to change
+as the mode started, but the Light block could only pick a shot. A Light or Hand back block may name one of the game's
+own lights instead (``insert``: an insert, a GI string or a flasher, the port's `lamp` lines) in the place of its
+``shot``; it is held by name as a shot's lights are (a slot of LIT after the shots), and the lit light going out at the
+start leaves it the mode's.
 
 ONE QUALIFIED AT A TIME (PAD-600). A Beatles owner made four modes, one per target (Target 1-4), each qualified and
 lit by three hits of its target, and wanted only one ready at a time, as Batman's villains are: the target that
@@ -916,6 +921,15 @@ def _check_shot(shot, where, ctx):
         ctx["out"].append("%s names %s, a shot this card does not have." % (where, shot))
 
 
+def _check_light(name, where, ctx):
+    """PAD-598: a Light or Hand back block's one light of the game's own (an insert, a GI string, a flasher: the port's
+    `lamp` lines), by name."""
+    if not isinstance(name, str) or "," in name or len(name) > INSERT_MAX:
+        ctx["out"].append("%s lights an insert that is not one." % where)
+    elif ctx["inserts"] is not None and name not in ctx["inserts"]:
+        ctx["out"].append("%s names the light %s, which this card's game does not have." % (where, name))
+
+
 def _check_hat(hat, n, ctx):
     kind = hat.get("kind")
     where = "Script %d" % n
@@ -990,7 +1004,10 @@ def _check_stack(stack, depth, where, ctx):
         elif op in ("light_shot", "lights_off"):
             if op == "lights_off" and b.get("shot") == "*":
                 continue
-            _check_shot(b.get("shot"), where + "'s lights", ctx)
+            if b.get("insert"):                         # PAD-598: one of the game's lights by name, not a shot's
+                _check_light(b.get("insert"), where, ctx)
+            else:
+                _check_shot(b.get("shot"), where + "'s lights", ctx)
             if op == "light_shot":
                 if not COLOR_RE.match(str(b.get("color") or "")):
                     ctx["out"].append("%s lights a shot in no color." % where)
@@ -1336,6 +1353,7 @@ class _Gen:
         self.p = program
         self.slug = slug
         self.shots = []                 # shot names, in first-use order
+        self.lamps = []                 # PAD-598: the game's lights the blocks light by name, in first-use order
         self.events = []
         self.vars = {}                  # lower name -> index
         self.var_names = []
@@ -1381,6 +1399,16 @@ class _Gen:
 
     def shot(self, name):
         return "S[%d]" % self.shot_i(name)
+
+    def light_i(self, b):
+        """The C of a Light or Hand back block's slot in LIT: its shot's, or (PAD-598) after the shots, the game's
+        light it names."""
+        name = b.get("insert")
+        if name and isinstance(name, str):
+            if name not in self.lamps:
+                self.lamps.append(name)
+            return "N_SHOTS + %d" % self.lamps.index(name)
+        return "%d" % self.shot_i(b.get("shot"))
 
     def shot_i(self, name):
         name = str(name or "")
@@ -1520,13 +1548,13 @@ class _Gen:
                 rgb = int(color[1:], 16) if COLOR_RE.match(color) else 0xFFFFFF
                 rate = b.get("rate")
                 pace = self.num(rate) if rate is not None and pattern not in ("solid", "hurry") else "%dLL" % ms
-                out.append(pad + "light(%d, 0x%06xu, %s, %s, %d);"
-                           % (self.shot_i(b.get("shot")), rgb, pat, pace, 1 if pattern == "hurry" else 0))
+                out.append(pad + "light(%s, 0x%06xu, %s, %s, %d);"
+                           % (self.light_i(b), rgb, pat, pace, 1 if pattern == "hurry" else 0))
             elif op == "lights_off":
-                if b.get("shot") == "*":
+                if b.get("shot") == "*" and not b.get("insert"):
                     out.append(pad + "unlight_all();")
                 else:
-                    out.append(pad + "unlight(%d);" % self.shot_i(b.get("shot")))
+                    out.append(pad + "unlight(%s);" % self.light_i(b))
             elif op == "show":
                 steps = show_steps(b)
                 if steps:
@@ -2192,8 +2220,9 @@ def to_c(program, slug):
     forget = "    lit_shown = 0;                    /* PAD-503: the mode's light is held again next tick */\n" if g.lit else ""
     if g.lit:
         L.append("static int lit_shown;                 /* PAD-503: 1 + the LIT_AT held on the playfield now; 0 = none */")
-    L.extend((_LAMPS_C % {"n": len(g.shots), "size": nshots, "lo": RATE_MIN, "hi": RATE_MAX, "forget": forget}
-              ).split("\n"))
+    L.extend((_LAMPS_C % {"n": len(g.shots), "size": nshots + len(g.lamps), "lo": RATE_MIN, "hi": RATE_MAX,
+                          "forget": forget, "nl": len(g.lamps), "lsize": max(1, len(g.lamps)),
+                          "lamps": ", ".join(_c_str(n) for n in g.lamps) or "0"}).split("\n"))
     if g.shows:
         L.extend(_SHOW_C.split("\n"))
     if media:
@@ -2644,10 +2673,14 @@ static int new_game(void)
 }
 """
 
-#: the C that holds the shots' lights (PAD-376); %(n)d shots named, LIT sized %(size)d
+#: the C that holds the shots' lights (PAD-376); %(n)d shots named, LIT sized %(size)d; PAD-598: and %(nl)d of the
+#: game's lights the blocks name (LAMP_NAMES), in LIT after the shots
 _LAMPS_C = """/* ---- the shots' lights the blocks hold (PAD-376): kept, so a light show gives them back when
- * it is over, and a blink that hurries follows the clock ---- */
+ * it is over, and a blink that hurries follows the clock. PAD-598: after the shots, the game's own lights a block
+ * names (an insert, a GI string, a flasher), held by name ---- */
 #define N_SHOTS   %(n)d
+#define N_LIGHTS  (N_SHOTS + %(nl)d)
+UNUSED static const char *const LAMP_NAMES[%(lsize)d] = {%(lamps)s};
 #define RATE_MIN  %(lo)d                     /* a blink's, pulse's or chase's pace, ms */
 #define RATE_MAX  %(hi)d
 UNUSED static struct { unsigned rgb, ms, sent; int pattern, hurry, on; } LIT[%(size)d];
@@ -2668,16 +2701,17 @@ UNUSED static unsigned hurry_ms(void)
 UNUSED static void lamp_send(int i)
 {
     unsigned ms;
-    if (i < 0 || i >= N_SHOTS || !S[i] || !LIT[i].on || SHOWING) return;
+    if (i < 0 || i >= N_LIGHTS || (i < N_SHOTS && !S[i]) || !LIT[i].on || SHOWING) return;
     ms = LIT[i].hurry ? hurry_ms() : LIT[i].ms;
-    pm_lamp_shot(S[i], LIT[i].rgb, LIT[i].pattern, ms);
+    if (i < N_SHOTS) pm_lamp_shot(S[i], LIT[i].rgb, LIT[i].pattern, ms);
+    else pm_lamp_set(LAMP_NAMES[i - N_SHOTS], LIT[i].rgb, LIT[i].pattern, ms);
     LIT[i].sent = ms;
 }
 
-/* a shot's inserts lit; the same light again is left alone (a blink keeps its beat) */
+/* a shot's inserts lit, or one of the game's lights; the same light again is left alone (a blink keeps its beat) */
 UNUSED static void light(int i, unsigned rgb, int pattern, long long ms, int hurry)
 {
-    if (i < 0 || i >= N_SHOTS) return;
+    if (i < 0 || i >= N_LIGHTS) return;
     if (pattern == PM_LAMP_SOLID || hurry) ms = 0;
     else if (ms < RATE_MIN) ms = RATE_MIN;
     else if (ms > RATE_MAX) ms = RATE_MAX;
@@ -2693,28 +2727,29 @@ UNUSED static void light(int i, unsigned rgb, int pattern, long long ms, int hur
 
 UNUSED static void unlight(int i)
 {
-    if (i < 0 || i >= N_SHOTS) return;
+    if (i < 0 || i >= N_LIGHTS) return;
     LIT[i].on = 0;
-    if (S[i]) pm_lamp_release_shot(S[i]);
+    if (i >= N_SHOTS) pm_lamp_release(LAMP_NAMES[i - N_SHOTS]);
+    else if (S[i]) pm_lamp_release_shot(S[i]);
 %(forget)s}
 
 static void unlight_all(void)
 {
     int i;
-    for (i = 0; i < N_SHOTS; i++) LIT[i].on = 0;
+    for (i = 0; i < N_LIGHTS; i++) LIT[i].on = 0;
     pm_lamp_release_all();
 %(forget)s}
 
 UNUSED static void relight_all(void)                /* after a show: every light the blocks hold */
 {
     int i;
-    for (i = 0; i < N_SHOTS; i++) lamp_send(i);
+    for (i = 0; i < N_LIGHTS; i++) lamp_send(i);
 }
 
 static void lamps_tick(void)                        /* a hurrying blink follows the clock */
 {
     int i;
-    for (i = 0; i < N_SHOTS; i++)
+    for (i = 0; i < N_LIGHTS; i++)
         if (LIT[i].on && LIT[i].hurry && !SHOWING && hurry_ms() != LIT[i].sent) lamp_send(i);
 }
 """
@@ -3074,6 +3109,7 @@ static void lit_off(void)
     if (!lit_waiting && LIT_AT[k].insert[0]) pm_lamp_release(LIT_AT[k].insert);
     if (LIT_AT[k].solid[0]) pm_lamp_release(LIT_AT[k].solid);
     lit_shown = 0;
+    for (k = N_SHOTS; k < N_LIGHTS; k++) lamp_send(k);   /* PAD-598: one the blocks light by name stays theirs */
 }
 
 /* every tick: the player up's light on the playfield while the mode is not running. While one of the game's own

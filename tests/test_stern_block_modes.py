@@ -285,7 +285,7 @@ def test_a_newer_or_broken_blocks_file_is_refused(tmp_path):
 
 
 # ---- the ARM build ---------------------------------------------------------------------------------
-@pytest.mark.parametrize("which", ["starter", "own clips and sounds", "light shows"])   # PAD-374, PAD-376
+@pytest.mark.parametrize("which", ["starter", "own clips and sounds", "light shows", "lights by name"])   # PAD-598
 def test_the_starter_builds_with_build_mode_sh(tmp_path, which):
     if os.name == "nt":
         pytest.skip("build_mode.sh runs under bash with arm-linux-gnueabihf-gcc (WSL or Linux)")
@@ -293,7 +293,7 @@ def test_the_starter_builds_with_build_mode_sh(tmp_path, which):
         pytest.skip("no arm-linux-gnueabihf-gcc here")
     src = tmp_path / "ramp_frenzy.c"
     program = {"starter": lambda: BM.starter("RAMP FRENZY", SHOTS), "own clips and sounds": _media_prog,
-               "light shows": _lights_prog}[which]()
+               "light shows": _lights_prog, "lights by name": _lights_by_name_prog}[which]()
     program.update(game_modes="block", block_modes=[21, 23])      # PAD-373
     src.write_text(BM.to_c(program, "ramp_frenzy"), encoding="utf-8")
     out = tmp_path / "mode.so"
@@ -1786,3 +1786,84 @@ def test_the_info_line_reaches_the_assets_and_goes_where_the_port_says(tmp_path)
     spec = CM.load(project, slug)
     assert spec.info_line is False
     assert not [s for s in MA._code_screens(project, [(slug, spec)], bond) if s["name"] == names["info_node"]]
+
+
+# ---- PAD-598: a Light block lights one of the game's own lights by name (an insert, a GI string, a flasher) --------
+# An owner lit their mode at Target 4 with RINGO SPINNER pulsing, and wanted that insert to change as the mode started;
+# the Light block could only pick a shot. It picks a shot's lights or one of the game's lights (the port's lamp lines).
+def _lights_by_name_prog():
+    return prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [dict(LIT)]},
+                 {"hat": {"kind": "mode_start"}, "do": [_light_insert("MASER READY"), _light_insert("HEAT RAY", "hurry")]},
+                 {"hat": {"kind": "mode_end"}, "do": [{"op": "lights_off", "insert": "HEAT RAY"}]}])
+
+
+def _light_insert(name, pattern="solid", color="#ff2000"):
+    return {"op": "light_shot", "insert": name, "color": color, "pattern": pattern, "rate": None}
+
+
+def test_a_light_block_names_one_of_the_games_lights_and_is_checked():
+    lamps = ["MASER READY", "RIGHT RAMP", "LOWER PLAYFIELD GI 1"]
+    p = prog([{"hat": {"kind": "mode_start"}, "do": [
+        _light_insert("MASER READY"), _light_insert("LOWER PLAYFIELD GI 1", "blink"),
+        {"op": "lights_off", "insert": "MASER READY"}, {"op": "lights_off", "shot": "*"}]}])
+    assert BM.problems(p, SHOTS, GZ.events, inserts=lamps) == []
+    assert BM.problems(p, SHOTS, GZ.events) == []                       # no list of the game's lights: not checked
+    bad = prog([{"hat": {"kind": "mode_start"}, "do": [
+        _light_insert("MOON"), {"op": "lights_off", "insert": "A,B"}, dict(_light_insert("MASER READY"), color="red")]}])
+    assert BM.problems(bad, SHOTS, GZ.events, inserts=lamps) == [
+        "Script 1 names the light MOON, which this card's game does not have.",
+        "Script 1 lights an insert that is not one.",
+        "Script 1 lights a shot in no color."]
+    # a game with no lights a mode can hold: none can be named
+    assert BM.problems(prog([{"hat": {"kind": "mode_start"}, "do": [_light_insert("MASER READY")]}]),
+                       SHOTS, GZ.events, inserts=[]) == [
+        "Script 1 names the light MASER READY, which this card's game does not have."]
+
+
+def test_a_light_block_on_one_of_the_games_lights_holds_it_by_name_in_the_c():
+    p = prog([{"hat": {"kind": "mode_start"}, "do": [
+        _light_insert("MASER READY", "pulse"), {"op": "light_shot", "shot": "Building", "color": "#00ff00",
+                                                "pattern": "solid"},
+        _light_insert("HEAT RAY", "blink"), {"op": "lights_off", "insert": "MASER READY"}]}])
+    src = BM.to_c(p, "blk")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+    assert 'LAMP_NAMES[2] = {"MASER READY", "HEAT RAY"};' in src and "#define N_LIGHTS  (N_SHOTS + 2)" in src
+    assert "light(N_SHOTS + 0, 0xff2000u, PM_LAMP_PULSE, 1600LL, 0);" in src
+    assert "light(0, 0x00ff00u, PM_LAMP_SOLID, 0LL, 0);" in src             # the shot keeps its own slot
+    assert "unlight(N_SHOTS + 0);" in src
+    plain = BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
+    assert "#define N_LIGHTS  (N_SHOTS + 0)" in plain and "LAMP_NAMES[1] = {0};" in plain
+
+
+def test_the_insert_a_mode_is_lit_with_changes_as_it_starts_on_the_harness(tmp_path):
+    """The owner's case: lit at the Right ramp with MASER READY pulsing; When the mode starts lights MASER READY solid
+    red. Starting puts the lit light out, and MASER READY stays the mode's, red, until it ends: then the game has it."""
+    lit = dict(LIT, pattern="pulse", color="#40c040")
+    p = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "any"}, "do": [lit]},
+              {"hat": {"kind": "mode_start"}, "do": [_light_insert("MASER READY")]},
+              {"hat": {"kind": "shot", "shot": "Building", "when": "running"},
+               "do": [{"op": "lights_off", "insert": "MASER READY"}]}], seconds=5)
+    out = play(tmp_path, p, "event", "skill_shot", "secs", 0.2, "lamps",       # lit: pulsing green
+               "shot", "Right ramp", "secs", 0.5, "lamps",                     # started: red, solid, and held
+               "secs", 1, "lamps",
+               "shot", "Building", "secs", 0.2, "lamps",                       # handed back by name
+               "secs", 6)
+    held = re.findall(r"HELD (RIGHT RAMP|MASER READY|none)(?: (\w+) (\w+))?", out)
+    assert held[:2] == [("RIGHT RAMP", "40c040", "pulse"), ("MASER READY", "40c040", "pulse")]
+    assert held[2:] == [("MASER READY", "ff2000", "solid"), ("MASER READY", "ff2000", "solid"), ("none", "", "")]
+    assert "START (its lit shot): player 1" in out
+    assert "LAMP MASER READY ff2000 solid 0 TEST MODE" in out and "LAMP OFF MASER READY TEST MODE" in out
+    assert "lamps held 0" in out
+
+
+def test_a_light_held_by_name_comes_back_after_a_light_show_and_goes_at_the_end_on_the_harness(tmp_path, monkeypatch):
+    _cc()
+    monkeypatch.setenv("HARNESS_PLACES", "1")
+    p = prog([{"hat": {"kind": "event", "event": "skill_shot", "when": "idle"}, "do": [{"op": "start_mode"}]},
+              {"hat": {"kind": "mode_start"}, "do": [_light_insert("HEAT RAY", "blink"), {"op": "show", "show": "burst"}]}],
+             seconds=5)
+    out = play(tmp_path, p, "event", "skill_shot", "secs", 6)
+    sent = re.findall(r"^\s*\d+ LAMP HEAT RAY ff2000 blink (\d+)", out, re.M)
+    assert len(sent) == 2 and sent[0] == sent[1]                        # lit, then again once the show is over
+    assert "END lamps held 0" in out

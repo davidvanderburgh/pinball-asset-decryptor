@@ -95,8 +95,10 @@ def test_a_stale_game_out_is_not_quoted_as_this_runs_crash():
             '"$GUESTLOG"') in report
 
 
-@pytest.mark.skipif(sys.platform == "win32" or not BASH,
-                    reason="needs a native bash")
+# watch.sh runs on Linux only (WSL, or the Mac toolbox's Debian): its mark is
+# GNU `stat -c %s`, which BSD stat on macOS does not have.
+@pytest.mark.skipif(not sys.platform.startswith("linux") or not BASH,
+                    reason="needs Linux bash and GNU stat")
 def test_run_debug_log_returns_only_lines_written_after_the_mark(tmp_path):
     watch = _src("watch.sh")
     mark = next(ln for ln in watch.split("\n") if ln.startswith("DBG_MARK="))

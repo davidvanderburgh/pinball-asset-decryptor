@@ -1945,6 +1945,18 @@ def test_a_light_block_on_one_of_the_games_lights_holds_it_by_name_in_the_c():
     assert "#define N_LIGHTS  (N_SHOTS + 0)" in plain and "LAMP_NAMES[1] = {0};" in plain
 
 
+def test_a_light_block_lights_one_off_held_dark(tmp_path):
+    """PAD-601: a Light block may light an insert "off": held dark, its color and pace ignored (Hand back lets the
+    game's own light show through instead)."""
+    off = dict(_light_insert("RINGO SPINNER", "off"), color="", rate={"k": "num", "v": 5})
+    p = prog([{"hat": {"kind": "mode_end"}, "do": [off, {"op": "light_shot", "shot": "Building", "pattern": "off"}]}])
+    assert BM.problems(p, SHOTS, GZ.events, inserts=["RINGO SPINNER"]) == []
+    src = BM.to_c(p, "blk")
+    assert "light(N_SHOTS + 0, 0x000000u, PM_LAMP_SOLID, 0LL, 0);" in src
+    assert len(re.findall(r"light\([^;]*, 0x000000u, PM_LAMP_SOLID, 0LL, 0\);", src)) == 2   # the shot's too
+    assert BM.normalize(p)["scripts"][0]["do"][0]["pattern"] == "off"
+
+
 def test_the_insert_a_mode_is_lit_with_changes_as_it_starts_on_the_harness(tmp_path):
     """The owner's case: lit at the Right ramp with MASER READY pulsing; When the mode starts lights MASER READY solid
     red. Starting puts the lit light out, and MASER READY stays the mode's, red, until it ends: then the game has it."""

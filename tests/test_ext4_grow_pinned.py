@@ -198,3 +198,29 @@ def test_only_a_scene_assets_directory_may_be_made():
     assert ext4_grow._makes_dir("scene.assets/1.asset") is None
     s = ext4_grow._bash_script(OFF, [("g/b/scene.assets/1.asset", "/s")], "/c.raw")
     assert 'mkdir "$MP"/g/b/scene.assets' in s and "PAD_GROW_NODIR" in s
+
+
+def test_the_card_is_opened_three_times_however_many_files():
+    """PAD-599: one stat session, one write session, one size read-back - a
+    Godzilla card's 81 files used to open the filesystem some 400 times, each
+    open 0.2 s over 9p."""
+    jobs = [("g/bank/%d.asset" % i, "/src/%d" % i) for i in range(81)]
+    s = ext4_grow._pinned_script(OFF, jobs, "/x/card.raw", EPOCH)
+    runs = [ln for ln in s.splitlines() if ln.lstrip().startswith("debugfs ")]
+    assert len(runs) == 3, runs
+    assert sum(ln.startswith("echo \"PAD_GROW_OK ") for ln in s.splitlines()) == 81
+
+
+@needs_e2fs
+def test_a_file_written_twice_keeps_the_last_copy(tmp_path):
+    card = _card(tmp_path)
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.write_bytes(os.urandom(5000))
+    b.write_bytes(os.urandom(9000))
+    out = _run(card, [("g/bank/scene.radium", str(a)), ("g/bank/scene.radium", str(b))])
+    assert out.count("PAD_GROW_OK ") == 2
+    ref = "%s?offset=%d" % (card, OFF)
+    got = subprocess.run(["debugfs", "-R", "cat /g/bank/scene.radium", ref],
+                         capture_output=True).stdout
+    assert got == b.read_bytes()
+    assert "Mode:  0664" in _stat(ref, "/g/bank/scene.radium")

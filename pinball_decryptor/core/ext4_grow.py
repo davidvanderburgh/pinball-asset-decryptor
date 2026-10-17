@@ -645,23 +645,46 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
 #: The mode a new file gets: what every stock asset on a Spike 2 card carries.
 PINNED_NEW_MODE = 0o100664
 
+# Every debugfs run opens the card's filesystem afresh, and on Windows the card
+# sits on a Windows drive the executor's Linux reads over 9p: about 0.2 s an
+# open on a 16 GB card, and the delivery used to open it four or five times a
+# file (a stat for the room, another for the old mode, the write, the size
+# check), 400 opens for a Godzilla card's 81 files, two of its build's minutes
+# (PAD-599).  Now one read-only session stats every path up front, one
+# ``debugfs -w`` session runs every job's commands in order, and one more reads
+# back every size; the commands, and so the bytes, are the ones the per-file
+# runs gave.
+
 _PINNED_HEAD = r'''set -e
 export E2FSPROGS_FAKE_TIME=@EPOCH@ E2FSCK_TIME=@EPOCH@
 DEV=@DEV@
 command -v debugfs >/dev/null && command -v e2fsck >/dev/null || { echo "PAD_GROW_NOTOOLS debugfs/e2fsck" >&2; exit 5; }
-# stat of a path -> "<size> <mode> <uid> <gid>", or nothing when it is not there
-fst() {
-    debugfs -R "stat \"$1\"" "$DEV" 2>/dev/null | awk '
+LOG=$(mktemp /var/tmp/pad_pinned_XXXXXX)
+trap 'rm -f "$LOG" "$LOG.cmd" "$LOG.q" "$LOG.st" "$LOG.fst"' EXIT
+# one debugfs -f session's "stat" answers -> "<path>\t<size> <mode> <uid> <gid>"
+# per path that is there (each command is echoed as "debugfs: stat "<path>"")
+stparse() {
+    awk '
+        function out() { if (p != "" && m != "") printf "%s\t%s %s %s %s\n", p, s, m, u, g }
+        /^debugfs: / { out(); p = ""; m = ""
+                       if ($0 ~ /^debugfs: stat "/) { p = $0; sub(/^debugfs: stat "/, "", p); sub(/"$/, "", p) }
+                       next }
         /^Inode:/ { for (i = 1; i < NF; i++) if ($i == "Mode:") m = $(i + 1) }
         /^User:/  { u = $2; g = $4; for (i = 1; i < NF; i++) if ($i == "Size:") s = $(i + 1) }
-        END { if (m != "") print s, m, u, g }'
+        END { out() }' "$1"
 }
-stats=$(debugfs -R stats "$DEV" 2>/dev/null)
-fb=$(echo "$stats" | awk -F: '/^Free blocks:/ { gsub(/ /, "", $2); print $2 }')
-bs=$(echo "$stats" | awk -F: '/^Block size:/ { gsub(/ /, "", $2); print $2 }')
+# stat of a path -> "<size> <mode> <uid> <gid>", or nothing when it is not there
+fst() { awk -F'\t' -v p="$1" '$1 == p { print $2; exit }' "$LOG.fst"; }
+cat > "$LOG.q" <<'PAD_STAT_EOF'
+stats
+@STATS@
+PAD_STAT_EOF
+debugfs -f "$LOG.q" "$DEV" > "$LOG.st" 2>/dev/null
+stparse "$LOG.st" > "$LOG.fst"
+fb=$(awk -F: '/^Free blocks:/ { gsub(/ /, "", $2); print $2; exit }' "$LOG.st")
+bs=$(awk -F: '/^Block size:/ { gsub(/ /, "", $2); print $2; exit }' "$LOG.st")
 [ -n "$fb" ] && [ -n "$bs" ] || { echo "PAD_GROW_NOFS" >&2; exit 7; }
-LOG=$(mktemp /var/tmp/pad_pinned_XXXXXX)
-trap 'rm -f "$LOG" "$LOG.cmd"' EXIT
+: > "$LOG.cmd"
 need=0
 '''
 
@@ -671,13 +694,12 @@ if [ "$d" -gt 0 ]; then need=$((need + d))
 echo "PAD_GROW_ITEM $d @REL@"; fi
 '''
 
+# a directory made here is answered by fst from then on, as a fresh stat would
 _PINNED_MKDIR = r'''if [ -z "$(fst @DIR@)" ] && [ -n "$(fst @UP@)" ]; then
     set -- $(fst @UP@); dmode=$(printf "%o" $((8#40000 | 8#$2)))
     printf 'mkdir "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
-        @DIR@ @DIR@ "$dmode" @DIR@ "$3" @DIR@ "$4" > "$LOG.cmd"
-    debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
-    bad=$(grep -v '^debugfs\|^$' "$LOG" || true)
-    if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS "@DIR@": $bad" >&2; exit 6; fi
+        @DIR@ @DIR@ "$dmode" @DIR@ "$3" @DIR@ "$4" >> "$LOG.cmd"
+    printf '%s\t%s %s %s %s\n' @DIR@ 4096 "$2" "$3" "$4" >> "$LOG.fst"
     echo "PAD_GROW_MKDIR "@DIR@
 fi
 '''
@@ -690,21 +712,30 @@ echo "PAD_GROW_SPACE need=$need avail=$avail"
 _PINNED_JOB = r'''old=$(fst @TGT@)
 if [ -n "$old" ]; then
     set -- $old; mode=$2; uid=$3; gid=$4
-    printf 'kill_file "%s"\nrm "%s"\n' @TGT@ @TGT@ > "$LOG.cmd"
+    printf 'kill_file "%s"\nrm "%s"\n' @TGT@ @TGT@ >> "$LOG.cmd"
 else
     par=$(fst @PARENT@)
     [ -n "$par" ] || { echo "PAD_GROW_NODIR "@REL@ >&2; exit 4; }
     set -- $par; mode=@NEWMODE@; uid=$3; gid=$4
-    : > "$LOG.cmd"
 fi
 # debugfs prints a mode's permission bits only (0664); a FILE needs S_IFREG too
 case "$mode" in 10????) ;; *) mode=$(printf "%o" $((8#100000 | 8#$mode))) ;; esac
 printf 'write "%s" "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
     @SRC@ @TGT@ @TGT@ "$mode" @TGT@ "$uid" @TGT@ "$gid" >> "$LOG.cmd"
-debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
+'''
+
+# every job's commands in one session, then every size read back in another
+_PINNED_WRITE = r'''debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
 bad=$(grep -v '^debugfs\|^Allocated inode:\|^$' "$LOG" || true)
-if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS "@REL@": $bad" >&2; exit 6; fi
-got=$(fst @TGT@ | cut -d" " -f1); want=$(stat -c%s @SRC@)
+if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS: $bad" >&2; exit 6; fi
+cat > "$LOG.q" <<'PAD_STAT_EOF'
+@STATS@
+PAD_STAT_EOF
+debugfs -f "$LOG.q" "$DEV" > "$LOG.st" 2>/dev/null
+stparse "$LOG.st" > "$LOG.fst"
+'''
+
+_PINNED_CHECK = r'''got=$(fst @TGT@ | cut -d" " -f1); want=$(stat -c%s @SRC@)
 if [ "$got" != "$want" ]; then echo "PAD_GROW_SHORT "@REL@" $got/$want" >&2; exit 6; fi
 echo "PAD_GROW_OK @I@ "@REL@
 '''
@@ -715,24 +746,48 @@ echo "PAD_GROW_DONE fsck=$rc"
 '''
 
 
+def _stat_lines(paths):
+    """debugfs ``stat`` commands for *paths*, each once, in order."""
+    seen, out = set(), []
+    for p in paths:
+        if p not in seen:
+            seen.add(p)
+            out.append('stat "%s"' % p)
+    return "\n".join(out)
+
+
 def _pinned_script(part_offset, jobs_exec, image_exec, epoch):
-    """The bash script :func:`grow_files_pinned` runs: a free-space check, then
-    per job one ``debugfs -w`` (kill_file/rm when the file exists, write, the
-    old or stock mode/uid/gid), a size check and a ``PAD_GROW_OK`` marker, then
-    one ``e2fsck -fy`` to reconcile the free counts debugfs leaves stale.  Every
-    tool runs with the clock pinned to *epoch*."""
+    """The bash script :func:`grow_files_pinned` runs: one read-only debugfs
+    session statting every path it needs (with the free-space ``stats``), a
+    free-space check, every job's commands (kill_file/rm when the file
+    exists, write, the old or stock mode/uid/gid) run in ONE ``debugfs -w``
+    session, every size read back in one more and a ``PAD_GROW_OK`` marker
+    per file, then one ``e2fsck -fy`` to reconcile the free counts debugfs
+    leaves stale.  Every tool runs with the clock pinned to *epoch*."""
     q = shlex.quote
     for rel, src in jobs_exec:
         if '"' in src or '"' in rel:
             raise Ext4GrowError("a path contains a double quote, which debugfs "
                                 "cannot take: %s" % (src if '"' in src else rel))
+        if "\n" in src or "\n" in rel:
+            raise Ext4GrowError("a path contains a line break, which debugfs "
+                                "cannot take: %r" % (src if "\n" in src else rel))
+    targets = ["/" + rel for rel, _src in jobs_exec]
+    looked = []
+    for rel, _src in jobs_exec:
+        tgt = "/" + rel
+        looked += [tgt, tgt.rsplit("/", 1)[0] or "/"]
+        made = _makes_dir(rel)
+        if made:
+            looked += ["/" + made[0], "/" + made[1]]
     out = [_PINNED_HEAD.replace("@EPOCH@", str(int(epoch))).replace(
-        "@DEV@", q("%s?offset=%d" % (image_exec, int(part_offset))))]
+        "@DEV@", q("%s?offset=%d" % (image_exec, int(part_offset))))
+        .replace("@STATS@", _stat_lines(looked))]
     for rel, src in jobs_exec:
         out.append(_PINNED_NEED.replace("@TGT@", q("/" + rel))
                    .replace("@SRC@", q(src)).replace("@REL@", q(rel)))
     out.append(_PINNED_SPACE)
-    for i, (rel, src) in enumerate(jobs_exec):
+    for rel, src in jobs_exec:
         tgt = "/" + rel
         made = _makes_dir(rel)
         if made:
@@ -741,7 +796,16 @@ def _pinned_script(part_offset, jobs_exec, image_exec, epoch):
                    .replace("@PARENT@", q(tgt.rsplit("/", 1)[0] or "/"))
                    .replace("@SRC@", q(src))
                    .replace("@REL@", q(rel))
-                   .replace("@NEWMODE@", "%o" % PINNED_NEW_MODE)
+                   .replace("@NEWMODE@", "%o" % PINNED_NEW_MODE))
+    out.append(_PINNED_WRITE.replace("@STATS@", _stat_lines(targets)))
+    last = {rel: i for i, (rel, _src) in enumerate(jobs_exec)}
+    for i, (rel, src) in enumerate(jobs_exec):
+        if last[rel] != i:
+            # written again further down: only the last copy's size is there
+            out.append('echo "PAD_GROW_OK %d "%s\n' % (i, q(rel)))
+            continue
+        out.append(_PINNED_CHECK.replace("@TGT@", q("/" + rel))
+                   .replace("@SRC@", q(src)).replace("@REL@", q(rel))
                    .replace("@I@", str(i)))
     out.append(_PINNED_TAIL)
     return "".join(out)

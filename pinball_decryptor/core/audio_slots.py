@@ -338,6 +338,8 @@ def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
     cache = audio_cache(assets_dir)
     kept = 0
+    import threading
+    lock = threading.Lock()         # the cache is shared by the workers
 
     def _one(rel, rep):
         """Stage one sound: ``(ok, kept, detail, lines)``, *lines* its log
@@ -350,18 +352,23 @@ def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
         orig = (staged_originals.snapshot_path(assets_dir, rel)
                 if assets_dir else None)
         recipe = _audio_recipe(slot, rep, orig, slot_trim) if orig else None
-        if cache.fresh(slot, recipe):
+        with lock:
+            fresh = cache.fresh(slot, recipe)
+        if fresh:
             lines.append((f"  ✓ {rel}  (already converted from this file — "
                           f"kept)", "success"))
             return True, True, "", lines
         ok, detail = stage_replacement(_pristine_slot(slot, orig), rep,
                                        trim_to_length=slot_trim)
+        with lock:
+            if ok:
+                cache.record(slot, recipe)
+            else:
+                cache.forget(rel)
         if ok:
-            cache.record(slot, recipe)
             lines.append((f"  ✓ {rel}" + (f"  ({detail})" if detail else ""),
                           "success"))
         else:
-            cache.forget(rel)
             lines.append((f"  ✗ {rel}: {detail}", "error"))
         return ok, False, detail, lines
 

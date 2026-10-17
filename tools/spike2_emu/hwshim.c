@@ -842,15 +842,92 @@ int shim_clock_nanosleep(int clk, int flags, const struct shim_ts *req,
     return 4 /* EINTR */;
 }
 
+/* ★ PAD-603: THE NODE BUS IS ALWAYS READY TO BE READ. The shim answers every
+ * read() on /dev/ttymxc1 itself, so as far as the game can tell a reply is
+ * waiting the moment it has asked. But the fd underneath is a pty nobody
+ * writes to, and the real select/poll says "not readable" - which older
+ * builds believe: deadpool_le 0.99's ASYNCSERIAL_ReadBytes waits in
+ * select(1024, ...) before every read, timed out on every exchange ("short
+ * response (got 0, expected 12)"), never called read(), and the game stopped
+ * at "LOCATING NODE BOARDS - 1 8 9 NODES NOT FOUND". Later builds read
+ * without asking, which is why only older code met it. So when a node bus
+ * fd is in the read set, the other fds are asked without waiting and the bus
+ * fd is reported ready. *done says whether a bus fd was involved; when it
+ * was not, the caller takes its normal path. */
+static int nb_fd_set_has(int n, const void *set, int fd)
+{
+    return set && fd < n &&
+           ((((const unsigned *)set)[fd >> 5] >> (fd & 31)) & 1u);
+}
+
+static int nb_select_ready(int n, void *r, void *w, void *e,
+                           int (*real)(int, void *, void *, void *,
+                                       struct shim_tv *), int *done)
+{
+    unsigned char want[MAXFD / 8];
+    struct shim_tv zero = { 0, 0 };
+    int fd, any = 0, ret, top = n < MAXFD ? n : MAXFD;
+    for (fd = 0; fd < top; fd++) {
+        int is = faked[fd] == 'T' && nb_fd_set_has(n, r, fd);
+        if (is) any = 1;
+        want[fd >> 3] = (unsigned char)((want[fd >> 3] & ~(1u << (fd & 7)))
+                                        | ((unsigned)is << (fd & 7)));
+    }
+    *done = any;
+    if (!any) return 0;
+    ret = real(n, r, w, e, &zero);
+    if (ret < 0) return ret;
+    for (fd = 0; fd < top; fd++)
+        if ((want[fd >> 3] >> (fd & 7)) & 1u) {
+            if (!nb_fd_set_has(n, r, fd)) ret++;
+            ((unsigned *)r)[fd >> 5] |= 1u << (fd & 31);
+        }
+    return ret;
+}
+
+struct nb_pollfd { int fd; short events; short revents; };
+
+static int nb_poll_ready(void *fds, unsigned long nfds,
+                         int (*real)(void *, unsigned long, int), int *done)
+{
+    struct nb_pollfd *p = fds;
+    unsigned long i;
+    int any = 0, ret;
+    for (i = 0; p && i < nfds; i++)
+        if (p[i].fd >= 0 && p[i].fd < MAXFD && faked[p[i].fd] == 'T' &&
+            (p[i].events & 1 /* POLLIN */))
+            any = 1;
+    *done = any;
+    if (!any) return 0;
+    ret = real(fds, nfds, 0);
+    if (ret < 0) return ret;
+    for (i = 0; i < nfds; i++)
+        if (p[i].fd >= 0 && p[i].fd < MAXFD && faked[p[i].fd] == 'T' &&
+            (p[i].events & 1)) {
+            if (!p[i].revents) ret++;
+            p[i].revents |= 1;
+        }
+    return ret;
+}
+
+static int real_poll_ms(void *fds, unsigned long nfds, int ms)
+{
+    static int (*real)(void *, unsigned long, int);
+    if (!real) real = dlsym(RTLD_NEXT, "poll");
+    return real(fds, nfds, ms);
+}
+
 int shim_select(int n, void *r, void *w, void *e, struct shim_tv *tv) __asm__("select");
 int shim_select(int n, void *r, void *w, void *e, struct shim_tv *tv)
 {
     static int (*real)(int, void *, void *, void *, struct shim_tv *);
     long long g, b, left;
     struct shim_tv k;
-    int ret;
+    int ret, done;
     if (!real) real = dlsym(RTLD_NEXT, "select");
     warp_poll();
+    ret = nb_select_ready(n, r, w, e, real, &done);
+    if (done) return ret;
     if (!w_on || !tv) return real(n, r, w, e, tv);
     g = (long long)tv->s * 1000000LL + tv->us;
     b = warp_budget(g);
@@ -871,9 +948,14 @@ int shim_pselect(int n, void *r, void *w, void *e, const struct shim_ts *ts,
                  const void *mask)
 {
     static int (*real)(int, void *, void *, void *, const struct shim_ts *, const void *);
+    static int (*real_sel)(int, void *, void *, void *, struct shim_tv *);
     struct shim_ts k;
+    int ret, done;
     if (!real) real = dlsym(RTLD_NEXT, "pselect");
+    if (!real_sel) real_sel = dlsym(RTLD_NEXT, "select");
     warp_poll();
+    ret = nb_select_ready(n, r, w, e, real_sel, &done);
+    if (done) return ret;
     if (!w_on || !ts) return real(n, r, w, e, ts, mask);
     us_ts(warp_budget(ts_us(ts)), &k);
     return real(n, r, w, e, &k, mask);
@@ -888,8 +970,11 @@ int shim_poll(void *fds, unsigned long nfds, int ms)
 {
     static int (*real)(void *, unsigned long, int);
     struct shim_ts k;
+    int ret, done;
     if (!real) real = dlsym(RTLD_NEXT, "poll");
     warp_poll();
+    ret = nb_poll_ready(fds, nfds, real_poll_ms, &done);
+    if (done) return ret;
     if (!w_on || ms <= 0) return real(fds, nfds, ms);
     if (!real_ppoll) real_ppoll = dlsym(RTLD_NEXT, "ppoll");
     if (!real_ppoll) return real(fds, nfds, ms);
@@ -903,8 +988,11 @@ int shim_ppoll(void *fds, unsigned long nfds, const struct shim_ts *ts,
                const void *mask)
 {
     struct shim_ts k;
+    int ret, done;
     if (!real_ppoll) real_ppoll = dlsym(RTLD_NEXT, "ppoll");
     warp_poll();
+    ret = nb_poll_ready(fds, nfds, real_poll_ms, &done);
+    if (done) return ret;
     if (!w_on || !ts) return real_ppoll(fds, nfds, ts, mask);
     us_ts(warp_budget(ts_us(ts)), &k);
     return real_ppoll(fds, nfds, &k, mask);
@@ -2678,14 +2766,47 @@ int shim_system(const char *cmd)
     return rc;
 }
 
+/* ★ PAD-603: THE CPU BOARD SAYS WHAT IT IS IN /proc/cpuinfo, and older
+ * builds ask. The node bus library in deadpool_le 0.99 (2019) picks its
+ * platform in a static constructor, PLATFORMUTIL_getPlatform: it popens
+ * `/bin/cat /proc/cpuinfo | /bin/grep Hardware` and looks for
+ * "Freescale i.MX6" (Spike 2, platform 2) or "Atmel AT91SAM9M10G45"
+ * (Spike 1, platform 1). Under qemu-user that file is the HOST's, which has
+ * neither, so the platform read 0 and NODEBUS_Init took the Spike 1 branch -
+ * open("/dev/gpio") - which fails here: the node bus control thread returned
+ * at once, /dev/ttymxc1 was never opened, and the game sat at "bringing up
+ * node boards" for good. Later builds dropped the probe (deadpool_le 1.16,
+ * venom_le 0.95 have no "cpuinfo" string at all), which is why only older
+ * code hit it. So a `cat /proc/cpuinfo` in a command answers the board's
+ * own Hardware line, and the rest of the pipeline runs as written. */
+#define SPIKE2_CPUINFO_HW "Hardware\t: Freescale i.MX6 Quad/DualLite (Device Tree)"
+
+static const char *cpuinfo_cmd(const char *cmd, char *out, unsigned long n)
+{
+    const char *p, *s;
+    if (!cmd || !(p = strstr(cmd, "cat /proc/cpuinfo"))) return cmd;
+    for (s = p; s > cmd && s[-1] != ' ' && s[-1] != '|' && s[-1] != ';'
+                && s[-1] != '&' && s[-1] != '('; s--) ;     /* "/bin/" too */
+    snprintf(out, n, "%.*secho '%s'%s", (int)(s - cmd), cmd, SPIKE2_CPUINFO_HW,
+             p + sizeof "cat /proc/cpuinfo" - 1);
+    return out;
+}
+
 void *shim_popen(const char *cmd, const char *mode) __asm__("popen");
 void *shim_popen(const char *cmd, const char *mode)
 {
     static void *(*real_popen)(const char *, const char *);
-    char b[320];
+    char b[320], swapped[512];
+    const char *run;
     void *f;
     if (!real_popen) real_popen = dlsym(RTLD_NEXT, "popen");
-    f = real_popen ? real_popen(cmd, mode) : 0;
+    run = cpuinfo_cmd(cmd, swapped, sizeof swapped);
+    if (run != cmd) {
+        snprintf(b, sizeof b, "[popen] /proc/cpuinfo answered as the Spike 2 "
+                 "CPU board's: \"%.200s\"\n", run);
+        logmsg(b);
+    }
+    f = real_popen ? real_popen(run, mode) : 0;
     snprintf(b, sizeof b, "[popen] \"%.240s\" (%s) -> %s\n", cmd ? cmd : "(null)", mode ? mode : "?", f ? "ok" : "NULL");
     logmsg(b);
     return f;
@@ -14652,7 +14773,14 @@ long shim_read(int fd, void *b, unsigned long n)
                     }
                 }
             }
-            if (nb_req_len > 2 && nb_req[2] == 0xfe && plen >= 11) {
+            /* PAD-603: OLDER BUILDS ASK FOR 10 BYTES, NOT 11. deadpool_le 0.99
+             * (2019) sends `8n 02 fe xx 0c` - a 12-byte reply, 10 of payload,
+             * from before the VARIANT byte at [10] was added - and this block
+             * used to require 11, so every identity it got was zeros and the
+             * game stopped at "LOCATING NODE BOARDS - 1 8 9 NODES NOT FOUND".
+             * The first ten bytes are the same layout either way; [10] is
+             * only written when the caller asked for it. */
+            if (nb_req_len > 2 && nb_req[2] == 0xfe && plen >= 10) {
                 unsigned nid = (unsigned)(nb_req[0] & 0x3f);
                 const struct nb_ident *ident = nb_ident_for(nid);
                 unsigned part = nb_env_hex("PAD_NB_PART",
@@ -14709,7 +14837,7 @@ long shim_read(int fd, void *b, unsigned long n)
                  *     if (hex_variant != identity[10] && hex_variant != 0) fail
                  * so a non-zero variant in the image forces this to match.
                  * pinnode-*-1_35_0.hex carries 01, ws2812node 05. */
-                p[10] = (unsigned char)var;
+                if (plen >= 11) p[10] = (unsigned char)var;
             }
             /* ★ PAD-237: A NODE BOARD'S MOTOR STATUS CARRIES ITS OWN SWITCH
              * INPUTS, and answering it with zeros is what kept john_wick_le's
@@ -14837,6 +14965,27 @@ long shim_write(int fd, const void *b, unsigned long n)
          * completes the same way the boot one does. See i2c_ready_arm(). */
         if (nb_req_len == 3 && nb_req[0] == 0x08 && !(nb_req[0] & 0x80))
             i2c_ready_arm();
+        /* PAD-603: `0d 05 <op> <4 bytes>` asks the CPU board's bus master
+         * to compute a 4-byte answer. venom_le 0.95 - the only build of the
+         * 94 in the library that sends it - unscrambles each answer with a
+         * TinyMT32 it mirrors (transport 0x45da8c) and decodes its own data
+         * with the results. What the board computes lives in its firmware,
+         * which no card ships (the one netbridge hex on any card, deadpool
+         * 0.99's 0.29, has neither the command nor the TinyMT), and the
+         * answer is not the value echoed back (tried under gdb: same crash).
+         * So this rig cannot answer it; its zeros decode to a
+         * 200-million-entry copy that faults at 0x348128, 15 s in. This line
+         * is here so the run can say why it ended instead of leaving a bare
+         * segv. One line per run; watch.sh turns it into the explanation. */
+        if (nb_req_len >= 2 && nb_req[0] == 0x0d && nb_req[1] == 0x05) {
+            static int said;
+            if (!said) {
+                said = 1;
+                logmsg("[busmaster] the game asked the CPU board's bus"
+                       " master for bus command 0x0d, which this emulator"
+                       " cannot answer\n");
+            }
+        }
         {
             static int rabudget = 12;
             unsigned long ra = (unsigned long)__builtin_return_address(0);

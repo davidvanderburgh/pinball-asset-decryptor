@@ -1403,6 +1403,14 @@ GAMEOUTTAIL=""
 
 teardown() {
     trap - INT TERM EXIT
+    # EVERY HELPER BELOW IS KILLED, AND NONE OF THEM IS WAITED FOR - so none of
+    # them belongs in bash's job table any more. Left there, each kill -9 comes
+    # back as a "Killed" job notice that quotes the job's whole command line:
+    # for the event feed that is the ENTIRE awk program with its comments, 90
+    # lines in the app's log right after a crash report, and pausekeep.py came
+    # back the same way (PAD-603, venom_le 0.95). kill -0 checks still work
+    # on a disowned pid.
+    disown -a 2>/dev/null
     echo
     echo "[watch] stopping..."
     rm -f "$BOARD_RUN" 2>/dev/null
@@ -2333,6 +2341,13 @@ sel_flag_stale() {
     if [ -n "$SEL_SEEN" ]; then bound=$SEL_GAP; else bound=$SEL_WAIT; fi
     [ "$bound" != 0 ] && [ "$age" -ge "$bound" ]
 }
+# THE GAME'S DEBUG LOG OUTLIVES THE RUN - one file per slot, appended by every
+# boot - so the exit report below reads only what THIS run wrote past here.
+# Without the mark it quoted a FATAL from a fortnight before and called a
+# segfault the game's own watchdog (PAD-603: venom_le 0.95's report named an
+# error 233 of 2026-10-16 and a DISPATCH TIMEOUT, on a run that crashed).
+DBG_MARK=$(stat -c %s "$ROOT/dump/debug_log.txt" 2>/dev/null || echo 0)
+run_debug_log() { tail -c +$((DBG_MARK + 1)) "$ROOT/dump/debug_log.txt" 2>/dev/null; }
 # PAD_MODE_SO AND PAD_CARD_MODES ARE NAMED ON THIS LINE ALTHOUGH `env` WOULD INHERIT THEM.
 # The first is how a launch brings a mode runtime of its own (the Emulate tab's override
 # set, the Modes tab's Try it); the second is the opt-out from the card's own modes
@@ -3080,6 +3095,10 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # its number and the values Tech Alerts shows (hwshim val_watch,
         # PAD-178). One line per change, and none on a clean run.
         /\[validation\]/         { print "[event] " $0; fflush(); next }
+        # [security] is the game asking the CPU board security function
+        # (PAD-603): early builds of some titles do, and no emulator can
+        # answer it. One line a run, and it is why such a run ends.
+        /\[security\]/           { print "[event] " $0; fflush(); next }
         # PAD-441: the GL bridge saying a kind of object name came round, or
         # that every name of a kind is in use (and a picture will be wrong).
         # A few lines a session; the graphics-went-to-pieces report would
@@ -3089,11 +3108,6 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         /SEGV|Segmentation|FATAL/{ print "[event] " $0; fflush(); next }
     ' &
     EVTPG=$!
-    # Its end is ours to cause (stop_all's kill -9). Left in the job table,
-    # bash reports that kill as "Killed  tail ... | $AWK '...'" and prints
-    # the WHOLE awk program above into the app's log - 90 lines of comments
-    # after every crash (PAD-603, venom_le 0.95).
-    disown "$EVTPG"
 fi
 
 if [ "$PAD_HIDDEN" = 1 ]; then
@@ -3210,9 +3224,14 @@ while :; do
         # the pane showed only ExchangeData noise, which read as "no report
         # at all". The report is small and bounded (3 header prints max),
         # so on any exit, surface it from the authoritative file directly.
-        if grep -aq '\[segv\]' "$ROOT/dump/game.out" 2>/dev/null; then
+        # ONLY A PAD_PIVOT GUEST WRITES game.out, and only that run clears it
+        # first; any other run finds one left behind by whatever ran in this
+        # slot before (PAD-603 quoted a stale one), and its own [segv] lines
+        # went straight into $LOG, which the event feed already carried.
+        if [ -n "${PAD_PIVOT:-}" ]; then GUESTLOG=$ROOT/dump/game.out; else GUESTLOG=$LOG; fi
+        if [ -n "${PAD_PIVOT:-}" ] && grep -aq '\[segv\]' "$GUESTLOG" 2>/dev/null; then
             echo "[watch] the guest left a crash report in game.out:"
-            grep -a '\[segv\]' "$ROOT/dump/game.out" | grep -av scenebytes | head -40
+            grep -a '\[segv\]' "$GUESTLOG" | grep -av scenebytes | head -40
         fi
         # A SCENE FILE THE GAME COULD NOT READ, BY NAME (PAD-159) - see
         # pad_scenefail_report. A PAD_PIVOT guest writes to game.out, any
@@ -3229,9 +3248,9 @@ while :; do
         # NVMigration could not create its map file, because an elevated run
         # had left data/nv/beatles owned by root. The lines carry the game's own
         # clock; the last ones are this run's when the game just exited.
-        if grep -aq 'FATAL' "$ROOT/dump/debug_log.txt" 2>/dev/null; then
-            echo "[watch] the game's own debug log ($ROOT/dump/debug_log.txt) holds FATAL lines; the last:"
-            grep -a 'FATAL' "$ROOT/dump/debug_log.txt" | tail -2 | cut -c1-200
+        if run_debug_log | grep -aq 'FATAL'; then
+            echo "[watch] the game's own debug log ($ROOT/dump/debug_log.txt) holds FATAL lines from this run; the last:"
+            run_debug_log | grep -a 'FATAL' | tail -2 | cut -c1-200
         fi
         grep -a '^\[exit\] status' "$LOG" 2>/dev/null | grep -av 'child process' | tail -1
         # EXIT 5 IS THE GAME'S OWN WATCHDOG (PAD-200): main() waits on its
@@ -3239,8 +3258,17 @@ while :; do
         # "GAME EXIT DISPATCH TIMEOUT" to the debug log and exits 5 - a
         # machine reboots there. The pane showed ExchangeData noise and the
         # bare status, which read as a crash with no reason.
-        if tail -3 "$ROOT/dump/debug_log.txt" 2>/dev/null | grep -aq 'GAME EXIT DISPATCH TIMEOUT'; then
+        if run_debug_log | tail -3 | grep -aq 'GAME EXIT DISPATCH TIMEOUT'; then
             echo "[watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here."
+        fi
+        # PAD-603: THE SECURITY CHECK EARLY BUILDS MAKE. hwshim prints the
+        # [security] line the first time the game asks the CPU board's
+        # security function; nothing here can answer it, so whatever the
+        # crash above looks like, this is the reason, and it is said in
+        # words a user can act on: a later build of the same game does not
+        # ask. Read from this run's guest log (see [segv] above).
+        if grep -aqs '\[security\] the game asked' "$GUESTLOG"; then
+            echo "[watch] THIS GAME CODE CHECKS THE MACHINE'S SECURITY HARDWARE: it asked the CPU board's security function, which only a real machine can answer, so it cannot run in the emulator. Later code versions of this game do not make that check - use one of those."
         fi
         break
     fi

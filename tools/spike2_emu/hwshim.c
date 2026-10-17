@@ -14837,6 +14837,25 @@ long shim_write(int fd, const void *b, unsigned long n)
          * completes the same way the boot one does. See i2c_ready_arm(). */
         if (nb_req_len == 3 && nb_req[0] == 0x08 && !(nb_req[0] & 0x80))
             i2c_ready_arm();
+        /* PAD-603: `0d 05 <op> <4 bytes>` is the bus master's SECURITY
+         * function - early builds (venom_le 0.95) challenge it with fixed
+         * words and build the key for their own data out of the answers,
+         * each answer scrambled by a per-session TinyMT32 the game mirrors.
+         * Only the real CPU board knows the answers; this rig answers zeros
+         * and the game decodes junk (venom 0.95: a 200-million-entry copy at
+         * 0x348128, 15 s in). It is copy protection and is NOT emulated:
+         * this line is here so the run can say why it ended, instead of
+         * leaving a bare segv. Later builds of the same titles never send
+         * it. One line per run; watch.sh turns it into the explanation. */
+        if (nb_req_len >= 2 && nb_req[0] == 0x0d && nb_req[1] == 0x05) {
+            static int said;
+            if (!said) {
+                said = 1;
+                logmsg("[security] the game asked the CPU board's security"
+                       " function (bus command 0x0d); this emulator cannot"
+                       " answer it\n");
+            }
+        }
         {
             static int rabudget = 12;
             unsigned long ra = (unsigned long)__builtin_return_address(0);

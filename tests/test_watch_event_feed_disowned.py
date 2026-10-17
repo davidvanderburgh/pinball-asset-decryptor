@@ -1,11 +1,12 @@
 """PAD-603: a crash must not print the [event] awk program into the log.
 
 watch.sh starts the event feed (tail | tr | $AWK '...') as a background job
-and stop_all ends it with kill -9. Left in bash's job table, that kill comes
+and teardown ends it with kill -9. Left in bash's job table, that kill comes
 back as a "Killed" job notice that quotes the whole pipeline - every line of
 the awk program and its comments, about 90 lines, in the user's log right
 after the game's crash report (venom_le 0.95). disown takes it out of the job
-table, the way bootcheck.sh and motorcheck.sh already do for theirs.
+table (teardown's disown -a, which covers pausekeep.py and every other
+helper it kills the same way), as bootcheck.sh and motorcheck.sh already do.
 """
 import os
 import shutil
@@ -15,7 +16,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _watch_event_filter import CLOSE, RIG  # noqa: E402
+from _watch_event_filter import RIG  # noqa: E402
 
 
 def _watch_lines():
@@ -24,21 +25,26 @@ def _watch_lines():
         return fh.read().split("\n")
 
 
-def test_event_feed_is_disowned_after_it_starts():
+def test_teardown_disowns_every_job_before_killing():
     lines = _watch_lines()
-    close = [i for i, ln in enumerate(lines) if ln.strip() == CLOSE.strip()]
-    assert close, "watch.sh no longer backgrounds the event feed with ' &"
-    i = close[-1]
-    assert lines[i + 1].strip() == "EVTPG=$!", lines[i + 1]
-    # Up to the `fi` that closes the PAD_EVENTS block, a disown of that job.
-    tail = []
-    for ln in lines[i + 2:]:
-        if ln.strip() == "fi":
+    start = next((i for i, ln in enumerate(lines)
+                  if ln.startswith("teardown() {")), None)
+    assert start is not None, "watch.sh no longer has teardown()"
+    body = []
+    for ln in lines[start + 1:]:
+        if ln.startswith("}"):
             break
-        tail.append(ln.strip())
-    assert 'disown "$EVTPG"' in tail, (
-        "the event feed is still in bash's job table: stop_all's kill -9 "
-        "will print the whole awk program into the log")
+        body.append(ln.strip())
+    code = [ln for ln in body if ln and not ln.startswith("#")]
+    disown = next((i for i, ln in enumerate(code)
+                   if ln.startswith("disown -a")), None)
+    assert disown is not None, (
+        "teardown no longer disowns its jobs: each kill -9 below prints a "
+        "'Killed' notice quoting the job, the event feed's whole awk program")
+    first_kill = next(i for i, ln in enumerate(code) if "kill" in ln)
+    assert disown < first_kill, "disown -a must come before the first kill"
+    assert not any(ln.startswith("wait") for ln in code), (
+        "teardown waits on a job, which disown -a takes out of its reach")
 
 
 _SHAPE = r"""
@@ -47,7 +53,7 @@ tail -q -n 0 -F "$1" 2>/dev/null | tr -d '\000' | awk '
   { print }
 ' &
 EVTPG=$!
-[ "$2" = 1 ] && disown "$EVTPG"
+[ "$2" = 1 ] && disown -a
 sleep 0.3
 kill -9 "$EVTPG" 2>/dev/null
 pkill -9 -f "tail -q -n 0 -F $1" 2>/dev/null

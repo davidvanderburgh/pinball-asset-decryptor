@@ -120,10 +120,9 @@ def main():
                 settle(page, 1.5)
                 page.screenshot(path=out("images_done.png"))
                 print("saved images:", sorted(os.listdir(dest)), flush=True)
-                btn = page.query_selector(".dlg button:has-text('OK'), .modal button:has-text('OK')")
-                if btn:
-                    btn.click()
-                    time.sleep(1)
+                # the closing question ("Open the folder?"): No
+                page.locator(".scrim button:has-text('No')").first.click()
+                time.sleep(1)
 
             # ---- Video ----
             api("ui.select_tab", "video")

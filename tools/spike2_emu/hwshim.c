@@ -2678,14 +2678,47 @@ int shim_system(const char *cmd)
     return rc;
 }
 
+/* ★ PAD-603: THE CPU BOARD SAYS WHAT IT IS IN /proc/cpuinfo, and older
+ * builds ask. The node bus library in deadpool_le 0.99 (2019) picks its
+ * platform in a static constructor, PLATFORMUTIL_getPlatform: it popens
+ * `/bin/cat /proc/cpuinfo | /bin/grep Hardware` and looks for
+ * "Freescale i.MX6" (Spike 2, platform 2) or "Atmel AT91SAM9M10G45"
+ * (Spike 1, platform 1). Under qemu-user that file is the HOST's, which has
+ * neither, so the platform read 0 and NODEBUS_Init took the Spike 1 branch -
+ * open("/dev/gpio") - which fails here: the node bus control thread returned
+ * at once, /dev/ttymxc1 was never opened, and the game sat at "bringing up
+ * node boards" for good. Later builds dropped the probe (deadpool_le 1.16,
+ * venom_le 0.95 have no "cpuinfo" string at all), which is why only older
+ * code hit it. So a `cat /proc/cpuinfo` in a command answers the board's
+ * own Hardware line, and the rest of the pipeline runs as written. */
+#define SPIKE2_CPUINFO_HW "Hardware\t: Freescale i.MX6 Quad/DualLite (Device Tree)"
+
+static const char *cpuinfo_cmd(const char *cmd, char *out, unsigned long n)
+{
+    const char *p, *s;
+    if (!cmd || !(p = strstr(cmd, "cat /proc/cpuinfo"))) return cmd;
+    for (s = p; s > cmd && s[-1] != ' ' && s[-1] != '|' && s[-1] != ';'
+                && s[-1] != '&' && s[-1] != '('; s--) ;     /* "/bin/" too */
+    snprintf(out, n, "%.*secho '%s'%s", (int)(s - cmd), cmd, SPIKE2_CPUINFO_HW,
+             p + sizeof "cat /proc/cpuinfo" - 1);
+    return out;
+}
+
 void *shim_popen(const char *cmd, const char *mode) __asm__("popen");
 void *shim_popen(const char *cmd, const char *mode)
 {
     static void *(*real_popen)(const char *, const char *);
-    char b[320];
+    char b[320], swapped[512];
+    const char *run;
     void *f;
     if (!real_popen) real_popen = dlsym(RTLD_NEXT, "popen");
-    f = real_popen ? real_popen(cmd, mode) : 0;
+    run = cpuinfo_cmd(cmd, swapped, sizeof swapped);
+    if (run != cmd) {
+        snprintf(b, sizeof b, "[popen] /proc/cpuinfo answered as the Spike 2 "
+                 "CPU board's: \"%.200s\"\n", run);
+        logmsg(b);
+    }
+    f = real_popen ? real_popen(run, mode) : 0;
     snprintf(b, sizeof b, "[popen] \"%.240s\" (%s) -> %s\n", cmd ? cmd : "(null)", mode ? mode : "?", f ? "ok" : "NULL");
     logmsg(b);
     return f;

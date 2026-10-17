@@ -41,7 +41,9 @@ def test_the_runtime_never_floods():
     assert "if (ms > 2000) ms = 2000;" in flash and "h->flash_only = 1;" in flash
     assert "(h->owner && h->owner != me)) continue;" in flash                  # another mode's inserts: left alone
     tick = _fn(src, "static void lamps_tick(void)")
-    assert "if (h->flash_only) { lamp_let_go(k); continue; }" in tick         # handed back once the strobe is over
+    assert "if (h->flash_only) { lamp_hand_down(k); continue; }" in tick      # handed back once the strobe is over
+    down = _fn(src, "static int lamp_hand_down(int k)")
+    assert "lamp_let_go(k);" in down                                           # PAD-601: to the game, or a mode under it
     release = _fn(src, "static int lamp_release_list(")
     assert "h->flash_only = 1;" in release                                     # a release mid-strobe finishes it
 

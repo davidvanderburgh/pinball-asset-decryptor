@@ -5456,6 +5456,42 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel, cache=None):
         reader, [cp for (_o, cp, _s, _w, _h, _f) in texture_edits], cancel)
     patches = []
     skipped = 0
+
+    def _encode(output, staged, w, h, fmt, stock_raw):
+        """``(payload or None, [log lines])`` of one texture; the card is
+        read before, on the caller's thread."""
+        lines = []
+        try:
+            im = Image.open(_lp(staged)).convert("RGBA")
+        except Exception as e:
+            return None, [("Texture %s: can't read PNG (%s); skipped."
+                           % (output, e), "warning")]
+        if im.size != (w, h):
+            return None, [(
+                "Texture %s is %dx%d but the original is %dx%d; skipped "
+                "(scene textures must keep their exact dimensions). Resize "
+                "your image to %dx%d." % (output, im.size[0], im.size[1], w, h,
+                                          w, h), "warning")]
+        arr = np.asarray(im, dtype=np.uint8)
+        pw, ph = ((w + 3) // 4) * 4, ((h + 3) // 4) * 4
+        try:
+            stock = (_dds.decode_bc1 if fmt == _DXT1_FORMAT
+                     else _dds.decode_bc3)(stock_raw, pw, ph)
+        except Exception:
+            stock = None
+        arr, premult = _premultiply_like_stock(arr, stock)
+        if premult:
+            lines.append(("Texture %s: colors premultiplied by alpha, the way "
+                          "the game blends scene textures." % output, "info"))
+        return (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
+                else _dds.encode_bc3(arr)), lines
+
+    # Encoded on a pool, placed in order afterwards (PAD-599; see
+    # _radium_image_writes).
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=_encode_workers(),
+                              thread_name_prefix="pad-bc")
+    jobs = []           # (output, w, h, node, key, cached payload or future)
     for output, card_path, staged, w, h, fmt in texture_edits:
         if cancel():
             break
@@ -5465,57 +5501,42 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel, cache=None):
                 "skipped." % (output, card_path), "warning")
             skipped += 1
             continue
-        key = stock_raw = None
+        key = None
+        try:
+            stock_raw = reader.read_file_bytes(node)
+        except Exception:
+            stock_raw = None
         if cache is not None:
-            try:
-                stock_raw = reader.read_file_bytes(node)
-            except Exception:
-                stock_raw = None
             png = cache.png_md5(staged)
             if png is not None and stock_raw is not None:
                 key = cache.key("texture", fmt, w, h, node["size"], png,
                                 stock_raw)
             payload = cache.get(key)
             if payload is not None and len(payload) == node["size"]:
-                patches.append((node, payload))
-                log("Texture %s: ready to patch (%dx%d, %d bytes)."
-                    % (output, w, h, node["size"]), "info")
+                jobs.append((output, w, h, node, None, (payload, [])))
                 continue
+        jobs.append((output, w, h, node, key,
+                     pool.submit(_encode, output, staged, w, h, fmt,
+                                 stock_raw)))
+    pool.shutdown(wait=True, cancel_futures=bool(cancel()))
+    for output, w, h, node, key, job in jobs:
         try:
-            im = Image.open(_lp(staged)).convert("RGBA")
-        except Exception as e:
-            log("Texture %s: can't read PNG (%s); skipped." % (output, e),
-                "warning")
+            payload, lines = job if isinstance(job, tuple) else job.result()
+        except Exception as e:                          # noqa: BLE001
+            payload, lines = None, [("Texture %s: couldn't be encoded (%s); "
+                                     "skipped." % (output, e), "warning")]
+        for text, level in lines:
+            log(text, level)
+        if payload is None:
             skipped += 1
             continue
-        if im.size != (w, h):
-            log("Texture %s is %dx%d but the original is %dx%d; skipped "
-                "(scene textures must keep their exact dimensions). Resize your "
-                "image to %dx%d." % (output, im.size[0], im.size[1], w, h, w, h),
-                "warning")
-            skipped += 1
-            continue
-        arr = np.asarray(im, dtype=np.uint8)
-        pw, ph = ((w + 3) // 4) * 4, ((h + 3) // 4) * 4
-        try:
-            stock = (_dds.decode_bc1 if fmt == _DXT1_FORMAT
-                     else _dds.decode_bc3)(
-                stock_raw if stock_raw is not None
-                else reader.read_file_bytes(node), pw, ph)
-        except Exception:
-            stock = None
-        arr, premult = _premultiply_like_stock(arr, stock)
-        if premult:
-            log("Texture %s: colors premultiplied by alpha, the way the game "
-                "blends scene textures." % output, "info")
-        payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
-                   else _dds.encode_bc3(arr))
         if len(payload) != node["size"]:
             log("Texture %s: re-encoded to %d bytes but the slot is %d; skipped."
                 % (output, len(payload), node["size"]), "warning")
             skipped += 1
             continue
-        if cache is not None:
+        if cache is not None and key is not None and not isinstance(job,
+                                                                     tuple):
             cache.put(key, payload)
         patches.append((node, payload))
         log("Texture %s: ready to patch (%dx%d, %d bytes)."
@@ -5855,6 +5876,18 @@ def _radium_cache_key(cache, reader, node, staged, override, data_off, length,
     return cache.key("radium", fmt, pad_w, pad_h, length, src, stock)
 
 
+def _encode_workers():
+    """How many picture block encodes run at once (PAD-599): half the
+    computer's cores, at most eight; ``PAD_STAGE_WORKERS`` overrides it."""
+    try:
+        n = int(os.environ.get("PAD_STAGE_WORKERS", "") or 0)
+    except ValueError:
+        n = 0
+    if n <= 0:
+        n = min(8, max(1, (os.cpu_count() or 1) // 2))
+    return n
+
+
 def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                          grow_dir=None, dest_is_device=False, grown=None,
                          cache=None):
@@ -6003,6 +6036,21 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
         return ""
 
     moved = {}                     # card path -> outputs whose record isn't there
+    # The block encodes run on a pool (PAD-599): a BC3 encode of a screen
+    # sized picture is a fraction of a second of numpy that mostly runs
+    # outside Python's lock, and a retheme's 2,330 pictures spent 160 s of
+    # its build in them one after another.  Each occurrence's bytes are
+    # placed after the loop, in the order it met them.
+    from concurrent.futures import Future, ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=_encode_workers(),
+                              thread_name_prefix="pad-bc")
+    placed = []                    # (output, node, data_off, length, payload)
+    to_cache = []                  # (ckey, payload, length)
+
+    def _encode(arr, fmt):
+        return (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
+                else _dds.encode_bc3(arr))
+
     for output, radium_path, staged, data_off, length, pad_w, pad_h, fmt in edits:
         if cancel():
             break
@@ -6109,11 +6157,23 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                     payload = _splice_changed_blocks(raw, arr, pad_w, pad_h,
                                                      fmt)
             if payload is None:
-                payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
-                           else _dds.encode_bc3(arr))
+                payload = pool.submit(_encode, arr, fmt)
             (fitted if fit else encoded)[staged] = payload
-            if cache is not None and not fit and len(payload) == length:
-                cache.put(ckey, payload)
+            if cache is not None and not fit:
+                to_cache.append((ckey, payload, length))
+        placed.append((output, node, data_off, length, payload))
+    pool.shutdown(wait=True, cancel_futures=bool(cancel()))
+
+    def _bytes(payload):
+        return payload.result() if isinstance(payload, Future) else payload
+
+    for output, node, data_off, length, payload in placed:
+        try:
+            payload = _bytes(payload)
+        except Exception as e:                          # noqa: BLE001
+            log("Radium image %s: couldn't be encoded (%s); skipped."
+                % (output, e), "warning")
+            continue
         if len(payload) != length:
             log("Radium image %s: re-encoded to %d bytes but the slot is %d; "
                 "skipped." % (output, len(payload), length), "warning")
@@ -6121,6 +6181,13 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
         writes.extend(_place(reader, node, data_off, payload))
         overlays.setdefault(bytes(node["i_block"]), (node, {}))[1][data_off] = payload
         patched_outputs.add(output)
+    for ckey, payload, length in to_cache:
+        try:
+            payload = _bytes(payload)
+        except Exception:                               # noqa: BLE001
+            continue
+        if len(payload) == length:
+            cache.put(ckey, payload)
     for radium_path, outs in sorted(moved.items()):
         # Once per scene: an atlas can have hundreds of occurrences.
         names = sorted(set(outs))
@@ -8156,6 +8223,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     if audio_patches is None:
                         return None, None, None, None, None
                     bank_beds = {}
+                    chain_cache = (_chain_body_cache(assets_dir, gr_path,
+                                                     stock_ident, log)
+                                   if sound_ok is not False
+                                   and (_chain_edits or bank_plan is not None)
+                                   else None)
                     if bank_plan is not None:
                         # PAD-595: the sound banks of the modes' own sounds
                         # image.bin had no room for.  image.bin's header
@@ -8173,7 +8245,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             mode_own_used, _loop_idx,
                             _sm_gains(slot_gains, sound_mode_used),
                             os.path.join(grow_work, "banks"), np, log,
-                            _span(progress, 40, 45), cancel)
+                            _span(progress, 40, 45), cancel,
+                            body_cache=chain_cache)
                         if cancel():
                             return None, None, None, None, None
                         _stage_done(log, "building %d sound bank(s) for the modes' "
@@ -8189,8 +8262,15 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                     _loop_idx, log, used=mode_own_used),
                                     **_sm_level_refs(sound_mode_used)),
                                 progress=_span(progress, 45, 75),
-                                cancel=cancel)
+                                cancel=cancel, body_cache=chain_cache)
                             audio_patches.update(_cp)
+                        if chain_cache is not None:
+                            if chain_cache.hits:
+                                log("%d sound(s) appended along the firmware's "
+                                    "chain were encoded by an earlier build from "
+                                    "the same file the same way, and are used "
+                                    "as they are." % chain_cache.hits, "info")
+                            chain_cache.prune()
                         # an appended record's container key comes out of the chain,
                         # so the play tables are re-pointed again at the keys the
                         # finished bank registers (descriptors are no record's window);
@@ -14497,7 +14577,7 @@ _LEVEL_REF_UNSET = object()
 
 
 def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
-                 loop=False, orig=_LEVEL_REF_UNSET):
+                 loop=False, orig=_LEVEL_REF_UNSET, blocks=None):
     # Returns encode_sound's ``(start_off, body)`` — the write offset can sit
     # one word below body_off on delta=-1 codec keys (the start-click fix).
     # Fit to the codec's TRUE emitted sample count (length - BLOCK), not the raw
@@ -14524,7 +14604,10 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
     seed = _encode_seed_for(p, int(np.abs(tgt).max()))
     tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, seed)
-    start, body = gr.encode_sound(p, tgt)
+    # *blocks*: a chain encode's block workers (PAD-599, spike2.parallel);
+    # without them the codec is asked the way it always was
+    start, body = (gr.encode_sound(p, tgt, blocks=blocks) if blocks is not None
+                   else gr.encode_sound(p, tgt))
     body = _resolve_shared_boundary(emu, p, pred, start, body, tgt, None, np,
                                     gr=gr, log=log)
     body, head_stock = _apply_stock_head(emu, p, start, body, tgt, gr, np,
@@ -14535,7 +14618,8 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
 
 
 def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
-                   gain_db=None, loop=False, orig=_LEVEL_REF_UNSET):
+                   gain_db=None, loop=False, orig=_LEVEL_REF_UNSET,
+                   blocks=None):
     from .spike2.emulator import emitted_length
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
@@ -14557,7 +14641,8 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
         p, max(int(np.abs(L).max()), int(np.abs(R).max())))
     L = _apply_slot_seed(L, np, _STEREO_RANGE, _seed)
     R = _apply_slot_seed(R, np, _STEREO_RANGE, _seed)
-    start, body = sr.encode_sound(p, L, R)
+    start, body = (sr.encode_sound(p, L, R, blocks=blocks) if blocks is not None
+                   else sr.encode_sound(p, L, R))
     body = _resolve_shared_boundary(emu, p, pred, start, body, L, R, np,
                                     sr=sr, log=log)
     body, head_stock = _apply_stock_head(emu, p, start, body, L, sr, np,
@@ -14687,6 +14772,7 @@ class _AudioBodyCache:
 
     _PATH_ONLY = frozenset((
         "PAD_STERN_AUDIO_CACHE", "PAD_STERN_BLIP_FREE",
+        "PAD_STERN_BLOCK_WORKERS",
         "PAD_STERN_SERIAL_ENCODE", "PAD_STERN_SKIP_FINAL_VERIFY",
         "PAD_STERN_SKIP_KEYPATCH", "PAD_STERN_SKIP_MASTERDIR_FIX"))
 
@@ -14887,6 +14973,145 @@ def _grown_cache_sounds(assets_dir, audio_edits, grows, gains, loop_idx, own_use
                     idx in (loop_idx or ()),
                     None if want is None else int(want)))
     return tuple(sorted(out))
+
+
+class _ChainBodyCache:
+    """Each record a chain encode made, under ``<assets>/.write_cache/chain``
+    (PAD-599).
+
+    The records appended along the firmware's chain (a longer sound, the
+    modes' own sounds and music, the banks of the modes' own) are encoded one
+    after another, a minute and more for every song, and the build that has
+    them (a sound bank of the modes' own, or the blip-free cave) never takes
+    :class:`_GrownBankCache`: the Godzilla Heisei build with its modes spent
+    18 of its 23 minutes on them every time it was pressed, the same sounds
+    the same way.  The chain itself is
+    still walked every build (its derive is what gives each record its
+    parameters); only a record's encode is replayed, and only when everything
+    it is a function of is what made the kept one: the card and the encode
+    environment (:func:`_audio_cache_base_key`), the record's row as the chain
+    derived it, the bytes the encode starts from (the staged record's window),
+    the sound file's bytes, its level reference, gain and loop.  Anything
+    else, and it is encoded again.  ``PAD_STERN_AUDIO_CACHE=0`` turns it off
+    with the other audio caches.  A build keeps the entries it used and drops
+    the rest (:meth:`prune`)."""
+
+    _MAGIC = b"PADCB1\n"
+    _REV = 1
+
+    def __init__(self, assets_dir, gr_path, stock_ident):
+        self.dir = os.path.join(assets_dir, ".write_cache", "chain")
+        os.makedirs(self.dir, exist_ok=True)
+        self.base_key = _audio_cache_base_key(gr_path, stock_ident)
+        self.used = set()
+        self.hits = 0
+
+    @staticmethod
+    def _file_md5(path):
+        h = hashlib.md5()
+        with open(_lp(path), "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def key(self, where, row, window, wav_path, gain_db=None, loop=False,
+            ref=None):
+        """The key of encoding *wav_path* into the record *row* (the extended
+        row the encode is handed) whose staged bytes are *window*; *where*
+        names the chain (``"image"`` or the bank), *ref* the row whose render
+        is the level reference, if any."""
+        h = hashlib.md5()
+        h.update(self.base_key.encode())
+        h.update(b"chain%d derive%d " % (self._REV, _DERIVE_REV))
+        h.update(repr(where).encode())
+        h.update(repr(sorted(row.items())).encode())
+        h.update(hashlib.md5(bytes(window)).digest())
+        h.update(self._file_md5(wav_path).encode())
+        h.update(repr((gain_db, bool(loop))).encode())
+        h.update(repr(sorted(ref.items()) if ref else None).encode())
+        return h.hexdigest()
+
+    def get(self, key):
+        """``(write_off, body)`` kept under *key*, or ``None``."""
+        path = os.path.join(self.dir, key + ".bin")
+        try:
+            with open(_lp(path), "rb") as f:
+                if f.read(len(self._MAGIC)) != self._MAGIC:
+                    return None
+                off, n = struct.unpack("<QQ", f.read(16))
+                body = f.read()
+        except (OSError, struct.error):
+            return None
+        if len(body) != n:
+            return None
+        self.used.add(key)
+        self.hits += 1
+        return off, body
+
+    def put(self, key, off, body):
+        path = os.path.join(self.dir, key + ".bin")
+        tmp = path + ".tmp"
+        try:
+            with open(_lp(tmp), "wb") as f:
+                f.write(self._MAGIC)
+                f.write(struct.pack("<QQ", int(off), len(body)))
+                f.write(bytes(body))
+            os.replace(_lp(tmp), _lp(path))
+            self.used.add(key)
+        except OSError:
+            pass
+
+    def prune(self):
+        """Drop every kept record this build did not use."""
+        try:
+            names = os.listdir(_lp(self.dir))
+        except OSError:
+            return
+        for name in names:
+            if name.endswith(".bin") and name[:-4] not in self.used:
+                try:
+                    os.remove(_lp(os.path.join(self.dir, name)))
+                except OSError:
+                    pass
+
+
+def _chain_body_cache(assets_dir, gr_path, stock_ident, log):
+    """A :class:`_ChainBodyCache` for this build, or ``None`` (no project
+    folder, the audio caches turned off, or it can't be made)."""
+    if (not assets_dir or os.environ.get("PAD_STERN_AUDIO_CACHE") == "0"
+            or stock_ident is None):
+        return None
+    try:
+        return _ChainBodyCache(assets_dir, gr_path, stock_ident)
+    except Exception as e:                              # noqa: BLE001
+        log("Chain-encode cache unavailable (%s); every appended sound is "
+            "encoded." % e, "info")
+        return None
+
+
+def _chain_encoded(cache, where, emu, row, wav_path, encode, gain_db=None,
+                   loop=False, ref=None, chan=1):
+    """``encode()``'s ``(write_off, body)`` for *row*, from *cache* when it
+    kept this very encode (:class:`_ChainBodyCache`), else made and kept."""
+    if cache is None:
+        return encode()
+    key = None
+    try:
+        width = 4 if chan == 2 else 2
+        lo = max(0, int(row["body_off"]) - 4 * width)
+        window = emu.mm[lo:int(row["body_off"])
+                        + width * (int(row["length"]) + 4)]
+        key = cache.key(where, row, window, wav_path, gain_db=gain_db,
+                        loop=loop, ref=ref)
+        hit = cache.get(key)
+    except Exception:                                   # noqa: BLE001
+        hit = None
+    if hit is not None:
+        return hit
+    off, body = encode()
+    if key is not None:
+        cache.put(key, off, body)
+    return off, body
 
 
 class _GrownBankCache:
@@ -17037,7 +17262,7 @@ def _extended_row(p, extra):
 
 def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
                            level_refs=None, gains=None, progress=None,
-                           cancel=None):
+                           cancel=None, body_cache=None):
     """Encode the APPENDED records named by *edits* (``{idx: wav}``, idx being
     the collapsed index of a grown sound) along the firmware's own chain, so no
     window of theirs has to be restored.  *loops* are the idx whose records
@@ -17072,6 +17297,13 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
     if progress:
         progress(0, 100, "Encoding the new sounds along the firmware's chain: "
                  "starting the firmware...")
+    # A long sound's blocks go to workers (PAD-599); they boot while the
+    # firmware below walks the chain to the first appended record.
+    from .spike2.parallel import start_block_pool
+    pool = start_block_pool(
+        "image", gr_path, staged, stock_rows, first_warm=params, log=log,
+        longest=max(int(byidx[i].get("length") or 0)
+                    for i, _w in want.values()))
     emu_e = Spike2Emu(gr_path, staged)
     emu_d = Spike2Emu(gr_path, staged)
     patches, done, state = {}, [], {"gr": None, "sr": None}
@@ -17100,6 +17332,8 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
                 if base.get(k) is not None:
                     p[k] = base[k]
             emu_e.warm_slots_for_grown(stock_rows + [p])
+            if pool is not None:
+                pool.warm(p)
             if p["chan"] == 2:
                 state["sr"] = state["sr"] or StereoRecover(emu_e)
             else:
@@ -17109,14 +17343,21 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
                     "idx %d: this sound's codec cannot re-encode bit-exact on "
                     "the chain's parameters (scale %s)" % (idx, p["scale"]))
             kw = dict(pred=None, log=log, gain_db=gains.get(idx),
-                      loop=idx in loops)
+                      loop=idx in loops,
+                      blocks=pool.blocks if pool is not None else None)
             if idx in refs:
                 kw["orig"] = refs[idx]
             # the lead-out block too, as silence (_APPENDED_TAIL); the target is zero-padded to it
             pe = _extended_row(p, _APPENDED_TAIL)
-            off, body = (_encode_stereo(emu_e, state["sr"], pe, wav, np, **kw)
+            # *body_cache*: the same encode a build made before (PAD-599)
+            off, body = _chain_encoded(
+                body_cache, "image", emu_e, pe, wav,
+                lambda: (_encode_stereo(emu_e, state["sr"], pe, wav, np, **kw)
                          if p["chan"] == 2 else
-                         _encode_mono(emu_e, state["gr"], pe, wav, np, **kw))
+                         _encode_mono(emu_e, state["gr"], pe, wav, np, **kw)),
+                gain_db=kw["gain_db"], loop=kw["loop"],
+                ref=byidx.get(level_refs[idx]) if idx in refs else None,
+                chan=p["chan"])
             emu_d._ensure_range(EM.DESC_BASE + off, len(body))
             emu_d.mu.mem_write(EM.DESC_BASE + off, bytes(body))
             patches[off] = bytes(body)
@@ -17137,6 +17378,8 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
             progress=_span(progress, 2, 95,
                            "Encoding the new sounds along the firmware's chain"))
     finally:
+        if pool is not None:
+            pool.close()
         emu_e.close()
         emu_d.close()
     missing = sorted(set(i for i, _w in want.values()) - set(done))
@@ -17978,7 +18221,7 @@ def _read_stock_directory(gr_path, img_path):
 
 
 def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, gains,
-                       work, np, log, progress=None, cancel=None):
+                       work, np, log, progress=None, cancel=None, body_cache=None):
     """Stage, encode and verify every bank of *plan* (PAD-595), write each
     one's play tables (a sid of the bank's category per sound, its descriptor
     a copy of the carrier's naming the bank record), name the banks in
@@ -18020,7 +18263,7 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
             loops=set(loop_idx) & set(wavs), gains=gains, level_refs=refs,
             progress=_span(progress, int(100 * n / len(plan.files)),
                            int(100 * (n + 1) / len(plan.files))),
-            cancel=cancel, revalidate=rev)
+            cancel=cancel, revalidate=rev, body_cache=body_cache)
         # the check derives the finished file afresh; the rows kept are the
         # chain's, which carry each record's host sound
         BB.verify_bank(gr_path, img_path, path, cat, rows, log, revalidate=rev)

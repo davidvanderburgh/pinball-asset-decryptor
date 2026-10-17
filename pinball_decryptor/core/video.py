@@ -19,6 +19,7 @@ ffmpeg / ffprobe discovery (and the no-console-window flag) is shared with
 :mod:`core.audio`, so installing ffmpeg once lights up both tabs.
 """
 
+import copy
 import json
 import os
 import re
@@ -195,13 +196,47 @@ def detect_video_info(path):
 
     if not path or not os.path.isfile(path):
         return None
+    # A build probes the same clip several times over (the slot, its .orig/
+    # snapshot, the user's file: staging asks twice, the engine's checks
+    # twice more), each one an ffprobe process: a retheme of 300 clips paid
+    # for well over a thousand of them (PAD-599).  An answer is kept for as
+    # long as the file is the same size and modification time, and with the
+    # same prober (an ffmpeg-only install reads a banner instead).
+    key = _probe_key(path)
+    if key is not None:
+        with _PROBE_LOCK:
+            hit = _PROBE_MEMO.get(key, _MISS)
+        if hit is not _MISS:
+            return copy.copy(hit) if hit is not None else None
     info = _probe_video_info(path)
     if info is not None and not getattr(info, "keyint", 0):
         # Neither ffprobe's stream summary nor the banner says how far apart
         # the key frames are; the MP4 sample table does, for free.
         from .video_quality import keyframe_interval
         info.keyint = keyframe_interval(path)
+    if key is not None and key == _probe_key(path):
+        with _PROBE_LOCK:
+            if len(_PROBE_MEMO) >= _PROBE_MEMO_MAX:
+                _PROBE_MEMO.clear()
+            _PROBE_MEMO[key] = copy.copy(info) if info is not None else None
     return info
+
+
+#: :func:`detect_video_info`'s answers, ``{(path, size, mtime_ns, prober):
+#: VideoInfo or None}``; callers get a copy, since some adjust what they get
+_PROBE_MEMO: dict = {}
+_PROBE_MEMO_MAX = 20000
+_PROBE_LOCK = threading.Lock()
+_MISS = object()
+
+
+def _probe_key(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (os.path.normcase(os.path.abspath(path)), st.st_size,
+            st.st_mtime_ns, find_ffprobe())
 
 
 def _probe_video_info(path):

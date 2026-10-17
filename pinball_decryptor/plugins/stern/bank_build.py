@@ -149,7 +149,7 @@ def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None, stride
 # --------------------------------------------------------------------------
 def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, log,
                  loops=(), gains=None, level_refs=None, progress=None, cancel=None,
-                 revalidate=None):
+                 revalidate=None, body_cache=None):
     """Encode *edits* (``{host idx: wav}``) into the staged bank at *bank_path*
     along the firmware's chain for category *cat*, and compose the bodies
     into the file.  *params* are ``image.bin``'s rows (the codec entries and
@@ -175,6 +175,12 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
     if progress:
         progress(0, 100, "Encoding the sounds of bank %s along the firmware's chain: "
                  "starting the firmware..." % SB.bank_name(cat))
+    # A long sound's blocks go to workers (PAD-599, spike2.parallel); they
+    # boot while the firmware below walks the bank's chain.
+    from .spike2.parallel import start_block_pool
+    pool = start_block_pool(
+        "cat", gr_path, img_path, stock_rows, cat_file=bank_path, log=log,
+        longest=max(int(by_new[n].length or 0) for n in want))
     emu_e = CatEmu(gr_path, img_path)
     emu_d = CatEmu(gr_path, img_path)
     patches, done, state = {}, [], {"gr": None, "sr": None}
@@ -200,6 +206,8 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
             emu_e.mm = emu_e._mm_img
             emu_e.warm_slots_for_grown(stock_rows + [dict(p, idx=-1 - n)])
             emu_e.mm = emu_e._mm_cat
+            if pool is not None:
+                pool.warm(dict(p, idx=-1 - n))
             if p["chan"] == 2:
                 state["sr"] = state["sr"] or StereoRecover(emu_e)
             else:
@@ -208,13 +216,20 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
                 raise RuntimeError(
                     "idx %d: this sound's codec cannot re-encode bit-exact on bank %s's "
                     "chain parameters (scale %s)" % (idx, SB.bank_name(cat), p["scale"]))
-            kw = dict(pred=None, log=log, gain_db=gains.get(idx), loop=idx in loops)
+            kw = dict(pred=None, log=log, gain_db=gains.get(idx), loop=idx in loops,
+                      blocks=pool.blocks if pool is not None else None)
             if idx in refs:
                 kw["orig"] = refs[idx]
             pe = E._extended_row(p, E._APPENDED_TAIL)
-            off, body = (E._encode_stereo(emu_e, state["sr"], pe, edits[idx], np, **kw)
+            # *body_cache*: the same encode a build made before (PAD-599)
+            off, body = E._chain_encoded(
+                body_cache, SB.bank_name(cat), emu_e, pe, edits[idx],
+                lambda: (E._encode_stereo(emu_e, state["sr"], pe, edits[idx], np, **kw)
                          if p["chan"] == 2 else
-                         E._encode_mono(emu_e, state["gr"], pe, edits[idx], np, **kw))
+                         E._encode_mono(emu_e, state["gr"], pe, edits[idx], np, **kw)),
+                gain_db=kw["gain_db"], loop=kw["loop"],
+                ref=byidx.get((level_refs or {}).get(idx)) if idx in refs else None,
+                chan=p["chan"])
             emu_d._ensure_range(emu_d.DESC2 + off, len(body))
             emu_d.mu.mem_write(emu_d.DESC2 + off, bytes(body))
             patches[off] = bytes(body)
@@ -233,6 +248,8 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
         rows = emu_d.derive_bank(cat, bank_path, after_step=after, revalidate=revalidate)
         rev = emu_d._revalidate
     finally:
+        if pool is not None:
+            pool.close()
         emu_e.mm = emu_e._mm_img
         emu_e.close()
         emu_d.close()

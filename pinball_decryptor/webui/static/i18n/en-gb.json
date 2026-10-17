@@ -337,6 +337,7 @@
 "Set in the Font bar: this line is drawn in exactly this color, in the preview and on the machine, so the color profile does not change it.": "Set in the Font bar: this line is drawn in exactly this colour, in the preview and on the machine, so the colour profile does not change it.",
 "Show the selected pictures side by side, big, beside the Color profiles bar: up to {} (Ctrl-click or Shift-click rows to select them). One picture shows its Original beside its Replacement.": "Show the selected pictures side by side, big, beside the Colour profiles bar: up to {} (Ctrl-click or Shift-click rows to select them). One picture shows its Original beside its Replacement.",
 "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize": "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalise",
+"Staging {} ← the game's own clip, with the individual files color profile": "Staging {} ← the game's own clip, with the individual files colour profile",
 "Starting the game with your color profile...": "Starting the game with your colour profile...",
 "Stern made its colors for the machine's screen, so the individual files profile is not offered on it.": "Stern made its colours for the machine's screen, so the individual files profile is not offered on it.",
 "Stock colors: leave out my color profile": "Stock colours: leave out my colour profile",
@@ -352,6 +353,7 @@
 "Text only: the card shows its title and subtitle on the menu's own colors.": "Text only: the card shows its title and subtitle on the menu's own colours.",
 "Text: **Font controls** opens the **Font** bar on the right edge: the line's font and **Size** (the sizes the scene was made at draw sharpest), **Italic**, **Slant** and letter **Width**, letter and line **Spacing**, **Across** (Left / Center / Right) and **Up/down** (Top / Middle / Bottom) in its box, wrapping, shrink to fit and line breaks, **Fit box to text**, and **Add** / **Remove** a drop shadow, in the preview and in the game. **Font as shipped** puts the font and style back. Its **Color** gives the line a color of its own: a wheel, **Brightness**, an exact color, and **Save a copy...** / **Load...** with your **Saved** colors. The line is drawn in exactly that color and the color profile no longer changes it; **Default** puts the game's color (and the profile) back. A score panel line the game paints as it plays shows the game's colors there instead. Lines the game fills in itself on Godzilla's mode screens (a battle's title and instructions) always sit in the middle of their box and shrink to fit it; the preview shows them that way.": "Text: **Font controls** opens the **Font** bar on the right edge: the line's font and **Size** (the sizes the scene was made at draw sharpest), **Italic**, **Slant** and letter **Width**, letter and line **Spacing**, **Across** (Left / Centre / Right) and **Up/down** (Top / Middle / Bottom) in its box, wrapping, shrink to fit and line breaks, **Fit box to text**, and **Add** / **Remove** a drop shadow, in the preview and in the game. **Font as shipped** puts the font and style back. Its **Colour** gives the line a colour of its own: a wheel, **Brightness**, an exact colour, and **Save a copy...** / **Load...** with your **Saved** colours. The line is drawn in exactly that colour and the colour profile no longer changes it; **Default** puts the game's colour (and the profile) back. A score panel line the game paints as it plays shows the game's colours there instead. Lines the game fills in itself on Godzilla's mode screens (a battle's title and instructions) always sit in the middle of their box and shrink to fit it; the preview shows them that way.",
 "Text: most text is a font with baked-in colors, so **Tint** recolours it.": "Text: most text is a font with baked-in colours, so **Tint** recolours it.",
+"Texture {}: colors premultiplied by alpha, the way the game blends scene textures.": "Texture {}: colours premultiplied by alpha, the way the game blends scene textures.",
 "That insert's color": "That insert's colour",
 "The Color column": "The Colour column",
 "The Color profile tab's controls beside the list: pick a saved profile and tune it with each": "The Colour profile tab's controls beside the list: pick a saved profile and tune it with each",
@@ -489,6 +491,8 @@
 "image {} put back to the extract's original (its color switch went off)": "image {} put back to the extract's original (its colour switch went off)",
 "in a player-friendly format, organized by what tool you use to edit:": "in a player-friendly format, organised by what tool you use to edit:",
 "is archived. Extract into it again to unlock the tabs marked with a lock; until then they are grayed out in the list on the left.": "is archived. Extract into it again to unlock the tabs marked with a lock; until then they are greyed out in the list on the left.",
+"its own picture, colors corrected for the machine": "its own picture, colours corrected for the machine",
+"its own picture, its own colors (No change)": "its own picture, its own colours (No change)",
 "light color": "light colour",
 "no catalog for": "no catalogue for",
 "no catalog for {}": "no catalogue for {}",
@@ -553,5 +557,7 @@
 "{}:color=#{}": "{}:colour=#{}",
 "{}This game build encrypts its assets in a way this version does not recognize, so there is nothing to show for the run. Newer game engines change the scheme and support has to be added for them.": "{}This game build encrypts its assets in a way this version does not recognise, so there is nothing to show for the run. Newer game engines change the scheme and support has to be added for them.",
 "{}{} Canceled before the rest.": "{}{} Cancelled before the rest.",
-"°). Move Hue to center it on the color you want.": "°). Move Hue to centre it on the colour you want."
+"°). Move Hue to center it on the color you want.": "°). Move Hue to centre it on the colour you want.",
+"– {}: canceled, left as it was": "– {}: cancelled, left as it was",
+"✓ {} ← the game's own clip, its own colors (No change)": "✓ {} ← the game's own clip, its own colours (No change)"
 }

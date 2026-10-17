@@ -407,8 +407,12 @@ class GenRecover:
                        rb.astype(np.int64)).astype(np.uint16)
         return body16, err
 
-    def encode_sound(self, p, target):
+    def encode_sound(self, p, target, blocks=None):
         """Full size-neutral mono body bytes that re-decode to ``target``.
+
+        *blocks*, when given, is :meth:`.parallel.BlockPool.blocks`: every
+        block after the first is recovered and encoded by its workers
+        (PAD-599), the first here so the calibration is this object's own.
 
         Returns ``(start_off, bytes)``: the byte window the hardware actually
         READS for this sound — ``body_off + 2*delta`` for ``delta < 0`` keys
@@ -443,14 +447,23 @@ class GenRecover:
         tgt = np.asarray(target, np.int64)
         body = np.frombuffer(
             self.emu.mm[start:start + 2 * length], dtype="<u2").copy()
-        for k in range((length + 199) // 200):
+        nblk = (length + 199) // 200
+        pre = None
+        for k in range(nblk):
             g0 = 200 * k
             seg = tgt[g0:g0 + 200]
             if len(seg) == 0:
                 break
-            K, rb = self.recover_block(p, 200 + 200 * k, n=len(seg))
-            m = len(K)
-            enc, _ = self.encode_block(seg[:m], K, rb)
+            if k == 1 and blocks is not None:
+                pre = blocks(p, [(j, 200 + 200 * j, tgt[200 * j:200 * j + 200],
+                                  None)
+                                 for j in range(1, nblk) if 200 * j < len(tgt)])
+            if pre is not None and k in pre:
+                m, enc = pre[k]
+            else:
+                K, rb = self.recover_block(p, 200 + 200 * k, n=len(seg))
+                m = len(K)
+                enc, _ = self.encode_block(seg[:m], K, rb)
             lo = g0 + delta - d          # window-relative index of enc[0]
             s = max(0, -lo); e = min(m, length - lo)  # clip words out of range
             if s < e:
@@ -637,9 +650,12 @@ class StereoRecover:
         self._calib[key] = delta
         return delta
 
-    def encode_sound(self, p, targetL, targetR):
+    def encode_sound(self, p, targetL, targetR, blocks=None):
         """Full size-neutral stereo body bytes (interleaved u0/u1 per frame)
-        that re-decode to ``(targetL, targetR)``.
+        that re-decode to ``(targetL, targetR)``.  *blocks*: as the mono
+        :meth:`GenRecover.encode_sound`'s (PAD-599); the first block here also
+        settles whether the scale needs its third probe, and the workers are
+        told the answer.
 
         Returns ``(start_off, bytes)`` — the frame window the hardware reads,
         ``body_off + 4*delta`` on delta<0 keys so frame 0 (the trigger-time
@@ -656,14 +672,25 @@ class StereoRecover:
         body = np.frombuffer(
             self.emu.mm[start:start + 4 * length],
             dtype="<u2").copy()          # interleaved u0, u1
-        for k in range((length + 199) // 200):
+        nblk = (length + 199) // 200
+        pre = None
+        for k in range(nblk):
             g0 = 200 * k
             segL = L[g0:g0 + 200]
             if len(segL) == 0:
                 break
-            rec = self.recover_block(p, 200 + 200 * k, nf=len(segL))
-            m = rec["m"]
-            frame, _ = self.encode_block(L[g0:g0 + m], R[g0:g0 + m], rec)
+            if k == 1 and blocks is not None:
+                pre = blocks(p, [(j, 200 + 200 * j, L[200 * j:200 * j + 200],
+                                  R[200 * j:200 * j + 200])
+                                 for j in range(1, nblk) if 200 * j < len(L)],
+                             three=self._three_probe.get(
+                                 (p["scale"], p["chan"])))
+            if pre is not None and k in pre:
+                m, frame = pre[k]
+            else:
+                rec = self.recover_block(p, 200 + 200 * k, nf=len(segL))
+                m = rec["m"]
+                frame, _ = self.encode_block(L[g0:g0 + m], R[g0:g0 + m], rec)
             fr = frame.reshape(-1, 2)          # [m, 2] -> (u0, u1) per frame
             lo = g0 + delta - d          # window-relative index of frame 0
             s = max(0, -lo); e = min(m, length - lo)   # clip frames out of range

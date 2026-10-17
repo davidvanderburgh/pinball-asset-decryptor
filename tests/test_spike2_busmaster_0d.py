@@ -1,13 +1,14 @@
-"""PAD-603: a run that ends on the CPU board's security check says so.
+"""PAD-603: a run that ends on bus command 0x0d says so.
 
-venom_le 0.95 (and other early builds) authenticate the machine: they send the
-bus master `0d 05 <op> <4 bytes>` challenges, unscramble each 4-byte answer
-with a TinyMT32 they mirror, and build the key for their own data out of the
-answers. Only a real CPU board can answer, so the emulator does not - it is
-copy protection - and the game decodes junk and crashes 15 s in. Later builds
-of the same titles never ask. What the rig owes the user is the reason, in
-words: hwshim names the request once, the event feed carries it to the pane,
-and the exit report says what it means.
+venom_le 0.95 - the only build of the 94 in the library that does - sends the
+CPU board's bus master `0d 05 <op> <4 bytes>` requests, unscrambles each
+4-byte answer with a TinyMT32 it mirrors, and decodes its own data with the
+results. What the board computes lives in its firmware, which no card ships,
+and it is not the value echoed back, so the emulator cannot answer: the game
+decodes junk and crashes 15 s in. Later builds of the same title never ask.
+What the rig owes the user is the reason, in words: hwshim names the request
+once, the event feed carries it to the pane, and the exit report says what it
+means.
 
 The same report used to quote the game's debug log whole, and that file
 outlives every run in a slot: venom 0.95's crash came back labelled with a
@@ -27,8 +28,8 @@ from _watch_event_filter import RIG, event_filter  # noqa: E402
 
 AWK = shutil.which("awk")
 BASH = shutil.which("bash")
-SHIM_LINE = ("[security] the game asked the CPU board's security function "
-             "(bus command 0x0d); this emulator cannot answer it")
+SHIM_LINE = ("[busmaster] the game asked the CPU board's bus master for bus "
+             "command 0x0d, which this emulator cannot answer")
 
 
 def _src(name):
@@ -43,7 +44,7 @@ def _exit_report():
     return watch[at:watch.index("\n        break\n", at)]
 
 
-def test_the_shim_names_the_security_request_once():
+def test_the_shim_names_the_0x0d_request_once():
     shim = _src("hwshim.c")
     at = shim.index("nb_req[0] == 0x0d && nb_req[1] == 0x05")
     block = shim[at:at + 600]
@@ -56,11 +57,13 @@ def test_the_shim_names_the_security_request_once():
 def test_the_exit_report_keys_on_the_shims_own_words():
     report = _exit_report()
     m = re.search(r"grep -aqs '(.*?)' \"\$GUESTLOG\"", report)
-    assert m, "the exit report no longer looks for the [security] line"
+    assert m, "the exit report no longer looks for the [busmaster] line"
     pattern = m.group(1).replace("\\[", "[").replace("\\]", "]")
     assert pattern in SHIM_LINE
-    assert "CHECKS THE MACHINE'S SECURITY HARDWARE" in report
-    assert "Later code versions of this game do not make that check" in report
+    assert "NEEDS AN ANSWER ONLY A REAL MACHINE CAN GIVE" in report
+    assert "Later code versions of this game do not ask for it" in report
+    # It says what is known and no more: nothing claims a protection scheme.
+    assert "SECURITY" not in report.upper().replace("SECURITY_", "")
 
 
 @pytest.mark.skipif(not AWK, reason="no awk")

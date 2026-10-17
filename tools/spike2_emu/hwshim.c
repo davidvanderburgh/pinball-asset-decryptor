@@ -14837,23 +14837,25 @@ long shim_write(int fd, const void *b, unsigned long n)
          * completes the same way the boot one does. See i2c_ready_arm(). */
         if (nb_req_len == 3 && nb_req[0] == 0x08 && !(nb_req[0] & 0x80))
             i2c_ready_arm();
-        /* PAD-603: `0d 05 <op> <4 bytes>` is the bus master's SECURITY
-         * function - early builds (venom_le 0.95) challenge it with fixed
-         * words and build the key for their own data out of the answers,
-         * each answer scrambled by a per-session TinyMT32 the game mirrors.
-         * Only the real CPU board knows the answers; this rig answers zeros
-         * and the game decodes junk (venom 0.95: a 200-million-entry copy at
-         * 0x348128, 15 s in). It is copy protection and is NOT emulated:
-         * this line is here so the run can say why it ended, instead of
-         * leaving a bare segv. Later builds of the same titles never send
-         * it. One line per run; watch.sh turns it into the explanation. */
+        /* PAD-603: `0d 05 <op> <4 bytes>` asks the CPU board's bus master
+         * to compute a 4-byte answer. venom_le 0.95 - the only build of the
+         * 94 in the library that sends it - unscrambles each answer with a
+         * TinyMT32 it mirrors (transport 0x45da8c) and decodes its own data
+         * with the results. What the board computes lives in its firmware,
+         * which no card ships (the one netbridge hex on any card, deadpool
+         * 0.99's 0.29, has neither the command nor the TinyMT), and the
+         * answer is not the value echoed back (tried under gdb: same crash).
+         * So this rig cannot answer it; its zeros decode to a
+         * 200-million-entry copy that faults at 0x348128, 15 s in. This line
+         * is here so the run can say why it ended instead of leaving a bare
+         * segv. One line per run; watch.sh turns it into the explanation. */
         if (nb_req_len >= 2 && nb_req[0] == 0x0d && nb_req[1] == 0x05) {
             static int said;
             if (!said) {
                 said = 1;
-                logmsg("[security] the game asked the CPU board's security"
-                       " function (bus command 0x0d); this emulator cannot"
-                       " answer it\n");
+                logmsg("[busmaster] the game asked the CPU board's bus"
+                       " master for bus command 0x0d, which this emulator"
+                       " cannot answer\n");
             }
         }
         {

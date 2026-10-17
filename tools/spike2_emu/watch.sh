@@ -3095,10 +3095,10 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # its number and the values Tech Alerts shows (hwshim val_watch,
         # PAD-178). One line per change, and none on a clean run.
         /\[validation\]/         { print "[event] " $0; fflush(); next }
-        # [security] is the game asking the CPU board security function
-        # (PAD-603): early builds of some titles do, and no emulator can
-        # answer it. One line a run, and it is why such a run ends.
-        /\[security\]/           { print "[event] " $0; fflush(); next }
+        # [busmaster] is the game asking the CPU board bus master for bus
+        # command 0x0d (PAD-603): one early build does, and this emulator
+        # cannot answer it. One line a run, and it is why such a run ends.
+        /\[busmaster\]/          { print "[event] " $0; fflush(); next }
         # PAD-441: the GL bridge saying a kind of object name came round, or
         # that every name of a kind is in use (and a picture will be wrong).
         # A few lines a session; the graphics-went-to-pieces report would
@@ -3261,14 +3261,14 @@ while :; do
         if run_debug_log | tail -3 | grep -aq 'GAME EXIT DISPATCH TIMEOUT'; then
             echo "[watch] the game stopped responding for 10 s and its own watchdog ended it (GAME EXIT DISPATCH TIMEOUT in its debug log). A machine would reboot here."
         fi
-        # PAD-603: THE SECURITY CHECK EARLY BUILDS MAKE. hwshim prints the
-        # [security] line the first time the game asks the CPU board's
-        # security function; nothing here can answer it, so whatever the
+        # PAD-603: A REQUEST ONLY A REAL CPU BOARD CAN ANSWER. hwshim prints
+        # the [busmaster] line the first time the game sends the bus master
+        # command 0x0d; nothing here can answer it, so whatever the
         # crash above looks like, this is the reason, and it is said in
         # words a user can act on: a later build of the same game does not
         # ask. Read from this run's guest log (see [segv] above).
-        if grep -aqs '\[security\] the game asked' "$GUESTLOG"; then
-            echo "[watch] THIS GAME CODE CHECKS THE MACHINE'S SECURITY HARDWARE: it asked the CPU board's security function, which only a real machine can answer, so it cannot run in the emulator. Later code versions of this game do not make that check - use one of those."
+        if grep -aqs '\[busmaster\] the game asked' "$GUESTLOG"; then
+            echo "[watch] THIS GAME CODE NEEDS AN ANSWER ONLY A REAL MACHINE CAN GIVE: it asked the CPU board for a calculation (bus command 0x0d) that the emulator cannot do, and it cannot run without the answer. Later code versions of this game do not ask for it - use one of those."
         fi
         break
     fi

@@ -87,6 +87,7 @@ int main(void)
     int bus[2], other[2], done, k;
     fd_set r;
     struct pollfd p[2];
+    /* FD_ISSET is a truth value: glibc gives 1, macOS gives the fd's bit */
     pipe(bus); pipe(other);
     faked[bus[0]] = 'T';
     /* the bus fd alone: reported ready although nothing was written */
@@ -96,8 +97,8 @@ int main(void)
     /* bus + an idle other fd: the other stays clear */
     FD_ZERO(&r); FD_SET(bus[0], &r); FD_SET(other[0], &r);
     k = nb_select_ready(1024, &r, 0, 0, real_select, &done);
-    printf("mixed select ret=%%d bus=%%d other=%%d\n", k, FD_ISSET(bus[0], &r),
-           FD_ISSET(other[0], &r));
+    printf("mixed select ret=%%d bus=%%d other=%%d\n", k, !!FD_ISSET(bus[0], &r),
+           !!FD_ISSET(other[0], &r));
     /* no bus fd: not handled, the caller takes its own path */
     FD_ZERO(&r); FD_SET(other[0], &r);
     nb_select_ready(1024, &r, 0, 0, real_select, &done);

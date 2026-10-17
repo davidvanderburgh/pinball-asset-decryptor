@@ -78,7 +78,9 @@ def test_cpuinfo_cmd_rewrites_only_the_cat(tmp_path, cmd, expect):
                          check=True).stdout.rstrip("\n")
     assert got == expect
     # and the rewritten pipeline really gives the old code its platform
+    # (the guest's grep is /bin/grep; macOS keeps its own in /usr/bin)
     if "cpuinfo" in cmd:
+        got = got.replace("/bin/grep", shutil.which("grep"))
         out = subprocess.run(["sh", "-c", got], capture_output=True,
                              text=True).stdout
         assert "Freescale i.MX6" in out

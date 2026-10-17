@@ -28,6 +28,7 @@ const SHOW_TIP = "Narrow the list by what you've already done to it. Changed = t
 const GROUP_TIP = "Group the images under the scene / animation they belong to (in play order), so a whole animation can be reviewed — or bulk-replaced via right-click — as one unit.";
 const FONTS_TIP = "Preview any game font (type your own text, rendered from the real glyphs) and import a desktop font into it — letters are auto-fitted into the space each character has. Stern Spike 2.";
 const MORE_TIP = "More: Export CSV, Clear replacements…, Save / load settings";
+const CSAVE_TIP = "Save a copy of every picture with a color profile attached (green palette), with that profile baked in, into a folder you pick. To save others, select them, right-click and save them. The project and the card are not changed.";
 const CSV_TIP = "Save every row of the list as a spreadsheet (CSV), exactly as it reads here.";
 const FOLDER_TIP = "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.";
 const ORIGINALS_TIP = "Find the files your replacements were made from in a folder of your own, by how they look: the names don't matter.\n\nFor picks that are copies off a card, like the ones \"Transfer Mods to New Version\" takes from an extract of a built card: those pictures were already squeezed into the card's format once by the Write that built that card. With your own files picked instead, the next Write converts from them. Nothing changes until you press Use.";
@@ -645,6 +646,8 @@ export default function ImagesTab() {
   return html`<div class="cpd-shell"><div class="page img-page">
     <${PageHead} title="Images" sub=${INTRO}>
       ${status ? html`<${Chip} kind=${s.changed ? "acc" : ""}>${status.trim()}<//>` : null}
+      ${s.csave ? html`<${Chip} kind="acc">${s.csave.text}<//>
+        <${Button} kind="ghost" icon="x" onClick=${() => call("images.colour_save_cancel")}>Cancel save<//>` : null}
       ${s.scanning
         ? html`<${Button} icon="x" onClick=${() => call("images.cancel_scan")}>Cancel scan<//>`
         : html`<${Button} icon="refresh" onClick=${() => call("images.scan")}>Scan<//>`}
@@ -653,9 +656,11 @@ export default function ImagesTab() {
       <${Button} icon="compare" cls="img-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!compareRels().length}
         title=${COMPARE_TIP}>Compare<//>
       ${s.shades_only ? null : html`<${Button} kind="ghost" icon="text" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>`}
-      <${Button} kind="ghost" icon="more" label="More" title=${MORE_TIP}
+      <${Button} kind="ghost" icon="more" label="More" title=${colorCol ? MORE_TIP.replace("Export CSV, ", "Export CSV, Save pictures with their color profiles…, ") : MORE_TIP}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: CSV_TIP, onClick: () => call("images.export_csv") },
+          colorCol ? { label: "Save pictures with their color profiles…", icon: "download", title: CSAVE_TIP,
+            onClick: () => call("images.colour_save") } : null,
           { label: "Clear replacements…", icon: "trash", title: CLEAR_TIP, disabled: !s.can_clear,
             onClick: () => call("images.clear_all") },
           { sep: true },

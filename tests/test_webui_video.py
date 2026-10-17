@@ -285,7 +285,7 @@ def test_per_clip_conversion(tmp_path):
                    for t in log)
         multi = w.call("video.row_menu", ["video/intro.mp4",
                                           "video/attract.mp4"])
-        assert multi == {"multi": True, "rows": 2, "targets": 1}
+        assert multi == {"multi": True, "rows": 2, "targets": 1, "csave": None}
 
 
 # ---------------------------------------------------------------- clearing

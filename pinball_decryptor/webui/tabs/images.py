@@ -26,6 +26,7 @@ import threading
 import time
 
 from .. import compat, look_switches
+from ..colour_save import ColourSaveMixin
 from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
 
@@ -277,7 +278,7 @@ def _plural(n, word):
 
 
 # ---------------------------------------------------------------------------
-class ImagesTab(FindOriginalsMixin, TabService):
+class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
     ns = "images"
     key = "Replace Images"
     label = "Images"
@@ -1271,6 +1272,27 @@ class ImagesTab(FindOriginalsMixin, TabService):
             if on is not None and (on or scope == "all"):
                 out[rel] = on
         return out
+
+    # ---- Save with color profile (PAD-604) -----------------------------
+    _cs_kind = "images"
+    _cs_noun = ("picture", "pictures")
+
+    def _cs_project(self):
+        return self._assets_dir()
+
+    def _cs_profiled(self):
+        return self.color_targets("profiled")
+
+    def _cs_source(self, rel):
+        """The picture *rel*'s profile goes on: the Replacement pane's
+        (a pick, or the uncorrected copy of one an earlier build put in),
+        else the game's own (its snapshot where a build changed it)."""
+        if rel not in self._by_rel:
+            return None
+        if self._profile_side(rel) == "rep":
+            src = self._rep_pane_path(rel)
+            return src if isinstance(src, str) else None
+        return self._orig_pane_path(rel)[0]
 
     def put_color_switches(self, switches):
         """PAD-439: pictures' own switches set at once (``True`` /
@@ -2618,6 +2640,10 @@ class ImagesTab(FindOriginalsMixin, TabService):
             else:
                 items.append({"label": "No replacements in this selection",
                               "disabled": True})
+            if self._per_file_colour():
+                items.append({"sep": True})
+                items.append({"label": self._cs_menu_label(len(rows)),
+                              "act": "csave"})
             return items
         if iid.startswith(GROUP_IID):
             key = iid[len(GROUP_IID):]
@@ -2658,6 +2684,8 @@ class ImagesTab(FindOriginalsMixin, TabService):
                               "act": "fonts"})
             items.append({"label": "Show scene contents…", "act": "scenes"})
         items.append({"sep": True})
+        if self._per_file_colour():
+            items.append({"label": self._cs_menu_label(1), "act": "csave"})
         items.append({"label": "Open in default app", "act": "open_orig"})
         if self._open_target(iid, "rep"):
             items.append({"label": "Open replacement in default app",
@@ -2673,6 +2701,10 @@ class ImagesTab(FindOriginalsMixin, TabService):
         """Run a menu entry from :meth:`menu`."""
         if action == "choose":
             return self.choose(iid)
+        if action == "csave":
+            rows = [r for r in (sel or []) if r in self._by_rel]
+            return self.colour_save(rows if iid in rows and len(rows) >= 2
+                                    else [iid])
         if action in ("color_on", "color_off", "color_box"):
             return self.set_color(iid, {"color_on": True, "color_off": False,
                                         "color_box": None}[action])

@@ -46,6 +46,7 @@ from .. import compat
 from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
 from .. import look_switches
 from .. import video_helpers as vh
+from ..colour_save import ColourSaveMixin
 from ..video_best import BEST_TIP, BestQualityMixin
 from ..video_modes import ModesMixin
 from ..video_undo import UndoMixin, undoable
@@ -94,7 +95,8 @@ STOCK_ON_ORIG = ("no replacement assigned: the game's own clip, its color "
                  "profile is on the Original player")
 
 
-class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
+class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
+               TabService):
     ns = "video"
     key = "Replace Video"
     label = "Video"
@@ -1419,6 +1421,27 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
                 out[rel] = on
         return out
 
+    # ---- Save with color profile (PAD-604) -----------------------------
+    _cs_kind = "videos"
+    _cs_noun = ("clip", "clips")
+
+    def _cs_project(self):
+        return self._assets_path()
+
+    def _cs_profiled(self):
+        return self.color_targets("profiled")
+
+    def _cs_source(self, rel):
+        """The clip *rel*'s profile goes on: its replacement, else the
+        game's own (its snapshot where a build changed the slot)."""
+        rep = self._assign.get(rel)
+        if rep:
+            return rep if isinstance(rep, str) else None
+        slot = self._by_rel.get(rel)
+        if slot is None:
+            return None
+        return self._stock_path(rel) or slot.abs_path
+
     def put_color_switches(self, switches):
         """PAD-439: clips' own switches set at once (``True`` / ``False``,
         ``None`` = follow the box again), one save and one redraw.  Returns
@@ -2246,7 +2269,9 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
         rows = [rel for rel in (rels or []) if rel in self._by_rel]
         if len(rows) >= 2:
             return {"multi": True, "rows": len(rows),
-                    "targets": len(self._targets(rows))}
+                    "targets": len(self._targets(rows)),
+                    "csave": (self._cs_menu_label(len(rows))
+                              if self._per_file_colour() else None)}
         if not rows:
             return None
         rel = rows[0]
@@ -2277,6 +2302,8 @@ class VideoTab(ModesMixin, BestQualityMixin, UndoMixin, TabService):
                                           None) is not None),
             # PAD-444: a mode's own clip an earlier build made plays the shared one again
             "back": (self._m_preview(rel) or {}).get("back") or "",
+            "csave": (self._cs_menu_label(1) if self._per_file_colour()
+                      else None),
         }
 
     # -- random clips (PAD-446) ---------------------------------------------

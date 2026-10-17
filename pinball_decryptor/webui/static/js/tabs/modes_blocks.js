@@ -94,6 +94,7 @@ const TIP = {
   show: "A light show over the playfield's inserts (the ones the game's port places), a few seconds long: the shots' own lights come back when it is over. A new show takes the place of one still running.",
   ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colors, from a place on the playfield.",
   stepRate: "The pattern's pace, ms (a strobe's flash, a beam's turn, a chase's step). 0 = its usual.",
+  lightShot: "Lights a shot's inserts, or one of the game's own lights by name (an insert, a GI string or a flasher, under The game's lights), in this color and pattern, over what the game shows there. It stays lit until a Hand back block or the end of the mode gives it back to the game. To light the mode itself, so that a shot starts it, use Light the mode at.",
   gi: "The lights between the inserts (the general illumination) during this step: the game's, dark, or flashing white.",
   hold: "Holds the mechanism this many ms (100 to 5000) at its own power settings, then lets go. Only while the mode runs, never while the game uses it, 3 s apart and 6 a minute at most; the mode ending, the ball draining or a tilt lets go at once. Any value: a number, a variable, a sum.",
   scoopHold: "A ball that settles in the scoop waits this many ms (100 to 10000), then the game kicks it out as always. The next ball, or every ball while the mode runs. The game's own use of the scoop comes first; the mode ending lets it go.",
@@ -230,6 +231,22 @@ function Pick({ value, options, onChange, width, title, missing = "(not on this 
   return html`<${Select} sm value=${value ?? ""} options=${opts} onChange=${onChange} width=${width} title=${title} />`;
 }
 
+// PAD-598: what a Light or Hand back block lights: a shot's inserts, or one of the game's own lights by name (an
+// insert, a GI string, a flasher: the port's lamp lines), kept in the block's `insert` instead of its `shot`
+const LAMP = "lamp:";
+function LightPick({ b, path, ed, every }) {
+  const lamps = ed.ch.inserts || [];
+  const opts = [...(every ? [{ value: "*", label: "every shot" }] : []),
+    ...(ed.ch.shots || []).map((n) => ({ value: n, label: n, group: "Shots" })),
+    ...lamps.map((n) => ({ value: LAMP + n, label: n, group: "The game's lights" }))];
+  if (b.insert && !lamps.includes(b.insert)) opts.unshift({ value: LAMP + b.insert, label: `${b.insert} (not on this game)` });
+  const pick = (v) => ed.edit((d) => {
+    const t = at(d, path);
+    if (v.startsWith(LAMP)) { t.insert = v.slice(LAMP.length); delete t.shot; } else { t.shot = v; delete t.insert; }
+  });
+  return html`<${Pick} value=${b.insert ? LAMP + b.insert : b.shot} options=${opts} onChange=${pick} />`;
+}
+
 function TimerPick({ value, ed, onChange }) {
   return html`<${Pick} value=${value} options=${ed.timers.map((t) => t.name)} missing="(no such timer)" onChange=${onChange} />`;
 }
@@ -343,7 +360,7 @@ function StmtBody({ b, path, ed }) {
     }
     case "words": return html`<span class="bk-w">Show</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">on its screen</span>`;
-    case "light_shot": return html`<span class="bk-w">Light</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
+    case "light_shot": return html`<span class="bk-w" ...${tip(TIP.lightShot)}>Light</span><${LightPick} b=${b} path=${path} ed=${ed} />
       <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The insert's color")} />
       <${Pick} value=${b.pattern} options=${PATTERNS} title=${b.pattern === "hurry" ? TIP.hurry : undefined} onChange=${(v) => set("pattern", v)} />
       ${PACED.includes(b.pattern) ? html`<span class="bk-w" ...${tip(TIP.rate)}>every</span><${Slot} kind="num" optional empty="its usual pace"
@@ -361,7 +378,7 @@ function StmtBody({ b, path, ed }) {
       return html`<span class="bk-w" ...${tip(TIP.show)}>Run the light show</span><${Pick} value=${b.show}
         options=${[...shows.map((x) => [x.key, x.label]), ["own", "its own steps…"]]} onChange=${pick} />`;
     }
-    case "lights_off": return html`<span class="bk-w">Hand back the lights of</span><${Pick} value=${b.shot} options=${[["*", "every shot"], ...shots.map((n) => [n, n])]} onChange=${(v) => set("shot", v)} />`;
+    case "lights_off": return html`<span class="bk-w">Hand back the lights of</span><${LightPick} b=${b} path=${path} ed=${ed} every />`;
     case "add_time": return html`<span class="bk-w" ...${tip(TIP.addTime)}>Add</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "set_time": return html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
@@ -556,7 +573,7 @@ function hatLabel(h) {
 function stmtLabel(b) {
   return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
-    words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
+    words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",

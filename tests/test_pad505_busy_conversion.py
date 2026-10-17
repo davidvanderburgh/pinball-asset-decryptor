@@ -327,12 +327,28 @@ def test_a_changed_profile_or_a_touched_file_converts_again(tmp_path, monkeypatc
 
 def test_a_cancelled_start_keeps_what_it_converted(tmp_path, monkeypatch):
     from pinball_decryptor.core import image_slots
+    monkeypatch.setenv("PAD_STAGE_WORKERS", "1")    # one at a time: exact
     assets, slots = _pictures(tmp_path)
     seen = _count_stagings(monkeypatch)
     image_slots.stage_replacements(slots, {}, assets_dir=assets,
                                    cancel_cb=lambda: len(seen) >= 2)
     assert len(seen) == 2
     assert image_slots.pictures_due(slots, {}, assets_dir=assets) == 1
+
+
+def test_a_cancel_mid_parallel_staging_keeps_every_picture_it_made(
+        tmp_path, monkeypatch):
+    """PAD-599: several pictures convert at once, so one or two may finish
+    after the Cancel; each one that did is kept, none is redone next time."""
+    from pinball_decryptor.core import image_slots
+    monkeypatch.setenv("PAD_STAGE_WORKERS", "4")
+    assets, slots = _pictures(tmp_path)
+    seen = _count_stagings(monkeypatch)
+    image_slots.stage_replacements(slots, {}, assets_dir=assets,
+                                   cancel_cb=lambda: len(seen) >= 1)
+    assert 1 <= len(seen) <= len(slots)
+    assert (image_slots.pictures_due(slots, {}, assets_dir=assets)
+            == len(slots) - len(set(seen)))
 
 
 # -- the app's loop while a staging floods it --------------------------------

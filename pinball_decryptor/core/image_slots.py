@@ -279,6 +279,19 @@ def _stock_to_stage(assets_dir, slots_by_rel, picked):
              or staged_originals.has_snapshot(assets_dir, rel)}, profs)
 
 
+def picture_workers(pictures: int) -> int:
+    """How many pictures :func:`stage_replacements` converts at once: half
+    the computer's cores, at most eight.  ``PAD_STAGE_WORKERS`` overrides
+    it (1 = one at a time, as before PAD-599)."""
+    try:
+        n = int(os.environ.get("PAD_STAGE_WORKERS", "") or 0)
+    except ValueError:
+        n = 0
+    if n <= 0:
+        n = min(8, max(1, (os.cpu_count() or 1) // 2))
+    return max(1, min(n, pictures))
+
+
 def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
                        assignments: Dict[str, str],
                        log_cb=None, progress_cb=None, assets_dir=None,
@@ -381,22 +394,16 @@ def _stage_items(items, slots_by_rel, baseline, failures, cache, colour,
     from . import staged_originals
     total = len(items)
     staged = 0
-    for i, (rel, rep) in enumerate(items):
-        if cancel_cb is not None and cancel_cb():
-            if log_cb:
-                log_cb("Canceled — skipping the remaining image "
-                       "replacement(s).", "error")
-            break
+
+    def _one(rel, rep):
+        """Stage one picture: ``(ok, detail, lines)``."""
         slot = slots_by_rel[rel]
-        if progress_cb:
-            progress_cb(i, total, rel)
-        if log_cb:
-            log_cb(f"Staging {rel}  ←  "
-                   + (os.path.basename(rep) if rep else
-                      "its own picture, colors corrected for the machine"
-                      if colour or chosen.get(rel) else
-                      "its own picture, its own colors (No change)"),
-                   "info")
+        lines = [(f"Staging {rel}  ←  "
+                  + (os.path.basename(rep) if rep else
+                     "its own picture, colors corrected for the machine"
+                     if colour or chosen.get(rel) else
+                     "its own picture, its own colors (No change)"),
+                  "info")]
         original = snap = None
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
@@ -415,17 +422,63 @@ def _stage_items(items, slots_by_rel, baseline, failures, cache, colour,
                                        original_info=original,
                                        colour=colour or chosen.get(rel))
         if ok:
-            staged += 1
             if cache is not None:
                 cache.record(slot, cache.recipe(rep, snap, rel in keep_size,
                                                 colour or chosen.get(rel)))
-            if log_cb:
-                msg = f"  ✓ {rel}" + (f"  ({detail})" if detail else "")
-                log_cb(msg, "success")
+            lines.append((f"  ✓ {rel}" + (f"  ({detail})" if detail else ""),
+                          "success"))
         else:
-            failures.append((rel, detail))
             if cache is not None:
                 cache.forget(rel)
+            lines.append((f"  ✗ {rel}: {detail}", "error"))
+        return ok, detail, lines
+
+    # Pillow does its decoding, scaling and PNG packing outside Python's
+    # lock, so several pictures convert at once (PAD-599: a retheme's 2,331
+    # took 101 s one at a time).  At most a few run ahead of the one being
+    # reported, so a Cancel still stops within a picture or two.
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    workers = picture_workers(total)
+    pool = (ThreadPoolExecutor(max_workers=workers,
+                               thread_name_prefix="pad-stage-image")
+            if workers > 1 else None)
+    queued = deque()
+    todo = iter(enumerate(items))
+    try:
+        while True:
+            while len(queued) < (workers * 2 if pool is not None else 1):
+                nxt = next(todo, None)
+                if nxt is None:
+                    break
+                if cancel_cb is not None and cancel_cb():
+                    todo = iter(())
+                    if log_cb:
+                        log_cb("Canceled — skipping the remaining image "
+                               "replacement(s).", "error")
+                    break
+                i, (rel, rep) = nxt
+                queued.append((i, rel, pool.submit(_one, rel, rep)
+                               if pool is not None else None, rep))
+            if not queued:
+                break
+            i, rel, fut, rep = queued.popleft()
+            if progress_cb:
+                progress_cb(i, total, rel)
+            try:
+                ok, detail, lines = (fut.result() if fut is not None
+                                     else _one(rel, rep))
+            except Exception as e:                      # noqa: BLE001
+                ok, detail, lines = False, str(e), [(f"  ✗ {rel}: {e}",
+                                                     "error")]
             if log_cb:
-                log_cb(f"  ✗ {rel}: {detail}", "error")
+                for text, level in lines:
+                    log_cb(text, level)
+            if ok:
+                staged += 1
+            else:
+                failures.append((rel, detail))
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
     return staged

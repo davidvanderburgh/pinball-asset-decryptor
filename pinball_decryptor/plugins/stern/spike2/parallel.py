@@ -187,3 +187,250 @@ def decode_to_wav(task):
     w.writeframes(inter.tobytes()); w.close()
     _put(("done", idx, length, chan))
     return (idx, True)
+
+
+# ---------------------------------------------------------------------------
+# Block workers (Write) -- one LONG sound's blocks across processes (PAD-599).
+# A sound appended along the firmware's chain is encoded in chain order, one
+# after another (its window bytes set the parameters of every record after
+# it), so a bank of five 2.5-minute mode songs or a card's 60 appended sounds
+# ran on one core: about 100 s a song, 24 minutes for the Godzilla Heisei
+# build.  Three quarters of a song's encode is the keystream recovery, two
+# emulated decodes of every 200-sample block, and a block's keystream depends
+# on the record's codec parameters and its position alone, never on the
+# audio.  So each block is recovered AND encoded by whichever worker has it,
+# and the parent lays the words in exactly where its own loop would have.
+# Each worker's emulator is set up the way the parent's encoder was (the same
+# boot, the same warm of the codec slots, record by record), so the bytes are
+# the serial encode's own.
+# ---------------------------------------------------------------------------
+
+#: a sound with fewer blocks than this is encoded in the parent: the round
+#: trip would cost more than it saves
+BLOCKS_MIN = 256
+
+
+def block_workers():
+    """How many block workers a chain encode starts: the computer's cores
+    less two, at most eight (the cat-0 pool's rule); 0 = none.
+    ``PAD_STERN_BLOCK_WORKERS`` overrides it (0 turns them off)."""
+    import os
+    v = os.environ.get("PAD_STERN_BLOCK_WORKERS", "")
+    try:
+        if v.strip():
+            return max(0, int(v))
+    except ValueError:
+        pass
+    n = min(8, (os.cpu_count() or 1) - 2)
+    return n if n >= 2 else 0
+
+
+def _block_main(conn, kind, gr_path, img_path, stock_rows, first_warm,
+                cat_file):
+    """A block worker: boot like the parent's encoder, then take
+    ``("warm", row)`` (no reply) and answer ``("encode", p, three, jobs)``
+    with ``("ok", [(k, m, words), ...])`` until ``("stop",)``."""
+    err = None
+    try:
+        if kind == "cat":
+            from .category import CatEmu
+            emu = CatEmu(gr_path, img_path)
+            emu.boot()
+            emu.set_category_file(cat_file)
+        else:
+            from .emulator import Spike2Emu
+            emu = Spike2Emu(gr_path, img_path)
+            emu.boot()
+            if first_warm is not None:
+                emu.warm_slots_for_grown(first_warm)
+        conn.send(("ready", None))
+    except Exception as e:                              # noqa: BLE001
+        conn.send(("error", "a worker did not start: %r" % (e,)))
+        return
+    from .codec import GenRecover, StereoRecover
+    gr = sr = None
+    while True:
+        try:
+            msg = conn.recv()
+        except (EOFError, OSError):
+            break
+        op = msg[0]
+        if op == "stop":
+            break
+        if op == "warm":
+            if err is not None:
+                continue
+            try:
+                row = msg[1]
+                if kind == "cat":
+                    emu.mm = emu._mm_img
+                    emu.warm_slots_for_grown(stock_rows + [row])
+                    emu.mm = emu._mm_cat
+                else:
+                    emu.warm_slots_for_grown(stock_rows + [row])
+            except Exception as e:                      # noqa: BLE001
+                err = "a worker's warm failed: %r" % (e,)
+            continue
+        if op != "encode":
+            continue
+        if err is not None:
+            conn.send(("error", err))
+            continue
+        try:
+            _op, p, three, jobs = msg
+            out = []
+            if p["chan"] == 2:
+                sr = sr or StereoRecover(emu)
+                if three is not None:
+                    sr._three_probe[(p["scale"], p["chan"])] = three
+                for k, cursor, L, R in jobs:
+                    L = np.asarray(L, np.int64)
+                    R = np.asarray(R, np.int64)
+                    rec = sr.recover_block(p, cursor, nf=len(L))
+                    m = rec["m"]
+                    frame, _ = sr.encode_block(L[:m], R[:m], rec)
+                    out.append((k, m, frame))
+            else:
+                gr = gr or GenRecover(emu)
+                for k, cursor, seg, _r in jobs:
+                    seg = np.asarray(seg, np.int64)
+                    K, rb = gr.recover_block(p, cursor, n=len(seg))
+                    m = len(K)
+                    enc, _ = gr.encode_block(seg[:m], K, rb)
+                    out.append((k, m, enc))
+            conn.send(("ok", out))
+        except Exception as e:                          # noqa: BLE001
+            conn.send(("error", "a worker's encode failed: %r" % (e,)))
+    try:
+        emu.close()
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+class BlockPool:
+    """Block workers for one chain encode (see above).  *kind* is ``"image"``
+    (a :class:`.emulator.Spike2Emu` on *img_path*, warmed first with
+    *first_warm*) or ``"cat"`` (a :class:`.category.CatEmu` serving
+    *cat_file*).  :meth:`warm` must follow every warm of the parent's
+    encoder; :meth:`blocks` is the ``blocks`` callable the codecs'
+    ``encode_sound`` take.  Anything that goes wrong turns the pool off
+    (``None`` from :meth:`blocks`) and the encode carries on in the parent,
+    as it did before there were workers."""
+
+    def __init__(self, kind, gr_path, img_path, stock_rows, workers,
+                 first_warm=None, cat_file=None, log=None):
+        import multiprocessing as mp
+        self.log = log or (lambda *a, **k: None)
+        self.broken = None
+        self._ready = False
+        self.used = 0
+        self.conns, self.procs = [], []
+        ctx = mp.get_context("spawn")
+        try:
+            for _i in range(workers):
+                a, b = ctx.Pipe()
+                pr = ctx.Process(target=_block_main, daemon=True,
+                                 args=(b, kind, gr_path, img_path,
+                                       list(stock_rows), first_warm, cat_file))
+                pr.start()
+                b.close()
+                self.conns.append(a)
+                self.procs.append(pr)
+        except Exception as e:                          # noqa: BLE001
+            self._fail("the workers did not start (%s)" % e)
+
+    def _fail(self, why):
+        if self.broken is None:
+            self.broken = why
+            self.log("Long sounds are encoded in one process from here on: "
+                     "%s." % why, "warning")
+        self.close()
+
+    def _wait_ready(self, timeout=300):
+        if self._ready or self.broken:
+            return not self.broken
+        for c in self.conns:
+            try:
+                if not c.poll(timeout):
+                    self._fail("a worker took over %d s to start" % timeout)
+                    return False
+                tag, why = c.recv()
+            except (EOFError, OSError) as e:
+                self._fail("a worker stopped (%s)" % e)
+                return False
+            if tag != "ready":
+                self._fail(why)
+                return False
+        self._ready = True
+        return True
+
+    def warm(self, row):
+        """Say the parent's encoder warmed its codec slots for *row*."""
+        if self.broken:
+            return
+        for c in self.conns:
+            try:
+                c.send(("warm", row))
+            except (OSError, ValueError) as e:
+                self._fail("a worker stopped (%s)" % e)
+                return
+
+    def blocks(self, p, jobs, three=None):
+        """``{k: (m, words)}`` for *jobs* ``[(k, cursor, seg, segR or
+        None), ...]``, or ``None`` (the caller encodes them itself)."""
+        if self.broken or len(jobs) < BLOCKS_MIN or not self._wait_ready():
+            return None
+        n = len(self.conns)
+        per = -(-len(jobs) // n)
+        sent = []
+        try:
+            for i, c in enumerate(self.conns):
+                part = jobs[i * per:(i + 1) * per]
+                if part:
+                    c.send(("encode", p, three, part))
+                    sent.append(c)
+            out = {}
+            for c in sent:
+                tag, got = c.recv()
+                if tag != "ok":
+                    self._fail(got)
+                    return None
+                for k, m, words in got:
+                    out[k] = (m, words)
+        except (EOFError, OSError, ValueError) as e:
+            self._fail("a worker stopped (%s)" % e)
+            return None
+        self.used += 1
+        return out
+
+    def close(self):
+        for c in self.conns:
+            try:
+                c.send(("stop",))
+            except Exception:                           # noqa: BLE001
+                pass
+        # a worker still booting (a chain that never needed one) is not
+        # waited for
+        for pr in self.procs:
+            pr.join(timeout=2 if self._ready else 0.2)
+            if pr.is_alive():
+                pr.kill()
+                pr.join(timeout=5)
+        for c in self.conns:
+            try:
+                c.close()
+            except Exception:                           # noqa: BLE001
+                pass
+        self.conns, self.procs = [], []
+
+
+def start_block_pool(kind, gr_path, img_path, stock_rows, first_warm=None,
+                     cat_file=None, log=None, longest=None):
+    """A :class:`BlockPool` when this computer has the cores for one and the
+    chain has a sound long enough to use it (*longest*, its length in
+    samples, when the caller knows it), else ``None``."""
+    n = block_workers()
+    if n < 2 or (longest is not None and longest < 200 * (BLOCKS_MIN + 1)):
+        return None
+    return BlockPool(kind, gr_path, img_path, stock_rows, n,
+                     first_warm=first_warm, cat_file=cat_file, log=log)

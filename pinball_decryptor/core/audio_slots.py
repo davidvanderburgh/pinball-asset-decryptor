@@ -256,6 +256,55 @@ def _pristine_slot(slot: AudioSlot, orig: Optional[str]) -> AudioSlot:
     return replace(slot, info=info)
 
 
+#: Where :func:`stage_replacements` remembers what it last staged into each
+#: sound slot (the sounds' half of :class:`core.video_slots.StagedCache`).
+AUDIO_CACHE = os.path.join(".write_cache", "audio_staged.json")
+
+
+def audio_cache(assets_dir):
+    """The project's sound staging cache (PAD-599): every Write converted
+    every assigned sound again, the same way, and rewrote it, so the build
+    after it read each one whole again too.  An entry is the recipe
+    (:func:`_audio_recipe`) and the slot's file it left."""
+    from .video_slots import StagedCache
+
+    class AudioCache(StagedCache):
+        FILE = AUDIO_CACHE
+
+    return AudioCache(assets_dir)
+
+
+def _audio_recipe(slot, rep, orig, trim):
+    """Everything that decides what staging *rep* into *slot* makes: the
+    source's path, size and modification time, the stock sound it is
+    matched to (its ``.orig/`` snapshot), the trim, and this app's version
+    (a new version converts once more, in case it converts differently)."""
+    import hashlib
+    import json
+    from .. import __version__
+    try:
+        st = os.stat(rep)
+        ost = os.stat(orig)
+    except (OSError, TypeError):
+        return None
+    blob = json.dumps([__version__, os.path.normcase(os.path.abspath(rep)),
+                       st.st_size, st.st_mtime_ns, ost.st_size,
+                       ost.st_mtime_ns, slot.ext, bool(trim)])
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+
+def audio_workers(sounds: int) -> int:
+    """How many sounds :func:`stage_replacements` converts at once: half the
+    computer's cores, at most eight.  ``PAD_STAGE_WORKERS`` overrides it."""
+    try:
+        n = int(os.environ.get("PAD_STAGE_WORKERS", "") or 0)
+    except ValueError:
+        n = 0
+    if n <= 0:
+        n = min(8, max(1, (os.cpu_count() or 1) // 2))
+    return max(1, min(n, sounds))
+
+
 def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
                        assignments: Dict[str, str],
                        trim_to_length: bool = False,
@@ -287,30 +336,74 @@ def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
     failures: List = []
     keep_full = frozenset(keep_full_rels or ())
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
+    cache = audio_cache(assets_dir)
+    kept = 0
+    import threading
+    lock = threading.Lock()         # the cache is shared by the workers
 
-    for i, (rel, rep) in enumerate(items):
+    def _one(rel, rep):
+        """Stage one sound: ``(ok, kept, detail, lines)``, *lines* its log
+        lines (said in order once it is done)."""
         slot = slots_by_rel[rel]
-        if progress_cb:
-            progress_cb(i, total, rel)
-        if log_cb:
-            log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
+        lines = [(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")]
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
         slot_trim = trim_to_length and rel not in keep_full
         orig = (staged_originals.snapshot_path(assets_dir, rel)
                 if assets_dir else None)
+        recipe = _audio_recipe(slot, rep, orig, slot_trim) if orig else None
+        with lock:
+            fresh = cache.fresh(slot, recipe)
+        if fresh:
+            lines.append((f"  ✓ {rel}  (already converted from this file — "
+                          f"kept)", "success"))
+            return True, True, "", lines
         ok, detail = stage_replacement(_pristine_slot(slot, orig), rep,
                                        trim_to_length=slot_trim)
+        with lock:
+            if ok:
+                cache.record(slot, recipe)
+            else:
+                cache.forget(rel)
         if ok:
-            staged += 1
-            if log_cb:
-                msg = f"  ✓ {rel}" + (f"  ({detail})" if detail else "")
-                log_cb(msg, "success")
+            lines.append((f"  ✓ {rel}" + (f"  ({detail})" if detail else ""),
+                          "success"))
         else:
-            failures.append((rel, detail))
-            if log_cb:
-                log_cb(f"  ✗ {rel}: {detail}", "error")
+            lines.append((f"  ✗ {rel}: {detail}", "error"))
+        return ok, False, detail, lines
 
+    # Each conversion is mostly one single-threaded ffmpeg, so several run
+    # at once (PAD-599); the results come back in order.
+    workers = audio_workers(total)
+    if workers <= 1 or total <= 1:
+        results = map(lambda it: _one(*it), items)
+        pool = None
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        pool = ThreadPoolExecutor(max_workers=workers,
+                                  thread_name_prefix="pad-stage-audio")
+        results = pool.map(lambda it: _one(*it), items)
+    try:
+        for i, ((rel, _rep), (ok, was_kept, detail, lines)) in enumerate(
+                zip(items, results)):
+            if progress_cb:
+                progress_cb(i, total, rel)
+            if log_cb:
+                for text, level in lines:
+                    log_cb(text, level)
+            if ok:
+                staged += 1
+                kept += 1 if was_kept else 0
+            else:
+                failures.append((rel, detail))
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
+        cache.save()
+
+    if kept and log_cb:
+        log_cb("%d sound(s) were already converted from the same file with "
+               "the same settings and were kept as they are." % kept, "info")
     if progress_cb:
         progress_cb(total, total, "")
     return staged, failures

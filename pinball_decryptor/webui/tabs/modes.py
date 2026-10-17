@@ -2830,12 +2830,21 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "status_bar": bool(getattr(p, "status_bar", False)) if p is not None else False,
                 # PAD-547: an info line is a screen of its own, so it goes on every title that takes screens
                 "info_line": p is None or bool(p.can("screen")),
+                # PAD-600: the project's other blocks modes, whose light a Put out the light of block may put out
+                "modes": [{"slug": s, "name": n} for s, n in self._blocks_modes() if s != self._code_slug],
                 "game_wizards_off": ("Not on this game: " + p.why_not("wizard")) if p is not None and not p.can("wizard")
                                     else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else
                               "Not on this game yet: the app has not found where %s starts its own modes, so a "
                               "mode cannot keep them from starting; set to hold them off, it gives way to them "
                               "instead." % p.label)}
+
+    def _blocks_modes(self):
+        """PAD-600: ``[(slug, name)]`` of the project's modes made of blocks."""
+        project = self.project()
+        if not project:
+            return []
+        return [(s, n) for s, n in self._code_list if BM.is_blocks(project, s)]
 
     @staticmethod
     def _blocks_mechs(p):
@@ -2874,8 +2883,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         wizards = ([n for n, _f in getattr(p, "game_wizards", ())] if p.can("wizard") else []) if p is not None else None
         inserts = list(getattr(p, "inserts", ()) or ()) if p is not None else None                     # PAD-503
         building = (getattr(p, "building_rule", "") if p.can("building") else False) if p is not None else None
+        modes = [s for s, _n in self._blocks_modes()] if self.project() else None                     # PAD-600
         return (BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards,   # PAD-436
-                            inserts, building), BM.notes(program))                                          # PAD-589
+                            inserts, building, modes), BM.notes(program))                                   # PAD-589
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

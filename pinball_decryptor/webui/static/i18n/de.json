@@ -12119,5 +12119,15 @@
 "Show this sound on the Audio tab": "Diesen Sound auf dem Tab Audio zeigen",
 "asked for in the same part of the program": "im selben Teil des Programms angefordert",
 "named like it": "ähnlich benannt",
-"named like part of its name": "nach einem Teil seines Namens benannt"
+"named like part of its name": "nach einem Teil seines Namens benannt",
+"Put out the light of": "Licht ausschalten von",
+"Put out the light": "Licht ausschalten",
+"(no such mode)": "(kein solcher Modus)",
+"Set the hits of": "Treffer setzen von",
+"Set the hits of a shot": "Treffer eines Schusses setzen",
+"{}'s Set the hits of": "Treffer setzen von, von {}",
+"{} puts out the light of a mode that is not one.": "{} schaltet das Licht eines Modus aus, der keiner ist.",
+"{} puts out the light of a mode that is not in this project ({}): pick it again.": "{} schaltet das Licht eines Modus aus, der nicht in diesem Projekt ist ({}): wählen Sie ihn erneut.",
+"Puts out a Light the mode at for the player up: this mode's, or another mode of yours on the card (another target's when this one is qualified, so only one is ready at a time). It lights again only when a Light the mode at block runs again.": "Schaltet ein Modus beleuchten bei für den aktuellen Spieler aus: das dieses Modus oder eines anderen Ihrer Modi auf der Karte (das eines anderen Ziels, wenn dieses qualifiziert ist, damit immer nur eines bereit ist). Es leuchtet erst wieder, wenn ein Block Modus beleuchten bei erneut läuft.",
+"Sets a shot's hits this ball for the player up. The hits are one count for every mode of yours on the card, so setting another target's hits back below what qualifies it takes it back for its own mode too. A ball ending or a new game puts every count back to 0.": "Setzt die Treffer eines Schusses in diesem Ball für den aktuellen Spieler. Die Treffer sind ein Zähler für alle Ihre Modi auf der Karte: Werden die Treffer eines anderen Ziels unter seine Qualifikation gesetzt, gilt das auch für dessen eigenen Modus. Ein Ballende oder ein neues Spiel setzt jeden Zähler auf 0 zurück."
 }

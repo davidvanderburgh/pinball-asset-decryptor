@@ -3089,6 +3089,11 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         /SEGV|Segmentation|FATAL/{ print "[event] " $0; fflush(); next }
     ' &
     EVTPG=$!
+    # Its end is ours to cause (stop_all's kill -9). Left in the job table,
+    # bash reports that kill as "Killed  tail ... | $AWK '...'" and prints
+    # the WHOLE awk program above into the app's log - 90 lines of comments
+    # after every crash (PAD-603, venom_le 0.95).
+    disown "$EVTPG"
 fi
 
 if [ "$PAD_HIDDEN" = 1 ]; then

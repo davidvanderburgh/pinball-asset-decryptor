@@ -114,6 +114,13 @@ mode adds in (never below 0); (2) Put out the light of (``{"op": "unlight_mode",
 another mode's slug) puts out a Light the mode at for the player up: a mode's light (its ``lit_as``) is a weak global
 too (``pad_lit_<mode>``), so another mode can clear it and that mode's next tick takes its lights down.
 
+A LIGHT UNDER ANOTHER (PAD-601). The same owner used one insert for two things: one mode's light on it, and a
+higher one's over it while that one runs. When the higher one ended its lights went to the game, and the insert was
+dark (or the game's) though the first mode still had it lit; a Light block in its When the mode ends could not put
+it back, as the end hands every light back after that hat. So the runtime keeps, per insert, the holds it was taken
+from (pad_mode_runtime.c ``lamp_under``): when the mode on top lets go, the latest one still holding it has it back.
+And a Light block may light it "off" (held dark), where Hand back lets the game's own light show through.
+
 What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 gives the blocks:
 
 - A SHARED variable is one value per player that every mode naming it reads and writes - the
@@ -244,10 +251,11 @@ HUD_PRIORITY = 180               # a HUD mode with no priority of its own takes 
                                  # pm_display_covered watches for it
 TOTAL_MS = 3000                  # the HUD's TOTAL stays up this long after the end
 #: a lit shot's pattern: the SDK's, and its pace (ms) when the block gives none. "hurry" is a
-#: blink that quickens as the clock runs down (PAD-376, the kit's kit_hurry_ms)
+#: blink that quickens as the clock runs down (PAD-376, the kit's kit_hurry_ms); "off" holds it dark (PAD-601: the
+#: game's own light there does not show through, as it does when the light is handed back)
 PATTERNS = {"solid": ("PM_LAMP_SOLID", 0), "blink": ("PM_LAMP_BLINK", 500),
             "pulse": ("PM_LAMP_PULSE", 1600), "chase": ("PM_LAMP_CHASE", 150),
-            "hurry": ("PM_LAMP_BLINK", 0)}
+            "hurry": ("PM_LAMP_BLINK", 0), "off": ("PM_LAMP_SOLID", 0)}
 RATE_MIN, RATE_MAX = 20, 5000    # a blink's, pulse's or chase's pace, ms
 #: PAD-503: a mode lit at a shot shows it in one of these (no clock runs while it is lit, so no hurry)
 LIT_PATTERNS = ("solid", "blink", "pulse", "chase")
@@ -1009,12 +1017,12 @@ def _check_stack(stack, depth, where, ctx):
             else:
                 _check_shot(b.get("shot"), where + "'s lights", ctx)
             if op == "light_shot":
-                if not COLOR_RE.match(str(b.get("color") or "")):
+                if b.get("pattern") != "off" and not COLOR_RE.match(str(b.get("color") or "")):
                     ctx["out"].append("%s lights a shot in no color." % where)
                 if b.get("pattern") not in PATTERNS:
                     ctx["out"].append("%s lights a shot in no pattern." % where)
                 rate = b.get("rate")
-                if rate is not None and b.get("pattern") not in ("solid", "hurry"):
+                if rate is not None and b.get("pattern") not in ("solid", "hurry", "off"):
                     _check_num(rate, where, ctx)
                     if (isinstance(rate, dict) and rate.get("k") == "num"
                             and _int_ok(rate.get("v"), -NUMBER_MAX, NUMBER_MAX)
@@ -1546,8 +1554,10 @@ class _Gen:
                 pat, ms = PATTERNS[pattern]
                 color = str(b.get("color") or "#ffffff")
                 rgb = int(color[1:], 16) if COLOR_RE.match(color) else 0xFFFFFF
+                if pattern == "off":
+                    rgb = 0                             # PAD-601: held dark
                 rate = b.get("rate")
-                pace = self.num(rate) if rate is not None and pattern not in ("solid", "hurry") else "%dLL" % ms
+                pace = self.num(rate) if rate is not None and pattern not in ("solid", "hurry", "off") else "%dLL" % ms
                 out.append(pad + "light(%s, 0x%06xu, %s, %s, %d);"
                            % (self.light_i(b), rgb, pat, pace, 1 if pattern == "hurry" else 0))
             elif op == "lights_off":

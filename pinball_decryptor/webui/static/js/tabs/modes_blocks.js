@@ -28,9 +28,9 @@ const SHARED_RESETS = RESETS.filter(([r]) => r !== "mode");
 // MODE_SDK.md "Display priority": a mode's 180 lets jackpots, starts and the tilt warning through
 const DISPLAY_PRIORITIES = [[0, "none"], [180, "a mode's (180)"], [190, "a wizard mode's (190)"]];
 const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"],
-  ["hurry", "blinking faster"]];
+  ["hurry", "blinking faster"], ["off", "off (dark)"]];   // PAD-601: off holds it dark
 const PACED = ["blink", "pulse", "chase"];
-const LIT_PATTERNS = PATTERNS.filter(([p]) => p !== "hurry");   // PAD-503: no clock runs while a mode is lit
+const LIT_PATTERNS = PATTERNS.filter(([p]) => p !== "hurry" && p !== "off");   // PAD-503: no clock runs while a mode is lit
 const LIT_INSERTS_MAX = 8;                                        // PAD-521: block_modes.LIT_INSERTS_MAX
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
@@ -94,7 +94,8 @@ const TIP = {
   show: "A light show over the playfield's inserts (the ones the game's port places), a few seconds long: the shots' own lights come back when it is over. A new show takes the place of one still running.",
   ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colors, from a place on the playfield.",
   stepRate: "The pattern's pace, ms (a strobe's flash, a beam's turn, a chase's step). 0 = its usual.",
-  lightShot: "Lights a shot's inserts, or one of the game's own lights by name (an insert, a GI string or a flasher, under The game's lights), in this color and pattern, over what the game shows there. It stays lit until a Hand back block or the end of the mode gives it back to the game. To light the mode itself, so that a shot starts it, use Light the mode at.",
+  lightShot: "Lights a shot's inserts, or one of the game's own lights by name (an insert, a GI string or a flasher, under The game's lights), in this color and pattern, over what the game shows there; off holds it dark. It stays so until a Hand back block or the end of the mode gives it back: to another of your modes that had it lit before, else to the game. To light the mode itself, so that a shot starts it, use Light the mode at.",
+  handBack: "Gives these lights back: to another of your modes that had one lit before this mode lit it over theirs (its light comes back as it was), else to the game. The end of the mode gives back every light it holds.",
   gi: "The lights between the inserts (the general illumination) during this step: the game's, dark, or flashing white.",
   hold: "Holds the mechanism this many ms (100 to 5000) at its own power settings, then lets go. Only while the mode runs, never while the game uses it, 3 s apart and 6 a minute at most; the mode ending, the ball draining or a tilt lets go at once. Any value: a number, a variable, a sum.",
   scoopHold: "A ball that settles in the scoop waits this many ms (100 to 10000), then the game kicks it out as always. The next ball, or every ball while the mode runs. The game's own use of the scoop comes first; the mode ending lets it go.",
@@ -371,7 +372,8 @@ function StmtBody({ b, path, ed }) {
     case "words": return html`<span class="bk-w">Show</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">on its screen</span>`;
     case "light_shot": return html`<span class="bk-w" ...${tip(TIP.lightShot)}>Light</span><${LightPick} b=${b} path=${path} ed=${ed} />
-      <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The insert's color")} />
+      ${b.pattern === "off" ? null : html`<input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)}
+        ...${tip("The insert's color")} />`}
       <${Pick} value=${b.pattern} options=${PATTERNS} title=${b.pattern === "hurry" ? TIP.hurry : undefined} onChange=${(v) => set("pattern", v)} />
       ${PACED.includes(b.pattern) ? html`<span class="bk-w" ...${tip(TIP.rate)}>every</span><${Slot} kind="num" optional empty="its usual pace"
         value=${b.rate} path=${[...path, "rate"]} ed=${ed} /><span class="bk-w">ms</span>` : null}`;
@@ -388,7 +390,7 @@ function StmtBody({ b, path, ed }) {
       return html`<span class="bk-w" ...${tip(TIP.show)}>Run the light show</span><${Pick} value=${b.show}
         options=${[...shows.map((x) => [x.key, x.label]), ["own", "its own steps…"]]} onChange=${pick} />`;
     }
-    case "lights_off": return html`<span class="bk-w">Hand back the lights of</span><${LightPick} b=${b} path=${path} ed=${ed} every />`;
+    case "lights_off": return html`<span class="bk-w" ...${tip(TIP.handBack)}>Hand back the lights of</span><${LightPick} b=${b} path=${path} ed=${ed} every />`;
     case "add_time": return html`<span class="bk-w" ...${tip(TIP.addTime)}>Add</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "set_time": return html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />

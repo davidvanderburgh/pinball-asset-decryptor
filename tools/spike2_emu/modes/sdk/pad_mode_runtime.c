@@ -1312,7 +1312,15 @@ struct lamp_held {
     int flash_only;                 /* held for the strobe alone: handed back to the game when it ends */
 };
 static struct lamp_held lamp_held[N_LAMPS];
-static unsigned lamp_hold_on_ms;    /* the on time the next hold takes (set around a call, runtime-internal) */
+/* PAD-601: the holds an insert was taken from, the latest last. A mode lighting an insert another of ours holds
+ * takes it, as before; the one it took it from is kept here, and when the mode on top lets go the latest one still
+ * under it has the insert back (its pattern, colour and layer), not the game. A mode letting go of an insert it is
+ * under leaves this list; the game leaving play empties it. */
+#define LAMP_UNDER   4
+struct lamp_under { const struct pm_mode *owner; unsigned rgb, period, chase_i, chase_n, on_ms; int pattern, layer; };
+static struct lamp_under lamp_under[N_LAMPS][LAMP_UNDER];
+static int lamp_n_under[N_LAMPS];
+static unsigned lamp_hold_on_ms;   /* the on time the next hold takes (set around a call, runtime-internal) */
 static struct { unsigned prio; unsigned char *group; unsigned misses; } lamp_layer[LAMP_LAYERS];
 static int n_lamp_layers;
 static struct { const struct pm_mode *mode; unsigned prio; } lamp_mode_prio[LAMP_MODES];
@@ -1547,6 +1555,51 @@ static void lamp_let_go(int k)
     h->flash_only = 0;
 }
 
+/* PAD-601: m's hold under insert k forgotten (m let go of it, or holds it on top again) */
+static void lamp_under_drop(int k, const struct pm_mode *m)
+{
+    int i, j;
+    for (i = 0; i < lamp_n_under[k]; i++)
+        if (lamp_under[k][i].owner == m) {
+            for (j = i + 1; j < lamp_n_under[k]; j++) {
+                struct lamp_under *a = &lamp_under[k][j - 1], *b = &lamp_under[k][j];
+                a->owner = b->owner; a->rgb = b->rgb; a->period = b->period; a->chase_i = b->chase_i;
+                a->chase_n = b->chase_n; a->on_ms = b->on_ms; a->pattern = b->pattern; a->layer = b->layer;
+            }
+            lamp_n_under[k]--;
+            return;
+        }
+}
+
+/* PAD-601: insert k's owner's hold kept under the mode taking it over (the oldest goes when the list is full) */
+static void lamp_under_push(int k)
+{
+    struct lamp_held *h = &lamp_held[k];
+    struct lamp_under *u;
+    if (!h->owner || h->flash_only) return;     /* a hit's strobe alone holds nothing to come back to */
+    lamp_under_drop(k, h->owner);
+    if (lamp_n_under[k] == LAMP_UNDER) lamp_under_drop(k, lamp_under[k][0].owner);
+    u = &lamp_under[k][lamp_n_under[k]++];
+    u->owner = h->owner; u->rgb = h->rgb; u->period = h->period; u->chase_i = h->chase_i;
+    u->chase_n = h->chase_n; u->on_ms = h->on_ms; u->pattern = h->pattern; u->layer = h->layer;
+}
+
+/* PAD-601: the mode on top let go of insert k: the latest hold still under it has it back (1), else the game (0) */
+static int lamp_hand_down(int k)
+{
+    struct lamp_held *h = &lamp_held[k];
+    struct lamp_under *u;
+    lamp_let_go(k);
+    if (!lamp_n_under[k]) return 0;
+    u = &lamp_under[k][--lamp_n_under[k]];
+    h->owner = u->owner; h->rgb = u->rgb; h->period = u->period; h->chase_i = u->chase_i;
+    h->chase_n = u->chase_n; h->on_ms = u->on_ms; h->pattern = u->pattern; h->layer = u->layer;
+    h->t0 = pm_ms();
+    h->last[0] = h->last[1] = h->last[2] = -1;
+    lamp_say("lamps: %s back to %s", lamps[k].name, h->owner->name ? h->owner->name : "another mode");
+    return 1;
+}
+
 static const char *const lamp_pattern_name[] = { "solid", "blink", "pulse", "chase" };
 
 /* hold the lamps in list[0..n) for the calling mode */
@@ -1562,11 +1615,15 @@ static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned
     if (layer < 0) return 0;
     for (j = 0; j < n; j++) {
         struct lamp_held *h = &lamp_held[list[j]];
-        if (h->owner && h->owner != current)
-            lamp_say("lamps: %s takes %s from %s", current && current->name ? current->name : "a mode", lamps[list[j]].name,
-                     h->owner->name ? h->owner->name : "another mode");
+        const struct pm_mode *me = current ? current : (const struct pm_mode *)&lamps;   /* a call from outside a callback */
+        if (h->owner && h->owner != me) {
+            lamp_say("lamps: %s takes %s from %s", current && current->name ? current->name : "a mode",
+                     lamps[list[j]].name, h->owner->name ? h->owner->name : "another mode");
+            lamp_under_push(list[j]);           /* PAD-601: it has the insert back when this mode lets go */
+        }
+        lamp_under_drop(list[j], me);
         if (h->owner && h->layer != layer) lamp_let_go(list[j]);
-        h->owner = current ? current : (const struct pm_mode *)&lamps;   /* a call from outside a callback */
+        h->owner = me;
         h->rgb = rgb;
         h->pattern = pattern;
         h->period = period_ms;
@@ -1597,6 +1654,9 @@ int pm_lamp_paint(int k, unsigned rgb)
     }
     layer = lamp_layer_for(lamp_prio_of(current));
     if (layer < 0) return 0;
+    if (h->owner && h->owner != (current ? current : (const struct pm_mode *)&lamps))
+        lamp_under_push(k);                     /* PAD-601: a show over another mode's light gives it back */
+    lamp_under_drop(k, current ? current : (const struct pm_mode *)&lamps);
     if (h->owner && h->layer != layer) lamp_let_go(k);
     h->owner = current ? current : (const struct pm_mode *)&lamps;
     h->rgb = rgb;
@@ -1666,21 +1726,25 @@ int pm_lamp_shot(uint64_t shots, unsigned rgb, int pattern, unsigned period_ms)
 
 static int lamp_release_list(const int *list, int n, const char *what)
 {
-    int j, r = 0;
+    int j, r = 0, down = 0;
     unsigned long now = pm_ms();
     for (j = 0; j < n; j++) {
         struct lamp_held *h = &lamp_held[list[j]];
+        if (current) lamp_under_drop(list[j], current);     /* PAD-601: one it is under no longer comes back */
+        else lamp_n_under[list[j]] = 0;                      /* from outside a callback: the game has it */
         if (!h->owner || (current && h->owner != current)) continue;
         if (h->flash_until && (long)(h->flash_until - now) > 0) {
             h->flash_only = 1;      /* PAD-415: a hit's strobe ends first, then the game has it back */
             h->rgb = 0;
             h->pattern = PM_LAMP_SOLID;
         } else {
-            lamp_let_go(list[j]);
+            down += lamp_hand_down(list[j]);    /* PAD-601: to a mode it was taken from, if one still holds it */
         }
         r++;
     }
-    if (r) lamp_say("lamps: %d insert(s) handed back to the game (%s)", r, what);
+    if (r && down) lamp_say("lamps: %d insert(s) handed back, %d to the game and %d to the mode under it (%s)",
+                            r, r - down, down, what);
+    else if (r) lamp_say("lamps: %d insert(s) handed back to the game (%s)", r, what);
     return r;
 }
 
@@ -1707,6 +1771,7 @@ int pm_lamp_release_all(void)
     if (!(can & PM_CAN_LAMPS)) return 0;
     for (k = 0; k < n_lamps; k++)
         if (lamp_held[k].owner && (!current || lamp_held[k].owner == current)) list[n++] = k;
+        else if (current) lamp_under_drop(k, current);     /* PAD-601: the ones it is under too */
     return lamp_release_list(list, n, "all of the mode's");
 }
 
@@ -1778,7 +1843,13 @@ int pm_lamp_priority(unsigned priority)
         h->layer = layer;
         h->last[0] = h->last[1] = h->last[2] = -1;
     }
-    lamp_say("lamps: %s's layer is at priority %u", current && current->name ? current->name : "the mode", priority);
+    for (k = 0; k < n_lamps; k++) {             /* PAD-601: a hold of its under another mode's comes back there */
+        int j;
+        for (j = 0; j < lamp_n_under[k]; j++)
+            if (lamp_under[k][j].owner == current && (layer >= 0 || (layer = lamp_layer_for(priority)) >= 0))
+                lamp_under[k][j].layer = layer;
+    }
+    lamp_say("lamps: %s's layer is at priority %u",current && current->name ? current->name : "the mode", priority);
     return (int)priority;
 }
 
@@ -1831,8 +1902,10 @@ static void lamps_tick(void)
     in = pm_in_game();
     if (was_in && !in) {
         int n = 0;
-        for (k = 0; k < n_lamps; k++)
+        for (k = 0; k < n_lamps; k++) {
+            lamp_n_under[k] = 0;
             if (lamp_held[k].owner) { lamp_let_go(k); n++; }
+        }
         if (n) lamp_say("lamps: the game left play - %d insert(s) handed back", n);
     }
     was_in = in;
@@ -1852,7 +1925,7 @@ static void lamps_tick(void)
                 continue;
             }
             h->flash_until = 0;
-            if (h->flash_only) { lamp_let_go(k); continue; }
+            if (h->flash_only) { lamp_hand_down(k); continue; }
             h->last[0] = h->last[1] = h->last[2] = -1;
         }
         f = lamp_level(h, now);

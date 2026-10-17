@@ -582,6 +582,9 @@ HELP_CONTENT = {
             "Select several rows (Ctrl-click, Shift-click) with the **Colors** bar open "
             "and a profile you pick goes to every one of them that is not locked, each "
             "attached.",
+            "To keep a copy on your PC, right-click a row (or several) and pick **Save "
+            "this clip with its color profile…**: the clips are saved to a folder you choose with "
+            "their color profile baked in.",
             "### Preview colors\n"
             "Switches above the players show the clips as the machine will (preview "
             "only; no re-encode), drawn the same way Scenes draws a picture, color ranges "
@@ -867,7 +870,10 @@ HELP_CONTENT = {
             "others.\n"
             "- Tick **Unlock extracted images** under Advanced to give the game's own "
             "pictures a palette too. Detaching one, or locking again, puts the "
-            "original back.",
+            "original back.\n"
+            "- To keep a copy on your PC, right-click a row (or several) and pick "
+            "**Save this picture with its color profile…** (or **More**): the pictures are saved "
+            "to a folder you choose with their color profile baked in.",
         ]),
         ("Replace from folder", [
             "**Replace from folder…**, beside the project folder, gives each file in "

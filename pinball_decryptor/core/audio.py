@@ -1255,10 +1255,33 @@ def _native_audio_player(path):
 
 
 def probe_duration(path):
-    """Best-effort total duration in seconds (via ffprobe), else 0.0."""
+    """Best-effort total duration in seconds (via ffprobe), else 0.0.
+
+    Kept for as long as the file is the same size and modification time: a
+    build asks it of the same clip more than once, an ffprobe each time
+    (PAD-599)."""
     if not path or not os.path.isfile(path):
         return 0.0
-    return _ffmpeg_get_duration(path)
+    try:
+        st = os.stat(path)
+        key = (os.path.normcase(os.path.abspath(path)), st.st_size,
+               st.st_mtime_ns, find_ffprobe())
+    except OSError:
+        key = None
+    if key is not None:
+        hit = _DURATION_MEMO.get(key)
+        if hit is not None:
+            return hit
+    dur = _ffmpeg_get_duration(path)
+    if key is not None and dur:
+        if len(_DURATION_MEMO) >= 20000:
+            _DURATION_MEMO.clear()
+        _DURATION_MEMO[key] = dur
+    return dur
+
+
+#: :func:`probe_duration`'s answers, ``{(path, size, mtime_ns, prober): s}``
+_DURATION_MEMO: dict = {}
 
 
 def render_spectrogram_png(path, width=700, height=90, gain_db=0.0):

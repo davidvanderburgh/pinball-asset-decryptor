@@ -645,23 +645,48 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
 #: The mode a new file gets: what every stock asset on a Spike 2 card carries.
 PINNED_NEW_MODE = 0o100664
 
+# Every debugfs run opens the card's filesystem afresh, and on Windows the card
+# sits on a Windows drive the executor's Linux reads over 9p: about 0.2 s an
+# open on a 16 GB card, and the delivery used to open it four or five times a
+# file (a stat for the room, another for the old mode, the write, the size
+# check), 400 opens for a Godzilla card's 81 files, two of its build's minutes
+# (PAD-599).  Now one read-only session stats every path up front, one
+# ``debugfs -w`` session runs every job's commands in order, and one more reads
+# back every size; the commands, and so the bytes, are the ones the per-file
+# runs gave.
+
 _PINNED_HEAD = r'''set -e
 export E2FSPROGS_FAKE_TIME=@EPOCH@ E2FSCK_TIME=@EPOCH@
 DEV=@DEV@
 command -v debugfs >/dev/null && command -v e2fsck >/dev/null || { echo "PAD_GROW_NOTOOLS debugfs/e2fsck" >&2; exit 5; }
-# stat of a path -> "<size> <mode> <uid> <gid>", or nothing when it is not there
-fst() {
-    debugfs -R "stat \"$1\"" "$DEV" 2>/dev/null | awk '
+LOG=$(mktemp /var/tmp/pad_pinned_XXXXXX)
+trap 'rm -f "$LOG" "$LOG.cmd" "$LOG.ecmd" "$LOG.q" "$LOG.st" "$LOG.fst" "$LOG.x"' EXIT
+# one debugfs -f session's "stat" answers -> "<path>\t<size> <mode> <uid> <gid>"
+# per path that is there (each command is echoed as "debugfs: stat "<path>"")
+stparse() {
+    awk '
+        function out() { if (p != "" && m != "") printf "%s\t%s %s %s %s\n", p, s, m, u, g }
+        /^debugfs: / { out(); p = ""; m = ""
+                       if ($0 ~ /^debugfs: stat "/) { p = $0; sub(/^debugfs: stat "/, "", p); sub(/"$/, "", p) }
+                       next }
         /^Inode:/ { for (i = 1; i < NF; i++) if ($i == "Mode:") m = $(i + 1) }
         /^User:/  { u = $2; g = $4; for (i = 1; i < NF; i++) if ($i == "Size:") s = $(i + 1) }
-        END { if (m != "") print s, m, u, g }'
+        END { out() }' "$1"
 }
-stats=$(debugfs -R stats "$DEV" 2>/dev/null)
-fb=$(echo "$stats" | awk -F: '/^Free blocks:/ { gsub(/ /, "", $2); print $2 }')
-bs=$(echo "$stats" | awk -F: '/^Block size:/ { gsub(/ /, "", $2); print $2 }')
+# stat of a path -> "<size> <mode> <uid> <gid>", or nothing when it is not there
+fst() { awk -F'\t' -v p="$1" '$1 == p { print $2; exit }' "$LOG.fst"; }
+cat > "$LOG.q" <<'PAD_STAT_EOF'
+stats
+@STATS@
+PAD_STAT_EOF
+debugfs -f "$LOG.q" "$DEV" > "$LOG.st" 2>/dev/null
+stparse "$LOG.st" > "$LOG.fst"
+fb=$(awk -F: '/^Free blocks:/ { gsub(/ /, "", $2); print $2; exit }' "$LOG.st")
+bs=$(awk -F: '/^Block size:/ { gsub(/ /, "", $2); print $2; exit }' "$LOG.st")
 [ -n "$fb" ] && [ -n "$bs" ] || { echo "PAD_GROW_NOFS" >&2; exit 7; }
-LOG=$(mktemp /var/tmp/pad_pinned_XXXXXX)
-trap 'rm -f "$LOG" "$LOG.cmd"' EXIT
+echo "PAD_GROW_BS $bs"
+: > "$LOG.cmd"
+: > "$LOG.ecmd"
 need=0
 '''
 
@@ -671,13 +696,12 @@ if [ "$d" -gt 0 ]; then need=$((need + d))
 echo "PAD_GROW_ITEM $d @REL@"; fi
 '''
 
+# a directory made here is answered by fst from then on, as a fresh stat would
 _PINNED_MKDIR = r'''if [ -z "$(fst @DIR@)" ] && [ -n "$(fst @UP@)" ]; then
     set -- $(fst @UP@); dmode=$(printf "%o" $((8#40000 | 8#$2)))
     printf 'mkdir "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
-        @DIR@ @DIR@ "$dmode" @DIR@ "$3" @DIR@ "$4" > "$LOG.cmd"
-    debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
-    bad=$(grep -v '^debugfs\|^$' "$LOG" || true)
-    if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS "@DIR@": $bad" >&2; exit 6; fi
+        @DIR@ @DIR@ "$dmode" @DIR@ "$3" @DIR@ "$4" >> "$LOG.cmd"
+    printf '%s\t%s %s %s %s\n' @DIR@ 4096 "$2" "$3" "$4" >> "$LOG.fst"
     echo "PAD_GROW_MKDIR "@DIR@
 fi
 '''
@@ -690,21 +714,60 @@ echo "PAD_GROW_SPACE need=$need avail=$avail"
 _PINNED_JOB = r'''old=$(fst @TGT@)
 if [ -n "$old" ]; then
     set -- $old; mode=$2; uid=$3; gid=$4
-    printf 'kill_file "%s"\nrm "%s"\n' @TGT@ @TGT@ > "$LOG.cmd"
+    printf 'kill_file "%s"\nrm "%s"\n' @TGT@ @TGT@ >> "$LOG.cmd"
 else
     par=$(fst @PARENT@)
     [ -n "$par" ] || { echo "PAD_GROW_NODIR "@REL@ >&2; exit 4; }
     set -- $par; mode=@NEWMODE@; uid=$3; gid=$4
-    : > "$LOG.cmd"
 fi
 # debugfs prints a mode's permission bits only (0664); a FILE needs S_IFREG too
 case "$mode" in 10????) ;; *) mode=$(printf "%o" $((8#100000 | 8#$mode))) ;; esac
 printf 'write "%s" "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
-    @SRC@ @TGT@ @TGT@ "$mode" @TGT@ "$uid" @TGT@ "$gid" >> "$LOG.cmd"
-debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
+    @WSRC@ @TGT@ @TGT@ "$mode" @TGT@ "$uid" @TGT@ "$gid" >> "$LOG.cmd"
+@ALLOC@'''
+
+# A big file's blocks only (see grow_files_pinned): debugfs allocates them,
+# fallocate's way, and sets the size; the bytes are written afterwards
+_PINNED_ALLOC = r'''size=$(stat -c%s @SRC@); nb=$(( (size + bs - 1) / bs ))
+if [ "$nb" -gt 0 ]; then printf 'fallocate "%s" 0 %s\n' @TGT@ $((nb - 1)) >> "$LOG.cmd"; fi
+printf 'set_inode_field "%s" size %s\n' @TGT@ "$size" >> "$LOG.cmd"
+'''
+
+# ...and its extents, read back once every job is in: each is said to the
+# caller (PAD_GROW_EXT <job> <logical> <length> <physical>, in blocks) and
+# marked written (fallocate leaves them unwritten, which read as zeros)
+_PINNED_EXTENTS = r'''t=@TGT@
+debugfs -R "ex \"$t\"" "$DEV" 2>/dev/null | awk '
+    { gsub(/\/ +/, "/"); gsub(/ - +/, "-") }
+    $1 ~ /^[0-9]+\/[0-9]+$/ { split($1, a, "/"); if (a[1] != a[2]) next
+        split($3, l, "-"); split($4, p, "-"); print l[1], $5, p[1] }' > "$LOG.x"
+printf 'extent_open "%s"\n' "$t" >> "$LOG.ecmd"
+while read -r L N P; do
+    echo "PAD_GROW_EXT @I@ $L $N $P"
+    printf 'goto_block %s\nreplace_node %s %s %s\n' "$L" "$L" "$N" "$P" >> "$LOG.ecmd"
+done < "$LOG.x"
+printf 'extent_close\n' >> "$LOG.ecmd"
+'''
+
+_PINNED_MARK = r'''if [ -s "$LOG.ecmd" ]; then
+    debugfs -w -f "$LOG.ecmd" "$DEV" > "$LOG" 2>&1
+    bad=$(grep -v '^debugfs\|^extent: \|^$' "$LOG" || true)
+    if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS: $bad" >&2; exit 6; fi
+fi
+'''
+
+# every job's commands in one session, then every size read back in another
+_PINNED_WRITE = r'''debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
 bad=$(grep -v '^debugfs\|^Allocated inode:\|^$' "$LOG" || true)
-if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS "@REL@": $bad" >&2; exit 6; fi
-got=$(fst @TGT@ | cut -d" " -f1); want=$(stat -c%s @SRC@)
+if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS: $bad" >&2; exit 6; fi
+cat > "$LOG.q" <<'PAD_STAT_EOF'
+@STATS@
+PAD_STAT_EOF
+debugfs -f "$LOG.q" "$DEV" > "$LOG.st" 2>/dev/null
+stparse "$LOG.st" > "$LOG.fst"
+'''
+
+_PINNED_CHECK = r'''got=$(fst @TGT@ | cut -d" " -f1); want=$(stat -c%s @SRC@)
 if [ "$got" != "$want" ]; then echo "PAD_GROW_SHORT "@REL@" $got/$want" >&2; exit 6; fi
 echo "PAD_GROW_OK @I@ "@REL@
 '''
@@ -715,19 +778,48 @@ echo "PAD_GROW_DONE fsck=$rc"
 '''
 
 
-def _pinned_script(part_offset, jobs_exec, image_exec, epoch):
-    """The bash script :func:`grow_files_pinned` runs: a free-space check, then
-    per job one ``debugfs -w`` (kill_file/rm when the file exists, write, the
-    old or stock mode/uid/gid), a size check and a ``PAD_GROW_OK`` marker, then
-    one ``e2fsck -fy`` to reconcile the free counts debugfs leaves stale.  Every
-    tool runs with the clock pinned to *epoch*."""
+def _stat_lines(paths):
+    """debugfs ``stat`` commands for *paths*, each once, in order."""
+    seen, out = set(), []
+    for p in paths:
+        if p not in seen:
+            seen.add(p)
+            out.append('stat "%s"' % p)
+    return "\n".join(out)
+
+
+def _pinned_script(part_offset, jobs_exec, image_exec, epoch, native=()):
+    """The bash script :func:`grow_files_pinned` runs: one read-only debugfs
+    session statting every path it needs (with the free-space ``stats``), a
+    free-space check, every job's commands (kill_file/rm when the file
+    exists, write, the old or stock mode/uid/gid) run in ONE ``debugfs -w``
+    session, every size read back in one more and a ``PAD_GROW_OK`` marker
+    per file, then one ``e2fsck -fy`` to reconcile the free counts debugfs
+    leaves stale.  Every tool runs with the clock pinned to *epoch*.
+
+    The jobs whose index is in *native* only get their blocks (allocated,
+    sized and marked written, the extents said in ``PAD_GROW_EXT`` lines);
+    :func:`grow_files_pinned` writes their bytes itself."""
     q = shlex.quote
+    native = frozenset(native)
     for rel, src in jobs_exec:
         if '"' in src or '"' in rel:
             raise Ext4GrowError("a path contains a double quote, which debugfs "
                                 "cannot take: %s" % (src if '"' in src else rel))
+        if "\n" in src or "\n" in rel:
+            raise Ext4GrowError("a path contains a line break, which debugfs "
+                                "cannot take: %r" % (src if "\n" in src else rel))
+    targets = ["/" + rel for rel, _src in jobs_exec]
+    looked = []
+    for rel, _src in jobs_exec:
+        tgt = "/" + rel
+        looked += [tgt, tgt.rsplit("/", 1)[0] or "/"]
+        made = _makes_dir(rel)
+        if made:
+            looked += ["/" + made[0], "/" + made[1]]
     out = [_PINNED_HEAD.replace("@EPOCH@", str(int(epoch))).replace(
-        "@DEV@", q("%s?offset=%d" % (image_exec, int(part_offset))))]
+        "@DEV@", q("%s?offset=%d" % (image_exec, int(part_offset))))
+        .replace("@STATS@", _stat_lines(looked))]
     for rel, src in jobs_exec:
         out.append(_PINNED_NEED.replace("@TGT@", q("/" + rel))
                    .replace("@SRC@", q(src)).replace("@REL@", q(rel)))
@@ -737,11 +829,29 @@ def _pinned_script(part_offset, jobs_exec, image_exec, epoch):
         made = _makes_dir(rel)
         if made:
             out.append(_PINNED_MKDIR.replace("@DIR@", q("/" + made[0])).replace("@UP@", q("/" + made[1])))
-        out.append(_PINNED_JOB.replace("@TGT@", q(tgt))
+        alloc = (_PINNED_ALLOC.replace("@TGT@", q(tgt)).replace("@SRC@", q(src))
+                 if i in native else "")
+        out.append(_PINNED_JOB.replace("@ALLOC@", alloc)
+                   .replace("@WSRC@", "/dev/null" if i in native else q(src))
+                   .replace("@TGT@", q(tgt))
                    .replace("@PARENT@", q(tgt.rsplit("/", 1)[0] or "/"))
                    .replace("@SRC@", q(src))
                    .replace("@REL@", q(rel))
-                   .replace("@NEWMODE@", "%o" % PINNED_NEW_MODE)
+                   .replace("@NEWMODE@", "%o" % PINNED_NEW_MODE))
+    out.append(_PINNED_WRITE.replace("@STATS@", _stat_lines(targets)))
+    for i in sorted(native):
+        out.append(_PINNED_EXTENTS.replace("@TGT@", q("/" + jobs_exec[i][0]))
+                   .replace("@I@", str(i)))
+    if native:
+        out.append(_PINNED_MARK)
+    last = {rel: i for i, (rel, _src) in enumerate(jobs_exec)}
+    for i, (rel, src) in enumerate(jobs_exec):
+        if last[rel] != i:
+            # written again further down: only the last copy's size is there
+            out.append('echo "PAD_GROW_OK %d "%s\n' % (i, q(rel)))
+            continue
+        out.append(_PINNED_CHECK.replace("@TGT@", q("/" + rel))
+                   .replace("@SRC@", q(src)).replace("@REL@", q(rel))
                    .replace("@I@", str(i)))
     out.append(_PINNED_TAIL)
     return "".join(out)
@@ -794,7 +904,9 @@ def grow_files_pinned(image_path, part_offset, jobs, epoch, log=None,
     jobs_exec = [(rel, ex.to_exec_path(os.path.abspath(src))) for rel, src in jobs]
     log("Writing %d file(s) onto the card with a fixed clock, so the next "
         "build of the same project is byte-identical..." % len(jobs), "info")
-    script = _pinned_script(part_offset, jobs_exec, image_exec, epoch)
+    native = _native_jobs(image_path, jobs)
+    script = _pinned_script(part_offset, jobs_exec, image_exec, epoch,
+                            native=native)
     import tempfile
     b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
     fd, tmp = tempfile.mkstemp(suffix=".b64", prefix="pad_pinned_")
@@ -815,6 +927,8 @@ def grow_files_pinned(image_path, part_offset, jobs, epoch, log=None,
             os.remove(tmp)
         except OSError:
             pass
+    if native:
+        _write_native(image_path, part_offset, jobs, native, out)
     grown = out.count("PAD_GROW_OK ")
     for line in out.splitlines():
         if line.startswith("PAD_GROW_OK "):
@@ -822,3 +936,86 @@ def grow_files_pinned(image_path, part_offset, jobs, epoch, log=None,
     log("Wrote %d file(s) with the clock fixed at %d (filesystem checked)."
         % (grown, int(epoch)), "success")
     return grown
+
+
+# --------------------------------------------------------------------------
+# PAD-599: a big file's bytes written straight into the image.  debugfs
+# writes a file a few blocks at a time, and on Windows every one of those
+# writes crosses the 9p mount into the card image on the Windows drive: the
+# 2 GB sound bank of a build with many long sounds took 75 of the copy's 100
+# seconds.  For a file this big, debugfs only allocates its blocks (the
+# same session, in the same order, so a build is still byte-identical to
+# the next) and marks them written, and the bytes go in here, at the blocks
+# its extents name, as fast as the drive takes them.
+# --------------------------------------------------------------------------
+
+#: a file at least this big has its bytes written by :func:`_write_native`
+NATIVE_MIN = 32 << 20
+
+
+def _native_jobs(image_path, jobs):
+    """The indexes of *jobs* whose bytes :func:`_write_native` writes: on
+    Windows, into an image file (not a device), files of :data:`NATIVE_MIN`
+    or more that are not written twice.  ``PAD_PINNED_NATIVE=0`` turns it
+    off (debugfs writes every byte, as before PAD-599)."""
+    if (sys.platform != "win32" or os.environ.get("PAD_PINNED_NATIVE") == "0"
+            or not os.path.isfile(image_path)):
+        return ()
+    seen = {}
+    for rel, _src in jobs:
+        seen[rel] = seen.get(rel, 0) + 1
+    out = []
+    for i, (rel, src) in enumerate(jobs):
+        try:
+            big = os.path.getsize(src) >= NATIVE_MIN
+        except OSError:
+            big = False
+        if big and seen[rel] == 1:
+            out.append(i)
+    return tuple(out)
+
+
+def _write_native(image_path, part_offset, jobs, native, out):
+    """Write each *native* job's source into the blocks the script's
+    ``PAD_GROW_EXT`` lines name (the last block's tail zeroed).  Raises
+    :class:`Ext4GrowError` when the extents do not cover the file exactly."""
+    bs, exts = None, {}
+    for line in out.splitlines():
+        f = line.split()
+        if f[:1] == ["PAD_GROW_BS"] and len(f) == 2:
+            bs = int(f[1])
+        elif f[:1] == ["PAD_GROW_EXT"] and len(f) == 5:
+            exts.setdefault(int(f[1]), []).append(
+                tuple(int(v) for v in f[2:5]))
+    if not bs:
+        raise Ext4GrowError("the card's block size was not reported", grown=0)
+    chunk = max(bs, (8 << 20) // bs * bs)
+    with open(image_path, "r+b") as img:
+        for i in native:
+            rel, src = jobs[i]
+            size = os.path.getsize(src)
+            want = -(-size // bs)
+            got = sorted(exts.get(i, ()))
+            nxt = 0
+            for lblk, n, _p in got:
+                if lblk != nxt or n <= 0:
+                    break
+                nxt += n
+            if nxt != want or sum(n for _l, n, _p in got) != want:
+                raise Ext4GrowError(
+                    "%s: its blocks on the card cover %d of its %d blocks"
+                    % (rel, nxt, want), grown=i)
+            with open(src, "rb") as f:
+                for lblk, n, pblk in got:
+                    f.seek(lblk * bs)
+                    img.seek(int(part_offset) + pblk * bs)
+                    left = n * bs
+                    while left:
+                        data = f.read(min(chunk, left))
+                        if len(data) < min(chunk, left):
+                            # the file's end: the rest of its last block is zeros
+                            data += b"\0" * (min(chunk, left) - len(data))
+                        img.write(data)
+                        left -= len(data)
+        img.flush()
+        os.fsync(img.fileno())

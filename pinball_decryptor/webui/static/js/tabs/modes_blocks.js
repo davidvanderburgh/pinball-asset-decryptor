@@ -28,9 +28,9 @@ const SHARED_RESETS = RESETS.filter(([r]) => r !== "mode");
 // MODE_SDK.md "Display priority": a mode's 180 lets jackpots, starts and the tilt warning through
 const DISPLAY_PRIORITIES = [[0, "none"], [180, "a mode's (180)"], [190, "a wizard mode's (190)"]];
 const PATTERNS = [["solid", "solid"], ["blink", "blinking"], ["pulse", "pulsing"], ["chase", "chasing"],
-  ["hurry", "blinking faster"]];
+  ["hurry", "blinking faster"], ["off", "off (dark)"]];   // PAD-601: off holds it dark
 const PACED = ["blink", "pulse", "chase"];
-const LIT_PATTERNS = PATTERNS.filter(([p]) => p !== "hurry");   // PAD-503: no clock runs while a mode is lit
+const LIT_PATTERNS = PATTERNS.filter(([p]) => p !== "hurry" && p !== "off");   // PAD-503: no clock runs while a mode is lit
 const LIT_INSERTS_MAX = 8;                                        // PAD-521: block_modes.LIT_INSERTS_MAX
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
@@ -94,6 +94,8 @@ const TIP = {
   show: "A light show over the playfield's inserts (the ones the game's port places), a few seconds long: the shots' own lights come back when it is over. A new show takes the place of one still running.",
   ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colors, from a place on the playfield.",
   stepRate: "The pattern's pace, ms (a strobe's flash, a beam's turn, a chase's step). 0 = its usual.",
+  lightShot: "Lights a shot's inserts, or one of the game's own lights by name (an insert, a GI string or a flasher, under The game's lights), in this color and pattern, over what the game shows there; off holds it dark. It stays so until a Hand back block or the end of the mode gives it back: to another of your modes that had it lit before, else to the game. To light the mode itself, so that a shot starts it, use Light the mode at.",
+  handBack: "Gives these lights back: to another of your modes that had one lit before this mode lit it over theirs (its light comes back as it was), else to the game. The end of the mode gives back every light it holds.",
   gi: "The lights between the inserts (the general illumination) during this step: the game's, dark, or flashing white.",
   hold: "Holds the mechanism this many ms (100 to 5000) at its own power settings, then lets go. Only while the mode runs, never while the game uses it, 3 s apart and 6 a minute at most; the mode ending, the ball draining or a tilt lets go at once. Any value: a number, a variable, a sum.",
   scoopHold: "A ball that settles in the scoop waits this many ms (100 to 10000), then the game kicks it out as always. The next ball, or every ball while the mode runs. The game's own use of the scoop comes first; the mode ending lets it go.",
@@ -102,6 +104,8 @@ const TIP = {
   shakeGame: "Plays one of the game's own shakes, as the game does: on Godzilla its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble or its multiball start (five shakes over 4 seconds); on the other games the one it plays most of each length (a tap, a short, medium or long shake, a rumble). The same limits as Shake the cabinet.",
   gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds; a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
   lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the inserts picked (a villain's; several take turns with Chase) shine in this color while the mode is not running, ball after ball, and that shot made starts the mode. As the game's own do, it waits while the game says one of its modes is in the way (on James Bond: a henchman, villain or Q Branch mode, or one of its mini-wizards) and, as this mode is set, while another of the game's modes or a multiball runs; it stays lit for the next shot. While the game says one of its modes is in the way, only the insert held solid shows: the shot's lights and the inserts picked light once that mode is over, as the game's own wait to cycle their villains. Once it could start, its shot is its own: the game does not start one of its own modes on it (on James Bond's Right ramp, a henchman or villain), which waits for a later shot. It stays lit when a ball or one of the game's modes ends. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
+  unlight: "Puts out a Light the mode at for the player up: this mode's, or another mode of yours on the card (another target's when this one is qualified, so only one is ready at a time). It lights again only when a Light the mode at block runs again.",
+  setHits: "Sets a shot's hits this ball for the player up. The hits are one count for every mode of yours on the card, so setting another target's hits back below what qualifies it takes it back for its own mode too. A ball ending or a new game puts every count back to 0.",
   litMore: "Another insert lit with it. With more than one, Chase runs the light across them in turn, as James Bond cycles its villains on the Right ramp while one of its mini-wizards is lit; the other patterns light them all at once.",
   litSolid: "One insert more, held solid in its own color while the mode is lit and handed back with the rest: the film's insert (Y.O.L.T., DIAMONDS ARE FOREVER) as the game holds it for one of its own mini-wizards. It shows even while one of the game's modes is in the way.",
   bar: "While it runs, its name goes in the game's own status bar under the screen, in this color, with its clock draining along it, as the game shows its own modes (James Bond: Goldfinger's Jackpot in gold). At the end the bar stays full through its total, then the game has it back; a drain gives it back at once.",
@@ -147,7 +151,7 @@ function stmtTemplates(ch, vars, prog = {}) {
   const sound = ((prog.sounds || [])[0] || {}).name || "";
   return [
     ["Mode", [{ op: "start_mode" }, { op: "light_mode", shot: litShot(ch), insert: "", color: "#ffd000", pattern: "blink" },
-      { op: "end_mode" }, { op: "add_time", seconds: num(5) },
+      { op: "unlight_mode", mode: "" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
       { op: "set_time", seconds: num(10) },
       { op: "multiball", balls: 2, save: 10 },
       { op: "game_wizard", name: ((ch.game_wizards || [])[0] || {}).name || "", how: "light" }]],
@@ -157,7 +161,7 @@ function stmtTemplates(ch, vars, prog = {}) {
       { op: "shield", where: "toward" }, { op: "building", floor: "3" }, { op: "shake", ms: num(500), strength: "hard" },
       { op: "shake_game", shake: ((ch.shakes || [])[0] || {}).name || "jackpot" }].filter((t) => !machineLacks(t, ch))],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
-      { op: "change", var: v, by: num(1) }]],
+      { op: "change", var: v, by: num(1) }, { op: "set_hits", shot, value: num(0) }]],
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
     ["Control", [{ op: "if", cond: null, then: [], else: null }, { op: "if", cond: null, then: [], else: [] }]],
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
@@ -185,7 +189,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
   player: "the player up", op: "a sum" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs" };
-const STMT_CLASS = { start_mode: "mode", light_mode: "mode", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
+const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
@@ -228,6 +232,22 @@ function Pick({ value, options, onChange, width, title, missing = "(not on this 
   if (value != null && value !== "" && !opts.some((o) => o.value === value)) opts.unshift({ value, label: `${value} ${missing}` });
   if (value == null || value === "") opts.unshift({ value: "", label: "(choose)" });
   return html`<${Select} sm value=${value ?? ""} options=${opts} onChange=${onChange} width=${width} title=${title} />`;
+}
+
+// PAD-598: what a Light or Hand back block lights: a shot's inserts, or one of the game's own lights by name (an
+// insert, a GI string, a flasher: the port's lamp lines), kept in the block's `insert` instead of its `shot`
+const LAMP = "lamp:";
+function LightPick({ b, path, ed, every }) {
+  const lamps = ed.ch.inserts || [];
+  const opts = [...(every ? [{ value: "*", label: "every shot" }] : []),
+    ...(ed.ch.shots || []).map((n) => ({ value: n, label: n, group: "Shots" })),
+    ...lamps.map((n) => ({ value: LAMP + n, label: n, group: "The game's lights" }))];
+  if (b.insert && !lamps.includes(b.insert)) opts.unshift({ value: LAMP + b.insert, label: `${b.insert} (not on this game)` });
+  const pick = (v) => ed.edit((d) => {
+    const t = at(d, path);
+    if (v.startsWith(LAMP)) { t.insert = v.slice(LAMP.length); delete t.shot; } else { t.shot = v; delete t.insert; }
+  });
+  return html`<${Pick} value=${b.insert ? LAMP + b.insert : b.shot} options=${opts} onChange=${pick} />`;
 }
 
 function TimerPick({ value, ed, onChange }) {
@@ -329,6 +349,14 @@ function StmtBody({ b, path, ed }) {
         ${b.solid ? html`<input type="color" class="bk-color" value=${b.solid_color || "#ffffff"} onInput=${(e) => set("solid_color", e.target.value)}
           ...${tip("That insert's color")} />` : null}<span class="bk-w">solid</span>`;
     }
+    case "unlight_mode": {
+      // PAD-600: this mode's light, or another mode's of the project (only one target qualified at a time)
+      const others = (ed.ch.modes || []).map((m) => [m.slug, m.name]);
+      return html`<span class="bk-w" ...${tip(TIP.unlight)}>Put out the light of</span><${Pick} value=${b.mode || "-"}
+        options=${[["-", "this mode"], ...others]} missing="(no such mode)" width=${200} onChange=${(v) => set("mode", v === "-" ? "" : v)} />`;
+    }
+    case "set_hits": return html`<span class="bk-w" ...${tip(TIP.setHits)}>Set the hits of</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
+      <span class="bk-w">to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />`;
     case "score": return html`<span class="bk-w">Score</span><${Slot} kind="num" value=${b.points} path=${[...path, "points"]} ed=${ed} /><span class="bk-w">points</span>`;
     case "set": return html`<span class="bk-w">Set</span><${Pick} value=${b.var} options=${ed.vars.map((v) => v.name)} missing="(no such variable)" onChange=${(v) => set("var", v)} />
       <span class="bk-w">to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />`;
@@ -343,8 +371,9 @@ function StmtBody({ b, path, ed }) {
     }
     case "words": return html`<span class="bk-w">Show</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">on its screen</span>`;
-    case "light_shot": return html`<span class="bk-w">Light</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
-      <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The insert's color")} />
+    case "light_shot": return html`<span class="bk-w" ...${tip(TIP.lightShot)}>Light</span><${LightPick} b=${b} path=${path} ed=${ed} />
+      ${b.pattern === "off" ? null : html`<input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)}
+        ...${tip("The insert's color")} />`}
       <${Pick} value=${b.pattern} options=${PATTERNS} title=${b.pattern === "hurry" ? TIP.hurry : undefined} onChange=${(v) => set("pattern", v)} />
       ${PACED.includes(b.pattern) ? html`<span class="bk-w" ...${tip(TIP.rate)}>every</span><${Slot} kind="num" optional empty="its usual pace"
         value=${b.rate} path=${[...path, "rate"]} ed=${ed} /><span class="bk-w">ms</span>` : null}`;
@@ -361,7 +390,7 @@ function StmtBody({ b, path, ed }) {
       return html`<span class="bk-w" ...${tip(TIP.show)}>Run the light show</span><${Pick} value=${b.show}
         options=${[...shows.map((x) => [x.key, x.label]), ["own", "its own steps…"]]} onChange=${pick} />`;
     }
-    case "lights_off": return html`<span class="bk-w">Hand back the lights of</span><${Pick} value=${b.shot} options=${[["*", "every shot"], ...shots.map((n) => [n, n])]} onChange=${(v) => set("shot", v)} />`;
+    case "lights_off": return html`<span class="bk-w" ...${tip(TIP.handBack)}>Hand back the lights of</span><${LightPick} b=${b} path=${path} ed=${ed} every />`;
     case "add_time": return html`<span class="bk-w" ...${tip(TIP.addTime)}>Add</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "set_time": return html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
@@ -554,9 +583,9 @@ function hatLabel(h) {
 }
 
 function stmtLabel(b) {
-  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
-    score: "Score points", set: "Set a variable", change: "Change a variable", callout: "Say a callout",
-    words: "Show words", light_shot: "Light a shot", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
+  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
+    score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
+    words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",

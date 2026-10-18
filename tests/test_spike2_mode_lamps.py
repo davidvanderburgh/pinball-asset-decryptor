@@ -420,6 +420,44 @@ def test_only_the_owner_releases_and_a_mode_takes_over_with_a_line(runtime):
     assert "B takes LEFT RAMP from A" in out
 
 
+def test_a_mode_letting_go_hands_the_insert_back_to_the_mode_it_took_it_from(runtime):
+    """PAD-601: one insert, two states: A's light on it, B's over it while B runs. B letting go gives A's back, as it
+    was (red, not the game's dark); A letting go then gives it to the game."""
+    out = _rt(runtime, "as", "A", "set", "ff0000", "0", "0", "LEFT RAMP", "tick", "1", "out", "346",
+              "as", "B", "set", "0000ff", "0", "0", "LEFT RAMP", "tick", "1", "out", "346", "out", "348",
+              "release_all", "tick", "1", "out", "346", "out", "348",
+              "as", "A", "release", "LEFT RAMP", "tick", "1", "out", "346")
+    assert re.findall(r"^OUT (\d+) (\d+)$", out, re.M) == [
+        ("346", "255"), ("346", "0"), ("348", "255"), ("346", "255"), ("348", "0"), ("346", "0")]
+    assert "B takes LEFT RAMP from A" in out and "lamps: LEFT RAMP back to A" in out
+    assert "1 insert(s) handed back, 0 to the game and 1 to the mode under it" in out
+    assert "1 insert(s) handed back to the game" in out                 # A's, after
+    assert re.findall(r"RELEASE (\d+)", out) == ["1", "1"]
+
+
+def test_a_mode_under_another_that_lets_go_does_not_come_back(runtime):
+    """A lets go while B is over it (its mode ended): B letting go then gives the insert to the game, not to A. A
+    lighting it again takes it back on top, and B's comes back when A lets go."""
+    out = _rt(runtime, "as", "A", "set", "ff0000", "0", "0", "LEFT RAMP", "as", "B", "set", "0000ff", "0", "0", "LEFT RAMP",
+              "as", "A", "release_all", "as", "B", "release_all", "tick", "1", "out", "346", "out", "348",
+              "as", "A", "set", "ff0000", "0", "0", "LEFT RAMP", "as", "B", "set", "0000ff", "0", "0", "LEFT RAMP",
+              "as", "A", "set", "ff0000", "0", "0", "LEFT RAMP", "tick", "1", "out", "346", "out", "348",
+              "release_all", "tick", "1", "out", "346", "out", "348")
+    assert re.findall(r"RELEASE (\d+)", out) == ["0", "1", "1"]       # A under B held nothing on top
+    assert re.findall(r"^OUT (\d+) (\d+)$", out, re.M) == [
+        ("346", "0"), ("348", "0"), ("346", "255"), ("348", "0"), ("346", "0"), ("348", "255")]
+    assert "back to A" not in out and "lamps: LEFT RAMP back to B" in out
+
+
+def test_the_light_under_comes_back_in_its_own_pattern_and_game_over_forgets_it(runtime):
+    out = _rt(runtime, "as", "A", "set", "00ff00", "1", "500", "LEFT RAMP", "as", "B", "set", "ff0000", "0", "0", "LEFT RAMP",
+              "release", "LEFT RAMP", "trace", "347", "60",
+              "as", "B", "set", "ff0000", "0", "0", "LEFT RAMP", "game_over", "tick", "1", "out", "346", "out", "347")
+    green = [int(x) for x in re.search(r"TRACE 347 (.*)", out).group(1).split()]
+    assert set(green) == {0, 255} and 20 <= green.count(255) <= 40      # A's blink again, half on
+    assert re.findall(r"^OUT (\d+) (\d+)$", out, re.M) == [("346", "0"), ("347", "0")]   # the game's, not A's
+
+
 def test_a_layer_the_game_took_back_is_replaced_and_game_over_hands_everything_back(runtime):
     out = _rt(runtime, "as", "A", "set", "ff0000", "0", "0", "LEFT RAMP", "tick", "1", "lose", "tick", "70",
               "out", "346", "layers", "game_over", "tick", "1", "out", "346")

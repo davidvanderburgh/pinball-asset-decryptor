@@ -4233,15 +4233,25 @@ class App:
         if kind == "video":
             # Probe only the assigned slots — the tab's background pass probes
             # the whole folder, far too slow to repeat here per build.
+            # Each probe is an ffprobe process, so they run several at once:
+            # one after another, a retheme's 300 clips took 13 s before the
+            # first clip was staged (PAD-599).
+            from concurrent.futures import ThreadPoolExecutor
             from .core.video import backend_for, detect_video_info
-            for rel in assignments:
-                s = slots_by_rel[rel]
-                if s.info is None and backend_for(s.abs_path) is None:
-                    try:
-                        s.info = detect_video_info(s.abs_path)
-                    except Exception:
-                        s.info = None
-                    s.probed = True
+
+            def _probe(s):
+                try:
+                    s.info = detect_video_info(s.abs_path)
+                except Exception:
+                    s.info = None
+                s.probed = True
+
+            todo = [slots_by_rel[rel] for rel in assignments
+                    if slots_by_rel[rel].info is None
+                    and backend_for(slots_by_rel[rel].abs_path) is None]
+            if todo:
+                with ThreadPoolExecutor(max_workers=min(8, len(todo))) as ex:
+                    list(ex.map(_probe, todo))
             return (slots_by_rel, assignments,
                     bool(saved.get("video_trim",
                                    self.window.video_trim_var.get())),

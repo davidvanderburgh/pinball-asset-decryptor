@@ -307,7 +307,11 @@ lit at a time, in the order given, stepping every period; 150 ms). A period of 0
 pattern's own. A single-colour insert (`MASER`, `POWERLINE LEFT`) is lit at the colour's
 brightest part; an RGB one shows the colour. Names are the game's, any case. A mode that holds
 an insert another of ours holds takes it (`[pad] lamps: X takes LEFT RAMP from Y`); a mode
-releases only what it holds; every held insert is handed back when the game leaves play.
+releases only what it holds, and an insert it took from another of ours goes back to that one,
+as it was (`[pad] lamps: LEFT RAMP back to Y`), while Y still holds it (PAD-601: one insert for
+two states, the lower mode's light under the higher one's); else to the game. A mode releasing
+an insert it is under no longer comes back there. Every held insert is handed back to the game
+when the game leaves play.
 `pm_can(PM_CAN_LAMPS)` is 0, and every call does nothing, on a port without `lamp` lines.
 
 **How the game layers its lights, and the rule.** Read off Premium 1.16 and Pro 1.15 and
@@ -3217,6 +3221,7 @@ lines:
 | `[pad] lamps: 88 named inserts (24 tied to a shot)...` | the port's `lamp` lines were read; `the game counts 592 lights` once the game has counted them |
 | `[pad] lamps: our layer at priority 255; the game's layers now ... (* ours)` | the first hold made the mode's lamp layer |
 | `[pad] lamps: N insert(s) held (...)` / `handed back to the game` | a hold, a release |
+| `[pad] lamps: LEFT RAMP back to Y` / `handed back, N to the game and M to the mode under it` | a release gave an insert back to the mode it was taken from (PAD-601) |
 | nothing at all | no port found, or this process is not the game (normal for the game's helper processes) |
 
 ## When something goes wrong

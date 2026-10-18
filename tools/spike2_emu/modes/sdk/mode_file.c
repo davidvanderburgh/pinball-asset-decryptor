@@ -886,6 +886,7 @@ static void own_sounds_clear(struct slot *M)
     S->start_ms = S->shot_ms = S->end_ms = 0;
     S->music_sid = 0;
     S->n_swap = 0;
+    S->n_point = 0;                     /* PAD-597: else every reload adds its sid lines again */
     S->shot_until = 0;
 }
 

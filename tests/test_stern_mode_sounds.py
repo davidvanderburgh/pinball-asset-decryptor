@@ -1,5 +1,6 @@
 """A mode's own sounds (item 150): carriers per title, their assignment, mode-file lines."""
 import os
+import re
 import struct
 from collections import namedtuple
 
@@ -545,6 +546,20 @@ def test_a_sound_in_a_bank_of_the_modes_own_points_its_carrier_at_the_banks_sid(
     requests, ms = MW.own_cfg_args(None, "kaiju_rush", spec, used)
     assert requests["music_sid"] == 0x10000 and requests["sids"] == [(901, 0x10001)]
     assert requests["swaps"] == [(70, "11" * 8, "22" * 8)] and ms == {"sound_start": 1200, "sound_shot": 900}
+
+
+def test_a_reloaded_mode_file_starts_its_sound_lists_empty():
+    """PAD-597: mode_file.c re-reads a changed mode file in place, so every list own_sounds_key
+    appends to is emptied by own_sounds_clear first - else a removed ``sid`` line kept pointing its
+    call and, after 8 lines over all the reloads, new ones were logged 'ignored'."""
+    text = open(os.path.join(SDK, "mode_file.c"), encoding="utf-8").read()
+    keys = text[text.index("static int own_sounds_key("):text.index("static const unsigned char *own_swap_of(")]
+    clear = text[text.index("static void own_sounds_clear("):]
+    clear = clear[:clear.index("\n}\n")]
+    counts = set(re.findall(r"S->(n_\w+)\+\+", keys))
+    assert counts == {"n_point", "n_swap"}
+    for n in counts:
+        assert f"S->{n} = 0;" in clear, n
 
 
 def test_mode_file_c_and_code_modes_swap_the_carrier_key_right_before_playing():

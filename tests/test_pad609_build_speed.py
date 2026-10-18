@@ -391,3 +391,36 @@ def test_the_bank_worker_count_is_no_part_of_an_audio_cache_key(tmp_path, monkey
     a = E._audio_cache_base_key(str(gr), b"id")
     monkeypatch.setenv("PAD_STERN_BANK_WORKERS", "1")
     assert E._audio_cache_base_key(str(gr), b"id") == a
+
+
+# --------------------------------------------------------------------------
+# a picture's stock pixels decoded only when they decide something
+# --------------------------------------------------------------------------
+def test_a_premultiplied_picture_never_decodes_its_stock_one():
+    np = pytest.importorskip("numpy")
+    from pinball_decryptor.plugins.stern import engine as E
+    calls = []
+    arr = np.zeros((8, 8, 4), np.uint8)
+    arr[..., 3] = 200
+    arr[..., :3] = 100                              # colour <= alpha: premultiplied
+    out, changed = E._premultiply_like_stock(arr, lambda: calls.append(1))
+    assert out is arr and not changed and calls == []
+
+
+def test_a_lazy_stock_picture_gives_what_the_decoded_one_gave():
+    np = pytest.importorskip("numpy")
+    from pinball_decryptor.plugins.stern import engine as E
+    rng = np.random.default_rng(3)
+    straight = rng.integers(0, 256, (8, 8, 4), dtype=np.uint8)
+    straight[..., 3] = 40                           # colour brighter than alpha
+    premult = np.zeros((8, 8, 4), np.uint8)
+    for stock in (premult, straight, None):
+        want = E._premultiply_like_stock(straight, stock)
+        got = E._premultiply_like_stock(straight, lambda s=stock: s)
+        assert got[1] == want[1] and np.array_equal(got[0], want[0])
+
+    def broken():
+        raise ValueError("no stock bytes")
+    want = E._premultiply_like_stock(straight, None)
+    got = E._premultiply_like_stock(straight, broken)
+    assert got[1] == want[1] and np.array_equal(got[0], want[0])

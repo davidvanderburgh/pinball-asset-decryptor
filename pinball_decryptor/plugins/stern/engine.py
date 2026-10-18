@@ -5514,12 +5514,10 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel, cache=None):
                                           w, h), "warning")]
         arr = np.asarray(im, dtype=np.uint8)
         pw, ph = ((w + 3) // 4) * 4, ((h + 3) // 4) * 4
-        try:
-            stock = (_dds.decode_bc1 if fmt == _DXT1_FORMAT
-                     else _dds.decode_bc3)(stock_raw, pw, ph)
-        except Exception:
-            stock = None
-        arr, premult = _premultiply_like_stock(arr, stock)
+        # the stock picture decoded only if this one is not premultiplied
+        arr, premult = _premultiply_like_stock(
+            arr, lambda: (_dds.decode_bc1 if fmt == _DXT1_FORMAT
+                          else _dds.decode_bc3)(stock_raw, pw, ph))
         if premult:
             lines.append(("Texture %s: colors premultiplied by alpha, the way "
                           "the game blends scene textures." % output, "info"))
@@ -5710,11 +5708,21 @@ def _premultiply_like_stock(arr, stock):
     transparent pixel that isn't black draws as a solid box (a white
     "transparent" background became a white bar in the emulator).  An
     extracted picture edited in place is premultiplied already and is left
-    alone, as is a slot whose own stock pixels are not premultiplied."""
+    alone, as is a slot whose own stock pixels are not premultiplied.
+
+    *stock* may be a callable giving the stock pixels (or None): it is only
+    called for a picture that is not premultiplied already (PAD-609: the
+    stock picture's BC3 decode, done for each of a TMNT retheme's 2,330
+    pictures, was a minute of its build, and one of them needed it)."""
     import numpy as np
-    if stock is not None and _straight_alpha_share(stock) > 0.005:
-        return arr, False
     if _straight_alpha_share(arr) <= 0.005:
+        return arr, False
+    if callable(stock):
+        try:
+            stock = stock()
+        except Exception:                               # noqa: BLE001
+            stock = None
+    if stock is not None and _straight_alpha_share(stock) > 0.005:
         return arr, False
     out = np.array(arr, dtype=np.uint8, copy=True)
     a = arr[..., 3:4].astype(np.uint16)
@@ -6036,12 +6044,10 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                        pad_w, pad_h, fmt):
         """*arr* premultiplied when its slot's stock pixels are (see
         :func:`_premultiply_like_stock`)."""
-        try:
+        def stock():
             raw = _scene(radium_path, node)[data_off:data_off + length]
-            stock = (_dds.decode_bc1 if fmt == _DXT1_FORMAT
-                     else _dds.decode_bc3)(raw, pad_w, pad_h)
-        except Exception:
-            stock = None
+            return (_dds.decode_bc1 if fmt == _DXT1_FORMAT
+                    else _dds.decode_bc3)(raw, pad_w, pad_h)
         arr, changed = _premultiply_like_stock(arr, stock)
         if changed:
             log("Radium image %s: colors premultiplied by alpha, the way the "

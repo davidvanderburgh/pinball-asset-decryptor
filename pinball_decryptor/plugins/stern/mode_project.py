@@ -2477,8 +2477,11 @@ def profiles(ports_dir=None):
 def _folder_profiles(d):
     """{key: profile} of every usable port in one folder, cached until a file in it changes."""
     try:
-        names = sorted(n for n in os.listdir(d) if n.endswith(".port"))
-        stamp = tuple((n, os.path.getmtime(os.path.join(d, n))) for n in names)
+        # one listing carries the times (on Windows), not a stat per port
+        with os.scandir(d) as it:
+            times = {e.name: e.stat().st_mtime for e in it if e.name.endswith(".port")}
+        names = sorted(times)
+        stamp = tuple((n, times[n]) for n in names)
     except OSError:
         names, stamp = [], ()
     cached = _PROFILES_CACHE.get(d)

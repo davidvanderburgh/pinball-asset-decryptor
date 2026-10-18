@@ -686,3 +686,25 @@ def test_a_real_program_cut_short_gets_no_port_not_an_error(cache):
     assert d["errors"] == {}
     r = D.ensure_port(half, "zzz_test", "1.00.0", workers=1)
     assert r.origin in ("", "derived")
+
+
+def test_the_port_list_is_kept_until_a_port_file_changes(cache):
+    """PAD-610: port_paths() is asked thousands of times while the Modes and Write tabs fill,
+    so it keeps its answer - but a port derived, removed or re-judged since must show at once,
+    even a sidecar rewritten in the same clock tick at the same size."""
+    first = MR.port_paths()
+    assert MR.port_paths() == first and MR.port_paths() is not MR.port_paths()
+    path = _put_derived("zzz_test-1.00", PORT_TEXT)
+    assert path in [p for _g, _v, p in MR.port_paths()]
+    side = os.path.join(D.user_ports_dir(), "zzz_test-1.00.json")
+    st = os.stat(side)
+    with open(side, "r", encoding="utf-8") as f:
+        text = f.read()
+    with open(side, "w", encoding="utf-8") as f:              # same size, ok: false
+        f.write(text.replace('"ok": true', '"ok": 0   '))
+    os.utime(side, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert os.path.getsize(side) == st.st_size
+    assert path not in [p for _g, _v, p in MR.port_paths()]
+    os.remove(side)
+    os.remove(path)
+    assert MR.port_paths() == first

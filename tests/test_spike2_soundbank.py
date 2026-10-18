@@ -339,12 +339,14 @@ def test_plan_sound_banks_takes_the_spilled_sounds_out_of_the_build_and_marks_th
                                                used, Reader(), None, None,
                                                lambda *a, **k: None)
     assert plan is not None
-    assert sorted(plan.grows) == [2, 3]                 # the two largest bankable ones
-    assert sorted(grows2) == [1, 4] and sorted(edits2) == [1, 4]
-    assert plan.wavs == {2: "s2.wav", 3: "s3.wav"}
+    # PAD-593: once one has to go, every bankable one goes (the game holds image.bin and
+    # the bank playing in memory together, so image.bin is kept as small as it can be)
+    assert sorted(plan.grows) == [2, 3, 4]
+    assert sorted(grows2) == [1] and sorted(edits2) == [1]
+    assert plan.wavs == {2: "s2.wav", 3: "s3.wav", 4: "s4.wav"}
     assert [c for c, _e in plan.banks] == [1]
-    assert [e.idx for e in plan.banks[0][1]] == [2, 3]
-    assert used[0]["bank"] == 1 and used[1]["bank"] == 1 and "bank" not in used[2]
+    assert [e.idx for e in plan.banks[0][1]] == [2, 3, 4]
+    assert used[0]["bank"] == used[1]["bank"] == used[2]["bank"] == 1
     # everything fits: no plan, nothing moves
     monkeypatch.delenv(BB.BANK_CAP_ENV)
     plan, e3, g3 = E._plan_sound_banks("game", str(img), params, audio_edits, grows, {}, used,
@@ -465,3 +467,40 @@ def test_a_bank_is_kept_within_the_emulators_window_beside_image_bin():
     assert room == 0x1_0000_0000 - DESC_BASE - 2_010_400_998 - 0x120000
     assert 390 * 10**6 < room < 410 * 10**6
     assert SB.emulator_bank_room(0x1_0000_0000) == 0
+
+
+def test_banks_are_kept_as_small_as_sterns_own_and_refused_past_what_a_machine_holds(
+        monkeypatch, tmp_path):
+    """PAD-593: a Godzilla card with image.bin at 2,125 MB and one 136 MB bank died on the
+    machine at its first bank sound ("FATAL: error 232 (Flash memory init mmap failed)"):
+    the game maps image.bin and the bank playing whole, together. Banks are cut at
+    BANK_SLICE, and a build whose image.bin and largest bank pass MAPPED_MAX is refused."""
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import bank_build as BB
+    assert SB.BANK_SLICE <= 40_000_000 and SB.MAPPED_MAX == 2_142_352_388 + 39_598_976
+    img = tmp_path / "image.bin"
+    img.write_bytes(_image_header(md_off=1000, count=10))
+    want = 16_000_000 // 4                               # each a 16 MB stereo body
+    params = [{"idx": i, "chan": 2, "length": 100, "findkey": bytes([i]) * 8} for i in range(1, 6)]
+    grows = {i: (100, want) for i in range(1, 6)}
+    audio_edits = {i: "s%d.wav" % i for i in grows}
+    used = [{"idx": i, "swap": True, "key": "call:%d" % i, "name": "M%d" % i} for i in grows]
+    monkeypatch.setenv(BB.BANK_CAP_ENV, "1000000")
+    recs = b"".join(_record(0x100 ^ 0xDEADBEEF, body_off=0x1000 * i) for i in range(6))
+    monkeypatch.setattr(E, "_read_stock_directory", lambda gr, im: MD.Directory(recs, 6, 0x9000, 0))
+
+    class Reader(object):
+        def iter_regular_files(self, **kw):
+            return iter([("/godzilla_le/image.bin", 5, {})])
+
+    lines = []
+    plan, _e, _g = E._plan_sound_banks("game", str(img), params, audio_edits, grows, {}, used,
+                                       Reader(), None, None, lambda m, *a: lines.append(m))
+    assert all(SB.bank_bytes([e.body_bytes for e in g]) <= SB.BANK_SLICE for _c, g in plan.banks)
+    assert len(plan.banks) == 3                          # two, two and one 16 MB sounds
+    assert any("the size of Stern's own" in m for m in lines)
+    # an image.bin already so big that one bank beside it passes what a machine holds
+    monkeypatch.setattr(SB, "MAPPED_MAX", 20_000_000)
+    with pytest.raises(RuntimeError, match="in memory at once"):
+        E._plan_sound_banks("game", str(img), params, audio_edits, grows, {}, used,
+                            Reader(), None, None, lambda *a: None)

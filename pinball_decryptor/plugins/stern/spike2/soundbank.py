@@ -74,6 +74,17 @@ IMG_CAT_IDS = 0x6c
 PAD_TRAILER = b"PADB"
 #: The biggest bank the game can open and stream: the same 2 GiB - 1 as image.bin.
 MAX_BANK_BYTES = MAX_IMAGE_BYTES
+#: The most a machine has been seen to hold mapped at once: ``image.bin`` and the bank
+#: playing (PAD-593).  The game maps both whole into its 32-bit address space, and a
+#: Godzilla card at 2,260 MB (image.bin 2,125 MB + a 136 MB bank) died with "FATAL: error
+#: 232 (Flash memory init mmap failed)" at its first bank sound.  Stern's own largest is
+#: Dungeons & Dragons LE/Pro 1.10: image.bin 2,142,352,388 + its 39,598,976-byte bank
+#: (Rush 1.19: 1,836,701,778 + 218,349,330 = 2,055,051,108).  The emulator cannot see this
+#: limit: it runs the game with a whole 4 GiB of address space.
+MAPPED_MAX = 2_181_951_364
+#: How big a bank of the modes' own sounds is made: Stern's largest D&D bank, so the bank
+#: playing adds no more beside image.bin than a shipped title does (PAD-593).
+BANK_SLICE = 40_000_000
 #: Category ids the loader can name: ``image-sc%02d.bin``.
 MIN_CATEGORY, MAX_CATEGORY = 1, 99
 #: A fragment's slot: 8 bytes (the descriptor offset, whitened, and a zero word).

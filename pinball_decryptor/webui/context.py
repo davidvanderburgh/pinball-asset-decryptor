@@ -20,6 +20,7 @@ class Context:
         self.host = None         # the desktop host (window chrome, pickers)
         self.app = None          # the App (run logic, app.py)
         self.window = None       # the WebWindow (what the run logic drives)
+        self.start_geometry = None   # the window's saved place (host.build)
         self._clients = 0
         self._clients_lock = threading.Lock()
         self.on_clients_changed = None

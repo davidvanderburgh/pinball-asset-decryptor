@@ -49,13 +49,32 @@ class Host:
         self.window = None
         self._quit = threading.Event()
         self._maximized = False
+        # a title the app set before the window was showing: pywebview's
+        # set_title waits for the window to show, and the app sets titles on
+        # its UI loop, so it is kept here and put up when the window shows
+        self._shown = False
+        self._pending_title = None
+        # the screens, read while the App is built (preload_window)
+        self.screens = None
 
     # -- called by the app ------------------------------------------------
     def set_title(self, text):
         win = self.window
-        if win is not None:
+        if win is None or not self._shown:
+            self._pending_title = text or APP_TITLE
+            return
+        try:
+            win.set_title(text or APP_TITLE)
+        except Exception:                               # noqa: BLE001
+            pass
+
+    def _on_shown(self):
+        self._shown = True
+        text, self._pending_title = self._pending_title, None
+        win = self.window
+        if text and win is not None:
             try:
-                win.set_title(text or APP_TITLE)
+                win.set_title(text)
             except Exception:                           # noqa: BLE001
                 pass
 
@@ -78,6 +97,13 @@ class Host:
                 win.destroy()
             except Exception:                           # noqa: BLE001
                 pass
+
+    def preload_window(self):
+        """Load the window toolkit and read the screens (the first ask of
+        pywebview's screens loads its Windows backend: 0.4 s) on the main
+        thread while the UI loop builds the App, not after it (PAD-610)."""
+        import webview
+        self.screens = _screens(webview)
 
     @property
     def quitting(self):
@@ -119,8 +145,12 @@ class Host:
         return result[0] if result else ""
 
 
-def build(ctx=None):
-    """Context + server + app, ready for a host.  Returns (ctx, server)."""
+def build(ctx=None, meanwhile=None):
+    """Context + server + app, ready for a host.  Returns (ctx, server).
+
+    ``meanwhile()``, when given, runs on the calling thread while the UI loop
+    builds the App (the native host loads its window toolkit then), and its
+    errors are logged, never raised."""
     ctx = ctx or Context()
     compat.install(ctx)
     ctx.loop.start()
@@ -128,7 +158,36 @@ def build(ctx=None):
     server.start()
 
     from ..app import App
-    app = ctx.loop.call(lambda: App(ctx))
+
+    def _make_app():
+        app = App(ctx)
+        # what the native window opens with, read before the jobs the App
+        # queued at start-up run: asked for afterwards, the window waited
+        # behind all of them (PAD-610)
+        ctx.start_geometry = app.saved_geometry()
+        return app
+    if meanwhile is None:
+        app = ctx.loop.call(_make_app)
+    else:
+        made = {}
+        done = threading.Event()
+
+        def _job():
+            try:
+                made["app"] = _make_app()
+            except BaseException as e:               # noqa: BLE001 - re-raised
+                made["error"] = e
+            finally:
+                done.set()
+        ctx.loop.post(_job)
+        try:
+            meanwhile()
+        except Exception:                               # noqa: BLE001
+            log.warning("start-up work beside the App failed", exc_info=True)
+        done.wait()
+        if "error" in made:
+            raise made["error"]
+        app = made["app"]
     reg = ctx.registry
     reg.register("shell.accept_disclaimer", app.accept_disclaimer)
     reg.register("fs.list", list_dir, on_loop=False)
@@ -160,20 +219,18 @@ def _close_app(ctx):
 
 def run_native(ctx, server, host):
     import webview
-    geo = None
-    try:
-        geo = ctx.loop.call(ctx.app.saved_geometry)
-    except Exception:                                   # noqa: BLE001
-        geo = None
+    geo = getattr(ctx, "start_geometry", None)
     width, height, x, y, maximized = geo or (1280, 860, None, None, False)
     width = max(MIN_SIZE[0], width)
     height = max(MIN_SIZE[1], height)
-    width, height, x, y = fit_to_screens(width, height, x, y,
-                                         _screens(webview))
+    screens = host.screens if host.screens is not None else _screens(webview)
+    width, height, x, y = fit_to_screens(width, height, x, y, screens)
     # the App composed its title (version, the dev branch badge) before this
-    # window existed, so its set_title found no window: open with it
+    # window existed, so its set_title found no window: open with it (a
+    # title set from here on waits in host._pending_title for the window to
+    # show).  Read here, not on the UI loop: that runs the start-up jobs.
     try:
-        title = ctx.loop.call(ctx.app.root.title) or APP_TITLE
+        title = ctx.app.root.title() or APP_TITLE
     except Exception:                                   # noqa: BLE001
         title = APP_TITLE
     win = webview.create_window(
@@ -226,6 +283,7 @@ def run_native(ctx, server, host):
                         exc_info=True)
 
     win.events.loaded += _on_loaded
+    win.events.shown += host._on_shown
     win.events.closing += _on_closing
     win.events.maximized += _on_maximized
     win.events.restored += _on_restored
@@ -400,7 +458,8 @@ def main(argv=None):
     ctx = Context()
     host = Host(ctx, mode)
     ctx.host = host
-    ctx, server = build(ctx)
+    meanwhile = host.preload_window if mode == "native" else None
+    ctx, server = build(ctx, meanwhile=meanwhile)
     try:
         if mode == "native":
             try:

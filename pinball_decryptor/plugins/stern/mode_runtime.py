@@ -25,18 +25,29 @@ SOURCES = ("pad_mode.h", "pad_stock.h", "pad_mode_runtime.c", "mode_file.c", "bu
 BUILDER = "tools/spike2_emu/modes/sdk/build_prebuilt.sh"
 
 
+#: sdk_dir()'s answer once the folder was found: every port lookup asks it (thousands of
+#: times while the Modes and Write tabs fill at start-up), and resolving the path from disk
+#: each time cost over a second there (PAD-610)
+_SDK_DIR = None
+
+
 def sdk_dir():
     """``tools/spike2_emu/modes/sdk`` - beside the package in a checkout or an install, or
     under PyInstaller's bundle root in a frozen build (the Linux/macOS builds add
     ``tools/spike2_emu`` as data)."""
+    global _SDK_DIR
+    if _SDK_DIR is not None:
+        return _SDK_DIR
     here = pathlib.Path(__file__).resolve().parents[3] / "tools" / "spike2_emu" / "modes" / "sdk"
     if here.is_dir():
-        return str(here)
+        _SDK_DIR = str(here)
+        return _SDK_DIR
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle:
         frozen = pathlib.Path(bundle) / "tools" / "spike2_emu" / "modes" / "sdk"
         if frozen.is_dir():
-            return str(frozen)
+            _SDK_DIR = str(frozen)
+            return _SDK_DIR
     return str(here)
 
 
@@ -71,9 +82,18 @@ def port_paths():
     """Every port as ``(game_dir, version, path)``, shipped ones first, each folder sorted. A
     derived port that is no longer current (:func:`.port_derive.derived_current`: another
     drafting revision, or its reference ports changed) is left out until the card is read
-    again."""
+    again.
+
+    The answer is kept until a file in the port folders or the recipes changes
+    (:func:`_ports_stamp`): every lookup asks this, and working it out stats every reference
+    of every derived port (thousands of files at start-up, PAD-610)."""
+    dirs = port_dirs()
+    stamp = _ports_stamp(dirs)
+    cached = _PORT_PATHS.get("v")
+    if cached is not None and cached[0] == stamp:
+        return list(cached[1])
     out = []
-    for n, d in enumerate(port_dirs()):
+    for n, d in enumerate(dirs):
         try:
             names = sorted(os.listdir(d))
         except OSError:
@@ -88,7 +108,46 @@ def port_paths():
                 if not derived_current(path):
                     continue
             out.append((m.group(1), m.group(2), path))
-    return out
+    _PORT_PATHS["v"] = (stamp, out)
+    return list(out)
+
+
+#: port_paths()'s last answer, with the _ports_stamp it was worked out at
+_PORT_PATHS = {}
+
+
+
+def _ports_stamp(dirs):
+    """What port_paths() depends on, cheaply: every file's name, size and mtime in the port
+    folders and the shipped recipes (one directory listing each; on Windows the listing
+    carries the stats), the text of each derived port's sidecar (what derived_current reads:
+    a sidecar rewritten in the same clock tick at the same size must still count as changed),
+    the drafting revision, and which derived_current is in force."""
+    from . import port_derive, portgen
+    stamp = [tuple(dirs), portgen.REVISION, port_derive.derived_current]
+    folders = (list(dirs) + [os.path.join(dirs[0], "recipes")]) if dirs else []
+    for n, d in enumerate(folders):
+        derived = 0 < n < len(dirs)
+        try:
+            with os.scandir(d) as it:
+                entries = []
+                for e in it:
+                    try:
+                        st = e.stat()
+                    except OSError:
+                        continue
+                    ent = (e.name, st.st_size, st.st_mtime_ns)
+                    if derived and e.name.endswith(".json"):
+                        try:
+                            with open(e.path, "rb") as f:
+                                ent += (f.read(),)
+                        except OSError:
+                            pass
+                    entries.append(ent)
+        except OSError:
+            entries = None
+        stamp.append((d, tuple(sorted(entries)) if entries is not None else None))
+    return tuple(stamp)
 
 
 def port_file(game_dir, version):

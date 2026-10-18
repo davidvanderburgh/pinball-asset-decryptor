@@ -487,6 +487,9 @@ def _raw_read_hook(mu, fn, begin, end):
 #: per-instruction code hook it used before the narrow derive (a comparison
 #: switch: both give the same rows, the narrow one 2-17x sooner).
 DERIVE_HOOKS_ENV = "PAD_DERIVE_HOOKS"
+#: ``PAD_BOOT_HOOKS=global`` boots a generic build under the per-instruction
+#: code hook it used before PAD-609 (a comparison switch: the same machine state).
+BOOT_HOOKS_ENV = "PAD_BOOT_HOOKS"
 #: appended to a narrow derive's failure (see :meth:`Spike2Emu.derive_params`)
 NARROW_DERIVE_HINT = ("(Sound derive ran under narrow hooks; %s=global runs "
                       "the older, slower derive.)" % DERIVE_HOOKS_ENV)
@@ -781,6 +784,14 @@ class Spike2Emu:
         h = self.PLT.get(addr)
         if h:
             h(self)
+            if addr in self._plt_entry:
+                # PAD-609: on an older build the validated build's stub address can
+                # be one of this build's own PLT thunks (Deadpool's __fxstat64 sits
+                # at TMNT 1.58's munmap).  Under the global hook the thunk branch
+                # runs AFTER the handler and wins; this hook is added after the
+                # branch's, so it would have the last word and skip the import.
+                # Branching again here gives the global hook's run exactly.
+                self._plt_branch(mu, addr, size, ud)
 
     def _on_extra(self, mu, addr, size, ud):
         fn = self.extra.get(addr)
@@ -1231,8 +1242,32 @@ class Spike2Emu:
         except UcError as e:
             return ("err", (str(e), hex(mu.reg_read(UC_ARM_REG_PC)), self.faults[-6:]))
 
+    def narrow_boot(self):
+        """Whether :meth:`boot` runs under narrow hooks (PAD-609): on every
+        generic build unless :data:`BOOT_HOOKS_ENV` says ``global``, as
+        :meth:`narrow_derive` does for the derive."""
+        return bool(self._generic) and os.environ.get(BOOT_HOOKS_ENV, "") != "global"
+
     def boot(self):
-        """Build the keystream + rt tables, init the registry, register cat 0."""
+        """Build the keystream + rt tables, init the registry, register cat 0.
+
+        A generic build boots under narrow hooks (:meth:`narrow_boot`): the
+        global hook made the boot a Python call on each of its ~870,000 guest
+        instructions, 0.65 s a boot on Godzilla, and a Write with modes' sound
+        banks boots 57 emulators.  The boot acts only at the import sentinels
+        and the PLT table, so the narrow hooks leave every mapped byte and
+        register as the global hook does (tests/test_pad609_build_speed.py),
+        in a fraction of the time.  The hooks are as they were afterwards."""
+        if not self.narrow_boot():
+            return self._boot()
+        state = self._narrow_derive_begin(())
+        try:
+            return self._boot()
+        finally:
+            self._narrow_derive_end(state)
+
+    def _boot(self):
+        """:meth:`boot` itself, under whichever hooks are in place."""
         if not self._build_keystream():
             raise RuntimeError("Spike 2 boot: keystream/rt build failed")
         if self._generic:
@@ -1976,6 +2011,10 @@ class Spike2Emu:
         """Decode one sound by driving codec ``entry``; see :meth:`decode`."""
         import numpy as np
         self.setup_decode()
+        if getattr(self, "_capture_owners", None):
+            # PAD-609: a recovery's per-sample capture hooks off for the decode
+            from .codec import drop_captures
+            drop_captures(self)
         mu = self.mu
         chan = p["chan"]; stereo = (chan == 2); length = p["length"]
         Rmul, Roff = (4, 800) if stereo else (2, 400)

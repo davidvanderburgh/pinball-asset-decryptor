@@ -258,6 +258,42 @@ def _find_companding_all(mu, fn_addr, n=0xC00):
     return out
 
 
+def _own_captures(emu, rec):
+    """Name *rec* (a :class:`GenRecover` / :class:`StereoRecover`) to *emu* as
+    an owner of capture hooks, so a whole-sound decode on it can take them off
+    (:func:`drop_captures`)."""
+    owners = getattr(emu, "_capture_owners", None)
+    if owners is None:
+        owners = emu._capture_owners = []
+    owners.append(rec)
+
+
+def _drop_captures(rec):
+    """Take *rec*'s capture hooks off its emulator; its next recovery puts
+    them back (``_hooked`` is emptied with them)."""
+    for h in rec._handles:
+        if isinstance(h, tuple):
+            rec.emu.del_hook(h[1])
+        else:
+            rec.mu.hook_del(h)
+    rec._handles = []
+    rec._hooked = set()
+
+
+def drop_captures(emu):
+    """Take every recovery's capture hooks off *emu* (PAD-609).
+
+    A capture hook is a Python call on every output sample, and once a
+    recovery installed it, it stayed on for everything else the emulator ran:
+    the full decode that checks each encoded sound (``_verify_encoded``) paid
+    one for every sample of every song, 86 million calls and about two minutes
+    of a Godzilla build with 11 modes' music.  Nothing reads what a decode
+    captures, so a decode takes them off and the next recovery puts them back."""
+    for rec in getattr(emu, "_capture_owners", None) or ():
+        if rec._handles:
+            _drop_captures(rec)
+
+
 class GenRecover:
     """Mono keystream recovery + analytic encode, driven on a booted emulator."""
 
@@ -268,6 +304,8 @@ class GenRecover:
         self._cap = []
         self._capreg = None
         self._hooked = set()
+        self._handles = []
+        _own_captures(emu, self)
         self.qmul = emu.qmul(1)
         self._calib = {}   # (scale, chan) -> (dom_mul_addr, S_reg, body_word_delta)
 
@@ -286,11 +324,13 @@ class GenRecover:
             def cap(uc, address, size, ud):
                 rr(uch, self._capreg, pbuf)
                 self._cap.append(buf.value & 0xffff)
-            self.mu.hook_add(UC_HOOK_CODE, cap, begin=mul_addr, end=mul_addr)
+            self._handles.append(
+                self.mu.hook_add(UC_HOOK_CODE, cap, begin=mul_addr, end=mul_addr))
         else:
             def cap(eng):
                 self._cap.append(eng.mu.reg_read(self._capreg))
             self.emu.add_hook(mul_addr, cap)
+            self._handles.append(("extra", mul_addr))
         self._hooked.add(mul_addr)
 
     def _drive_decode(self, p, cursor, body_u16):
@@ -529,6 +569,8 @@ class StereoRecover:
         self.qmul = emu.qmul(2)
         self._cap = []
         self._hooked = set()
+        self._handles = []
+        _own_captures(emu, self)
         self._calib = {}   # (scale, chan) -> body_frame_delta
         self._comps = {}   # render_fn -> [(mul_addr, S_reg), ...] (capstone cache)
         # (scale, chan) -> needs the third (0,1) probe.  The u1 rotate ``bR`` is
@@ -552,11 +594,12 @@ class StereoRecover:
             def cap(uc, address, size, ud, _a=addr, _r=reg):
                 rr(uch, _r, pbuf)
                 self._cap.append((_a, buf.value & 0xffff))
-            self.mu.hook_add(UC_HOOK_CODE, cap, begin=addr, end=addr)
+            self._handles.append(self.mu.hook_add(UC_HOOK_CODE, cap, begin=addr, end=addr))
         else:
             def cap(eng, _a=addr, _r=reg):
                 self._cap.append((_a, eng.mu.reg_read(_r) & 0xffff))
             self.emu.add_hook(addr, cap)
+            self._handles.append(("extra", addr))
         self._hooked.add(key)
 
     @staticmethod

@@ -32,6 +32,7 @@ maps it.
 """
 import os
 import struct
+from dataclasses import dataclass
 
 from ...core.longpath import ext as _lp
 from .spike2 import masterdir as MD
@@ -190,11 +191,17 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
     try:
         emu_e.boot()
         emu_d.boot()
-        refs = {}
-        for idx, ref in (level_refs or {}).items():
-            q = byidx.get(ref)
-            if q is not None and idx in edits:
-                refs[idx] = E._stock_render(emu_e, q, np, stereo=byidx[idx].get("chan") == 2)
+        def render(idx, q):
+            # a stock sound of image.bin's, decoded from image.bin's window
+            was, emu_e.mm = emu_e.mm, emu_e._mm_img
+            try:
+                return E._stock_render(emu_e, q, np, stereo=byidx[idx].get("chan") == 2)
+            finally:
+                emu_e.mm = was
+
+        # PAD-609: decoded only when an encode needs it (E._LazyRefs)
+        refs = E._LazyRefs({idx: byidx[ref] for idx, ref in (level_refs or {}).items()
+                            if byidx.get(ref) is not None and idx in edits}, render)
         emu_e.set_category_file(bank_path)
 
         def after(n, row, redo):
@@ -221,15 +228,15 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
                     "chain parameters (scale %s)" % (idx, SB.bank_name(cat), p["scale"]))
             kw = dict(pred=None, log=log, gain_db=gains.get(idx), loop=idx in loops,
                       blocks=pool.blocks if pool is not None else None)
-            if idx in refs:
-                kw["orig"] = refs[idx]
             pe = E._extended_row(p, E._APPENDED_TAIL)
             # *body_cache*: the same encode a build made before (PAD-599)
             off, body = E._chain_encoded(
                 body_cache, SB.bank_name(cat), emu_e, pe, edits[idx],
-                lambda: (E._encode_stereo(emu_e, state["sr"], pe, edits[idx], np, **kw)
+                lambda: (E._encode_stereo(emu_e, state["sr"], pe, edits[idx], np,
+                                          **refs.kw(idx, kw))
                          if p["chan"] == 2 else
-                         E._encode_mono(emu_e, state["gr"], pe, edits[idx], np, **kw)),
+                         E._encode_mono(emu_e, state["gr"], pe, edits[idx], np,
+                                        **refs.kw(idx, kw))),
                 gain_db=kw["gain_db"], loop=kw["loop"],
                 ref=byidx.get((level_refs or {}).get(idx)) if idx in refs else None,
                 chan=p["chan"])
@@ -275,6 +282,245 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
         "into the file (%.1f MB)." % (SB.bank_name(cat), len(done),
                                        os.path.getsize(_lp(bank_path)) / 1e6), "info")
     return rows, patches, rev
+
+
+# --------------------------------------------------------------------------
+# every bank of a Write, side by side (PAD-609)
+# --------------------------------------------------------------------------
+#: ``PAD_STERN_BANK_WORKERS``: how many banks are encoded at once (1 = one after
+#: another, in this process, as before PAD-609).
+BANK_WORKERS_ENV = "PAD_STERN_BANK_WORKERS"
+
+
+@dataclass
+class BankJob:
+    """One bank of :func:`encode_banks`: category *cat*'s staged file at *path*,
+    its :class:`.soundbank.BankPlacement` list and ``{host idx: wav}``."""
+    cat: int
+    path: str
+    places: list
+    wavs: dict
+
+
+def bank_workers(n_banks, first_too=False):
+    """How many banks :func:`encode_banks` encodes at once: one per four cores
+    (each bank's long sounds have block workers of their own), at most the banks
+    after the first (*first_too*: at most all of them); :data:`BANK_WORKERS_ENV`
+    overrides it."""
+    most = n_banks if first_too else n_banks - 1
+    v = os.environ.get(BANK_WORKERS_ENV, "")
+    try:
+        if v.strip():
+            return max(1, min(int(v), max(1, most)))
+    except ValueError:
+        pass
+    return max(1, min((os.cpu_count() or 1) // 4, most))
+
+
+def encode_and_verify(gr_path, img_path, job, params, np, log, loops=(), gains=None,
+                      level_refs=None, progress=None, cancel=None, revalidate=None,
+                      body_cache=None):
+    """:func:`chain_encode` then :func:`verify_bank` for one :class:`BankJob`;
+    returns ``(rows, revalidate)`` (the chain's rows, which carry each
+    record's host sound)."""
+    rows, _patches, rev = chain_encode(
+        gr_path, img_path, job.path, job.cat, params, job.places, job.wavs, np, log,
+        loops=set(loops or ()) & set(job.wavs), gains=gains, level_refs=level_refs,
+        progress=progress, cancel=cancel, revalidate=revalidate, body_cache=body_cache)
+    # the check derives the finished file afresh
+    verify_bank(gr_path, img_path, job.path, job.cat, rows, log, revalidate=rev)
+    return rows, rev
+
+
+def _bank_worker(task):
+    """A worker of :func:`encode_banks`: one bank, its log lines held and
+    handed back whole (the parent says them in bank order).  A cancel is the
+    parent's flag file appearing."""
+    (gr_path, img_path, job, params, loops, gains, level_refs, revalidate, body_cache,
+     flag, blocks) = task
+    import numpy as np
+    if blocks is not None:
+        os.environ["PAD_STERN_BLOCK_WORKERS"] = str(blocks)
+    lines = []
+    if body_cache is not None:
+        # what this bank used, handed back for the parent's cache to keep
+        import copy
+        body_cache = copy.copy(body_cache)
+        body_cache.used, body_cache.hits = set(), 0
+    try:
+        rows, rev = encode_and_verify(
+            gr_path, img_path, job, params, np,
+            lambda m, lv="info", *_a, **_k: lines.append((m, lv)),
+            loops=loops, gains=gains, level_refs=level_refs,
+            cancel=lambda: os.path.exists(flag), revalidate=revalidate,
+            body_cache=body_cache)
+    except Exception as e:                              # noqa: BLE001
+        return ("error", (type(e).__name__, str(e)), lines, None)
+    used = (body_cache.used, body_cache.hits) if body_cache is not None else None
+    return ("ok", (rows, rev), lines, used)
+
+
+def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
+                 level_refs=None, progress=None, cancel=None, body_cache=None):
+    """``[(rows, revalidate), ...]``: :func:`encode_and_verify` for every
+    :class:`BankJob` of *jobs*, in order.
+
+    The first bank is encoded here: its derive settles the firmware's
+    map-revalidation stub, which every later bank's derive is then handed.
+    Those are encoded side by side in worker processes (:func:`bank_workers`),
+    each its own file, its own emulators and its own share of the cores for
+    its long sounds' blocks; their log lines are said in bank order as they
+    come back.  A Godzilla build with 11 modes' music had them one after
+    another: 11 banks, 5 to 30 s each.  A worker's failure stops the Write
+    with the bank's own words, as it would have here; a pool that cannot
+    start leaves the rest to be encoded here.
+
+    A game program with one candidate for that stub has nothing to settle,
+    so every bank goes to the workers at once (PAD-609: the first bank of a
+    Godzilla build was a minute on its own before the others started)."""
+    from .engine import _span
+    out = []
+    n = len(jobs)
+
+    def span(i):
+        return _span(progress, int(100 * i / n), int(100 * (i + 1) / n))
+    if not jobs:
+        return out
+    w = bank_workers(n, first_too=True)
+    rev = known_revalidate(gr_path, img_path) if w > 1 else None
+    if rev is not None:
+        got = _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains,
+                                     level_refs, progress, cancel, body_cache, rev, w, n,
+                                     done0=0)
+        if got is not None:
+            return got
+    rows, rev = encode_and_verify(gr_path, img_path, jobs[0], params, np, log, loops=loops,
+                                  gains=gains, level_refs=level_refs, progress=span(0),
+                                  cancel=cancel, body_cache=body_cache)
+    out.append((rows, rev))
+    rest = jobs[1:]
+    w = bank_workers(n)
+    got = None
+    if w > 1 and len(rest) > 1:
+        got = _encode_banks_parallel(gr_path, img_path, rest, params, log, loops, gains,
+                                     level_refs, progress, cancel, body_cache, rev, w, n)
+    if got is not None:
+        return out + got
+    for i, job in enumerate(rest, 1):
+        out.append(encode_and_verify(gr_path, img_path, job, params, np, log, loops=loops,
+                                     gains=gains, level_refs=level_refs, progress=span(i),
+                                     cancel=cancel, revalidate=rev, body_cache=body_cache))
+    return out
+
+
+def _job_bytes(job):
+    """How much audio a :class:`BankJob` encodes, by its sounds' file sizes."""
+    n = 0
+    for wav in (job.wavs or {}).values():
+        try:
+            n += os.path.getsize(wav)
+        except (OSError, TypeError):
+            pass
+    return n
+
+
+def known_revalidate(gr_path, img_path):
+    """The game program's map-revalidation stub when it has only one
+    candidate for it (a derive would settle on that one or fail), else None:
+    several candidates, or a loader that cannot be analysed."""
+    try:
+        from .spike2.category import CatEmu
+        emu = CatEmu(gr_path, img_path)
+        try:
+            cands = list((emu._cat_locs or {}).get("REVALIDATE_CANDIDATES") or ())
+        finally:
+            emu.close()
+    except Exception:                                   # noqa: BLE001
+        return None
+    return cands[0] if len(cands) == 1 else None
+
+
+def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, level_refs,
+                           progress, cancel, body_cache, rev, workers, n_all, done0=1):
+    """:func:`encode_banks`' workers; None when the pool could not start (the
+    caller encodes the banks itself).  *done0*: the banks already encoded
+    before these (the first, here)."""
+    import multiprocessing as mp
+    import tempfile
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+    from .spike2.parallel import block_workers, emulator_commit, emulators_that_fit
+    # PAD-609: a worker runs two emulators and its block workers, each committing
+    # its share of memory; the workers and their blocks are as many as fit
+    per = max(emulator_commit(img_path, j.path) for j in jobs)
+    room = emulators_that_fit(per, workers * (2 + block_workers()))
+    if room // 2 < workers:
+        log("Sound banks: %d at a time, not %d: this computer has room for the "
+            "memory of %d sound encoder(s) now." % (max(1, room // 2), workers, room), "info")
+        workers = room // 2
+        if workers < 2:
+            return None
+    # the cores shared out: a worker's long sounds take its share for their blocks
+    blocks = min(max(0, (os.cpu_count() or 1) // workers - 1), block_workers(),
+                 room // workers - 2)
+    if blocks < 2:
+        blocks = 0
+    fd, flag = tempfile.mkstemp(prefix="spike2_bankcancel_")
+    os.close(fd)
+    os.remove(flag)
+    log("Sound banks %s: encoded %d at a time, each in a worker of its own." % (
+        ", ".join(SB.bank_name(j.cat) for j in jobs), workers), "info")
+    results = [None] * len(jobs)
+    said = 0
+    pool = None
+    try:
+        try:
+            pool = ProcessPoolExecutor(workers, mp_context=mp.get_context("spawn"))
+            # the biggest banks first, so no worker is left with a long one at
+            # the end; their lines are still said in bank order
+            futs = {pool.submit(_bank_worker, (gr_path, img_path, jobs[i], params,
+                                               set(loops or ()), gains, level_refs, rev,
+                                               body_cache, flag, blocks)): i
+                    for i in sorted(range(len(jobs)), key=lambda i: -_job_bytes(jobs[i]))}
+        except Exception as e:                          # noqa: BLE001
+            log("Sound banks are encoded one after another: the workers did not start "
+                "(%s)." % e, "info")
+            return None
+        pending = set(futs)
+        while pending:
+            done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            if cancel is not None and cancel():
+                open(flag, "w").close()
+            for f in done:
+                try:
+                    results[futs[f]] = f.result()
+                except Exception as e:                  # noqa: BLE001
+                    results[futs[f]] = ("error", ("RuntimeError", "sound bank %s's worker "
+                                                  "stopped (%s)" % (SB.bank_name(
+                                                      jobs[futs[f]].cat), e)), [], None)
+            # the log lines of every bank done so far, in bank order
+            while said < len(jobs) and results[said] is not None:
+                tag, val, lines, used = results[said]
+                for m, lv in lines:
+                    log(m, lv)
+                if tag != "ok":
+                    open(flag, "w").close()
+                    raise RuntimeError(val[1])
+                if used is not None and body_cache is not None:
+                    body_cache.used |= used[0]
+                    body_cache.hits += used[1]
+                said += 1
+                if progress:
+                    progress(int(100 * (said + done0) / n_all), 100,
+                             "Encoding the modes' sound banks (%d of %d)..."
+                             % (said + done0, n_all))
+        return [r[1] for r in results]
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+        try:
+            os.remove(flag)
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------

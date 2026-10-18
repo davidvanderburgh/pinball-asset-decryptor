@@ -191,8 +191,11 @@ def convert_clip(src, out, w, h, ffmpeg, max_seconds=MODE_CLIP_MAX_SECONDS):
 #: ``PAD_CLIP_CACHE=0``: no clip is kept between builds (they are still made side by side).
 CLIP_CACHE_ENV = "PAD_CLIP_CACHE"
 CLIP_WORKERS = 4
-#: Clips kept at most; the least recently used go first.
-CLIP_CACHE_KEEP = 40
+#: Clips kept at most, and their bytes at most; the least recently used go first. PAD-609: it was
+#: 40 clips, and Godzilla's 11 modes make 76 in two batches, so each batch's prune threw out the
+#: other's and every build encoded all 76 again (35 s); a mode clip is 1-5 MB.
+CLIP_CACHE_KEEP = 1000
+CLIP_CACHE_BYTES = 1 << 30
 #: Bump when a clip's encode changes in a way its key does not show (2: PAD-562 cuts a video's
 #: burned-in bars off).
 _CLIP_REV = 2
@@ -270,12 +273,17 @@ def _encode_clip(job, out, ffmpeg):
         convert_clip(job.src, out, job.w, job.h, ffmpeg)
 
 
-def _prune_clip_cache(folder, keep=CLIP_CACHE_KEEP):
+def _prune_clip_cache(folder, keep=CLIP_CACHE_KEEP, budget=CLIP_CACHE_BYTES):
     try:
         names = [n for n in os.listdir(folder) if n.endswith(".mp4") and ".tmp" not in n]
-        names.sort(key=lambda n: os.path.getmtime(os.path.join(folder, n)))
-        for n in (names[:-keep] if len(names) > keep else ()):
-            os.remove(os.path.join(folder, n))
+        stats = {n: os.stat(os.path.join(folder, n)) for n in names}
+        names.sort(key=lambda n: stats[n].st_mtime, reverse=True)
+        total = 0
+        for i, n in enumerate(names):
+            total += stats[n].st_size
+            # the newest is always kept, however big
+            if i and (i >= keep or total > budget):
+                os.remove(os.path.join(folder, n))
     except OSError:
         pass
 

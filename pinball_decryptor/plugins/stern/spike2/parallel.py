@@ -226,7 +226,7 @@ def block_workers():
 
 
 def _block_main(conn, kind, gr_path, img_path, stock_rows, first_warm,
-                cat_file):
+                cat_file, first_edited=()):
     """A block worker: boot like the parent's encoder, then take
     ``("warm", row)`` (no reply) and answer ``("encode", p, three, jobs)``
     with ``("ok", [(k, m, words), ...])`` until ``("stop",)``."""
@@ -242,7 +242,7 @@ def _block_main(conn, kind, gr_path, img_path, stock_rows, first_warm,
             emu = Spike2Emu(gr_path, img_path)
             emu.boot()
             if first_warm is not None:
-                emu.warm_slots_for_grown(first_warm)
+                emu.warm_slots_for_grown(first_warm, edited=first_edited)
         conn.send(("ready", None))
     except Exception as e:                              # noqa: BLE001
         conn.send(("error", "a worker did not start: %r" % (e,)))
@@ -318,7 +318,7 @@ class BlockPool:
     as it did before there were workers."""
 
     def __init__(self, kind, gr_path, img_path, stock_rows, workers,
-                 first_warm=None, cat_file=None, log=None):
+                 first_warm=None, cat_file=None, log=None, first_edited=()):
         import multiprocessing as mp
         self.log = log or (lambda *a, **k: None)
         self.broken = None
@@ -331,7 +331,8 @@ class BlockPool:
                 a, b = ctx.Pipe()
                 pr = ctx.Process(target=_block_main, daemon=True,
                                  args=(b, kind, gr_path, img_path,
-                                       list(stock_rows), first_warm, cat_file))
+                                       list(stock_rows), first_warm, cat_file,
+                                       list(first_edited)))
                 pr.start()
                 b.close()
                 self.conns.append(a)
@@ -425,12 +426,173 @@ class BlockPool:
 
 
 def start_block_pool(kind, gr_path, img_path, stock_rows, first_warm=None,
-                     cat_file=None, log=None, longest=None):
+                     cat_file=None, log=None, longest=None, first_edited=(),
+                     workers=None):
     """A :class:`BlockPool` when this computer has the cores for one and the
     chain has a sound long enough to use it (*longest*, its length in
-    samples, when the caller knows it), else ``None``."""
+    samples, when the caller knows it), else ``None``.  *first_edited*: the
+    idx the first warm treats as edited (the cat-0 encoder's own warm);
+    *workers* caps how many start (the cores other workers leave)."""
     n = block_workers()
+    if workers is not None:
+        n = min(n, workers)
     if n < 2 or (longest is not None and longest < 200 * (BLOCKS_MIN + 1)):
         return None
+    n = emulators_that_fit(emulator_commit(img_path, cat_file), n)
+    if n < 2:
+        return None
     return BlockPool(kind, gr_path, img_path, stock_rows, n,
-                     first_warm=first_warm, cat_file=cat_file, log=log)
+                     first_warm=first_warm, cat_file=cat_file, log=log,
+                     first_edited=first_edited)
+
+
+# ---------------------------------------------------------------------------
+# How many emulators the computer has room for (PAD-609).  On Windows an
+# emulator process commits the guest memory it maps for image.bin (and a
+# bank's file) up front, ~2.6 GB on Godzilla LE 1.16 while it touches a few
+# hundred MB of it, and a Write that fails to commit one fails with the
+# emulator's UC_ERR_NOMEM.  The workers of a long build (the cat-0 pool, the
+# block workers, the banks') ran to sixty-odd GB of commit together, so each
+# count is held to what the commit limit (RAM and page file) has room for.
+# ---------------------------------------------------------------------------
+
+#: what an emulator process commits besides the files it maps into the guest
+#: (measured 0.45-1.07 GB over a 1.65 GB image.bin, Godzilla LE 1.16)
+EMU_COMMIT_EXTRA = 5 << 28
+#: commit left for the app itself and everything else on the computer
+COMMIT_RESERVE = 4 << 30
+
+
+def emulator_commit(*paths):
+    """The bytes one emulator process commits mapping the files *paths*
+    (image.bin, a bank's file; None and missing ones count nothing)."""
+    import os
+    n = EMU_COMMIT_EXTRA
+    for path in paths:
+        if path:
+            try:
+                n += os.path.getsize(path)
+            except OSError:
+                pass
+    return n
+
+
+def commit_room():
+    """The bytes Windows can still commit, or None elsewhere and when it does
+    not say: Linux and macOS commit a page when it is touched.  That is the
+    commit limit less what is committed, and three quarters of what the page
+    files can still grow by (:func:`_page_file_growth`): a system-managed
+    page file shrinks back between builds (80 GB of commit limit on this
+    PC between them, 125 GB during one), so the limit alone holds the
+    workers back for nothing."""
+    import ctypes
+    import os
+    if os.name != "nt":
+        return None
+
+    class _Status(ctypes.Structure):
+        _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+    st = _Status()
+    st.dwLength = ctypes.sizeof(st)
+    try:
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return None
+    except Exception:                                   # noqa: BLE001
+        return None
+    try:
+        grow = _page_file_growth(int(st.ullTotalPhys),
+                                 max(0, int(st.ullTotalPageFile) - int(st.ullTotalPhys)),
+                                 _page_file_entries())
+    except Exception:                                   # noqa: BLE001
+        grow = 0
+    return int(st.ullAvailPageFile) + grow * 3 // 4
+
+
+def _page_file_entries():
+    """The page files Windows is set up with: ``[(drive, max bytes or None
+    for system-managed)]`` from the registry (``?:`` is the system drive)."""
+    import os
+    import winreg
+    key = r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management"
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as k:
+        val, _t = winreg.QueryValueEx(k, "PagingFiles")
+    out = []
+    for e in (val if isinstance(val, (list, tuple)) else [val]):
+        parts = str(e).split()
+        if not parts:
+            continue
+        drive = parts[0][:2]
+        if drive.startswith("?"):
+            drive = os.environ.get("SystemDrive", "C:")
+        mx = None
+        if len(parts) >= 3:
+            try:
+                lo, hi = int(parts[1]), int(parts[2])
+            except ValueError:
+                lo = hi = 0
+            if lo or hi:
+                mx = hi << 20
+        out.append((drive, mx))
+    return out
+
+
+def _page_file_growth(ram, current, entries, usage=None):
+    """The bytes the page files *entries* (:func:`_page_file_entries`) can
+    still grow by, *current* bytes big together on a computer with *ram*: to
+    their maximum (a system-managed one's is three times the RAM or 4 GB,
+    at most an eighth of its drive), and no further than their drives' free
+    space less 2 GB.  *usage* is :func:`shutil.disk_usage` (for tests)."""
+    import shutil
+    usage = usage or shutil.disk_usage
+    most, free = 0, 0
+    for drive in sorted({d for d, _m in entries}):
+        try:
+            du = usage(drive + "\\")
+        except OSError:
+            continue
+        free += du.free
+        for d, mx in entries:
+            if d == drive:
+                most += mx if mx is not None else min(max(3 * ram, 4 << 30), du.total // 8)
+    return max(0, min(most - current, free - (2 << 30)))
+
+
+def emulators_that_fit(per, want):
+    """How many of *want* emulator processes, each committing *per* bytes
+    (:func:`emulator_commit`), the computer has room for now: at least one
+    (the encode needs that one whatever happens)."""
+    room = commit_room()
+    if room is None:
+        return want
+    return max(1, min(want, int((room - COMMIT_RESERVE) // max(per, 1))))
+
+
+# ---------------------------------------------------------------------------
+# The Write's final-bytes check (PAD-609): the replaced sounds decoded from the
+# finished card, spread over workers each booted and warmed as the serial check's
+# emulator is (engine._final_check_one does the work in both).
+# ---------------------------------------------------------------------------
+_FIN_EMU = None
+
+
+def init_final_worker(gr_path, img_path, params, edited):
+    global _FIN_EMU
+    from ..engine import _BodyOverlay
+    from .emulator import Spike2Emu
+    _FIN_EMU = Spike2Emu(gr_path, img_path)
+    _FIN_EMU.boot()
+    _FIN_EMU.warm_slots_for_grown(params, edited=edited)
+    _FIN_EMU.mm = _BodyOverlay(_FIN_EMU.mm)
+
+
+def final_check(task):
+    """task = ``(off, row, body, scrap_check)``; returns ``(off, result)``."""
+    from ..engine import _final_check_one
+    off, p, body, scrap = task
+    return off, _final_check_one(_FIN_EMU, off, p, body, scrap, np=np)

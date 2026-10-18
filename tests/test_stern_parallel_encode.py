@@ -37,7 +37,7 @@ def test_cat0_unknown_idx_is_dropped(monkeypatch):
     seen = {}
 
     def fake_serial(gr, img, byidx, edits, np, log, progress, cancel,
-                    gains=None):
+                    gains=None, **_k):
         seen["edits"] = edits
         return ({}, [], {})
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
@@ -92,12 +92,12 @@ def test_cat0_parallel_partial_resume_keeps_done_work(monkeypatch):
 
     # idx 1 finished in parallel; idx 2 + 3 were left over.
     def partial(gr, img, needed, edits, nworkers, np, log, progress, cancel,
-                gains=None):
+                gains=None, **_k):
         return ({1000: b"one"}, [], [(2, "b"), (3, "c")], {1: (1000, b"one")})
     seen = {}
 
     def fake_serial(gr, img, byidx, edits, np, log, progress, cancel,
-                    gains=None):
+                    gains=None, **_k):
         seen["edits"] = [idx for idx, _ in edits]
         return ({2000: b"two", 3000: b"three"}, [],
                 {2: (2000, b"two"), 3: (3000, b"three")})
@@ -132,7 +132,7 @@ def test_cat0_cache_replays_unchanged_sounds(monkeypatch, tmp_path):
     calls = []
 
     def fake_serial(g, i, byidx, edits, np, log, progress, cancel,
-                    gains=None):
+                    gains=None, **_k):
         calls.append([idx for idx, _ in edits])
         return ({1000: b"body1"}, [], {1: (1000, b"body1")})
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
@@ -154,7 +154,7 @@ def test_cat0_cache_skip_verdict_replays(monkeypatch, tmp_path):
     calls = []
 
     def fake_serial(g, i, byidx, edits, np, log, progress, cancel,
-                    gains=None):
+                    gains=None, **_k):
         calls.append([idx for idx, _ in edits])
         return ({}, [1], {})           # codec can't re-encode idx 1
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
@@ -172,7 +172,7 @@ def test_cat0_cache_env_and_kill_switch(monkeypatch, tmp_path):
     calls = []
 
     def fake_serial(g, i, byidx, edits, np, log, progress, cancel,
-                    gains=None):
+                    gains=None, **_k):
         calls.append(1)
         return ({1000: b"b"}, [], {1: (1000, b"b")})
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
@@ -214,7 +214,7 @@ def test_cat0_cache_dir_is_never_baselined(tmp_path):
 def test_run_bank_encode_serial_aggregates(monkeypatch):
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
 
-    def fake_bank(gr, img, rev, cid, sc_path, edits, np, gains=None):
+    def fake_bank(gr, img, rev, cid, sc_path, edits, np, gains=None, **_k):
         return ([(cid, idx, idx * 10, b"B" + bytes([idx]))
                  for idx, _ in edits], [])
     monkeypatch.setattr(E, "_derive_encode_bank", fake_bank)

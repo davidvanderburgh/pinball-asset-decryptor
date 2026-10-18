@@ -14932,7 +14932,7 @@ class _AudioBodyCache:
 
     _PATH_ONLY = frozenset((
         "PAD_STERN_AUDIO_CACHE", "PAD_STERN_BLIP_FREE",
-        "PAD_STERN_BLOCK_WORKERS",
+        "PAD_STERN_BANK_WORKERS", "PAD_STERN_BLOCK_WORKERS",
         "PAD_STERN_SERIAL_ENCODE", "PAD_STERN_SKIP_FINAL_VERIFY",
         "PAD_STERN_SKIP_KEYPATCH", "PAD_STERN_SKIP_MASTERDIR_FIX"))
 
@@ -18916,19 +18916,19 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
     finally:
         emu.close()
     beds = {}
-    rev = None
+    jobs = []
+    for cat, path in plan.files:
+        places, _r = plan.rows[cat]
+        jobs.append(BB.BankJob(cat, path, places,
+                               {pl.idx: plan.wavs[pl.idx] for pl in SB.records(places)}))
+    # PAD-609: the banks' chain encodes and their checks run side by side
+    encoded = BB.encode_banks(gr_path, img_path, jobs, params, np, log, loops=set(loop_idx),
+                              gains=gains, level_refs=refs, progress=progress, cancel=cancel,
+                              body_cache=body_cache)
     for n, (cat, path) in enumerate(plan.files):
         places, _r = plan.rows[cat]
-        wavs = {pl.idx: plan.wavs[pl.idx] for pl in SB.records(places)}
-        rows, _patches, rev = BB.chain_encode(
-            gr_path, img_path, path, cat, params, places, wavs, np, log,
-            loops=set(loop_idx) & set(wavs), gains=gains, level_refs=refs,
-            progress=_span(progress, int(100 * n / len(plan.files)),
-                           int(100 * (n + 1) / len(plan.files))),
-            cancel=cancel, revalidate=rev, body_cache=body_cache)
-        # the check derives the finished file afresh; the rows kept are the
-        # chain's, which carry each record's host sound
-        BB.verify_bank(gr_path, img_path, path, cat, rows, log, revalidate=rev)
+        # the rows kept are the chain's, which carry each record's host sound
+        rows, rev = encoded[n]
         plan.rows[cat] = (places, rows)
         # the play tables: each sound's carrier request names the sid whose
         # descriptor is copied (a bed's carrier is a looping tune, a call's

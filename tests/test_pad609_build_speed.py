@@ -21,7 +21,7 @@ import pytest
 
 pytest.importorskip("unicorn")
 
-from unicorn import UC_ARCH_ARM, UC_HOOK_CODE, UC_MODE_ARM, Uc  # noqa: E402
+from unicorn import UC_HOOK_CODE  # noqa: E402
 from unicorn.arm_const import UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_R0  # noqa: E402
 
 from pinball_decryptor.plugins.stern.spike2 import emulator as EM  # noqa: E402
@@ -286,3 +286,108 @@ def test_a_decode_with_the_capture_hooks_on_gives_the_same_samples():
         assert repr(gr.recover_block(mo, 2000, n=200)) == repr(b)
     finally:
         emu.close()
+
+
+# --------------------------------------------------------------------------
+# the banks of a Write side by side
+# --------------------------------------------------------------------------
+class _ThreadPool:
+    """ProcessPoolExecutor's stand-in: the same calls on threads, so a stubbed
+    encode is what the workers run."""
+
+    def __init__(self, n, mp_context=None, **kw):
+        from concurrent.futures import ThreadPoolExecutor
+        self._p = ThreadPoolExecutor(n)
+
+    def submit(self, fn, *a):
+        return self._p.submit(fn, *a)
+
+    def shutdown(self, wait=True, cancel_futures=False):
+        self._p.shutdown(wait=wait, cancel_futures=cancel_futures)
+
+
+def _bank_stub(monkeypatch, delays=None, fail=None):
+    import concurrent.futures as CF
+    import time
+    from pinball_decryptor.plugins.stern import bank_build as BB
+    monkeypatch.setattr(CF, "ProcessPoolExecutor", _ThreadPool)
+    seen = []
+
+    def fake(gr, img, job, params, np, log, loops=(), gains=None, level_refs=None,
+             progress=None, cancel=None, revalidate=None, body_cache=None):
+        time.sleep((delays or {}).get(job.cat, 0))
+        seen.append((job.cat, revalidate))
+        log("bank %d encoded" % job.cat)
+        if fail == job.cat:
+            raise RuntimeError("bank %d's chain never reached sound(s) [7]" % job.cat)
+        if body_cache is not None:
+            body_cache.used.add("k%d" % job.cat)
+            body_cache.hits += 1
+        return [{"idx": 0, "host": job.cat}], "rev-of-%d" % (revalidate is None and job.cat or 1)
+    monkeypatch.setattr(BB, "encode_and_verify", fake)
+    jobs = [BB.BankJob(c, "sc%02d" % c, [], {}) for c in range(1, 6)]
+    return BB, jobs, seen
+
+
+def test_banks_come_back_in_order_with_their_lines_in_order(monkeypatch):
+    BB, jobs, seen = _bank_stub(monkeypatch, delays={2: 0.3, 3: 0.0, 4: 0.1})
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "4")
+    logs = []
+
+    class Cache:
+        used, hits = set(), 0
+    cache = Cache()
+    out = BB.encode_banks("gr", "img", jobs, [], None,
+                          lambda m, lv="info": logs.append(m), body_cache=cache)
+    assert [r[0][0]["host"] for r in out] == [1, 2, 3, 4, 5]
+    lines = [m for m in logs if m.startswith("bank ")]
+    assert lines == ["bank %d encoded" % c for c in range(1, 6)]
+    # the first bank settles the stub; every later one is handed it
+    assert seen[0] == (1, None) and {r for c, r in seen[1:]} == {"rev-of-1"}
+    assert cache.used == {"k1", "k2", "k3", "k4", "k5"} and cache.hits == 5
+    assert any("at a time" in m for m in logs)
+
+
+def test_a_failing_bank_stops_the_write_with_its_own_words(monkeypatch):
+    BB, jobs, _seen = _bank_stub(monkeypatch, fail=3)
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "4")
+    logs = []
+    with pytest.raises(RuntimeError) as e:
+        BB.encode_banks("gr", "img", jobs, [], None, lambda m, lv="info": logs.append(m))
+    assert str(e.value) == "bank 3's chain never reached sound(s) [7]"
+    assert "bank 3 encoded" in logs and "bank 4 encoded" not in logs[:logs.index("bank 3 encoded")]
+
+
+def test_one_bank_worker_is_the_old_one_after_another(monkeypatch):
+    BB, jobs, seen = _bank_stub(monkeypatch)
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "1")
+    import concurrent.futures as CF
+
+    def no_pool(*a, **k):
+        raise AssertionError("a pool was started")
+    monkeypatch.setattr(CF, "ProcessPoolExecutor", no_pool)
+    out = BB.encode_banks("gr", "img", jobs, [], None, lambda *a: None)
+    assert [c for c, _r in seen] == [1, 2, 3, 4, 5] and len(out) == 5
+
+
+def test_the_bank_worker_count(monkeypatch):
+    from pinball_decryptor.plugins.stern import bank_build as BB
+    monkeypatch.delenv(BB.BANK_WORKERS_ENV, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 16)
+    assert BB.bank_workers(11) == 4
+    assert BB.bank_workers(3) == 2          # the banks after the first
+    assert BB.bank_workers(1) == 1
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    assert BB.bank_workers(11) == 1
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "3")
+    assert BB.bank_workers(11) == 3
+
+
+def test_the_bank_worker_count_is_no_part_of_an_audio_cache_key(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import engine as E
+    gr = tmp_path / "game_real"
+    gr.write_bytes(b"fw")
+    monkeypatch.delenv("PAD_STERN_BANK_WORKERS", raising=False)
+    a = E._audio_cache_base_key(str(gr), b"id")
+    monkeypatch.setenv("PAD_STERN_BANK_WORKERS", "1")
+    assert E._audio_cache_base_key(str(gr), b"id") == a

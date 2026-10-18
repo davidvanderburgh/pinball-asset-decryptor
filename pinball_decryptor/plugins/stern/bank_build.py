@@ -32,6 +32,7 @@ maps it.
 """
 import os
 import struct
+from dataclasses import dataclass
 
 from ...core.longpath import ext as _lp
 from .spike2 import masterdir as MD
@@ -281,6 +282,188 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
         "into the file (%.1f MB)." % (SB.bank_name(cat), len(done),
                                        os.path.getsize(_lp(bank_path)) / 1e6), "info")
     return rows, patches, rev
+
+
+# --------------------------------------------------------------------------
+# every bank of a Write, side by side (PAD-609)
+# --------------------------------------------------------------------------
+#: ``PAD_STERN_BANK_WORKERS``: how many banks are encoded at once (1 = one after
+#: another, in this process, as before PAD-609).
+BANK_WORKERS_ENV = "PAD_STERN_BANK_WORKERS"
+
+
+@dataclass
+class BankJob:
+    """One bank of :func:`encode_banks`: category *cat*'s staged file at *path*,
+    its :class:`.soundbank.BankPlacement` list and ``{host idx: wav}``."""
+    cat: int
+    path: str
+    places: list
+    wavs: dict
+
+
+def bank_workers(n_banks):
+    """How many banks :func:`encode_banks` encodes at once: one per four cores
+    (each bank's long sounds have block workers of their own), at most the banks
+    after the first; :data:`BANK_WORKERS_ENV` overrides it."""
+    v = os.environ.get(BANK_WORKERS_ENV, "")
+    try:
+        if v.strip():
+            return max(1, min(int(v), max(1, n_banks - 1)))
+    except ValueError:
+        pass
+    return max(1, min((os.cpu_count() or 1) // 4, n_banks - 1))
+
+
+def encode_and_verify(gr_path, img_path, job, params, np, log, loops=(), gains=None,
+                      level_refs=None, progress=None, cancel=None, revalidate=None,
+                      body_cache=None):
+    """:func:`chain_encode` then :func:`verify_bank` for one :class:`BankJob`;
+    returns ``(rows, revalidate)`` (the chain's rows, which carry each
+    record's host sound)."""
+    rows, _patches, rev = chain_encode(
+        gr_path, img_path, job.path, job.cat, params, job.places, job.wavs, np, log,
+        loops=set(loops or ()) & set(job.wavs), gains=gains, level_refs=level_refs,
+        progress=progress, cancel=cancel, revalidate=revalidate, body_cache=body_cache)
+    # the check derives the finished file afresh
+    verify_bank(gr_path, img_path, job.path, job.cat, rows, log, revalidate=rev)
+    return rows, rev
+
+
+def _bank_worker(task):
+    """A worker of :func:`encode_banks`: one bank, its log lines held and
+    handed back whole (the parent says them in bank order).  A cancel is the
+    parent's flag file appearing."""
+    (gr_path, img_path, job, params, loops, gains, level_refs, revalidate, body_cache,
+     flag, blocks) = task
+    import numpy as np
+    if blocks is not None:
+        os.environ["PAD_STERN_BLOCK_WORKERS"] = str(blocks)
+    lines = []
+    if body_cache is not None:
+        # what this bank used, handed back for the parent's cache to keep
+        import copy
+        body_cache = copy.copy(body_cache)
+        body_cache.used, body_cache.hits = set(), 0
+    try:
+        rows, rev = encode_and_verify(
+            gr_path, img_path, job, params, np,
+            lambda m, lv="info", *_a, **_k: lines.append((m, lv)),
+            loops=loops, gains=gains, level_refs=level_refs,
+            cancel=lambda: os.path.exists(flag), revalidate=revalidate,
+            body_cache=body_cache)
+    except Exception as e:                              # noqa: BLE001
+        return ("error", (type(e).__name__, str(e)), lines, None)
+    used = (body_cache.used, body_cache.hits) if body_cache is not None else None
+    return ("ok", (rows, rev), lines, used)
+
+
+def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
+                 level_refs=None, progress=None, cancel=None, body_cache=None):
+    """``[(rows, revalidate), ...]``: :func:`encode_and_verify` for every
+    :class:`BankJob` of *jobs*, in order.
+
+    The first bank is encoded here: its derive settles the firmware's
+    map-revalidation stub, which every later bank's derive is then handed.
+    Those are encoded side by side in worker processes (:func:`bank_workers`),
+    each its own file, its own emulators and its own share of the cores for
+    its long sounds' blocks; their log lines are said in bank order as they
+    come back.  A Godzilla build with 11 modes' music had them one after
+    another: 11 banks, 5 to 30 s each.  A worker's failure stops the Write
+    with the bank's own words, as it would have here; a pool that cannot
+    start leaves the rest to be encoded here."""
+    from .engine import _span
+    out = []
+    n = len(jobs)
+
+    def span(i):
+        return _span(progress, int(100 * i / n), int(100 * (i + 1) / n))
+    if not jobs:
+        return out
+    rows, rev = encode_and_verify(gr_path, img_path, jobs[0], params, np, log, loops=loops,
+                                  gains=gains, level_refs=level_refs, progress=span(0),
+                                  cancel=cancel, body_cache=body_cache)
+    out.append((rows, rev))
+    rest = jobs[1:]
+    w = bank_workers(n)
+    got = None
+    if w > 1 and len(rest) > 1:
+        got = _encode_banks_parallel(gr_path, img_path, rest, params, log, loops, gains,
+                                     level_refs, progress, cancel, body_cache, rev, w, n)
+    if got is not None:
+        return out + got
+    for i, job in enumerate(rest, 1):
+        out.append(encode_and_verify(gr_path, img_path, job, params, np, log, loops=loops,
+                                     gains=gains, level_refs=level_refs, progress=span(i),
+                                     cancel=cancel, revalidate=rev, body_cache=body_cache))
+    return out
+
+
+def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, level_refs,
+                           progress, cancel, body_cache, rev, workers, n_all):
+    """:func:`encode_banks`' workers; None when the pool could not start (the
+    caller encodes the banks itself)."""
+    import multiprocessing as mp
+    import tempfile
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+    from .spike2.parallel import block_workers
+    # the cores shared out: a worker's long sounds take its share for their blocks
+    blocks = min(max(0, (os.cpu_count() or 1) // workers - 1), block_workers())
+    fd, flag = tempfile.mkstemp(prefix="spike2_bankcancel_")
+    os.close(fd)
+    os.remove(flag)
+    log("Sound banks %s: encoded %d at a time, each in a worker of its own." % (
+        ", ".join(SB.bank_name(j.cat) for j in jobs), workers), "info")
+    results = [None] * len(jobs)
+    said = 0
+    pool = None
+    try:
+        try:
+            pool = ProcessPoolExecutor(workers, mp_context=mp.get_context("spawn"))
+            futs = {pool.submit(_bank_worker, (gr_path, img_path, j, params, set(loops or ()),
+                                               gains, level_refs, rev, body_cache, flag,
+                                               blocks)): i
+                    for i, j in enumerate(jobs)}
+        except Exception as e:                          # noqa: BLE001
+            log("Sound banks are encoded one after another: the workers did not start "
+                "(%s)." % e, "info")
+            return None
+        pending = set(futs)
+        while pending:
+            done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            if cancel is not None and cancel():
+                open(flag, "w").close()
+            for f in done:
+                try:
+                    results[futs[f]] = f.result()
+                except Exception as e:                  # noqa: BLE001
+                    results[futs[f]] = ("error", ("RuntimeError", "sound bank %s's worker "
+                                                  "stopped (%s)" % (SB.bank_name(
+                                                      jobs[futs[f]].cat), e)), [], None)
+            # the log lines of every bank done so far, in bank order
+            while said < len(jobs) and results[said] is not None:
+                tag, val, lines, used = results[said]
+                for m, lv in lines:
+                    log(m, lv)
+                if tag != "ok":
+                    open(flag, "w").close()
+                    raise RuntimeError(val[1])
+                if used is not None and body_cache is not None:
+                    body_cache.used |= used[0]
+                    body_cache.hits += used[1]
+                said += 1
+                if progress:
+                    progress(int(100 * (said + 1) / n_all), 100,
+                             "Encoding the modes' sound banks (%d of %d)..."
+                             % (said + 1, n_all))
+        return [r[1] for r in results]
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+        try:
+            os.remove(flag)
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------

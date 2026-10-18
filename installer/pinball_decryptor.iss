@@ -220,6 +220,15 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /reset /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
 Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /grant *S-1-5-32-545:(OI)(CI)RX /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
 
+; --- Compile the app's Python once, here --------------------------------
+; The app ships as source (the __pycache__ folders are excluded above), so
+; the first start after every install or update compiled each of its ~400
+; modules before the window could open: 1.2 - 2 s more on that start
+; (PAD-610).  Compiling them here, against the files just installed, makes
+; that first start as quick as every later one.  Not fatal: a failure only
+; costs that one slower start.
+Filename: "{app}\python\python.exe"; Parameters: "-m compileall -q -j 0 ""{app}\pinball_decryptor"""; WorkingDir: "{app}"; StatusMsg: "Preparing the app..."; Flags: runhidden waituntilterminated
+
 Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Description: "Launch Pinball Asset Decryptor"; Flags: nowait postinstall skipifsilent
 
 ; --- In-app update relaunch ----------------------------------------------
@@ -242,6 +251,8 @@ Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\spooky\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\bof\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\jjp\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\dp\__pycache__"
+; ...and every other package's, which the install-time compile writes too
+Type: filesandordirs; Name: "{app}\pinball_decryptor"
 
 [Code]
 { False when the desktop shortcut already exists and launches this install

@@ -498,3 +498,140 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
         emu.close()
     log("Sound bank %s: every one of its %d sound id(s) resolves through the game's own resolver "
         "to its descriptor and its record." % (SB.bank_name(cat), len(places)), "success")
+
+
+# --------------------------------------------------------------------------
+# PAD-606: the game's own sounds in a bank
+# --------------------------------------------------------------------------
+# A longer replacement of one of the game's own sounds reaches its record through the
+# descriptor of the sid that plays it, and a cat-0 sid's descriptor can only name an
+# image.bin record (the key's category bits come from the sid).  So a game sound that goes
+# into a bank gets a sid of the bank's category, as a mode's own sound does, and the game is
+# made to play THAT: the sid lists of the game's request table (``spike2.sound_requests``),
+# which the play worker reads at every play, name the bank sid where they named the game's.
+# That is how the music titles play their own banks' songs: their request lists carry the
+# songs' ``cat << 16 | n`` sids.
+
+#: Longest sid list :func:`request_list_slots` follows (the longest on the cards seen is
+#: well under it; the walk stops at the list's zero).
+_LIST_MAX = 256
+
+
+def request_list_slots(elf, head):
+    """``{sid: [file offsets]}``: every place the game's request table's sid lists (in
+    the game ELF *elf*; *head* is image.bin's header, for its fragment count) name a sid.
+    ``{}`` when the table cannot be found."""
+    from .info import container_counts
+    from .spike2 import sound_requests as SR
+    from .spike2.elf import parse_elf
+    counts = container_counts(head)
+    fragments = counts[0] if isinstance(counts, tuple) else counts.get("fragments")
+    count, table = SR.locate_sound_requests(elf, fragments)
+    if table is None or not count:
+        return {}
+    segs, _r = parse_elf(elf)
+
+    def va2off(va):
+        for vaddr, foff, filesz, _m in segs:
+            if vaddr <= va < vaddr + filesz:
+                return foff + va - vaddr
+        return None
+
+    out, seen = {}, set()
+    for r in range(int(count)):
+        for w in struct.unpack_from("<5I", elf, table + r * 20):
+            o = va2off(w) if w else None
+            if o is None or o <= table:
+                continue
+            # the first word that points past the record array is the list
+            # (mode_write.request_sids reads it the same way)
+            if o not in seen:
+                seen.add(o)
+                for i in range(_LIST_MAX):
+                    at = o + 4 * i
+                    if at + 4 > len(elf):
+                        break
+                    (sid,) = struct.unpack_from("<I", elf, at)
+                    if sid == 0:
+                        break
+                    out.setdefault(sid, []).append(at)
+            break
+    return out
+
+
+def stock_slots(slots, old_map):
+    """*slots* (:func:`request_list_slots`) keyed by the GAME's sid: a bank sid an
+    earlier Write put in a list (*old_map* ``{bank sid: game sid}``, the card's banks'
+    sid maps) counts as the sid it stands in for."""
+    out = {}
+    for sid, offs in slots.items():
+        out.setdefault(old_map.get(sid, sid), []).extend(offs)
+    return out
+
+
+def game_sound_sids(grows, byidx, sites, mask, slots, exclude=()):
+    """``(ok, why)``: of the user's longer replacements *grows* (``{idx: (room,
+    want)}``), ``ok`` ``{idx: sid}`` the ones a bank can hold, each with the game sid that
+    plays it, and ``why`` ``{idx: reason}`` for the rest.  A sound can move when exactly
+    one sid of the game's plays it (*sites*, the card's descriptor sites; *mask* its key
+    mask), that sid's descriptor names nothing else, a request list names the sid
+    (*slots*, :func:`stock_slots`), and it is not one a mode of this Write uses
+    (*exclude*)."""
+    from . import engine as E
+    exclude = {int(s) for s in exclude or ()}
+    by_key, sid_sites = {}, {}
+    for s in sites:
+        sid_sites.setdefault(s.sid, []).append(s)
+        by_key.setdefault(E._play_key(s.payload, s.sid, mask), set()).add(s.sid)
+    ok, why = {}, {}
+    for idx in sorted(grows):
+        key = (byidx.get(idx) or {}).get("findkey")
+        sids = sorted(by_key.get(bytes(key), ())) if key else []
+        if len(sids) != 1:
+            why[idx] = ("%d of the game's sound ids play it" % len(sids) if sids
+                        else "no sound id of the game's plays it")
+            continue
+        sid = sids[0]
+        if len(sid_sites[sid]) != 1:
+            why[idx] = "sound id %d plays it as one of %d parts" % (sid, len(sid_sites[sid]))
+        elif sid >> 16:
+            why[idx] = "sound id %d is already in a sound bank of the game's" % sid
+        elif sid in exclude:
+            why[idx] = "sound id %d is one a mode of this card plays" % sid
+        elif not slots.get(sid):
+            why[idx] = "the game plays sound id %d other than through its sound requests" % sid
+        else:
+            ok[idx] = sid
+    return ok, why
+
+
+def list_writes(slots, old_map, new_map):
+    """``{file offset: u32 bytes}``: the request lists as this Write wants them, against
+    *slots* (:func:`request_list_slots` of the game ELF the writes go into, keyed by the
+    sid each place holds now).  A place an earlier Write gave a bank sid (*old_map*) goes
+    back to the game's sid, and a game sid this Write put in a bank (*new_map* ``{game
+    sid: bank sid}``) takes the bank's."""
+    out = {}
+    for sid, offs in slots.items():
+        want = old_map.get(sid, sid)
+        want = new_map.get(want, want)
+        if want != sid:
+            for o in offs:
+                out[o] = struct.pack("<I", want & 0xFFFFFFFF)
+    return out
+
+
+def card_sid_map(reader):
+    """``{bank sid: game sid}`` over the sound banks on the card *reader* reads: the
+    game sounds an earlier Write moved into banks of this app's (their sid maps,
+    :func:`.soundbank.read_sid_map_at`).  ``{}`` when there are none."""
+    out = {}
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        cat = SB.category_of(path.rsplit("/", 1)[-1])
+        if cat is None:
+            continue
+        got = SB.read_sid_map_at(lambda off, n, _node=node: reader.read_range(_node, off, n),
+                                 int(node["size"]))
+        for k, sid in got.items():
+            out[SB.bank_sid(cat, k)] = int(sid)
+    return out

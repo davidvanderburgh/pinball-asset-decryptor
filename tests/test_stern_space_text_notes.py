@@ -94,7 +94,7 @@ def test_the_notes_on_macos_never_send_the_user_to_the_control(monkeypatch):
     for text in (video, audio, squeezed, small):
         assert "SD card size" not in text, text
         assert "Windows and Linux" in text, text
-    assert "not raise the 2 GB limit" in audio
+    assert "extra sound banks" in audio            # PAD-606: past the 2 GB
     assert audio.count("..") == 0 and ",," not in audio
     # the platform argument wins over this computer's
     monkeypatch.setattr("sys.platform", "win32")

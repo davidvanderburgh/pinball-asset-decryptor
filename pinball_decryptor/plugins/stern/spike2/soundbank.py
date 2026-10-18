@@ -101,6 +101,17 @@ DEFAULT_STRIDE = 5
 DESC_SLOT = 0x50
 #: The vf2 keystream window the resolver can point into.
 VF2_WINDOW = 0x3F00
+#: The bank's sid map (PAD-606), between the descriptor block and the directory: which of
+#: the GAME's own sids each fragment stands in for (0 for a mode's own sound), so a later
+#: Write of the same card can put the game's request lists back.  Nothing the game runs
+#: reads it: the descriptors are reached through the fragment table and the directory
+#: through ``hdr[0x40]``.
+SID_MAP_MAGIC = b"PADS"
+#: Sound channels the game plays at once (the voice loop at Godzilla LE 1.16's 0x43c210).
+#: A sound's start takes a reference on its sid's bank (0x43cdcc), its stop drops it
+#: (0x43c254), and mapping a bank unmaps only the OTHER banks with no sound playing
+#: (0x3b57d8): so as many banks as there are channels can be mapped beside image.bin.
+SOUND_CHANNELS = 8
 
 
 class SoundBankError(MD.MasterDirError):
@@ -235,9 +246,70 @@ def bank_bytes(bodies, stride=DEFAULT_STRIDE):
     n = len(bodies)
     body_end = (MD.align16(HDR_LEN + _tables_len(n, stride))
                 + sum(MD.BODY_PAD + b for b in bodies))
-    return MD.align16(MD.align16(body_end + MD.BODY_PAD) + n * DESC_SLOT) + MD.tail_len(n)
+    return (MD.align16(MD.align16(body_end + MD.BODY_PAD) + n * DESC_SLOT) + sid_map_len(n)
+            + MD.tail_len(n))
 
 
+def sid_map_len(n):
+    """Bytes the sid map of a bank of *n* sounds takes: :data:`SID_MAP_MAGIC`, the
+    count, one u32 a fragment, rounded up to 16."""
+    return MD.align16(8 + 4 * int(n))
+
+
+def sid_map_block(orig, n):
+    """The sid map for a bank of *n* fragments: *orig* ``{fragment: game sid}``."""
+    out = bytearray(sid_map_len(n))
+    out[0:4] = SID_MAP_MAGIC
+    struct.pack_into("<I", out, 4, int(n))
+    for k, sid in (orig or {}).items():
+        if not 0 <= int(k) < n:
+            raise SoundBankError("sid map: fragment %d of %d" % (k, n))
+        struct.pack_into("<I", out, 8 + 4 * int(k), int(sid) & 0xffffffff)
+    return bytes(out)
+
+
+def write_sid_map(path, md_off, n, orig):
+    """Write the sid map of a staged bank whose directory of *n* records is at
+    *md_off* (it sits just before the directory)."""
+    with open(path, "r+b") as f:
+        f.seek(int(md_off) - sid_map_len(n))
+        f.write(sid_map_block(orig, n))
+
+
+def read_sid_map(data):
+    """``{fragment: game sid}`` out of a whole bank file's bytes *data*: the game
+    sounds a PAD bank stands in for (:func:`read_sid_map_at`)."""
+    data = bytes(data)
+    return read_sid_map_at(lambda off, n: data[off:off + n], len(data))
+
+
+def read_sid_map_at(read, size):
+    """``{fragment: game sid}`` of the bank *size* bytes long that ``read(off, n)``
+    reads: the game sounds a PAD bank stands in for.  ``{}`` for a vendor bank, a bank
+    built before PAD-606, or anything that is not a bank."""
+    try:
+        h = bytes(read(0, HDR_LEN))
+        if len(h) < HDR_LEN:
+            return {}
+        md_off, count = MD.header_geometry(h)
+        if not 0 < count <= MD.MAX_RECORDS or md_off + MD.tail_len(count) != size:
+            return {}
+        if bytes(read(md_off + MD.align16(MD.RECORD_SIZE * count) + 4, 4)) != PAD_TRAILER:
+            return {}
+        at = md_off - sid_map_len(count)
+        if at < HDR_LEN:
+            return {}
+        block = bytes(read(at, sid_map_len(count)))
+        if block[:4] != SID_MAP_MAGIC or struct.unpack_from("<I", block, 4)[0] != count:
+            return {}
+        out = {}
+        for k in range(count):
+            sid = struct.unpack_from("<I", block, 8 + 4 * k)[0]
+            if sid:
+                out[k] = sid
+        return out
+    except (ValueError, struct.error, MD.MasterDirError):
+        return {}
 def alone_bank_room(image_size):
     """The biggest bank one long sound can have to itself beside an ``image.bin``
     of *image_size* bytes (PAD-607): what is left of :data:`MAPPED_MAX` with
@@ -304,7 +376,8 @@ def plan_bank(edits, stride=DEFAULT_STRIDE):
         off += e.body_bytes + MD.BODY_PAD
     desc0 = MD.align16(off)
     places = [BankPlacement(*pl, desc_off=desc0 + DESC_SLOT * pl[1]) for pl in places]
-    md_off = MD.align16(desc0 + DESC_SLOT * len(edits))
+    # the sid map (PAD-606) between the descriptors and the directory
+    md_off = MD.align16(desc0 + DESC_SLOT * len(edits)) + sid_map_len(len(edits))
     directory = MD.Directory(b"".join(records), len(records), md_off, 0,
                              trailer=PAD_TRAILER)
     return directory, places

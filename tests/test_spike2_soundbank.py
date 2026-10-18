@@ -84,7 +84,8 @@ def test_plan_bank_lays_each_body_behind_its_pad_and_the_directory_last():
     # then the descriptor block, one slot a sound, then the directory
     desc0 = MD.align16(places[1].body_off + 500 + MD.BODY_PAD)
     assert [p.desc_off for p in places] == [desc0, desc0 + SB.DESC_SLOT]
-    assert d.md_off == MD.align16(desc0 + 2 * SB.DESC_SLOT)
+    # PAD-606: the sid map sits between them
+    assert d.md_off == MD.align16(desc0 + 2 * SB.DESC_SLOT) + SB.sid_map_len(2)
     assert d.trailer == SB.PAD_TRAILER
     # a copy of the host record with only its geometry replaced
     assert d.body_off(0) == places[0].body_off
@@ -372,6 +373,8 @@ def test_build_sound_banks_gives_each_bank_sound_its_keys_and_names_the_bank_in_
     places = [SB.BankPlacement(618, 0, 0x78, 5000, 20000, 0x6000),
               SB.BankPlacement(1251, 1, 0x4F00, 2000, 4000, 0x6050)]
     bank = str(tmp_path / "image-sc01.bin")
+    with open(bank, "wb") as f:      # where the bank's sid map goes (PAD-606)
+        f.write(SB.bank_header(0x7000, 0x6100, 2, 2) + b"\0" * (0x7000 - SB.HDR_LEN))
     (tmp_path / "game").write_bytes(b"\0" * 64)
     from pinball_decryptor.plugins.stern import mode_write as MW
     monkeypatch.setattr(MW, "request_sids", lambda elf, head, r: {125: [73], 1251: [900]}[int(r)])
@@ -418,6 +421,9 @@ def test_build_sound_banks_gives_each_bank_sound_its_keys_and_names_the_bank_in_
     h = img.read_bytes()
     assert struct.unpack_from("<I", h, 0x68)[0] == 1
     assert struct.unpack_from("<I", h, 0x6C)[0] == 1
+    # the sid map: no game sound in this bank, only the modes' own
+    raw = open(bank, "rb").read()
+    assert raw[0x6100 - SB.sid_map_len(2):][:16] == SB.SID_MAP_MAGIC + struct.pack("<III", 2, 0, 0)
 
 
 # --------------------------------------------------------------------------
@@ -498,7 +504,7 @@ def test_banks_are_kept_as_small_as_sterns_own_and_refused_past_what_a_machine_h
                                        Reader(), None, None, lambda m, *a: lines.append(m))
     assert all(SB.bank_bytes([e.body_bytes for e in g]) <= SB.BANK_SLICE for _c, g in plan.banks)
     assert len(plan.banks) == 3                          # two, two and one 16 MB sounds
-    assert any("the size of Stern's own" in m for m in lines)
+    assert any("one for each of its %d sound channels" % SB.SOUND_CHANNELS in m for m in lines)
     # an image.bin already so big that one bank beside it passes what a machine holds
     monkeypatch.setattr(SB, "MAPPED_MAX", 20_000_000)
     with pytest.raises(RuntimeError, match="in memory at once"):

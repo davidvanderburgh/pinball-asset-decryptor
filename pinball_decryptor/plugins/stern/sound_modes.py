@@ -54,6 +54,16 @@ game's record lookup, ``site sound_lookup``, gets the next key each time it look
 file plays for as long as its slot's sound, so each one is cut to that length. No setting goes in the menu for them.
 While a music mode gives the slot a file of its own, that file plays every time (its descriptor
 names that file's record, not the slot's).
+
+IN A SOUND BANK (PAD-608): a file ``image.bin`` has no room for goes into a sound bank of the app's
+own (``image-scNN.bin``, PAD-595), as the modes' own sounds and the longer replacements do. The game
+plays a bank's sound only under a sound id of the bank's own (it streams from the file of the id's
+category), so such a file gets one bank sound id for every game sound id that plays its slot, each
+with that game id's descriptor naming the bank's record, and ``sounds.cfg`` says which (``bsid``
+for a mode's file, ``tsid`` for a file in turn): the runtime points the game's sound requests at
+the bank's ids when the setting (or the turn) wants that file (pad_mode_runtime.c "IN A SOUND
+BANK"). The card's record names such a file's record as ``<bank>:<record>``, and an extract of the
+card decodes that bank to bring it back.
 """
 from __future__ import annotations
 
@@ -476,11 +486,14 @@ def cut(wav, frames):
 
 
 # ---- the runtime's table ------------------------------------------------------------------------
-def cfg_text(live, count, sounds, only, record=(), turns=()):
+def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=()):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
     the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
     *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
     turn (PAD-565: ``turn`` lines, the record keys the runtime swaps at the game's lookup).
+    PAD-608: *bsids* ``[(mode, sound id, bank sound id)]`` and *tsids* ``[(k, slot key, sound id,
+    bank sound id)]``, the files in a sound bank (``bsid`` / ``tsid`` lines: the runtime points the
+    game's requests at the bank's id).
     PAD-553: *record* (:func:`card_record`) goes in as comment lines the runtime skips, so an
     extract of the card brings the modes back (:func:`read_card_record`)."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
@@ -492,6 +505,10 @@ def cfg_text(live, count, sounds, only, record=(), turns=()):
         lines.append("sound\t%d\t%d\t%s" % (int(mode), int(sid), bytes(desc).hex()))
     for k, slot, host in turns:
         lines.append("turn\t%d\t%s\t%s" % (int(k), bytes(slot).hex(), bytes(host).hex()))
+    for mode, sid, bank in bsids:
+        lines.append("bsid\t%d\t%d\t%d" % (int(mode), int(sid), int(bank)))
+    for k, slot, sid, bank in tsids:
+        lines.append("tsid\t%d\t%s\t%d\t%d" % (int(k), bytes(slot).hex(), int(sid), int(bank)))
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -504,6 +521,24 @@ REC_MODE, REC_FILE = "#mode", "#file"
 #: PAD-565: a slot's file in turn: ``#turn <k> <slot idx> <record idx> <dB or -> <slot rel>
 #: <the file's own name>``
 REC_TURN = "#turn"
+#: PAD-608: a file in a sound bank names its record as ``<bank category>:<record idx>`` (an app
+#: before PAD-608 skips such a line: its record field is not a number)
+_BANK_HOST = re.compile(r"^(\d{1,2}):(\d+)$")
+
+
+def _rec_host(u):
+    """The record field of a used entry *u*: ``<bank>:<record>`` for a file in a sound bank."""
+    if u.get("bank") is not None and u.get("bank_idx") is not None:
+        return "%d:%d" % (int(u["bank"]), int(u["bank_idx"]))
+    return str(int(u["host"]))
+
+
+def _read_host(text):
+    """``(record idx, bank category or None)`` of a record field (:func:`_rec_host`)."""
+    m = _BANK_HOST.match(text.strip())
+    if m:
+        return int(m.group(2)), int(m.group(1))
+    return int(text), None
 
 
 def _rec_word(text):
@@ -514,7 +549,8 @@ def _rec_word(text):
 def card_record(modes, used):
     """The record lines for a card built with *modes* (a :class:`Modes`): every mode's name, and
     for every file that landed (*used*, the engine's entries: ``rel``, ``slot``, ``mode``,
-    ``host``, ``db`` and ``lines``, how many sound ids play it) the record holding it."""
+    ``host``, ``db`` and ``lines``, how many sound ids play it) the record holding it (PAD-608:
+    ``bank`` and ``bank_idx`` for one in a sound bank)."""
     out = ["# PAD-553 what the project gave the card, for an extract of it to bring back"]
     out += ["%s\t%d\t%s" % (REC_MODE, m, _rec_word(modes.name(m))) for m in range(1, modes.count + 1)]
     for u in used:
@@ -528,7 +564,7 @@ def card_record(modes, used):
             src = (modes.slots.get(u["rel"]) or {}).get(m, "")
         db = u.get("db")
         out.append("\t".join([REC_TURN if is_turn(m) else REC_FILE,
-                               str(turn_of(m) if is_turn(m) else m), str(int(u["slot"])), str(int(u["host"])),
+                               str(turn_of(m) if is_turn(m) else m), str(int(u["slot"])), _rec_host(u),
                               "-" if db is None else str(int(db)), _rec_word(u["rel"]),
                               _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
     return out
@@ -538,7 +574,8 @@ def read_card_record(text):
     """``{"names": [...], "files": [{"mode", "slot", "host", "db", "rel", "name"}]}`` (and
     ``"turns"`` ``[{"turn", "slot", "host", "db", "rel", "name"}]`` when the card plays sounds in
     turn, PAD-565) from a card's ``sounds.cfg`` (*text*), or ``None``
-    when it has no record (a card written before PAD-553)."""
+    when it has no record (a card written before PAD-553). PAD-608: an entry whose file is in a
+    sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""
     names, files, turns, seen = {}, [], [], False
     for line in str(text or "").splitlines():
         f = line.split("\t")
@@ -552,16 +589,20 @@ def read_card_record(text):
                 seen = True
                 m = int(f[1])
                 if 2 <= m <= MAX_MODES:
-                    files.append({"mode": m, "slot": int(f[2]), "host": int(f[3]),
-                                  "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
-                                  "rel": f[5], "name": f[6] if len(f) > 6 else ""})
+                    host, bank = _read_host(f[3])
+                    files.append(dict({"mode": m, "slot": int(f[2]), "host": host,
+                                       "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
+                                       "rel": f[5], "name": f[6] if len(f) > 6 else ""},
+                                      **({"bank": bank} if bank is not None else {})))
             elif f[0] == REC_TURN and len(f) >= 6:
                 seen = True
                 k = int(f[1])
                 if 2 <= k <= TURN_MAX:
-                    turns.append({"turn": k, "slot": int(f[2]), "host": int(f[3]),
-                                  "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
-                                  "rel": f[5], "name": f[6] if len(f) > 6 else ""})
+                    host, bank = _read_host(f[3])
+                    turns.append(dict({"turn": k, "slot": int(f[2]), "host": host,
+                                       "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
+                                       "rel": f[5], "name": f[6] if len(f) > 6 else ""},
+                                      **({"bank": bank} if bank is not None else {})))
         except ValueError:
             continue
     if not seen:
@@ -570,4 +611,14 @@ def read_card_record(text):
     out = {"names": [names.get(m, "") for m in range(1, top + 1)], "files": files}
     if turns:
         out["turns"] = turns
+    return out
+
+
+def card_bank_records(rec):
+    """``{bank category: {record idx, ...}}``: the records of the app's sound banks a card's record
+    (:func:`read_card_record`) names (PAD-608: files in a sound bank), for an extract to decode."""
+    out = {}
+    for f in list((rec or {}).get("files") or ()) + list((rec or {}).get("turns") or ()):
+        if f.get("bank") is not None:
+            out.setdefault(int(f["bank"]), set()).add(int(f["host"]))
     return out

@@ -190,9 +190,23 @@ def header_writes_new_categories(image_header, cats):
 #: game looks the carrier up by, 24 bytes), the host's decoded length, the
 #: length the bank's record declares and how many bytes its body takes.
 BankEdit = collections.namedtuple("BankEdit", "idx record old_length new_length body_bytes")
-#: Where a sound landed: its host idx, its record number in the bank, its body.
+#: Where a sound landed: its host idx, its record number in the bank, its body.  PAD-608: a
+#: FRAGMENT past the records that plays one of them (*record*, that record's number; ``None`` for a
+#: record's own fragment) - a music mode's file several of the game's sound ids play, each with a
+#: descriptor of its own - is a placement too, *new_idx* its fragment number, the rest its record's.
 BankPlacement = collections.namedtuple("BankPlacement",
-                                       "idx new_idx body_off length body_bytes desc_off")
+                                       "idx new_idx body_off length body_bytes desc_off record",
+                                       defaults=(None,))
+
+
+def records(places):
+    """The placements of *places* that are records (not a fragment that plays one, PAD-608)."""
+    return [pl for pl in places if pl.record is None]
+
+
+def record_of(pl):
+    """The bank record placement *pl*'s fragment plays: its own number, or *record*."""
+    return pl.new_idx if pl.record is None else pl.record
 
 
 def fragment_stride(image_header):
@@ -238,16 +252,19 @@ def _tables_len(n, stride):
     return n * stride * FRAG_SLOT + 16
 
 
-def bank_bytes(bodies, stride=DEFAULT_STRIDE):
+def bank_bytes(bodies, stride=DEFAULT_STRIDE, aliases=0):
     """What a bank with the appended *bodies* (byte sizes) measures: the
     header, the fragment table, each body behind its zero pad, the
-    descriptor block, then the directory and its trailer."""
+    descriptor block, then the directory and its trailer.  *aliases*: the
+    fragments past the records that play one of them (PAD-608), each a slot
+    in the fragment table and the descriptor block."""
     bodies = list(bodies)
     n = len(bodies)
-    body_end = (MD.align16(HDR_LEN + _tables_len(n, stride))
+    nfrag = n + int(aliases)
+    body_end = (MD.align16(HDR_LEN + _tables_len(nfrag, stride))
                 + sum(MD.BODY_PAD + b for b in bodies))
-    return (MD.align16(MD.align16(body_end + MD.BODY_PAD) + n * DESC_SLOT) + sid_map_len(n)
-            + MD.tail_len(n))
+    return (MD.align16(MD.align16(body_end + MD.BODY_PAD) + nfrag * DESC_SLOT)
+            + sid_map_len(n) + MD.tail_len(n))
 
 
 def sid_map_len(n):
@@ -343,7 +360,7 @@ def split_banks(edits, limit=MAX_BANK_BYTES, stride=DEFAULT_STRIDE, alone=None):
     return banks
 
 
-def plan_bank(edits, stride=DEFAULT_STRIDE):
+def plan_bank(edits, stride=DEFAULT_STRIDE, aliases=()):
     """``(directory, placements)`` for a bank holding *edits*: record *n* is a
     copy of edit *n*'s host record with only its body offset and length word
     replaced (as :func:`masterdir.plan_grow_records` appends to ``image.bin``).
@@ -352,7 +369,12 @@ def plan_bank(edits, stride=DEFAULT_STRIDE):
     pad, then the descriptor block (:data:`DESC_SLOT` a sound) and the
     directory, which carries :data:`PAD_TRAILER`.  Each placement names its
     descriptor's offset; the tables themselves are written by
-    :func:`write_tables` once the records' keys are known."""
+    :func:`write_tables` once the records' keys are known.
+
+    PAD-608: *aliases* ``[host idx, ...]``: one more fragment each, past the
+    records, that plays that host's record (a placement with ``record``
+    set), for a sound several of the game's sound ids play, each through a
+    descriptor of its own."""
     edits = [BankEdit(*e) for e in edits]
     if not edits:
         raise SoundBankError("plan_bank called with no sounds")
@@ -367,7 +389,9 @@ def plan_bank(edits, stride=DEFAULT_STRIDE):
         raise SoundBankError(
             "the bank's records disagree about this build's length constant (%s)"
             % ", ".join("0x%08x" % v for v in sorted(xors)))
-    off = MD.align16(HDR_LEN + _tables_len(len(edits), stride)) + MD.BODY_PAD
+    aliases = [int(i) for i in aliases or ()]
+    nfrag = len(edits) + len(aliases)
+    off = MD.align16(HDR_LEN + _tables_len(nfrag, stride)) + MD.BODY_PAD
     records, places = [], []
     for n, e in enumerate(edits):
         word = MD._u32(e.record, 16) ^ (e.old_length & 0xffffffff) ^ (e.new_length & 0xffffffff)
@@ -376,8 +400,15 @@ def plan_bank(edits, stride=DEFAULT_STRIDE):
         off += e.body_bytes + MD.BODY_PAD
     desc0 = MD.align16(off)
     places = [BankPlacement(*pl, desc_off=desc0 + DESC_SLOT * pl[1]) for pl in places]
+    by_idx = {pl.idx: pl for pl in places}
+    for j, idx in enumerate(aliases):
+        pl = by_idx.get(idx)
+        if pl is None:
+            raise SoundBankError("a fragment for idx %d, which is not in the bank" % idx)
+        n = len(edits) + j
+        places.append(pl._replace(new_idx=n, desc_off=desc0 + DESC_SLOT * n, record=pl.new_idx))
     # the sid map (PAD-606) between the descriptors and the directory
-    md_off = MD.align16(desc0 + DESC_SLOT * len(edits)) + sid_map_len(len(edits))
+    md_off = MD.align16(desc0 + DESC_SLOT * nfrag) + sid_map_len(len(edits))
     directory = MD.Directory(b"".join(records), len(records), md_off, 0,
                              trailer=PAD_TRAILER)
     return directory, places
@@ -409,7 +440,7 @@ def write_bank(path, directory, places, scaffold, emu, stride=DEFAULT_STRIDE):
     size = directory.md_off + len(tail)
     with open(path, "wb") as f:
         f.write(bank_header(size, directory.md_off, directory.count, len(places), stride))
-        for pl in places:
+        for pl in records(places):
             src = scaffold[pl.new_idx] or b"\x00"
             reps = -(-pl.body_bytes // len(src))
             f.seek(pl.body_off - MD.BODY_PAD)

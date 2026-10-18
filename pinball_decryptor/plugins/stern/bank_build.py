@@ -104,19 +104,21 @@ def bank_edits(spilled, byidx, directory):
 # --------------------------------------------------------------------------
 # staging
 # --------------------------------------------------------------------------
-def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None, stride=None):
+def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None, stride=None,
+               aliases=()):
     """Write the bank for category *cat* holding *edits* into *work* and return
     ``(path, places)``.  Each body starts as the host's stock audio repeated
     to fill; *emu* is a booted emulator on the card's program (one is made
-    when None)."""
+    when None).  PAD-608: *aliases* (:func:`.soundbank.plan_bank`) are the
+    fragments past the records that play one of them."""
     from .spike2.emulator import Spike2Emu
     if stride is None:
         with open(_lp(img_path), "rb") as f:
             stride = SB.fragment_stride(f.read(0x100))
-    directory, places = SB.plan_bank(edits, stride)
+    directory, places = SB.plan_bank(edits, stride, aliases=aliases)
     scaffold = {}
     with open(_lp(img_path), "rb") as f:
-        for pl in places:
+        for pl in SB.records(places):
             p = byidx[pl.idx]
             step = 4 if p.get("chan") == 2 else 2
             f.seek(p["body_off"])
@@ -139,7 +141,7 @@ def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None, stride
         if own:
             emu.close()
     log("Sound bank %s: %d sound(s) staged, %.1f MB (the game's %d MB limit is "
-        "this bank's own)." % (SB.bank_name(cat), len(places), size / 1e6,
+        "this bank's own)." % (SB.bank_name(cat), len(SB.records(places)), size / 1e6,
                                 SB.MAX_BANK_BYTES // 10**6), "info")
     return path, places
 
@@ -167,6 +169,7 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
     gains = gains or {}
     loops = set(loops or ())
     byidx = {p["idx"]: p for p in params}
+    places = SB.records(places)
     by_new = {pl.new_idx: pl for pl in places}
     stock_rows = [p for p in params if not p.get("grown")]
     want = {pl.new_idx: pl.idx for pl in places if pl.idx in edits}
@@ -393,14 +396,17 @@ def compose_descriptor(template, key8, duration, music):
 
 
 def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers, durations,
-                      music_idx, log, stride=None):
+                      music_idx, log, stride=None, given=None):
     """Write the fragment table and the descriptors into the staged bank for
     the records *rows* (the chain's, with ``host`` and ``findkey``):
     placement *n*'s descriptor is a copy of its carrier's (*carriers*
     ``{host idx: carrier sid}``, resolved through the game's resolver) naming
     the bank record's key and declaring *durations[host idx]*; hosts in
-    *music_idx* are looping beds.  Returns ``{new_idx: (sid, plain, ks)}``
-    for :func:`verify_tables`."""
+    *music_idx* are looping beds.  PAD-608: *given* ``{new_idx: plain
+    descriptor}`` are fragments whose descriptor the caller wrote (a music
+    mode's file: the game sound id's own, naming the bank record), every
+    fragment past the records among them.  Returns ``{new_idx: (sid, plain,
+    ks)}`` for :func:`verify_tables`."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
     if stride is None:
@@ -416,8 +422,10 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
                                "bank's play tables cannot be written")
         mask, xor = resolver_rule(emu, resolver, out, img_path)
         vf2 = bytes(emu.mu.mem_read(emu.VF2_VA, SB.VF2_WINDOW + SB.DESC_SLOT))
-        descs = {}
+        descs = {n: bytes(d) for n, d in (given or {}).items()}
         for pl in places:
+            if pl.new_idx in descs:
+                continue
             r = by_new[pl.new_idx]
             csid = carriers[pl.idx]
             got = SN.resolve_descriptor(emu, resolver, out, csid)
@@ -459,9 +467,9 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
         # a full derive of a bank with real audio left the emulator unable
         # to run the resolver afterwards
         n = emu.register_bank(cat, bank_path, revalidate=revalidate)
-        if n != len(places):
+        if n != len(SB.records(places)):
             raise RuntimeError("bank %s registers %d record(s), not %d" % (
-                SB.bank_name(cat), n, len(places)))
+                SB.bank_name(cat), n, len(SB.records(places))))
         if resolver is None:
             resolver, out = SN._find_resolver(emu)
         if resolver is None:
@@ -491,9 +499,10 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
             if back != plain:
                 raise RuntimeError("sound id %#x: its descriptor does not read back as written" % sid)
             ops = E._op11_payloads(back)
-            if not ops or bytes(ops[0][1]) != bytes(by_new[pl.new_idx]["findkey"]):
+            key = bytes(by_new[SB.record_of(pl)]["findkey"])
+            if not ops or bytes(ops[0][1]) != key:
                 raise RuntimeError("sound id %#x: its descriptor names key %s, the record's is %s" % (
-                    sid, ops[0][1].hex() if ops else "none", bytes(by_new[pl.new_idx]["findkey"]).hex()))
+                    sid, ops[0][1].hex() if ops else "none", key.hex()))
     finally:
         emu.close()
     log("Sound bank %s: every one of its %d sound id(s) resolves through the game's own resolver "

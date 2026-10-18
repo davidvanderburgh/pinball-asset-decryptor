@@ -633,7 +633,7 @@ def _find_revalidate(game_real_path, image_path, files, log):
 
 
 def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
-                        cancel):
+                        cancel, only=None):
     """Derive + decode ONE bank on a FRESH CatEmu, emitting each decoded sound
     to ``sink(catid, idx, L, R, stereo)``.  Returns the count decoded.
 
@@ -643,7 +643,9 @@ def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
     fresh emu derives every bank in ~13 s flat, so the whole job parallelises
     cleanly.  The decode reuses this same emu — decoding is registry-stateless
     and switches the emulator to the narrow-hook fast path (~1 s per 20 s of
-    audio), so re-deriving it elsewhere would be wasted work."""
+    audio), so re-deriving it elsewhere would be wasted work.  *only*: the
+    record numbers to decode (PAD-608: a sound bank of this app's, of which an
+    extract wants the music modes' files alone); all when None."""
     emu = CatEmu(game_real_path, image_path)
     try:
         emu.boot()
@@ -660,6 +662,8 @@ def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
         for r in rows:
             if cancel():
                 break
+            if only is not None and r["idx"] not in only:
+                continue
             try:
                 res = emu.decode_cat(r, cancel=cancel)
             except Exception:
@@ -736,26 +740,28 @@ def _bank_pool_worker(args):
     straight to ``out_dir`` (so only a small count crosses the process boundary).
     Top-level so it pickles across the spawn boundary; ``rev`` is found once in
     the parent and passed in."""
-    game_real_path, image_path, rev, catid, sc_path, out_dir = args
+    game_real_path, image_path, rev, catid, sc_path, out_dir = args[:6]
+    only = args[6] if len(args) > 6 else None
     try:
         return _derive_decode_bank(
             game_real_path, image_path, rev, catid, sc_path,
             lambda c, idx, L, R, stereo: _write_cat_wav(out_dir, c, idx, L, R,
                                                         stereo),
-            lambda: False)
+            lambda: False, only=only)
     except Exception:
         return 0
 
 
 def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_dir,
                                     nworkers=None, log=None, progress=None,
-                                    cancel=None):
+                                    cancel=None, only=None):
     """Parallel twin of :func:`extract_category_audio` — one task PER BANK, each
     deriving + decoding on a fresh emulator in its own spawned process (so the
     per-bank derive can't accumulate the state that grinds a long-lived emu, and
     the work spreads across cores).  ``rev`` is located once up front and shared.
     Writes ``music_catNN_*.wav`` into ``out_dir``; falls back to the serial path
-    if the pool can't start.  Returns the count decoded."""
+    if the pool can't start.  Returns the count decoded.  *only* ``{category:
+    {record, ...}}`` decodes just those records of those banks (PAD-608)."""
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     files = sorted((c, p) for p in sc_files
@@ -780,6 +786,7 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
             return 0
     ordered = sorted(files, key=lambda cp: _sz(cp[1]), reverse=True)
     tasks = [(game_real_path, image_path, rev, catid, p, out_dir)
+             + ((frozenset((only or {}).get(catid, ())),) if only is not None else ())
              for catid, p in ordered]
     log("Decoding %d music bank(s) across %d process(es)..."
         % (len(files), nworkers), "info")
@@ -808,7 +815,8 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
             if cancel():
                 break
             ok += _bank_pool_worker(
-                (game_real_path, image_path, rev, catid, p, out_dir))
+                (game_real_path, image_path, rev, catid, p, out_dir)
+                + ((frozenset((only or {}).get(catid, ())),) if only is not None else ()))
             if progress:
                 progress(ok, len(files))
         return ok

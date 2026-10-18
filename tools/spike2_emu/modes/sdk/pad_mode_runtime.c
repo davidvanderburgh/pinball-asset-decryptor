@@ -1135,10 +1135,17 @@ int pm_callout_own_sound(unsigned carrier, const unsigned char key[8])
     return 1;
 }
 
-/* the sound log (soundlog.on): r0 = the request, r2 = 1 for a numbered variant (sound_census.c) */
+/* the sound worker, hooked once for the sound log (soundlog.on: r0 = the request, r2 = 1 for a
+ * numbered variant, sound_census.c) and for the sounds in a sound bank (PAD-608: blist_play points
+ * the request's sid list at the bank's sound ids before the worker reads it) */
+static int worker_hooked, worker_log;
+static volatile int blist_live;
+static void blist_play(unsigned request);
+
 static void on_sound_worker(unsigned *r)
 {
-    say("sound %u %u", r[0], r[2]);
+    if (worker_log) say("sound %u %u", r[0], r[2]);
+    if (blist_live) blist_play(r[0]);
 }
 
 /* ---- item 163: a carrier's STOCK key swapped for an appended record's key, for one play --------
@@ -9212,6 +9219,10 @@ static void clipv_arm(void)
  *     sound <TAB> <m> <TAB> <id> <TAB> <hex> mode m's descriptor for asset id (the resolver's r0)
  *     force <TAB> <m>                      a rig run's own pick (the build never writes it)
  *     turn <TAB> <k> <TAB> <slot key> <TAB> <file k's key>   PAD-565: a sound's files IN TURN
+ *     bsid <TAB> <m> <TAB> <id> <TAB> <bank id>              PAD-608: in mode m, asset id plays as a
+ *                                                            sound bank's id
+ *     tsid <TAB> <k> <TAB> <slot key> <TAB> <id> <TAB> <bank id>   PAD-608: file k in turn of the slot
+ *                                                            keyed <slot key> plays as a bank's id
  *
  * The setting is read at every resolve (one word), so a change in the menu is heard from the next
  * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg.
@@ -9227,7 +9238,20 @@ static void clipv_arm(void)
  * swap needs no descriptor of the game's read and rewritten at build time. Emulator-proven on James
  * Bond 007 Pro 1.06 (PAD-565: six plays of request 22 sounded files 3, 1, 2, 3, 1, 2 as picked; a
  * spike through the resolver wrap did too). A file plays as long as the slot's descriptor says, so
- * the build cuts each one to its slot's length. */
+ * the build cuts each one to its slot's length.
+ *
+ * IN A SOUND BANK (PAD-608): a file image.bin has no room for goes into a sound bank of the app's own
+ * (image-scNN.bin, PAD-595), and the game streams a sound out of the file of the SOUND ID's category
+ * (a bank record reached under a cat-0 id, by a swapped key or a swapped descriptor, plays image.bin's
+ * bytes there: white noise). So each such file gets bank ids of its own, one for every game id that
+ * plays its slot (the build writes each one's descriptor: the game id's with the slot's record
+ * swapped for the bank's), and a `bsid` / `tsid` line says which. The game id is swapped for the bank
+ * id where the game reads it: the play worker (`site sound_worker`, every port but Turtles Pro 1.58)
+ * reads a request's sid list (the pointer at +8 of its record) at every play, so at its entry the
+ * request is pointed at a copy of its own list naming the bank ids the setting (or the turn) wants,
+ * and at its own list again when it wants none - as pm_sound_sid points a mode's carrier. A slot with
+ * a file in turn in a bank takes its turns from the worker too: a play of a request naming the slot
+ * moves the turn on (SNDT_GAP apart), and the record lookup only swaps in the turn's image.bin file. */
 #define SNDM_FILE_MAX   (512 * 1024)
 #define SNDM_SOUNDS     3072
 #define SNDM_DESC       96                  /* a descriptor's bytes as the resolver's caller reads them */
@@ -9252,11 +9276,33 @@ struct sndt {                               /* a sound that plays files in turn 
     unsigned char key[8];                   /* its own record's key */
     unsigned char host[SNDT_MAX][8];        /* file k's record key at host[k - 1], k = 2..n */
     unsigned char n, pick;                  /* n files, its own one included; pick 0 = its own */
+    unsigned char by_worker;                /* PAD-608: a file is in a bank: the worker moves the turn on */
     unsigned plays;
-    unsigned long last;                     /* pm_ms() of its last lookup */
+    unsigned long last;                     /* pm_ms() of its last lookup (of its last play: by_worker) */
 };
 static struct sndt sndt[SNDT_SLOTS];
 static unsigned n_sndt, sndt_says;
+/* PAD-608: a game id that plays as a bank's id in music mode `mode` (2..), or, with `turn` k (2..), when
+ * the turn of sndt[t] is at file k */
+#define BSID_MAX        2048
+#define BLIST_MAX       512                 /* requests whose sid list names a game id with a bank id */
+#define BLIST_LEN       32                  /* the longest such list followed */
+#define BLIST_REQS      8192                /* requests the index covers (the most on a card seen: 3517) */
+struct bsid {
+    unsigned id, bank;
+    unsigned char mode, turn, said;
+    unsigned short t;
+};
+static struct bsid bsid[BSID_MAX];
+static unsigned n_bsid;
+struct blist {                              /* a request whose list names one: its own list and two copies */
+    unsigned request, orig, n;
+    unsigned list[2][BLIST_LEN + 1];
+    unsigned char which;
+};
+static struct blist blist[BLIST_MAX];
+static unsigned short blist_of[BLIST_REQS]; /* request -> blist index + 1 */
+static unsigned n_blist;
 
 static int key_hex(const char *p, unsigned char out[8])
 {
@@ -9269,37 +9315,78 @@ static int key_hex(const char *p, unsigned char out[8])
 }
 
 /* a `turn` line: file k (2..SNDT_MAX) of the slot whose record key is `slot` is the record `host` */
+/* the sndt entry of the slot whose record key is `key`, a new one when it has none; -1 when full */
+static int sndt_slot(const unsigned char key[8])
+{
+    unsigned j;
+    int i;
+    for (j = 0; j < n_sndt && !key_is(sndt[j].key, key); j++) ;
+    if (j == n_sndt) {
+        if (n_sndt >= SNDT_SLOTS) return -1;
+        for (i = 0; i < 8; i++) sndt[j].key[i] = key[i];
+        n_sndt++;
+    }
+    return (int)j;
+}
+
+/* a `turn` line: file k (2..SNDT_MAX) of the slot whose record key is `slot` is the record `host` */
 static void sndt_line(const char *ks, const char *slot, const char *host)
 {
     const char *p = ks;
     unsigned char key[8], h[8];
-    unsigned j, k;
-    int ok, i;
+    unsigned k;
+    int ok, i, j;
     struct sndt *t;
     k = (unsigned)number(&p, &ok);
     if (!ok || k < 2 || k > SNDT_MAX || !key_hex(slot, key) || !key_hex(host, h)) { sndm_bad++; return; }
-    for (j = 0; j < n_sndt && !key_is(sndt[j].key, key); j++) ;
-    if (j == n_sndt) {
-        if (n_sndt >= SNDT_SLOTS) { sndm_dropped++; return; }
-        for (i = 0; i < 8; i++) sndt[j].key[i] = key[i];
-        n_sndt++;
-    }
+    if ((j = sndt_slot(key)) < 0) { sndm_dropped++; return; }
     t = &sndt[j];
     for (i = 0; i < 8; i++) t->host[k - 1][i] = h[i];
     if (k > t->n) t->n = (unsigned char)k;
 }
 
+/* PAD-608: a `bsid` line (mode m's bank id for a game id: `slot` 0) or a `tsid` line (file k in turn
+ * of the slot keyed `slot`) */
+static void bsid_line(const char *ms, const char *slot, const char *ids, const char *banks)
+{
+    const char *p = ms;
+    unsigned char key[8];
+    unsigned m, id, bank;
+    int ok, ok2, ok3, j = -1;
+    struct bsid *e;
+    m = (unsigned)number(&p, &ok);
+    p = ids;
+    id = (unsigned)number(&p, &ok2);
+    p = banks;
+    bank = (unsigned)number(&p, &ok3);
+    if (!ok || !ok2 || !ok3 || !id || !(bank >> 16)) { sndm_bad++; return; }
+    if (slot) {
+        if (m < 2 || m > SNDT_MAX || !key_hex(slot, key)) { sndm_bad++; return; }
+        if ((j = sndt_slot(key)) < 0) { sndm_dropped++; return; }
+        sndt[j].by_worker = 1;
+        if (m > sndt[j].n) sndt[j].n = (unsigned char)m;
+    } else if (m < 2 || m > SNDM_MODES) { sndm_bad++; return; }
+    if (n_bsid >= BSID_MAX) { sndm_dropped++; return; }
+    e = &bsid[n_bsid++];
+    e->id = id;
+    e->bank = bank;
+    e->mode = slot ? 0 : (unsigned char)m;
+    e->turn = slot ? (unsigned char)m : 0;
+    e->t = (unsigned short)(j < 0 ? 0 : j);
+    e->said = 0;
+}
+
 static void sndm_line(char *s)
 {
     const char *p;
-    char *f[4];
+    char *f[5];
     unsigned n = 0, k, m;
     int ok;
     struct sndm *e;
     while (*s == ' ') s++;
     if (*s == '#' || !*s) return;
     for (;;) {
-        if (n < 4) f[n++] = s;
+        if (n < 5) f[n++] = s;
         while (*s && *s != '\t') s++;
         if (!*s) break;
         *s++ = 0;
@@ -9321,6 +9408,14 @@ static void sndm_line(char *s)
     }
     if (n >= 4 && str_eq(f[0], "turn")) {
         sndt_line(f[1], f[2], f[3]);
+        return;
+    }
+    if (n >= 4 && str_eq(f[0], "bsid")) {
+        bsid_line(f[1], 0, f[2], f[3]);
+        return;
+    }
+    if (n >= 5 && str_eq(f[0], "tsid")) {
+        bsid_line(f[1], f[2], f[3], f[4]);
         return;
     }
     if (n < 4 || !str_eq(f[0], "sound")) return;
@@ -9402,6 +9497,11 @@ static void sndt_lookup(unsigned *r)
     for (j = 0; j < n_sndt; j++)
         if (key_is(k, sndt[j].key)) { t = &sndt[j]; break; }
     if (!t || t->n < 2) return;
+    if (t->by_worker) {                     /* PAD-608: the worker moved the turn on at the play */
+        if (t->pick && (t->host[t->pick][0] | t->host[t->pick][1] | t->host[t->pick][2] | t->host[t->pick][3]))
+            r[1] = (unsigned)(unsigned long)t->host[t->pick];
+        return;
+    }
     now = pm_ms();
     if (!t->plays || now - t->last > SNDT_GAP) {
         t->pick = t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
@@ -9415,6 +9515,141 @@ static void sndt_lookup(unsigned *r)
     t->last = now;
     if (t->pick && (t->host[t->pick][0] | t->host[t->pick][1] | t->host[t->pick][2] | t->host[t->pick][3]))
         r[1] = (unsigned)(unsigned long)t->host[t->pick];
+}
+
+/* PAD-608: a play of a slot whose turn the worker moves on (a file of it is in a sound bank): the next
+ * file, or the same when it plays again within SNDT_GAP ms (one play the game started twice) */
+static void sndt_play(struct sndt *t)
+{
+    unsigned long now = pm_ms();
+    if (!t->plays || now - t->last > SNDT_GAP) {
+        t->pick = t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+        t->plays++;
+        if (sndt_says < 40 || !(t->plays % 50)) {
+            sndt_says++;
+            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x played (%u time(s)) - file %u of %u plays",
+                t->key[0], t->key[1], t->key[2], t->key[3], t->key[4], t->key[5], t->key[6], t->key[7],
+                t->plays, t->pick + 1, t->n);
+        }
+    }
+    t->last = now;
+}
+
+/* PAD-608: the id game id `id` plays as now - a bank's for music mode m, else for its slot's turn,
+ * else its own */
+static unsigned bsid_now(unsigned id, unsigned m)
+{
+    unsigned i;
+    struct bsid *e;
+    for (i = 0; i < n_bsid; i++)
+        if (bsid[i].id == id && bsid[i].mode && bsid[i].mode == m) break;
+    if (i == n_bsid)
+        for (i = 0; i < n_bsid; i++)
+            if (bsid[i].id == id && bsid[i].turn && sndt[bsid[i].t].pick + 1u == bsid[i].turn) break;
+    if (i == n_bsid) return id;
+    e = &bsid[i];
+    if (!e->said) {
+        e->said = 1;
+        if (e->mode)
+            say("sound banks: sound id %u plays mode %u's file, sound id %u (0x%x) in a sound bank", id, m,
+                e->bank, e->bank);
+        else
+            say("sound banks: sound id %u plays file %u in turn, sound id %u (0x%x) in a sound bank", id,
+                e->turn, e->bank, e->bank);
+    }
+    return e->bank;
+}
+
+/* PAD-608, from the worker's entry: point `request` at a copy of its own sid list naming the bank ids
+ * the setting and the turns want now, or at its own list when they want none. A list a mode's carrier
+ * was pointed at (pm_sound_sid) is left alone. */
+static void blist_play(unsigned request)
+{
+    unsigned table = data("sound_requests"), cur, m, i, j, n_sub = 0, *own, *out;
+    unsigned char *rec;
+    struct blist *e;
+    if (request >= BLIST_REQS || !blist_of[request] || !table) return;
+    e = &blist[blist_of[request] - 1];
+    rec = (unsigned char *)(unsigned long)(table + request * 20);
+    cur = *(volatile unsigned *)(rec + 8);
+    if (cur != e->orig && cur != (unsigned)(unsigned long)e->list[0] && cur != (unsigned)(unsigned long)e->list[1])
+        return;
+    own = (unsigned *)(unsigned long)e->orig;
+    for (i = 0; i < e->n; i++)              /* a play of a slot whose turn the worker moves on */
+        for (j = 0; j < n_bsid; j++)
+            if (bsid[j].turn && bsid[j].id == own[i]) { sndt_play(&sndt[bsid[j].t]); break; }
+    m = sndm_mode();
+    if (m != sndm_last) {
+        sndm_last = m;
+        say("music modes: mode %u from here on (request %u is the first sound it starts)", m, request);
+    }
+    out = e->list[e->which ^ 1];
+    for (i = 0; i < e->n; i++) {
+        out[i] = bsid_now(own[i], m);
+        n_sub += out[i] != own[i];
+    }
+    out[e->n] = 0;
+    if (!n_sub) {
+        if (cur != e->orig) *(volatile unsigned *)(rec + 8) = e->orig;
+        return;
+    }
+    e->which ^= 1;
+    *(volatile unsigned *)(rec + 8) = (unsigned)(unsigned long)out;
+}
+
+/* PAD-608: find every request whose sid list names a game id with a bank id, and hook the worker */
+static void blist_arm(void)
+{
+    unsigned table = data("sound_requests"), count = data("sound_request_count"), n, r, i, j, lost = 0;
+    if (!n_bsid) return;
+    if (!table || !count || !fn("sound_worker") || !maps_has(count, 4, MAP_R)) {
+        say("sound banks: off - the port has no sound_worker or request table for this build; the %u file "
+            "line(s) in a sound bank do not play (their sounds play their own)", n_bsid);
+        n_bsid = 0;
+        return;
+    }
+    n = *(volatile const unsigned *)(unsigned long)count;
+    for (r = 1; r < n && r < BLIST_REQS; r++) {
+        unsigned char *rec = (unsigned char *)(unsigned long)(table + r * 20);
+        unsigned *own, len;
+        int hit = 0;
+        if (!maps_has(table + r * 20, 20, MAP_R)) break;
+        own = (unsigned *)(unsigned long)*(unsigned *)(rec + 8);
+        if (!own) continue;                 /* (any priority: Godzilla LE 1.16's request 12 has 253) */
+        for (len = 0; len < BLIST_LEN && maps_has((unsigned)(unsigned long)(own + len), 4, MAP_R) && own[len]; len++)
+            for (j = 0; j < n_bsid && !hit; j++)
+                hit = bsid[j].id == own[len];
+        if (!hit || len == BLIST_LEN) continue;
+        if (n_blist >= BLIST_MAX) { sndm_dropped++; continue; }
+        blist[n_blist].request = r;
+        blist[n_blist].orig = (unsigned)(unsigned long)own;
+        blist[n_blist].n = len;
+        blist_of[r] = (unsigned short)(++n_blist);
+    }
+    for (j = 0; j < n_bsid; j++) {          /* a game id no list names never plays its bank's */
+        int named = 0;
+        for (i = 0; i < n_blist && !named; i++) {
+            unsigned k, *own = (unsigned *)(unsigned long)blist[i].orig;
+            for (k = 0; k < blist[i].n && !named; k++) named = own[k] == bsid[j].id;
+        }
+        lost += !named;
+    }
+    if (!n_blist) {
+        say("sound banks: off - no sound request of the game names the sound id(s) of the %u file line(s) in a "
+            "sound bank", n_bsid);
+        n_bsid = 0;
+        return;
+    }
+    if (!worker_hooked && !(worker_hooked = hook(fn("sound_worker"), on_sound_worker))) {
+        say("sound banks: off - sound_worker 0x%08x cannot be hooked; the files in a sound bank do not play",
+            fn("sound_worker"));
+        n_bsid = 0;
+        return;
+    }
+    blist_live = 1;
+    say("sound banks: %u file line(s) play from a sound bank through %u sound request(s)%s; sound_worker 0x%08x "
+        "is hooked", n_bsid, n_blist, lost ? " (some of their sound ids are in no request: those play their own)"
+        : "", fn("sound_worker"));
 }
 
 /* PAD-565: hook the record lookup for the sounds in turn (once: the modes' own sounds share it) */
@@ -9445,16 +9680,17 @@ static void sndm_arm(void)
     if (sndm_dropped || sndm_bad)
         say("music modes: %d line(s) not read (the table holds %d sounds), %d not a sound line", sndm_dropped,
             SNDM_SOUNDS, sndm_bad);
-    sndt_arm();                               /* PAD-565: the files in turn need no resolver */
-    if (!n_sndm) {
-        if (n_sndt) return;
-        say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
-        return;
-    }
     if (sndm_live && !maps_has(sndm_live, 4, MAP_R)) {
         say("music modes: the setting's value at 0x%08x is not in the game's memory - every sound plays mode 1's",
             sndm_live);
         sndm_live = 0;
+    }
+    sndt_arm();                               /* PAD-565: the files in turn need no resolver */
+    blist_arm();                              /* PAD-608: nor do the files in a sound bank */
+    if (!n_sndm) {
+        if (n_sndt || n_bsid) return;
+        say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
+        return;
     }
     if (!fn("sound_resolve")) {
         say("music modes: off - the port has no sound_resolve that matches this build; every sound plays mode 1's");
@@ -10128,8 +10364,11 @@ static void pad_mode_start(void)
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
      * takes is logged ("[pad] sound <request> <n>"), so a check game is also the sound census that
      * says which stock requests a build never plays (the carriers a mode's own sounds ride on) */
-    if (fn("sound_worker") && pm_trigger("soundlog.on") && hook(fn("sound_worker"), on_sound_worker))
+    if (fn("sound_worker") && pm_trigger("soundlog.on")
+        && (worker_hooked || (worker_hooked = hook(fn("sound_worker"), on_sound_worker)))) {
+        worker_log = 1;
         say("sound log: every request the sound worker takes (soundlog.on)");
+    }
     events_arm();
     switches_arm();                           /* shots from switches, when the port maps some */
     {   /* item 146: the battle roster, when the port has one */

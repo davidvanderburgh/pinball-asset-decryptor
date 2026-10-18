@@ -446,3 +446,65 @@ GODZILLA ANGRY call), so the bank streams in order past 227 s, where a 40 MB
 slice would have ended. No segv, no fatal. The rig cannot show the machine's
 mapping limit (it gives the game 4 GiB); the sizes above are what keep every
 pair and every bank within ones Stern's own cards play.
+
+## The music modes' files and the sounds in turn in a bank (PAD-608)
+
+The music modes (PAD-494) and the sounds in turn (PAD-565) switch their files at RUN
+time: a mode's file by a descriptor the runtime hands the resolver (`get_asset_descriptor`
+wrapped), a file in turn by a record key swapped at the lookup. Both name a record under
+the game's own cat-0 sid, so both could only reach `image.bin` records, and a file that
+did not fit was left out. PAD-606's route (the request lists rewritten in the program)
+does not reach them: which file plays is decided while the game runs.
+
+**At build time** (`engine._sound_modes_for_banks`, `_bank_mode_descs`): a host (one
+file; one file in several modes of a slot is one host) can move when every game sid that
+plays its slot -- and, for a song in parts (PAD-511), the sids that play the song without
+its opening -- is a plain `image.bin` sid a request list names, plays the slot alone or
+as the song it opens, and is not one a mode of the same Write plays. Such hosts are
+bankable beside the modes' own sounds and the longer game sounds (`_plan_sound_banks`
+`sm_frags`; a long one gets a bank to itself, as a mode's music does). In the bank the
+host is ONE record and one FRAGMENT per (mode or turn, game sid): the first fragment is
+the record's own, the rest come after the records (`soundbank.plan_bank(aliases=...)`,
+`BankPlacement.record`; the header's fragment count covers them, the directory and the
+sid map count records only). Each fragment's descriptor is the game sid's own,
+rewritten by `_mode_descriptor_table` (so a song plays the file in place of every part,
+once or looped as the song was) with every payload naming the bank record's key
+verbatim (`_bank_descriptor`; a descriptor that still names another record cannot be a
+bank sid's, so that sid plays its own). The music modes' sids are left out of PAD-606's
+static list rewrite (`exclude_sids`), since the runtime swaps them.
+
+**At run time** (`pad_mode_runtime.c` "IN A SOUND BANK"): `sounds.cfg` lines
+`bsid <mode> <list id> <bank sid>` and `tsid <k> <slot key> <list id> <bank sid>`
+(`list id` is what the request lists hold: the game sid, or an earlier Write's bank sid
+for a sound this one leaves alone, `_list_ids`). At start the runtime finds every request
+whose sid list names one of those ids (`blist_arm`) and hooks the play worker
+(`site sound_worker`, which every shipped port but Turtles Pro 1.58 names; the sound log
+shares the hook). At the worker's entry (`blist_play`) the request is pointed at a copy
+of its own list with each id swapped for the bank sid the setting (or the turn) wants
+now, or at its own list again -- `pm_sound_sid`'s pointer at +8 of the record, which the
+worker reads at every play; a pointer someone else put there is left alone. A slot with a
+file in turn in a bank takes its turns from the worker (`sndt_play`: a play of a request
+naming the slot moves the turn on, `SNDT_GAP` apart), and the record lookup only swaps in
+the turn's image.bin file, so the first play after power-on is now the sound's own.
+Any request priority: Godzilla LE 1.16's request 12 has priority byte 253 (the first rig
+run skipped it under `pm_sound_sid`'s `<= 9` guard).
+
+**Read back** (PAD-553's record): a file in a bank names its record `<bank>:<record>` on
+its `#file` / `#turn` line (an app before PAD-608 skips the line: the field is not a
+number). An extract reads the card's `sounds.cfg` first (`engine._card_bank_records`) and
+decodes just those records of the app's own banks (`category.extract_category_audio_parallel
+(only=...)`) into `Music mode files/.from_card`, which the read-back copies from and
+removes.
+
+**Proof** (2026-10-17, `C:\tmp\PAD-608`, `artifacts/PAD-608/emulator/RESULTS.txt`): stock
+Godzilla LE 1.16, image.bin's ceiling lowered to the stock file (`PAD_STERN_BANK_CAP`):
+TUNE 16 (idx 2241) with a Music Mode 2 file (a 30 s 880 Hz pulsed tone) and idx 1239
+(sid 16, request 12) replaced by a 500 Hz tone with two files in turn (1000 / 2000 Hz).
+`write_overrides` put all three in `image-sc01.bin` (5.5 MB): TUNE 16's file as one record
+with four fragments, 0x10000 / 0x10003-0x10005 for the game's 2500 / 2536 / 2541 / 2587,
+the turn files 0x10001 / 0x10002; every one resolves through the game's resolver. Rig 1,
+hidden and muted, the sound_fire instrument firing requests by hand: Music Mode 2 --
+request 12 six times sounded 500, 1000, 2000, 500, 1000, 2000 Hz, and requests 94, 95,
+152, 153 each played the 880 Hz file for their whole 12 s; Music Mode 1 -- the same turns,
+and TUNE 16's opening (request 94) and its NO INTRO body (95) are the game's own (NCC
+0.97 / 0.98; 0.02 in mode 2). 0 segv, 0 fatal in all three runs.

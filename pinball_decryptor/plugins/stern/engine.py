@@ -37,7 +37,7 @@ from collections import namedtuple
 # 260-character limit — with an error that reads as "file not found" (a tester's
 # build failed until he shortened the path).  _lp() opts each call out of it.
 from ...core.longpath import ext as _lp
-from ...core.checksums import is_other_extract
+from ...core.checksums import MUSIC_MODE_FILES_DIR, is_other_extract
 
 # The engine is wired; a missing unicorn/numpy is surfaced via the plugin's
 # prerequisite probe + a lazy import error, not by hiding the tabs.
@@ -2783,8 +2783,10 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         if music_banks and not cancel():
             if emu is not None:
                 emu.close(); emu = None    # free the cat-0 emu before booting CatEmu
-            ok += _extract_category_banks(reader, gr_path, img_path, work,
-                                          audio_dir, log, progress, cancel)
+            ok += _extract_category_banks(
+                reader, gr_path, img_path, work, audio_dir, log, progress, cancel,
+                pad_banks=_card_bank_records(image_path, partitions, open_disk),
+                pad_dir=os.path.join(output_dir, *_PAD_BANK_FILES))
         return ok
     finally:
         if emu is not None:
@@ -2793,14 +2795,41 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         _rmtree(work)
 
 
+#: PAD-608: where an extract puts the music modes' files it decodes out of the app's own
+#: sound banks (``music_catNN_NNNN.wav``), for :func:`.media_share.music_from_card` to
+#: bring back; it removes the folder once it has (it is inside "Music mode files", which
+#: holds no asset of the card's)
+_PAD_BANK_FILES = (MUSIC_MODE_FILES_DIR, ".from_card")
+
+
+def _card_bank_records(image_path, partitions, open_disk):
+    """PAD-608: ``{bank category: {record, ...}}`` - the records of the app's own sound
+    banks the card's music modes record names (:func:`.sound_modes.card_bank_records`);
+    ``{}`` for a card without them, or one that cannot be read."""
+    try:
+        from . import mode_from_card as _MFC
+        from . import sound_modes as _SMo
+        cfg = _MFC.read_padmode(image_path, parts=partitions,
+                                open_disk=open_disk).get(_SMo.CFG_NAME)
+        if not cfg:
+            return {}
+        return _SMo.card_bank_records(_SMo.read_card_record(cfg.decode("utf-8", "replace")))
+    except Exception:  # noqa: BLE001 - no music modes to bring back
+        return {}
+
+
 def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
-                            progress, cancel):
+                            progress, cancel, pad_banks=None, pad_dir=None):
     """Extract the card's ``image-scNN.bin`` banks to ``work`` and decode each to
     WAV under ``audio/`` (named ``music_catNN_idx.wav`` so the existing
     AcoustID auto-naming can title the songs).  Returns the count decoded; 0 (and
-    a clean skip) when there are no banks or the build can't be driven."""
+    a clean skip) when there are no banks or the build can't be driven.
+
+    PAD-608: of a bank this app built, the records *pad_banks* ``{category:
+    {record, ...}}`` names (the music modes' files there) are decoded into
+    *pad_dir*, for the music modes to come back from; the rest is left alone."""
     from .spike2.category import extract_category_audio_parallel
-    sc_paths = []
+    sc_paths, pad_paths = [], []
     for path, _ino, node in reader.iter_regular_files(min_size=1):
         if cancel():
             break
@@ -2812,10 +2841,21 @@ def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
             if _SB.is_pad_bank(op):
                 # PAD-595: a bank this app built for the modes' own sounds;
                 # its records are the modes' calls and music, not songs
+                from .spike2.category import read_category_id
+                if (pad_banks or {}).get(read_category_id(op)) and pad_dir:
+                    pad_paths.append(op)
+                    continue
                 log("%s is a sound bank this app added for the modes' own sounds; "
                     "it holds no songs and is left alone." % base, "info")
                 continue
             sc_paths.append(op)
+    if pad_paths and not cancel():
+        # PAD-608: the music modes' files the card keeps in banks of this app's
+        os.makedirs(pad_dir, exist_ok=True)
+        n = extract_category_audio_parallel(gr_path, img_path, pad_paths, pad_dir,
+                                            log=log, cancel=cancel, only=pad_banks)
+        log("Decoded %d music mode file(s) out of %d sound bank(s) this app added, for "
+            "the music modes to come back." % (n, len(pad_paths)), "info")
     if not sc_paths:
         return 0
     log("Extracting %d per-category music bank(s) — the licensed songs / extra "
@@ -7969,41 +8009,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites, audio_edits,
                             grows, mode_own, os.path.join(grow_work, "own_sounds"),
                             log)
-                    # PAD-595: the modes' own sounds image.bin cannot take
-                    # beside the user's longer sounds go into a sound bank of
-                    # their own (bank_build); they leave grows and audio_edits
-                    bank_plan = None
-                    # PAD-606: the user's longer replacements of the game's own
-                    # sounds can go into a bank too, played by a sid of the
-                    # bank's that the game's request lists then name
-                    _game_ok, _game_why = {}, {}
-                    try:
-                        from . import bank_build as _BB
-                        _old_bank_map = _BB.card_sid_map(reader)
-                    except Exception:  # noqa: BLE001 - no banks of ours read
-                        _old_bank_map = {}
-                    if _old_bank_map and not desc_sites:
-                        # an earlier Write moved game sounds into banks: the
-                        # sounds this one replaces are found by their sids
-                        desc_sites = _card_descriptor_sites(
-                            gr_path, img_path, log, card_key=_sites_key)
-                    if (_user_grows or _old_bank_map) and desc_sites:
-                        _game_ok, _game_why, _bank_touched = _game_sounds_for_banks(
-                            gr_path, img_path, params, desc_sites, _user_grows,
-                            set(_fits) | set(_user_grows),
-                            list(mode_own_used or ()) + ([mode_sound_used]
-                                                        if mode_sound_used else []),
-                            _old_bank_map, log)
-                    if mode_own_used or _game_ok:
-                        bank_plan, audio_edits, grows = _plan_sound_banks(
-                            gr_path, img_path, params, audio_edits, grows,
-                            _user_grows, mode_own_used, reader, img_node,
-                            space_chk, log, game_sids=_game_ok,
-                            game_why=_game_why)
-                        if bank_plan is not None:
-                            bank_plan.old_map = dict(_old_bank_map)
-                            _user_grows = {i: g for i, g in _user_grows.items()
-                                           if i not in bank_plan.grows}
                     _sm_grows = {}
                     if sound_modes:
                         # PAD-494: each file for another music mode, a grown copy
@@ -8029,6 +8034,53 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             sites=desc_sites)
                         _sm_grows = {int(u["host"]): grows[int(u["host"])]
                                      for u in sound_mode_used}
+                    # PAD-595: the modes' own sounds image.bin cannot take
+                    # beside the user's longer sounds go into a sound bank of
+                    # their own (bank_build); they leave grows and audio_edits
+                    bank_plan = None
+                    # PAD-606: the user's longer replacements of the game's own
+                    # sounds can go into a bank too, played by a sid of the
+                    # bank's that the game's request lists then name
+                    _game_ok, _game_why = {}, {}
+                    try:
+                        from . import bank_build as _BB
+                        _old_bank_map = _BB.card_sid_map(reader)
+                    except Exception:  # noqa: BLE001 - no banks of ours read
+                        _old_bank_map = {}
+                    if _old_bank_map and not desc_sites:
+                        # an earlier Write moved game sounds into banks: the
+                        # sounds this one replaces are found by their sids
+                        desc_sites = _card_descriptor_sites(
+                            gr_path, img_path, log, card_key=_sites_key)
+                    # PAD-608: the music modes' files and the sounds in turn can
+                    # go into a bank too, each played by bank sound ids the
+                    # runtime points the game's requests at
+                    _sm_frags, _sm_sids = {}, set()
+                    if _sm_grows and desc_sites:
+                        _sm_frags, _sm_sids = _sound_modes_for_banks(
+                            gr_path, img_path, params, desc_sites, sound_mode_used,
+                            list(mode_own_used or ()) + ([mode_sound_used]
+                                                        if mode_sound_used else []),
+                            _old_bank_map, log)
+                    if (_user_grows or _old_bank_map) and desc_sites:
+                        _game_ok, _game_why, _bank_touched = _game_sounds_for_banks(
+                            gr_path, img_path, params, desc_sites, _user_grows,
+                            set(_fits) | set(_user_grows),
+                            list(mode_own_used or ()) + ([mode_sound_used]
+                                                        if mode_sound_used else []),
+                            _old_bank_map, log, exclude_sids=_sm_sids)
+                    if mode_own_used or _game_ok or _sm_frags:
+                        bank_plan, audio_edits, grows = _plan_sound_banks(
+                            gr_path, img_path, params, audio_edits, grows,
+                            _user_grows, mode_own_used, reader, img_node,
+                            space_chk, log, game_sids=_game_ok,
+                            game_why=_game_why, sm_frags=_sm_frags)
+                        if bank_plan is not None:
+                            bank_plan.old_map = dict(_old_bank_map)
+                            _user_grows = {i: g for i, g in _user_grows.items()
+                                           if i not in bank_plan.grows}
+                            _sm_grows = {i: g for i, g in _sm_grows.items()
+                                         if i not in bank_plan.grows}
                     if _user_grows:
                         # The bank's budget: the game's 2 GB, and the room on
                         # the games partition beside the full-size videos,
@@ -8354,7 +8406,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites,
                             sound_mode_used, sound_modes,
                             not (mode_list or code_list),
-                            os.path.join(grow_work, "sound_modes"), log)
+                            os.path.join(grow_work, "sound_modes"), log,
+                            list_ids=_list_ids(bank_plan, _old_bank_map,
+                                               _bank_touched))
                         _stage_done(log, "reading the music modes' sound ids", t0)
                     # Keep the firmware's master-directory forward-chain intact.
                     # Blip-free (default): patch game_real so the boot-derive reads
@@ -10864,15 +10918,24 @@ def _mode_descriptor_table(found, params, mask, used, log):
     return out
 
 
-def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir, log):
+def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir, log,
+                     list_ids=None):
     """PAD-494: write ``sounds.cfg`` for the runtime (:func:`.sound_modes.cfg_text`) into
     *out_dir* and return its path, or ``""`` (and a warning) when the card cannot carry the music
-    modes after all - then every sound plays its own and MUSIC MODE is not added."""
+    modes after all - then every sound plays its own and MUSIC MODE is not added.
+
+    PAD-608: a file in a sound bank (its entry's ``bank``, :func:`_build_sound_banks`) gets a
+    ``bsid`` / ``tsid`` line for every game sound id that plays it there (``bank_sids``), naming
+    the id the game's request lists hold for that sound (*list_ids*, :func:`_list_ids`: an
+    earlier Write's bank id where it left one)."""
     from . import menu_settings as _MSet
     from . import sound_modes as _SMo
     from .adjustments import AdjustmentTable
     who = "Music modes" if modes.count else "Sounds in turn"
     live = 0
+    banked = [u for u in used if u.get("bank") is not None]
+    used = [u for u in used if u.get("bank") is None]
+    bsids, tsids = _bank_sid_lines(params, banked, list_ids or {}, log)
     turns = _turn_key_lines(params, [u for u in used if _SMo.is_turn(u["mode"])], log)
     used_modes = [u for u in used if not _SMo.is_turn(u["mode"])]
     try:
@@ -10886,22 +10949,54 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     except (RuntimeError, ValueError, OSError, struct.error) as e:
         log("%s: not put on this card: %s. Every sound plays its own." % (who, e), "warning")
         return ""
-    if modes.count and not sounds:
+    if modes.count and not sounds and not bsids:
         log("Music modes: none of the files for the other modes can be played on this card, so "
             "MUSIC MODE is not added.", "warning")
-        if not turns:
+        if not turns and not tsids:
             return ""
         modes.slots, modes.names = {}, []
-    if not sounds and not turns:
+    if not sounds and not turns and not bsids and not tsids:
         log("Sounds in turn: none of the files can be played on this card; every sound plays its "
             "own.", "warning")
         return ""
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_SMo.cfg_text(live, modes.count if sounds else 0, sounds, only, turns=turns,
-                              record=_SMo.card_record(modes, used)))
+        f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
+                              turns=turns, bsids=bsids, tsids=tsids,
+                              record=_SMo.card_record(modes, used + banked)))
     return path
+
+
+def _bank_sid_lines(params, used, list_ids, log):
+    """PAD-608: ``(bsids, tsids)`` - the ``sounds.cfg`` lines of the files in a sound bank
+    (*used*, their entries with ``bank_sids`` ``{game sid: bank sid}``): ``(mode, list id, bank
+    sid)`` for a music mode's file, ``(k, slot key, list id, bank sid)`` for file k in turn, the
+    slot key the one its ``turn`` lines name (the runtime keeps one turn per slot). *list_ids*
+    ``{game sid: id}``: what the game's request lists hold for a sound id, where not its own.
+    Each entry gets ``lines``, how many sound ids play it (the card's record names the ones
+    that landed)."""
+    from . import sound_modes as _SMo
+    byidx = {p["idx"]: p for p in params}
+    bsids, tsids = [], []
+    for u in used or ():
+        got = u.get("bank_sids") or {}
+        u["lines"] = len(got)
+        for sid, bank in sorted(got.items()):
+            lid = int(list_ids.get(int(sid), sid))
+            if _SMo.is_turn(u["mode"]):
+                sp = byidx.get(int(u["slot"])) or {}
+                if not sp.get("findkey"):
+                    u["lines"] -= 1
+                    continue
+                tsids.append((_SMo.turn_of(u["mode"]), bytes(sp["findkey"]), lid, int(bank)))
+            else:
+                bsids.append((int(u["mode"]), lid, int(bank)))
+        if not u["lines"]:
+            log("%s: %s is left out: no sound id of the game can play it from its sound bank."
+                % (_SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u.get("name", ""))),
+                "warning")
+    return sorted(bsids), sorted(tsids, key=lambda t: (t[1], t[0], t[2]))
 
 
 def _turn_key_lines(params, used, log):
@@ -18184,6 +18279,10 @@ class _BankPlan(object):
         self.banked = {}
         # the card's banks' sid maps, {bank sid: game sid} (an earlier Write's)
         self.old_map = {}
+        # PAD-608: the music modes' files and the sounds in turn in the banks,
+        # ``{host idx: [(used entry, game sid), ...]}``: a fragment each, the first
+        # the record's own (_sound_modes_for_banks)
+        self.sm_frags = {}
 
 
 def _bankable_idx(used):
@@ -18196,7 +18295,7 @@ def _bankable_idx(used):
 
 
 def _game_sounds_for_banks(gr_path, img_path, params, sites, user_grows, edited, used,
-                           old_map, log):
+                           old_map, log, exclude_sids=()):
     """PAD-606: ``(ok, why, touched)`` for the user's longer replacements of the game's
     own sounds *user_grows*: ``ok`` ``{idx: game sid}`` the ones a sound bank can hold
     (:func:`.bank_build.game_sound_sids`; *used* the modes' own sounds of this Write,
@@ -18204,7 +18303,9 @@ def _game_sounds_for_banks(gr_path, img_path, params, sites, user_grows, edited,
     :func:`.bank_build.card_sid_map`), ``why`` ``{idx: reason}`` the rest, and
     ``touched`` ``{idx: game sid}`` every sound of *edited* (all this Write replaces)
     that a single sid plays: a request list an earlier Write pointed at a bank for it
-    is put back, or pointed at this Write's bank."""
+    is put back, or pointed at this Write's bank.  *exclude_sids* (PAD-608: the sids
+    that play a sound with a music mode's file or files in turn) stay the game's: the
+    runtime swaps those for the files' own bank sids."""
     from . import bank_build as BB
     from . import mode_write as _MW
     with open(_lp(gr_path), "rb") as f:
@@ -18220,6 +18321,7 @@ def _game_sounds_for_banks(gr_path, img_path, params, sites, user_grows, edited,
                            for x in _MW.request_sids(elf, head, int(u["request"])))
         if u and u.get("sid"):
             exclude.add(int(u["sid"]))
+    exclude.update(int(x) for x in exclude_sids or ())
     mask = _desc_key_mask(params, sites) if _mode_family_on() else _DESC_KEY2_MASK
     byidx = {p["idx"]: p for p in params}
     ok, why = BB.game_sound_sids(user_grows, byidx, sites, mask, slots, exclude=exclude)
@@ -18228,8 +18330,99 @@ def _game_sounds_for_banks(gr_path, img_path, params, sites, user_grows, edited,
     return ok, why, touched
 
 
+def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_map, log):
+    """PAD-608: ``(frags, sids)`` for the music modes' files and the sounds in turn
+    (*sm_used*, :func:`_sound_modes_grow`'s entries): ``frags`` ``{host idx: [(entry,
+    game sid), ...]}`` the hosts a sound bank can hold, each with the game's sound ids
+    that play its slot (one bank fragment each, the first the record's own), and
+    ``sids`` every sound id that plays a slot with such files.
+
+    A file is played from a bank by a sound id of the bank's own (the game streams from
+    the file of the id's category), which the runtime puts in the game's request lists
+    in place of the game's id whenever the setting or the turn wants that file.  So a
+    host can move when, for every entry it holds (one file in several modes is one
+    host), every sound id that plays the slot (and the song it opens without its
+    opening, PAD-511) is a plain id of ``image.bin`` a request list names, plays the
+    slot alone (or as the song it opens: its descriptor then plays the file in place of
+    the whole song), and is not one a mode of this Write plays (*used*).  The others
+    stay in ``image.bin``, as before."""
+    from . import bank_build as BB
+    from . import mode_write as _MW
+    from . import sound_modes as _SMo
+    try:
+        mask = _desc_key_mask(params, sites)
+        plays = _sound_id_plays(params, sites, mask)
+    except RuntimeError:
+        return {}, set()
+    with open(_lp(gr_path), "rb") as f:
+        elf = f.read()
+    with open(_lp(img_path), "rb") as f:
+        head = f.read(1 << 16)
+    slots = BB.stock_slots(BB.request_list_slots(elf, head), old_map or {})
+    exclude = set()
+    for u in used or ():
+        if u and u.get("request") is not None:
+            exclude.update((old_map or {}).get(x, x)
+                           for x in _MW.request_sids(elf, head, int(u["request"])))
+        if u and u.get("sid"):
+            exclude.add(int(u["sid"]))
+    by_host, every = {}, set()
+    for u in sm_used or ():
+        by_host.setdefault(int(u["host"]), []).append(u)
+    frags, why = {}, {}
+    for host, us in sorted(by_host.items()):
+        got, bad = [], None
+        for u in us:
+            slot = int(u["slot"])
+            song = {int(k) for k in (u.get("song") or {})}
+            bodies = {int(k) for k in (u.get("bodies") or {})}
+            sids = sorted({sid for sid, idxs in plays.items() if slot in idxs}
+                          | {sid for sid in bodies if sid in plays})
+            every.update(sids)
+            if not sids:
+                bad = "no sound id of the game plays sound idx %d" % slot
+            for sid in sids:
+                if bad:
+                    break
+                if sid >> 16:
+                    bad = "sound id %d is in a sound bank of the game's" % sid
+                elif not (all(i == slot for i in plays[sid]) or sid in song or sid in bodies):
+                    bad = "sound id %d plays sound idx %d together with other sounds" % (sid, slot)
+                elif sid in exclude:
+                    bad = "sound id %d is one a mode of this card plays" % sid
+                elif not slots.get(sid):
+                    bad = ("the game plays sound id %d other than through its sound requests"
+                           % sid)
+                else:
+                    got.append((u, sid))
+            if bad:
+                break
+        if bad:
+            why[host] = bad
+            for u in us:
+                log("%s: %s stays in image.bin rather than a sound bank: %s." % (
+                    _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u.get("name", "")), bad),
+                    "info")
+        else:
+            frags[host] = got
+    return frags, every
+
+
+def _list_ids(plan, old_map, touched):
+    """PAD-608: ``{game sid: the id the game's request lists hold for it}`` where that is
+    not the game's own: a game sound an earlier Write put in a bank (*old_map* ``{bank
+    sid: game sid}``) that this Write neither replaces (*touched* ``{idx: game sid}``)
+    nor banks again keeps that bank's id in the lists (:func:`_sound_list_writes`)."""
+    new = dict(getattr(plan, "banked", None) or {})
+    redone = set((touched or {}).values()) | set(new)
+    out = {g: b for b, g in (old_map or {}).items() if g not in redone}
+    out.update(new)
+    return out
+
+
 def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows, used,
-                      reader, img_node, space_chk, log, game_sids=None, game_why=None):
+                      reader, img_node, space_chk, log, game_sids=None, game_why=None,
+                      sm_frags=None):
     """Decide which of the modes' own sounds leave ``image.bin`` for a sound
     bank of their own (PAD-595), and take them out of *grows* and
     *audio_edits*.  Returns ``(plan or None, audio_edits, grows)``.
@@ -18237,6 +18430,10 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     *game_sids* ``{idx: game sid}`` are the user's longer replacements of the
     game's own sounds a bank can hold (PAD-606, :func:`_game_sounds_for_banks`;
     *game_why* says why the others cannot): they go with the modes' own.
+
+    *sm_frags* (PAD-608, :func:`_sound_modes_for_banks`) are the music modes' files
+    and the sounds in turn a bank can hold, by host: they go with them too, a long
+    one (a whole song) in a bank of its own as a mode's music does.
 
     The user's longer sounds and the modes' sounds a bank cannot hold (the
     end sound on a re-pointed request) are placed first; the bankable ones
@@ -18248,7 +18445,9 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     from .spike2 import soundbank as SB
     byidx = {p["idx"]: p for p in params}
     game_sids = {int(i): int(s) for i, s in (game_sids or {}).items() if int(i) in grows}
-    bankable = ((_bankable_idx(used) & set(grows)) - set(user_grows)) | set(game_sids)
+    sm_frags = {int(i): list(f) for i, f in (sm_frags or {}).items() if int(i) in grows}
+    bankable = (((_bankable_idx(used) & set(grows)) - set(user_grows)) | set(game_sids)
+                | set(sm_frags))
     if not bankable:
         return None, audio_edits, grows
     fixed = {i: g for i, g in grows.items() if i not in bankable}
@@ -18315,6 +18514,19 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         return None, audio_edits, grows
     edits = BB.bank_edits(spilled, byidx, _read_stock_directory(gr_path, img_path))
     by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
+
+    def _named(i):
+        """What bank sound *i* is, for the log and the refusals."""
+        if i in by_idx_used:
+            return "%s's %s" % (by_idx_used[i].get("name"),
+                                _MW_sound_words(by_idx_used[i].get("key")))
+        if i in sm_frags:
+            from . import sound_modes as _SMo
+            u = sm_frags[i][0][0]
+            return _SMo.what(u["rel"], u["mode"], u.get("name", ""))
+        if i in game_sids:
+            return "the game's sound id %d (idx %d)" % (game_sids[i], i)
+        return "idx %d" % i
     # PAD-607 with PAD-606 (David, 2026-10-18, the middle rule): a sound too long for a
     # `limit` bank (a whole song as a mode's music) gets a bank of its own, as big as the
     # room left beside image.bin once the other banks that can play beside it are counted
@@ -18331,7 +18543,6 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                         reverse=True)[:SB.SOUND_CHANNELS - 1]
         room = min(cap_alone, max(0, SB.MAPPED_MAX - staged - sum(others)))
         if one_of[e.idx] > room:
-            u = by_idx_used.get(e.idx)
             stereo = byidx[e.idx].get("chan") == 2
             raise RuntimeError(
                 "%s is too long for this card: the modes' own sounds go into sound banks, and "
@@ -18340,8 +18551,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                 "this sound's bank can be at most %d MB here, about %.1f minutes of %s sound "
                 "(this one needs %d MB). Shorten it, or lengthen fewer of the card's own "
                 "sounds: those stay in image.bin."
-                % ("%s's %s" % (u.get("name"), _MW_sound_words(u.get("key"))) if u
-                   else "Sound idx %d" % e.idx, staged // 10**6, len(others),
+                % (_named(e.idx)[0].upper() + _named(e.idx)[1:], staged // 10**6, len(others),
                    sum(others) // 10**6, room // 10**6,
                    room / float(_STEREO_BYTES_PER_MIN // (1 if stereo else 2)),
                    "stereo" if stereo else "mono", one_of[e.idx] // 10**6))
@@ -18358,9 +18568,11 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             "sounds of the modes' own have to stay in image.bin."
             % (SB.SOUND_CHANNELS, (staged + live) // 10**6, staged // 10**6, live // 10**6,
                SB.MAPPED_MAX // 10**6))
-    who = ("the modes' own sounds" if not game_sids else
-           "the longer sounds" if not set(spilled) - set(game_sids) else
-           "the modes' own sounds and the longer sounds")
+    kinds = [w for w, on in (
+        ("the modes' own sounds", set(spilled) - set(game_sids) - set(sm_frags)),
+        ("the longer sounds", set(spilled) & set(game_sids)),
+        ("the music modes' files", set(spilled) & set(sm_frags))) if on]
+    who = " and ".join(kinds) if len(kinds) < 3 else "%s, %s and %s" % tuple(kinds)
     log("%s go into %d sound bank(s) of up to %d MB each: the game holds image.bin (%d MB) "
         "and every bank it is playing a sound from in memory at once, one for each of its %d "
         "sound channels at most, and together they come to at most %d MB (Stern's largest "
@@ -18383,7 +18595,11 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             u = by_idx_used.get(e.idx)
             if u is not None:
                 u["bank"] = int(cat)
-        size = SB.bank_bytes([e.body_bytes for e in group], stride)
+            for u, _sid in sm_frags.get(e.idx, ()):
+                u["bank"] = int(cat)
+        # (PAD-608: a music mode's file several sound ids play has a fragment for each)
+        size = SB.bank_bytes([e.body_bytes for e in group], stride, aliases=sum(
+            len(sm_frags[e.idx]) - 1 for e in group if e.idx in sm_frags))
         if space_chk is not None:
             try:
                 space_chk.clips.append((SB.bank_name(cat), "%s/%s" % (dir_rel, SB.bank_name(cat))
@@ -18393,14 +18609,10 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         log("%d sound(s) go into a sound bank of their own, %s (%.1f MB): with them "
             "image.bin would come to %d MB, past the %d MB the game can open. In the bank: %s."
             % (len(group), SB.bank_name(cat), size / 1e6, with_all // 10**6, cap // 10**6,
-               ", ".join(
-                   "%s's %s" % (by_idx_used[e.idx].get("name"),
-                                _MW_sound_words(by_idx_used[e.idx].get("key")))
-                   if e.idx in by_idx_used else
-                   "the game's sound id %d (idx %d)" % (game_sids[e.idx], e.idx)
-                   if e.idx in game_sids else "idx %d" % e.idx for e in group)), "info")
+               ", ".join(_named(e.idx) for e in group)), "info")
     plan = _BankPlan(banks, wavs, spilled, dir_rel)
     plan.game = {i: game_sids[i] for i in spilled if i in game_sids}
+    plan.sm_frags = {i: sm_frags[i] for i in spilled if i in sm_frags}
     return plan, audio_edits, grows
 
 
@@ -18493,6 +18705,110 @@ def _game_bank_duration(sites, sid, p, row, family):
     return (int(got[0].duration) + new - _duration_units(int(p["length"]))) & 0xFFFFFFFF
 
 
+def _bank_descriptor(desc, sid, extent, held, key, mask):
+    """PAD-608: a music mode's descriptor *desc* for game sound id *sid* (its own bytes
+    the first *extent*), made by :func:`_mode_descriptor_table` naming *held* (the bank
+    record's key as a plain sound id of ``image.bin`` carries it), with every payload
+    naming the bank record's own key *key* verbatim, as a bank's descriptor does
+    (:func:`.bank_build.compose_descriptor`), and nothing past its own bytes.  ``None``
+    when one of its payloads plays another record: a bank sound id's descriptor can
+    only name records of its own bank."""
+    from .spike2 import soundbank as SB
+    d = bytearray(desc)
+    own = _own_payloads(bytes(d), extent)
+    if not own:
+        return None
+    for o, pl in own:
+        if _play_key(pl, sid, mask) != bytes(held):
+            return None
+        d[o:o + 8] = bytes(key)
+    if extent is not None and int(extent) < len(d):
+        d[int(extent):] = bytes(len(d) - int(extent))
+    return bytes(d[:SB.DESC_SLOT])
+
+
+def _bank_mode_descs(gr_path, img_path, params, sites, plan, cat, places, rows, log):
+    """PAD-608: ``(given, played)`` for the music modes' files in bank *cat* (*plan*
+    ``sm_frags``; *places* the bank's placements, its fragments past the records
+    included; *rows* the chain's records, with their keys): ``given`` ``{fragment:
+    plain descriptor}`` - for each fragment of such a file, the descriptor the game's
+    sound id it stands in for plays it by in that mode or turn (read through the game's
+    own resolver off the staged ``image.bin``, as :func:`_sound_mode_descriptors` does,
+    the slot's record swapped for the bank's) - and ``played`` ``[(entry, game sid,
+    fragment)]``, the ones the runtime can point the game at.  A fragment no descriptor
+    could be made for takes another of its record's, and is never played."""
+    from . import bank_build as BB
+    from . import sound_modes as _SMo
+    from .spike2 import sfx_names as SN
+    from .spike2 import soundbank as SB
+    from .spike2.emulator import Spike2Emu
+    order = {}
+    for pl in sorted(places, key=lambda pl: pl.new_idx):
+        if pl.idx in plan.sm_frags:
+            order.setdefault(pl.idx, []).append(pl)
+    if not order:
+        return {}, []
+    mask = _desc_key_mask(params, sites)
+    byidx = {p["idx"]: p for p in params}
+    byrow = {r["idx"]: r for r in rows}
+    found = []
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        resolver, buf = SN._find_resolver(emu)
+        if resolver is None:
+            raise RuntimeError("the game's descriptor resolver could not be located, so the "
+                               "music modes' files cannot be played from a sound bank")
+        for sid in range(SN.sid_ceiling(img_path) + 1):
+            got = SN.resolve_descriptor(emu, resolver, buf, sid)
+            if got is not None:
+                found.append((sid, got[0], got[2]))
+    finally:
+        emu.close()
+    extents = _descriptor_extents([o for _s, o, _d in found], SN.DESC_WINDOW)
+    at = {sid: (off, desc) for sid, off, desc in found}
+    given, played = {}, []
+    for host, pls in order.items():
+        frs = plan.sm_frags[host]
+        if len(frs) != len(pls):
+            raise RuntimeError("sound bank %s: idx %d has %d fragment(s) where %d sound id(s) "
+                               "play it" % (SB.bank_name(cat), host, len(pls), len(frs)))
+        r = byrow[SB.record_of(pls[0])]
+        key = bytes(r["findkey"])
+        held = _play_key(key, 0, mask)
+        mine = [p for p in params if p["idx"] != host] + [dict(
+            byidx[host], findkey=held, length=int(r["length"]), grown=True)]
+        tables, spare = {}, None
+        for (u, sid), pl in zip(frs, pls):
+            if id(u) not in tables:
+                tables[id(u)] = {s_: d for _m, s_, d in _mode_descriptor_table(
+                    found, mine, mask, [dict(u)], lambda *a, **k: None)}
+            d = tables[id(u)].get(sid)
+            if d is not None and sid in at:
+                d = _bank_descriptor(d, sid, extents[at[sid][0]], held, key, mask)
+            if d is None:
+                log("%s: %s plays its own sound for sound id %d: that sound id cannot play it "
+                    "from a sound bank." % (_SMo.who(u["mode"]), _SMo.what(
+                        u["rel"], u["mode"], u.get("name", "")), sid), "warning")
+                continue
+            given[pl.new_idx] = d
+            played.append((u, sid, pl.new_idx))
+            spare = spare or d
+        for (u, sid), pl in zip(frs, pls):
+            if pl.new_idx in given:
+                continue
+            if spare is None and sid in at:
+                # (no sound id can play this record: a descriptor the verify accepts,
+                # that nothing ever points the game at)
+                spare = BB.compose_descriptor(at[sid][1], key,
+                                              _duration_units_emitted(int(r["length"])), False)
+            if spare is None:
+                raise RuntimeError("sound bank %s: no descriptor can be written for idx %d"
+                                   % (SB.bank_name(cat), host))
+            given[pl.new_idx] = spare
+    return given, played
+
+
 def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, gains,
                        work, np, log, progress=None, cancel=None, body_cache=None):
     """Stage, encode and verify every bank of *plan* (PAD-595), write each
@@ -18516,12 +18832,17 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
         head = f.read(1 << 16)
     refs = _mode_music_level_refs(gr_path, img_path, params, sites,
                                   set(loop_idx) & set(plan.grows), log, used=used)
+    # PAD-608: a music mode's file matches its slot's loudness, as in image.bin
+    refs.update(_sm_level_refs([u for f in plan.sm_frags.values() for u, _s in f]))
     emu = Spike2Emu(gr_path, img_path)
     try:
         emu.boot()
         for cat, edits in plan.banks:
+            # PAD-608: a fragment more for each further sound id that plays a music
+            # mode's file (the first plays the record's own)
+            aliases = [e.idx for e in edits for _f in plan.sm_frags.get(e.idx, ())[1:]]
             path, places = BB.stage_bank(gr_path, img_path, work, byidx, edits, cat, log,
-                                         emu=emu)
+                                         emu=emu, aliases=aliases)
             plan.files.append((cat, path))
             plan.rows[cat] = (places, None)
     finally:
@@ -18530,7 +18851,7 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
     rev = None
     for n, (cat, path) in enumerate(plan.files):
         places, _r = plan.rows[cat]
-        wavs = {pl.idx: plan.wavs[pl.idx] for pl in places}
+        wavs = {pl.idx: plan.wavs[pl.idx] for pl in SB.records(places)}
         rows, _patches, rev = BB.chain_encode(
             gr_path, img_path, path, cat, params, places, wavs, np, log,
             loops=set(loop_idx) & set(wavs), gains=gains, level_refs=refs,
@@ -18545,8 +18866,14 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
         # descriptor is copied (a bed's carrier is a looping tune, a call's
         # the call it rides in on); the length is the bank record's
         carriers, durations, music_idx = {}, {}, set()
+        # PAD-608: each fragment of a music mode's file takes the descriptor of the game's
+        # sound id it stands in for, naming the bank's record
+        given, sm_sids = _bank_mode_descs(gr_path, img_path, params, sites, plan, cat,
+                                          places, rows, log)
         for r in rows:
             idx = r.get("host")
+            if idx in plan.sm_frags:
+                continue
             if idx in plan.game and r.get("findkey"):
                 # PAD-606: a game sound's bank sid takes its own sid's descriptor
                 # (its bus, its script), the declared duration moved by the growth
@@ -18574,15 +18901,34 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
             if u.get("music"):
                 music_idx.add(idx)
         expect = BB.write_bank_tables(gr_path, img_path, path, cat, places, rows, carriers,
-                                      durations, music_idx, log)
+                                      durations, music_idx, log,
+                                      **({"given": given} if given else {}))
         BB.verify_tables(gr_path, img_path, path, cat, places, expect, rows, log, revalidate=rev)
         # PAD-606: which game sid each of the bank's sounds stands in for, kept in the
         # bank, so a later Write of this card can put the game's request lists back
         md_off, _n, _sz = SB.read_bank_header(_lp(path))
-        SB.write_sid_map(_lp(path), md_off, len(places),
-                         {pl.new_idx: plan.game[pl.idx] for pl in places if pl.idx in plan.game})
+        SB.write_sid_map(_lp(path), md_off, len(SB.records(places)),
+                         {pl.new_idx: plan.game[pl.idx] for pl in SB.records(places)
+                          if pl.idx in plan.game})
+        for u, sid, n in sm_sids:
+            # PAD-608: the runtime plays this file for game sound id *sid* as fragment *n*
+            u.setdefault("bank_sids", {})[int(sid)] = int(expect[n][0])
         for r in rows:
             idx = r["host"]
+            if idx in plan.sm_frags:
+                from . import sound_modes as _SMo
+                for u in {id(u): u for u, _s in plan.sm_frags[idx]}.values():
+                    u["bank"], u["bank_idx"] = int(cat), int(r["idx"])
+                    got = sorted(u.get("bank_sids") or {})
+                    log("%s: %s plays from sound bank %s record %d (%.2f s)%s." % (
+                        _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u.get("name", "")),
+                        SB.bank_name(cat), r["idx"], (int(r["length"]) - BLOCK) / 44100.0,
+                        " as sound id(s) %s, in place of the game's %s" % (
+                            ", ".join("%#x" % u["bank_sids"][g] for g in got),
+                            ", ".join(map(str, got))) if got else
+                        ", but no sound id of the game can play it there, so its sound plays "
+                        "its own"), "info" if got else "warning")
+                continue
             if idx in plan.game:
                 sid = expect[r["idx"]][0]
                 plan.banked[plan.game[idx]] = int(sid)

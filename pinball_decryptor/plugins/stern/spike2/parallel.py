@@ -434,3 +434,28 @@ def start_block_pool(kind, gr_path, img_path, stock_rows, first_warm=None,
         return None
     return BlockPool(kind, gr_path, img_path, stock_rows, n,
                      first_warm=first_warm, cat_file=cat_file, log=log)
+
+
+# ---------------------------------------------------------------------------
+# The Write's final-bytes check (PAD-609): the replaced sounds decoded from the
+# finished card, spread over workers each booted and warmed as the serial check's
+# emulator is (engine._final_check_one does the work in both).
+# ---------------------------------------------------------------------------
+_FIN_EMU = None
+
+
+def init_final_worker(gr_path, img_path, params, edited):
+    global _FIN_EMU
+    from ..engine import _BodyOverlay
+    from .emulator import Spike2Emu
+    _FIN_EMU = Spike2Emu(gr_path, img_path)
+    _FIN_EMU.boot()
+    _FIN_EMU.warm_slots_for_grown(params, edited=edited)
+    _FIN_EMU.mm = _BodyOverlay(_FIN_EMU.mm)
+
+
+def final_check(task):
+    """task = ``(off, row, body, scrap_check)``; returns ``(off, result)``."""
+    from ..engine import _final_check_one
+    off, p, body, scrap = task
+    return off, _final_check_one(_FIN_EMU, off, p, body, scrap, np=np)

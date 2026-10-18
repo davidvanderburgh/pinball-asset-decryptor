@@ -190,11 +190,17 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
     try:
         emu_e.boot()
         emu_d.boot()
-        refs = {}
-        for idx, ref in (level_refs or {}).items():
-            q = byidx.get(ref)
-            if q is not None and idx in edits:
-                refs[idx] = E._stock_render(emu_e, q, np, stereo=byidx[idx].get("chan") == 2)
+        def render(idx, q):
+            # a stock sound of image.bin's, decoded from image.bin's window
+            was, emu_e.mm = emu_e.mm, emu_e._mm_img
+            try:
+                return E._stock_render(emu_e, q, np, stereo=byidx[idx].get("chan") == 2)
+            finally:
+                emu_e.mm = was
+
+        # PAD-609: decoded only when an encode needs it (E._LazyRefs)
+        refs = E._LazyRefs({idx: byidx[ref] for idx, ref in (level_refs or {}).items()
+                            if byidx.get(ref) is not None and idx in edits}, render)
         emu_e.set_category_file(bank_path)
 
         def after(n, row, redo):
@@ -221,15 +227,15 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
                     "chain parameters (scale %s)" % (idx, SB.bank_name(cat), p["scale"]))
             kw = dict(pred=None, log=log, gain_db=gains.get(idx), loop=idx in loops,
                       blocks=pool.blocks if pool is not None else None)
-            if idx in refs:
-                kw["orig"] = refs[idx]
             pe = E._extended_row(p, E._APPENDED_TAIL)
             # *body_cache*: the same encode a build made before (PAD-599)
             off, body = E._chain_encoded(
                 body_cache, SB.bank_name(cat), emu_e, pe, edits[idx],
-                lambda: (E._encode_stereo(emu_e, state["sr"], pe, edits[idx], np, **kw)
+                lambda: (E._encode_stereo(emu_e, state["sr"], pe, edits[idx], np,
+                                          **refs.kw(idx, kw))
                          if p["chan"] == 2 else
-                         E._encode_mono(emu_e, state["gr"], pe, edits[idx], np, **kw)),
+                         E._encode_mono(emu_e, state["gr"], pe, edits[idx], np,
+                                        **refs.kw(idx, kw))),
                 gain_db=kw["gain_db"], loop=kw["loop"],
                 ref=byidx.get((level_refs or {}).get(idx)) if idx in refs else None,
                 chan=p["chan"])

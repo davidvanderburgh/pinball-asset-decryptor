@@ -15249,6 +15249,25 @@ def _chain_body_cache(assets_dir, gr_path, stock_ident, log):
         return None
 
 
+class _LazyRefs(dict):
+    """``{idx: the stock row whose decode is idx's loudness reference}``, each
+    decoded by ``render(idx, row)`` the first time an encode asks for it
+    (:meth:`kw`), and kept (PAD-609)."""
+
+    def __init__(self, rows, render):
+        super().__init__(rows)
+        self._render = render
+        self._done = {}
+
+    def kw(self, idx, kw):
+        """*kw* with ``orig``, idx's reference, when it has one."""
+        if idx not in self:
+            return kw
+        if idx not in self._done:
+            self._done[idx] = self._render(idx, self[idx])
+        return dict(kw, orig=self._done[idx])
+
+
 def _chain_encoded(cache, where, emu, row, wav_path, encode, gain_db=None,
                    loop=False, ref=None, chan=1):
     """``encode()``'s ``(write_off, body)`` for *row*, from *cache* when it
@@ -16896,10 +16915,10 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
     check: it decodes the final bytes and, when previews are enabled, writes
     the real card render (overwriting the encoder's pre-restore preview).
 
-    Log-only.  Returns ``[(idx, peak_dbfs, head_dbfs, reverted_dbfs)]``."""
-    import math
-
-    from .spike2.emulator import BLOCK, Spike2Emu, emitted_length
+    Log-only.  Returns ``[(idx, peak_dbfs, head_dbfs, reverted_dbfs)]``.
+    PAD-609: the sounds are decoded side by side in worker processes when
+    there is enough of them (:func:`_final_checks_parallel`)."""
+    from .spike2.emulator import Spike2Emu
 
     if not patches:
         return []
@@ -16910,85 +16929,42 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
         for d in (0, 1, 2):
             owners.setdefault(p["body_off"] - s * d, p)
 
-    def dbfs(v):
-        return -120.0 if v <= 0 else 20.0 * math.log10(v / 32768.0)
-
+    tasks = [(off, owners[off], patches[off], not (no_restore or off in no_scrap_offsets))
+             for off in sorted(patches) if off in owners]
+    edited = [owners[o]["idx"] for o in patches if o in owners]
+    got = _final_checks_parallel(gr_path, img_path, params, edited, tasks, log, cancel)
+    if got is None:
+        got = {}
+        emu = Spike2Emu(gr_path, img_path)
+        try:
+            emu.boot()
+            # the replaced sounds' bodies are ours now: settle their codec keys
+            # from the card's other sounds (PAD-331)
+            emu.warm_slots_for_grown(params, edited=edited)
+            if not isinstance(emu.mm, _BodyOverlay):
+                emu.mm = _BodyOverlay(emu.mm)
+            for t in tasks:
+                if cancel and cancel():
+                    break
+                got[t[0]] = _final_check_one(emu, *t, np=np)
+        finally:
+            emu.close()
     out = []
-    emu = Spike2Emu(gr_path, img_path)
-    try:
-        emu.boot()
-        # the replaced sounds' bodies are ours now: settle their codec keys
-        # from the card's other sounds (PAD-331)
-        emu.warm_slots_for_grown(
-            params, edited=[owners[o]["idx"] for o in patches if o in owners])
-        if not isinstance(emu.mm, _BodyOverlay):
-            emu.mm = _BodyOverlay(emu.mm)
-        for off in sorted(patches):
-            if cancel and cancel():
-                break
-            p = owners.get(off)
-            if p is None:
-                continue
-            body = patches[off]
-            n = emitted_length(p["length"])
-            step = 4 if p.get("chan") == 2 else 2
-            stock = bytes(emu.mm.base[off:off + len(body)]
-                          if hasattr(emu.mm, "base")
-                          else emu.mm[off:off + len(body)])
-            # The blip-free cave keeps the whole body as our audio (no master-
-            # directory restore), so there is no original-scrap to flag; the body
-            # differs from stock nearly everywhere and the scrap heuristic below
-            # would false-positive.  Skip it.
-            # An appended body (a sound grown past its slot) has no original
-            # underneath it at all — what it starts as is a scaffold this write
-            # laid down — so comparing against it would report a scrap of a
-            # sound that was never there.
-            reverted = (
-                np.empty(0, int) if (no_restore or off in no_scrap_offsets)
-                else np.flatnonzero(
-                    np.frombuffer(body, "<u2") != np.frombuffer(stock, "<u2")))
-            saved = emu.mm.patch
-            emu.mm.patch = (off, body)
-            try:
-                got = emu.decode(p)
-            finally:
-                emu.mm.patch = saved
-            if got is None or got[0] is None:
-                continue
-            s = np.asarray(got[0], np.int64)[:n]
-            if not len(s):
-                continue
-            # This render OVERWRITES the encoder's preview file, so it must
-            # carry the R channel too — dropping it here shipped mono preview
-            # WAVs for stereo slots while the card itself plays stereo.
-            chans = [s]
-            if got[2] and got[1] is not None:
-                chans.append(np.asarray(got[1], np.int64)[:n])
-            peak = int(np.abs(s).max())
-            head = int(np.abs(s[:BLOCK]).max()) if len(s) else 0
-            # Peak within the master-directory-reverted words specifically:
-            # those map ~1:1 to output samples (delta near 0), so index by
-            # word position clipped into range.
-            rev_pk = 0
-            if len(reverted):
-                ri = reverted[reverted < step * n] // step
-                ri = ri[ri < len(s)]
-                if len(ri):
-                    rev_pk = int(np.abs(s[ri]).max())
-            out.append((p["idx"], dbfs(peak), dbfs(head), dbfs(rev_pk)))
-            if peak or any(int(np.abs(c).max()) for c in chans[1:]):
-                _write_machine_render(p, chans, len(chans) == 2, np)
-            # A sound whose head is quiet but whose body carries a loud scrap
-            # is the master-directory tradeoff surfacing — name it so a "why is
-            # my quiet replacement not quiet?" is answered from the log.
-            if rev_pk > 512 and rev_pk >= peak - 6:
-                log("idx %d: the card plays a %.0f dBFS scrap of the original "
-                    "sound mid-body (bytes the firmware's decode chain forces "
-                    "back to stock — unavoidable without rebooting audio); "
-                    "the start is clean (%.0f dBFS)."
-                    % (p["idx"], dbfs(rev_pk), dbfs(head)), "warning")
-    finally:
-        emu.close()
+    for off, p, _b, _s in tasks:
+        r = got.get(off)
+        if r is None:
+            continue
+        idx, peak_db, head_db, rev_db, scrap = r
+        out.append((idx, peak_db, head_db, rev_db))
+        # A sound whose head is quiet but whose body carries a loud scrap
+        # is the master-directory tradeoff surfacing — name it so a "why is
+        # my quiet replacement not quiet?" is answered from the log.
+        if scrap:
+            log("idx %d: the card plays a %.0f dBFS scrap of the original "
+                "sound mid-body (bytes the firmware's decode chain forces "
+                "back to stock — unavoidable without rebooting audio); "
+                "the start is clean (%.0f dBFS)."
+                % (idx, rev_db, head_db), "warning")
     if out:
         worst = max(out, key=lambda r: r[1])
         log("Final-bytes check: %d replaced sound(s) decoded from the card "
@@ -16996,6 +16972,101 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
             % (len(out), max(r[2] for r in out),
                max(out, key=lambda r: r[2])[0]), "info")
     return out
+
+
+def _final_check_one(emu, off, p, body, scrap_check, np):
+    """One sound of :func:`_verify_final_patches` on *emu* (booted, warmed, its
+    ``mm`` a :class:`_BodyOverlay`): its body at *off* decoded as the card plays
+    it.  Returns ``(idx, peak dBFS, head dBFS, reverted dBFS, scrap?)`` or
+    None, and writes the machine render when previews are on.  *scrap_check*
+    False: the body has no stock words under it to compare against (the
+    blip-free cave keeps all of ours; an appended body starts as a scaffold)."""
+    import math
+
+    from .spike2.emulator import BLOCK, emitted_length
+
+    def dbfs(v):
+        return -120.0 if v <= 0 else 20.0 * math.log10(v / 32768.0)
+
+    n = emitted_length(p["length"])
+    step = 4 if p.get("chan") == 2 else 2
+    stock = bytes(emu.mm.base[off:off + len(body)]
+                  if hasattr(emu.mm, "base")
+                  else emu.mm[off:off + len(body)])
+    reverted = (np.flatnonzero(np.frombuffer(body, "<u2") != np.frombuffer(stock, "<u2"))
+                if scrap_check else np.empty(0, int))
+    saved = emu.mm.patch
+    emu.mm.patch = (off, body)
+    try:
+        got = emu.decode(p)
+    finally:
+        emu.mm.patch = saved
+    if got is None or got[0] is None:
+        return None
+    s = np.asarray(got[0], np.int64)[:n]
+    if not len(s):
+        return None
+    # This render OVERWRITES the encoder's preview file, so it must
+    # carry the R channel too — dropping it here shipped mono preview
+    # WAVs for stereo slots while the card itself plays stereo.
+    chans = [s]
+    if got[2] and got[1] is not None:
+        chans.append(np.asarray(got[1], np.int64)[:n])
+    peak = int(np.abs(s).max())
+    head = int(np.abs(s[:BLOCK]).max()) if len(s) else 0
+    # Peak within the master-directory-reverted words specifically:
+    # those map ~1:1 to output samples (delta near 0), so index by
+    # word position clipped into range.
+    rev_pk = 0
+    if len(reverted):
+        ri = reverted[reverted < step * n] // step
+        ri = ri[ri < len(s)]
+        if len(ri):
+            rev_pk = int(np.abs(s[ri]).max())
+    if peak or any(int(np.abs(c).max()) for c in chans[1:]):
+        _write_machine_render(p, chans, len(chans) == 2, np)
+    return (p["idx"], dbfs(peak), dbfs(head), dbfs(rev_pk), rev_pk > 512 and rev_pk >= peak - 6)
+
+
+#: PAD-609: the final check spreads its sounds over worker processes when they hold at
+#: least this many seconds of audio between them (each worker boots its own emulator).
+_FINAL_PARALLEL_MIN_S = 20
+
+
+def _final_checks_parallel(gr_path, img_path, params, edited, tasks, log, cancel):
+    """``{off: _final_check_one's result}`` for *tasks* from worker processes
+    (:func:`.spike2.parallel.final_check`), or None when the serial loop should
+    run them: too little audio to be worth the workers, no cores to spare, a
+    cancel, or a pool that failed (said in the log)."""
+    from .spike2.parallel import block_workers, final_check, init_final_worker
+    secs = sum(int(p["length"]) for _o, p, _b, _s in tasks) / 44100.0
+    n = min(block_workers(), len(tasks))
+    if n < 2 or secs < _FINAL_PARALLEL_MIN_S:
+        return None
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    # longest first, so no worker is left with a long song at the end
+    order = sorted(tasks, key=lambda t: -int(t[1]["length"]))
+    got = {}
+    # an executor, not mp.Pool: a worker whose start fails breaks it (and the
+    # check runs here) where a Pool starts the worker again, for ever
+    pool = None
+    try:
+        pool = ProcessPoolExecutor(n, mp_context=mp.get_context("spawn"),
+                                   initializer=init_final_worker,
+                                   initargs=(gr_path, img_path, params, edited))
+        for fut in as_completed([pool.submit(final_check, t) for t in order]):
+            off, r = fut.result()
+            got[off] = r
+            if cancel and cancel():
+                break
+    except Exception as e:                              # noqa: BLE001
+        log("Final-bytes check runs in one process: its workers failed (%s)." % e, "info")
+        return None
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+    return got
 
 
 def _card_rel_path(reader, node):
@@ -17480,12 +17551,11 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
     try:
         emu_e.boot()
         emu_e.warm_slots_for_grown(params)
-        refs = {}
-        for idx, ref in level_refs.items():
-            q = byidx.get(ref)
-            if q is not None:
-                refs[idx] = _stock_render(emu_e, q, np,
-                                          stereo=byidx[idx].get("chan") == 2)
+        # PAD-609: decoded when an encode needs it, not up front: a sound the
+        # body cache already holds is never encoded, and never needed it
+        refs = _LazyRefs(
+            {idx: byidx[ref] for idx, ref in level_refs.items() if byidx.get(ref) is not None},
+            lambda idx, q: _stock_render(emu_e, q, np, stereo=byidx[idx].get("chan") == 2))
         emu_d.boot()
         order = sorted(want)
 
@@ -17515,16 +17585,14 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
             kw = dict(pred=None, log=log, gain_db=gains.get(idx),
                       loop=idx in loops,
                       blocks=pool.blocks if pool is not None else None)
-            if idx in refs:
-                kw["orig"] = refs[idx]
             # the lead-out block too, as silence (_APPENDED_TAIL); the target is zero-padded to it
             pe = _extended_row(p, _APPENDED_TAIL)
             # *body_cache*: the same encode a build made before (PAD-599)
             off, body = _chain_encoded(
                 body_cache, "image", emu_e, pe, wav,
-                lambda: (_encode_stereo(emu_e, state["sr"], pe, wav, np, **kw)
+                lambda: (_encode_stereo(emu_e, state["sr"], pe, wav, np, **refs.kw(idx, kw))
                          if p["chan"] == 2 else
-                         _encode_mono(emu_e, state["gr"], pe, wav, np, **kw)),
+                         _encode_mono(emu_e, state["gr"], pe, wav, np, **refs.kw(idx, kw))),
                 gain_db=kw["gain_db"], loop=kw["loop"],
                 ref=byidx.get(level_refs[idx]) if idx in refs else None,
                 chan=p["chan"])

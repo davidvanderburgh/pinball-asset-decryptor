@@ -728,11 +728,13 @@ class SternManufacturer(Manufacturer):
                 "with silence) and amplitude-limited into the codec's range. "
                 "Advanced audio options can let a longer replacement grow the "
                 "sound bank instead of being trimmed, on image builds only. "
-                "The game can't open a sound bank bigger than about 2 GB, and "
-                "each lengthened sound also needs room for its whole length "
-                "on the card's games partition, shared with full-size "
-                "videos; a sound past either limit is trimmed. %s adds that "
-                "room but does not raise the 2 GB limit."
+                "The game can't open a sound bank bigger than about 2 GB; "
+                "past that, lengthened sounds go into extra sound banks of "
+                "their own beside it (a few the game plays in a way a bank "
+                "can't serve stay and are trimmed). Each lengthened sound "
+                "also needs room for its whole length on the card's games "
+                "partition, shared with full-size videos; a sound past that "
+                "is trimmed. %s adds that room."
                 % _bigger_card_words(capital=True))
 
     def video_length_note(self):

@@ -115,9 +115,11 @@ def test_longer_sound_texts_name_both_limits():
     sound-bank limit ("roughly 45 minutes per build").  On a stock 8 GB
     Godzilla card the games partition has 368 MB free, less than the bank's
     headroom, and overrunning it fails the whole build instead of trimming.
-    So each text names the games partition, points at SD card size, and says
-    that size does not lift the 2 GB limit; 45 minutes is one title's figure
-    (Godzilla 1.16), so it is never promised without the title."""
+    So each text names the games partition and points at SD card size; 45
+    minutes is one title's figure (Godzilla 1.16), so it is never promised
+    without the title.  PAD-606: the 2 GB no longer trims what an extra sound
+    bank can hold, and each text says so instead of "a bigger card does not
+    raise the 2 GB limit"."""
     import pinball_decryptor.webui as webui_pkg
     from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
     from pinball_decryptor.webui.help_content import HELP_CONTENT
@@ -134,15 +136,16 @@ def test_longer_sound_texts_name_both_limits():
     for text in (advanced, help_, note):
         assert "games partition" in text, text
         assert "SD card size" in text, text
-        assert "not raise the 2 GB limit" in text, text
+        assert "2 GB" in text and "extra sound banks" in text, text
+        assert "not raise the 2 GB limit" not in text, text
         assert "roughly 45 minutes" not in text, text
         if "45 minutes" in text:
             assert "Godzilla 1.16" in text, text
-    # and the SD card size tip says what a bigger card does NOT lift, so
-    # 32 GB never reads as "unlimited songs", and that a build too big for
-    # the games partition is refused before the card image is written
+    # and the SD card size tip says what is past the 2 GB one sound bank holds
+    # (PAD-606: extra banks), and that a build too big for the games partition
+    # is refused before the card image is written
     tip = dict(HELP_CONTENT["Write"])["SD card size (Stern Spike 2)"]
-    assert "sound bank over about 2 GB" in tip
+    assert "2 GB the game can open in one sound bank go into extra banks" in tip
     assert "Before anything is written to the card image" in tip
     assert "refused" in tip
 

@@ -334,3 +334,55 @@ registered those banks without complaint. The Write pipeline copies whole
 bodies, as the Godzilla LE runs did. Second run of the first sets
 (`library_rig_second_run.tsv`): 6 died again, 7 passed, so the shorter
 records sat near the boundary.
+
+## The game's own sounds in a bank (PAD-606)
+
+David, 2026-10-17: a longer replacement of one of the GAME's own sounds (the Audio
+tab) still had to stay in `image.bin`, so those were bounded by its room (about
+2.14 GB beside a bank). Now they can go into a bank too.
+
+**How the game plays it.** A game sound reaches its record through the
+descriptor of the sid that plays it, and a cat-0 sid's descriptor can only name
+an `image.bin` record (above: the key's category bits come from the sid). So a
+banked game sound gets a sid of the bank's category, as a mode's own sound does,
+with a descriptor copied from the game sid's OWN descriptor (its bus, its
+script, the declared duration moved by the growth as a re-pointed one is), and
+the game is made to play that sid: the request table's sid lists
+(`spike2/sound_requests.py`), which the play worker reads at every play, name
+the bank sid where they named the game's. That is how the music titles play
+their own banks' songs (their lists carry `cat << 16 | n` sids). The lists are
+plain data in the game program, so the words are written like the score
+colours' (PAD-507): into the staged program, or in place with the validator
+bypass refreshing the `.sidx` record over them (`engine._sound_list_writes`).
+
+**Which sounds can move** (`bank_build.game_sound_sids`): exactly one game sid
+plays the record, that sid's descriptor names nothing else, a request list
+names the sid, and no mode of the same Write uses that request. Stock Godzilla
+LE 1.16: 2438 of 2534 (96%); the rest are 62 records two sids play, 29 sids the
+game plays other than through its lists, and 5 multi-part sids. No fragment on
+that card has variants that differ (all five slots name one descriptor), so a
+bank fragment's five equal slots lose nothing. A sound that cannot move stays in
+`image.bin`, trimmed there when it is full, and the log says why.
+
+**How many banks can be mapped at once** (Godzilla LE 1.16's code): a sound's
+start takes a reference on its sid's bank (`0x43cdcc` -> `0x3b583c`), its stop
+drops it (`0x43c254` -> `0x3b5884`), and mapping a bank unmaps only the OTHER
+banks with no reference (`0x3b57d8`, called from the loader at `0x3b5b1c` and
+`0x3b5b64`). So every bank with a sound playing stays mapped beside
+`image.bin`, up to one per sound channel (the voice loop at `0x43c210` runs
+8). PAD-593's check (`image.bin` + the biggest bank <= `MAPPED_MAX`) assumed
+one; now banks are cut at `(MAPPED_MAX - image.bin) / 8` (and Stern's 40 MB),
+a sound too long for that gets a bank of its own when it is a mode's (a game
+sound stays in `image.bin`), and a build whose `image.bin` and its 8 biggest
+banks pass `MAPPED_MAX` is refused with the reason.
+
+**A later Write of the same card.** Each bank carries a sid map
+(`soundbank.SID_MAP_MAGIC`, between the descriptors and the directory; nothing
+the game runs reads it): which game sid each fragment stands in for. A Write
+reads the card's banks' maps (`bank_build.card_sid_map`) and treats a list
+place holding an earlier bank sid as the game sid it stands for: a sound this
+Write replaces again gets this Write's bank sid, or its own sid back when it
+stays in `image.bin`; a sound it leaves alone keeps the earlier bank's.
+
+**Also fixed here:** a build whose only edits all went into banks was refused
+as "Nothing could be written", and its Write summary counted 0 sounds.

@@ -334,3 +334,37 @@ registered those banks without complaint. The Write pipeline copies whole
 bodies, as the Godzilla LE runs did. Second run of the first sets
 (`library_rig_second_run.tsv`): 6 died again, 7 passed, so the shorter
 records sat near the boundary.
+
+## How big a bank is (PAD-593, PAD-607)
+
+The game maps `image.bin` for good and the bank it is playing beside it, both
+whole, in its 32-bit address space (the boot tail maps and releases every bank
+in turn, so only ONE bank is ever mapped with image.bin: Rush 1.19's
+image.bin and all 17 of its banks come to 3,049 MiB). A Godzilla custom card
+at 2,125 MB + one 136 MB bank died on the machine at its first bank sound
+("FATAL: error 232 (Flash memory init mmap failed)", PAD-593), while every
+Stern card plays. What Stern ships (`banksizes.py`, every Spike 2 card on D:,
+MiB):
+
+| title | image.bin | banks | largest bank | image.bin + largest |
+|---|---|---|---|---|
+| Dungeons & Dragons 1.10 | 2,043 | 29 | 37 | **2,080** (the largest pair: `MAPPED_MAX`) |
+| Rush 1.19 | 1,751 | 17 | **208** (218,349,330 bytes: `BANK_MAX_SEEN`) | 1,959 |
+| James Bond 1.06 | 1,456 | 5 | 205 | 1,662 |
+| Foo Fighters 1.04 | 1,269 | 16 | 129 | 1,399 |
+| Metallica 1.04 | 734 | 24 | 98 | 832 |
+| Deadpool 1.16 | 1,541 | 16 | 76 | 1,618 |
+| John Wick 1.02 | 1,497 | 14 | 52 | 1,549 |
+
+The failure is the PAIR, not the bank: Rush plays a 208 MiB bank, PAD-593's
+card died on a 130 MiB one with a bigger image.bin. So:
+
+* PAD-593: every bankable sound leaves image.bin once one has to, and banks
+  are cut at `BANK_SLICE` (40 MB, D&D's size).
+* PAD-607: a sound too long for a slice (a whole song as a mode's music: past
+  ~3.8 min stereo) gets a bank to itself, `alone_bank_room(image.bin)` =
+  `MAPPED_MAX - image.bin`, no bigger than `BANK_MAX_SEEN` (or the build
+  emulator's window). Every pair then stays within D&D's and every bank within
+  Rush's, both shipped and played on machines. David's Heisei build (image.bin
+  2,010 MB) has 171 MB, about 16 minutes of stereo; a longer sound is refused
+  by name, with the minutes it may have.

@@ -504,3 +504,71 @@ def test_banks_are_kept_as_small_as_sterns_own_and_refused_past_what_a_machine_h
     with pytest.raises(RuntimeError, match="in memory at once"):
         E._plan_sound_banks("game", str(img), params, audio_edits, grows, {}, used,
                             Reader(), None, None, lambda *a: None)
+
+
+def test_a_sound_too_long_for_a_slice_gets_a_bank_of_its_own():
+    """PAD-607: a whole song as a mode's music does not fit a BANK_SLICE bank; it gets a
+    bank to itself up to *alone*, the small sounds around it keep filling slices."""
+    small = [SB.BankEdit(i, _record(), 1, 2, 600) for i in (0, 1, 3, 4)]
+    song = SB.BankEdit(2, _record(), 1, 2, 5000)
+    edits = small[:2] + [song] + small[2:]
+    limit = SB.bank_bytes([600, 600]) + 8
+    banks = SB.split_banks(edits, limit=limit, alone=SB.bank_bytes([5000]))
+    assert sorted([e.idx for e in b] for b in banks) == [[0, 1], [2], [3, 4]]
+    # no room for it alone: refused, as before
+    with pytest.raises(SB.SoundBankError, match="alone"):
+        SB.split_banks(edits, limit=limit, alone=SB.bank_bytes([5000]) - 1)
+    with pytest.raises(SB.SoundBankError, match="alone"):
+        SB.split_banks(edits, limit=limit)
+
+
+def test_alone_bank_room_is_whats_left_beside_image_bin_up_to_sterns_biggest_bank():
+    """PAD-607: image.bin + the bank playing stay within MAPPED_MAX (D&D 1.10's pair), and no
+    bank is bigger than Stern ships (Rush 1.19's 218,349,330 bytes)."""
+    assert SB.BANK_MAX_SEEN == 218_349_330
+    # David's Godzilla build: image.bin 2,010 MB leaves 171 MB, about 16 minutes of stereo
+    room = SB.alone_bank_room(2_010_400_998)
+    assert room == SB.MAPPED_MAX - 2_010_400_998
+    assert 16 * 4 * 44100 * 60 < room < 17 * 4 * 44100 * 60
+    # Rush's own image.bin: the room is capped at Rush's own bank
+    assert SB.alone_bank_room(1_836_701_778) == SB.BANK_MAX_SEEN
+    assert SB.alone_bank_room(SB.MAPPED_MAX) == 0
+    assert SB.alone_bank_room(SB.MAPPED_MAX + 10) == 0
+
+
+def test_plan_sound_banks_gives_a_long_song_a_bank_of_its_own(monkeypatch, tmp_path):
+    """PAD-607: a mode's music 100 MB long (about 9.4 minutes of stereo) beside small calls:
+    the calls fill BANK_SLICE banks, the song gets a 100 MB bank, and image.bin + that bank
+    stay within MAPPED_MAX. A song past the room is refused with its length in minutes."""
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import bank_build as BB
+    img = tmp_path / "image.bin"
+    img.write_bytes(_image_header(md_off=1000, count=10))
+    sizes = {1: 16_000_000, 2: 100_000_000, 3: 16_000_000, 4: 16_000_000}
+    params = [{"idx": i, "chan": 2, "length": 100, "findkey": bytes([i]) * 8} for i in sizes]
+    grows = {i: (100, n // 4) for i, n in sizes.items()}
+    audio_edits = {i: "s%d.wav" % i for i in grows}
+    used = [{"idx": i, "swap": i != 2, "music": i == 2, "sid": 0x99 if i == 2 else None,
+             "key": "music" if i == 2 else "call:%d" % i, "name": "M%d" % i} for i in grows]
+    monkeypatch.setenv(BB.BANK_CAP_ENV, "1000000")
+    recs = b"".join(_record(0x100 ^ 0xDEADBEEF, body_off=0x1000 * i) for i in range(5))
+    monkeypatch.setattr(E, "_read_stock_directory", lambda gr, im: MD.Directory(recs, 5, 0x9000, 0))
+
+    class Reader(object):
+        def iter_regular_files(self, **kw):
+            return iter([("/godzilla_le/image.bin", 5, {})])
+
+    lines = []
+    plan, _e, _g = E._plan_sound_banks("game", str(img), params, audio_edits, grows, {}, used,
+                                       Reader(), None, None, lambda m, *a: lines.append(m))
+    sizes_of = {tuple(e.idx for e in g): SB.bank_bytes([e.body_bytes for e in g])
+                for _c, g in plan.banks}
+    assert (2,) in sizes_of and sizes_of[(2,)] > SB.BANK_SLICE
+    assert all(n <= SB.BANK_SLICE for k, n in sizes_of.items() if k != (2,))
+    assert len(set(c for c, _g in plan.banks)) == len(plan.banks)
+    assert any("a bank of their own" in m for m in lines)
+    # image.bin so big that the room beside it is under the song's 100 MB
+    monkeypatch.setattr(SB, "MAPPED_MAX", 60_000_000)
+    with pytest.raises(RuntimeError, match=r"M2's .* too long for this card.*minutes of stereo"):
+        E._plan_sound_banks("game", str(img), params, audio_edits, grows, {}, used,
+                            Reader(), None, None, lambda *a: None)

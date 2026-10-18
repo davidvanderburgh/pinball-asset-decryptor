@@ -424,3 +424,149 @@ def test_a_lazy_stock_picture_gives_what_the_decoded_one_gave():
     want = E._premultiply_like_stock(straight, None)
     got = E._premultiply_like_stock(straight, broken)
     assert got[1] == want[1] and np.array_equal(got[0], want[0])
+
+
+# --------------------------------------------------------------------------
+# a long song's blocks across processes beside the cat-0 pool
+# --------------------------------------------------------------------------
+def _rows(*lengths):
+    return [{"idx": i, "chan": 2, "length": n, "body_off": 0x10000 * (i + 1)}
+            for i, n in enumerate(lengths)]
+
+
+def _split(monkeypatch, lengths, cpus=16, blocks=8):
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern.spike2 import parallel
+    monkeypatch.setattr(E.os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(parallel, "block_workers", lambda: blocks)
+    rows = _rows(*lengths)
+    byidx = {r["idx"]: r for r in rows}
+    todo = sorted(((r["idx"], "w%d" % r["idx"]) for r in rows),
+                  key=lambda e: -byidx[e[0]]["length"])
+    return E._cat0_long_split(todo, byidx, min(cpus - 2, 8))
+
+
+def test_a_song_longer_than_an_even_share_is_split_off(monkeypatch):
+    # the Godzilla project: one 205 s song among 79 shorter sounds
+    long_, short, n = _split(monkeypatch, [9036650, 4108718, 3806279] + [400000] * 77)
+    assert [i for i, _w in long_] == [0]
+    assert len(short) == 79 and n == 6, "the pool's 8 workers leave 6 of 14 cores"
+
+
+def test_one_long_song_alone_gets_every_block_worker(monkeypatch):
+    long_, short, n = _split(monkeypatch, [9036650])
+    assert [i for i, _w in long_] == [0] and short == [] and n == 8
+
+
+def test_nothing_is_split_without_a_long_song_or_the_cores(monkeypatch):
+    long_, short, n = _split(monkeypatch, [400000] * 20)
+    assert long_ == [] and len(short) == 20 and n == 0
+    # a "long" sound too short for block workers stays in the pool
+    long_, short, n = _split(monkeypatch, [40000, 100, 100])
+    assert long_ == [] and n == 0
+    # 8 cores: the pool takes the 6 a computer spares, no room for blocks
+    long_, short, n = _split(monkeypatch, [9036650] + [400000] * 20, cpus=8, blocks=6)
+    assert long_ == [] and len(short) == 21 and n == 0
+
+
+def _dispatch(monkeypatch, lengths, long_ok=True):
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern.spike2 import parallel
+    monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", False)
+    monkeypatch.setattr(E.os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(parallel, "block_workers", lambda: 8)
+    rows = _rows(*lengths)
+    seen = {"serial": []}
+
+    def body(edits):
+        return ({r: b"%d" % i for i, _w in edits for r in [rows[i]["body_off"]]}, [],
+                {i: (rows[i]["body_off"], b"%d" % i) for i, _w in edits})
+
+    def fake_parallel(gr, img, params, edits, nworkers, np, log, progress, cancel,
+                      gains=None, edited=None, **_k):
+        seen["pool"] = ([i for i, _w in edits], sorted(edited), nworkers)
+        done, _sk, res = body(edits)
+        return done, [], [], res
+
+    def fake_serial(gr, img, byidx, edits, np, log, progress, cancel, gains=None,
+                    blocks=None, edited=None, **_k):
+        seen["serial"].append(([i for i, _w in edits], sorted(edited), blocks is not None))
+        if blocks is not None and not long_ok:
+            raise RuntimeError("block workers fell over")
+        return body(edits)
+    monkeypatch.setattr(E, "_encode_cat0_parallel", fake_parallel)
+    monkeypatch.setattr(E, "_encode_cat0_serial", fake_serial)
+    logs = []
+    edits = {r["idx"]: "w%d" % r["idx"] for r in rows}
+    patches, skipped = E._encode_cat0_sounds(
+        "g", "i", rows, edits, None, lambda t, l="info": logs.append((l, t)), None,
+        lambda: False)
+    return rows, seen, patches, logs
+
+
+def test_the_long_song_and_the_pool_encode_side_by_side_warmed_alike(monkeypatch):
+    rows, seen, patches, logs = _dispatch(monkeypatch, [9036650] + [400000] * 9)
+    every = list(range(10))
+    assert seen["pool"] == (list(range(1, 10)), every, 8)
+    assert seen["serial"] == [([0], every, True)], \
+        "the long song: one emulator with block workers, warmed as the pool's"
+    assert patches == {r["body_off"]: b"%d" % r["idx"] for r in rows}
+    assert any("idx 0 (204 s) encoded with its blocks across 6" in t for _l, t in logs)
+
+
+def test_a_long_song_whose_workers_fail_is_encoded_again_in_one_process(monkeypatch):
+    rows, seen, patches, logs = _dispatch(monkeypatch, [9036650] + [400000] * 9,
+                                          long_ok=False)
+    assert seen["serial"] == [([0], list(range(10)), True), ([0], list(range(10)), False)]
+    assert patches == {r["body_off"]: b"%d" % r["idx"] for r in rows}
+    assert any(l == "warning" and "again in one process" in t for l, t in logs)
+
+
+def test_block_workers_warm_with_the_writes_edited_sounds(monkeypatch):
+    from pinball_decryptor.plugins.stern.spike2 import parallel
+    got = {}
+
+    class Pool:
+        def __init__(self, kind, gr, img, rows, n, **kw):
+            got.update(kw, n=n)
+    monkeypatch.setattr(parallel, "BlockPool", Pool)
+    monkeypatch.setattr(parallel, "block_workers", lambda: 8)
+    parallel.start_block_pool("image", "g", "i", [], first_warm=[], first_edited=[3, 5],
+                              longest=10 ** 6, workers=6)
+    assert got["first_edited"] == [3, 5] and got["n"] == 6
+    assert parallel.start_block_pool("image", "g", "i", [], longest=10 ** 6,
+                                     workers=1) is None
+
+
+@pytest.mark.slow
+def test_a_long_song_with_block_workers_is_the_pools_own_bytes(tmp_path):
+    """The cat-0 encode of a long song in the app with block workers gives the
+    bytes an encode worker gives it alone (the build-wide proof: Godzilla LE
+    1.16, 80 replaced sounds and one 205 s song, every card file identical)."""
+    import wave
+    np = pytest.importorskip("numpy")
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    gr, img = ND._inputs("godzilla_le_116")
+    params = E._params_for(gr, img, lambda *a, **k: None, None)
+    p = min((q for q in params if q["chan"] == 2 and q["length"] >= 200 * 600),
+            key=lambda q: q["length"])
+    wav = str(tmp_path / "song.wav")
+    t = np.arange(p["length"]) / 44100.0
+    s = (8000 * np.sin(2 * np.pi * 330 * t)).astype(np.int16)
+    with wave.open(wav, "wb") as w:
+        w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100)
+        w.writeframes(np.stack([s, s[::-1]], 1).tobytes())
+    edited = [p["idx"]]
+    P.init_encode_worker(gr, img, params, {}, edited, {})
+    _i, off, body, ok = P.encode_one((p["idx"], wav))
+    assert ok
+    byidx = {q["idx"]: q for q in params}
+
+    def blocks(_emu):
+        return P.start_block_pool("image", gr, img, params, first_warm=params,
+                                  first_edited=edited, longest=p["length"], workers=4)
+    patches, skipped, _r = E._encode_cat0_serial(
+        gr, img, byidx, [(p["idx"], wav)], np, lambda *a, **k: None, None,
+        lambda: False, blocks=blocks, edited=edited)
+    assert skipped == [] and patches == {off: body}

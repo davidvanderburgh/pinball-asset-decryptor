@@ -226,7 +226,7 @@ def block_workers():
 
 
 def _block_main(conn, kind, gr_path, img_path, stock_rows, first_warm,
-                cat_file):
+                cat_file, first_edited=()):
     """A block worker: boot like the parent's encoder, then take
     ``("warm", row)`` (no reply) and answer ``("encode", p, three, jobs)``
     with ``("ok", [(k, m, words), ...])`` until ``("stop",)``."""
@@ -242,7 +242,7 @@ def _block_main(conn, kind, gr_path, img_path, stock_rows, first_warm,
             emu = Spike2Emu(gr_path, img_path)
             emu.boot()
             if first_warm is not None:
-                emu.warm_slots_for_grown(first_warm)
+                emu.warm_slots_for_grown(first_warm, edited=first_edited)
         conn.send(("ready", None))
     except Exception as e:                              # noqa: BLE001
         conn.send(("error", "a worker did not start: %r" % (e,)))
@@ -318,7 +318,7 @@ class BlockPool:
     as it did before there were workers."""
 
     def __init__(self, kind, gr_path, img_path, stock_rows, workers,
-                 first_warm=None, cat_file=None, log=None):
+                 first_warm=None, cat_file=None, log=None, first_edited=()):
         import multiprocessing as mp
         self.log = log or (lambda *a, **k: None)
         self.broken = None
@@ -331,7 +331,8 @@ class BlockPool:
                 a, b = ctx.Pipe()
                 pr = ctx.Process(target=_block_main, daemon=True,
                                  args=(b, kind, gr_path, img_path,
-                                       list(stock_rows), first_warm, cat_file))
+                                       list(stock_rows), first_warm, cat_file,
+                                       list(first_edited)))
                 pr.start()
                 b.close()
                 self.conns.append(a)
@@ -425,15 +426,21 @@ class BlockPool:
 
 
 def start_block_pool(kind, gr_path, img_path, stock_rows, first_warm=None,
-                     cat_file=None, log=None, longest=None):
+                     cat_file=None, log=None, longest=None, first_edited=(),
+                     workers=None):
     """A :class:`BlockPool` when this computer has the cores for one and the
     chain has a sound long enough to use it (*longest*, its length in
-    samples, when the caller knows it), else ``None``."""
+    samples, when the caller knows it), else ``None``.  *first_edited*: the
+    idx the first warm treats as edited (the cat-0 encoder's own warm);
+    *workers* caps how many start (the cores other workers leave)."""
     n = block_workers()
+    if workers is not None:
+        n = min(n, workers)
     if n < 2 or (longest is not None and longest < 200 * (BLOCKS_MIN + 1)):
         return None
     return BlockPool(kind, gr_path, img_path, stock_rows, n,
-                     first_warm=first_warm, cat_file=cat_file, log=log)
+                     first_warm=first_warm, cat_file=cat_file, log=log,
+                     first_edited=first_edited)
 
 
 # ---------------------------------------------------------------------------

@@ -15425,13 +15425,19 @@ def _grown_cache_mismatch(kept, places):
 
 
 def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
-                        cancel, gains=None, refs=None):
+                        cancel, gains=None, refs=None, blocks=None,
+                        edited=None):
     """Single-process cat-0 re-encode (the fallback + correctness reference).
     Returns ``(patches, skipped, results)`` — *results* maps each freshly
     encoded idx to its ``(off, body)`` so the caller can cache it.  *gains*
     maps idx -> that clip's total loudness dB (see :func:`_slot_gain_maps`);
     an idx it doesn't mention takes the build-wide offset.  *refs* ``{idx:
-    ref_idx}``: the record a sound's loudness matches instead of its own."""
+    ref_idx}``: the record a sound's loudness matches instead of its own.
+    *blocks* (PAD-609): ``blocks(emu)`` gives the :meth:`.spike2.parallel.
+    BlockPool.blocks` a long sound's blocks go to (or None), warmed as the
+    emulator here is; the bytes are the same either way.  *edited*: the idx
+    the codec warm treats as edited (default: *edits*' own), the whole
+    Write's when this encodes only part of it."""
     gains = gains or {}
     refs = refs or {}
     from .spike2.codec import GenRecover, StereoRecover
@@ -15439,11 +15445,14 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
     log("Booting firmware codec engine...", "info")
     emu = Spike2Emu(gr_path, img_path)
     emu.boot()
-    emu.warm_slots_for_grown(list(byidx.values()),
-                             edited=[idx for idx, _w in edits])
+    if edited is None:
+        edited = [idx for idx, _w in edits]
+    emu.warm_slots_for_grown(list(byidx.values()), edited=edited)
     patches, skipped, results = {}, [], {}
     gr = sr = None
     ends = _slot_end_map(byidx.values())
+    pool = blocks(emu) if blocks is not None else None
+    bkw = {"blocks": pool.blocks} if pool is not None else {}
     try:
         for n, (idx, wav) in enumerate(edits):
             if cancel():
@@ -15466,10 +15475,12 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                 gdb = gains.get(idx)
                 orig = _level_ref_render(emu, byidx, p, refs.get(idx), np)
                 off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred,
-                                            log=log, gain_db=gdb, orig=orig)
+                                            log=log, gain_db=gdb, orig=orig,
+                                            **bkw)
                              if p["chan"] == 2
                              else _encode_mono(emu, gr, p, wav, np, pred=pred,
-                                               log=log, gain_db=gdb, orig=orig))
+                                               log=log, gain_db=gdb, orig=orig,
+                                               **bkw))
             except _EncodeVerifyError as e:
                 skipped.append(idx)
                 log("%s -- skipped, left unchanged in the output." % e,
@@ -15481,12 +15492,15 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                 % (idx, "stereo" if p["chan"] == 2 else "mono", p["length"]),
                 "info")
     finally:
+        if pool is not None:
+            pool.close()
         emu.close()
     return patches, sorted(skipped), results
 
 
 def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
-                          log, progress, cancel, gains=None, refs=None):
+                          log, progress, cancel, gains=None, refs=None,
+                          edited=None):
     """Re-encode across ``nworkers`` spawned emulator processes (each boots once).
 
     Returns ``(patches, skipped, remaining, results)``: ``remaining`` is the
@@ -15498,7 +15512,9 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
     leftover edits, so the caller can finish just those in a single process
     instead of throwing away all the parallel work and re-encoding everything
     serially (the failure that turned a ~minutes job into hours).  Returns
-    ``(None, None, None, None)`` if cancelled."""
+    ``(None, None, None, None)`` if cancelled.  *edited*: the idx the
+    workers' codec warm treats as edited (default: *edits*' own; the whole
+    Write's when the long songs are encoded beside the pool, PAD-609)."""
     import multiprocessing as mp
 
     from .spike2.parallel import encode_one, encode_probe, init_encode_worker
@@ -15517,7 +15533,8 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
     # worker keeps both shapes unchanged.
     pool = ctx.Pool(nworkers, initializer=init_encode_worker,
                     initargs=(gr_path, img_path, params, gains or {},
-                              [idx for idx, _w in edits], refs or {}))
+                              [idx for idx, _w in edits] if edited is None
+                              else list(edited), refs or {}))
     patches, skipped, done_idx, results = {}, [], set(), {}
     try:
         # Confirm a worker actually booted (a stalled/unguarded pool raises here
@@ -19382,6 +19399,73 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
         "parameters." % len(stock), "success")
 
 
+def _cat0_long_split(todo, byidx, cores):
+    """``(long, short, block_workers)``: the edits (longest first, as *todo*
+    is) of a cat-0 re-encode split into the songs encoded with their blocks
+    across processes (PAD-599's block workers) and the rest, for the pool of
+    *cores* workers.  A sound is long when it alone holds more of the Write's
+    samples than an even share of them between the workers, so it would be
+    the encode's tail: a Godzilla project's 205 s song took a minute after
+    its 79 other sounds were done.  The block workers get the cores the pool
+    leaves; with fewer than two of those nothing is split."""
+    from .spike2.parallel import BLOCKS_MIN, block_workers
+    lens = {idx: int(byidx[idx].get("length") or 0) for idx, _w in todo}
+    share = sum(lens.values()) / max(cores, 1)
+    long_ = [e for e in todo
+             if lens[e[0]] > share and lens[e[0]] >= 200 * (BLOCKS_MIN + 1)]
+    short = [e for e in todo if e not in long_]
+    pool = min(cores, len(short)) if len(short) > 1 else 0
+    nblock = min(block_workers(), (os.cpu_count() or 2) - 2 - pool)
+    if not long_ or nblock < 2:
+        return [], todo, 0
+    return long_, short, nblock
+
+
+class _Cat0LongRun:
+    """The long songs of a cat-0 re-encode (:func:`_cat0_long_split`)
+    encoded on a thread of the app's own while the pool encodes the rest:
+    :func:`_encode_cat0_serial` with block workers warmed as its emulator is.
+    :meth:`join` gives its ``(patches, skipped, results)``, or ``(None, None,
+    None)`` when cancelled or failed (the failure said in the log)."""
+
+    def __init__(self, gr_path, img_path, byidx, edits, np, log, cancel,
+                 gains, refs, edited, nblock):
+        import threading
+        from .spike2.parallel import start_block_pool
+        self._out = (None, None, None)
+        params = list(byidx.values())
+        longest = max(int(byidx[idx].get("length") or 0) for idx, _w in edits)
+        log("%s encoded with %s blocks across %d process(es) beside the "
+            "other sounds." % (
+                ", ".join("idx %d (%d s)" % (idx, int(byidx[idx]["length"]) // 44100)
+                          for idx, _w in edits),
+                "its" if len(edits) == 1 else "their", nblock), "info")
+
+        def blocks(_emu):
+            return start_block_pool("image", gr_path, img_path, params,
+                                    first_warm=params, first_edited=edited,
+                                    log=log, longest=longest, workers=nblock)
+
+        def run():
+            try:
+                self._out = _encode_cat0_serial(
+                    gr_path, img_path, byidx, edits, np, log, None, cancel,
+                    gains=gains, blocks=blocks, edited=edited,
+                    **({"refs": refs} if refs else {}))
+            except Exception as e:                      # noqa: BLE001
+                log("The long sound(s) are encoded again in one process: "
+                    "%s." % e, "warning")
+                self._out = (None, None, None)
+
+        self._thread = threading.Thread(target=run, daemon=True,
+                                        name="cat0-long")
+        self._thread.start()
+
+    def join(self):
+        self._thread.join()
+        return self._out
+
+
 def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
                         progress, cancel, assets_dir=None, gains=None,
                         cache_img_ident=None, level_refs=None):
@@ -19457,24 +19541,51 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
                 "%s" % (len(skipped), ", ".join(map(str, skipped))), "warning")
         return patches, skipped
 
-    nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
-    nworkers = max(1, min(nworkers, len(todo)))
+    cores = max(1, min((os.cpu_count() or 2) - 2, 8))
+    # Every idx this Write re-encodes: the codec warm of each emulator below
+    # treats them all as edited, whichever share of them it encodes.
+    edited = [idx for idx, _w in todo]
+    long_, short, nblock = (([], todo, 0) if _FORCE_SERIAL_ENCODE
+                            else _cat0_long_split(todo, byidx, cores))
+    nworkers = max(1, min(cores, len(short)))
     fresh, remaining, results = {}, todo, {}
-    if not _FORCE_SERIAL_ENCODE and nworkers > 1 and not cancel():
+    longrun = None
+    if long_ and not cancel():
+        # PAD-609: a song that alone outlasts an even share of the work is
+        # encoded here, its blocks across processes of their own, while the
+        # pool encodes the rest beside it
+        longrun = _Cat0LongRun(gr_path, img_path, byidx, long_, np, log,
+                               cancel, gains, refs, edited, nblock)
+        remaining = short
+    if short and not _FORCE_SERIAL_ENCODE and nworkers > 1 and not cancel():
         try:
             # Full params, not just the edited sounds': the workers also need
             # each edit's layout-predecessor for the shared-boundary word.
             fresh, psk, remaining, results = _encode_cat0_parallel(
-                gr_path, img_path, params, todo, nworkers, np, log, progress,
-                cancel, gains=gains, **({"refs": refs} if refs else {}))
+                gr_path, img_path, params, short, nworkers, np, log, progress,
+                cancel, gains=gains, edited=edited,
+                **({"refs": refs} if refs else {}))
             if fresh is None:
+                if longrun is not None:
+                    longrun.join()
                 return None, None
             skipped.extend(psk)
         except Exception as e:
             # The pool never started -- fall back to a full single-process pass.
             log("Parallel re-encode unavailable (%s); using a single process."
                 % e, "warning")
-            fresh, remaining, results = {}, todo, {}
+            fresh, remaining, results = {}, short, {}
+    if longrun is not None:
+        lp, lsk, lres = longrun.join()
+        if lp is None:
+            if cancel():
+                return None, None
+            # it failed (said in the log): the serial pass below encodes them
+            remaining = list(remaining) + long_
+        else:
+            fresh.update(lp)
+            skipped.extend(lsk)
+            results.update(lres)
     # Finish any edits the parallel path didn't complete (all of them if it was
     # skipped/unavailable; just the leftovers if a worker died mid-run).  Keeping
     # the parallel results avoids re-encoding everything serially on a partial
@@ -19482,7 +19593,7 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     if remaining:
         sp, sk, sres = _encode_cat0_serial(
             gr_path, img_path, byidx, remaining, np, log, progress, cancel,
-            gains=gains, **({"refs": refs} if refs else {}))
+            gains=gains, edited=edited, **({"refs": refs} if refs else {}))
         if sp is None:
             return None, None
         fresh.update(sp)

@@ -85,6 +85,11 @@ MAPPED_MAX = 2_181_951_364
 #: How big a bank of the modes' own sounds is made: Stern's largest D&D bank, so the bank
 #: playing adds no more beside image.bin than a shipped title does (PAD-593).
 BANK_SLICE = 40_000_000
+#: The biggest bank Stern ships: Rush LE/Pro 1.19's largest, 218,349,330 bytes (James Bond
+#: 1.06's is 205 MiB, Foo Fighters 1.04's 129 MiB).  A sound too long for a
+#: :data:`BANK_SLICE` bank gets a bank of its own, sized to the room beside image.bin
+#: (:func:`alone_bank_room`) and never past this (PAD-607).
+BANK_MAX_SEEN = 218_349_330
 #: Category ids the loader can name: ``image-sc%02d.bin``.
 MIN_CATEGORY, MAX_CATEGORY = 1, 99
 #: A fragment's slot: 8 bytes (the descriptor offset, whitened, and a zero word).
@@ -233,14 +238,30 @@ def bank_bytes(bodies, stride=DEFAULT_STRIDE):
     return MD.align16(MD.align16(body_end + MD.BODY_PAD) + n * DESC_SLOT) + MD.tail_len(n)
 
 
-def split_banks(edits, limit=MAX_BANK_BYTES, stride=DEFAULT_STRIDE):
+def alone_bank_room(image_size):
+    """The biggest bank one long sound can have to itself beside an ``image.bin``
+    of *image_size* bytes (PAD-607): what is left of :data:`MAPPED_MAX` with
+    image.bin mapped, no bigger than :data:`BANK_MAX_SEEN` or the emulator's
+    window (:func:`emulator_bank_room`), which builds and checks it."""
+    return max(0, min(MAPPED_MAX - int(image_size), BANK_MAX_SEEN, MAX_BANK_BYTES,
+                      emulator_bank_room(image_size)))
+
+
+def split_banks(edits, limit=MAX_BANK_BYTES, stride=DEFAULT_STRIDE, alone=None):
     """*edits* (:class:`BankEdit`) split into banks in order, each as full as
-    *limit* allows.  Raises when one sound alone is bigger than a bank."""
+    *limit* allows.  A sound too big for a *limit* bank gets a bank of its own
+    when it fits *alone* bytes (PAD-607: a long song).  Raises when one sound
+    alone is bigger than a bank can be."""
     banks, cur = [], []
+    alone = limit if alone is None else max(int(alone), limit)
     for e in edits:
-        if bank_bytes([e.body_bytes], stride) > limit:
+        one = bank_bytes([e.body_bytes], stride)
+        if one > alone:
             raise SoundBankError("sound idx %d alone (%d MB) is bigger than a sound bank can be"
                                  % (e.idx, e.body_bytes // 10**6))
+        if one > limit:
+            banks.append([e])
+            continue
         if cur and bank_bytes([x.body_bytes for x in cur] + [e.body_bytes], stride) > limit:
             banks.append(cur)
             cur = []

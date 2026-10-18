@@ -18171,7 +18171,28 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     staged = _grown_bank_bytes(md_off, count, start + [
         _grown_body_bytes(byidx[i], g[1]) for i, g in sorted(kept.items())])
     limit = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged), SB.BANK_SLICE)
-    groups = SB.split_banks(edits, limit=limit, stride=SB.fragment_stride(head))
+    # PAD-607: a sound too long for a BANK_SLICE bank (a whole song) gets a bank of its
+    # own, as big as the room beside image.bin allows (soundbank.alone_bank_room)
+    alone = SB.alone_bank_room(staged)
+    stride = SB.fragment_stride(head)
+    by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
+    for e in edits:
+        one = SB.bank_bytes([e.body_bytes], stride)
+        room = max(limit, alone)
+        if one > room:
+            u = by_idx_used.get(e.idx)
+            stereo = byidx[e.idx].get("chan") == 2
+            raise RuntimeError(
+                "%s is too long for this card: the modes' own sounds go into sound banks, and "
+                "the game holds image.bin (%d MB) and the bank it is playing in memory at "
+                "once, so one sound's bank can be at most %d MB here, about %.1f minutes of "
+                "%s sound (this one needs %d MB). Shorten it, or lengthen fewer of the card's "
+                "own sounds: those stay in image.bin."
+                % ("%s's %s" % (u.get("name"), _MW_sound_words(u.get("key"))) if u
+                   else "Sound idx %d" % e.idx, staged // 10**6, room // 10**6,
+                   room / float(_STEREO_BYTES_PER_MIN // (1 if stereo else 2)),
+                   "stereo" if stereo else "mono", one // 10**6))
+    groups = SB.split_banks(edits, limit=limit, stride=stride, alone=alone)
     biggest = max(SB.bank_bytes([e.body_bytes for e in g]) for g in groups)
     if staged + biggest > SB.MAPPED_MAX:
         raise RuntimeError(
@@ -18186,12 +18207,17 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         "memory at once, and together they come to at most %d MB (Stern's largest is %d MB)."
         % (len(groups), limit // 10**6, staged // 10**6, (staged + biggest) // 10**6,
            SB.MAPPED_MAX // 10**6), "info")
+    longs = [g[0] for g in groups if SB.bank_bytes([e.body_bytes for e in g], stride) > limit]
+    if longs:
+        log("Modes: %d sound(s) too long for a %d MB bank get a bank of their own, as big as "
+            "the room beside image.bin allows (up to %d MB, about %.1f minutes of stereo sound)."
+            % (len(longs), limit // 10**6, alone // 10**6, alone / float(_STEREO_BYTES_PER_MIN)),
+            "info")
     cats = SB.next_category_ids(ids, on_card, len(groups))
     banks = list(zip(cats, groups))
     wavs = {i: audio_edits[i] for i in spilled}
     audio_edits = {i: w for i, w in audio_edits.items() if i not in spilled}
     grows = {i: g for i, g in grows.items() if i not in spilled}
-    by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
     for cat, group in banks:
         for e in group:
             u = by_idx_used.get(e.idx)

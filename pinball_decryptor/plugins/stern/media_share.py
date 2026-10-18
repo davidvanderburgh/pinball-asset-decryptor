@@ -505,6 +505,31 @@ def _card_idx(project):
     return out
 
 
+#: PAD-608: the folder (in :data:`MUSIC_DIR`) an extract decodes the music modes' files kept in
+#: the app's own sound banks into (``engine._PAD_BANK_FILES``)
+FROM_CARD_DIR = ".from_card"
+
+
+def _card_host(project, idx, f):
+    """The project rel of the record holding record line *f*'s file: a sound of the extract, or
+    (PAD-608: ``bank`` set) the file the extract decoded out of that sound bank; None when the
+    extract has neither."""
+    if f.get("bank") is None:
+        return idx.get(f["host"])
+    rel = "%s/%s/music_cat%02d_%04d.wav" % (MUSIC_DIR, FROM_CARD_DIR, int(f["bank"]), int(f["host"]))
+    return rel if os.path.isfile(os.path.join(project, *rel.split("/"))) else None
+
+
+def _card_missing(f, slot):
+    """Why record line *f*'s file is not back (:func:`_card_host` found nothing)."""
+    if slot is None:
+        return "this extract has no sound idx %d" % f["slot"]
+    if f.get("bank") is not None:
+        return "this extract could not decode record %d of sound bank image-sc%02d.bin" % (
+            int(f["host"]), int(f["bank"]))
+    return "this extract has no sound idx %d" % f["host"]
+
+
 def music_from_card(project, cfg_text):
     """The music modes a card's ``sounds.cfg`` (*cfg_text*) records, out of *project*, an extract
     of that card: each mode's file copied from the record holding it into :data:`MUSIC_DIR`.
@@ -517,10 +542,9 @@ def music_from_card(project, cfg_text):
     folder = os.path.join(project, MUSIC_DIR)
     slots, levels, left, copied = {}, {}, [], {}
     for f in rec["files"]:
-        slot, host = idx.get(f["slot"]), idx.get(f["host"])
+        slot, host = idx.get(f["slot"]), _card_host(project, idx, f)
         if slot is None or host is None:
-            left.append((f["rel"], f["mode"], "this extract has no sound idx %d"
-                         % (f["slot"] if slot is None else f["host"])))
+            left.append((f["rel"], f["mode"], _card_missing(f, slot)))
             continue
         if host not in copied:
             stem = os.path.splitext(_safe_name(f["name"], ""))[0] or "%s - mode %d" % (
@@ -531,10 +555,9 @@ def music_from_card(project, cfg_text):
             levels.setdefault(slot, {})[str(f["mode"])] = int(f["db"])
     # PAD-565: a slot's files in turn, each from the record holding it
     for f in rec.get("turns") or ():
-        slot, host = idx.get(f["slot"]), idx.get(f["host"])
+        slot, host = idx.get(f["slot"]), _card_host(project, idx, f)
         if slot is None or host is None:
-            left.append((f["rel"], SMo.turn_mode(f["turn"]), "this extract has no sound idx %d"
-                         % (f["slot"] if slot is None else f["host"])))
+            left.append((f["rel"], SMo.turn_mode(f["turn"]), _card_missing(f, slot)))
             continue
         if host not in copied:
             stem = os.path.splitext(_safe_name(f["name"], ""))[0] or "%s - in turn %d" % (
@@ -584,7 +607,11 @@ def readback(card, project, log=None, padmode=None):
             padmode = {}
     cfg = padmode.get(SMo.CFG_NAME)
     if cfg:
-        record, left = music_from_card(project, cfg.decode("utf-8", "replace"))
+        try:
+            record, left = music_from_card(project, cfg.decode("utf-8", "replace"))
+        finally:
+            # PAD-608: the files the extract decoded out of the sound banks are copied
+            shutil.rmtree(os.path.join(project, MUSIC_DIR, FROM_CARD_DIR), ignore_errors=True)
         where = " (their files are in the \"%s\" folder)" % MUSIC_DIR
         if record is None:
             record, left = _built_project_modes(card), []

@@ -199,8 +199,11 @@ HELP_CONTENT = {
          "on the sound itself is its own replacement's: it never reaches its mode "
          "files, and on a sound with no replacement the stock sound stays as it is.\n"
          "- Needs an image build, not a direct SD write. Every file takes room in the "
-         "sound bank, the 2 GB limit included; one that does not fit is left out, "
-         "and the log says so."),
+         "sound bank; past its 2 GB the files go into extra sound banks of their own "
+         "beside it (image-sc01.bin and on), so they are not left out for it. A file "
+         "for a sound the game plays in a way an extra bank can't serve (one it plays "
+         "together with other sounds, or not through the game's sound list) stays in "
+         "the main bank and is left out when that is full; the log names it."),
         ("Play in turn",
          "Stern Spike 2, the latest version of each game. A "
          "sound can play more than one file: each time the game plays it, the next one "
@@ -215,7 +218,8 @@ HELP_CONTENT = {
          "play after that is the next in turn.\n"
          "- In a music mode a sound has a file of its own for, that file plays every time.\n"
          "- Needs an image build, not a direct SD write. Each file takes room in the "
-         "sound bank."),
+         "sound bank, and in extra sound banks beside it once that is full, as a music "
+         "mode's files do."),
         ("Replace from folder",
          "**Replace from folder…**, beside the project folder, picks a whole folder "
          "of your files at once: each file goes to the slot with its name.\n\n"

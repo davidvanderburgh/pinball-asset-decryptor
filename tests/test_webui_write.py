@@ -797,3 +797,96 @@ def test_change_walk_leaves_the_folder_alone_in_a_capture_run(
     walk_changes(str(tmp_path), saved, hide_imported_cache=False,
                  current=lambda: True)
     assert sidecar.exists()
+
+
+def _old_walk(assets_path, saved):
+    """The change walk as it was before PAD-610 (os.walk, one stat and one
+    hash at a time), for the new one to be held to."""
+    from pinball_decryptor.core.checksums import (NON_ASSET_DIRS,
+                                                  TRACKING_SIDECARS,
+                                                  is_other_extract, md5_file)
+    from pinball_decryptor.core.staged_originals import ORIG_DIR
+    changed, cache = [], {}
+    for root_dir, dirs, files in os.walk(assets_path):
+        dirs[:] = [d for d in dirs
+                   if d != ORIG_DIR
+                   and not is_other_extract(os.path.join(root_dir, d))
+                   and not (root_dir == assets_path and d in NON_ASSET_DIRS)]
+        for name in files:
+            if (name.startswith(".") or name == "fl_decrypted.dat"
+                    or name.endswith(".img") or name in TRACKING_SIDECARS):
+                continue
+            full = os.path.join(root_dir, name)
+            rel = os.path.relpath(full, assets_path).replace("\\", "/")
+            if rel not in saved:
+                continue
+            st = os.stat(full)
+            digest = md5_file(full)
+            cache[rel] = [st.st_size, st.st_mtime_ns, digest]
+            if digest != saved[rel]:
+                changed.append((rel, os.path.splitext(name)[1].lstrip(".")
+                                or "?"))
+    return changed, cache
+
+
+def test_change_walk_finds_what_the_old_walk_found(tmp_path):
+    """PAD-610: the walk reads stats from the folder listings and hashes on
+    a few threads.  The same files, in the same order, the same skips (the
+    staged originals, another extract inside, build/ at the top, hidden
+    files) and the same hash cache as the one-at-a-time walk it replaced;
+    a second walk hashes nothing."""
+    from pinball_decryptor.core import hashcache
+    from pinball_decryptor.core.checksums import CHECKSUMS_FILE
+    from pinball_decryptor.core.staged_originals import ORIG_DIR
+    from pinball_decryptor.webui import write_scan
+    saved = {}
+    for i in range(60):
+        rel = "d%d/sub%d/f%02d.%s" % (i % 3, i % 2, i, ("wav", "png")[i % 2])
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        body = b"x" * (i * 977)
+        p.write_bytes(body)
+        saved[rel] = (hashlib.md5(body).hexdigest() if i % 7
+                      else "0" * 32)                    # every 7th changed
+    for rel in ("build/out.wav", ORIG_DIR + "/a.wav", "inner/b.wav",
+                "d0/.hidden.wav", "d1/x.img"):
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"other")
+        saved[rel] = "0" * 32
+    (tmp_path / "inner" / CHECKSUMS_FILE).write_text("")   # another extract
+    want, want_cache = _old_walk(str(tmp_path), saved)
+    found = []
+    got = write_scan.walk_changes(str(tmp_path), saved,
+                                  hide_imported_cache=False,
+                                  current=lambda: True,
+                                  on_found=found.append)
+    assert got == want and len(got) == 9
+    assert found == list(range(1, len(got) + 1))
+    assert hashcache.load(str(tmp_path)) == want_cache
+
+    import pinball_decryptor.webui.write_scan as ws
+    real = ws.md5_file
+    ws.md5_file = lambda p: (_ for _ in ()).throw(AssertionError(p))
+    try:
+        assert write_scan.walk_changes(str(tmp_path), saved,
+                                       hide_imported_cache=False,
+                                       current=lambda: True) == want
+    finally:
+        ws.md5_file = real
+
+
+def test_change_walk_stops_when_superseded(tmp_path):
+    from pinball_decryptor.webui import write_scan
+    saved = {}
+    for i in range(20):
+        (tmp_path / ("f%d.wav" % i)).write_bytes(b"y" * i)
+        saved["f%d.wav" % i] = "0" * 32
+    calls = []
+
+    def current():
+        calls.append(1)
+        return len(calls) < 25           # superseded part-way through
+    assert write_scan.walk_changes(str(tmp_path), saved,
+                                   hide_imported_cache=False,
+                                   current=current) is None

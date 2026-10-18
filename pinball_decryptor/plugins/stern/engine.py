@@ -18298,8 +18298,8 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         # follows image.bin's in the game's 32-bit address space)
         staged = _grown_bank_bytes(md_off, count, start + [
             _grown_body_bytes(byidx[i], g[1]) for i, g in sorted(kept.items())])
-        alone = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged), SB.BANK_SLICE)
-        limit = min(alone, max(0, SB.MAPPED_MAX - staged) // SB.SOUND_CHANNELS)
+        slice_max = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged), SB.BANK_SLICE)
+        limit = min(slice_max, max(0, SB.MAPPED_MAX - staged) // SB.SOUND_CHANNELS)
         big = [i for i in sorted(spilled) if i in game_sids and SB.bank_bytes(
             [_grown_body_bytes(byidx[i], spilled[i][1])], stride) > limit]
         if not big:
@@ -18314,7 +18314,38 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     if not spilled:
         return None, audio_edits, grows
     edits = BB.bank_edits(spilled, byidx, _read_stock_directory(gr_path, img_path))
-    groups = SB.split_banks(edits, limit=limit, stride=stride, alone=alone)
+    by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
+    # PAD-607 with PAD-606 (David, 2026-10-18, the middle rule): a sound too long for a
+    # `limit` bank (a whole song as a mode's music) gets a bank of its own, as big as the
+    # room left beside image.bin once the other banks that can play beside it are counted
+    # (one a sound channel, less its own), and never past the biggest bank Stern ships or
+    # the emulator's window (soundbank.alone_bank_room).  The longest is placed first.
+    one_of = {e.idx: SB.bank_bytes([e.body_bytes], stride) for e in edits}
+    small = [e for e in edits if one_of[e.idx] <= limit]
+    longs = sorted((e for e in edits if one_of[e.idx] > limit),
+                   key=lambda e: (-one_of[e.idx], e.idx))
+    groups = SB.split_banks(small, limit=limit, stride=stride) if small else []
+    cap_alone = SB.alone_bank_room(staged)
+    for e in longs:
+        others = sorted((SB.bank_bytes([x.body_bytes for x in g], stride) for g in groups),
+                        reverse=True)[:SB.SOUND_CHANNELS - 1]
+        room = min(cap_alone, max(0, SB.MAPPED_MAX - staged - sum(others)))
+        if one_of[e.idx] > room:
+            u = by_idx_used.get(e.idx)
+            stereo = byidx[e.idx].get("chan") == 2
+            raise RuntimeError(
+                "%s is too long for this card: the modes' own sounds go into sound banks, and "
+                "the game holds image.bin (%d MB) and every bank it is playing a sound from in "
+                "memory at once, so beside the %d other bank(s) that can play with it (%d MB) "
+                "this sound's bank can be at most %d MB here, about %.1f minutes of %s sound "
+                "(this one needs %d MB). Shorten it, or lengthen fewer of the card's own "
+                "sounds: those stay in image.bin."
+                % ("%s's %s" % (u.get("name"), _MW_sound_words(u.get("key"))) if u
+                   else "Sound idx %d" % e.idx, staged // 10**6, len(others),
+                   sum(others) // 10**6, room // 10**6,
+                   room / float(_STEREO_BYTES_PER_MIN // (1 if stereo else 2)),
+                   "stereo" if stereo else "mono", one_of[e.idx] // 10**6))
+        groups.append([e])
     sizes = sorted((SB.bank_bytes([e.body_bytes for e in g], stride) for g in groups),
                    reverse=True)
     live = sum(sizes[:SB.SOUND_CHANNELS])
@@ -18336,12 +18367,17 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         "is %d MB)." % (who[0].upper() + who[1:], len(groups), limit // 10**6,
                         staged // 10**6, SB.SOUND_CHANNELS, (staged + live) // 10**6,
                         SB.MAPPED_MAX // 10**6), "info")
+    if longs:
+        log("Modes: %d sound(s) too long for a %d MB bank get a bank of their own, as big as "
+            "the room left beside image.bin and the other banks that can play with them "
+            "allows (the biggest %.1f MB, about %.1f minutes of stereo sound)."
+            % (len(longs), limit // 10**6, one_of[longs[0].idx] / 1e6,
+               one_of[longs[0].idx] / float(_STEREO_BYTES_PER_MIN)), "info")
     cats = SB.next_category_ids(ids, on_card, len(groups))
     banks = list(zip(cats, groups))
     wavs = {i: audio_edits[i] for i in spilled}
     audio_edits = {i: w for i, w in audio_edits.items() if i not in spilled}
     grows = {i: g for i, g in grows.items() if i not in spilled}
-    by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
     for cat, group in banks:
         for e in group:
             u = by_idx_used.get(e.idx)

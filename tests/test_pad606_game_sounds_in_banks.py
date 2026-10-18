@@ -330,3 +330,36 @@ def test_sound_list_writes_go_into_a_staged_program_or_in_place(tmp_path):
     with pytest.raises(RuntimeError, match="no sound request"):
         E._sound_list_writes(Reader(), {"i_block": b"x"}, None, str(img), {}, {9: 0x10002},
                              set(), lambda *a: None)
+
+
+def test_a_long_mode_song_gets_the_room_left_beside_the_other_banks(monkeypatch, tmp_path):
+    """PAD-607 with PAD-606 (David's middle rule): every bank with a sound playing stays
+    mapped beside image.bin, so a long song's own bank gets MAPPED_MAX less image.bin and
+    the (up to 7) other banks that can play beside it; one longer than that is refused by
+    name with how big it may be."""
+    img = _image(tmp_path)
+    mb = 1_000_000
+    frames = lambda n: (n * mb - 4096) // 4 - 2000          # a stereo body of about n MB
+    small = {i: (100, frames(4)) for i in (1, 2, 3, 4)}       # four 4 MB calls
+    monkeypatch.setenv(BB.BANK_CAP_ENV, "1000")
+    monkeypatch.setattr(SB, "MAPPED_MAX", 80 * mb)           # 10 MB slices: two calls a bank
+    monkeypatch.setattr(E, "_read_stock_directory",
+                        lambda gr, im: MD.Directory(b"".join(_rec(i) for i in range(7)), 7, 0x9000, 0))
+
+    def plan(song_mb):
+        grows = dict(small)
+        grows[6] = (100, frames(song_mb))
+        params = [{"idx": i, "chan": 2, "length": 100, "findkey": bytes([i]) * 8} for i in grows]
+        used = [{"idx": i, "swap": True, "key": "call:%d" % i, "name": "M%d" % i} for i in small]
+        used.append({"idx": 6, "music": True, "sid": 618, "key": "music", "name": "SONG"})
+        lines = []
+        got = E._plan_sound_banks("game", str(img), params, {i: "s.wav" for i in grows}, grows,
+                                  {}, used, _Reader(), None, None, lambda m, *a: lines.append(m))
+        return got[0], lines
+
+    p, lines = plan(50)                                      # 80 - 16 MB of calls: room 64
+    sizes = sorted(SB.bank_bytes([e.body_bytes for e in g]) for _c, g in p.banks)
+    assert len(p.banks) == 3 and sizes[-1] > 49 * mb and sum(sizes) <= 80 * mb
+    assert any("get a bank of their own" in m for m in lines)
+    with pytest.raises(RuntimeError, match=r"SONG's .* beside the 2 other bank\(s\)"):
+        plan(70)

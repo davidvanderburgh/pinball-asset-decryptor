@@ -57,7 +57,6 @@ Medians of 3 rounds, main and the branch run in turn (tab switches: 4 each).
 | First start after an install or update: window on screen | 4.9 s | 0.9 s | 5x |
 | App not answering clicks during start-up | 2.2 s | 0.2 s | 13x |
 | Start until "Ready to extract / write" | 2.9 s | 1.4 s | 2x |
-| Card picture on the Card tab after the page loads | 4.5 s | at once | |
 | Start-up card read, as the log reports it | 0.6 s | 0.1 s | 6x |
 | Switching to the Modes tab | 0.84 s | 0.04 s | 21x |
 | Write change scan, 8,400-file project | 0.27 s | 0.10 s | 2.7x |

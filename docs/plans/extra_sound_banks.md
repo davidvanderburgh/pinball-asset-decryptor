@@ -368,3 +368,17 @@ card died on a 130 MiB one with a bigger image.bin. So:
   Rush's, both shipped and played on machines. David's Heisei build (image.bin
   2,010 MB) has 171 MB, about 16 minutes of stereo; a longer sound is refused
   by name, with the minutes it may have.
+
+Proof (2026-10-17, `C:\tmp\PAD-607`): David's Heisei project with MASER BARRAGE's
+music made a 9-minute stereo song (95 MB; every 4-s window unique: the beds
+sped up under seeded noise) and the mode's clock 400 s. Main refuses it ("sound
+idx 973 alone (95 MB) is bigger than a sound bank can be"); this branch builds a
+16 GB card with the song alone in `image-sc03.bin` (95.3 MB, sid 0x30000;
+image.bin 1,917 MiB + 90 MiB = 2,008 MiB, under D&D's 2,081) beside eight
+slices. Rig 1, hidden and muted: the mode plays sound id 196608 = 0x30000, and
+`songcheck.py` finds every window of the song at its own place in the capture
+(song 1..290 s at capture +46.9 s, NCC 0.92-0.94; 200 s at 0.48 under a
+GODZILLA ANGRY call), so the bank streams in order past 227 s, where a 40 MB
+slice would have ended. No segv, no fatal. The rig cannot show the machine's
+mapping limit (it gives the game 4 GiB); the sizes above are what keep every
+pair and every bank within ones Stern's own cards play.

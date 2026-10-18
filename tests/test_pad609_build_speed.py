@@ -750,3 +750,30 @@ def test_a_short_commit_holds_the_bank_workers_back(monkeypatch):
     seen.clear()
     out = BB.encode_banks("gr", "img", jobs, [], None, lambda *a, **k: None)
     assert len(out) == 5 and [c for c, _r in seen] == [1, 2, 3, 4, 5]
+
+
+def test_a_page_file_counts_what_it_can_still_grow_by():
+    from collections import namedtuple
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    gb = 1 << 30
+    Du = namedtuple("Du", "total used free")
+
+    def disk(free, total=2000 * gb):
+        return lambda d: Du(total, total - free, free)
+    ram = 64 * gb
+    # system-managed: up to three times the RAM, as the drive's free space allows
+    assert P._page_file_growth(ram, 19 * gb, [("C:", None)], disk(500 * gb)) == 192 * gb - 19 * gb
+    assert P._page_file_growth(ram, 19 * gb, [("C:", None)], disk(29 * gb)) == 27 * gb
+    assert P._page_file_growth(ram, 19 * gb, [("C:", None)], disk(1 * gb)) == 0
+    # ... and at most an eighth of the drive
+    assert P._page_file_growth(ram, 0, [("C:", None)], disk(500 * gb, total=800 * gb)) == 100 * gb
+    # a page file of a fixed size, or none, does not grow
+    assert P._page_file_growth(ram, 16 * gb, [("C:", 16 * gb)], disk(500 * gb)) == 0
+    assert P._page_file_growth(ram, 0, [], disk(500 * gb)) == 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows' page files")
+def test_windows_names_its_page_files():
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    for drive, mx in P._page_file_entries():
+        assert len(drive) == 2 and drive[1] == ":" and (mx is None or mx >= 0)

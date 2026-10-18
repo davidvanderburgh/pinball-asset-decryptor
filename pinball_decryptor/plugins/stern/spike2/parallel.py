@@ -478,9 +478,13 @@ def emulator_commit(*paths):
 
 
 def commit_room():
-    """The bytes Windows can still commit (its commit limit less what is
-    committed), or None elsewhere and when it does not say: Linux and macOS
-    commit a page when it is touched."""
+    """The bytes Windows can still commit, or None elsewhere and when it does
+    not say: Linux and macOS commit a page when it is touched.  That is the
+    commit limit less what is committed, and three quarters of what the page
+    files can still grow by (:func:`_page_file_growth`): a system-managed
+    page file shrinks back between builds (80 GB of commit limit on this
+    PC between them, 125 GB during one), so the limit alone holds the
+    workers back for nothing."""
     import ctypes
     import os
     if os.name != "nt":
@@ -501,7 +505,62 @@ def commit_room():
             return None
     except Exception:                                   # noqa: BLE001
         return None
-    return int(st.ullAvailPageFile)
+    try:
+        grow = _page_file_growth(int(st.ullTotalPhys),
+                                 max(0, int(st.ullTotalPageFile) - int(st.ullTotalPhys)),
+                                 _page_file_entries())
+    except Exception:                                   # noqa: BLE001
+        grow = 0
+    return int(st.ullAvailPageFile) + grow * 3 // 4
+
+
+def _page_file_entries():
+    """The page files Windows is set up with: ``[(drive, max bytes or None
+    for system-managed)]`` from the registry (``?:`` is the system drive)."""
+    import os
+    import winreg
+    key = r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management"
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as k:
+        val, _t = winreg.QueryValueEx(k, "PagingFiles")
+    out = []
+    for e in (val if isinstance(val, (list, tuple)) else [val]):
+        parts = str(e).split()
+        if not parts:
+            continue
+        drive = parts[0][:2]
+        if drive.startswith("?"):
+            drive = os.environ.get("SystemDrive", "C:")
+        mx = None
+        if len(parts) >= 3:
+            try:
+                lo, hi = int(parts[1]), int(parts[2])
+            except ValueError:
+                lo = hi = 0
+            if lo or hi:
+                mx = hi << 20
+        out.append((drive, mx))
+    return out
+
+
+def _page_file_growth(ram, current, entries, usage=None):
+    """The bytes the page files *entries* (:func:`_page_file_entries`) can
+    still grow by, *current* bytes big together on a computer with *ram*: to
+    their maximum (a system-managed one's is three times the RAM or 4 GB,
+    at most an eighth of its drive), and no further than their drives' free
+    space less 2 GB.  *usage* is :func:`shutil.disk_usage` (for tests)."""
+    import shutil
+    usage = usage or shutil.disk_usage
+    most, free = 0, 0
+    for drive in sorted({d for d, _m in entries}):
+        try:
+            du = usage(drive + "\\")
+        except OSError:
+            continue
+        free += du.free
+        for d, mx in entries:
+            if d == drive:
+                most += mx if mx is not None else min(max(3 * ram, 4 << 30), du.total // 8)
+    return max(0, min(most - current, free - (2 << 30)))
 
 
 def emulators_that_fit(per, want):

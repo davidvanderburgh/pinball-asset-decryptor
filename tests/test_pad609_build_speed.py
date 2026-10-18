@@ -31,6 +31,17 @@ NOP = struct.pack("<I", 0xE1A00000)          # mov r0, r0
 CODE = ND.CODE
 
 
+from pinball_decryptor.plugins.stern.spike2 import parallel as _PAR  # noqa: E402
+
+_REAL_COMMIT_ROOM = _PAR.commit_room
+
+
+@pytest.fixture(autouse=True)
+def _commit_room_unknown(monkeypatch):
+    """Worker counts here are the cores'; a test of the commit budget sets its own room."""
+    monkeypatch.setattr(_PAR, "commit_room", lambda: None)
+
+
 # --------------------------------------------------------------------------
 # a PLT thunk the validated build's table also names
 # --------------------------------------------------------------------------
@@ -570,3 +581,172 @@ def test_a_long_song_with_block_workers_is_the_pools_own_bytes(tmp_path):
         gr, img, byidx, [(p["idx"], wav)], np, lambda *a, **k: None, None,
         lambda: False, blocks=blocks, edited=edited)
     assert skipped == [] and patches == {off: body}
+
+
+# --------------------------------------------------------------------------
+# every bank to the workers at once when the stub is known up front
+# --------------------------------------------------------------------------
+def test_a_known_stub_sends_every_bank_to_the_workers(monkeypatch):
+    BB, jobs, seen = _bank_stub(monkeypatch)
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "4")
+    monkeypatch.setattr(BB, "known_revalidate", lambda gr, img: 0x3b57d8)
+    logs, prog = [], []
+    out = BB.encode_banks("gr", "img", jobs, [], None, lambda m, lv="info": logs.append(m),
+                          progress=lambda a, b, t="": prog.append(t))
+    assert [r[0][0]["host"] for r in out] == [1, 2, 3, 4, 5]
+    assert sorted(seen) == [(c, 0x3b57d8) for c in range(1, 6)], "none encoded in the app"
+    assert [m for m in logs if m.startswith("bank ")] == ["bank %d encoded" % c
+                                                         for c in range(1, 6)]
+    assert any("image-sc01.bin, image-sc02.bin" in m and "4 at a time" in m for m in logs)
+    assert prog and prog[0].endswith("(1 of 5)...") and prog[-1].endswith("(5 of 5)...")
+
+
+def test_the_stub_is_known_only_when_the_program_has_one_candidate(monkeypatch):
+    from pinball_decryptor.plugins.stern import bank_build as BB
+    from pinball_decryptor.plugins.stern.spike2 import category as CAT
+    locs = {}
+
+    class Emu:
+        def __init__(self, gr, img):
+            if locs.get("boom"):
+                raise RuntimeError("no game program")
+            self._cat_locs = locs.get("locs")
+
+        def close(self):
+            pass
+    monkeypatch.setattr(CAT, "CatEmu", Emu)
+    locs["locs"] = {"REVALIDATE_CANDIDATES": [0x3b57d8]}
+    assert BB.known_revalidate("gr", "img") == 0x3b57d8
+    locs["locs"] = {"REVALIDATE_CANDIDATES": [0x1000, 0x2000]}
+    assert BB.known_revalidate("gr", "img") is None, "the first bank's derive picks one"
+    locs["locs"] = None
+    assert BB.known_revalidate("gr", "img") is None
+    locs["boom"] = True
+    assert BB.known_revalidate("gr", "img") is None
+
+
+def test_the_bank_worker_count_with_the_first_bank_too(monkeypatch):
+    from pinball_decryptor.plugins.stern import bank_build as BB
+    monkeypatch.delenv(BB.BANK_WORKERS_ENV, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 16)
+    assert BB.bank_workers(3, first_too=True) == 3
+    assert BB.bank_workers(2, first_too=True) == 2 and BB.bank_workers(2) == 1
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "9")
+    assert BB.bank_workers(5, first_too=True) == 5
+
+
+def test_the_biggest_banks_go_to_the_workers_first(monkeypatch, tmp_path):
+    BB, _jobs, _seen = _bank_stub(monkeypatch)
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "2")
+    monkeypatch.setattr(BB, "known_revalidate", lambda gr, img: 7)
+    jobs = []
+    for c, size in ((1, 10), (2, 5000), (3, 300), (4, 90000)):
+        wav = tmp_path / ("b%d.wav" % c)
+        wav.write_bytes(b"\0" * size)
+        jobs.append(BB.BankJob(c, "sc%02d" % c, [], {c: str(wav)}))
+    order = []
+    submit = _ThreadPool.submit
+
+    def spy(self, fn, task):
+        order.append(task[2].cat)
+        return submit(self, fn, task)
+    monkeypatch.setattr(_ThreadPool, "submit", spy)
+    out = BB.encode_banks("gr", "img", jobs, [], None, lambda *a, **k: None)
+    assert order == [4, 2, 3, 1]
+    assert [r[0][0]["host"] for r in out] == [1, 2, 3, 4], "results stay in bank order"
+
+
+# --------------------------------------------------------------------------
+# no more emulators than the computer can commit the memory of
+# --------------------------------------------------------------------------
+def test_an_emulator_commits_its_files_and_a_margin(tmp_path):
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    img = tmp_path / "image.bin"
+    img.write_bytes(b"\0" * 1000)
+    assert P.emulator_commit(str(img)) == P.EMU_COMMIT_EXTRA + 1000
+    assert P.emulator_commit(str(img), None, str(tmp_path / "gone")) == P.EMU_COMMIT_EXTRA + 1000
+
+
+def test_the_emulators_that_fit(monkeypatch):
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    gb = 1 << 30
+    monkeypatch.setattr(P, "commit_room", lambda: None)
+    assert P.emulators_that_fit(3 * gb, 16) == 16, "Linux and macOS: as many as asked"
+    monkeypatch.setattr(P, "commit_room", lambda: P.COMMIT_RESERVE + 10 * gb)
+    assert P.emulators_that_fit(3 * gb, 16) == 3
+    assert P.emulators_that_fit(3 * gb, 2) == 2
+    monkeypatch.setattr(P, "commit_room", lambda: gb)
+    assert P.emulators_that_fit(3 * gb, 16) == 1, "the encode always gets its one"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows' commit limit")
+def test_windows_says_how_much_it_can_commit():
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    room = _REAL_COMMIT_ROOM()
+    assert room is not None and room > 0
+
+
+def test_a_short_commit_holds_the_block_workers_back(monkeypatch, tmp_path):
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    monkeypatch.setattr(P, "block_workers", lambda: 8)
+    made = []
+
+    class Pool:
+        def __init__(self, kind, gr, img, rows, n, **kw):
+            made.append(n)
+    monkeypatch.setattr(P, "BlockPool", Pool)
+    per = P.emulator_commit(None)
+    monkeypatch.setattr(P, "commit_room", lambda: P.COMMIT_RESERVE + 3 * per)
+    P.start_block_pool("image", "g", None, [], longest=10 ** 6)
+    assert made == [3]
+    monkeypatch.setattr(P, "commit_room", lambda: P.COMMIT_RESERVE + per)
+    assert P.start_block_pool("image", "g", None, [], longest=10 ** 6) is None
+
+
+def test_a_short_commit_shrinks_the_pool_and_keeps_the_long_song_whole(monkeypatch):
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    per = P.emulator_commit("i")
+    # room for 9 emulators: the pool's 8 and the long song's own one, no blocks
+    monkeypatch.setattr(P, "commit_room", lambda: P.COMMIT_RESERVE + 9 * per)
+    rows, seen, patches, logs = _dispatch(monkeypatch, [9036650] + [400000] * 9)
+    assert seen["pool"][0] == list(range(10)) and seen["pool"][2] == 8
+    assert seen["serial"] == []
+    # room for 4: a pool of 4, said in the log
+    monkeypatch.setattr(P, "commit_room", lambda: P.COMMIT_RESERVE + 4 * per)
+    rows, seen, patches, logs = _dispatch(monkeypatch, [9036650] + [400000] * 9)
+    assert seen["pool"][2] == 4
+    assert any("on 4 process(es), not 8" in t for _l, t in logs)
+    assert patches == {r["body_off"]: b"%d" % r["idx"] for r in rows}
+    # room for one: the one-process encode
+    monkeypatch.setattr(P, "commit_room", lambda: 0)
+    rows, seen, patches, logs = _dispatch(monkeypatch, [9036650] + [400000] * 9)
+    assert "pool" not in seen and [s[0] for s in seen["serial"]] == [list(range(10))]
+
+
+def test_a_short_commit_holds_the_bank_workers_back(monkeypatch):
+    from pinball_decryptor.plugins.stern.spike2 import parallel as P
+    BB, jobs, seen = _bank_stub(monkeypatch)
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "4")
+    monkeypatch.setattr(BB, "known_revalidate", lambda gr, img: 7)
+    monkeypatch.setattr(P, "block_workers", lambda: 8)
+    per = P.emulator_commit(None)
+    # room for 5 emulators: two banks at a time (two emulators each), no blocks
+    monkeypatch.setattr(P, "commit_room", lambda: P.COMMIT_RESERVE + 5 * per)
+    import os as _os
+    blocks_seen = []
+    real = BB._bank_worker
+
+    def spy(task):
+        blocks_seen.append(task[-1])
+        return real(task)
+    monkeypatch.setattr(BB, "_bank_worker", spy)
+    logs = []
+    out = BB.encode_banks("gr", "img", jobs, [], None, lambda m, lv="info": logs.append(m))
+    assert len(out) == 5 and set(blocks_seen) == {0}
+    assert any("2 at a time, not 4" in m for m in logs)
+    _os.environ.pop("PAD_STERN_BLOCK_WORKERS", None)
+    # room for 3: one at a time, in the app, as on a small computer before
+    monkeypatch.setattr(P, "commit_room", lambda: P.COMMIT_RESERVE + 3 * per)
+    seen.clear()
+    out = BB.encode_banks("gr", "img", jobs, [], None, lambda *a, **k: None)
+    assert len(out) == 5 and [c for c, _r in seen] == [1, 2, 3, 4, 5]

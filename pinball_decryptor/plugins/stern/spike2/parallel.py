@@ -438,9 +438,80 @@ def start_block_pool(kind, gr_path, img_path, stock_rows, first_warm=None,
         n = min(n, workers)
     if n < 2 or (longest is not None and longest < 200 * (BLOCKS_MIN + 1)):
         return None
+    n = emulators_that_fit(emulator_commit(img_path, cat_file), n)
+    if n < 2:
+        return None
     return BlockPool(kind, gr_path, img_path, stock_rows, n,
                      first_warm=first_warm, cat_file=cat_file, log=log,
                      first_edited=first_edited)
+
+
+# ---------------------------------------------------------------------------
+# How many emulators the computer has room for (PAD-609).  On Windows an
+# emulator process commits the guest memory it maps for image.bin (and a
+# bank's file) up front, ~2.6 GB on Godzilla LE 1.16 while it touches a few
+# hundred MB of it, and a Write that fails to commit one fails with the
+# emulator's UC_ERR_NOMEM.  The workers of a long build (the cat-0 pool, the
+# block workers, the banks') ran to sixty-odd GB of commit together, so each
+# count is held to what the commit limit (RAM and page file) has room for.
+# ---------------------------------------------------------------------------
+
+#: what an emulator process commits besides the files it maps into the guest
+#: (measured 0.45-1.07 GB over a 1.65 GB image.bin, Godzilla LE 1.16)
+EMU_COMMIT_EXTRA = 5 << 28
+#: commit left for the app itself and everything else on the computer
+COMMIT_RESERVE = 4 << 30
+
+
+def emulator_commit(*paths):
+    """The bytes one emulator process commits mapping the files *paths*
+    (image.bin, a bank's file; None and missing ones count nothing)."""
+    import os
+    n = EMU_COMMIT_EXTRA
+    for path in paths:
+        if path:
+            try:
+                n += os.path.getsize(path)
+            except OSError:
+                pass
+    return n
+
+
+def commit_room():
+    """The bytes Windows can still commit (its commit limit less what is
+    committed), or None elsewhere and when it does not say: Linux and macOS
+    commit a page when it is touched."""
+    import ctypes
+    import os
+    if os.name != "nt":
+        return None
+
+    class _Status(ctypes.Structure):
+        _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+    st = _Status()
+    st.dwLength = ctypes.sizeof(st)
+    try:
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return None
+    except Exception:                                   # noqa: BLE001
+        return None
+    return int(st.ullAvailPageFile)
+
+
+def emulators_that_fit(per, want):
+    """How many of *want* emulator processes, each committing *per* bytes
+    (:func:`emulator_commit`), the computer has room for now: at least one
+    (the encode needs that one whatever happens)."""
+    room = commit_room()
+    if room is None:
+        return want
+    return max(1, min(want, int((room - COMMIT_RESERVE) // max(per, 1))))
 
 
 # ---------------------------------------------------------------------------

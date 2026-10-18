@@ -17061,9 +17061,12 @@ def _final_checks_parallel(gr_path, img_path, params, edited, tasks, log, cancel
     (:func:`.spike2.parallel.final_check`), or None when the serial loop should
     run them: too little audio to be worth the workers, no cores to spare, a
     cancel, or a pool that failed (said in the log)."""
-    from .spike2.parallel import block_workers, final_check, init_final_worker
+    from .spike2.parallel import (block_workers, emulator_commit, emulators_that_fit,
+                                  final_check, init_final_worker)
     secs = sum(int(p["length"]) for _o, p, _b, _s in tasks) / 44100.0
     n = min(block_workers(), len(tasks))
+    if n >= 2:
+        n = emulators_that_fit(emulator_commit(img_path), n)
     if n < 2 or secs < _FINAL_PARALLEL_MIN_S:
         return None
     import multiprocessing as mp
@@ -19399,7 +19402,7 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
         "parameters." % len(stock), "success")
 
 
-def _cat0_long_split(todo, byidx, cores):
+def _cat0_long_split(todo, byidx, cores, room=None):
     """``(long, short, block_workers)``: the edits (longest first, as *todo*
     is) of a cat-0 re-encode split into the songs encoded with their blocks
     across processes (PAD-599's block workers) and the rest, for the pool of
@@ -19407,7 +19410,9 @@ def _cat0_long_split(todo, byidx, cores):
     samples than an even share of them between the workers, so it would be
     the encode's tail: a Godzilla project's 205 s song took a minute after
     its 79 other sounds were done.  The block workers get the cores the pool
-    leaves; with fewer than two of those nothing is split."""
+    leaves, and of *room* (the emulators the computer has memory for) what
+    the pool and the long songs' own emulator leave; with fewer than two of
+    those nothing is split."""
     from .spike2.parallel import BLOCKS_MIN, block_workers
     lens = {idx: int(byidx[idx].get("length") or 0) for idx, _w in todo}
     share = sum(lens.values()) / max(cores, 1)
@@ -19416,6 +19421,8 @@ def _cat0_long_split(todo, byidx, cores):
     short = [e for e in todo if e not in long_]
     pool = min(cores, len(short)) if len(short) > 1 else 0
     nblock = min(block_workers(), (os.cpu_count() or 2) - 2 - pool)
+    if room is not None:
+        nblock = min(nblock, room - pool - 1)
     if not long_ or nblock < 2:
         return [], todo, 0
     return long_, short, nblock
@@ -19542,11 +19549,19 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
         return patches, skipped
 
     cores = max(1, min((os.cpu_count() or 2) - 2, 8))
+    # PAD-609: no more emulators than the computer can commit the memory of
+    from .spike2.parallel import emulator_commit, emulators_that_fit
+    room = emulators_that_fit(emulator_commit(img_path), cores + 9)
+    if room < min(cores, len(todo)):
+        log("Encoding on %d process(es), not %d: this computer has room for "
+            "the memory of %d sound encoder(s) now."
+            % (room, min(cores, len(todo)), room), "info")
+        cores = room
     # Every idx this Write re-encodes: the codec warm of each emulator below
     # treats them all as edited, whichever share of them it encodes.
     edited = [idx for idx, _w in todo]
     long_, short, nblock = (([], todo, 0) if _FORCE_SERIAL_ENCODE
-                            else _cat0_long_split(todo, byidx, cores))
+                            else _cat0_long_split(todo, byidx, cores, room=room))
     nworkers = max(1, min(cores, len(short)))
     fresh, remaining, results = {}, todo, {}
     longrun = None

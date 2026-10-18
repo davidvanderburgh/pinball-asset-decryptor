@@ -302,17 +302,19 @@ class BankJob:
     wavs: dict
 
 
-def bank_workers(n_banks):
+def bank_workers(n_banks, first_too=False):
     """How many banks :func:`encode_banks` encodes at once: one per four cores
     (each bank's long sounds have block workers of their own), at most the banks
-    after the first; :data:`BANK_WORKERS_ENV` overrides it."""
+    after the first (*first_too*: at most all of them); :data:`BANK_WORKERS_ENV`
+    overrides it."""
+    most = n_banks if first_too else n_banks - 1
     v = os.environ.get(BANK_WORKERS_ENV, "")
     try:
         if v.strip():
-            return max(1, min(int(v), max(1, n_banks - 1)))
+            return max(1, min(int(v), max(1, most)))
     except ValueError:
         pass
-    return max(1, min((os.cpu_count() or 1) // 4, n_banks - 1))
+    return max(1, min((os.cpu_count() or 1) // 4, most))
 
 
 def encode_and_verify(gr_path, img_path, job, params, np, log, loops=(), gains=None,
@@ -371,7 +373,11 @@ def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
     come back.  A Godzilla build with 11 modes' music had them one after
     another: 11 banks, 5 to 30 s each.  A worker's failure stops the Write
     with the bank's own words, as it would have here; a pool that cannot
-    start leaves the rest to be encoded here."""
+    start leaves the rest to be encoded here.
+
+    A game program with one candidate for that stub has nothing to settle,
+    so every bank goes to the workers at once (PAD-609: the first bank of a
+    Godzilla build was a minute on its own before the others started)."""
     from .engine import _span
     out = []
     n = len(jobs)
@@ -380,6 +386,14 @@ def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
         return _span(progress, int(100 * i / n), int(100 * (i + 1) / n))
     if not jobs:
         return out
+    w = bank_workers(n, first_too=True)
+    rev = known_revalidate(gr_path, img_path) if w > 1 else None
+    if rev is not None:
+        got = _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains,
+                                     level_refs, progress, cancel, body_cache, rev, w, n,
+                                     done0=0)
+        if got is not None:
+            return got
     rows, rev = encode_and_verify(gr_path, img_path, jobs[0], params, np, log, loops=loops,
                                   gains=gains, level_refs=level_refs, progress=span(0),
                                   cancel=cancel, body_cache=body_cache)
@@ -399,16 +413,57 @@ def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
     return out
 
 
+def _job_bytes(job):
+    """How much audio a :class:`BankJob` encodes, by its sounds' file sizes."""
+    n = 0
+    for wav in (job.wavs or {}).values():
+        try:
+            n += os.path.getsize(wav)
+        except (OSError, TypeError):
+            pass
+    return n
+
+
+def known_revalidate(gr_path, img_path):
+    """The game program's map-revalidation stub when it has only one
+    candidate for it (a derive would settle on that one or fail), else None:
+    several candidates, or a loader that cannot be analysed."""
+    try:
+        from .spike2.category import CatEmu
+        emu = CatEmu(gr_path, img_path)
+        try:
+            cands = list((emu._cat_locs or {}).get("REVALIDATE_CANDIDATES") or ())
+        finally:
+            emu.close()
+    except Exception:                                   # noqa: BLE001
+        return None
+    return cands[0] if len(cands) == 1 else None
+
+
 def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, level_refs,
-                           progress, cancel, body_cache, rev, workers, n_all):
+                           progress, cancel, body_cache, rev, workers, n_all, done0=1):
     """:func:`encode_banks`' workers; None when the pool could not start (the
-    caller encodes the banks itself)."""
+    caller encodes the banks itself).  *done0*: the banks already encoded
+    before these (the first, here)."""
     import multiprocessing as mp
     import tempfile
     from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
-    from .spike2.parallel import block_workers
+    from .spike2.parallel import block_workers, emulator_commit, emulators_that_fit
+    # PAD-609: a worker runs two emulators and its block workers, each committing
+    # its share of memory; the workers and their blocks are as many as fit
+    per = max(emulator_commit(img_path, j.path) for j in jobs)
+    room = emulators_that_fit(per, workers * (2 + block_workers()))
+    if room // 2 < workers:
+        log("Sound banks: %d at a time, not %d: this computer has room for the "
+            "memory of %d sound encoder(s) now." % (max(1, room // 2), workers, room), "info")
+        workers = room // 2
+        if workers < 2:
+            return None
     # the cores shared out: a worker's long sounds take its share for their blocks
-    blocks = min(max(0, (os.cpu_count() or 1) // workers - 1), block_workers())
+    blocks = min(max(0, (os.cpu_count() or 1) // workers - 1), block_workers(),
+                 room // workers - 2)
+    if blocks < 2:
+        blocks = 0
     fd, flag = tempfile.mkstemp(prefix="spike2_bankcancel_")
     os.close(fd)
     os.remove(flag)
@@ -420,10 +475,12 @@ def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, l
     try:
         try:
             pool = ProcessPoolExecutor(workers, mp_context=mp.get_context("spawn"))
-            futs = {pool.submit(_bank_worker, (gr_path, img_path, j, params, set(loops or ()),
-                                               gains, level_refs, rev, body_cache, flag,
-                                               blocks)): i
-                    for i, j in enumerate(jobs)}
+            # the biggest banks first, so no worker is left with a long one at
+            # the end; their lines are still said in bank order
+            futs = {pool.submit(_bank_worker, (gr_path, img_path, jobs[i], params,
+                                               set(loops or ()), gains, level_refs, rev,
+                                               body_cache, flag, blocks)): i
+                    for i in sorted(range(len(jobs)), key=lambda i: -_job_bytes(jobs[i]))}
         except Exception as e:                          # noqa: BLE001
             log("Sound banks are encoded one after another: the workers did not start "
                 "(%s)." % e, "info")
@@ -453,9 +510,9 @@ def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, l
                     body_cache.hits += used[1]
                 said += 1
                 if progress:
-                    progress(int(100 * (said + 1) / n_all), 100,
+                    progress(int(100 * (said + done0) / n_all), 100,
                              "Encoding the modes' sound banks (%d of %d)..."
-                             % (said + 1, n_all))
+                             % (said + done0, n_all))
         return [r[1] for r in results]
     finally:
         if pool is not None:

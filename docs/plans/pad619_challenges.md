@@ -97,3 +97,11 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   cmp #1; movne`); TMNT Pro 1.59 fn 0xa7710: frame 0xa8f40, kinds compared to 10 and 12 (0xa8f94, 0xa9368); Bond 60th
   LE 1.11: message 1911 not loaded by an immediate - find its menu another way.
 - Proofs so far this round: Jaws Pro 1.02, John Wick Pro 1.02 (mode run; control pending).
+- Elvira 1.13: done in code (8572738e) - count in r5, hook_full on the frame. Rig proof queued (list_next).
+- JP Pro 1.16 pick at 0xe3954: entry = sp+0x2c0 + 4*(r6+r4) - 0xb8 with its kind at +0 and a word at -4 (0xe39a4
+  `ldr r1, [r6, #-0xbc]`), so its entries are laid out differently from Bond's {kind, caption, name}: the append
+  hook needs per-port field offsets before JP can take ours. Kinds 1, 2, 3 (3 guarded by r0 <= 3).
+- Proven this round: Jaws Pro 1.02, John Wick Pro 1.02 (mode + control).
+- Queued (C:/tmp/PAD-619/list_next.txt, chained after batch_all by sweep_next.sh): Godzilla Pro 1.16 rerun (grace),
+  Venom Pro 1.07 + control, Jaws LE 1.02, Venom LE 1.07, Godzilla LE 1.16 / Pro 1.15, Star Wars Pro 1.31 (own menu
+  entry), Elvira 1.13 (own menu entry).

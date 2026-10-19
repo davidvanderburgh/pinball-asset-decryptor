@@ -424,6 +424,7 @@ text  challenge_name_3  Final Showdown
 
 # ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
 site  challenge_balls     0x0027ee84 0xe92d4030 0xe1a05000
+site  challenge_balls_2   0x0041fb3c 0xe92d4038 0xe1a04000
 site  challenge_menu      0x00092578 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x00092748 0xe2433001 0xe3530005
 value challenge_menu_list_at   532

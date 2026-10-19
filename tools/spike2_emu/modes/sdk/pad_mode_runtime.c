@@ -9081,6 +9081,10 @@ static void challenges_arm(void)
     challenge_game_id = event_bus_id("game_start");
     if (site("challenge_balls") && (!fn("challenge_balls") || !hook_veto_n(fn("challenge_balls"), challenge_balls_veto, 0, 1)))
         say("challenges: the balls-per-game getter could not be hooked - a mode's challenge game is as long as the game's");
+    /* PAD-619: the older builds (Batman 1.13, Iron Maiden LE 1.16, Rush LE 1.18, ...) also ask a per-player sum of the
+     * balls-per-game setting and the next one (`site challenge_balls_2`) when they decide the game is over */
+    if (site("challenge_balls_2") && (!fn("challenge_balls_2") || !hook_veto_n(fn("challenge_balls_2"), challenge_balls_veto, 1, 1)))
+        say("challenges: the per-player balls getter could not be hooked - an older build's challenge game may run on");
     for (n = 0; n < (unsigned)challenges_n; n++)
         if (!challenge_site[n] && challenge_ball_id < 0) {
             say("challenges: the port has no ball_start event - no challenge list");

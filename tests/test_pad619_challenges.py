@@ -275,3 +275,20 @@ def test_a_mode_picked_as_the_challenge_does_not_give_way_to_the_games_modes():
     src = (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert "run.by_challenge = why[0] == 'c' && why[1] == 'h'" in src
     assert "cfg.game_modes != GM_STACK && !run.by_challenge && pm_aside()" in src
+
+
+OLDER = ("aerosmith_le-1.15", "avengers_infinity_le-1.09", "batman-1.13", "guardians_le-1.14", "iron_maiden_le-1.16",
+         "rush_le-1.18", "stranger_things_le-1.12", "sword_of_rage_le-1.18")
+
+
+@pytest.mark.parametrize("key", OLDER)
+def test_the_older_builds_name_their_per_player_balls_getter_too(key):
+    test_the_ports_carry_what_the_finder_reads_off_the_game(key)
+    assert "challenge_balls_2" in _port(key)["site"]
+
+
+def test_the_runtime_vetoes_the_second_getter_and_portgen_keeps_the_pad630_line():
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    assert 'hook_veto_n(fn("challenge_balls_2"), challenge_balls_veto, 1, 1)' in src
+    from pinball_decryptor.plugins.stern import portgen as G
+    assert G._GENERATED.match("site challenge_end_ball 0x1") and G._GENERATED.match("site challenge_balls_2 0x1")

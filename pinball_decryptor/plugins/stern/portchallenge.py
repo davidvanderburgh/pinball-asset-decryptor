@@ -187,7 +187,16 @@ def balls_lines(e):
     if len(hits) != 1:
         return []
     k = hits[0]
-    return ["site  challenge_balls     0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
+    out = ["site  challenge_balls     0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
+    # PAD-619: the older builds' per-player sum of the setting and the next (push ; mov r4, r0 ; mov r1, r4 ; mov r0,
+    # #<bpg> ; bl ; mov r1, r4 ; mov r5, r0 ; mov r0, #<bpg + 1> ; bl ; add r0, r0, r5), what they end a game by
+    two = [j for j in range(len(w) - 9) if (w[j] & 0xFFFF0000) == 0xE92D0000 and w[j + 1] == 0xE1A04000
+           and w[j + 2] == 0xE1A01004 and w[j + 3] in mov_r0(bpg) and w[j + 5] == 0xE1A01004 and w[j + 6] == 0xE1A05000
+           and w[j + 7] in mov_r0(bpg + 1) and w[j + 9] == 0xE0800005]
+    if len(two) == 1:
+        j = two[0]
+        out.append("site  challenge_balls_2   0x%08x 0x%08x 0x%08x" % (base + 4 * j, w[j], w[j + 1]))
+    return out
 
 
 def _short(stem):

@@ -881,6 +881,9 @@ CHALLENGE_PROVEN = frozenset({
     "stranger_things-1.13",            # PAD-615 2026-10-19: Default Game Mode 2 (Demogorgon), challenge 0 claimed: DEMO TEST START 7 ms after the pick, the game's Demogorgon Challenge (flag 104) never set; control: it started
     "stranger_things_le-1.12",         # PAD-615 2026-10-19: the same (its Demogorgon Challenge flag 99): mode started, the game's not; control: the game's started
     "stranger_things_le-1.13",         # PAD-615 2026-10-19: the same (flag 104): mode started, the game's not; control: the game's started
+    "jaws_le-1.02",                    # PAD-619 2026-10-19 rig 1: the same as Jaws Pro below on the stock LE card - 8 -> 1 at the ball's start, START (challenge pick), one ball, GAME OVER
+    "venom_le-1.07",                   # PAD-619 2026-10-19 rig 2: the game-play mode set to Challenge Mode Low (11) in attract, challenge 0 claimed: 11 -> 0 (Standard) at the ball's start, START (challenge pick), one ball, GAME OVER
+    "venom_pro-1.07",                  # PAD-619 2026-10-19 rig 2: the same on the stock Pro card; control (rig 4, no mode): index kept at 11, flag 18, the game's own challenge
     "jaws_pro-1.02",                   # PAD-619 2026-10-19 rig 3, the stock card, hidden, muted: the game-play mode set to 4th of July (8) in attract as the start menu's pick sets it, challenge 0 claimed: at the ball's start the index went 8 -> 1 (Standard), TAKEN BY PAD START (challenge pick), no 4th of July screen, one ball (the getter said 1), GAME OVER. Control (no mode): index kept at 8, flag 18 set, the game's own 4th OF JULY challenge on screen
     "john_wick_pro-1.02",              # PAD-619 2026-10-19 rig 3: the game-play mode set to Red Circle Reckoning (4, wck_cm_dance_club) in attract, challenge 0 claimed: 4 -> 1 at the ball's start, TAKEN BY PAD START (challenge pick), one ball, GAME OVER. Control: index kept at 4, flag 18, the game's own DANCE CLUB challenge (60 s) on screen
     "metallica_spike-1.04",            # PAD-619 2026-10-19 rig 3: the game-play mode set to the Lux Aeterna Combo Challenge (8) in attract, challenge 0 claimed: 8 -> 1 at the ball's start, TAKEN BY PAD START (challenge pick), one ball, GAME OVER. Control: index kept at 8, flag 18, the game's own COMBO CHALLENGE on screen
@@ -906,6 +909,7 @@ CHALLENGE_MENU_PROVEN = {
     "iron_maiden_pro-1.18": 2, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
     "munsters_le-1.28": 5,  # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 5, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
     "munsters_pro-1.28": 5, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 5, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "star_wars_pro-1.31": 2,          # PAD-619 2026-10-19 rig 2: the compare-chain menu (no challenge kind of the game's): PAD CHALLENGE appended after Standard and Competition, picked as Standard: START (challenge pick) at the ball's start, one ball, GAME OVER
 }
 #: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)
 CHALLENGE_MENU_GAMES_OWN = 7

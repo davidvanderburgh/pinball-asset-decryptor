@@ -382,6 +382,13 @@ function DiskSpaceDialog({ close }) {
       </div>`)}
     </div>
     <div class="stack" style="gap:4px">
+      <span class="h2">Automatic clean-up</span>
+      <span class="small muted wrap">${d ? d.auto_note : ""}</span>
+      <div class="row wrap"><span class="small grow">${d ? d.auto_summary : ""}</span>
+        <${Button} onClick=${() => call("shellx.disk_tidy_now")} disabled=${!(d && d.can_tidy)}>Clean up now<//></div>
+    </div>
+    <hr class="sx-hr" />
+    <div class="stack" style="gap:4px">
       <span class="h2">Leftover staging, caches and emulator files</span>
       <span class="small muted">${d ? d.tree_note : ""}</span>
     </div>

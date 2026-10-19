@@ -51,6 +51,9 @@ done
 
 BASE=$JJP_BASE
 mkdir -p "$BASE"
+# When this image was last asked for: the app's automatic clean-up
+# (core/space_keeper.py, PAD-613) removes an image unused for 30 days.
+touch "$BASE/.used"
 
 # ROOT ONLY (2026-09-15).  The JJP menu program links against a handful of the
 # root's libraries and needs nothing else of the image, and it used to get them

@@ -4,6 +4,7 @@ audits counted, its game flags set or cleared) or, on Deadpool, when the mode's 
 getters point into it. Checked on synthetic programs, and on the real programs where the cards
 are on this machine (skipped elsewhere, as on CI)."""
 
+import collections
 import os
 import struct
 
@@ -71,15 +72,28 @@ class _Prog:
 def test_a_file_is_a_modes_when_only_that_modes_records_are_written_in_it():
     prog = _Prog()
     graph = CF._Graph(prog, [0x2000, 0x4000, 0x6000])
-    files = CF._files_of(graph, {0x1100: {"TOYS"}, 0x1300: {"TOYS"},       # file 0x2000: TOYS
-                                 0x2100: {"TOYS"}, 0x3100: {"LOVE"},       # file 0x4000: both
-                                 0x4100: {"TOYS", "LOVE"}})                # names two: no file
+    C = collections.Counter
+    files = CF._files_of(graph, {0x1100: C(TOYS=2), 0x1300: C(TOYS=1, **{"": 1}),  # 0x2000: TOYS
+                                 0x2100: C(TOYS=1), 0x3100: C(LOVE=1),       # 0x4000: both
+                                 0x4100: C(TOYS=1, LOVE=1)})                 # names two: none
     fo = CF.FileOwners(prog, graph, files)
     assert fo.of_code(0x1880) == ("TOYS", "file")
     assert fo.of_code(0x2000) == ("TOYS", "file")        # the initialiser ends its own file
     assert fo.of_code(0x3880) == ("", "")
     assert fo.of_code(0x5880) == ("", "")
     assert fo.of_code(0x7000) == ("", "")                # past the last initialiser
+
+
+def test_a_feature_file_whose_records_are_mostly_of_no_mode_is_no_modes():
+    # Stranger Things' pop bumper file: 2 records of Super Pop Bumpers, 4 of pop hits
+    prog = _Prog()
+    graph = CF._Graph(prog, [0x2000, 0x4000])
+    C = collections.Counter
+    files = CF._files_of(graph, {0x1100: C(SUPER_POP_BUMPERS=2), 0x1300: C(**{"": 4}),
+                                 0x2100: C(BUST_OUT=10), 0x3100: C(**{"": 2})})
+    fo = CF.FileOwners(prog, graph, files)
+    assert fo.of_code(0x1880) == ("", "")
+    assert fo.of_code(0x3880) == ("BUST_OUT", "file")
 
 
 def test_a_table_is_a_modes_when_only_its_files_load_it(monkeypatch):

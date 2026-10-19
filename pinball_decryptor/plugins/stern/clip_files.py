@@ -12,7 +12,9 @@ A clip named anywhere in a file - its functions, its initialiser's tables - belo
 file, and a file belongs to a mode when the program shows it is that mode's code, and no other
 mode's:
 
-* plain C - the mode's own records, which only its code writes: the audits counted for it
+* plain C - the mode's own records, which only its code writes, outnumbering the records of
+  no mode written there (a feature's file - pop bumpers - also runs a "super" mode): the audits
+  counted for it
   (``AUD_TOYS_IN_THE_ATTIC_MULTIBALL_STARTED``, ``..._SUPER_JACKPOT_AWARDS``: the audit witness
   of :mod:`.stock_scan_c`) and its game flags SET or CLEARED (``FG_MODE_SWEET_EMOTION_ACTIVE``:
   Aerosmith's songs have no start audit, only that flag; :func:`flag_writers`). A flag only
@@ -113,10 +115,11 @@ def flag_writers(prog, count):
 
 
 def c_modes(prog):
-    """``(keys, evidence)`` of a plain-C program: ``keys`` the modes (``SWEET_EMOTION``, as the
+    """``(keys, records)`` of a plain-C program: ``keys`` the modes (``SWEET_EMOTION``, as the
     Modes tab keys them: :func:`.stock_scan_c.mode_key`) - every mode a ``..._STARTED`` audit
-    counts and every ``FG_<mode>_ACTIVE`` flag; ``evidence`` ``{function VA: {key}}``, the
-    functions that count one of a mode's audits or set or clear one of its flags."""
+    counts and every ``FG_<mode>_ACTIVE`` flag; ``records`` ``{function VA: Counter}``, how many
+    audits each function counts and game flags it sets or clears, by the mode they are of
+    (``""`` for a record of no mode: a pop bumper hit, a dart level)."""
     from . import stock_scan_c as SC
     names, ids, _rec = SC.audit_ids(prog)
     flags = SC.name_array(prog, b"FG_")
@@ -143,23 +146,20 @@ def c_modes(prog):
                 return k
         return None
 
-    ev = collections.defaultdict(set)
+    recs = collections.defaultdict(collections.Counter)
     audit_add = SC.find_audit_add(prog, ids)
     if audit_add:
         for site in prog.callers(audit_add):
             name = ids.get(prog.const_before(site, 0))
-            k = key_of(name, "AUD_") if name else None
-            if k:
-                ev[prog.func_start(site)].add(k)
+            if name:
+                recs[prog.func_start(site)][key_of(name, "AUD_") or ""] += 1
     for f in flag_writers(prog, len(flags)) if flags else ():
         for site in prog.callers(f):
             v = prog.const_before(site, 0)
             if v is None or not 0 < v < len(flags) or not flags[v]:
                 continue
-            k = key_of(flags[v], "FG_")
-            if k:
-                ev[prog.func_start(site)].add(k)
-    return keys, dict(ev)
+            recs[prog.func_start(site)][key_of(flags[v], "FG_") or ""] += 1
+    return keys, dict(recs)
 
 
 def c_label(key):
@@ -360,15 +360,26 @@ class FileOwners:
         return got
 
 
-def _files_of(graph, evidence):
-    """``{file: {mode}}`` of the evidence functions that name one mode."""
-    out = collections.defaultdict(set)
-    for f, ms in evidence.items():
-        if len(ms) != 1:
+def _files_of(graph, records):
+    """``{file: {mode}}``: each file's modes - a file is a mode's when the records written in it
+    (*records*, ``{function: Counter}``; a function naming two modes counts for neither) are of
+    that mode alone, and outnumber the file's records of no mode. Stranger Things LE 1.13's
+    pop bumper file writes 2 of Super Pop Bumpers and 4 of none (pop hits, dart levels: its clips
+    show in normal play), Bust Out's 10 and 2."""
+    per = collections.defaultdict(collections.Counter)
+    for f, c in records.items():
+        if len([k for k in c if k]) > 1:
             continue
         fi = graph.file_of(f)
         if fi is not None:
-            out[fi] |= set(ms)
+            per[fi].update(c)
+    out = {}
+    for fi, c in per.items():
+        ms = [k for k in c if k]
+        if len(ms) == 1:
+            out[fi] = set(ms) if c[ms[0]] > c[""] else set()
+        elif ms:
+            out[fi] = set(ms)
     return out
 
 
@@ -383,15 +394,16 @@ def owners(S, prog, model=None, modes=None, anchors=None):
         return None, {}
     graph = _Graph(prog, inits)
     if modes:
-        files = _files_of(graph, {f: {m} for f, m in (anchors or {}).items()})
+        files = _files_of(graph, {f: collections.Counter({m: 1})
+                                  for f, m in (anchors or {}).items()})
         for fi, ms in effect_files(prog, model, modes, graph).items():
             files.setdefault(fi, set()).update(ms)
         labels = {m: mode_label(m) for m in modes}
     else:
-        keys, ev = c_modes(prog)
+        keys, recs = c_modes(prog)
         if not keys:
             return None, {}
-        files = _files_of(graph, ev)
+        files = _files_of(graph, recs)
         labels = {k: c_label(k) for k in keys}
     if not files:
         return None, {}

@@ -235,8 +235,9 @@ while :; do
     ANC="$ANC
 $_p"
 done
-SCRIPT=$(pad_pids -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh' \
-         | grep -cvxF "$ANC")
+# A sweep's card copier (cardmount.sh --cache-now) is left out: it is no
+# rig's run (PAD-632, padslot.sh).
+SCRIPT=$(pad_run_script_pids | grep -cvxF "$ANC")
 SCRIPT=${SCRIPT:-0}
 
 # The guest's unshare wrapper - run_game.sh's `unshare $USERNS -m -p -f`, the

@@ -67,6 +67,25 @@ pad_count() {
     echo "$((n + 0))"
 }
 
+#: The RUN SCRIPTS of this slot - watch.sh and what a run starts under it -
+#: as alive.sh counts them and killgame.sh kills them. One list for both.
+#
+#: A LIBRARY SWEEP'S CARD COPIER IS NOT A RUN (PAD-632). rigbatch's stager
+#: (cardstage.sh `cache`) fills the card cache a few builds ahead of its rigs
+#: with `cardmount.sh <card> --cache-now`, and it runs with no PAD_SLOT at all:
+#: it belongs to the sweep, not to a rig. Read as slot 0, it made the main
+#: rig's Status say "Not running" and "1 running" in one breath, with only
+#: "Stop emulator" on the button - and that Stop would have killed the sweep's
+#: copy. The copy is waited for by the sweep's own jobs, never by a rig-0 run.
+pad_run_script_pids() {
+    local p
+    for p in $(pad_pids -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh'); do
+        tr '\0' '\n' < "/proc/$p/cmdline" 2>/dev/null | grep -qx -- '--cache-now' \
+            && continue
+        echo "$p"
+    done
+}
+
 #: `pkill -<SIG> <pgrep args>`, restricted to this slot. Returns 0 when it
 #: signalled something, 1 when nothing matched - pkill's own contract.
 pad_pkill() {                     # -<SIG> <pgrep args...>

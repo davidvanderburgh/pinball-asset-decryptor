@@ -63,12 +63,19 @@ class FakeExt4Reader:
                 self._inodes[cino] = {"mode": S_IFLNK, "size": len(tgt),
                                      "i_block": tgt[:60].ljust(60, b"\x00")}
             else:
+                # ("file", data, mtime): a regular file with a modification
+                # time, for code that tells a later write by it (PAD-631)
+                mtime = None
+                if isinstance(val, tuple) and val[0] == "file":
+                    _f, val, mtime = val
                 data = val if isinstance(val, (bytes, bytearray)) \
                     else str(val).encode()
                 self._inodes[cino] = {"mode": S_IFREG, "size": len(data),
                                      "i_block": b"\x00" * 60,
                                      "_data": bytes(data),
                                      "_disk_off": self._data_cursor}
+                if mtime is not None:
+                    self._inodes[cino]["mtime"] = mtime
                 # 1 KB alignment keeps the spans disjoint and readable.
                 self._data_cursor += max(1024, len(data))
 

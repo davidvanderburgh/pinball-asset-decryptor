@@ -130,3 +130,99 @@ def test_read_video_manifest_round_trips(tmp_path):
 
 def test_read_video_manifest_missing_file_is_empty(tmp_path):
     assert engine._read_video_manifest(str(tmp_path)) == {}
+
+
+# ---- PAD-633: a clip no scene names keeps its name whatever a build adds ----
+
+from tests._ext4_fake import FakeExt4Reader  # noqa: E402
+
+_GZ = "/godzilla_le/assets/lcd/auto_loaded/"
+_LONE = "eae3e0844950ec5f071bf3c4e951fbff709a2028"
+
+
+def _clip(tag):
+    """Enough of an MP4 for find_card_videos' ftyp sniff (>= 0x1000 bytes)."""
+    return b"\x00\x00\x00\x18ftypisom" + tag.encode() + b"\x00" * 0x1000
+
+
+def _card(added=0):
+    """Godzilla LE's shape: named clips in one scene, the one clip its scene
+    does not name in another, and *added* named clips a build put in a scene
+    the walk reaches first."""
+    named = b"\x00" * 16 + b"".join(
+        _record("clip%d" % i, "%d.asset" % i, 0x02) for i in range(3))
+    tree = {}
+    if added:
+        tree["00bank"] = {
+            "scene.radium": b"\x00" * 16 + b"".join(
+                _record("PAD_Mode%d" % i, "%d.asset" % i, 0x02) for i in range(added)),
+            "scene.assets": {"%d.asset" % i: _clip("m%d" % i) for i in range(added)}}
+    tree["11named"] = {"scene.radium": named,
+                       "scene.assets": {"%d.asset" % i: _clip("n%d" % i)
+                                        for i in range(3)}}
+    tree[_LONE] = {"scene.radium": b"\x00" * 64,
+                   "scene.assets": {"34.asset": _clip("lone")}}
+    return FakeExt4Reader({"godzilla_le": {"assets": {"lcd": {"auto_loaded": tree}}}})
+
+
+def _manifest(out):
+    return engine._read_video_manifest(os.path.join(out, "video"))
+
+
+def test_unnamed_clip_is_named_from_its_card_path():
+    assert engine._unnamed_clip_base(_GZ + _LONE + "/scene.assets/34.asset") \
+        == "video_eae3e084_34"
+    assert engine._unnamed_clip_base(_GZ + "60ed7e50abc/scene.assets/2.asset/584.asset") \
+        == "video_60ed7e50_2_584"
+    other = engine._unnamed_clip_base("/videos/attract.mp4")
+    assert other.startswith("video_attract_") and other == \
+        engine._unnamed_clip_base("/videos/attract.mp4")
+
+
+def test_unnamed_clip_name_does_not_move_when_a_build_adds_clips(tmp_path):
+    """The report: video_0655 on the stock card came out as video_0721 off
+    the card a Write made, because the number was its place in the walk."""
+    names = {}
+    for added in (0, 66):
+        out = str(tmp_path / ("x%d" % added))
+        engine.extract_videos(_card(added), out)
+        names[added] = {c: n for n, c in _manifest(out).items()}
+    path = _GZ + _LONE + "/scene.assets/34.asset"
+    assert names[0][path] == names[66][path] == "video_eae3e084_34.mp4"
+    assert len(names[66]) == len(names[0]) + 66
+
+
+def test_a_project_keeps_the_name_it_already_has(tmp_path):
+    """A folder extracted before the fix keeps video_0655: its edits, sidecars
+    and records are filed under that name."""
+    out = str(tmp_path)
+    vid = os.path.join(out, "video")
+    os.makedirs(vid)
+    path = _GZ + _LONE + "/scene.assets/34.asset"
+    with open(os.path.join(vid, "manifest.txt"), "w", encoding="utf-8") as f:
+        f.write("# output\tcard path\tbytes\nvideo_0655.mp4\t%s\t4120\n" % path)
+    _touch(vid, "video_0655.mp4")
+    engine.extract_videos(_card(66), out)
+    assert _manifest(out)["video_0655.mp4"] == path
+    assert os.path.isfile(os.path.join(vid, "video_0655.mp4"))
+    assert not any(n.startswith("video_eae3") for n in os.listdir(vid))
+
+
+def test_a_kept_name_is_never_given_to_another_clip():
+    vids = [("/a/scene.assets/1.asset", None, b"isom"),
+            ("/b/scene.assets/2.asset", None, b"isom")]
+    got = engine._video_names(vids, lambda p: None,
+                              {"/b/scene.assets/2.asset": "video_a_1.mp4"})
+    assert [n for n, _t in got] == ["video_a_1_2.mp4", "video_a_1.mp4"]
+
+
+def test_a_named_clip_ignores_an_old_number():
+    vids = [("/a/scene.assets/1.asset", None, b"isom")]
+    got = engine._video_names(vids, lambda p: "Cowabunga",
+                              {"/a/scene.assets/1.asset": "video_0001.mp4"})
+    assert got == [("Cowabunga.mp4", True)]
+
+
+def test_card_scan_names_the_clip_like_the_extract(tmp_path):
+    clips = engine.scan_video_quality(_card(66))
+    assert "video_eae3e084_34.mp4" in [c.name for c in clips]

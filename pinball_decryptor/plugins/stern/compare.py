@@ -47,6 +47,7 @@ ref that pointed at something unopenable would be worse than none.
 import os
 
 from ...core.image_info import human_size
+from . import multiimage
 from . import sidx as sidx_mod
 from .explorer import CardImage
 from .info import (_IMAGE_EXTS, _game_elf_bytes, _walk_partition,
@@ -105,7 +106,9 @@ def _probe(path):
     p = {"path": path, "files": None, "video_paths": set(),
          "counts": (None, None), "adjust": None, "scores": None,
          "folders": set(), "sidx_name": "", "part": None,
-         "version": None, "edition": None, "name_version": None}
+         "version": None, "edition": None, "name_version": None,
+         "manifest": None, "stale": 0, "mtimes": {},
+         "images": multiimage.images_for_path(path)}
     with CardImage(path) as card:
         parts = [pt for pt in card.partitions() if pt.browsable]
         parts.sort(key=lambda pt: pt.size, reverse=True)
@@ -126,10 +129,13 @@ def _probe(path):
         if found["sidx_node"] is not None:
             p["sidx_name"] = os.path.basename(found["sidx_path"])
             try:
-                p["files"] = sidx_mod.manifest_files(
+                p["manifest"] = sidx_mod.manifest_files(
                     reader.read_file_bytes(found["sidx_node"])) or None
             except Exception:
-                p["files"] = None
+                p["manifest"] = None
+            if p["manifest"]:
+                p["files"], p["stale"], p["mtimes"] = _card_truth(
+                    reader, p["manifest"])
         p["video_paths"] = {v.lstrip("/") for v in found["video_paths"]}
         if found["image_bin"] is not None:
             try:
@@ -140,8 +146,9 @@ def _probe(path):
         fw = _game_elf_bytes(reader, found)
         if fw:
             p["adjust"], p["scores"] = _firmware_tables(fw)
-    if p["files"]:
-        p["folders"] = {f.split("/", 1)[0] for f in p["files"] if "/" in f}
+    if p["manifest"]:
+        p["folders"] = {f.split("/", 1)[0] for f in p["manifest"]
+                        if "/" in f}
     # The card's own update index outranks the filename (info.resolve_version)
     # — a renamed or relabelled card diffs as the build it really is, so the
     # "Version A -> B" row can't be thrown off by what the file is called.
@@ -149,6 +156,97 @@ def _probe(path):
     p["version"], p["edition"], _src, p["name_version"] = \
         resolve_version(path, p["sidx_name"], folder)
     return p
+
+
+def _card_truth(reader, manifest):
+    """``(files, stale, mtimes)`` for one card: what it REALLY holds.
+
+    The card's own ``.sidx`` is not the whole truth (PAD-631).  A card built
+    by another tool can replace a file and leave its manifest record as Stern
+    wrote it: the Heisei Godzilla card swapped 534 videos and still lists
+    every one at its stock size and MD5, so a diff of the two manifests said
+    "Videos: No changes".  So every record is checked against the size the
+    filesystem gives (free: one metadata walk, no file bytes), the way the
+    official-release check does (:func:`stock_prints.card_files`); a file of
+    another size is changed whatever its record says.  *stale* counts those.
+
+    Files on the card that its manifest does not index at all are kept too,
+    so a mod that ADDED one without indexing it still shows; the manifest
+    files themselves and Stern's ``spk`` tree are not game assets.  *mtimes*
+    is each file's modification time, for :func:`_touched_same_size`."""
+    from .stock_prints import _file_nodes, card_files
+    nodes = _file_nodes(reader)
+    files, stale = card_files(reader, manifest, set(manifest), nodes=nodes)
+    for rel, node in nodes.items():
+        if (rel not in files and "/" in rel and not rel.startswith("spk/")
+                and not rel.endswith(".sidx")):
+            files[rel] = (node["size"], "")
+    mtimes = {rel: node.get("mtime") for rel, node in nodes.items()}
+    return files, stale, mtimes
+
+
+#: Bytes read from EACH end of a file by :func:`_sample`.
+SAMPLE_BYTES = 64 << 10
+
+
+def _sample(reader, node):
+    """MD5 of a file's first and last :data:`SAMPLE_BYTES` (the whole file
+    when it is no bigger than both).
+
+    A sample, not the whole file: two mods built from the same stock card
+    carry the same replaced videos at fresh times, and hashing all 534 of
+    them on both cards took 171 s off a spinning disk.  A re-encode that
+    lands on the very same byte count is already rare; one that also keeps
+    the head and the tail (an MP4's ``ftyp``/``moov`` boxes hold every
+    sample's size and offset) is not a case worth minutes per compare."""
+    import hashlib
+    size = node["size"]
+    h = hashlib.md5()
+    if size <= 2 * SAMPLE_BYTES:
+        h.update(reader.read_range(node, 0, size))
+    else:
+        h.update(reader.read_range(node, 0, SAMPLE_BYTES))
+        h.update(reader.read_range(node, size - SAMPLE_BYTES, SAMPLE_BYTES))
+    return h.hexdigest()
+
+
+def _touched_same_size(a, b):
+    """Paths whose bytes differ although size and record agree on both
+    cards — the one replacement a size check cannot see (PAD-631).
+
+    Only asked when the two cards are copies of the SAME base image (most
+    shared files keep the identical modification time): then a file whose
+    time differs was written later, by whatever built the mod, and only
+    those are sampled (:func:`_sample`, in on-disk order).  Two different
+    Stern releases carry different times on every file, but their manifests
+    are Stern's own and already tell every change, so nothing is read
+    there."""
+    from .info import _first_block
+    from .stock_prints import _file_nodes
+    fa, fb, ta, tb = a["files"], b["files"], a["mtimes"], b["mtimes"]
+    common = [k for k in fa if k in fb]
+    if not common or not ta or not tb:
+        return []
+    same_time = sum(1 for k in common if ta.get(k) == tb.get(k))
+    if same_time * 2 < len(common):
+        return []
+    todo = [k for k in common
+            if fa[k] == fb[k] and ta.get(k) != tb.get(k)]
+    if not todo:
+        return []
+    digests = []
+    for side in (a, b):
+        with CardImage(side["path"]) as card:
+            reader = card.reader(side["part"])
+            nodes = _file_nodes(reader)
+            have = sorted((k for k in todo if k in nodes),
+                          key=lambda k: _first_block(reader, nodes[k]))
+            digests.append({k: _sample(reader, nodes[k]) for k in have})
+    da, db = digests
+    changed = sorted(k for k in todo if da.get(k) != db.get(k))
+    for k in changed:
+        fb[k] = (fb[k][0], "sample:" + (db.get(k) or "?"))
+    return changed
 
 
 # ---------------------------------------------------------------------------
@@ -177,20 +275,25 @@ def _scene_dir_of(path, scene_dirs):
 
 
 def _classify(path, scene_dirs, video_paths):
-    """Asset-type bucket for a manifest path.  A video or image inside a
-    scene's folder belongs to the scene (the game treats the folder as one
-    unit), so the scene test outranks the sniff/extension ones."""
+    """Asset-type bucket for a manifest path.
+
+    A video or picture is listed as one wherever it sits, scene folder or not
+    (PAD-631): Godzilla keeps every one of its 658 videos inside a scene's
+    ``scene.assets``, so with the scene test first the Videos section could
+    never list a single one.  The Scenes section still counts them in their
+    folder's changed files (:func:`compare_cards` rolls every changed path up
+    to its scene, not just this bucket's)."""
     base = path.rsplit("/", 1)[-1]
     if path.endswith("/image.bin"):
         return "container"
     if base.startswith("image-sc") and base.endswith(".bin"):
         return "music"
-    if _scene_dir_of(path, scene_dirs) is not None:
-        return "scene"
     if path in video_paths:
         return "video"
     if path.lower().endswith(_IMAGE_EXTS):
         return "image"
+    if _scene_dir_of(path, scene_dirs) is not None:
+        return "scene"
     return "other"
 
 
@@ -488,6 +591,50 @@ def folder_sound_rows(dir_a, dir_b, dig_a, dig_b):
                                folders=True)
 
 
+def _official(side, path):
+    """Is *side*'s file at *path* the one Stern released?  ``None`` when the
+    official-release table has no record of the card's build or the file."""
+    try:
+        from . import stock_prints as sp
+        release = sp.release_for(side["sidx_name"])
+    except Exception:                                     # noqa: BLE001
+        return None
+    want = ((release or {}).get("files") or {}).get(path)
+    got = (side["files"] or {}).get(path)
+    if not want or not got:
+        return None
+    return (got[0] == want[0]
+            and (got[1] or "")[:len(want[1])] == want[1])
+
+
+def _container_differs(a, b, path):
+    """The "Container bytes" row when the two ``image.bin`` digests differ.
+
+    Between two BUILDS that says nothing: Stern repacks and re-keys the
+    container every time.  Between two cards of the SAME build it says a
+    lot (PAD-631): Stern ships one image.bin per build, so one of them has
+    had its sounds changed since — the "Orchestral" Heisei Godzilla card
+    against stock 1.16.0 LE read "says nothing about the sounds inside it".
+    The official-release table, when it knows the build, names which."""
+    same = (a["version"] and a["version"] == b["version"]
+            and (a["edition"] or "") == (b["edition"] or ""))
+    if not same:
+        return ("differ — as they do between ANY two builds: Stern repacks "
+                "and re-keys image.bin every time, so this says nothing "
+                "about the sounds inside it")
+    build = " ".join(x for x in (a["version"], a["edition"]) if x)
+    oa, ob = _official(a, path), _official(b, path)
+    if oa is True and ob is False:
+        who = "image B's sounds were replaced (A's are Stern's)"
+    elif ob is True and oa is False:
+        who = "image A's sounds were replaced (B's are Stern's)"
+    elif oa is False and ob is False:
+        who = "neither card's sounds are Stern's"
+    else:
+        who = "one card's sounds were replaced"
+    return ("differ — both are build %s, which Stern ships with one "
+            "image.bin, so %s; Extract Both lists them" % (build, who))
+
 def _sound_rows(a, b, cont, a_files, b_files, assets_a, assets_b):
     """The Sounds section: what the two cards say about their packed audio,
     and — once both cards have been extracted — the sound-by-sound diff.
@@ -522,10 +669,8 @@ def _sound_rows(a, b, cont, a_files, b_files, assets_a, assets_b):
                                  human_size(size_b) if size_b is not None
                                  else "?"))))
         if cont and cont["modified"]:
-            rows.append(("Container bytes",
-                         "differ — as they do between ANY two builds: Stern "
-                         "repacks and re-keys image.bin every time, so this "
-                         "says nothing about the sounds inside it"))
+            rows.append(("Container bytes", _container_differs(
+                a, b, cont["modified"][0])))
         elif a_files is not None and b_files is not None:
             # Matching digests DO settle it: same container bytes, same
             # packed audio.  (The inequality is the meaningless direction.)
@@ -564,6 +709,18 @@ def compare_cards(path_a, path_b, assets_a=None, assets_b=None):
         ("Image B", "%s — %s" % (os.path.basename(path_b),
                                  human_size(os.path.getsize(path_b)))),
     ]
+    # A multi-boot card holds several games; the report is on its first,
+    # the one every other tab reads and writes (multiimage).  Say which, or
+    # a mod sitting in another of its images reads as "No changes".
+    for tag, side in (("A", a), ("B", b)):
+        imgs = side["images"] or []
+        if len(imgs) > 1:
+            head.append(("Multi-boot (%s)" % tag,
+                         "this card carries %d game images; compared is the "
+                         "first, %s (p%d) — the one the boot menu lists "
+                         "first and the app edits"
+                         % (len(imgs), multiimage.pretty(imgs[0]),
+                            imgs[0].part)))
     if a["version"] or b["version"]:
         av, bv = a["version"] or "?", b["version"] or "?"
         head.append(("Version",
@@ -602,7 +759,19 @@ def compare_cards(path_a, path_b, assets_a=None, assets_b=None):
         buckets = None
     else:
         head.append(_count_delta("Validated files",
-                                 len(a_files), len(b_files)))
+                                 len(a["manifest"]), len(b["manifest"])))
+        for tag, side in (("A", a), ("B", b)):
+            if side["stale"]:
+                head.append((
+                    "Manifest out of date (%s)" % tag,
+                    "%s file(s) on this card are not what its own validation "
+                    "manifest records (it still lists Stern's size and digest "
+                    "for them) — they were compared by what is really on the "
+                    "card" % _num(side["stale"])))
+        try:
+            _touched_same_size(a, b)
+        except Exception:                                 # noqa: BLE001
+            pass                # the size + record diff below still stands
         scene_dirs = {p[:-len("/scene.radium")]
                       for p in list(a_files) + list(b_files)
                       if p.endswith("/scene.radium")}
@@ -641,12 +810,13 @@ def compare_cards(path_a, path_b, assets_a=None, assets_b=None):
                   if p.endswith("/scene.radium")}
         b_dirs = {p[:-len("/scene.radium")] for p in b_files
                   if p.endswith("/scene.radium")}
+        # Every changed path counts toward its scene folder — the videos and
+        # pictures listed in their own sections too (see _classify).
         changed_by_dir = {}
-        for st in ("added", "deleted", "modified"):
-            for p in buckets.get("scene", {}).get(st, ()):
-                d = _scene_dir_of(p, scene_dirs)
-                if d is not None:
-                    changed_by_dir.setdefault(d, []).append(p)
+        for p in added + deleted + modified:
+            d = _scene_dir_of(p, scene_dirs)
+            if d is not None:
+                changed_by_dir.setdefault(d, []).append(p)
         sc_rows = []
         sc_rows += _listed(
             "Added", sorted(b_dirs - a_dirs),

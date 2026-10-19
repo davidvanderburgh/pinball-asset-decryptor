@@ -150,7 +150,7 @@ export function stmtWords(b, ch = {}) {
     case "set_time": return `Set the clock to ${valWords(b.seconds)} seconds`;
     case "multiball": return `Multiball of ${b.balls} balls, ball save ${b.save || 0} s`;
     case "game_wizard": return `${b.how === "start" ? "Start" : "Light"} the game's ${b.name || "mini-wizard"}`;
-    case "hold": return `Hold the ${b.what || "magnet"} for ${msWords(b.ms)}`;
+    case "hold": return `Hold the ${b.what || "magnet"} for ${msWords(b.ms)}${b.clock === "wait" ? ", its clock waiting until it lets go" : ""}`;
     case "scoop_hold": return `Hold ${b.which === "every" ? "every ball" : "the next ball"} in the scoop for ${msWords(b.ms)}`;
     case "let_go": return `Let go of ${b.what === "*" ? "everything it holds" : b.what || "?"}`;
     case "shield": return `Turn the shield targets ${({ toward: "toward the player", away: "away", leave: "where they are" })[b.where] || b.where || "?"}`;

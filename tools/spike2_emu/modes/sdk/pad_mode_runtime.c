@@ -4504,7 +4504,19 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  *     where a static initializer builds it once and nothing gets it), `value <name>_ctl` (where it keeps the id of
  *     the process controlling it), and the take/give calls (`site <name>_take` / `<name>_give`, or the
  *     port's `coil_take` / `coil_give`); `value <name>_devoff` checks the object's device against the
- *     record's. The process takes it, sends, and gives it back (the give's own update switches it off). */
+ *     record's. The process takes it, sends, and gives it back (the give's own update switches it off).
+ *   - PAD-621: a post the game keeps up by a countdown of its own (James Bond LE/Pro 1.06's right return up post, a
+ *     Device-framework BottomLaneUpPost: `+0x20` ticks left, `+0x24` a raise pending, which most switch hits set and
+ *     its tick turns into 1875 ticks up) is held this way too, its object taken (`value <name>_ctl 16`, the
+ *     framework's controlling process; take 0x79100, give 0x791b4 on the LE): while a process controls it the
+ *     device's own update leaves it alone. Before control is given back the runtime clears that countdown and
+ *     the pending raise (`value <name>_left`, `value <name>_pending`), so the give's update LOWERS it - else it
+ *     would raise it again for the rest of a countdown its tick armed meanwhile.
+ *   - PAD-621: `value <name>_max_ms`: the game's own longest hold there, longer than the runtime's 5 s for one command
+ *     (the post: 14 s, as its own mini-wizards hold the ball through their start clip; its own command on it is 255 for
+ *     64 ms then its hold power for 20 s); the hold part of the one command runs to the time asked, at most that.
+ *   - PAD-621: `value <name>_no_hold_flag`: a game flag that, set, refuses every hold of it (James Bond's
+ *     FG_MODES_DO_NOT_HOLD_BALL, 166). */
 #define COIL_REC_SIZE  0x68u   /* the framework's coil record, the same on every newest build (coilrec.py) */
 #define COIL_REC_ID    0x14u   /* u32: the latest request's id; 0 when its command has run out */
 #define COIL_REC_LINK  0x10u   /* u32: 0x60000 = a coil linked to another (a flipper's pair): never held */
@@ -4537,6 +4549,7 @@ struct held_coil {
 };
 static struct held_coil coils[COILS_MAX];
 static int n_coils;
+static void coil_clear_countdown(const struct held_coil *c);   /* PAD-621: below */
 
 static int proc_alive(unsigned id)
 {
@@ -4714,6 +4727,7 @@ static void magnet_proc(struct held_coil *c)
     }
     if (c->release && c->why) end = c->why;
     if (has_obj) {
+        coil_clear_countdown(c);            /* PAD-621: its own update lowers it, never raises it again */
         ((unsigned (*)(unsigned, unsigned))(unsigned long)coil_call(c, "give"))(c->obj, 1);
         say("%s: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
             "game's coil update switches it off", c->name, end, pm_ms() - sent, (long)(c->until - pm_ms()));
@@ -4829,6 +4843,45 @@ static int coil_device_ok(struct held_coil *c)
     return 1;
 }
 
+/* PAD-621: `value <name>_no_hold_flag`: the game's own "no mode holds the ball now", set - why not; else 0 */
+static const char *coil_no_hold(const struct held_coil *c)
+{
+    static char why[64];
+    char key[40];
+    long id;
+    pm_snprintf(key, sizeof key, "%s_no_hold_flag", c->name);
+    if ((id = pm_port_value(key, 0)) <= 0 || game_flag((unsigned)id) != 1) return 0;
+    pm_snprintf(why, sizeof why, "the game says no mode holds the ball now (its flag %ld)", id);
+    return why;
+}
+
+/* PAD-621: `value <name>_max_ms` above MAGNET_MAX_MS - the game's own longest hold there: the one command's hold part
+ * runs to the time asked (magnet_plan stopped it at MAGNET_MAX_MS), at most that */
+static void long_hold(const struct held_coil *c, unsigned ms, struct magnet_cmd *cmd)
+{
+    char key[40];
+    unsigned top;
+    pm_snprintf(key, sizeof key, "%s_max_ms", c->name);
+    top = (unsigned)pm_port_value(key, 0);
+    if (top <= MAGNET_MAX_MS || ms <= MAGNET_MAX_MS) return;
+    if (ms > top) ms = top;
+    if (ms > cmd->draw_ms) cmd->hold_ms = ms - cmd->draw_ms;
+}
+
+/* PAD-621: before control of a post the game keeps up by its own countdown goes back - the countdown and its pending
+ * raise cleared, so the give's update lowers it (`value <name>_left` / `<name>_pending`: their offsets) */
+static void coil_clear_countdown(const struct held_coil *c)
+{
+    char key[40];
+    long off;
+    pm_snprintf(key, sizeof key, "%s_left", c->name);
+    if ((off = pm_port_value(key, 0)) > 0 && maps_has(c->obj + (unsigned)off, 4, MAP_R))
+        *(volatile unsigned *)(unsigned long)(c->obj + (unsigned)off) = 0;
+    pm_snprintf(key, sizeof key, "%s_pending", c->name);
+    if ((off = pm_port_value(key, 0)) > 0 && maps_has(c->obj + (unsigned)off, 1, MAP_R))
+        *(volatile unsigned char *)(unsigned long)(c->obj + (unsigned)off) = 0;
+}
+
 int pm_coil_hold(const char *name, unsigned ms)
 {
     struct held_coil *c = coil_named(name);
@@ -4840,9 +4893,12 @@ int pm_coil_hold(const char *name, unsigned ms)
     why = magnet_refusal(pm_running(), pm_in_game(), coil_disabled(c), coil_game_busy(c), c->until, c->ended, now,
                          c->starts);
     if (!why && proc_alive(c->id)) why = "the last hold's process is still ending";
+    if (!why) why = coil_no_hold(c);                     /* PAD-621: the game says no mode holds the ball now */
     if (c->route && c->cap_ms && ms > c->cap_ms) ms = c->cap_ms;   /* PAD-420: never longer than the game's own */
-    if (!why && c->route)
+    if (!why && c->route) {
         magnet_plan(ms, coil_drive(c, 0), coil_drive(c, 1), coil_drive(c, 2), &cmd, &why);
+        long_hold(c, ms, &cmd);                          /* PAD-621: a post the game holds longer itself */
+    }
     else if (!why)
         magnet_plan(ms, coil_virtual(c->obj, 29) & 0xffu, coil_virtual(c->obj, 30) & 0xffffu,
                     coil_virtual(c->obj, 31) & 0xffu, &cmd, &why);

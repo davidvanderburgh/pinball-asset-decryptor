@@ -1555,6 +1555,8 @@ def test_modes_tab_premium_1_16_project_offers_godzillas_names(tmp_path):
             assert "not yet seen a mode of yours hold the ball on it" in st["reasons"].pop("magnet")
         if "godzilla_le-1.16" not in MP.WIZARDS_PROVEN:     # PAD-436 / PAD-473: greyed until emulator-proven
             assert "own mini-wizards" in st["reasons"].pop("wizard")
+        # PAD-615: Godzilla's Player Challenge mode names no challenges a mode may take the place of
+        assert "has no list of challenges" in st["reasons"].pop("challenge")
         assert st["reasons"] == {}, st["reasons"]
         assert not st["dis"]["lights"]
         spec = MP.load(str(project / "modes" / "kaiju_rush" / "mode.json"))

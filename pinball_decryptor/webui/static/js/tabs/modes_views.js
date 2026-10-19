@@ -69,6 +69,7 @@ export function hatWords(h = {}, ch = {}) {
     case "seconds_left": return `When ${h.seconds} seconds are left`;
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
     case "timer_done": return `When timer ${h.timer} runs out`;
+    case "challenge": return `When the player picks the challenge ${h.challenge || "?"}`;   // PAD-615
     default: return h.kind || "";
   }
 }
@@ -218,6 +219,7 @@ export function storyOf(prog) {
     else if (h.kind === "mode_start") out.start.push(si);
     else if (h.kind === "mode_end") out.end.push(si);
     else if (h.kind === "ball_end") out.drain.push(si);
+    else if (h.kind === "challenge") out.waiting.push(si);   // PAD-615: the pick comes before the mode starts
     else out.running.push(si);                       // every, seconds left, a timer: they work while it runs
   });
   return out;

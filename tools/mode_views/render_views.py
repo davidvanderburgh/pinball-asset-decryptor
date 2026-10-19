@@ -90,6 +90,8 @@ def state_of(h):
         return "drain"
     if k in ("every", "seconds_left", "timer_done"):
         return "running"
+    if k == "challenge":
+        return "waiting"
     return {"idle": "waiting", "running": "running"}.get(w, "both")
 
 

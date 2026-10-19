@@ -163,6 +163,8 @@ def hat(h):
         return "When the game: %s%s" % (h.get("event") or "?", when)
     if k == "timer_done":
         return "When %s runs out" % (h.get("timer") or "a timer")
+    if k == "challenge":
+        return "When the player picks the challenge %s" % (h.get("challenge") or "?")
     return "(%s)" % k
 
 

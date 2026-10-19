@@ -56,7 +56,8 @@ EVERY_COND = [{"k": "cmp", "op": o, "a": {"k": "secs_left"}, "b": num(3)} for o 
 EVERY_HAT = [{"kind": "mode_start"}, {"kind": "mode_end"}, {"kind": "shot", "shot": "Left ramp", "when": "running"},
              {"kind": "any_shot", "when": "idle"}, {"kind": "every", "seconds": 5}, {"kind": "seconds_left", "seconds": 10},
              {"kind": "ball_end"}, {"kind": "event", "event": "ball_saved", "when": "any"},
-             {"kind": "timer_done", "timer": "window"}]
+             {"kind": "timer_done", "timer": "window"},
+             {"kind": "challenge", "challenge": "Ahoy Mr. Bond"}]                                  # PAD-615
 
 
 def every_program():
@@ -72,6 +73,7 @@ def test_every_block_hat_and_value_is_covered():
     ops = {b["op"] for b in EVERY_BLOCK}
     assert ops == set(BM.STATEMENTS), "a block the views do not know: %s" % (set(BM.STATEMENTS) ^ ops)
     assert {h["kind"] for h in EVERY_HAT} == set(BM.HATS)
+    assert [D.hat(h) for h in EVERY_HAT if D.hat(h).startswith("(")] == []     # every hat has words (PAD-615)
     assert {v["k"] for v in EVERY_VALUE} == set(BM.NUM_KINDS)
     assert {c["k"] for c in EVERY_COND} == set(BM.BOOL_KINDS)
     assert set(D.SAY) | {"if"} == set(BM.STATEMENTS)

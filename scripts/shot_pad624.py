@@ -11,6 +11,8 @@ same files. Writes, under the same names before and after:
 - video_venom.png       Venom Pro 1.07, CarnageMultiball_CarnageJackpot selected
 - video_card_gone.png   the X-Men project with its card moved away
 - video_no_modes.png    Aerosmith 1.16 (its rules are plain C), a clip selected
+- video_batman.png      Batman 66 1.14 (its clips are in scenes holding several videos, not banks),
+                        Lock.BM66_S1E003_Sub_03 selected
 
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
@@ -39,11 +41,17 @@ PROJECTS = {
                "LasherBattle_Advance_1", "ToxinTeamUp_Award_Captain", "Bloodlust_Award_BlueShot",
                "RiotBattle_Advance_1", "HostHurryUp_Award_AgentVenom")),
     "aerosmith": ("aerosmith-1_16_0.Release.8G.sdcard.raw", None),
+    # named as Extract names them (no video bank holds them): see _extract_rows
+    "batman": ("batman-1_14_0.Release.8G.sdcard.raw",
+               ("Lock.BM66_S1E003_Sub_03", "Lock.BM66_S1E003_Sub_01", "ATTRACT_LOOP1",
+                "KingTut", "S1E001_00-16-28-21")),
 }
 SHOTS = (("video_xmen", "xmen", "Stopping_A_Juggernaut_Award2.mp4", False),
          ("video_venom", "venom", "CarnageMultiball_CarnageJackpot.mp4", False),
          ("video_card_gone", "xmen", "Stopping_A_Juggernaut_Award2.mp4", True),
-         ("video_no_modes", "aerosmith", None, False))
+         ("video_no_modes", "aerosmith", None, False),
+         ("video_batman", "batman", "Lock_BM66_S1E003_Sub_03.mp4", False))
+EXTRACT_NAMED = ("batman",)
 
 
 def _rows(card):
@@ -76,6 +84,25 @@ def _rows(card):
     return out, part
 
 
+def _extract_rows(card):
+    """``{clip name: card path}`` of every clip on the card, named as Extract names them
+    (engine.find_card_videos + video_titler), and the partition."""
+    sys.path.insert(0, os.path.dirname(HERE))
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern.mode_tryit import card_title
+    _g, _v, part = card_title(card)
+    out = {}
+    with open(card, "rb") as f:
+        reader, _fw, _img = E._locate(f, E._linux_partitions(card))
+        vids, radiums = E.find_card_videos(reader)
+        title_for = E.video_titler(reader, radiums)
+        for path, _node, _brand in vids:
+            t = title_for(path)
+            if t:
+                out.setdefault(t, path)
+    return out, part
+
+
 def _source(key):
     """The project's clips, copied off its card once (the card is read only)."""
     dst = os.path.join(SOURCE, key)
@@ -83,7 +110,7 @@ def _source(key):
         return dst
     cardname, clips = PROJECTS[key]
     card = os.path.join(CARDS, cardname)
-    rows, part = _rows(card)
+    rows, part = (_extract_rows if key in EXTRACT_NAMED else _rows)(card)
     if clips is None:
         clips = sorted(rows)[:8]
     from pinball_decryptor.plugins.stern.explorer import CardImage
@@ -91,9 +118,10 @@ def _source(key):
     lines = ["# output\tcard path\tbytes"]
     with CardImage(card) as img:
         for c in clips:
-            out = os.path.join(dst, "video", c + ".mp4")
+            fname = c.replace(".", "_") + ".mp4"            # as engine._sanitize_title does
+            out = os.path.join(dst, "video", fname)
             img.extract_file(part, rows[c], out)
-            lines.append("%s.mp4\t%s\t%d" % (c, rows[c], os.path.getsize(out)))
+            lines.append("%s\t%s\t%d" % (fname, rows[c], os.path.getsize(out)))
     with open(os.path.join(dst, "video", "manifest.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return dst

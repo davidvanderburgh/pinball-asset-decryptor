@@ -156,6 +156,7 @@ static struct {
     unsigned mball_one_ticks;         /* ticks with one ball (or none) in play since */
     unsigned add_balls_left;
     int mball_wait;                   /* PAD-228: `multiball_on` - the balls are not served until its shot */
+    int by_challenge;                 /* PAD-619: started by a challenge pick - the challenge game is the mode's */
     unsigned long shield_due;         /* PAD-392: when the shield platform turns (0 = turned, or not asked) */
     unsigned long building_due;       /* PAD-589: when the building moves as it starts (0 = moved, or not asked) */
 } run;
@@ -2295,6 +2296,7 @@ static void mode_start(struct slot *M, const char *why)
         if (!pm_block_game_modes(1)) pm_log("%s: this game's port cannot hold its modes off - it gives way to them", cfg.name);
     }
     run.mball_on = run.mball_wait = 0;
+    run.by_challenge = why[0] == 'c' && why[1] == 'h' && why[2] == 'a' && why[3] == 'l';   /* "challenge pick" */
     if (cfg.mball_balls && cfg.mball_on_bits) {
         run.mball_wait = 1;                  /* PAD-228: served on its shot, while the mode runs */
     } else if (cfg.mball_balls) {            /* item 167: the game serves the balls, or the mode does not start */
@@ -2989,7 +2991,9 @@ static void on_tick(void)
         mode_end("left the game, or the player changed");
         return;
     }
-    if (cfg.game_modes != GM_STACK && pm_aside()) {   /* PAD-363: one of the game's modes began anyway */
+    /* PAD-363: one of the game's modes began anyway - PAD-619: not in a challenge game the mode was picked for (Avengers
+     * runs a mode of its own at every ball's start; the pick started past it, and the game's are blocked as they can be) */
+    if (cfg.game_modes != GM_STACK && !run.by_challenge && pm_aside()) {
         mode_end("the game's own mode began");
         return;
     }

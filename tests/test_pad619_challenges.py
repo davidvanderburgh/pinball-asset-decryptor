@@ -268,3 +268,10 @@ def test_elvira_keeps_its_menu_count_in_a_register_and_the_frame_hook_saves_ever
     built = src[src.index("static void challenge_menu_built(unsigned *r)"):]
     built = built[:built.index("\n}\n")]
     assert "r + (creg >= 0 ? 14 : 6)" in built and "&r[creg]" in built
+
+
+def test_a_mode_picked_as_the_challenge_does_not_give_way_to_the_games_modes():
+    # Avengers 1.10 / Led Zeppelin: the pick started past the game's ball-start mode, which then ended ours at once
+    src = (SDK / "mode_file.c").read_text(encoding="utf-8")
+    assert "run.by_challenge = why[0] == 'c' && why[1] == 'h'" in src
+    assert "cfg.game_modes != GM_STACK && !run.by_challenge && pm_aside()" in src

@@ -2265,6 +2265,8 @@ static void hand_off(struct slot *M, const char *why)
            "its way" : "lit for its start shot", p);
 }
 
+static int challenge_force;                /* PAD-619: mode_start past the game's modes (the pick's grace ran out) */
+
 static void mode_start(struct slot *M, const char *why)
 {
     int k;
@@ -2279,7 +2281,7 @@ static void mode_start(struct slot *M, const char *why)
     }
     if (!starts_allowed(M, why)) return;     /* item 139: how often it can start */
     if (!stack_allows(M, why)) return;       /* item 140: the game's own modes */
-    if (cfg.game_modes != GM_STACK && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) {   /* PAD-363 */
+    if (cfg.game_modes != GM_STACK && !challenge_force && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) { /* PAD-363 */
         pm_log("%s not started (%s): %s is running - its trigger count is kept", cfg.name, why,
                pm_stock_mode_what((unsigned)k));
         return;
@@ -2537,6 +2539,8 @@ static unsigned challenge_wait;             /* mode file slot + 1 picked but not
 static unsigned challenge_wait_player;
 
 static int challenge_said_wait;            /* PAD-619: the wait for a game's mode was logged */
+static unsigned long challenge_wait_ms;    /* PAD-619: when the pick was made */
+#define CHALLENGE_GRACE_MS 3000            /* how long a pick waits for a game's mode to end before starting anyway */
 
 static void challenge_tick(void)
 {
@@ -2550,17 +2554,24 @@ static void challenge_tick(void)
         return;
     }
     /* PAD-619: a game's mode running as the ball starts (Avengers LE 1.10: one at every ball's start) - the pick
-     * waits for it to end, as long as the ball lasts (challenge_ball_end lapses it), rather than giving up */
+     * waits up to CHALLENGE_GRACE_MS for it to end, then starts anyway: the player chose this challenge for the whole
+     * game, and in a challenge game some builds' own checks say a mode runs throughout (Godzilla's "any" query). */
     if (cfg.valid && !cfg.wizard[0] && cfg.game_modes != GM_STACK && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) {
-        if (!challenge_said_wait) {
-            challenge_said_wait = 1;
-            pm_log("%s: the challenge pick waits - %s is running", cfg.name, pm_stock_mode_what((unsigned)k));
+        if (pm_ms() - challenge_wait_ms < CHALLENGE_GRACE_MS) {
+            if (!challenge_said_wait) {
+                challenge_said_wait = 1;
+                pm_log("%s: the challenge pick waits - %s is running", cfg.name, pm_stock_mode_what((unsigned)k));
+            }
+            return;
         }
-        return;
+        pm_log("%s: %s still running after %u s - the challenge pick starts anyway", cfg.name,
+               pm_stock_mode_what((unsigned)k), CHALLENGE_GRACE_MS / 1000);
+        challenge_force = 1;
     }
     challenge_wait = 0;
     challenge_said_wait = 0;
     mode_start(M, "challenge pick");
+    challenge_force = 0;
     if (!running(M))
         pm_log("%s: picked as the challenge but not started (its starts, cooldown or the stack said no) - the "
                "challenge game goes on with nothing of its own or the game's", cfg.name);
@@ -2586,6 +2597,7 @@ static int challenge_pick(unsigned challenge)
         }
         challenge_wait = k + 1;
         challenge_wait_player = pm_player();
+        challenge_wait_ms = pm_ms();
         pm_log("%s: challenge %u (%s) picked - it starts now, in place of the game's own challenge", cfg.name,
                challenge, pm_challenge_name(challenge) ? pm_challenge_name(challenge) : "?");
         return 1;

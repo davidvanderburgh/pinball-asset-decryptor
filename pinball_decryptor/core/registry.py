@@ -682,6 +682,10 @@ class Manufacturer(ABC):
         File/Detection sections; whatever a plugin returns is appended.  Must
         stay read-only and cheap — a slow probe holds the whole tab on
         "Reading image…".  The default contributes nothing.
+
+        A plugin may also take a ``partial`` keyword: a callable it calls
+        with its sections so far when part of the probe is slow, so the page
+        shows them while the rest is read (Stern's video count, PAD-626).
         """
         return []
 

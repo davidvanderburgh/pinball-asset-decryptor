@@ -83,7 +83,7 @@ def _detection_section(mfr, game):
     return ("Detection", rows)
 
 
-def collect(mfr, path, assets_dir=None):
+def collect(mfr, path, assets_dir=None, partial=None):
     """All known sections for *path* under manufacturer *mfr*.
 
     Returns ``[(section_title, [(name, value), ...]), ...]``.  Never raises
@@ -97,6 +97,10 @@ def collect(mfr, path, assets_dir=None):
     *path* may also be a raw-device path — the card sitting in a reader
     (PAD-191).  Everything below is the same probe; only the first section
     differs, because a device has no file to stat.
+
+    *partial*, when given, is called with the report so far whenever the
+    plugin has an early one (see ``Manufacturer.image_info``), before the
+    full report is returned (PAD-626).
     """
     from .rawdevice import is_device_path
 
@@ -117,13 +121,32 @@ def collect(mfr, path, assets_dir=None):
         # Platform details only for a file the detector actually claims — a
         # foreign image would otherwise get one plugin's headers over noise.
         if game is not None:
+            kw = {}
+            if partial is not None and _takes_partial(mfr.image_info):
+                head = list(sections)
+
+                def early(more):
+                    try:
+                        partial(head + list(more or []))
+                    except Exception:                   # noqa: BLE001
+                        pass                # the full report still comes
+                kw["partial"] = early
             try:
                 sections.extend(
-                    mfr.image_info(path, assets_dir=assets_dir) or [])
+                    mfr.image_info(path, assets_dir=assets_dir, **kw) or [])
             except Exception as e:
                 sections.append(
                     ("Details", [("Error", "Could not read: %s" % e)]))
     return sections
+
+
+def _takes_partial(fn):
+    """Does a plugin's ``image_info`` take the ``partial`` keyword?"""
+    import inspect
+    try:
+        return "partial" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def group_rows(rows):

@@ -305,6 +305,9 @@ HELP_CONTENT = {
          "| Type: Callouts | Speech (needs Auto-name call-outs to have run) |\n"
          "| Show: Changed | Slots you replaced or that differ from the extract |\n"
          "| Show: Unchanged | Only what you haven't touched yet |\n\n"
+         "On Stern games the **Requests** column counts the game code's sound "
+         "requests that play each sound (hover it for their numbers and Sound Test "
+         "names); **None** marks a sound no request plays.\n\n"
          "**Export CSV** saves the whole table (every slot, not just the filtered "
          "view) for a spreadsheet."),
         ("Where is this on the card?",

@@ -998,6 +998,21 @@ class SternManufacturer(Manufacturer):
         return {"why": why, "slots": slots, "max": MAX_MODES,
                 "turns_why": twhy, "turn_slots": tslots}
 
+    def sound_request_uses(self, assets_dir, rels):
+        # PAD-635: Extract's sound_requests.tsv, for the decoded idx sounds;
+        # a music bank's song (no idx) is left out, not called unplayed
+        from .clip_sounds import _IDX_RE, sound_uses
+        uses = sound_uses(assets_dir)
+        if uses is None:
+            return None
+        out = {}
+        for rel in rels:
+            d, _s, name = rel.rpartition("/")
+            m = _IDX_RE.search(name) if d == "audio" else None
+            if m:
+                out[rel] = list(uses.get(int(m.group(1)), ()))
+        return out
+
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games
         # partition, which neither a Whitestar ROM zip nor a Spike 1 card has.

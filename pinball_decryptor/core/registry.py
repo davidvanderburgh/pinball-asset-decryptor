@@ -999,6 +999,14 @@ class Manufacturer(ABC):
         off the UI thread: it may open the project's card image."""
         return None
 
+    def sound_request_uses(self, assets_dir, rels):
+        """Which of the game code's sound requests play each Replace-Audio
+        slot (PAD-635): ``{rel: [(request number, name), ...]}``, ``[]`` for a
+        slot no request plays, the slot left out when this plugin cannot say.
+        ``None`` (the default) when the project has no such map at all, and the
+        tab shows no Requests column. Called off the UI thread."""
+        return None
+
     def video_pins_byte_size(self, assets_dir=None) -> bool:
         """Whether this plugin's Write may hold a replacement clip to the
         original's exact byte length.

@@ -378,9 +378,10 @@ def test_the_request_sidecar_round_trips_and_names_the_projects_files(tmp_path):
     lists = [[3], [4, 5], []]
     CS.write_requests(str(tmp_path / CS.REQUESTS_TSV), lists, {0: [12], 1: [13, 14]},
                       {1: "SE FX ROAR"})
-    assert CS.read_requests(str(tmp_path)) == {0: {"idx": [12], "name": ""},
-                                               1: {"idx": [13, 14], "name": "SE FX ROAR"},
-                                               2: {"idx": [], "name": ""}}
+    assert CS.read_requests(str(tmp_path)) == {0: {"idx": [12], "name": "", "also": None},
+                                               1: {"idx": [13, 14], "name": "SE FX ROAR",
+                                                   "also": None},
+                                               2: {"idx": [], "name": "", "also": None}}
     audio = tmp_path / "audio"
     audio.mkdir()
     for n in ("idx0012.wav", "idx0013 - SE FX ROAR.wav", "00m01s200 - idx0014.wav", "notes.txt"):
@@ -394,7 +395,7 @@ def test_requests_resolve_to_the_records_their_sound_ids_name(monkeypatch):
     from pinball_decryptor.plugins.stern.spike2 import sfx_names as SN
     monkeypatch.setattr(SN, "_find_resolver", lambda emu, fw=None: (0x1000, 0x2000))
     monkeypatch.setattr(SN, "_try_resolve", lambda emu, addr, out, sid: b"d%d" % sid)
-    monkeypatch.setattr(SN, "_primary_idx", lambda desc, key0: {b"d7": 70, b"d8": 80}.get(desc))
+    monkeypatch.setattr(SN, "_part_idxs", lambda desc, key0: {b"d7": [70], b"d8": [80]}.get(desc, []))
     params = [{"idx": 70, "key0": 1}]
     assert CS.resolve_requests(None, params, [[7], [8, 7, 9], [9]]) == {0: [70], 1: [80, 70]}
     assert CS.resolve_requests(None, [{"idx": 1}], [[7]]) == {}

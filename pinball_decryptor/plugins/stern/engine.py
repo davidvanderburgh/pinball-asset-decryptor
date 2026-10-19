@@ -102,7 +102,7 @@ _CACHE_KINDS = (
     (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
     (_REV_TAG + ".sfxnames4.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
     (_REV_TAG + ".sites1.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
-    (_REV_TAG + ".requests1.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
+    (_REV_TAG + ".requests2.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
 )
 
 
@@ -2479,19 +2479,21 @@ def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
 
 
 def _requests_cache_path(fp):
-    """Sibling of the params cache holding ``{request: [idx, ...]}``
+    """Sibling of the params cache holding ``{request: [[idx, ...], [also, ...]]}``
     (:func:`_write_sound_requests`). Carries the derive revision for the same
-    reason the SFX-name map does: the idx it names are the params' records."""
+    reason the SFX-name map does: the idx it names are the params' records.
+    Version 2 added the later parts (PAD-635); a version-1 file is pruned."""
     return os.path.join(_params_cache_dir(),
-                        fp[:32] + _REV_TAG + ".requests1.json")
+                        fp[:32] + _REV_TAG + ".requests2.json")
 
 
 def _write_sound_requests(emu, game_real_path, image_path, params, output_dir,
                           log):
     """Write ``sound_requests.tsv`` at the assets root: every sound REQUEST the
-    game code can ask for, the ``idx`` records its sound ids resolve to, and
-    its Sound Test name (:mod:`.clip_sounds`). The Video tab reads it to name
-    the sound files a clip's code plays.
+    game code can ask for, the ``idx`` records its sound ids resolve to, the
+    records it plays as later parts, and its Sound Test name
+    (:mod:`.clip_sounds`). The Video tab reads it to name the sound files a
+    clip's code plays, the Audio tab to show which requests play each sound.
 
     Resolved through the firmware's own ``get_asset_descriptor`` while *emu*
     is still booted (the Sound Test names' chain); cached per card next to the
@@ -2513,21 +2515,26 @@ def _write_sound_requests(emu, game_real_path, image_path, params, output_dir,
             return 0
         cache = _requests_cache_path(_fingerprint(game_real_path, image_path))
         idx_of = None
+        also = {}
         if os.path.exists(cache):
             try:
                 with open(cache, encoding="utf-8") as f:
-                    idx_of = {int(k): v for k, v in json.load(f).items()}
+                    got = json.load(f)
+                idx_of = {int(k): v[0] for k, v in got.items() if v[0]}
+                also = {int(k): v[1] for k, v in got.items() if v[1]}
             except Exception:
-                idx_of = None
+                idx_of, also = None, {}
         if idx_of is None:
-            idx_of = _cs.resolve_requests(emu, params, lists, fw)
+            idx_of = _cs.resolve_requests(emu, params, lists, fw, also=also)
             try:
                 with open(cache, "w", encoding="utf-8") as f:
-                    json.dump({str(k): v for k, v in idx_of.items()}, f)
+                    json.dump({str(k): [idx_of.get(k, []), also.get(k, [])]
+                               for k in set(idx_of) | set(also)}, f)
             except Exception:
                 pass
         _cs.write_requests(os.path.join(output_dir, _cs.REQUESTS_TSV), lists,
-                           idx_of, _cs.menu_names(fw, lists))
+                           idx_of, _cs.menu_names(fw, lists),
+                           also=also if idx_of else None)
         if log:
             log("Mapped %d of the game's %d sound requests to their sounds (%s)."
                 % (len(idx_of), count, _cs.REQUESTS_TSV), "info")

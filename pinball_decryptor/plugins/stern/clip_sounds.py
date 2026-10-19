@@ -107,7 +107,7 @@ def request_table(raw, fragments):
     needs to tell the table from its look-alikes. The registry VA is where the build's
     ``{data_va, count, 20}`` triple for the table sits (None when it is not found)."""
     from .spike2.elf import parse_elf
-    from .spike2.sound_requests import locate_sound_requests
+    from .spike2.sound_requests import LIST_MAX, locate_sound_requests
     count, table = locate_sound_requests(raw, fragments)
     if not count:
         return 0, [], None, None
@@ -134,7 +134,7 @@ def request_table(raw, fragments):
             o = va2off(w) if w else None
             if o is None or o < end:
                 continue
-            for i in range(256):
+            for i in range(LIST_MAX):
                 if o + 4 * i + 4 > len(raw):
                     break
                 s = struct.unpack_from("<I", raw, o + 4 * i)[0]
@@ -862,12 +862,17 @@ def analyse(elf, names, fragments, game="", version="", refs=None, ctx=None):
 
 
 # ---- a request's sounds ------------------------------------------------------------------------
-def resolve_requests(emu, params, lists, fw=None):
+def resolve_requests(emu, params, lists, fw=None, also=None):
     """``{request: [idx, ...]}``: the master-directory records (Extract's ``idxNNNN.wav``) each
     request's sound ids resolve to, through the firmware's own ``get_asset_descriptor`` on the
     booted codec emulator *emu* (the chain :mod:`.spike2.sfx_names` names the Sound Test's
     sounds by). *params* is ``derive_params``' (rows carry ``key0``). A sound id of another
-    category's bank (a licensed song) names no cat-0 record and is left out."""
+    category's bank (a licensed song) names no cat-0 record and is left out.
+
+    Each sound id counts by its descriptor's primary record. A dict *also* is filled with
+    ``{request: [idx, ...]}`` of the records the request plays as a LATER part of a multi-part
+    descriptor (:func:`.spike2.sfx_names._part_idxs`), which the Audio tab needs to tell a
+    sound the game never asks for (PAD-635)."""
     from .spike2 import sfx_names as SN
     key0 = {p["key0"]: p["idx"] for p in params if p.get("key0") is not None}
     if not key0:
@@ -877,50 +882,88 @@ def resolve_requests(emu, params, lists, fw=None):
         return {}
     by_sid, out = {}, {}
     for req, sids in enumerate(lists):
-        got = []
+        got, more = [], []
         for sid in sids:
             if sid not in by_sid:
                 desc = SN._try_resolve(emu, resolver, buf, sid)
-                by_sid[sid] = SN._primary_idx(desc, key0) if desc else None
-            i = by_sid[sid]
-            if i is not None and i not in got:
-                got.append(i)
+                by_sid[sid] = SN._part_idxs(desc, key0) if desc else []
+            parts = by_sid[sid]
+            if parts and parts[0] not in got:
+                got.append(parts[0])
+            more.extend(i for i in parts[1:] if i not in more)
         if got:
             out[req] = got
+        more = [i for i in more if i not in got]
+        if more and also is not None:
+            also[req] = more
     return out
 
 
-def write_requests(path, lists, idx_of, names):
-    """Write :data:`REQUESTS_TSV`: one row per request, ``request idx sids name``."""
+def write_requests(path, lists, idx_of, names, also=None):
+    """Write :data:`REQUESTS_TSV`: one row per request, ``request idx sids name also``
+    (*also*: :func:`resolve_requests`' later parts; ``None`` writes the column-less file of an
+    extract that did not resolve them)."""
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write("# The game's sound requests (what its code asks for by number) and the sounds\n"
                 "# each plays: idx = audio/idxNNNN.wav, sids = its sound ids, name = its Sound\n"
-                "# Test name. Written by Extract; the Video tab reads it.\n")
-        f.write("request\tidx\tsids\tname\n")
+                "# Test name, also = the sounds it plays as later parts of a multi-part sound.\n"
+                "# Written by Extract; the Video and Audio tabs read it.\n")
+        f.write("request\tidx\tsids\tname%s\n" % ("\talso" if also is not None else ""))
         for req, sids in enumerate(lists):
-            f.write("%d\t%s\t%s\t%s\n" % (req, ",".join("%d" % i for i in idx_of.get(req, ())),
-                                          ",".join("%d" % s for s in sids),
-                                          (names.get(req) or "").replace("\t", " ")))
+            f.write("%d\t%s\t%s\t%s" % (req, ",".join("%d" % i for i in idx_of.get(req, ())),
+                                        ",".join("%d" % s for s in sids),
+                                        (names.get(req) or "").replace("\t", " ")))
+            if also is not None:
+                f.write("\t" + ",".join("%d" % i for i in also.get(req, ())))
+            f.write("\n")
     os.replace(tmp, path)
 
 
 def read_requests(project):
-    """``{request: {"idx": [...], "name": str}}`` from the project's :data:`REQUESTS_TSV`
-    (``{}`` when the extract predates it)."""
+    """``{request: {"idx": [...], "name": str, "also": [...] or None}}`` from the project's
+    :data:`REQUESTS_TSV` (``{}`` when the extract predates it; ``also`` is ``None`` when the
+    file predates that column)."""
     out = {}
+    has_also = False
     try:
         with open(os.path.join(project, REQUESTS_TSV), encoding="utf-8") as f:
             for line in f:
-                if line.startswith("#") or line.startswith("request\t"):
+                if line.startswith("#"):
+                    continue
+                if line.startswith("request\t"):
+                    has_also = "also" in line.rstrip("\r\n").split("\t")[4:]
                     continue
                 cols = line.rstrip("\r\n").split("\t")
                 if len(cols) < 4 or not cols[0].isdigit():
                     continue
-                out[int(cols[0])] = {"idx": [int(x) for x in cols[1].split(",") if x.isdigit()],
-                                     "name": cols[3]}
+                out[int(cols[0])] = {
+                    "idx": [int(x) for x in cols[1].split(",") if x.isdigit()],
+                    "name": cols[3],
+                    "also": ([int(x) for x in cols[4].split(",") if x.isdigit()]
+                             if has_also and len(cols) > 4 else [] if has_also else None)}
     except OSError:
         pass
+    return out
+
+
+def sound_uses(project):
+    """``{idx: [(request, Sound Test name), ...]}`` of every request that plays each decoded
+    sound, as the first sound of a sound id or a later part of one; a sound no request plays
+    is absent (PAD-635: the Audio tab's Requests column). ``None`` when the project's
+    :data:`REQUESTS_TSV` is missing or predates its ``also`` column, so the answer would miss
+    the later parts and call them unplayed, or names no sound at all (the resolver was not
+    found, which says nothing about the sounds)."""
+    req = read_requests(project)
+    if (not req or any(v["also"] is None for v in req.values())
+            or not any(v["idx"] for v in req.values())):
+        return None
+    out = {}
+    for r, v in sorted(req.items()):
+        for i in v["idx"] + v["also"]:
+            uses = out.setdefault(i, [])
+            if not uses or uses[-1][0] != r:
+                uses.append((r, v["name"]))
     return out
 
 

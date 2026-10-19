@@ -39,6 +39,7 @@ its own names instead of shipping mislabels.
 """
 
 import random
+import re
 import struct
 
 from .elf import parse_elf
@@ -432,6 +433,28 @@ def _primary_idx(desc, key0_to_idx):
     if p < 0 or p + 8 > len(desc):
         return None
     return key0_to_idx.get(_u32(desc, p + 4))
+
+
+#: An op11 marker with its parameter byte, which :data:`_OP11` reads as 0 only (PAD-635: Led
+#: Zeppelin Pro 1.22 names 10 records, all requested, only behind ``0b 00 01 00`` /
+#: ``0b 00 04 00``).
+_OP11_ANY = re.compile(rb"\x0b\x00.\x00", re.S)
+
+
+def _part_idxs(desc, key0_to_idx):
+    """Every extraction record a descriptor plays, the first marker's first: a multi-part
+    entry names each part with an op11 marker of its own, whatever its parameter byte
+    (PAD-635: on Godzilla Pro 1.16, 6 records are only ever a later part, so the primary
+    alone called them unplayed)."""
+    out = []
+    for m in _OP11_ANY.finditer(desc, 9):
+        p = m.start()
+        if p + 8 > len(desc):
+            break
+        i = key0_to_idx.get(_u32(desc, p + 4))
+        if i is not None and i not in out:
+            out.append(i)
+    return out
 
 
 def _select_names(entries, seconds_by_idx):

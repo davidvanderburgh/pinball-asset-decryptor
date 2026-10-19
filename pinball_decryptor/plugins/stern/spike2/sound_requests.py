@@ -42,6 +42,12 @@ from .elf import parse_elf
 # Bytes per request record.  Field 2 (or 3 on some builds) is the sid-list
 # pointer; the rest is playback state the count doesn't care about.
 _REC_SIZE = 20
+#: The most sids any reader follows in one request's list, a runaway guard only:
+#: the list ends at its zero.  The longest on the vendor images on hand is Star
+#: Wars 1.31's 927, and 16 of 49 titles have one over 256, which is where the
+#: readers used to stop (PAD-635: Deadpool read 2116 of its 8175 sounds as
+#: requested by nothing).
+LIST_MAX = 1 << 16
 # A build with fewer than this many requests is not a Stern game (the smallest
 # on hand is Led Zeppelin 1.20 at 462); the ceiling is a runaway guard.
 _MIN_REQUESTS = 8

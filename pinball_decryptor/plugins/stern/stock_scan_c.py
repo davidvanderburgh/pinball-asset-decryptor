@@ -119,15 +119,41 @@ def audit_ids(prog):
     rec = descriptor_record(prog, len(names)) if names else None
     if rec is None:
         return names, by_index, None
-    table, count, elem = rec
-    idoff = {28: 0x12, 16: 0x0A}.get(elem)
-    by_desc = {}
-    if idoff is not None:
-        for i in range(min(count, len(names))):
+    # PAD-634: the first record of the count is not always the descriptors (Batman 66 1.14 and
+    # Metallica 1.04 have an 8-byte one ahead of them, Guardians 1.14 a 16-byte one whose
+    # halfwords are no ids): the record whose entries map the most names, as PAD-363's
+    # cstart_lib reads them
+    best, best_rec = {}, None
+    for cand in _records_of(prog, len(names)):
+        table, count, elem = cand
+        idoff = {28: 0x12, 16: 0x0A}.get(elem)
+        got = {}
+        for i in range(min(count, len(names))) if idoff is not None else ():
             hid = prog.u16(table + i * elem + idoff)
             if hid and names[i]:
-                by_desc.setdefault(hid, names[i])
-    return names, (by_desc or by_index), rec
+                got.setdefault(hid, names[i])
+        if len(got) > len(best):
+            best, best_rec = got, cand
+    if best and len(best) >= len(names) // 3:
+        return names, best, best_rec
+    return names, by_index, rec
+
+
+def _records_of(prog, count):
+    """Every ``{live, table, count, elem}`` record whose count is *count*, whose element is a
+    descriptor's size (16 or 28 bytes) and whose table is an address."""
+    out = []
+    for off, _va, fsz, _msz, _flg in prog.loads:
+        base = (off + 3) & ~3
+        n = (off + fsz - base) // 4
+        if n < 5:
+            continue
+        w = np.frombuffer(prog.b, dtype="<u4", count=n, offset=base)
+        for i in np.nonzero((w[2:n - 2] == count) & np.isin(w[3:n - 1], (16, 28)))[0].tolist():
+            table = int(w[i + 1])
+            if prog.va2off(table) is not None:
+                out.append((table, count, int(w[i + 3])))
+    return out
 
 
 def find_audit_add(prog, ids):

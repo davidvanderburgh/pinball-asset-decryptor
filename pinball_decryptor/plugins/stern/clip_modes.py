@@ -20,8 +20,9 @@ table (:func:`.progreloc.reference_census` finds all three). So "which mode play
 Every other mode keeps the shared clip. Nothing is moved: the shared clip, its name and every
 other reference stay where they are, so a card built without the copy is the card it was.
 
-WHOSE CODE (a C++ title; a title whose rules are plain C has no mode classes, and this reading
-then names no mode at all). A mode is a class ``cmode_<name>``, a class deriving from ``cmode``
+WHOSE CODE (a C++ title; a title whose rules are plain C has no mode classes, and Deadpool
+plays its clips from display files no mode class is in: both are read source file by source file
+instead, :mod:`.clip_files`, PAD-634). A mode is a class ``cmode_<name>``, a class deriving from ``cmode``
 named freely (``cberserker_rage``), or on a title with no ``cmode`` a rule class that is its own
 ``Singleton<>`` (``Mode_Stopping_A_Juggernaut``: :func:`_mode_classes`, PAD-624); its screens
 are display-layer classes ``BDL<Name>...`` (paired by name, as the SDK's stock-mode reader pairs them), the
@@ -58,8 +59,9 @@ from dataclasses import dataclass, field
 #: bumped when what :func:`analyse` reads changes; older cached readings are read again
 #: (4: each clip's sounds, :mod:`.clip_sounds`; 5: freely named and singleton mode classes, PAD-624,
 #: and a bank's clip another bank also names, and the scenes that play their own clips, PAD-627;
-#: 6: the clips of a scene that is no video bank, by name, PAD-624)
-READ_REV = 6
+#: 6: the clips of a scene that is no video bank, by name, PAD-624; 7: the plain-C titles and
+#: Deadpool, source file by source file, PAD-634: :mod:`.clip_files`)
+READ_REV = 7
 #: a :attr:`CardClips.bank_of` value's third item: the clip is a scene's own, not a video bank's
 SCENE = "scene"
 #: the most clip-name characters a project file keeps (engine._sanitize_title's cap)
@@ -148,7 +150,11 @@ def mode_label(cls):
     ``Berserker Rage`` (:func:`.stock_scan.class_words`); a singleton rule class in words,
     its kind's prefix dropped (``Mode_Stopping_A_Juggernaut`` -> ``Stopping a Juggernaut``,
     ``Multiball_Berserker`` -> ``Berserker Multiball``, ``Rule_Danger_Room`` -> ``Danger
-    Room``)."""
+    Room``); a plain-C title's mode key as the Modes tab names it (``SWEET_EMOTION`` -> ``Sweet
+    Emotion``, :func:`.clip_files.c_label`)."""
+    from .clip_files import c_label, is_c_key
+    if is_c_key(cls):
+        return c_label(cls)
     if cls.startswith("cmode_"):
         from .stock_modes import Mode
         return Mode(id=0, cls=cls).name
@@ -428,11 +434,26 @@ def analyse(elf, names, ctx=None):
         ctx["prog"] = prog
     model = S.class_model(prog)
     modes = _mode_classes(S, model, prog)
-    if not modes:
-        return out
-    layers = _layers(model, modes)
-    owners = _Owners(S, prog, _anchors(S, prog, model, modes, layers), _inits(S, prog))
-    out.refs = clip_refs(prog, elf, names, owners)
+    anchors = {}
+    if modes:
+        layers = _layers(model, modes)
+        anchors = _anchors(S, prog, model, modes, layers)
+        owners = _Owners(S, prog, anchors, _inits(S, prog))
+        out.refs = clip_refs(prog, elf, names, owners)
+    if not any(r.mode for rs in out.refs.values() for r in rs):
+        # PAD-634: no mode class's code names a clip (a plain-C title, Deadpool): by file
+        from . import clip_files
+        files, labels = clip_files.owners(S, prog, model, modes, anchors)
+        if files is not None:
+            if out.refs:
+                own(prog, out.refs, files)
+            else:
+                out.refs = clip_refs(prog, elf, names, files)
+            for rs in out.refs.values():
+                for r in rs:
+                    if r.mode and r.mode not in out.labels:
+                        out.labels[r.mode] = labels.get(r.mode) or mode_label(r.mode)
+            return out
     for rs in out.refs.values():
         for r in rs:
             if r.mode and r.mode not in out.labels:
@@ -443,13 +464,13 @@ def analyse(elf, names, ctx=None):
 def clip_refs(prog, elf, names, owners=None):
     """``{clip name: [Ref]}``: every place in the game program *elf* (its
     :class:`.stock_scan.Program` *prog*) that names one of *names*, in address order, each
-    given its mode by *owners* (none without: a title whose rules are plain C)."""
+    given its mode by *owners* (:class:`_Owners`, :class:`.clip_files.FileOwners`; none
+    without)."""
     from . import progreloc
     from . import stock_scan as S
     spans, at_name = _spans(elf, sorted(set(names)))
     census = progreloc.reference_census(elf, spans)
     _wide_pairs(S, prog, elf, spans, at_name, census)
-    text_hi = prog.code_end
     out = {}
     for off, refs in census.items():
         for ref in refs:
@@ -460,15 +481,24 @@ def clip_refs(prog, elf, names, owners=None):
             at = prog.off2va(first)
             if at is None:
                 continue
-            mode, how = "", ""
-            if owners is not None:
-                code = ref["kind"] in (progreloc.KIND_A32, progreloc.KIND_T32) or (
-                    prog.tlo <= at < text_hi)
-                mode, how = owners.of_code(at) if code else owners.of_table(at)
-            out.setdefault(name, []).append(Ref(ref["kind"], list(ref["offs"]), at, mode, how))
+            out.setdefault(name, []).append(Ref(ref["kind"], list(ref["offs"]), at))
     for rs in out.values():
         rs.sort(key=lambda r: r.at)
+    if owners is not None:
+        own(prog, out, owners)
     return out
+
+
+def own(prog, refs, owners):
+    """Give each :class:`Ref` of *refs* (``{clip: [Ref]}``) its mode by *owners*: a code
+    reference by the function it is in, a pointer in a table by the code that loads the
+    table."""
+    from . import progreloc
+    for rs in refs.values():
+        for r in rs:
+            code = r.kind in (progreloc.KIND_A32, progreloc.KIND_T32) or (
+                prog.tlo <= r.at < prog.code_end)
+            r.mode, r.how = owners.of_code(r.at) if code else owners.of_table(r.at)
 
 
 # ---- a mode's own copy -----------------------------------------------------------------------

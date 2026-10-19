@@ -864,6 +864,7 @@ static void *vid_thread(void *arg)
     unsigned consumed = 0;
     unsigned freed = 0;           /* PAD-617: what read_idx says */
     unsigned long held_at = 0;    /* PAD-617: when freed stopped short */
+    unsigned long waited_us = 0;  /* this frame's wait on an empty ring */
     unsigned delay = 33333;
     unsigned long t_epoch = 0;   /* set at frame 0; the schedule's zero */
     /* PAD-456: the run's first frame is the one at start_ms, not frame 0. */
@@ -973,20 +974,22 @@ static void *vid_thread(void *arg)
              * the remaining candidate. Counts waits that outlast the frame
              * they were due for, budgeted so a stall cannot flood. */
             {
-                static unsigned long waited_us[PADVID_CHANNELS];
+                /* PAD-617: compared with ==, a wait counted in 1000 us steps
+                 * never equalled a 33333 us period, so this never fired - not
+                 * in any rig run and not in a user's log. Now: once per wait,
+                 * when it first outlasts the period; the wait starts again at
+                 * every handoff. */
                 static unsigned budget = 60;
-                int ch = chan_of(s);
-                waited_us[ch] += 1000;
-                if (waited_us[ch] == delay && budget) {
+                waited_us += 1000;
+                if (waited_us >= delay && waited_us - 1000 < delay && budget) {
                     char m[112];
                     budget--;
                     snprintf(m, sizeof m,
                              "[vid] ch%d RING EMPTY for a whole frame period"
                              " at frame %u - the decoder is behind\n",
-                             ch, consumed);
+                             chan_of(s), consumed);
                     pad_say(m);
                 }
-                if (waited_us[ch] > delay * 8) waited_us[ch] = 0;
             }
             pad_real_sleep_us(1000);   /* the decoder is the host's */
             continue;
@@ -1132,6 +1135,7 @@ static void *vid_thread(void *arg)
             }
             s->last_use = ++use_tick;
             consumed++;
+            waited_us = 0;
             /* Updated per frame rather than on each of the five exit paths:
              * a return that forgot to record it would read as a runaway. */
             s->delivered = consumed;

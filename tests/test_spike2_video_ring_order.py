@@ -93,6 +93,17 @@ def test_the_host_keeps_the_slot_of_distance_the_guest_leans_on():
     assert "while produced - min(get(m, c, \"read_idx\"), produced) >= SLOTS - 1:" in host
 
 
+def test_an_empty_ring_is_reported_when_the_wait_outlasts_a_frame():
+    """It compared a wait counted in 1000 us steps with == against a 33333 us
+    period, so it could never fire."""
+    thread = _code_only(_function(_read("gstvid.c"),
+                                  "static void *vid_thread(void *arg)"))
+    assert "waited_us == delay" not in thread
+    assert "if (waited_us >= delay && waited_us - 1000 < delay && budget) {" in thread
+    hand = thread[thread.index("consumed++;"):]
+    assert hand.index("waited_us = 0;") < hand.index("s->delivered = consumed;")
+
+
 def test_the_bridge_calls_are_looked_up_not_linked():
     """hwshim.so must still load against a libGLESv2 built before PAD-617;
     without the calls it frees at handoff, as it always did."""

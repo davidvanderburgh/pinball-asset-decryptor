@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 
+from ..core import space_keeper
 from . import compat
 from .rpc import rpc
 from .shellx_common import fmt_binary as _fmt
@@ -38,15 +39,26 @@ INTRO = ("The tools stage their work in WSL (Chicago Gaming, Dutch Pinball, "
          "(Stern, plus render/ffmpeg scratch); the Emulate tabs keep the "
          "games they unpacked, their last runs and their own Python in WSL; "
          "and the Spike 2 emulator keeps whole cards cached on its own disk. "
-         "None of them shrinks on its own — clean up here.")
+         "The app keeps all of it in check by itself (below); this window is "
+         "for seeing where the space went, or for freeing more now.")
 TREE_NOTE = ("Select rows to remove, or use “Clean all”. Finished runs clean "
              "up after themselves, so the staging rows here are from crashed "
-             "or canceled runs. The emulators' files and cached cards are "
-             "different: they are meant to be there, and deleting one costs "
-             "time on the next Start (the game is unpacked again, the "
-             "emulator's Python installed again). An emulator whose game is "
-             "running is left alone; saved settings and high scores are never "
-             "listed.")
+             "or canceled runs, or from runs still going. The emulators' files "
+             "and cached cards are different: they are meant to be there, and "
+             "deleting one costs time on the next Start (the game is unpacked "
+             "again, the emulator's Python installed again). An emulator whose "
+             "game is running is left alone; saved settings and high scores "
+             "are never listed.")
+#: PAD-613: what the automatic clean-up (core/space_keeper.py) does - the
+#: numbers are its own, so the sentence cannot drift from the code.
+AUTO_NOTE = (
+    "Leftovers from crashed or canceled runs go once nothing has used them "
+    "for a day. An emulator's unpacked game, and a cached Spike 2 card, go "
+    "after %d days unplayed — and the least recently played go first "
+    "whenever the app's Linux has under %d GB of room left. Nothing in use "
+    "is touched, nor settings, high scores or save states."
+    % (space_keeper.UNUSED_SECS // 86400,
+       space_keeper.FLOOR_BYTES // 1024 ** 3))
 RESIZE_NOTE = ("Set how large the WSL virtual disk may grow. Increase it when "
                "an extract needs more room than WSL has (the biggest titles "
                "can need 20+ GiB); the disk only uses real space as it fills. "
@@ -86,6 +98,72 @@ class DiskMixin:
         self.set(disk=None)
 
     # ------------------------------------------------------------------
+    # the automatic clean-up (PAD-613): shortly after start, then every
+    # CHECK_EVERY_SECS; space_keeper decides whether anything is due
+    # ------------------------------------------------------------------
+    def _keeper_tick(self):
+        try:
+            self.ctx.loop.after(space_keeper.CHECK_EVERY_SECS * 1000,
+                                self._keeper_tick)
+        except Exception:                               # noqa: BLE001
+            pass
+        self.start_disk_badge_check()
+
+    def _keeper_run(self, force=False, wsl=None):
+        """Worker thread: one automatic clean-up; True when it removed
+        anything."""
+        if space_keeper.disabled():
+            return False
+        helpers = None
+        try:
+            from .emu_cache import keeper_cards
+            helpers = keeper_cards()
+        except Exception:                               # noqa: BLE001
+            pass
+        try:
+            rec = space_keeper.tidy(force=force, cards=helpers, wsl=wsl)
+        except Exception:                               # noqa: BLE001
+            log.exception("automatic disk clean-up")
+            return False
+        if self._disk is not None:
+            text = space_keeper.summary()
+            self.ctx.loop.post(lambda: self._disk_view(auto_summary=text))
+        return bool(rec and rec.get("count"))
+
+    @rpc
+    def disk_tidy_now(self):
+        """The window's "Clean up now": the automatic clean-up, run at once
+        whatever its schedule says - the same rules, nothing more."""
+        d = self._disk
+        if d is None or d["busy"]:
+            return False
+        self._disk_busy(True, "Cleaning up…")
+        wsl = bool(d["wsl_ok"])
+
+        def _worker():
+            self._keeper_run(force=True, wsl=wsl)
+            self.ctx.loop.post(self._disk_after_tidy)
+
+        threading.Thread(target=_worker, name="pad-shellx-disktidy",
+                         daemon=True).start()
+        return True
+
+    @rpc
+    def disk_set_auto(self, on):
+        """The "Clean up automatically" box (on by default): off stops the
+        scheduled runs on this PC; Clean up now still works."""
+        space_keeper.set_auto(bool(on))
+        self._disk_view(auto_on=space_keeper.auto_enabled(),
+                        auto_summary=space_keeper.summary())
+        return space_keeper.auto_enabled()
+
+    def _disk_after_tidy(self):
+        if self._disk is None:
+            return
+        self._disk["busy"] = False
+        self.disk_refresh()
+
+    # ------------------------------------------------------------------
     # the gear's amber badge (MainWindow._start_disk_badge_check)
     # ------------------------------------------------------------------
     def start_disk_badge_check(self):
@@ -93,6 +171,7 @@ class DiskMixin:
             return
 
         def _worker():
+            self._keeper_run()
             count, total = 0, 0
             try:
                 from ..core import host_temp
@@ -144,6 +223,10 @@ class DiskMixin:
                                      LOC_EMU: None},
             "vhdx": None,
             "view": {"intro": INTRO, "tree_note": TREE_NOTE,
+                     "auto_note": AUTO_NOTE,
+                     "auto_summary": space_keeper.summary(),
+                     "can_tidy": False,
+                     "auto_on": space_keeper.auto_enabled(),
                      "resize_note": RESIZE_NOTE, "reclaim_note": RECLAIM_NOTE,
                      "bars": [
                          {"key": LOC_WSL, "text": "Checking WSL…",
@@ -174,6 +257,7 @@ class DiskMixin:
         kw["can_reclaim"] = reclaim_ok
         kw["can_resize"] = bool(not busy and d["wsl_ok"])
         kw["can_clean_all"] = bool(not busy and d["entries"])
+        kw["can_tidy"] = bool(not busy and not space_keeper.disabled())
         self._disk_view(**kw)
 
     @rpc

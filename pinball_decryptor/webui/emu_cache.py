@@ -93,6 +93,26 @@ def scan_emu_cache():
     return entries, usage
 
 
+def list_cards():
+    """``cardmount.sh --cache-list`` rows (label, real_kb, boot...), for the
+    automatic clean-up (core/space_keeper.py); ``[]`` with no rig."""
+    rig = _emu_rig()
+    if not rig:
+        return []
+    rig_cmd, parse_cache_list = rig
+    out = subprocess.run(rig_cmd("cardmount.sh", "--cache-list"),
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                         timeout=30, creationflags=_CREATE_FLAGS)
+    return parse_cache_list(out.stdout.decode("utf-8", "replace"))[0]
+
+
+def keeper_cards():
+    """``(list, drop)`` for :func:`core.space_keeper.tidy`, or None."""
+    if not _emu_rig():
+        return None
+    return list_cards, lambda labels: drop_emu_cache(labels, {})
+
+
 def drop_emu_cache(labels, sizes):
     """Drop cached cards by label; return the bytes actually freed.
 

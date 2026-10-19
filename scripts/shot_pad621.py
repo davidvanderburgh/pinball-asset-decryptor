@@ -69,6 +69,10 @@ def main():
             webui_shot.api(url, "modes.select", slug, "form")
             time.sleep(3)
             _scroll_to(page, "Other mechanisms")
+            page.evaluate("""() => { const all = [...document.querySelectorAll('*')].filter((e) =>
+                e.children.length === 0 && e.textContent.trim() === 'Its clock waits until it lets go');
+                if (all.length) all[all.length - 1].scrollIntoView({ block: 'end' }); }""")
+            time.sleep(1)
             out = os.path.join(out_dir, "%s_mechanisms.png" % prefix)
             page.screenshot(path=out)
             print("shot", out, flush=True)

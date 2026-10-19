@@ -475,7 +475,7 @@ class ModesMixin:
                 return out
             if rel in self._m_unplayed:
                 return None
-            out["none"] = NONE_TEXT
+            out.update(head="", none=NONE_TEXT)
             return out
         # "function" (a call elsewhere in the code naming the clip) was right 6 times in 28:
         # with nothing surer it is one that MAY be the clip's (PAD-592)

@@ -481,6 +481,7 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
         # a clip the game plays that no sound is found for says so
         snd = shown(w, QUIET)
         assert snd["none"] == VM.NONE_TEXT and not snd["items"] and not snd["maybe"]
+        assert snd["head"] == ""                          # PAD-627: not run into the head
         # an older extract (no request map): a file named after the sound's Sound Test name
         (proj / "audio").mkdir()
         for n in ("idx0012 - SE GZ VO ROAR.wav", "idx0013.wav", "idx0014.wav"):

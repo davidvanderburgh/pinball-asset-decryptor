@@ -140,3 +140,8 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
 - Still open: JP LE/Pro 1.16 (its pick is not the 0xe3960 chain - that is text building), Mando LE/Pro 1.44/1.45,
   Foo Fighters LE/Pro 1.04, Bond 60th LE 1.11 (menu not yet found), D&D (adapter, no challenge; menu?), Elvira's game
   end, the rig re-runs. Chains: chain6.sh (batch_r6) then chain7.sh (batch_r7); re-arm both after a restart.
+- Bond 60th LE 1.11: one challenge, a timed whole game ("CHALLENGE MODE ENDS", its own champion score) - nothing a
+  mode can stand in for, so its profile's cannot sentence should say that; its start menu is an object list built
+  by calls (fn 0x5cf38: `0x5cef0(list, kind, ?, flag, caption msg, text msg)` per entry: Standard 0x77a/0x77b, flag
+  0x10 Tournament 0x77c/0x77d, ...) - a challenge of a mode's own there means calling 0x5cef0 after the builder and
+  finding its pick.

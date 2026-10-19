@@ -1,11 +1,14 @@
 """PAD-611 proof shots: RAMP FRENZY (tools/mode_views/showcase.py) in the Modes tab's blocks, and in each alternative view.
 
-    python scripts/shot_pad611.py <out dir> [<repo>]
+    python scripts/shot_pad611.py <out dir> [<repo>] [asc]
 
 The server runs from <repo> (default: this tree) against a scratch settings folder and a Godzilla Pro 1.15 project
 holding the one blocks mode. Shots:
   blocks.png           the mode's blocks as the tab shows them today (the page scrolled to its scripts)
   <view>.png           the same mode in each alternative (tools/mode_views/render_views.py), drawn from its blocks.json
+with "asc" (Edit as C is a one-way step, said where it is pressed) instead:
+  asc_button.png       the blocks mode's "C it makes" page, with the Edit as C button
+  asc_dialog.png       the question Edit as C asks (answered No, so nothing changes)
 """
 
 import json
@@ -47,7 +50,8 @@ print(BM.blocks_path(%(project)r, slug))
 
 def main():
     outdir = os.path.abspath(sys.argv[1])
-    repo = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else HERE
+    repo = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] != "asc" else HERE
+    asc = "asc" in sys.argv[2:]
     os.makedirs(outdir, exist_ok=True)
     webui_shot.REPO = repo
     scratch = tempfile.mkdtemp(prefix="pad611-")
@@ -57,8 +61,9 @@ def main():
     with open(seed, "w", encoding="utf-8") as f:
         f.write(SEED % {"repo": repo, "project": project, "views": os.path.join(HERE, "tools", "mode_views")})
     blocks_json = subprocess.run([sys.executable, seed], check=True, capture_output=True, text=True).stdout.strip()
-    subprocess.run([sys.executable, os.path.join(HERE, "tools", "mode_views", "render_views.py"), outdir, blocks_json],
-                   check=True)
+    if not asc:
+        subprocess.run([sys.executable, os.path.join(HERE, "tools", "mode_views", "render_views.py"), outdir,
+                        blocks_json], check=True)
     hostpy = os.path.join(scratch, "host.py")
     with open(hostpy, "w", encoding="utf-8") as f:
         f.write(HOST % {"repo": repo})
@@ -92,6 +97,21 @@ def main():
             if hide.count():
                 hide.first.click()
                 time.sleep(1)
+            if asc:
+                page.get_by_text("C it makes", exact=True).first.click()
+                time.sleep(1.5)
+                page.screenshot(path=os.path.join(outdir, "asc_button.png"))
+                page.locator("button", has_text="Edit as C").first.click()
+                time.sleep(2)
+                page.screenshot(path=os.path.join(outdir, "asc_dialog.png"))
+                for label in ("Keep the blocks", "No"):
+                    btn = page.get_by_role("button", name=label, exact=True)
+                    if btn.count():
+                        btn.first.click()
+                        break
+                time.sleep(1)
+                browser.close()
+                return
             scripts = page.locator(".bk-script")
             print("scripts on the page:", scripts.count(), flush=True)
             if scripts.count():

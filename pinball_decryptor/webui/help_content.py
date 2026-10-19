@@ -3070,8 +3070,9 @@ PREVIEW_HELP = {
                 "- Every change saves itself; the line at the top says what is left to fix.",
                 {"note": "The app turns the blocks into a mode in C, which Try it and "
                          "Write build like any other. **C it makes** shows it, and "
-                         "**Edit as C…** keeps that C and puts the blocks away, for "
-                         "carrying on in C."},
+                         "**Edit as C (one way)…** keeps that C and puts the blocks away, for "
+                         "carrying on in C. It is a one-way step: C can't be turned back "
+                         "into blocks, so press **Duplicate** first to keep a blocks copy."},
             ]),
             ("Modes written in C", [
                 "For what the form can't do.\n\n"

@@ -3008,18 +3008,27 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @rpc
     def blocks_to_code(self):
-        """Edit as C: the open blocks mode keeps the C its blocks made and becomes a code mode."""
+        """Edit as C: the open blocks mode keeps the C its blocks made and becomes a code mode - ONE WAY (PAD-611):
+        C cannot be read back into blocks, so the question says so, and keeping the blocks is what Enter and Escape
+        answer."""
         slug = self._code_slug
         project = self.project()
         if not slug or not BM.is_blocks(project, slug):
             return False
-        if not compat.messagebox.askyesno(
-                "Edit as C", "Carry on with %s in C? Its C file stays as its blocks made it, and "
-                "the blocks are put away (as blocks.json.bak in its folder), so the tab no longer "
-                "edits it with blocks." % ((self.get("code") or {}).get("name") or slug)):
+        name = (self.get("code") or {}).get("name") or slug
+        answer = compat.ctx().dialogs.message(
+            "warning", "Edit as C: a one-way step",
+            "Turn %s into C for good? This is a one-way step: once it is C, the Modes tab can't turn it back "
+            "into blocks." % name,
+            [{"id": "yes", "label": "Turn it into C"}, {"id": "no", "label": "Keep the blocks", "style": "primary"}],
+            default="no",
+            detail="Its C file stays as the blocks made it, and from then on you change the C yourself. A copy of "
+                   "the blocks is kept in its folder (blocks.json.bak), but changes you make to the C never go back "
+                   "into it. To try C and keep this mode as blocks, press Duplicate first and turn the copy into C.")
+        if answer != "yes":
             return False
         BM.detach(project, slug)
-        self._say("modes/%s is a code mode now; its blocks are in blocks.json.bak" % slug)
+        self._say("modes/%s is a code mode now, for good (Edit as C is one way); its blocks are in blocks.json.bak" % slug)
         self._refresh_list()
         self.open_path(os.path.join(MP.mode_folder(project, slug), slug + ".c"))
         return True

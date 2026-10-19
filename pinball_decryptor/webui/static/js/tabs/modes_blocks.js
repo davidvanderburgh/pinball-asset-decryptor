@@ -55,7 +55,7 @@ const TIP = {
   drain: "The ball draining ends the mode.",
   undo: "Undo the last change to the blocks (Ctrl+Z)",
   redo: "Redo the change just undone (Ctrl+Y or Ctrl+Shift+Z)",
-  asC: "Carry on in C: the mode keeps the C its blocks made, and the blocks are put away.",
+  asC: "One way: the mode becomes C for good, starting from the C its blocks made. C can't be turned back into blocks; press Duplicate first to keep a blocks copy.",
   hits: "How many times the player up has made this shot in this ball (while the mode runs or not).",
   scored: "How many times a Score block has paid since the mode started.",
   total: "The points the mode's Score blocks have paid since it started.",
@@ -1015,14 +1015,15 @@ export function BlocksEditor({ s, c }) {
   </div>`;
 }
 
-// The C the blocks make, to read (and the way out to C for good).
+// The C the blocks make, to read (and the way out to C for good: PAD-611 says it is one way, beside the button).
 export function BlocksCode({ c }) {
   const b = c.blocks || {};
   return html`<div class="stack" style="gap:10px">
     <div class="row wrap">
       <span class="small muted grow">What Try it and Write build: the Modes tab writes it again from the blocks at every change (modes/${c.slug}/${c.slug}.c).</span>
-      <${Button} size="sm" icon="edit" title=${TIP.asC} onClick=${() => call("modes.blocks_to_code")}>Edit as C…<//>
+      <${Button} size="sm" icon="edit" title=${TIP.asC} onClick=${() => call("modes.blocks_to_code")}>Edit as C (one way)…<//>
     </div>
+    <${Note} kind="warn">Edit as C is a one-way step: the mode becomes C for good, and C can't be turned back into blocks. To try C and keep the blocks, press Duplicate first and turn the copy into C.<//>
     <pre class="bk-c-src mono">${b.c || ""}</pre>
   </div>`;
 }

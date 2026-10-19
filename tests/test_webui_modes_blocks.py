@@ -55,6 +55,16 @@ def test_a_blocks_mode_is_made_listed_opened_saved_and_taken_to_c(tmp_path, prev
         # only the OPEN mode's blocks are saved
         assert w.call("modes.blocks_save", "someone_else", prog) is None
 
+        # Edit as C is ONE WAY (PAD-611): the question says so, and keeping the blocks is its default
+        w.answers.append("no")
+        assert w.call("modes.blocks_to_code") is False
+        q = w.asked[-1]
+        assert q["icon"] == "warning" and "one-way" in q["title"]
+        assert "can't turn it back into blocks" in q["message"] and "Duplicate first" in q["detail"]
+        assert q["default"] == "no" and [b["label"] for b in q["buttons"]] == ["Turn it into C", "Keep the blocks"]
+        assert w.state("modes")["code"]["blocks"] is not None
+        assert os.path.isfile(BM.blocks_path(str(proj), "ramp_frenzy"))
+
         # Edit as C: a code mode from now on, its blocks kept aside
         w.answers.append("yes")
         assert w.call("modes.blocks_to_code") is True

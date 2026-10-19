@@ -697,6 +697,18 @@ int pm_challenge_slots(void);                                        /* 0 when t
 const char *pm_challenge_name(unsigned slot);                        /* "Ahoy Mr. Bond", or 0 */
 int pm_challenge_named(const char *name);                            /* its slot, any case, or -1 */
 int pm_challenge_claim(unsigned slot, int (*on_pick)(unsigned slot)); /* 1 = claimed */
-void pm_challenge_release(unsigned slot);
+void pm_challenge_release(unsigned slot);             /* a challenge claimed, or one added below */
+/* The game's own start menu (Bond LE/Pro 1.06: CHOOSE YOUR MODE OF PLAY, both flipper buttons held in attract)
+ * lists the challenges one entry at a time, CHALLENGE over the challenge's name. Where the port names that menu:
+ * pm_challenge_title shows `words` (in capitals) in place of the name of a challenge the calling mode holds, and
+ * pm_challenge_add puts a challenge of the mode's own in the menu, after the game's: picked, the game makes a
+ * one-ball challenge game of it (to the game, challenge 0's - whose own start does not run) and on_pick(slot) runs
+ * at the ball's start, as for a claimed one. It returns the new one's slot (16 and
+ * up; pm_challenge_name gives its words) or -1. The menu holds 9 entries (Bond: 7 of the game's), so only as many
+ * as fit are shown; the rest are logged. */
+#define PM_CAN_CHALLENGE_MENU 0x0400u /* pm_challenge_title / pm_challenge_add */
+int pm_challenge_menu(void);                                         /* 1 = the start menu is ours to change */
+int pm_challenge_title(unsigned slot, const char *words);            /* 1 = shown; the holder only */
+int pm_challenge_add(const char *words, int (*on_pick)(unsigned slot)); /* its slot, or -1 */
 
 #endif

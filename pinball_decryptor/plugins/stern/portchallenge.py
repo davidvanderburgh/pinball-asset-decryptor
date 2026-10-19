@@ -166,7 +166,62 @@ def find(elf):
                   "site  challenge_go_%d    0x%08x 0x%08x 0x%08x" % (n, va, e.word(va), e.word(va + 4)),
                   "value challenge_flag_%d  %d" % (n, f),
                   "text  challenge_name_%d  %s" % (n, pretty(stem))]
-    return (lines if not notes else []), notes
+    if notes:
+        return [], notes
+    return lines + menu_lines(e), notes
+
+
+def rot_imm(w):
+    rot, imm = (w >> 8) & 0xF, w & 0xFF
+    return ((imm >> (2 * rot)) | (imm << (32 - 2 * rot))) & 0xFFFFFFFF if rot else imm
+
+
+#: PAD-615 round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons held in attract), Bond
+#: LE/Pro 1.06. One function builds the menu's list on its stack - 12-byte entries {kind, caption message id, name}
+#: from sp+<list_at>, their count at sp+<count_at> - and, as the player selects, jumps on the entry's kind (3..7: the
+#: five challenges). Its two hook points, each two plain words the runtime moves:
+#:   after the list is built:  sub r0, r0, #1 ; cmp r0, #5 ; movwls r3, ... ; movhi r4, #0   (the Default Game Mode read)
+#:   at the pick:              ldr r3, [r3, #-n] ; sub r3, r3, #1 ; cmp r3, #7 ; ldrls pc, [pc, r3, lsl #2]
+MENU_AT = (0xE2400001, 0xE3500005)
+PICK_AT = (0xE2433001, 0xE3530007, 0x979FF103)
+
+
+def menu_lines(e):
+    """The start menu's port lines (empty when the build has no such menu code): its two sites, where the list and
+    its count are on the menu function's stack, how many entries fit before the next local, the first challenge's
+    kind and the caption message the game gives a challenge entry."""
+    w, base = e.words, e.text_va
+    n = len(w)
+    menu = [k for k in range(n - 4) if (w[k], w[k + 1]) == MENU_AT and (w[k + 2] & 0xFFF0F000) == 0x93003000
+            and w[k + 3] == 0x83A04000]
+    pick = [k for k in range(1, n - 3) if tuple(w[k:k + 3]) == PICK_AT and (w[k - 1] & 0xFFFFF000) == 0xE5133000]
+    caption = [k for k in range(n - 2) if w[k] == 0xE3A0C003 and (w[k + 1] & 0xFFF0F000) == 0xE3002000
+               and (w[k + 2] & 0xFFF0F000) == 0xE3000000]
+    if len(menu) != 1 or len(pick) != 1 or len(caption) != 1:
+        return []
+    m, k = menu[0], pick[0]
+    back = w[k - 1] & 0xFFF                                   # ldr r3, [r3, #-back]: the entry's kind
+    top = next((rot_imm(w[q] & 0xFFF) for q in range(k - 2, k - 8, -1) if (w[q] & 0xFFFFF000) == 0xE28D2000), None)
+    count = next((w[q] & 0xFFF for q in range(m + 4, m + 24) if (w[q] & 0xFFFFF000) == 0xE59D1000), None)
+    after = [rot_imm(w[q] & 0xFFF) for q in range(k - 24, k) if (w[q] & 0xFFFFF000) == 0xE28D0000]
+    if top is None or count is None:
+        return []
+    list_at = top - back
+    ends = [a for a in after if a > list_at]
+    if not ends:
+        return []
+    cap = (min(ends) - list_at) // 12
+    cw = w[caption[0] + 1]
+    menu_va, pick_va = base + 4 * m, base + 4 * k
+    return ["# the start menu (CHOOSE YOUR MODE OF PLAY): our names on the challenges modes take, and challenges of "
+            "their own",
+            "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (menu_va, w[m], w[m + 1]),
+            "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (pick_va, w[k], w[k + 1]),
+            "value challenge_menu_list_at   %d" % list_at,
+            "value challenge_menu_count_at  %d" % count,
+            "value challenge_menu_cap       %d" % cap,
+            "value challenge_menu_kind      3",
+            "value challenge_menu_caption   %d" % ((cw >> 4 & 0xF000) | (cw & 0xFFF))]
 
 
 def missing_from(lines, port_text):

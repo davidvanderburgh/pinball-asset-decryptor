@@ -5,8 +5,8 @@
 <repo> is the source tree to serve (the ticket branch, or a ``git archive`` of main for the "before" shots).
 Writes into <out_dir>:
 
-- <prefix>_page_starts.png       a form mode's page at Starts on: on the branch, set to a challenge game of Ahoy Mr.
-                                 Bond in its place; before it, the same mode with no such choice
+- <prefix>_page_starts.png       a form mode's page at Starts on: on the branch, set to a challenge game of its own
+                                 (round 2; round 1: Ahoy Mr. Bond's place); before it, the same mode without it
 - <prefix>_blocks_challenge.png  a blocks mode lit by its film at the Right ramp: on the branch it also has a When the
                                  player picks the challenge Ahoy Mr. Bond script that starts it; before it, the film
                                  script alone (the When block did not exist)
@@ -50,15 +50,15 @@ def main():
     spec = MP.ModeSpec(name="YOLT WIZARD", title="james_bond_le_1_06")
     spec.start_shot, spec.scoring_shots = "Right ramp exit opto", ["Right ramp exit opto", "Side ramp enter opto"]
     spec.seconds = 60
-    if hasattr(spec, "challenge"):
-        spec.starts_on, spec.challenge = "challenge", 1
+    if hasattr(spec, "challenge"):              # round 2: a challenge of its own where the app has one, else Ahoy's place
+        spec.starts_on, spec.challenge = "challenge", getattr(MP, "CHALLENGE_NEW", 1)
     slug, _path = MP.new_mode(project, spec=spec)
     bslug, _bpath = BM.new_blocks_mode(project, "DAF WIZARD")
     scripts = [{"hat": {"kind": "event", "event": "film_daf", "when": "any"}, "do": [
         {"op": "light_mode", "shot": "Right ramp exit opto", "insert": "BLOFELD", "color": "#00ff00",
          "pattern": "solid"}]}]
     if "challenge" in BM.HATS:
-        scripts.append({"hat": {"kind": "challenge", "challenge": "Duel on the Disco Volante"},
+        scripts.append({"hat": {"kind": "challenge", "challenge": getattr(BM, "CHALLENGE_NEW", "Duel on the Disco Volante")},
                         "do": [{"op": "start_mode"}]})
     scripts.append({"hat": {"kind": "mode_start"}, "do": [{"op": "log", "text": "DAF running"}]})
     BM.save(project, bslug, {"name": "DAF WIZARD", "seconds": 60, "screen": False, "game_modes": "block",

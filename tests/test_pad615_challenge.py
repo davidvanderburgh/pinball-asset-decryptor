@@ -302,10 +302,13 @@ def test_the_runtime_hooks_every_named_handler_and_refuses_with_its_own_1():
 
 
 HARNESS_EXTRA = r"""
-static int (*ch_claimed[8])(unsigned);
+static int (*ch_claimed[32])(unsigned);
 int pm_challenge_claim(unsigned slot, int (*f)(unsigned)) { if (slot >= 5) return 0; ch_claimed[slot] = f; printf("CHCLAIM %u\n", slot); return 1; }
-void pm_challenge_release(unsigned slot) { if (slot < 8) ch_claimed[slot] = 0; printf("CHRELEASE %u\n", slot); }
-const char *pm_challenge_name(unsigned slot) { return slot < 5 ? "Ahoy Mr. Bond" : 0; }
+void pm_challenge_release(unsigned slot) { if (slot < 32) ch_claimed[slot] = 0; printf("CHRELEASE %u\n", slot); }
+const char *pm_challenge_name(unsigned slot) { return slot == 16 ? "OWN" : slot < 5 ? "Ahoy Mr. Bond" : 0; }
+int pm_challenge_menu(void) { return 1; }
+int pm_challenge_title(unsigned slot, const char *w) { printf("CHTITLE %u %s\n", slot, w); return 1; }
+int pm_challenge_add(const char *w, int (*f)(unsigned)) { ch_claimed[16] = f; printf("CHADD %s\n", w); return 16; }
 """
 
 
@@ -370,7 +373,7 @@ def test_the_docs_say_how():
     sdk = (SDK / "MODE_SDK.md").read_text(encoding="utf-8")
     assert "## A mode in the game's Challenge list (PAD-615)" in sdk
     doc = (SDK / "MODE_PARAMETERS.md").read_text(encoding="utf-8")
-    assert re.search(r"\| `challenge` \| -1 \|", doc) and re.search(r"\| `challenge` \| a challenge 0-7", doc)
+    assert re.search(r"\| `challenge` \| -1 \|", doc) and re.search(r"\| `challenge` \| `new`, or a challenge 0-7", doc) and "| `challenge_name` |" in doc
     assert "Start it as one of the game's challenges" in (SDK / "MODE_LIMITS.md").read_text(encoding="utf-8")
 
 
@@ -402,5 +405,181 @@ def test_the_tab_offers_the_challenges_on_bond_and_nothing_elsewhere(tmp_path):
             w.call("modes.new")
             st = w.state("modes")
             assert st["profile"]["challenges"] == [] and not st["profile"]["challenge_found"] and st["dis"]["challenge"]
+    finally:
+        preview.enabled = old
+
+
+# ---- round 2: our names on the game's start menu, and challenges of our own (Bond LE/Pro 1.06) ------------------
+BOND_PORTS = ("james_bond_le-1.06", "james_bond_pro-1.06")
+
+
+@pytest.mark.parametrize("key", BOND_PORTS)
+def test_the_bond_ports_name_the_start_menu(key):
+    port = MP.read_port(str(SDK / "ports" / ("%s.port" % key)))
+    assert {"challenge_menu", "challenge_menu_pick"} <= set(port["site"])
+    v = {k: int(port["value"]["challenge_menu_" + k]) for k in ("list_at", "count_at", "cap", "kind", "caption")}
+    assert v == {"list_at": 388, "count_at": 92, "cap": 9, "kind": 3, "caption": 1921}
+    words = (SDK / "ports" / ("%s.port" % key)).read_text(encoding="utf-8")
+    assert re.search(r"site  challenge_menu      0x[0-9a-f]{8} 0xe2400001 0xe3500005", words)
+    assert re.search(r"site  challenge_menu_pick 0x[0-9a-f]{8} 0xe2433001 0xe3530007", words)
+
+
+def test_the_menu_lines_are_the_builds_own_never_a_references():
+    from pinball_decryptor.plugins.stern import portgen as G
+    for key, rest in (("site", "challenge_menu  0x1 0x2 0x3"), ("site", "challenge_menu_pick 0x1 0x2 0x3"),
+                      ("value", "challenge_menu_cap 9"), ("value", "challenge_menu_list_at 388")):
+        assert G.generated(key, rest), rest
+    assert PC.menu_lines(PC.Elf(_fake_game()[0])) == []          # a program with no such menu: no lines
+
+
+def test_bond_has_room_for_two_of_our_own_and_stranger_things_none():
+    assert LE.challenge_menu == 2 and STP.challenge_menu == 0
+    pro = MP.profile_from_port(str(SDK / "ports" / "james_bond_pro-1.06.port"))
+    assert pro.challenge_menu == 2
+    assert set(MP.CHALLENGE_MENU_PROVEN) == set(BOND_PORTS)
+
+
+def test_a_challenge_of_its_own_is_written_as_new_and_refused_where_the_menu_is_not_ours():
+    spec = _spec(LE, starts_on="challenge", challenge=MP.CHALLENGE_NEW)
+    assert MP.validate(spec) == []
+    lines = _lines(spec)
+    assert "challenge      new" in lines and not [l for l in lines if l.startswith("trigger")]
+    assert MP.validate(_spec(STP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)) == [
+        "A challenge of its own is not on Stranger Things 1.13: its start menu is not one the app can add to."]
+    spec = _spec(STP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)
+    MP._switch_off_what_it_cannot(spec, STP)
+    assert (spec.starts_on, spec.challenge) == ("shot", -1)
+
+
+def test_the_blocks_add_the_mode_or_title_the_challenge_it_takes():
+    own = {"name": "YOLT WIZARD", "seconds": 30, "scripts": [
+        {"hat": {"kind": "challenge", "challenge": BM.CHALLENGE_NEW}, "do": [{"op": "start_mode"}]}]}
+    assert BM.problems(own, challenges=list(BOND) + [BM.CHALLENGE_NEW]) == []
+    assert BM.problems(own, challenges=list(ST)) == [
+        "Script 1 waits for the challenge A new challenge of its own, which this card's game does not have."]
+    c = BM.to_c(own, "yolt")
+    assert 'CHALLENGE_NAMES[1] = { "" };' in c
+    assert "CHALLENGE_AT[i] = pm_challenge_add(MODE_NAME, on_challenge);" in c
+    c = BM.to_c(YOLT, "yolt")
+    assert "pm_challenge_title((unsigned)CHALLENGE_AT[i], MODE_NAME);" in c
+
+
+def test_a_mode_file_adds_its_own_or_names_the_one_it_takes(harness, tmp_path):
+    out = _run(harness, tmp_path, CHALLENGE_ONLY.replace("challenge 1", "challenge new"), "chpick", "16", "tick", "2")
+    assert "CHADD YOLT" in out and "its own challenge 16 (OWN) is on the game's start menu" in out
+    assert "YOLT START (challenge pick)" in out.split("CHPICK 16 -> 1", 1)[1]
+    out = _run(harness, tmp_path, CHALLENGE_ONLY.replace("challenge 1", "challenge new") + "challenge_name DIAMONDS\n")
+    assert "CHADD DIAMONDS" in out
+    out = _run(harness, tmp_path, CHALLENGE_ONLY)
+    assert "CHCLAIM 1" in out and "CHTITLE 1 YOLT" in out and "the start menu shows challenge 1 as YOLT" in out
+
+
+MENU_CONTEXT = r"""
+#include <stdio.h>
+#include <string.h>
+#define N_CHALLENGE 8
+#define N_OWN_CHALLENGE 4
+static int (*challenge_fn[N_CHALLENGE])(unsigned slot);
+static char challenge_title[N_CHALLENGE][40];
+static int challenges_n = 5;
+static struct { int (*fn)(unsigned slot); const void *by; char name[40]; } own_challenge[N_OWN_CHALLENGE];
+static volatile int own_pending = -1;
+static long pm_port_value(const char *n, long f)
+{
+    if (!strcmp(n, "challenge_menu_count_at")) return 92;
+    if (!strcmp(n, "challenge_menu_list_at")) return 388;
+    if (!strcmp(n, "challenge_menu_cap")) return 9;
+    if (!strcmp(n, "challenge_menu_kind")) return 3;
+    if (!strcmp(n, "challenge_menu_caption")) return 1921;
+    return f;
+}
+#define say(...) (printf(__VA_ARGS__), putchar('\n'))
+static int yes(unsigned s) { (void)s; return 1; }
+"""
+
+MENU_MAIN = r"""
+int main(int argc, char **argv)
+{
+    unsigned stack[6 + 200], *r = stack, i, kinds[7] = { 0, 2, 3, 4, 5, 6, 7 };
+    unsigned char *fsp = (unsigned char *)(stack + 6);
+    int own = argc > 1 ? atoi(argv[1]) : 0, k;
+    static const char *names[7] = { "STANDARD", "COMPETITION", "CHAOS", "AHOY", "GF", "DISCO", "HMSS" };
+    memset(stack, 0, sizeof stack);
+    *(unsigned *)(fsp + 92) = 7;
+    for (i = 0; i < 7; i++) {
+        *(unsigned *)(fsp + 388 + 12 * i) = kinds[i];
+        *(unsigned short *)(fsp + 388 + 12 * i + 4) = i < 2 ? 1914 + i : 1921;
+        *(unsigned *)(fsp + 388 + 12 * i + 8) = (unsigned)(unsigned long)names[i];
+    }
+    *(unsigned *)(fsp + 496) = 0xfeedface;                       /* the next local: must survive */
+    challenge_fn[1] = yes; strcpy(challenge_title[1], "DAF WIZARD");
+    for (k = 0; k < own; k++) { own_challenge[k].fn = yes; sprintf(own_challenge[k].name, "OWN %d", k); }
+    challenge_menu_built(r);
+    for (i = 0; i < *(unsigned *)(fsp + 92); i++) {      /* the name field is the game's u32: match it to whose */
+        unsigned w = *(unsigned *)(fsp + 388 + 12 * i + 8), n;
+        const char *who = "?";
+        for (n = 0; n < 7; n++) if (w == (unsigned)(unsigned long)names[n]) who = names[n];
+        for (n = 0; n < N_OWN_CHALLENGE; n++) if (w == (unsigned)(unsigned long)own_challenge[n].name) who = own_challenge[n].name;
+        if (w == (unsigned)(unsigned long)challenge_title[1]) who = challenge_title[1];
+        printf("E %u %u %s\n", *(unsigned *)(fsp + 388 + 12 * i), *(unsigned short *)(fsp + 388 + 12 * i + 4), who);
+    }
+    printf("NEXT %x\n", *(unsigned *)(fsp + 496));
+    r[3] = 0x100 + 1; challenge_menu_picked(r); printf("PICK own %d kind %u\n", own_pending, r[3]);
+    r[3] = 4; challenge_menu_picked(r); printf("PICK stock %d kind %u\n", own_pending, r[3]);
+    return 0;
+}
+"""
+
+
+def _menu(tmp_path, own):
+    R = _host()
+    src = R.RUNTIME.read_text(encoding="utf-8")
+    code = MENU_CONTEXT + "#include <stdlib.h>\n#define CHALLENGE_MENU_KIND 0x100u\n" \
+        + "static int challenge_menu_said, challenge_menu_room_said;\n" \
+        + R._lift(src, "static void challenge_menu_built(unsigned *r)") + "\n" \
+        + R._lift(src, "static void challenge_menu_picked(unsigned *r)") + MENU_MAIN
+    return R._host_run(tmp_path, code, args=(str(own),)).splitlines()
+
+
+def test_the_menu_names_a_taken_challenge_and_appends_ours_within_its_room(tmp_path):
+    out = _menu(tmp_path, 2)
+    entries = [l for l in out if l.startswith("E ")]
+    assert entries[3] == "E 4 1921 DAF WIZARD"                   # Ahoy (kind 4) under the mode's name
+    assert entries[7:] == ["E 256 1921 OWN 0", "E 257 1921 OWN 1"]
+    assert "NEXT feedface" in out
+    assert "PICK own 1 kind 3" in out and "PICK stock -1 kind 4" in out   # ours becomes Crab Key's kind; the game's stays
+
+
+def test_the_menu_never_writes_past_its_room(tmp_path):
+    out = _menu(tmp_path, 4)
+    assert len([l for l in out if l.startswith("E ")]) == 9
+    assert "NEXT feedface" in out
+    assert any("no room for OWN 2" in l for l in out)
+
+
+def test_the_tab_offers_a_challenge_of_its_own_on_bond(tmp_path):
+    from tests.test_webui_modes import _card_project, _project, _wait
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import preview
+    old = preview.enabled
+    preview.enabled = lambda feature: feature == "modes"
+    try:
+        proj = _card_project(tmp_path / "bond", "james_bond_le-1_06_0.Release.16G.sdcard.raw")
+        with web_app(tmp_path, mfr="stern") as w:
+            _project(w, proj)
+            slug = w.call("modes.new")
+            st = w.state("modes")
+            assert st["profile"]["challenge_new"] == "A new challenge of its own" and st["profile"]["challenge_room"] == 2
+            path = proj / "modes" / slug / "mode.json"
+            w.call("ui.set", "modes", "f:challenge", "A new challenge of its own")
+            w.call("ui.set", "modes", "f:starts_kind", "challenge")
+            assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("challenge") == MP.CHALLENGE_NEW)
+            assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")
+            assert _wait(w, lambda: w.state("modes")["form"]["challenge"] == "A new challenge of its own")
+        proj = _card_project(tmp_path / "st", "stranger_things-1_13_0.Release.8G.sdcard.raw")
+        with web_app(tmp_path, mfr="stern") as w:
+            _project(w, proj)
+            w.call("modes.new")
+            assert w.state("modes")["profile"]["challenge_new"] == ""
     finally:
         preview.enabled = old

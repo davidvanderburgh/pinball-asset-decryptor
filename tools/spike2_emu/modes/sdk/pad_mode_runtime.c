@@ -8442,6 +8442,12 @@ static void on_roster_start(unsigned *r)
 static int (*challenge_fn[N_CHALLENGE])(unsigned slot);
 static const struct pm_mode *challenge_by[N_CHALLENGE];
 static int challenges_n;                 /* the hooked handlers, 0..N_CHALLENGE; 0 = no challenge list */
+static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start menu shows for a taken one ("" = its own) */
+/* round 2: challenges of a mode's own, added to the game's start menu: slot CHALLENGE_OWN + k */
+#define CHALLENGE_OWN 16
+#define N_OWN_CHALLENGE 4
+static struct { int (*fn)(unsigned slot); const struct pm_mode *by; char name[40]; } own_challenge[N_OWN_CHALLENGE];
+static volatile int own_pending = -1;    /* the own challenge picked on the start menu, until its ball starts */
 
 int pm_challenge_slots(void)
 {
@@ -8451,6 +8457,8 @@ int pm_challenge_slots(void)
 const char *pm_challenge_name(unsigned slot)
 {
     char key[24];
+    if (slot >= CHALLENGE_OWN && slot < CHALLENGE_OWN + N_OWN_CHALLENGE)
+        return own_challenge[slot - CHALLENGE_OWN].fn ? own_challenge[slot - CHALLENGE_OWN].name : 0;
     if (slot >= (unsigned)pm_challenge_slots()) return 0;
     pm_snprintf(key, sizeof key, "challenge_name_%u", slot);
     return pm_port_text(key);
@@ -8479,9 +8487,65 @@ int pm_challenge_claim(unsigned slot, int (*on_pick)(unsigned slot))
     return 1;
 }
 
+/* the menu's words: upper case (the menu's lettering has no lower case), at most 39 characters */
+static void challenge_words(char *out, const char *words)
+{
+    unsigned k;
+    for (k = 0; words && words[k] && k < 39; k++)
+        out[k] = (char)(words[k] >= 'a' && words[k] <= 'z' ? words[k] - 32 : words[k]);
+    out[k] = 0;
+}
+
+int pm_challenge_menu(void)
+{
+    return (can & PM_CAN_CHALLENGE_MENU) != 0;
+}
+
+int pm_challenge_title(unsigned slot, const char *words)
+{
+    if (!pm_challenge_menu() || slot >= (unsigned)pm_challenge_slots() || challenge_by[slot] != current
+        || !challenge_fn[slot]) return 0;                                /* the holder only */
+    challenge_words(challenge_title[slot], words);
+    return 1;
+}
+
+int pm_challenge_add(const char *words, int (*on_pick)(unsigned slot))
+{
+    int k, free_k = -1;
+    char name[40];
+    if (!pm_challenge_menu() || !on_pick || !words || !*words) return -1;
+    challenge_words(name, words);
+    for (k = 0; k < N_OWN_CHALLENGE; k++) {
+        if (own_challenge[k].fn && own_challenge[k].by == current && str_eq(own_challenge[k].name, name)) {
+            own_challenge[k].fn = on_pick;                               /* the same one again: a reload */
+            return CHALLENGE_OWN + k;
+        }
+        if (!own_challenge[k].fn && free_k < 0) free_k = k;
+    }
+    if (free_k < 0) {
+        say("challenge \"%s\": not added - %d challenges of the modes' own already", name, N_OWN_CHALLENGE);
+        return -1;
+    }
+    own_challenge[free_k].fn = on_pick;
+    own_challenge[free_k].by = current;
+    str_copy(own_challenge[free_k].name, sizeof own_challenge[free_k].name, name, sizeof name);
+    say("challenge %d (%s): added to the game's start menu", CHALLENGE_OWN + free_k, name);
+    return CHALLENGE_OWN + free_k;
+}
+
 void pm_challenge_release(unsigned slot)
 {
+    if (slot >= CHALLENGE_OWN && slot < CHALLENGE_OWN + N_OWN_CHALLENGE) {
+        unsigned k = slot - CHALLENGE_OWN;
+        if (own_challenge[k].fn && own_challenge[k].by == current) {
+            say("challenge %u (%s): taken out of the game's start menu", slot, own_challenge[k].name);
+            own_challenge[k].fn = 0; own_challenge[k].by = 0;
+            if (own_pending == (int)k) own_pending = -1;
+        }
+        return;
+    }
     if (slot < N_CHALLENGE && challenge_fn[slot] && challenge_by[slot] == current) {
+        challenge_title[slot][0] = 0;
         challenge_fn[slot] = 0; challenge_by[slot] = 0;
         say("challenge %u (%s): released - the game's own again", slot, pm_challenge_name(slot));
     }
@@ -8501,10 +8565,23 @@ static int challenge_veto(unsigned *r, unsigned n)
     int took, on, picked;
     static int said;
     (void)r;
-    if (n >= N_CHALLENGE || !challenge_fn[n]) return 0;          /* nobody holds it: the game's own runs */
     pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
     on = game_flag((unsigned)pm_port_value("challenge_on_flag", 0));
     picked = game_flag((unsigned)pm_port_value(key, 0));
+    if (n == 0 && own_pending >= 0 && challenge_takes(1, on, picked)) {    /* round 2: a challenge of a mode's own */
+        int k = own_pending;
+        own_pending = -1;
+        if (own_challenge[k].fn) {
+            note_thread("challenge pick", &said);
+            current = own_challenge[k].by;
+            took = own_challenge[k].fn(CHALLENGE_OWN + (unsigned)k);
+            current = was;
+            say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
+                took ? "its mode starts - the game's own challenge does not" : "the mode let it go - the game's own starts");
+            if (took) return 1;
+        }
+    }
+    if (n >= N_CHALLENGE || !challenge_fn[n]) return 0;          /* nobody holds it: the game's own runs */
     if (!challenge_takes(1, on, picked)) {                        /* not a challenge game, or another pick */
         if (on == 1) say("challenge %u (%s): a challenge game, another pick - the game's own runs", n, pm_challenge_name(n));
         return 0;
@@ -8516,6 +8593,72 @@ static int challenge_veto(unsigned *r, unsigned n)
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
     return took != 0;
+}
+
+/* ---- round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract; Bond LE/Pro 1.06)
+ * One function of the game's builds the menu's list on its stack and then runs the menu: 12-byte entries {u32 kind,
+ * u16 caption message, char *name} from sp + challenge_menu_list_at, their count at sp + challenge_menu_count_at, room
+ * for challenge_menu_cap before the next local; kind challenge_menu_kind + n is challenge n (its name the subtitle
+ * under the caption CHALLENGE). Two hooks, each on two plain words:
+ *   site challenge_menu       once the list is built: a taken challenge shows its mode's name; the modes' own
+ *                             challenges are appended (as many as there is room for; the rest are said and left out)
+ *   site challenge_menu_pick  where the game jumps on the chosen entry's kind (r3): one of ours (kind
+ *                             CHALLENGE_MENU_KIND + k) becomes challenge 0's kind, so the game makes a real one-ball
+ *                             challenge game of it, and remembers which; at the ball's start challenge 0's handler
+ *                             hands it to that mode's on_pick instead (challenge_veto). */
+#define CHALLENGE_MENU_KIND 0x100u
+
+static int challenge_menu_said, challenge_menu_room_said;
+
+static void challenge_menu_built(unsigned *r)
+{
+    unsigned char *fsp = (unsigned char *)(r + 6);         /* the menu function's sp: above the six words pushed */
+    unsigned *count = (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
+    unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), first = (unsigned)pm_port_value("challenge_menu_kind", 3);
+    unsigned short caption = (unsigned short)pm_port_value("challenge_menu_caption", 0);
+    unsigned i, k, n0 = *count;
+    if (n0 > cap) return;                                  /* not the list this hook knows: leave it alone */
+    for (i = 0; i < n0; i++) {
+        unsigned kind = *(unsigned *)(list + 12 * i);
+        if (kind >= first && kind < first + (unsigned)challenges_n) {
+            caption = *(unsigned short *)(list + 12 * i + 4);    /* the game's own caption for a challenge */
+            if (challenge_fn[kind - first] && challenge_title[kind - first][0])
+                *(unsigned *)(list + 12 * i + 8) = (unsigned)(unsigned long)challenge_title[kind - first];   /* the game's u32 */
+        }
+    }
+    for (k = 0; k < N_OWN_CHALLENGE; k++) {
+        if (!own_challenge[k].fn) continue;
+        if (*count >= cap) {
+            if (!challenge_menu_room_said++)
+                say("challenge menu: no room for %s - the game's menu holds %u entries", own_challenge[k].name, cap);
+            continue;
+        }
+        i = *count;
+        *(unsigned *)(list + 12 * i) = CHALLENGE_MENU_KIND + k;
+        *(unsigned short *)(list + 12 * i + 4) = caption;
+        *(unsigned short *)(list + 12 * i + 6) = 0;
+        *(unsigned *)(list + 12 * i + 8) = (unsigned)(unsigned long)own_challenge[k].name;
+        *count = i + 1;
+    }
+    if (*count != n0 || !challenge_menu_said++)
+        say("challenge menu: %u entries (%u of the modes' own)", *count, *count - n0);
+}
+
+static void challenge_menu_picked(unsigned *r)
+{
+    unsigned kind = r[3];
+    int was = own_pending;          /* the game runs this on every frame of the menu: say only a change */
+    if (kind >= CHALLENGE_MENU_KIND && kind < CHALLENGE_MENU_KIND + N_OWN_CHALLENGE
+        && own_challenge[kind - CHALLENGE_MENU_KIND].fn) {
+        own_pending = (int)(kind - CHALLENGE_MENU_KIND);
+        r[3] = (unsigned)pm_port_value("challenge_menu_kind", 3);   /* the game makes a challenge game of it */
+        if (own_pending != was)
+            say("challenge menu: %s on the menu - picked, a challenge game whose ball starts its mode",
+                own_challenge[own_pending].name);
+    } else {
+        own_pending = -1;
+    }
 }
 
 static void challenges_arm(void)
@@ -8537,6 +8680,17 @@ static void challenges_arm(void)
     can |= PM_CAN_CHALLENGE;
     say("challenges: %d of the game's a mode may take the place of (flag %ld for a challenge game)", challenges_n,
         pm_port_value("challenge_on_flag", 0));
+    if (site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
+        && pm_port_value("challenge_menu_list_at", 0) > 0 && pm_port_value("challenge_menu_count_at", 0) > 0) {
+        if (fn("challenge_menu") && fn("challenge_menu_pick") && hook(fn("challenge_menu"), challenge_menu_built)
+            && hook(fn("challenge_menu_pick"), challenge_menu_picked)) {
+            can |= PM_CAN_CHALLENGE_MENU;
+            say("challenge menu: the start menu at 0x%08x shows our names and up to %ld entries", fn("challenge_menu"),
+                pm_port_value("challenge_menu_cap", 0));
+        } else {
+            say("challenge menu: its sites could not be hooked - the menu stays the game's own");
+        }
+    }
 }
 
 /* ---- events (item 147) ------------------------------------------------------------------------

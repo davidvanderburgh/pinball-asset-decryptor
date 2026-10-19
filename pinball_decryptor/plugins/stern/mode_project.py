@@ -87,6 +87,8 @@ class TitleProfile:
     #                                  game_rules): it turns the platform back while it counts shots
     roster: tuple = ()               # PAD-589: the battle selection's slots a mode may take (their names, slot order);
     #                                  () where the title has no roster a mode can take
+    challenge_menu: int = 0          # PAD-615 round 2: how many challenges of the modes' own the game's start menu has
+    #                                  room for (0 = none: the build's menu is not the runtime's to change)
     challenges: tuple = ()           # PAD-615: the game's Challenge list a mode may take a place in (the challenges'
     #                                  names, in the game's menu order); () where the title names none a mode can take
     building_rule: str = ""          # PAD-589: the game's own building locks (one of game_rules, BUILDING_RULES): a
@@ -877,6 +879,30 @@ CHALLENGE_PROVEN = frozenset({
     "stranger_things_le-1.12",         # PAD-615 2026-10-19: the same (its Demogorgon Challenge flag 99): mode started, the game's not; control: the game's started
     "stranger_things_le-1.13",         # PAD-615 2026-10-19: the same (flag 104): mode started, the game's not; control: the game's started
 })
+
+
+#: PAD-615 round 2: the builds whose start menu (CHOOSE YOUR MODE OF PLAY) was seen in the emulator showing a taken
+#: challenge under its mode's name and challenges of the modes' own after the game's, one picked starting its mode as
+#: a one-ball challenge game.
+CHALLENGE_MENU_PROVEN = frozenset({
+    "james_bond_le-1.06",              # PAD-615 2026-10-19 rig 2, the stock card, hidden, muted: both flipper buttons in attract; YOLT WIZARD (`challenge new`) the 8th entry, DAF WIZARD (`challenge 1`) in Ahoy's place; YOLT picked: START (challenge pick) at the ball's start, the game's Ahoy not started, GAME OVER after the ball. Three of our own: 9 entries, the third "no room"; the last (DAF) picked and started. Control (no modes): 7 entries, Ahoy picked, the game's own Ahoy
+    "james_bond_pro-1.06",             # PAD-615 2026-10-19 rig 2: the same on the stock Pro card (flipper buttons 62/63): YOLT WIZARD the 8th entry, picked, START at the ball's start, GAME OVER after the ball
+})
+#: the entries the game's own menu takes on those builds: Standard, Competition and the five challenges (Tournament and
+#: DJ Mixer when switched on would take two more)
+CHALLENGE_MENU_GAMES_OWN = 7
+CHALLENGE_NEW = 16                   #: ModeSpec.challenge for a challenge of the mode's own (the runtime's first own slot)
+
+
+def _challenge_menu(key, port):
+    """PAD-615 round 2: how many challenges of the modes' own the build's start menu has room for (0 = none)."""
+    if not port or key not in CHALLENGE_MENU_PROVEN or not {"challenge_menu", "challenge_menu_pick"} <= set(port["site"]):
+        return 0
+    try:
+        cap = int(port["value"].get("challenge_menu_cap", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, cap - CHALLENGE_MENU_GAMES_OWN)
 
 
 def _challenge_cannot(key, label, port=None):
@@ -2230,6 +2256,7 @@ def profile_from_port(path):
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589
         challenges=_challenges(port) if not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
+        challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
         shakes=_shakes(port),                                                # PAD-414
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
@@ -2971,6 +2998,7 @@ class ModeSpec:
     # picking it there starts the mode instead of that battle; -1 = none
     roster_slot: int = -1
     # PAD-615: with starts_on "challenge", the game's challenge (the profile's challenges, menu order) the mode takes the
+    # place of; CHALLENGE_NEW: a challenge of its own on the game's start menu, under its name (round 2)
     # place of: a Player Challenge game with that pick starts the mode at its ball's start instead; -1 = none
     challenge: int = -1
     # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
@@ -3166,7 +3194,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.building_floor, spec.building_shot = 0, ""
     if not p.can("roster") and starts_on_battle(spec):
         spec.starts_on, spec.roster_slot = "shot", -1
-    if not p.can("challenge") and starts_on_challenge(spec):
+    if starts_on_challenge(spec) and (not p.can("challenge")
+                                      or (spec.challenge == CHALLENGE_NEW and not getattr(p, "challenge_menu", 0))):
         spec.starts_on, spec.challenge = "shot", -1
     if not p.can("shaker"):
         spec.shakes = []
@@ -4708,7 +4737,9 @@ def _validate_starts_ends(spec, p, ends=True):
         n = _int_or_none(spec.challenge)
         if not p.can("challenge"):
             out.append("Starting as one of the game's challenges is not on %s yet (Mode says why)." % p.label)
-        elif n is None or not 0 <= n < len(p.challenges):
+        elif n == CHALLENGE_NEW and not getattr(p, "challenge_menu", 0):
+            out.append("A challenge of its own is not on %s: its start menu is not one the app can add to." % p.label)
+        elif n != CHALLENGE_NEW and (n is None or not 0 <= n < len(p.challenges)):
             out.append("Pick the game's challenge the mode takes the place of.")
     elif words[0] == "battle":                      # PAD-589
         slot = _int_or_none(spec.roster_slot)
@@ -5301,7 +5332,8 @@ def _starts_ends_lines(spec, lines, p, ends=True):
         out.insert(2, "roster_slot    %d" % int(spec.roster_slot))
     elif starts_on_challenge(spec) and p.can("challenge"):   # PAD-615: only the challenge game's pick starts it
         out = [line for line in out if not line.startswith("trigger ")]
-        out.insert(2, "challenge      %d" % int(spec.challenge))
+        n = int(spec.challenge)
+        out.insert(2, "challenge      %s" % ("new" if n == CHALLENGE_NEW else n))
     elif starts_on_sequence(spec):
         out = [line for line in out if not line.startswith("trigger ")]
         seq = ["%-14s 0x%08x" % ("trigger_seq", p.mask([s])) for s in spec.start_sequence]

@@ -105,3 +105,23 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
 - Queued (C:/tmp/PAD-619/list_next.txt, chained after batch_all by sweep_next.sh): Godzilla Pro 1.16 rerun (grace),
   Venom Pro 1.07 + control, Jaws LE 1.02, Venom LE 1.07, Godzilla LE 1.16 / Pro 1.15, Star Wars Pro 1.31 (own menu
   entry), Elvira 1.13 (own menu entry).
+
+## Round 4 (2026-10-19, evening)
+
+- Proven: Metallica 1.04 (Lux Aeterna Combo Challenge by index; control: the game's Combo Challenge); own challenges
+  on the start menu of Aerosmith LE 1.16, Batman 66 1.14, Deadpool LE 1.14/1.16, Pro 1.16, Guardians 1.15 / LE 1.15,
+  Iron Maiden LE/Pro 1.18, Munsters LE/Pro 1.28 (CHALLENGE_MENU_PROVEN).
+- Fixed: a challenge-picked mode does not give way to the game's modes (run.by_challenge) - Avengers 1.10 / Led
+  Zeppelin started it past the game's ball-start mode, which then ended it at once.
+- Sweep failures left (rerun list_r5 with job619d's `hitall`): Avengers x3, Beatles, Led Zeppelin x2 (no ball end: the
+  drains were re-served - a playfield switch the old job never hit), Batman 1.13 and Iron Maiden LE 1.16 (the ball
+  ended, GAME OVER did not: these older builds do not end a game through the balls-per-game getter - Batman 1.13
+  never called it; candidate 0x1ddb84 = adj(79) + adj(80) per player, reached by pointer 0x6efd24; the same shape on
+  Aerosmith LE 1.15, Avengers 1.09, Guardians LE 1.14, Mando LE 1.44, Rush LE 1.18, ST LE 1.12, SoR LE 1.18, TMNT Pro
+  1.58 - veto it on the rig and see), JP The Pin 1.05 (no menu line).
+- TMNT Pro 1.59 start menu: 24-byte entries at sp+0x2e0 {+0 u8, +4 kind, +8/+0xa caption, +0xc char *, +0x14 u32},
+  count sp+0x3c, frame 0xa8f40; kinds 10 TRAINING RESET, 11 FINAL BATTLE CHALLENGE (a named challenge - likely
+  FG_PLAYER_ALL_TURTLE_CHALLENGE_ACTIVE), 13 DJ MIXER; the pick on Start at 0xa9368 (kind 12 special). JP Pro 1.16:
+  kind at +4 too. The append hook needs per-port field offsets (kind/caption/name) and a template copy.
+- Batches: the chain (chain_all.sh: batch_all -> batch_next -> list_r5) runs from this session's background task; a
+  new session must re-arm it (workers survive, rigbatch's main and the chain do not).

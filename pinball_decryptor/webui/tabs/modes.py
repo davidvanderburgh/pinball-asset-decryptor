@@ -1843,6 +1843,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._probe_card(card.image)
                 text = "Card: %s. Reading which game it is from the card..." % MP.file_name(card.image)
                 no_port = "Reading which game the card is."
+            elif card.image and not os.path.isfile(card.image):
+                # PAD-623: said apart from a card that would not read, so the fix is plain
+                text = ("Card: %s is not on this computer any more (moved or deleted?), so which "
+                        "game it is cannot be read and modes cannot be made for it. Select card "
+                        "to point the project at it." % MP.file_name(card.image))
+                no_port = note = text
             else:
                 text = ("Card: %s. Which game it is could not be read, so modes cannot be made "
                         "for it." % MP.file_name(card.image))
@@ -3044,21 +3050,51 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                    "shots": [n for n, m in p.shots if m & i["shot"]]})
         game = p.game_dir
         card, _via = self._title_card(self.project())
-        if card is None or not card.image:
+        # PAD-623: the project's card first, then any other card of this game the app was pointed at, then the
+        # picture kept from an earlier read - a moved or deleted card still shows the playfield
+        images = self._playfield_cards(card, game)
+        try:
+            data, where = off_loop(self.ctx, PA.game_art, images, game)
+        except OSError as e:
+            data, where = None, str(e)
+        if data:
+            import base64
+            out["w"], out["h"] = PA.png_size(data)
+            out["art"] = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+        elif card is None or not card.image:
             out["why"] = "The project has no card to read the playfield picture from."
         elif card.game_dir != game:
-            out["why"] = "The project's card is another game's (%s)." % card.game_dir
+            out["why"] = "The project's card is another game's (%s)." % (card.game_dir or "not read")
         else:
+            out["why"] = "No playfield picture: %s." % str(where).rstrip(".")
+        return out
+
+    #: the remembered card paths (Settings' path history) a playfield picture may be read from
+    PLAYFIELD_HISTORY = ("extract_input", "write_original", "partition_image", "compare_a", "compare_b")
+
+    def _playfield_cards(self, card, game):
+        """PAD-623: card images of ``game`` to read its playfield picture from, best first: the project's card, the
+        "Try it on" card, then the cards the app was pointed at before whose Stern name or earlier read says
+        ``game``. Never opens an image."""
+        out = []
+        if card is not None and card.image and card.game_dir == game:
+            out.append(card.image)
+        var = self._export("emulate_card_var")
+        paths = [((var.get() if var is not None else "") or "").strip().strip('"')]
+        history = getattr(self.window, "path_history", None)
+        for field in self.PLAYFIELD_HISTORY:
             try:
-                data, where = off_loop(self.ctx, PA.card_art, card.image, game)
-            except OSError as e:
-                data, where = None, str(e)
-            if data:
-                import base64
-                out["w"], out["h"] = PA.png_size(data)
-                out["art"] = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
-            else:
-                out["why"] = "No playfield picture: %s." % str(where).rstrip(".")
+                paths += list(history(field) or ()) if history else []
+            except Exception:                               # noqa: BLE001 - a history is a nicety
+                continue
+        for path in paths:
+            if not path or path in out:
+                continue
+            got = MP.card_from_name(path)
+            if not got[0]:
+                got = MP.probed_card_title(path) or (None, None)
+            if got[0] == game:
+                out.append(path)
         return out
 
     @rpc

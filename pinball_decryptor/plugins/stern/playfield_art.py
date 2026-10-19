@@ -188,3 +188,52 @@ def card_art(image, game_dir):
         _memo.clear()
         _memo[key] = got
     return got
+
+
+def _kept_path(game_dir):
+    from .title_reader import cache_dir
+    return os.path.join(cache_dir("playfield_art"), "%s.png" % re.sub(r"[^a-z0-9_]+", "_", game_dir.lower()))
+
+
+def kept_art(game_dir):
+    """PAD-623: the picture last read for ``game_dir`` on this computer (off the person's own card, kept in the
+    machine's cache, never shipped), or None."""
+    try:
+        with open(_kept_path(game_dir), "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    return data if png_size(data) else None
+
+
+def _keep(game_dir, data):
+    try:
+        path = _kept_path(game_dir)
+        if os.path.isfile(path) and os.path.getsize(path) == len(data):
+            return
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except OSError:
+        pass                                            # a cache: the picture still shows this time
+
+
+def game_art(images, game_dir):
+    """PAD-623: ``game_dir``'s playfield picture from the first of ``images`` (cards of that game, best first) that
+    is on this computer and holds one, else the one kept from an earlier read (:func:`kept_art`) - so a project whose
+    card was moved or deleted still shows it. Returns ``(png bytes or None, card path or the words why not)``; the
+    words are the first card's."""
+    why = ""
+    for image in images:
+        if not image or not os.path.isfile(image):
+            continue
+        data, where = card_art(image, game_dir)
+        if data:
+            _keep(game_dir, data)
+            return data, where
+        why = why or where
+    data = kept_art(game_dir)
+    if data:
+        return data, "kept from an earlier read of a %s card" % game_dir
+    return None, why or "no %s card is on this computer to read it from" % game_dir

@@ -648,6 +648,7 @@ def _gpm_singleton(e):
         elif x & 0xFF7F0000 == 0xE51F0000:
             hit = _lit(e, base + 4 * k, x) in vptrs
         if hit:
+            ctors.add(base + 4 * k)                          # the load may be its first instruction (Godzilla)
             for j in range(k, max(k - 12, 0), -1):           # the function starts after the one before returns
                 if w[j - 1] == 0xE12FFF1E or w[j - 1] & 0xFFFF8000 == 0xE8BD8000:
                     ctors.add(base + 4 * j)

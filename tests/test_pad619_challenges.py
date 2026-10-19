@@ -49,7 +49,8 @@ def test_every_menu_port_names_the_whole_menu():
         assert {"challenge_menu", "challenge_menu_pick"} <= set(port["site"]), key
         assert port["data"].get("game_flags") and port["data"].get("game_flag_count"), key
         cap, count_at, list_at = (int(v["challenge_menu_%s" % n]) for n in ("cap", "count_at", "list_at"))
-        assert 5 <= cap <= 9 and 0 < count_at < 1024 and 0 < list_at < 1024, key
+        low = 3 if int(v.get("challenge_menu_sets_on", 0)) else 5          # Star Wars sized its list for its own
+        assert low <= cap <= 9 and 0 < count_at < 1024 and 0 < list_at < 1024, key
         assert int(v.get("challenge_menu_entry", 12)) in (12, 16), key
         assert 1890 < int(v["challenge_menu_caption"]) < 1930, key           # CHALLENGE: 1921, 1911, 1901 by era
         assert int(v.get("challenge_menu_slot", 0)) in (-1, 0), key
@@ -231,3 +232,25 @@ def test_the_runtime_takes_a_pick_by_its_flag_or_its_game_play_mode():
     start = src[src.index("static void challenge_ball_start(void)"):]
     start = start[:start.index("\n}\n")]
     assert "picked = challenge_picked(n);" in start and "challenge_unpick(n);" in start
+
+
+# ---- Star Wars' compare-chain start menu: no challenge kind, ours play as Standard ----------------------
+@pytest.mark.parametrize("key", ("star_wars_le-1.30", "star_wars_le-1.31", "star_wars_pro-1.31"))
+def test_star_wars_menu_takes_ours_as_standard_through_the_entry(key):
+    test_the_ports_carry_what_the_finder_reads_off_the_game(key)
+    v = _port(key)["value"]
+    assert int(v["challenge_menu_kind"]) == 0 and int(v["challenge_menu_slot"]) == -1
+    assert int(v["challenge_menu_sets_on"]) == 1 and int(v["challenge_menu_pick_back"]) in (224, 240)
+    assert int(v["challenge_menu_entry"]) == 16 and int(v["challenge_menu_list_at"]) == 400
+
+
+def test_the_runtime_reads_a_compare_chain_pick_through_its_entry_and_knows_ours_by_name():
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    own = src[src.index("static int own_entry(const unsigned *ent)"):]
+    own = own[:own.index("\n}\n")]
+    assert "ent[2] == (unsigned)(unsigned long)own_challenge[k].name" in own
+    pick = src[src.index("static void challenge_menu_picked(unsigned *r)"):]
+    pick = pick[:pick.index("\n}\n")]
+    assert 'pm_port_value("challenge_menu_pick_back", 0)' in pick and "ent[0] = (unsigned)pm_port_value(" in pick
+    start = src[src.index("static void challenge_ball_start(void)"):]
+    assert 'pm_port_value("challenge_menu_sets_on", 0)) on = 1;' in start[:start.index("\n}\n")]

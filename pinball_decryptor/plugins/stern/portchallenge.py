@@ -346,6 +346,16 @@ def _pick_sites(e):
             and (w[k + 2] & 0xFFFFFF00) == 0xE3530000 and w[k + 3] == 0x979FF103]
 
 
+def _chain_sites(e):
+    """PAD-619: the compare-chain pick (Star Wars' generation): ldr r3, [r3, #-back] after `add r3, sp, #T ; add
+    r3, r3, rC` (rC = cursor << 4), then cmp r3, #n ; beq - word indexes of the ldr."""
+    w = e.words
+    return [k for k in range(3, len(w) - 2) if (w[k] & 0xFFF0F000) == PICK_LDR and (w[k + 1] & 0xFFFFFF00) == 0xE3530000
+            and (w[k + 2] & 0xFF000000) == 0x0A000000 and (w[k - 3] & 0xFFFFF000) == 0xE28D3000
+            and (w[k - 2] & 0xFFFFFFF0) == 0xE0833000 and (w[k - 1] & 0x0E000010) == 0
+            and (w[k - 1] & 0xF000F) != 0xF000F]
+
+
 def _case_flags(e, va, r0, fl, limit=40):
     """The flags one case of a kind jump sets (calls of the set function), following its branches until another
     call (the shared tail's first) or a return. r0: what the code before the jump left in r0."""
@@ -443,6 +453,9 @@ def menu_generic(e, names, on_flag):
     w, base = e.words, e.text_va
     picks = _pick_sites(e)
     fl = flag_functions(e)
+    chain = False
+    if not picks:
+        picks, chain = _chain_sites(e), True                    # PAD-619: Star Wars' compare chain
     if len(picks) != 1 or not fl:
         return None
     k = picks[0]
@@ -479,6 +492,28 @@ def menu_generic(e, names, on_flag):
         x = w[j]
         if x & 0x0FFF0000 == 0x03A00000 and x >> 28 == 0xE and (x >> 12) & 0xF == 0:
             r0 = rot_imm(x & 0xFFF)
+    caption = challenge_caption(e)
+    if chain:
+        # no kind of this menu makes a challenge game (Star Wars LE/Pro 1.30/1.31: Standard, Tournament, Competition,
+        # DJ Mixer); ours become Standard's (0) at the pick, the runtime hands the ball to the mode. The hook sits a
+        # word early (`mov r7, r0 ; ldr r3, [r3, #-back]`: the cmp/beq after it cannot move) and reads the entry
+        # through r3.
+        if caption is None:
+            return None
+        lines = ["# the start menu (CHOOSE YOUR MODE OF PLAY): challenges of the modes' own - no kind of the game's "
+                 "makes a challenge game, so ours play as Standard (kind 0) and the runtime hands the ball to the mode",
+                 "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
+                 "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * (k - 1), w[k - 1], w[k]),
+                 "value challenge_menu_pick_back %d" % back,
+                 "value challenge_menu_list_at   %d" % list_at,
+                 "value challenge_menu_count_at  %d" % count_at,
+                 "value challenge_menu_cap       %d" % cap,
+                 "value challenge_menu_entry     %d" % entry,
+                 "value challenge_menu_kind      0",
+                 "value challenge_menu_slot      -1",
+                 "value challenge_menu_sets_on   1",
+                 "value challenge_menu_caption   %d" % caption]
+        return {"lines": lines, "named": [], "plain": None}
     n = (w[k + 2] & 0xFF) + 1
     named, plain = [], None
     for i in range(n):
@@ -490,7 +525,6 @@ def menu_generic(e, names, on_flag):
             plain = i + 1
         elif len(own) == 1 and len(flags) == 2:
             named.append((i + 1, own[0]))
-    caption = challenge_caption(e)
     if caption is None or (plain is None and not named):
         return None
     kind = plain if plain is not None else named[0][0]

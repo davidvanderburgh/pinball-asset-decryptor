@@ -17,6 +17,10 @@ conflicts later (PAD-421).  The table answers the question from the bytes:
   the release's ``scene.radium`` files -- the same digits the extract puts at
   the end of a ``radimg_..._<md5[:8]>`` file name, so a project folder can be
   checked against stock without touching a card.
+* ``videos``: which of ``files`` are videos (the ``ftyp`` sniff), so a card
+  read knows them without opening each one (PAD-626: on a spinning disk
+  that sniff took a cold Stranger Things card 93 s).  A table made before
+  PAD-626 has no ``videos``: the card is then sniffed as before.
 
 Hashes only: nothing of Stern's ships in the table.
 
@@ -108,6 +112,24 @@ def picture_set(release):
     blob = (release or {}).get("pictures") or ""
     return {blob[i:i + PICTURE_DIGITS]
             for i in range(0, len(blob), PICTURE_DIGITS)}
+
+
+def video_set(release):
+    """The release's video paths as a set, or ``None`` when the table has no
+    record of them (made before PAD-626)."""
+    vids = (release or {}).get("videos")
+    return set(vids) if isinstance(vids, list) else None
+
+
+def release_videos(reader, files):
+    """The paths of *files* (``{path: ...}``, card-relative) that are videos
+    on the partition *reader* reads, by sniffing every one: the generator's
+    half of :func:`video_set`."""
+    from .info import _sniff_videos
+    todo = [(p, nd) for p, nd in sorted(_file_nodes(reader).items())
+            if p in files and nd["size"] >= 0x1000]
+    found = _sniff_videos(reader, {"to_sniff": todo}, stock=False)
+    return sorted(found["video_paths"])
 
 
 def folder_name(folder):
@@ -215,6 +237,7 @@ def make_release(card_path, verify=True, log=None, cancel=None,
                     bad.append("%s: bytes differ from the manifest" % rel)
             if i % 200 == 0:
                 log("  %d/%d files" % (i, len(files)))
+        videos = release_videos(reader, files)
     if bad:
         raise ValueError("%s is not consistent with its own manifest "
                          "(%d file(s)), e.g. %s"
@@ -228,6 +251,7 @@ def make_release(card_path, verify=True, log=None, cancel=None,
         "files": {rel: [size, md5[:FILE_DIGITS]]
                   for rel, (size, md5) in sorted(files.items())},
         "pictures": "".join(sorted(pictures)),
+        "videos": videos,
     }
     return probe["sidx_name"].lower(), release
 

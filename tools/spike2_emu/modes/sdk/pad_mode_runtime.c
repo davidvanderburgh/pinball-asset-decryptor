@@ -8209,6 +8209,71 @@ static void on_shot(unsigned *r)
     current = 0;
 }
 
+/* ---- the end of a ball held for a mode's total (PAD-622) ------------------------------------------
+ * luvthatapex (Bond LE): a drain in one of the game's own mini-wizards shows its TOTAL for a few seconds before
+ * the bonus; a drain in a mode of his own went straight to the bonus. The game's own ending is a loop in the
+ * process that runs the end of ball (Goldfinger 0xc0928: it draws its own frames, 0x2fd144 between them), so
+ * its bonus (bus 0x27) and next ball wait. A mode asks the same from its .ball_end (pm_ball_end_hold): when every
+ * mode's .ball_end has run, on_ball_end - inside the game's end-of-ball dispatch, on the game's own thread -
+ * sleeps a tick at a time (`site proc_sleep`, as the scoop's hold does) while the modes' tick, on its own
+ * thread, draws the total; then returns, and the game's end of ball goes on exactly as before. Never on a tilted
+ * ball (the port's `tilt` event counted since the last ball ended). The limit is the runtime's, not the mode's. */
+#define BALL_END_HOLD_MAX_MS 10000u
+
+static struct {
+    unsigned ms;                            /* the longest any mode asked this ball end; 0 = none */
+    volatile int release;                   /* pm_ball_end_release, from a tick */
+    volatile int holding;                   /* from the ask until the game's end of ball goes on */
+    int asking;                             /* the modes' .ball_end are running: they may ask */
+    unsigned tilts;                         /* the tilt event's count when the last ball ended */
+} beh;
+
+static unsigned event_count(int id);        /* the events section, below */
+
+static int ball_tilted(void)
+{
+    return pm_event("tilt") >= 0 && event_count(pm_event("tilt")) != beh.tilts;
+}
+
+int pm_ball_end_hold(unsigned ms)
+{
+    if (!(can & PM_CAN_BALL_END_HOLD) || !beh.asking || !ms) return 0;
+    if (ball_tilted()) {
+        say("ball end: %s asked to hold it - not on a tilted ball", current && current->name ? current->name : "a mode");
+        return 0;
+    }
+    if (ms > BALL_END_HOLD_MAX_MS) ms = BALL_END_HOLD_MAX_MS;
+    if (ms > beh.ms) beh.ms = ms;
+    beh.holding = 1;
+    return 1;
+}
+
+void pm_ball_end_release(void) { if (beh.holding) beh.release = 1; }
+
+int pm_ball_end_holding(void) { return beh.holding; }
+
+/* after the modes' .ball_end: the game's end of ball waits for the total they asked for */
+static void ball_end_hold_run(void)
+{
+    unsigned long t0 = pm_ms(), until;
+    const char *why;
+    if (!beh.ms) return;
+    until = t0 + beh.ms;
+    say("ball end: held up to %u ms for a mode's total - then the game's end of ball goes on", beh.ms);
+    while (!beh.release && !ball_tilted() && pm_ms() < until)
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    why = beh.release ? "the mode let go" : ball_tilted() ? "the ball tilted" : "its time ran out";
+    say("ball end: let go after %lu ms (%s)", pm_ms() - t0, why);
+}
+
+static void ball_end_hold_arm(void)
+{
+    static const char *const s[] = { "proc_sleep", 0 };
+    if (!have_sites(s)) return;
+    can |= PM_CAN_BALL_END_HOLD;
+    say("ball end: a mode may hold it for its total, up to %u ms", BALL_END_HOLD_MAX_MS);
+}
+
 static void roster_owed_ball_end(void);   /* item 146 */
 static void on_ball_end(unsigned *r)
 {
@@ -8218,14 +8283,21 @@ static void on_ball_end(unsigned *r)
     note_thread("ball_end", &said);
     stock_ball_ends++;
     ball_end_at = pm_ms() | 1;                /* PAD-411: no show of the game's starts now */
+    beh.ms = 0;
+    beh.release = 0;
+    beh.asking = 1;
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
-    if (disp_linger_until) disp_release("the ball ended");
-    bd_reset("the ball ended");
+    beh.asking = 0;
     magnet_let_go("the ball ended");          /* PAD-381 */
     building_let_go("the ball ended");        /* PAD-393 */
     shield_let_go("the ball ended");          /* PAD-392 */
     shake_let_go("the ball ended");           /* PAD-414 */
+    ball_end_hold_run();                      /* PAD-622: a mode's total first, as the game's own mini-wizards */
+    beh.holding = 0;
+    beh.tilts = pm_event("tilt") >= 0 ? event_count(pm_event("tilt")) : 0;
+    if (disp_linger_until) disp_release("the ball ended");
+    bd_reset("the ball ended");
     roster_owed_ball_end();
 }
 
@@ -10711,6 +10783,7 @@ static void pad_mode_start(void)
     multiball_arm();                                /* item 167: a multiball of the mode's own */
     coils_arm();                                    /* PAD-381: a magnet grab of the mode's own */
     scoop_arm();                                    /* PAD-381: a ball held in the scoop */
+    ball_end_hold_arm();                            /* PAD-622: the end of a ball held for a mode's total */
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
     building_arm();                                 /* PAD-393: the Premium's building */
     shake_arm();                                    /* PAD-414: the shaker motor */
@@ -10731,7 +10804,7 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
@@ -10740,7 +10813,8 @@ static void pad_mode_start(void)
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
         can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
         can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "",
-        can & PM_CAN_STATUS_BAR ? " status-bar" : "", can & PM_CAN_CHALLENGE ? " challenges" : "");
+        can & PM_CAN_STATUS_BAR ? " status-bar" : "", can & PM_CAN_CHALLENGE ? " challenges" : "",
+        can & PM_CAN_BALL_END_HOLD ? " ball-end-hold" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

@@ -1,6 +1,7 @@
 """Build the official Stern stock fingerprint table (PAD-426).
 
     python scripts/make_stock_prints.py D:\\Pinball\\images\\Stern\\spike2 [--all] [--no-verify]
+    python scripts/make_stock_prints.py D:\\Pinball\\images\\Stern\\spike2 --add-videos
 
 Reads every official Spike 2 card in the folder (Stern's own file names:
 ``<title>-<1_16_0>[_spike2].Release.<size>.sdcard.raw``) and writes
@@ -12,6 +13,10 @@ every file up to 32 MB (scenes, pictures, program; ``--full-verify`` reads
 the videos and the sound bank too) -- and a card with a ``.pad-build.json``
 beside it is refused, so a card that was written to is not recorded as
 stock.
+
+``--add-videos`` fills in the ``videos`` of a table made before PAD-626
+(which of each release's files are videos) by reading each release's own
+card again, without re-hashing anything; the table is saved after each.
 
 Progress is kept in ``stock_prints.partial.json`` beside the table, so a run
 that is stopped picks up where it was.  Nothing of Stern's is written: file
@@ -57,7 +62,11 @@ def main():
     ap.add_argument("--full-verify", action="store_true",
                     help="re-hash the videos and sound bank too (slow)")
     ap.add_argument("--out", default=sp.TABLE_PATH)
+    ap.add_argument("--add-videos", action="store_true",
+                    help="only fill in each release's videos (PAD-626)")
     args = ap.parse_args()
+    if args.add_videos:
+        return add_videos(args.folder, args.out)
     partial = os.path.splitext(os.path.splitext(args.out)[0])[0] \
         + ".partial.json"
     done = {}
@@ -94,6 +103,46 @@ def main():
           % (args.out, len(done), os.path.getsize(args.out)))
     if failed:
         print("refused: %s" % ", ".join(failed))
+    return 1 if failed else 0
+
+
+def add_videos(folder, out):
+    """Give every release in the table at *out* its ``videos``, read from
+    its own card in *folder*."""
+    from pinball_decryptor.plugins.stern.explorer import CardImage
+    from pinball_decryptor.plugins.stern.info import _walk_partition
+    table = sp.load_table(out)
+    todo = sorted((k for k, r in table.items() if sp.video_set(r) is None),
+                  key=lambda k: table[k]["card"])
+    print("%d of %d release(s) to read" % (len(todo), len(table)), flush=True)
+    failed = []
+    for i, key in enumerate(todo):
+        rel = table[key]
+        card = os.path.join(folder, rel["card"])
+        t = time.time()
+        try:
+            with CardImage(card) as img:
+                parts = sorted((p for p in img.partitions() if p.browsable),
+                               key=lambda p: p.size, reverse=True)
+                reader = None
+                for p in parts:
+                    r = img.reader(p.index)
+                    found = _walk_partition(r, sniff=False)
+                    if os.path.basename(found["sidx_path"]).lower() == key:
+                        reader = r
+                        break
+                if reader is None:
+                    raise ValueError("no %s on the card" % key)
+                rel["videos"] = sp.release_videos(reader, rel["files"])
+        except Exception as e:                       # noqa: BLE001
+            print("[%d/%d] %s: FAILED - %s" % (i + 1, len(todo), key, e),
+                  flush=True)
+            failed.append(key)
+            continue
+        sp.save_table(table, out)
+        print("[%d/%d] %s: %d videos (%.0f s)"
+              % (i + 1, len(todo), key, len(rel["videos"]), time.time() - t),
+              flush=True)
     return 1 if failed else 0
 
 

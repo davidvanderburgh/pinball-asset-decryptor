@@ -81,6 +81,63 @@ def _writable_len(table, data, va, limit=64):
     return max(0, pad - off - 1)
 
 
+# The bytes a record's initials can be made of: latin1 printable, plus the
+# newline _cstr lets through.  A superset is fine - this only picks the words
+# worth checking; _cstr still decides each one.
+_SHORT_OK = bytes(1 if (chr(b).isprintable() or b == 0x0a) else 0
+                  for b in range(256))
+
+
+def _initials_mask(data):
+    """A bit per byte of *data*, set where 1-3 string bytes followed by a NUL
+    start - where a record's initials pointer can point - packed
+    (``numpy.packbits``, MSB first).
+
+    _locate used to try _cstr on every word of the ELF (1.4 million on
+    Godzilla, 47 million on Rush), most of the time Card details spent on
+    the game program (PAD-626); the words are now matched against this first."""
+    import numpy as np
+    lut = np.frombuffer(_SHORT_OK, dtype=np.uint8).astype(bool)
+    full = np.frombuffer(data, dtype=np.uint8)
+    packed = []
+    step = 8 << 20                     # bounded memory on a 190 MB ELF
+    for s in range(0, len(full), step):
+        arr = full[s:s + step + MAX_INITIALS]  # the tail looks past the cut
+        n = len(arr)
+        ok = lut[arr]
+        nul = arr == 0
+        hit = np.zeros(n, dtype=bool)
+        run = np.ones(n, dtype=bool)
+        for k in range(1, MAX_INITIALS + 1):
+            # o .. o+k-1 printable, o+k the NUL
+            run[:n - k + 1] &= ok[k - 1:]
+            run[n - k + 1:] = False
+            hit[:n - k] |= run[:n - k] & nul[k:]
+        packed.append(np.packbits(hit[:step]))  # the rest is the next chunk's
+    return np.concatenate(packed) if packed else np.zeros(0, dtype=np.uint8)
+
+
+def _np_hits(table, words, n, mask):
+    """The indexes ``j < n`` whose word is a VA *table* maps (as ``_off``
+    does: the first load that holds it) onto a set bit of *mask*."""
+    import numpy as np
+    out = []
+    step = 4 << 20                     # bounded memory on a 190 MB ELF
+    for s in range(0, n, step):
+        w = np.frombuffer(words, dtype=np.uint32, count=min(step, n - s),
+                          offset=4 * s).astype(np.int64)
+        off = np.full(len(w), -1, dtype=np.int64)
+        for po, pv, fsz in table._loads:
+            sel = (off < 0) & (w >= pv) & (w < pv + fsz)
+            off[sel] = w[sel] - pv + po
+        sel = (off >= 0) & (off < len(mask) * 8)
+        hit = np.zeros(len(w), dtype=bool)
+        o = off[sel]
+        hit[sel] = (mask[o >> 3] >> (7 - (o & 7))) & 1 == 1
+        out.extend((np.flatnonzero(hit) + s).tolist())
+    return out
+
+
 class HighScoreDefaults:
     """The factory high-score board compiled into a game ELF.
 
@@ -217,13 +274,14 @@ class HighScoreDefaults:
         """
         t, data = self._t, self.data
         cands = []
+        initials = _initials_mask(data)
         for po, _pv, fsz in t._loads:
             base = (po + 3) & ~3
             n = (po + fsz - base) // 4
             if n <= 3:
                 continue
             words = memoryview(data)[base:base + n * 4].cast("I")
-            for j in range(n - 3):
+            for j in _np_hits(t, words, n - 3, initials):
                 w0 = words[j]
                 if not w0:
                     continue

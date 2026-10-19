@@ -111,6 +111,21 @@ def test_a_scenes_clips_are_named_as_extract_names_them():
                                                      "S1E001_00-16-28-21"}
 
 
+def test_a_scenes_clip_is_named_only_where_the_program_names_it():
+    d = "/batman/assets/lcd/x"
+    rows = {"video/ATTRACT_LOOP1.mp4": d + "/scene.assets/2.asset/0.asset",
+            "video/S1E013.mp4": d + "/scene.assets/2.asset/1.asset",
+            "video/Lock1.mp4": "/batman/assets/lcd/b/scene.assets/2.asset/0.asset"}
+    clips = CM.CardClips(bank_of={"ATTRACT_LOOP1": [d, "2.asset/0.asset", CM.SCENE],
+                                  "S1E013": [d, "2.asset/1.asset", CM.SCENE],
+                                  "Lock1": ["/batman/assets/lcd/b", "2.asset/0.asset"]},
+                         scenes=[d], sounds={"pairs": {"ATTRACT_LOOP1": [[5, "function", 3, 4]]}})
+    CM._name_rows(clips, rows)
+    assert clips.name_of == {"video/ATTRACT_LOOP1.mp4": "ATTRACT_LOOP1", "video/Lock1.mp4": "Lock1"}
+    # the one the program never names stays its scene's (PAD-627: "a scene that plays it")
+    assert clips.scene_of == {"video/S1E013.mp4": d}
+
+
 def test_a_scenes_own_clips_are_never_not_played():
     reading = CM.Reading(refs={"Lock1": [object()]})
     bank = {"Lock1": ["/b", "2.asset/0.asset"], "Lock2": ["/b", "2.asset/1.asset"]}

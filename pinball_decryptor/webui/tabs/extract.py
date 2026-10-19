@@ -1223,9 +1223,14 @@ class ExtractTab(TabService):
         self.set(info={"open": True, "path": path, "sections": [],
                        "loading": True, "status": "Reading image…"})
 
+        def _early(sections):
+            # the report but the video count (PAD-626)
+            self.ctx.loop.post(self._apply_info, seq, key, sections, True)
+
         def _work():
             try:
-                sections = _info_mod.collect(mfr, path, assets)
+                sections = _info_mod.collect(mfr, path, assets,
+                                             partial=_early)
             except Exception as e:                      # noqa: BLE001
                 sections = [("Error", [("Could not read", str(e))])]
             self.ctx.loop.post(self._apply_info, seq, key, sections)
@@ -1234,21 +1239,26 @@ class ExtractTab(TabService):
         self._info_thread = t
         t.start()
 
-    def _apply_info(self, seq, key, sections):
+    def _apply_info(self, seq, key, sections, early=False):
         if seq != self._info_seq:
             return
-        self._info_shown_key = key
+        if early and self._info_shown_key == key:
+            return                  # the full report beat it to the loop
+        if not early:
+            self._info_shown_key = key
         self._info_sections = list(sections or [])
         out = []
         for title, rows in self._info_sections:
             out.append({"title": str(title),
                         "rows": [[str(r[0]), str(r[1])] for r in rows]})
-        self._info_state(sections=out, loading=False, status="")
+        self._info_state(sections=out, loading=early,
+                         status="Counting the videos…" if early else "")
 
     @rpc
     def info_copy(self):
         from ...core import image_info as _info_mod
-        if not self._info_sections:
+        if not self._info_sections or (self.get("info") or {}).get(
+                "loading"):                     # not while it is half read
             return ""
         text = _info_mod.as_text(self._info_sections)
         self.ctx.bus.publish("clipboard", text=text)

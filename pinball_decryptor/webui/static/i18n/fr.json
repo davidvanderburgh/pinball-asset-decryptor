@@ -8780,6 +8780,7 @@
 "count {}": "nombre {}",
 "countdown word": "mot du compte à rebours",
 "counter {}": "compteur {}",
+"Counting the videos…": "Comptage des vidéos…",
 "counting…": "comptage…",
 "counts as": "compte comme",
 "counts as: row removed ({} took {} as {})": "compte comme : ligne supprimée ({} prenait {} comme {})",
@@ -12374,5 +12375,10 @@
 "Played in: not shown for this game": "Joué dans : non affiché pour ce jeu",
 "The app can't tell which part of this game plays each clip from its program, so the Played in column is not shown.": "L'application ne peut pas savoir, d'après le programme de ce jeu, quelle partie du jeu joue chaque clip : la colonne Joué dans n'est donc pas affichée.",
 "The sounds the game plays with a clip are shown under it.": "Les sons que le jeu joue avec un clip sont affichés en dessous.",
-"The sounds the game plays with its clips can't be read from it either.": "Les sons que le jeu joue avec ses clips ne peuvent pas non plus en être lus."
+"The sounds the game plays with its clips can't be read from it either.": "Les sons que le jeu joue avec ses clips ne peuvent pas non plus en être lus.",
+"This clip belongs to a scene that plays it on its own, so the game's program never asks for it by name and does not say which sound goes with it.": "Ce clip appartient à une scène qui le lit d'elle-même ; le programme du jeu ne le demande donc jamais par son nom et ne dit pas quel son va avec.",
+"This clip is not one the app found in the card's clip banks, so it can't tell which sound goes with it.": "Ce clip n'est pas l'un de ceux que l'application a trouvés dans les banques de clips de la carte ; elle ne peut donc pas dire quel son va avec.",
+"The sounds that go with the clips were not read: {}.": "Les sons qui vont avec les clips n'ont pas été lus : {}.",
+"the card was not read": "la carte n'a pas été lue",
+"**The picture** is the game's own playfield drawing, read from your card. It shows as an **X-ray** (light lines on dark) so the lit inserts stand out; the **X-ray / Drawing** switch in its top corner shows the drawing as the game ships it instead, and the window remembers your pick.": "**L'image** est le dessin du plateau du jeu lui-même, lu sur votre carte. Elle s'affiche en **radiographie** (traits clairs sur fond sombre) pour que les inserts allumés ressortent ; l'interrupteur **X-ray / Drawing** dans son coin supérieur montre à la place le dessin tel que le jeu le fournit, et la fenêtre retient votre choix."
 }

@@ -572,12 +572,19 @@ def test_a_start_waits_out_a_multiball_and_the_next_one_after_it_starts_it(tmp_p
 def test_the_display_priority_is_held_while_it_runs_and_back_at_a_drain(tmp_path):
     p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
              seconds=5, priority=190)
-    out = play(tmp_path, p, "shot", "Left ramp", "secs", 6, "shot", "Left ramp", "secs", 1, "ball_end")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 6, "shot", "Left ramp", "secs", 1, "ball_end", "secs", 1)
     assert out.count("DISPLAY 190 TEST MODE") == 2
     assert "END (time ran out)" in out and "END (ball ended)" in out
-    # the clock running out keeps it for the total on its screen; a drain gives it back at once
+    # the clock running out keeps it for the total on its screen
     assert _at_any(out, "DISPLAY lingers TEST MODE 3000 ms") == _at_any(out, r"END \(time ran out\)")
-    assert _at_any(out, "DISPLAY 0 TEST MODE") == _at_any(out, r"END \(ball ended\)") == _at_any(out, ">> ball_end")
+    # PAD-622: so does a drain, for its TOTAL as long as the game's own mini-wizards show theirs, the end of ball waiting
+    drain = _at_any(out, ">> ball_end")
+    assert _at_any(out, "DISPLAY lingers TEST MODE 6000 ms") == _at_any(out, r"END \(ball ended\)") == drain
+    assert 5900 <= _at_any(out, r"DISPLAY released TEST MODE") - drain <= 6100
+    assert 5900 <= _at_any(out, "BALL END goes on") - drain <= 6100
+    # a tilted ball gives it back at once, as before
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 1, "tilt", "ball_end", "secs", 1)
+    assert _at_any(out, "DISPLAY 0 TEST MODE") == _at_any(out, r"END \(ball ended\)") == _at_any(out, "BALL END goes on")
     assert "DISPLAY" not in play(tmp_path, dict(p, priority=0), "shot", "Left ramp", "secs", 6)
 # ---- PAD-374: the mode's own clips and sounds ------------------------------------------------------
 def _media_prog(**kw):
@@ -1049,7 +1056,7 @@ def test_the_hud_c_calls_only_the_header_and_the_kit():
     assert kit_used and kit_used <= kit, kit_used - kit
     assert 'static struct kit_hud hud = { .slug = "maser" };' in src
     # a HUD with no priority of its own takes a mode's 180 (PAD-377's choice wins when made)
-    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_MS + total_due" in src
+    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_NOW_MS + total_due" in src
     p = maser_hud()
     p["priority"] = 190
     assert re.search(r"#define DISPLAY_PRIORITY 190\b", BM.to_c(p, "maser"))
@@ -1124,11 +1131,15 @@ def test_the_hud_steps_aside_for_the_games_modes_and_displays(tmp_path):
     back = out[out.index(">> battle 0"):out.index(">> ball_end")]
     assert "back in its places" in back and "Hud_C1_Label: MULTIPLIER" in back
     assert "SHOW PadMode_maser_Screen 1" in back
-    # a drain: down at once, the display given back in the same tick
+    # a drain: its TOTAL as long as the game's own mini-wizards show theirs, the end of ball waiting (PAD-622); then
+    # down, the display given back as the end of ball goes on
     drain = out[out.index(">> ball_end"):]
     t = int(re.search(r"^\s*(\d+) >> ball_end", out, re.M).group(1))
-    assert re.search(r"^\s*%d SHOW PadMode_maser_Hud 0" % t, drain, re.M)
-    assert re.search(r"^\s*%d DISPLAY 0 TEST MODE" % t, drain, re.M)
+    on = _at_any(out, "BALL END goes on")
+    assert 5900 <= on - t <= 6100
+    assert "Hud_Title: TEST MODE TOTAL" in drain
+    assert [x for x in map(int, re.findall(r"^\s*(\d+) SHOW PadMode_maser_Hud 0", drain, re.M)) if t < x <= on + 40]
+    assert 5900 <= _at_any(drain, r"DISPLAY (0|released) TEST MODE") - t <= 6100
 
 
 def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
@@ -1163,8 +1174,9 @@ def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, 
     assert "SHOW PadMode_blk_Hud 1" in out and "Hud_Award: GO" in out
     assert _at(out, "CLIP PadMode_blk_Intro") >= start
     assert "show its own: 4 step(s)" in out
-    t = _at(out, ">> ball_end")
-    assert re.search(r"^\s*%d SHOW PadMode_blk_Hud 0" % t, out, re.M)
+    t = _at(out, "BALL END goes on")                        # PAD-622: after its TOTAL at the drain
+    assert t - _at(out, ">> ball_end") >= 5900
+    assert [x for x in map(int, re.findall(r"^\s*(\d+) SHOW PadMode_blk_Hud 0", out, re.M)) if t - 100 <= x <= t + 40]
     assert "END lamps held 0, display priority 0" in out
 
 
@@ -1579,7 +1591,7 @@ def test_the_bar_is_off_unless_ticked_and_keeps_a_colour():
 def test_the_bar_shows_the_name_and_its_clock_then_the_total_then_goes(tmp_path):
     """The Bond owner (PAD-521): the game's own mini-wizards show their name in a coloured bar under the TV, the clock
     draining along it, kept through the total. Started, it is full; the clock runs it down; at the end it is full again
-    for the total's 3 s, then given back. A drain gives it back at once."""
+    for the total's 3 s, then given back. A drain keeps it through its TOTAL, the end of ball waiting (PAD-622)."""
     p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
              seconds=4, bar={"on": True, "color": "#00c040"}, name="YOLT WIZARD")
     out = play(tmp_path, p, "shot", "Left ramp", "secs", 2, "secs", 2.5, "secs", 3.5)
@@ -1594,6 +1606,10 @@ def test_the_bar_shows_the_name_and_its_clock_then_the_total_then_goes(tmp_path)
     assert 2900 <= off - end <= 3200                                   # through the total
     assert "STATUSBAR 100 00c040 YOLT WIZARD" in out
     out = play(tmp_path, p, "shot", "Left ramp", "secs", 1, "ball_end", "secs", 0.2)
+    bars = re.findall(r"^\s*(\d+) STATUSBAR (-?\d+|OFF)", out, re.M)
+    assert bars[-1][1] == "OFF" and 0 <= int(bars[-1][0]) - _at_any(out, "BALL END goes on") <= 40
+    assert int(bars[-1][0]) - _at_any(out, r"END \(ball ended\)") >= 5900
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 1, "tilt", "ball_end", "secs", 0.2)   # a tilt: at once
     bars = re.findall(r"^\s*(\d+) STATUSBAR (-?\d+|OFF)", out, re.M)
     assert bars[-1][1] == "OFF" and int(bars[-1][0]) - _at_any(out, r"END \(ball ended\)") <= 40
 
@@ -1677,10 +1693,46 @@ def test_an_award_ending_the_mode_shows_then_the_next_then_the_total(tmp_path):
     assert any(3900 <= t - end <= 4100 for t, on in tot if on) and any(6900 <= t - end <= 7200 for t, on in tot if not on)
     assert "has no HUD" not in BM.to_c(_award(screen_style="words"), "blk")
     assert BM.problems(_award(screen_style="words")) == [] and not [t for t in BM.notes(_award(screen_style="words")) if "HUD" in t]
-    # a drain while they wait: nothing of it stays
+    # PAD-622: a drain while they wait: the end of ball waits them out (the game's own mini-wizards' way), then they go
     out = play(tmp_path, _award(screen_style="words"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp",
                "ball_end", "secs", 6)
+    end, on = _at_any(out, r"END \(a block\)"), _at_any(out, "BALL END goes on")
+    assert 1900 <= _at_any(out, r"WORDS PadMode_blk_Screen_Words: TOTAL 700") - end <= 2100
+    assert 3900 <= _at_any(out, r"WORDS PadMode_blk_Total_Words: 700") - end <= 4100
+    assert 6900 <= on - end <= 7100
+    tot = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Total (\d)$", out, re.M)]
+    assert tot[-1][1] == 0 and 0 <= tot[-1][0] - on <= 40
+    # a tilted ball: nothing of it stays
+    out = play(tmp_path, _award(screen_style="words"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp",
+               "tilt", "ball_end", "secs", 6)
     assert not re.search(r"WORDS PadMode_blk_Total_Words", out)
+
+
+def test_a_drain_while_it_runs_shows_its_total_and_the_end_of_ball_waits(tmp_path):
+    """PAD-622 (the Bond owner): a drain in one of the game's own mini-wizards shows its TOTAL before the bonus; his
+    own modes went straight on. Now a drain ends it as its clock would - TOTAL under the bar, the bar kept - and the
+    game's end of ball waits the 6 s the game's own TOTAL shows (measured: Goldfinger's Jackpot, LE 1.06)."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+              {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"}, "do": [{"op": "score", "points": num(500)}]}],
+             seconds=30, screen=True, screen_style="words", bar={"on": True, "color": "#00c040"})
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 5, "shot", "Right ramp", "secs", 1, "ball_end", "secs", 2)
+    drain, on = _at_any(out, ">> ball_end"), _at_any(out, "BALL END goes on")
+    assert _at_any(out, r"END \(ball ended\): 1 scores, total 500") == drain
+    assert _at_any(out, "BALL END HOLD 6000 TEST MODE") == drain
+    assert _at_any(out, r"WORDS PadMode_blk_Total_Words: 500") == drain
+    assert 5900 <= on - drain <= 6100
+    tot = [(int(t), int(v)) for t, v in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Total (\d)$", out, re.M)]
+    assert (drain, 1) in tot and tot[-1][1] == 0 and 0 <= tot[-1][0] - on <= 40
+    assert 0 <= _at_any(out, "STATUSBAR OFF") - on <= 40                       # the bar through it, as the game's
+    # a tilted ball, or a mode the drain does not end: no wait
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 2, "tilt", "ball_end", "secs", 1)
+    assert "BALL END HOLD" not in out and _at_any(out, "BALL END goes on") == _at_any(out, ">> ball_end")
+    out = play(tmp_path, dict(p, ends_on_drain=False), "shot", "Left ramp", "secs", 2, "ball_end", "secs", 1)
+    assert "BALL END HOLD" not in out and "END (ball ended)" not in out
+    # with a HUD, its TOTAL there for the same 6 s
+    out = play(tmp_path, dict(p, screen=False, hud=dict(BM.normalize({})["hud"], on=True)),
+               "shot", "Left ramp", "secs", 2, "ball_end", "secs", 1)
+    assert 5900 <= _at_any(out, "BALL END goes on") - _at_any(out, ">> ball_end") <= 6100
 
 
 def test_an_award_on_a_panel_and_with_no_screen(tmp_path):

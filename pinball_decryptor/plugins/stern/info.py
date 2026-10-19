@@ -9,7 +9,9 @@ the plaintext count words in the ``image.bin`` container header (sounds +
 sound fragments), the game ELF's objective namespace (the title's three-letter
 code, e.g. ``VEN``) and its adjustment table (how many operator settings and
 high-score places the game has), plus on-card asset counts (videos by the
-same 12-byte ``ftyp`` sniff the extract uses, images/scenes by name).  Apart
+same 12-byte ``ftyp`` sniff the extract uses - or, for a file still as the
+official release shipped it, the release table's record of it - and
+images/scenes by name).  Apart
 from one pass over the game ELF, the probe walks directory metadata and never
 reads more than a magic-sniff of any file, so it stays quick even on a
 multi-GB image.
@@ -244,14 +246,20 @@ def version_id(code, version, edition):
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga", ".webp")
 
 
-def _walk_partition(reader):
+def _walk_partition(reader, sniff=True):
     """One metadata walk of a partition: the ``.sidx`` manifest, ``image.bin``,
     per-category music banks, and on-card asset counts.  Videos are the same
     12-byte ``ftyp`` sniff the extract's video scan does (Spike 2 stores them
-    as extensionless ``.asset`` files); nothing larger is ever read."""
+    as extensionless ``.asset`` files); nothing larger is ever read.
+
+    With *sniff* False the videos are left uncounted (``videos`` is None) and
+    the files to sniff wait in ``found["to_sniff"]`` for
+    :func:`_sniff_videos`: the sniff is the one slow part on a spinning disk
+    (PAD-626), so Card details shows the rest first."""
     found = {"sidx_path": "", "sidx_node": None, "image_bin": None,
-             "image_bin_path": "", "videos": 0, "images": 0, "scenes": 0,
-             "music_banks": 0, "game_elves": {}, "video_paths": []}
+             "image_bin_path": "", "videos": None, "images": 0, "scenes": 0,
+             "music_banks": 0, "game_elves": {}, "video_paths": [],
+             "to_sniff": []}
     for fpath, _ino, node in reader.iter_regular_files(min_size=1,
                                                        max_depth=20):
         base = fpath.rsplit("/", 1)[-1]
@@ -268,16 +276,86 @@ def _walk_partition(reader):
         elif fpath.lower().endswith(_IMAGE_EXTS):
             found["images"] += 1
         elif node["size"] >= 0x1000:
-            try:
-                b = reader.peek(node, 12)
-            except Exception:
-                b = b""
-            if len(b) >= 12 and b[4:8] == b"ftyp":
-                found["videos"] += 1
-                # The paths too, not just the count — the Compare tab
-                # classifies changed files by them.
-                found["video_paths"].append(fpath)
+            found["to_sniff"].append((fpath, node))
+    if sniff:
+        _sniff_videos(reader, found)
     return found
+
+
+def _sniff_videos(reader, found, stock=True):
+    """Count the videos among ``found["to_sniff"]`` into *found*.
+
+    With *stock*, a file the official-release table vouches for (see
+    :func:`_stock_known`) is not opened at all; the rest are sniffed."""
+    todo = found.pop("to_sniff", None) or []
+    known = _stock_known(reader, found, todo) if stock else {}
+    hits = {i for i, (fpath, _n) in enumerate(todo) if known.get(fpath)}
+    # The sniffs are read in the order the files sit on the card, not the
+    # order the directories list them (PAD-626): in directory order each one
+    # is a seek across the image.
+    order = sorted((i for i, (fpath, _n) in enumerate(todo)
+                    if fpath not in known),
+                   key=lambda i: _first_block(reader, todo[i][1]))
+    for i in order:
+        try:
+            b = reader.peek(todo[i][1], 12)
+        except Exception:
+            b = b""
+        if len(b) >= 12 and b[4:8] == b"ftyp":
+            hits.add(i)
+    found["videos"], found["video_paths"] = 0, []
+    for i, (fpath, _node) in enumerate(todo):
+        if i in hits:
+            found["videos"] += 1
+            # The paths too, not just the count — the Compare tab
+            # classifies changed files by them.
+            found["video_paths"].append(fpath)
+    return found
+
+
+def _stock_known(reader, found, todo):
+    """``{path: is_video}`` for the files in *todo* the official-release
+    table can answer for (PAD-626): the card names a release the table
+    records videos for, and the file's record in the card's own manifest
+    and its size on the card are still the release's.  That is the trust
+    the official-release check puts in a card (see stock_prints), and every
+    PAD build rewrites the records of the files it changes.
+
+    Sniffing a cold Stranger Things card on a spinning disk took 93 s, each
+    of its 8,500 files a seek; an official card now opens none of them, a
+    built one only the files it changed."""
+    node = found.get("sidx_node")
+    if node is None or not todo:
+        return {}
+    try:
+        from . import stock_prints as sp
+        release = sp.release_for(found.get("sidx_path") or "")
+        vids = sp.video_set(release)
+        if vids is None:
+            return {}
+        manifest = sidx_mod.manifest_files(reader.read_file_bytes(node))
+    except Exception:                                   # noqa: BLE001
+        return {}
+    files = release.get("files") or {}
+    known = {}
+    for fpath, nd in todo:
+        rel = fpath.lstrip("/")
+        rec, want = manifest.get(rel), files.get(rel)
+        if (rec and want and rec[0] == want[0] == nd["size"]
+                and rec[1][:sp.FILE_DIGITS] == want[1]):
+            known[fpath] = rel in vids
+    return known
+
+
+def _first_block(reader, node):
+    """Where *node*'s first byte sits on the partition (its first run's
+    physical block), for reading many files in disk order; 0 when it can't
+    be told, which only puts that file first."""
+    try:
+        runs = reader._runs(node)
+    except Exception:
+        return 0
+    return runs[0][1] if runs else 0
 
 
 def _game_elf_bytes(reader, found):
@@ -342,19 +420,28 @@ def _adjustment_rows(fw):
     return rows
 
 
-def _data_partition_probe(card):
+#: The Videos row while the sniff is still running (PAD-626).
+VIDEOS_COUNTING = "counting…"
+
+
+def _data_partition_probe(card, early=None):
     """``(firmware_rows, asset_rows, sidx_name, title_code, game_folder)``
     from the card's data partition.
 
     Walks browsable partitions largest-first (the data partition carrying the
     sidx + assets is the largest ext partition) and stops at the first one
-    with a ``.sidx``; falls back to the largest if none has one."""
+    with a ``.sidx``; falls back to the largest if none has one.
+
+    *early*, when given, is called with the same five values before the
+    videos are counted (the Videos row reads :data:`VIDEOS_COUNTING`, and the
+    official-release row, which needs the videos, is not there yet): on a
+    card on a spinning disk the count is most of the read (PAD-626)."""
     parts = [p for p in card.partitions() if p.browsable]
     parts.sort(key=lambda p: p.size, reverse=True)
     best = None
     for p in parts:
         reader = card.reader(p.index)
-        found = _walk_partition(reader)
+        found = _walk_partition(reader, sniff=False)
         if best is None:
             best = (reader, found)
         if found["sidx_node"] is not None:  # the sidx lives here — this is it
@@ -367,16 +454,6 @@ def _data_partition_probe(card):
     image_bin = found["image_bin"]
 
     rows = []
-    # Is this the card Stern released, or one built from it (PAD-426)?  The
-    # version above comes from the update index, which a built card keeps,
-    # so a custom card read as the stock build until this row.
-    try:
-        from .stock_prints import check_walked
-        stock = check_walked(reader, found)
-    except Exception:                                   # noqa: BLE001
-        stock = None
-    if stock and stock["status"] != "unreadable":
-        rows.append(("Official release", stock["text"]))
     recs, fmt = {}, None
     if sidx_node is not None:
         try:
@@ -430,7 +507,7 @@ def _data_partition_probe(card):
             requests = None
 
     asset_rows = [
-        ("Videos", format(found["videos"], ",")),
+        ("Videos", VIDEOS_COUNTING),
         ("Images", format(found["images"], ",")),
         ("Scenes", format(found["scenes"], ",")),
     ]
@@ -466,8 +543,24 @@ def _data_partition_probe(card):
             rows.extend(_adjustment_rows(fw))
     except Exception:
         title_code = None
-    return (rows, asset_rows, os.path.basename(sidx_path), title_code,
-            game_folder)
+    sidx_name = os.path.basename(sidx_path)
+    if early is not None:
+        early(list(rows), list(asset_rows), sidx_name, title_code,
+              game_folder)
+
+    _sniff_videos(reader, found)
+    asset_rows[0] = ("Videos", format(found["videos"], ","))
+    # Is this the card Stern released, or one built from it (PAD-426)?  The
+    # version above comes from the update index, which a built card keeps,
+    # so a custom card read as the stock build until this row.
+    try:
+        from .stock_prints import check_walked
+        stock = check_walked(reader, found)
+    except Exception:                                   # noqa: BLE001
+        stock = None
+    if stock and stock["status"] != "unreadable":
+        rows.insert(0, ("Official release", stock["text"]))
+    return rows, asset_rows, sidx_name, title_code, game_folder
 
 
 def _multi_image_section(path):
@@ -498,28 +591,40 @@ def _multi_image_section(path):
     return [("Games on this Card", rows)]
 
 
-def card_info(path):
-    """Image-Info sections for a Spike 2 card image."""
-    firmware = [("System", "Stern Spike 2")]
+def card_info(path, partial=None):
+    """Image-Info sections for a Spike 2 card image.
+
+    *partial*, when given, is called once with the report as it stands
+    before the videos are counted (see :func:`_data_partition_probe`), so
+    the page can show it while the slow part runs (PAD-626)."""
+    multi = _multi_image_section(path)
     partitions = []
-    asset_rows = []
-    sidx_name, title_code, game_folder = "", None, ""
     try:
         with CardImage(path) as card:
-            fw_rows, asset_rows, sidx_name, title_code, game_folder = \
-                _data_partition_probe(card)
             for p in card.partitions():
                 partitions.append(
                     ("Partition %d" % p.index,
                      "%s — %s" % (p.label, human_size(p.size))))
+            early = None
+            if partial is not None:
+                def early(*probe):
+                    partial(_card_sections(path, probe, multi, partitions))
+            probe = _data_partition_probe(card, early=early)
     except Exception as e:
-        fw_rows = [("Card read", "Could not open: %s" % e)]
+        probe = ([("Card read", "Could not open: %s" % e)], [], "", None, "")
+    return _card_sections(path, probe, multi, partitions)
+
+
+def _card_sections(path, probe, multi, partitions):
+    """:func:`card_info`'s sections from :func:`_data_partition_probe`'s
+    five values (*probe*), the multi-boot section and the partition rows."""
+    fw_rows, asset_rows, sidx_name, title_code, game_folder = probe
+    firmware = [("System", "Stern Spike 2")]
     # The card's own update index outranks the filename entirely — the build
     # is a fact about the image, not about what the file happens to be called
     # (a tester).  The name is only the fallback, and a name that disagrees
     # gets said out loud rather than silently dropped.
-    version, edition, version_src, name_version = \
-        resolve_version(path, sidx_name, game_folder)
+    version, edition, version_src, name_version =         resolve_version(path, sidx_name, game_folder)
     if version:
         firmware.append(("Version", "%s  (from %s)" % (version, version_src)))
     if name_version:
@@ -535,7 +640,7 @@ def card_info(path):
         firmware.append(("Version ID", vid))
     firmware.extend(fw_rows)
     sections = [("Firmware", firmware)]
-    sections.extend(_multi_image_section(path))
+    sections.extend(multi)
     if asset_rows:
         sections.append(("Assets on Card", asset_rows))
     if partitions:

@@ -2323,6 +2323,11 @@ HELP_CONTENT = {
             "A second window beside the game draws the machine's playfield, every "
             "insert lit live and every switch clickable: click one and the game reacts "
             "as if the ball rolled over it.",
+            "- **The picture** is the game's own playfield drawing, read from your "
+            "card. It shows as an **X-ray** (light lines on dark) so the lit inserts "
+            "stand out; the **X-ray / Drawing** switch "
+            "in its top corner shows the drawing as the game ships it instead, and the "
+            "window remembers your pick.\n"
             "- **Down the right:** the keyboard reference (a row lights when the game "
             "sees that switch), the coin-door buttons (click and hold **BACK**, **-**, "
             "**+**, **SELECT** for the operator menu), a coin door open/close button "

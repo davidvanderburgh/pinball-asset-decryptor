@@ -1,0 +1,44 @@
+# PAD-619 - Challenge modes on every Spike 2 build
+
+PAD-615 gave James Bond LE/Pro 1.06 and Stranger Things a mode in a challenge's place, and Bond's start menu our
+names and challenges of our own. This ticket takes the feature to every Spike 2 title and version.
+
+## What a "challenge" is on each build (census, 2026-10-19)
+
+Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CHALLENGE_MODE_ACTIVE` (18; 16 on the
+1.13-era builds) and the start menu CHOOSE YOUR MODE OF PLAY (both flipper buttons held in attract; message 1911,
+1894 on the older builds). What the game does with it differs by generation:
+
+| family | builds | the menu | its challenges |
+|---|---|---|---|
+| Bond's generation, named | Bond LE/Pro 1.06, Stranger Things 1.13 / LE 1.12 / LE 1.13, Rush LE 1.18 / 1.19 / Pro 1.19, Sword of Rage LE 1.18 / 1.19 / Pro 1.19 | list on the stack, jump on the entry's kind | one kind per challenge, each setting 18 + a flag of its own (Bond 185-189, ST 144-147, Rush 29-31 Cygnus Book 1 / 2 / 2112, SoR 67/68 Retro / Ransom) |
+| Bond's generation, plain | Aerosmith (3), Avengers (3), Batman 66 (2), The Beatles, Deadpool (3), Guardians (3), Iron Maiden (3), JP The Pin, Led Zeppelin (2), The Munsters (2), Star Wars ELG | the same | one plain kind setting 18 alone - the entry the menu adds only when Stern Insider Connected has sent a challenge (its name is the download's); with flag 18 alone the game plays its normal length (Deadpool: ball 2 followed) |
+| Bond's generation, count in a register | Elvira 1.13 | the same, but the loop keeps the count in r5 | plain |
+| index list (Godzilla's) | Godzilla 1.15/1.16, Jaws, John Wick, King Kong, Metallica, X-Men | a list of game-mode table indices; selecting one applies its flags live | a static game-mode table (Godzilla 32-byte entries with a second flag: KOTM 40, Time Attack 41; Jaws/JW/Metallica/Venom `<x>_cm_<name>` entries, 28 bytes, one flag - the pick is the index) |
+| other | D&D, Foo Fighters, Jurassic Park LE/Pro, Mando, Star Wars LE/Pro 1.30/1.31, TMNT, Venom, Bond 60th | not found yet | TMNT/Venom: Default Game Mode switches with calls, not flags; Bond 60th: a timed whole game |
+
+## Round 1 (this run): Bond's generation - done
+
+- `portchallenge.py`: `flag_lines` (the flag bitmap holder and size, from the flag functions' one shape, every
+  build), `menu_generic` (the menu: every-frame site, the kind jump, list place, entry size 12/16, count, room, the
+  kind ours become, CHALLENGE caption), named challenges from the menu's kinds where no handler of PAD-615's shape
+  exists (`value challenge_flag_<n>` without a site), `balls_lines` (`site challenge_balls`, the framework's
+  balls-per-game getter, every build).
+- Runtime: challenges by their flag alone - at the dispatch of `event ball_start`, on the game's thread before its
+  handlers, a challenge game with the held challenge's flag set has the flag cleared and the mode's on_pick called;
+  the start menu's every-frame append (idempotent), 16-byte entries, the plain challenge kind (`challenge_menu_slot
+  -1`: nothing of the game's to stop, the ball's start hands it over); `challenge_balls` says 1 while a mode's
+  challenge game runs (Deadpool would otherwise play three balls).
+- Rig: `C:\tmp\PAD-619` (proof.sh, job619.sh for rigbatch, rig/ch619.c flag watcher). Gotchas: Rush's switch list
+  ids are 529 high (DIP 1 = 546; the job rewrites the run's list); Guided Setup rows move with SERVICE PLUS; a
+  plain flag-18 game does not end after one ball without `challenge_balls`.
+
+## What is left (next runs)
+
+1. Elvira 1.13: hook the menu where the builder has stored the count, before the loop loads it into r5.
+2. The index-list family: take a challenge's place (Godzilla: clear flag 40/41 as the ball starts - the flag route
+   as it is; Jaws/JW/Metallica: the pick is the game-mode index, needs a per-title stop), our names (message ids:
+   `pm_message_set` on the entry's name message), challenges of our own (the table's accessors are bounded to its
+   entries - an entry of ours needs the accessors hooked or a spare entry borrowed).
+3. The other family: find each title's menu and what its challenge kinds do; Bond 60th's timed game says so in its
+   cannot sentence.

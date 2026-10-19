@@ -399,3 +399,16 @@ text shake_tap              0:80:0
 text shake_short            0:200:0
 text shake_medium           0:334:0
 text shake_long             0:1536:0
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x0024bd1c 0xe92d4030 0xe1a05000
+site  challenge_menu      0x0006538c 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x0006557c 0xe2433001 0xe3530005
+value challenge_menu_list_at   388
+value challenge_menu_count_at  92
+value challenge_menu_cap       7
+value challenge_menu_entry     12
+value challenge_menu_kind      5
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921

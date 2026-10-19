@@ -556,3 +556,6 @@ value challenge_menu_count_at  92
 value challenge_menu_cap       9
 value challenge_menu_kind      3
 value challenge_menu_caption   1921
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+site  challenge_balls     0x001de38c 0xe92d4030 0xe1a05000

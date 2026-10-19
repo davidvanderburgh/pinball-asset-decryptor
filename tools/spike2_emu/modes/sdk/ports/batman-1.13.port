@@ -430,3 +430,16 @@ site block_start_20     0x00148d3c 0xe92d4038 0xe1a05000
 text block_name_20      Mr. Freeze (episodes 53-54)
 site block_start_21     0x00034ba8 0xe92d40f8 0xebffffde
 text block_name_21      Batturn Mania
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   16
+site  challenge_balls     0x003a4128 0xe92d4030 0xe1a05000
+site  challenge_menu      0x00028ddc 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00028fac 0xe2433001 0xe3530005
+value challenge_menu_list_at   316
+value challenge_menu_count_at  24
+value challenge_menu_cap       7
+value challenge_menu_entry     12
+value challenge_menu_kind      2
+value challenge_menu_slot      -1
+value challenge_menu_caption   1901

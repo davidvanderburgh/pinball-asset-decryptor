@@ -671,6 +671,9 @@ def merge(drafts, refs, tgt, game, version, family):
     from . import portchallenge
     b = getattr(tgt, "b", None)
     challenges, _why = portchallenge.find(b) if b else ([], [])   # PAD-615: read off the build's own code
+    # PAD-619: the finder also writes the flag bitmap's lines, which the body may already carry: never twice
+    challenges = [line for line in portchallenge.missing_from(challenges, "\n".join(body))
+                  if not line.startswith("#")] if challenges else []
     if challenges:
         body += ["", "# ---- the game's Challenge list (PAD-615, portchallenge.py): each challenge's own start on the "
                      "ball's start event ----"] + challenges

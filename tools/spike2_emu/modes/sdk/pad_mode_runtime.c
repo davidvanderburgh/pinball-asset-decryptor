@@ -8647,7 +8647,8 @@ static void challenge_menu_built(unsigned *r)
         if (kind >= CHALLENGE_MENU_KIND && kind < CHALLENGE_MENU_KIND + N_OWN_CHALLENGE) { mine++; continue; }
         if (kind == first) tmpl = i;                       /* the entry ours stand in for, when the menu shows it */
         if (kind >= first && kind < first + (unsigned)challenges_n) {
-            caption = *(unsigned short *)(list + es * i + 4);    /* the game's own caption for a challenge */
+            if (!pm_port_value("challenge_menu_caption", 0))     /* PAD-619: the port's CHALLENGE, else the game's */
+                caption = *(unsigned short *)(list + es * i + 4);    /* own caption for a challenge */
             if (challenge_fn[kind - first] && challenge_title[kind - first][0])
                 *(unsigned *)(list + es * i + 8) = (unsigned)(unsigned long)challenge_title[kind - first];   /* the game's u32 */
         }
@@ -8669,8 +8670,14 @@ static void challenge_menu_built(unsigned *r)
         *(unsigned *)(list + es * i + 8) = (unsigned)(unsigned long)own_challenge[k].name;
         *count = i + 1;
     }
-    if (*count != n0 || !challenge_menu_said++)
-        say("challenge menu: %u entries (%u of the modes' own)", *count, *count - n0);
+    if (*count != n0 || !challenge_menu_said++) {
+        char kinds[120];
+        unsigned at = 0;
+        kinds[0] = 0;
+        for (i = 0; i < *count && at < sizeof kinds - 8; i++)     /* PAD-619: the menu's order, for whoever steps it */
+            at += (unsigned)pm_snprintf(kinds + at, sizeof kinds - at, " %u", *(unsigned *)(list + es * i));
+        say("challenge menu: %u entries (%u of the modes' own) - kinds%s", *count, *count - n0, kinds);
+    }
 }
 
 static void challenge_menu_picked(unsigned *r)

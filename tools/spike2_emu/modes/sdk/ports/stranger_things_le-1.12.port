@@ -421,3 +421,15 @@ text  challenge_name_2  Light the Fire
 site  challenge_go_3    0x00198728 0xe92d4008 0xeb038747
 value challenge_flag_3  142
 text  challenge_name_3  Final Showdown
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+site  challenge_balls     0x0027ee84 0xe92d4030 0xe1a05000
+site  challenge_menu      0x00092578 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00092748 0xe2433001 0xe3530005
+value challenge_menu_list_at   532
+value challenge_menu_count_at  28
+value challenge_menu_cap       7
+value challenge_menu_entry     12
+value challenge_menu_kind      2
+value challenge_menu_slot      0
+value challenge_menu_caption   1901

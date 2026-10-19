@@ -457,3 +457,19 @@ text  wizard_film_1   both quests won and Sauron Multiball
 data  wizard_obj_2    0x006b5658   # cmrsinister_clones, a multiball
 text  wizard_name_2   Clone Multiball
 text  wizard_film_2   the three level 2 battles won
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x00733f64
+value game_flags_at       4
+data  game_flag_count     0x00566678
+value challenge_on_flag   18
+site  challenge_balls     0x00220318 0xe92d4030 0xe1a05000
+site  challenge_menu      0x00073de0 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00073fc4 0xe2433001 0xe3530006
+value challenge_menu_list_at   240
+value challenge_menu_count_at  32
+value challenge_menu_cap       8
+value challenge_menu_entry     12
+value challenge_menu_kind      3
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921

@@ -866,9 +866,10 @@ def _roster(game, port):
 
 #: PAD-615: a mode that takes the place of one of the game's challenges in a Player Challenge game (the mode file's
 #: ``challenge`` line; MODE_SDK.md "A mode in the game's Challenge list"). What pad_mode_runtime.c's challenge list
-#: needs - (sites, data, values): at least the first challenge's own start (the port's `site challenge_go_<n>`, from
-#: portchallenge.py), the game flags it reads and the flag of a challenge game.
-CHALLENGE_NEEDS = (("challenge_go_0",), ("game_flags",), ("challenge_on_flag",))
+#: needs - (sites, data, values): the game flags it reads and the flag of a challenge game; and per challenge either
+#: its own start (`site challenge_go_<n>`, PAD-615) or, PAD-619, its flag alone (`value challenge_flag_<n>`, taken as
+#: the ball starts: the port's `event ball_start`). portchallenge.py writes them.
+CHALLENGE_NEEDS = ((), ("game_flags",), ("challenge_on_flag",))
 #: The builds where a mode holding a challenge was seen in the emulator: the game made a Player Challenge game with that
 #: pick by its own Default Game Mode setting (AD_DEFAULT_GAME_MODE), the mode started at the first ball's start instead
 #: of the game's challenge, and a control run (the same setting, no mode) started the game's own.
@@ -878,18 +879,19 @@ CHALLENGE_PROVEN = frozenset({
     "stranger_things-1.13",            # PAD-615 2026-10-19: Default Game Mode 2 (Demogorgon), challenge 0 claimed: DEMO TEST START 7 ms after the pick, the game's Demogorgon Challenge (flag 104) never set; control: it started
     "stranger_things_le-1.12",         # PAD-615 2026-10-19: the same (its Demogorgon Challenge flag 99): mode started, the game's not; control: the game's started
     "stranger_things_le-1.13",         # PAD-615 2026-10-19: the same (flag 104): mode started, the game's not; control: the game's started
+    "rush_pro-1.19",                   # PAD-619 2026-10-19 rig 1, the stock card, hidden, muted: Default Game Mode 2 (Cygnus Book 1), challenge 0 claimed by its flag: RUSH TEST START (challenge pick) as the ball started, flag 29 cleared, the game's Cygnus intro (flag 37) never set, GAME OVER after the one ball. Control: flags 29 and 37 set, the game's own Cygnus played
 })
 
 
-#: PAD-615 round 2: the builds whose start menu (CHOOSE YOUR MODE OF PLAY) was seen in the emulator showing a taken
-#: challenge under its mode's name and challenges of the modes' own after the game's, one picked starting its mode as
-#: a one-ball challenge game.
-CHALLENGE_MENU_PROVEN = frozenset({
-    "james_bond_le-1.06",              # PAD-615 2026-10-19 rig 2, the stock card, hidden, muted: both flipper buttons in attract; YOLT WIZARD (`challenge new`) the 8th entry, DAF WIZARD (`challenge 1`) in Ahoy's place; YOLT picked: START (challenge pick) at the ball's start, the game's Ahoy not started, GAME OVER after the ball. Three of our own: 9 entries, the third "no room"; the last (DAF) picked and started. Control (no modes): 7 entries, Ahoy picked, the game's own Ahoy
-    "james_bond_pro-1.06",             # PAD-615 2026-10-19 rig 2: the same on the stock Pro card (flipper buttons 62/63): YOLT WIZARD the 8th entry, picked, START at the ball's start, GAME OVER after the ball
-})
-#: the entries the game's own menu takes on those builds: Standard, Competition and the five challenges (Tournament and
-#: DJ Mixer when switched on would take two more)
+#: PAD-615 round 2 / PAD-619: the builds whose start menu (CHOOSE YOUR MODE OF PLAY) was seen in the emulator showing
+#: challenges of the modes' own after the game's (and a taken challenge under its mode's name), one picked starting
+#: its mode as a one-ball challenge game - and how many entries the game's own menu took there (the room left for
+#: ours is the port's challenge_menu_cap less those).
+CHALLENGE_MENU_PROVEN = {
+    "james_bond_le-1.06": 7,           # PAD-615 2026-10-19 rig 2, the stock card, hidden, muted: both flipper buttons in attract; YOLT WIZARD (`challenge new`) the 8th entry, DAF WIZARD (`challenge 1`) in Ahoy's place; YOLT picked: START (challenge pick) at the ball's start, the game's Ahoy not started, GAME OVER after the ball. Three of our own: 9 entries, the third "no room"; the last (DAF) picked and started. Control (no modes): 7 entries, Ahoy picked, the game's own Ahoy
+    "james_bond_pro-1.06": 7,          # PAD-615 2026-10-19 rig 2: the same on the stock Pro card (flipper buttons 62/63): YOLT WIZARD the 8th entry, picked, START at the ball's start, GAME OVER after the ball
+}
+#: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)
 CHALLENGE_MENU_GAMES_OWN = 7
 CHALLENGE_NEW = 16                   #: ModeSpec.challenge for a challenge of the mode's own (the runtime's first own slot)
 
@@ -902,27 +904,40 @@ def _challenge_menu(key, port):
         cap = int(port["value"].get("challenge_menu_cap", 0) or 0)
     except (TypeError, ValueError):
         return 0
-    return max(0, cap - CHALLENGE_MENU_GAMES_OWN)
+    return max(0, cap - CHALLENGE_MENU_PROVEN[key])
+
+
+def _challenge_ready(port):
+    """PAD-619: the port names what the runtime needs for a challenge list (:data:`CHALLENGE_NEEDS`), and either a
+    challenge (its start, or its flag with the ball's start to take it on) or a start menu of the known shape."""
+    _sites, data, values = CHALLENGE_NEEDS
+    if not port or not (all(port["data"].get(n) for n in data) and all(n in port["value"] for n in values)):
+        return False
+    return bool(_challenges(port)) or {"challenge_menu", "challenge_menu_pick"} <= set(port["site"])
 
 
 def _challenge_cannot(key, label, port=None):
-    """The ``cannot`` entry for taking a challenge's place on build ``key``, or () when it can."""
-    sites, data, values = CHALLENGE_NEEDS
-    if not port or not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
-                        and all(n in port["value"] for n in values)):
+    """The ``cannot`` entry for a mode in the game's challenges on build ``key`` (taking one's place, or one of its
+    own on the start menu), or () when it can do either."""
+    if not _challenge_ready(port):
         return (("challenge", "%s's Player Challenge mode has no list of challenges a mode of yours can take a place "
-                              "in." % label),)
-    if key in CHALLENGE_PROVEN:
+                              "in, and no start menu the app can add one to." % label),)
+    if key in CHALLENGE_PROVEN or key in CHALLENGE_MENU_PROVEN:
         return ()
     return (("challenge", "The app has found %s's challenges but has not yet seen a mode of yours start from one in "
                           "the emulator, so it cannot here yet." % label),)
 
 
 def _challenges(port):
-    """The names of the port's challenges, in the game's menu order (``challenge_go_<n>`` from 0, no gap)."""
+    """The names of the port's challenges, in the game's menu order, from 0 with no gap: each one's own start
+    (``challenge_go_<n>``) or, PAD-619, its flag where the port has the ball's start to take it on."""
     out = []
-    while port and "challenge_go_%d" % len(out) in port["site"] and len(out) < 8:
+    ball = any(e[0] == "ball_start" for e in (port or {}).get("event", ()))
+    while port and len(out) < 8:
         n = len(out)
+        if not ("challenge_go_%d" % n in port["site"]
+                or ball and str(port["value"].get("challenge_flag_%d" % n, "0")).strip() not in ("", "0")):
+            break
         out.append(port["text"].get("challenge_name_%d" % n, "").strip() or "Challenge %d" % (n + 1))
     return tuple(out)
 
@@ -2255,7 +2270,7 @@ def profile_from_port(path):
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589
-        challenges=_challenges(port) if not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
+        challenges=_challenges(port) if key in CHALLENGE_PROVEN and not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
         challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
         shakes=_shakes(port),                                                # PAD-414
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414

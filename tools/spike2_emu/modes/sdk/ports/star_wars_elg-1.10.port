@@ -540,3 +540,16 @@ site show_7               0x0002fb00 0xe92d4ff0 0xe24dd00c   # 57 lights in its 
 text show_name_7          Fast strobe
 text show_kind_7          accent
 value show_secs_7         2
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x00345428 0xe92d4030 0xe1a05000
+site  challenge_menu      0x00042afc 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00042cb8 0xe2433001 0xe3530005
+value challenge_menu_list_at   268
+value challenge_menu_count_at  44
+value challenge_menu_cap       7
+value challenge_menu_entry     12
+value challenge_menu_kind      2
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921

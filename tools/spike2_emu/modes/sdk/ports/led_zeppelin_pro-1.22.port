@@ -777,3 +777,19 @@ text  wizard_film_2   all four tour multiballs
 data  wizard_obj_3    0x0424c4f4   # ctop_of_the_charts_multiball, a multiball
 text  wizard_name_3   Top of the Charts Multiball
 text  wizard_film_3   all ten songs
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x0424f6d4
+value game_flags_at       4
+data  game_flag_count     0x004a5fc4
+value challenge_on_flag   18
+site  challenge_balls     0x00275a1c 0xe92d4030 0xe1a05000
+site  challenge_menu      0x0006f848 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x0006fa28 0xe2433001 0xe3530003
+value challenge_menu_list_at   384
+value challenge_menu_count_at  84
+value challenge_menu_cap       5
+value challenge_menu_entry     16
+value challenge_menu_kind      4
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921

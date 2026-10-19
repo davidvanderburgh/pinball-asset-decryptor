@@ -3748,9 +3748,66 @@ of our own: 9 entries and `no room for EXTRA WIZARD`, the last entry picked and 
 `mode_project.CHALLENGE_MENU_PROVEN`. Stranger Things' menu is other code: there a mode takes a challenge's place under
 the challenge's own name, and cannot add one.
 
-**Other titles:** their challenges are other things - Godzilla's King of the Monsters / Time Attack, Rush's 2112,
-Venom's Knull levels, Jaws' 4th of July, a timed whole game on Bond 60th - no `FG_<name>_CHALLENGE` flag with a
-handler of this shape, so `challenge_lines.py` writes nothing and the tab offers no such start there.
+**Every build of Bond's generation (PAD-619).** The same start menu is on Aerosmith, Avengers, Batman 66, The Beatles,
+Deadpool, Guardians, Iron Maiden, JP The Pin, Led Zeppelin, The Munsters, Rush, Star Wars ELG, Stranger Things and
+Sword of Rage, every version: one function builds the list on its stack (12-byte entries, or 16 on The Beatles, Led
+Zeppelin, Rush and Sword of Rage: the same three fields and a word more), reads the buttons every frame and, as the
+selection is shown, jumps on its kind to set the game's mode flags. `portchallenge.menu_generic` finds it by those
+two points and reads off the code, per build:
+
+```
+site  challenge_menu      <the every-frame point: mov rX, r0 ; tst rX, #0x80 - the buttons just read>
+site  challenge_menu_pick <the kind jump: sub r3, r3, #1 ; cmp r3, #N>
+value challenge_menu_list_at   <the list: the last stack address taken before the index maths, less the load's offset>
+value challenge_menu_count_at  <the count: what the cursor's wrap past the last entry reads>
+value challenge_menu_cap       <room: up to the first local object above the list the function hands a call>
+value challenge_menu_entry     12 | 16
+value challenge_menu_kind      <the kind ours become>
+value challenge_menu_slot      0 (challenge 0's kind: ours stop it) | -1 (the plain challenge game)
+value challenge_menu_caption   <CHALLENGE: the first after CHOOSE YOUR MODE OF PLAY - 1921, 1911 or 1901 by era>
+site  challenge_balls     <the framework's balls-per-game getter>
+data  game_flags / value game_flags_at / data game_flag_count   <the flag bitmap, from the flag functions>
+```
+
+What each kind does is read the same way: the calls of the game's flag-set function in its case. A kind setting only
+the challenge game's flag is the **plain** challenge game - on most of these builds the entry the menu adds only once
+Stern Insider Connected has sent a challenge (its name is the download's), so the menu never shows it on a machine
+without one. A kind setting it and one flag more is a **named** challenge: Rush (Cygnus Book 1 / 2, 2112: flags 29-31;
+LE 1.18: 24-26 with 16 for the challenge game) and Sword of Rage (Retro, Ransom: 67/68) have no handler of the shape
+above, so `challenge_lines.py` names them by their flags alone:
+
+```
+value challenge_flag_<n>  <its flag>            # no site challenge_go_<n>
+text  challenge_name_<n>  <its name, from its flag's: Cygnus Book 1, 2112, Retro>
+```
+
+The runtime takes those **as the ball starts**: on the game's dispatch of the port's `event ball_start` (its thread,
+before any handler of the game's runs), a challenge game with a held challenge's flag set has the flag cleared - the
+game's own challenge then sees no pick and never starts - and the holder's on_pick called. A challenge of the modes'
+own becomes `challenge_menu_kind`: the plain one where the menu has it (nothing of the game's to stop: the ball's
+start hands it to the mode), else challenge 0's (Rush, Sword of Rage: its flag cleared as the ball starts; Stranger
+Things: its handler hands it over, as on Bond). The every-frame site appends ours only while the list does not
+already hold them, and copies a 16-byte entry's fourth word from the entry ours stand in for.
+
+**One ball.** The plain challenge game does not end after one ball by itself: its length is the Insider challenge's
+(Deadpool Pro 1.16, flag 18 alone: ball 2 followed). `site challenge_balls` - `push {r4, r5, lr} ; mov r5, r0 ; sub sp,
+sp, #12 ; mov r0, #<AD_BALLS_PER_GAME> ; bl ...`, the same on every Spike 2 build - is hooked to answer 1 from the
+moment a mode takes a challenge game until the next game starts, so every challenge game a mode plays is one ball,
+as Bond's own are.
+
+Proven (emulator, 2026-10-19, the stock cards, hidden, muted): Deadpool Pro 1.16 - two of our own on the menu
+(CHALLENGE over MERC WIZARD and TACO RUN), MERC WIZARD picked: START (challenge pick) as the ball started, GAME OVER
+after the one ball. Rush Pro 1.19 - Default Game Mode 2 (Cygnus Book 1) with a mode on challenge 0: START as the ball
+started, flag 29 cleared, the game's Cygnus intro (flag 37) never set, GAME OVER after the ball; the control started
+the game's own (flags 29, 37). The start menu on every build of the generation: the rigbatch job
+(`C:\tmp\PAD-619\job619.sh`) opens the menu, steps to the mode's own entry, starts it, plays one ball and drains -
+`mode_project.CHALLENGE_MENU_PROVEN` lists each build that passed, with the entries its own menu took.
+
+**Other titles** (docs/plans/pad619_challenges.md): Godzilla, Jaws, John Wick, King Kong, Metallica and X-Men build
+the menu from a game-mode table (a list of table indices; Godzilla's challenges are table entries with a flag of
+their own, 40/41; Jaws', John Wick's and Metallica's are the index itself); Elvira keeps the count in a register;
+D&D, Foo Fighters, Jurassic Park, Mando, Star Wars LE/Pro, TMNT, Venom and Bond 60th have other menus. Until their
+lines are written the tab offers no challenge start there and says so.
 
 ## Display priority: a mode layered on the game's display (item 154 display)
 

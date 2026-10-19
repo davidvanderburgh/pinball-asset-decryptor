@@ -161,7 +161,7 @@ def test_the_named_builds_can_and_the_others_say_why_not():
     assert STP.can("challenge") and STP.challenges == ST
     assert not GZ.can("challenge") and GZ.challenges == ()
     assert GZ.why_not("challenge") == ("Godzilla Premium/LE 1.16's Player Challenge mode has no list of challenges a "
-                                       "mode of yours can take a place in.")
+                                       "mode of yours can take a place in, and no start menu the app can add one to.")
     assert "has not yet seen a mode of yours start from one in the emulator" in UNPROVEN.why_not("challenge")
     assert not MP.GODZILLA_PRO_1_15.can("challenge")
 
@@ -172,9 +172,11 @@ def test_every_shipped_build_gets_a_verdict_with_the_game_named():
         if "%s-%s" % (p.game_dir, p.version) in MP.CHALLENGE_PROVEN:
             assert p.can("challenge") and p.challenges, key
             seen.add("%s-%s" % (p.game_dir, p.version))
+        elif "%s-%s" % (p.game_dir, p.version) in MP.CHALLENGE_MENU_PROVEN:    # PAD-619: only its own, on the menu
+            assert p.can("challenge") and p.challenge_menu and not p.challenges, key
         else:
             assert not p.can("challenge") and p.label in p.why_not("challenge"), key
-    assert seen == set(MP.CHALLENGE_PROVEN) == set(PORTS)
+    assert seen == set(MP.CHALLENGE_PROVEN) >= set(PORTS)          # PAD-619: + the flag route's (Rush, ..)
 
 
 # ---- the mode file, from the form ----------------------------------------------------------
@@ -436,7 +438,7 @@ def test_bond_has_room_for_two_of_our_own_and_stranger_things_none():
     assert LE.challenge_menu == 2 and STP.challenge_menu == 0
     pro = MP.profile_from_port(str(SDK / "ports" / "james_bond_pro-1.06.port"))
     assert pro.challenge_menu == 2
-    assert set(MP.CHALLENGE_MENU_PROVEN) == set(BOND_PORTS)
+    assert set(MP.CHALLENGE_MENU_PROVEN) >= set(BOND_PORTS)         # PAD-619: + every build of their generation
 
 
 def test_a_challenge_of_its_own_is_written_as_new_and_refused_where_the_menu_is_not_ours():

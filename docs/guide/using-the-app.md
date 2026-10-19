@@ -324,8 +324,9 @@ its clip or by where the card keeps it). Extracting a card built with
 random clips brings them back on its slots by itself.
 It does nothing else, and the machine still reports its scores to
 Insider Connected.
-**Played in (Stern Spike 2 titles whose modes the app can tell apart,
-such as Godzilla).** The *Played in* column names the battles,
+**Played in (Stern Spike 2 titles whose modes the app can tell apart:
+Godzilla, Uncanny X-Men, Venom, Mandalorian, Star Wars, TMNT, D&D, Jaws,
+King Kong and most other titles whose program is C++).** The *Played in* column names the battles,
 multiballs and other modes of the game that play each clip, read from
 the card's game program, and the list beside *All / Changed /
 Unchanged* shows one mode's clips only. *Other parts of the game*
@@ -339,7 +340,12 @@ with an arrow, says *Same clip as* the first until you choose a
 replacement in it, and then only that mode plays yours. That mode's
 clip goes on the card as a new clip, so it takes an image build (not
 a direct SD write); clear the replacement and the row follows the
-first again.
+first again. When the column is missing, one line beside the list says
+why: the project's card image is not on this PC (put it back, or extract
+again), it could not be read, or the game's program does not tell its
+modes apart (Aerosmith, Batman 66, Beatles, Elvira 3 and the other
+titles whose rules are plain C, and Deadpool). In that last case the
+sounds with a clip below still show.
 **Sounds with a clip (Stern Spike 2).** A clip and its sound are
 separate files on a Spike 2 card, named differently, and nothing in
 the file names links them. The game's program does, and under the

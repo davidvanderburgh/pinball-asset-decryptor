@@ -3707,6 +3707,47 @@ Bond LE 1.06 (a mode file on challenge 1: `START (challenge pick)` 8 ms after th
 the drain ended it and the game; a blocks mode lit by its film and holding Ahoy the same), Bond Pro 1.06, Stranger
 Things 1.13, LE 1.12 and LE 1.13 (challenge 0, Demogorgon). `mode_project.CHALLENGE_PROVEN` lists them.
 
+**Our names, and challenges of our own: the game's start menu (round 2, Bond LE/Pro 1.06).** Holding both flipper
+buttons in attract opens `CHOOSE YOUR MODE OF PLAY`: one entry at a time (STANDARD / NORMAL PLAY, COMPETITION, then
+CHALLENGE over each challenge's name), the flippers to change, Start to select. One function of the game's (LE
+`0xaccb0`; the Pro its own) builds the list on its own stack - 12-byte entries `{u32 kind, u16 caption message, char
+*name}` from `sp+388`, the count at `sp+92` - and then runs the menu; the next local is at `sp+496`, so the list holds
+**9 entries**. Bond's own take 7 (Standard, Competition, the five challenges; Tournament and DJ Mixer when switched on
+would take two more), which leaves room for **2** of ours. Kinds: 0 Standard, 1 Tournament, 2 Competition, 3-7 the
+challenges (names: messages 2882-2886, caption 1921 CHALLENGE), 8 DJ Mixer. Picking jumps on `kind - 1` (`ldrls pc`
+on `cmp #7`): 3-7 set flag 18 and the challenge's flag; anything else is a standard game.
+
+`portchallenge.py` finds both points by their words and writes, with the offsets read off the code:
+
+```
+site  challenge_menu      0x000ace80 0xe2400001 0xe3500005    # once the list is built (sub r0,r0,#1; cmp r0,#5)
+site  challenge_menu_pick 0x000adf74 0xe2433001 0xe3530007    # the jump on the chosen kind (sub r3,r3,#1; cmp r3,#7)
+value challenge_menu_list_at   388
+value challenge_menu_count_at  92
+value challenge_menu_cap       9
+value challenge_menu_kind      3
+value challenge_menu_caption   1921
+```
+
+Both are plain hooks (the logger sees the menu function's stack above the six words the trampoline pushes, and may
+change the saved r3). At `challenge_menu` a challenge a mode holds gets the name `pm_challenge_title(slot, words)`
+gave it (the menu's lettering: capitals), and each challenge `pm_challenge_add(words, on_pick)` added is appended
+(kind `0x100 + k`, the game's own caption) while there is room; the rest are logged once (`no room for ...`). At
+`challenge_menu_pick` (the game runs it on every frame of the menu) one of ours is remembered and its kind made 3, so
+the game makes a real one-ball challenge game - to the game, Chaos at Crab Key's; at the ball's start Crab Key's own
+handler hands it to the mode's `on_pick` instead (`challenge_veto`), so Crab Key never starts. A mode file says
+`challenge new` (its `name`, or `challenge_name <words>`, on the menu); a mode file taking a challenge (`challenge
+<n>`) shows its name in that challenge's place. The Modes tab: Starts on > a challenge game of > *A new challenge of
+its own*; blocks: the same choice in *When the player picks the challenge*.
+
+Proven (emulator, 2026-10-19, the stock cards, hidden, muted; both flipper buttons held 3 s in attract): Bond LE 1.06
+- YOLT WIZARD (`challenge new`) the 8th entry, DAF WIZARD (`challenge 1`) in Ahoy's place under its own name; YOLT
+picked: `START (challenge pick)` at the ball's start, the game's Ahoy not started, `GAME OVER` after the ball; three
+of our own: 9 entries and `no room for EXTRA WIZARD`, the last entry picked and started; the control with no modes:
+7 entries, Ahoy picked and the game's own Ahoy played. Bond Pro 1.06 (flipper buttons 62/63): the same.
+`mode_project.CHALLENGE_MENU_PROVEN`. Stranger Things' menu is other code: there a mode takes a challenge's place under
+the challenge's own name, and cannot add one.
+
 **Other titles:** their challenges are other things - Godzilla's King of the Monsters / Time Attack, Rush's 2112,
 Venom's Knull levels, Jaws' 4th of July, a timed whole game on Bond 60th - no `FG_<name>_CHALLENGE` flag with a
 handler of this shape, so `challenge_lines.py` writes nothing and the tab offers no such start there.

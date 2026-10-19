@@ -214,6 +214,8 @@ HATS = {
     "timer_done": "When a timer runs out",
     "challenge": "When the player picks a challenge",
 }
+#: PAD-615 round 2: the challenge hat's choice that adds the mode to the game's start menu as a challenge of its own
+CHALLENGE_NEW = "A new challenge of its own"
 #: a shot / event hat's "when": the mode's state it runs in
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
 RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game"}
@@ -2466,8 +2468,8 @@ def to_c(program, slug):
     if challenge_names:                     # PAD-615
         L.append("/* PAD-615: the game's challenges this mode takes the place of (a Player Challenge game with one picked")
         L.append(" * starts its script instead of the game's own challenge), claimed as it loads */")
-        L.append("static const char *const CHALLENGE_NAMES[%d] = { %s };"
-                 % (len(challenge_names), ", ".join(_c_str(n) for n in challenge_names)))
+        L.append("static const char *const CHALLENGE_NAMES[%d] = { %s };   /* \"\" = a new one of its own */"
+                 % (len(challenge_names), ", ".join(_c_str("" if n == CHALLENGE_NEW else n) for n in challenge_names)))
         L.append("static int CHALLENGE_AT[%d];" % len(challenge_names))
         L.append("static volatile unsigned challenge_picked;   /* set on the game's thread, run on the tick */")
         L.append("")
@@ -2501,9 +2503,16 @@ def to_c(program, slug):
         L.append("    pm_game_wizard_claim_named(%s);" % _c_str(name))
     if challenge_names:                             # PAD-615
         L.append("    for (i = 0; i < %d; i++) {" % len(challenge_names))
+        L.append("        if (!CHALLENGE_NAMES[i][0]) {     /* its own, on the game's start menu under its name */")
+        L.append("            CHALLENGE_AT[i] = pm_challenge_add(MODE_NAME, on_challenge);")
+        L.append("            if (CHALLENGE_AT[i] < 0) pm_log(\"no challenge of its own: this game's start menu is not ours to add to\");")
+        L.append("            continue;")
+        L.append("        }")
         L.append("        CHALLENGE_AT[i] = pm_challenge_named(CHALLENGE_NAMES[i]);")
         L.append("        if (CHALLENGE_AT[i] < 0 || !pm_challenge_claim((unsigned)CHALLENGE_AT[i], on_challenge))")
         L.append('            pm_log("the challenge %s is not one this game lets a mode take the place of", CHALLENGE_NAMES[i]);')
+        L.append("        else")
+        L.append("            pm_challenge_title((unsigned)CHALLENGE_AT[i], MODE_NAME);   /* the start menu shows its name */")
         L.append("    }")
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")

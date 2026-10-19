@@ -77,7 +77,7 @@ const T = {
   endNow: "End whichever of this project's modes is running.",
   codeMode: "A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others.",
   cutFilms: "Cut this example's clip, picture, music and calls from your own copy of the films. Pick the folder that holds them; the app keeps only the cuts.",
-  challenge: "The mode takes the place of one of the game's own challenges in its Player Challenge mode: a one-ball game, picked on the game's own menu as a game starts (Player Game Mode), or every game when the service menu's Default Game Mode is set to that challenge. When the ball starts in a challenge game with this challenge picked, this mode starts at once instead and the game's own challenge never runs; the game ends when the ball ends, as it does after its own. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge. The game's menu and screens keep the challenge's own name.",
+  challenge: "The mode takes the place of one of the game's own challenges in its Player Challenge mode: a one-ball game, picked on the game's own menu as a game starts (Player Game Mode), or every game when the service menu's Default Game Mode is set to that challenge. When the ball starts in a challenge game with this challenge picked, this mode starts at once instead and the game's own challenge never runs; the game ends when the ball ends, as it does after its own. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge. On James Bond the game's start menu (both flipper buttons held in attract) shows the mode's name in that challenge's place, and A new challenge of its own adds the mode after the game's challenges instead (the menu has room for 2); elsewhere the game's menu and screens keep the challenge's own name.",
   countsAs: "A shot of your choosing counts as one of this mode's own while it runs: a Left ramp can reach the battle vs Ebirah as a left spin (its points, and the count down by one). One ramp is one spin, so a ramp standing in for a spinner needs the spinner's count of hits. Saved with this project and put on the card by Write with the modes; with no rows the mode plays as it always did.",
   rewrite: "This mode is compiled into the game. A rewrite is a mode in C of this project whose code runs INSTEAD of this mode's shot handling: which shots, in what order and what they pay is yours, while its start, clock, screens and ending stay the game's own. It starts from the SDK's example for the mode; delete it and the mode plays as it always did.",
   leaveOut: "Build this Try it without the modes' own sounds: the game's own calls play, and the sound bank is not grown (the slow part of a build). A card Written from the project still carries them.",
@@ -427,7 +427,10 @@ function ModePage({ s, f, off, dis, rs, lim }) {
   const challengeOn = f.starts_kind === "challenge";                            // PAD-615
   const challenges = prof.challenges || [];
   const challengeOff = off || dis.challenge || !challenges.length;
-  const challengeOpts = withValue([{ value: "", label: "(choose a challenge)", disabled: true }, ...challenges.map((x) => ({ value: x, label: x }))], f.challenge);
+  const challengeNew = prof.challenge_new || "";                                // round 2: one of its own
+  const challengeOpts = withValue([{ value: "", label: "(choose a challenge)", disabled: true }, ...challenges.map((x) => ({ value: x, label: x })),
+    ...(challengeNew ? [{ value: challengeNew, label: challengeNew }] : [])], f.challenge);
+  const challengeIsNew = challengeOn && !!challengeNew && f.challenge === challengeNew;
   const END_PICK = "(these shots)";
   const endOpts = withValue((prof.end_shots || ["(no shot)"]).map((x) => ({ value: x, label: x })), f.end_shot);
   const endOn = new Set(s.end_shots_on || []);
@@ -495,7 +498,8 @@ function ModePage({ s, f, off, dis, rs, lim }) {
           <${Radio} name="m-starts" value="challenge" label="a challenge game of" checked=${challengeOn} disabled=${challengeOff && !challengeOn} title=${T.challenge} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.challenge || ""} options=${challengeOpts} ns="modes" k="f:challenge" disabled=${challengeOff || !challengeOn} width=${250} title=${T.challenge} />
         </div>
-        ${challengeOn && !dis.challenge ? html`<div class="small muted wrap" style="padding-left:26px">In a Player Challenge game with this challenge picked, this mode starts as the ball starts, in place of the game's own challenge, and the game ends when the ball ends. To start every game this way, set Default Game Mode in the service menu to this challenge.</div>` : null}
+        ${challengeOn && !dis.challenge && challengeIsNew ? html`<div class="small muted wrap" style="padding-left:26px">The game's start menu (both flipper buttons in attract) lists it after the game's own challenges, under this mode's name. Picked, the game is a one-ball challenge game and this mode starts as the ball starts. The menu has room for ${prof.challenge_room} of these.</div>` : null}
+        ${challengeOn && !dis.challenge && !challengeIsNew ? html`<div class="small muted wrap" style="padding-left:26px">In a Player Challenge game with this challenge picked, this mode starts as the ball starts, in place of the game's own challenge, and the game ends when the ball ends.${challengeNew ? " The game's start menu shows this mode's name in that challenge's place." : ""} To start every game this way, set Default Game Mode in the service menu to this challenge.</div>` : null}
         ${rs.challenge ? html`<div class="small muted wrap" style="padding-left:26px">${rs.challenge}</div>` : null}`}
         ${[0, 1].map((i) => html`<div class="row wrap">
           <span class="dim nw">and also</span>

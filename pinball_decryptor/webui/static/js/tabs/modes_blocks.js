@@ -557,7 +557,7 @@ function addMenu(ed, path) {
 
 // ------------------------------------------------------------------ scripts
 // PAD-615: what the challenge hat does
-const CHALLENGE_TIP = "In the game's own Player Challenge mode (a one-ball game picked on the game's menu as a game starts, or every game when the service menu's Default Game Mode is set to a challenge), this script runs as the ball starts when this challenge is picked, and the game's own challenge does not start: put Start the mode in it. The game ends when the ball ends, as it does after its own. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge.";
+const CHALLENGE_TIP = "In the game's own Player Challenge mode (a one-ball game picked on the game's menu as a game starts, or every game when the service menu's Default Game Mode is set to a challenge), this script runs as the ball starts when this challenge is picked, and the game's own challenge does not start: put Start the mode in it. The game ends when the ball ends, as it does after its own. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge. On James Bond the start menu (both flipper buttons in attract) shows this mode's name, and A new challenge of its own adds it after the game's challenges instead of taking one's place.";
 
 export function HatBody({ h, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);

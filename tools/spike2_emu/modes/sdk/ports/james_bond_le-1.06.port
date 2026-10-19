@@ -801,3 +801,11 @@ text  challenge_name_3  Duel on the Disco Volante
 site  challenge_go_4    0x001d9a24 0xe92d4008 0xeb0c4035
 value challenge_flag_4  189
 text  challenge_name_4  Her Majesty's Secret Service
+# the start menu (CHOOSE YOUR MODE OF PLAY): our names on the challenges modes take, and challenges of their own
+site  challenge_menu      0x000ace80 0xe2400001 0xe3500005
+site  challenge_menu_pick 0x000adf74 0xe2433001 0xe3530007
+value challenge_menu_list_at   388
+value challenge_menu_count_at  92
+value challenge_menu_cap       9
+value challenge_menu_kind      3
+value challenge_menu_caption   1921

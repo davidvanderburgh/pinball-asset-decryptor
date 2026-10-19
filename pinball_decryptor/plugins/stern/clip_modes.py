@@ -56,8 +56,11 @@ import struct
 from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes; older cached readings are read again
-#: (4: each clip's sounds, :mod:`.clip_sounds`; 5: freely named and singleton mode classes, PAD-624)
-READ_REV = 5
+#: (4: each clip's sounds, :mod:`.clip_sounds`; 5: freely named and singleton mode classes, PAD-624;
+#: 6: the clips of a scene that is no video bank, PAD-624)
+READ_REV = 6
+#: a :attr:`CardClips.bank_of` value's third item: the clip is a scene's own, not a video bank's
+SCENE = "scene"
 #: the most clip-name characters a project file keeps (engine._sanitize_title's cap)
 NAME_MAX = 64
 #: how far back from a table's pointer the table's start is looked for (words)
@@ -777,7 +780,7 @@ class CardClips:
     version: str = ""
     reading: Reading = field(default_factory=Reading)
     name_of: dict = field(default_factory=dict)    # project rel -> clip name
-    bank_of: dict = field(default_factory=dict)    # clip name -> its bank's directory
+    bank_of: dict = field(default_factory=dict)    # clip name -> [its directory, path(, SCENE)]
     note: str = ""                                  # why there is nothing, in words
     #: clips of a bank the game plays by name that nothing in the program names: never shown
     unplayed: list = field(default_factory=list)
@@ -891,6 +894,11 @@ def read_card(card, rows, cancel=None):
                 except (OSError, ValueError, VB.VideoBankError):
                     bank = None
                 if bank is None:
+                    # PAD-624: a scene that is no video bank (Batman 66, Bond 60th: a library
+                    # of several Videos) - its clips named as Extract names them
+                    for name, path in _scene_clips(data, d, rows):
+                        names.add(name)
+                        banks.setdefault(name, [d, path, SCENE])
                     continue
                 for c in bank.library.entries:
                     names.add(c.name)
@@ -941,13 +949,30 @@ def unplayed(reading, bank_of):
     clips (an attract scene's) play with the scene and are never in this list."""
     by_dir = {}
     for name, v in bank_of.items():
-        by_dir.setdefault(v[0], []).append(name)
+        if len(v) < 3:                      # not a scene's own clip (:data:`SCENE`)
+            by_dir.setdefault(v[0], []).append(name)
     out = []
     for _d, names in by_dir.items():
         named = [n for n in names if reading.refs.get(n)]
         if names and len(named) * 3 >= len(names):
             out += [n for n in names if not reading.refs.get(n)]
     return sorted(out)
+
+
+def _scene_clips(data, d, rows):
+    """``[(clip name, path under scene.assets)]`` of the project's clips in the scene directory
+    *d* whose ``scene.radium`` (*data*) is no video bank: each named by the scene element that
+    references it, as Extract named its file (:func:`.engine._parse_radium`)."""
+    from .engine import _parse_radium
+    pre = "%s/scene.assets/" % d
+    refs = [p[len(pre):] for p in rows.values() if p.startswith(pre)]
+    if not data or not refs:
+        return []
+    try:
+        named = _parse_radium(data)
+    except (ValueError, IndexError, struct.error):
+        return []
+    return [(named[r], r) for r in refs if named.get(r)]
 
 
 def _names_of(rows, bank_of, clips):

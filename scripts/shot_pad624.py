@@ -170,6 +170,10 @@ def _one(repo, out, pre, screen, key, rel, gone):
                     break
                 time.sleep(1)
             if rel:
+                # the row may be below the list's fold (a clip several modes play has a row
+                # for each): search for it, then click it
+                page.locator(".vid-card .toolbar input").first.fill(os.path.splitext(rel)[0])
+                time.sleep(1.5)
                 page.locator(".vid-tbl .tr:has-text('%s')" % rel).first.click()
             else:
                 page.locator(".vid-tbl .tr").first.click()

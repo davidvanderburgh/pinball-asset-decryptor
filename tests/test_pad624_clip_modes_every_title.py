@@ -83,6 +83,43 @@ def test_a_copy_of_a_freely_named_modes_clip_is_known_again():
         "Bloodlust_Start", "cblood_lust")
 
 
+# ---- clips of a scene that is no video bank ------------------------------------------------------
+def _radium(*clips):
+    """A scene.radium's video records: <u64 len><name><u32 id><u64 len><N.asset/M.asset>."""
+    import struct
+    out = b"\x01" + struct.pack("<Q", 11)              # a library of 11 Videos: no video bank
+    for i, (name, ref) in enumerate(clips):
+        out += struct.pack("<Q", len(name)) + name.encode() + struct.pack("<I", 0x80000040 + i)
+        out += struct.pack("<Q", len(ref)) + ref.encode()
+    return out
+
+
+def test_a_scenes_clips_are_named_as_extract_names_them():
+    d = "/batman/assets/lcd/demand_loaded/3aa0"
+    rows = {"video/KingTut.mp4": d + "/scene.assets/155.asset/0.asset",
+            "video/S1E001_00-16-28-21.mp4": d + "/scene.assets/155.asset/1.asset",
+            "video/other.mp4": "/batman/assets/lcd/x/scene.assets/2.asset/0.asset"}
+    data = _radium(("KingTut", "155.asset/0.asset"), ("S1E001_00-16-28-21", "155.asset/1.asset"),
+                   ("NotInTheProject", "155.asset/2.asset"))
+    assert CM._scene_clips(data, d, rows) == [("KingTut", "155.asset/0.asset"),
+                                              ("S1E001_00-16-28-21", "155.asset/1.asset")]
+    assert CM._scene_clips(b"", d, rows) == []
+    # named per project file, by card path
+    bank_of = {n: [d, p, CM.SCENE] for n, p in CM._scene_clips(data, d, rows)}
+    assert CM._names_of(rows, bank_of, None) == {"video/KingTut.mp4": "KingTut",
+                                                 "video/S1E001_00-16-28-21.mp4":
+                                                     "S1E001_00-16-28-21"}
+
+
+def test_a_scenes_own_clips_are_never_not_played():
+    reading = CM.Reading(refs={"Lock1": [object()]})
+    bank = {"Lock1": ["/b", "2.asset/0.asset"], "Lock2": ["/b", "2.asset/1.asset"]}
+    scene = {"Intro": ["/s", "2.asset/0.asset", CM.SCENE],
+             "Loop": ["/s", "2.asset/1.asset", CM.SCENE],
+             "Lock3": ["/s", "2.asset/2.asset", CM.SCENE]}
+    assert CM.unplayed(reading, {**bank, **scene}) == ["Lock2"]
+
+
 # ---- the toolbar says why there is nothing ---------------------------------------------------------
 def _ready(w):
     return _wait(w, lambda st: st["rows"] and st["modes"]["ready"] and not st.get("scanning"))

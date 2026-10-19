@@ -125,3 +125,18 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   kind at +4 too. The append hook needs per-port field offsets (kind/caption/name) and a template copy.
 - Batches: the chain (chain_all.sh: batch_all -> batch_next -> list_r5) runs from this session's background task; a
   new session must re-arm it (workers survive, rigbatch's main and the chain do not).
+
+## Round 5 (2026-10-19, night)
+
+- Proven: Venom LE/Pro 1.07 (Challenge Mode Low by index 11 -> 0; control: the game's own), Jaws LE 1.02, Star Wars
+  Pro 1.31's compare-chain menu (own entry as Standard). In CHALLENGE_PROVEN / CHALLENGE_MENU_PROVEN.
+- Found: Avengers / The Beatles / Led Zeppelin / Godzilla / Iron Maiden LE 1.16 challenge games never ended because
+  these games re-serve every drain in a challenge game until the challenge itself ends the ball. PAD-630's
+  `site challenge_end_ball` (one shape, 59 builds) is now written on every build (fc5dd5ea), not only the handler
+  builds; the taker's end ends the ball. Rerun in batch_r6.
+- TMNT LE/Pro 1.59 (and Pro 1.58): menu_wide - 24-byte entries, kind at +4, name at +12, plain kind = FINAL BATTLE
+  CHALLENGE (11; 1.58: 10); the runtime's append/pick take the port's field offsets and copy a game entry (49aa4e6c).
+  TMNT Pro 1.58's shipped port names no events (thin port), so its menu stays the game's. Proof queued (chain7).
+- Still open: JP LE/Pro 1.16 (its pick is not the 0xe3960 chain - that is text building), Mando LE/Pro 1.44/1.45,
+  Foo Fighters LE/Pro 1.04, Bond 60th LE 1.11 (menu not yet found), D&D (adapter, no challenge; menu?), Elvira's game
+  end, the rig re-runs. Chains: chain6.sh (batch_r6) then chain7.sh (batch_r7); re-arm both after a restart.

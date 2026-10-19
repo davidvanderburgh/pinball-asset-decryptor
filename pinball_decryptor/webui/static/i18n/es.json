@@ -12371,5 +12371,6 @@
 "This clip belongs to a scene that plays it on its own, so the game's program never asks for it by name and does not say which sound goes with it.": "Este clip pertenece a una escena que lo reproduce por sí misma, así que el programa del juego nunca lo pide por su nombre y no dice qué sonido va con él.",
 "This clip is not one the app found in the card's clip banks, so it can't tell which sound goes with it.": "Este clip no es uno de los que la aplicación encontró en los bancos de clips de la tarjeta, así que no puede saber qué sonido va con él.",
 "The sounds that go with the clips were not read: {}.": "No se leyeron los sonidos que van con los clips: {}.",
-"the card was not read": "no se leyó la tarjeta"
+"the card was not read": "no se leyó la tarjeta",
+"**The picture** is the game's own playfield drawing, read from your card. It shows as an **X-ray** (light lines on dark) so the lit inserts stand out; the **X-ray / Drawing** switch in its top corner shows the drawing as the game ships it instead, and the window remembers your pick.": "**La imagen** es el dibujo del tablero del propio juego, leído de tu tarjeta. Se muestra como **rayos X** (líneas claras sobre fondo oscuro) para que los insertos encendidos destaquen; el interruptor **X-ray / Drawing** de su esquina superior muestra en su lugar el dibujo tal como lo trae el juego, y la ventana recuerda tu elección."
 }

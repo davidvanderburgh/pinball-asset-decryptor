@@ -933,6 +933,20 @@ def cab_panel_open():
     return load_state().get("cab_panel_open", True) is not False
 
 
+#: PAD-628: how the playfield picture is shown - "xray" (the Modes tab's
+#: look: the drawing inverted to light lines on dark, the lights glowing on it)
+#: or "drawing" (the game's test-menu drawing as it ships, black on white)
+ART_LOOKS = ("xray", "drawing")
+
+
+def art_look():
+    """The picture's look (PAD-628), X-ray until it is first switched; kept in
+    the state file like the tick boxes, the page's own storage being private
+    to one run."""
+    look = load_state().get("art_look")
+    return look if look in ART_LOOKS else ART_LOOKS[0]
+
+
 def cabinet_names(boards=None, expression=True):
     """{(node, channel): name} for the cabinet's own lights (cablights.py),
     which GROUP_NODE has no node for - so the swatch grid can name a blade or a
@@ -3511,6 +3525,7 @@ class Field(LedRing):
             "kind": "field",
             "info": self.info,
             "art": "art" if self.art else None,
+            "look": art_look(),
             "base": list(self.base or (313, 710)),
             "fixtures": [[F["fid"], round(F["x"], 2), round(F["y"], 2)]
                          for F in self.fixtures],
@@ -4870,6 +4885,19 @@ class Playfield:
         except Exception:                                   # noqa: BLE001
             pass
         return on
+
+    def api_art_look(self, look):
+        """PAD-628: the picture's X-ray / Drawing switch, kept for the next
+        run beside the tick boxes. Nothing to redraw: the page did it."""
+        look = look if look in ART_LOOKS else ART_LOOKS[0]
+        try:
+            st = load_state()
+            st["art_look"] = look
+            with open(STATE, "w") as f:
+                json.dump(st, f, indent=1)
+        except Exception:                                   # noqa: BLE001
+            pass
+        return look
 
     def api_clear_alerts(self):
         label, script, arg = next(a for a in WINDOW_ACTIONS

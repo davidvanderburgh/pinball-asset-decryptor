@@ -462,14 +462,40 @@ function startMain() {
     const V = S.view, D = S.dyn || {};
     const wrap = el("div", "pf-stagewrap");
     const stage = el("div", "pf-stage" + (V.art ? "" : " noart"));
+    // PAD-628: the picture X-ray (the Modes tab's look) or as the drawing ships
+    let look = V.look === "drawing" ? "drawing" : "xray";
+    let lookBox = null;
     if (V.art) {
       const img = el("img", "art");
       img.src = "/file/art?t=" + encodeURIComponent(TOKEN);
       img.draggable = false;
       stage.append(img);
+      lookBox = el("div", "pf-look");
+      const pick = {};
+      for (const [k, label, words] of [
+        ["xray", "X-ray", "The playfield picture as light lines on dark, the lights glowing on it"],
+        ["drawing", "Drawing", "The playfield picture as the game ships it: its test menu's black-on-white drawing"],
+      ]) {
+        pick[k] = btn(label, () => {
+          pick[k].blur();               // never keep the keyboard: the space bar is the Action Button
+          if (look === k) return;
+          look = k;
+          shown();
+          dirty = true;
+          api("art_look", k);
+        });
+        pick[k].title = words;
+        lookBox.append(pick[k]);
+      }
+      const shown = () => {
+        stage.classList.toggle("xray", look === "xray");
+        for (const k in pick) pick[k].classList.toggle("on", k === look);
+      };
+      shown();
     }
     const cv = el("canvas");
     stage.append(cv);
+    if (lookBox) stage.append(lookBox);
     const overlay = el("div", "pf-overlay");
     let trough = null;
     if (V.trough) { trough = troughStrip(V.trough, D.trough); overlay.append(trough.el); }
@@ -531,9 +557,10 @@ function startMain() {
         const cx = x * scale, cy = y * scale;
         g.beginPath();
         if (!v) {
+          // a dark insert: the drawing's own dark grey, ringed light on the X-ray's dark ground
           g.arc(cx, cy, LED_R, 0, Math.PI * 2);
           g.fillStyle = "#1a1a1a"; g.fill();
-          g.lineWidth = 1; g.strokeStyle = "#3a3a3a"; g.stroke();
+          g.lineWidth = 1; g.strokeStyle = look === "xray" ? "#6d7680" : "#3a3a3a"; g.stroke();
         } else {
           const [r, gg, b, a, rad] = v;
           g.arc(cx, cy, rad, 0, Math.PI * 2);

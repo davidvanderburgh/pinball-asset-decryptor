@@ -12,6 +12,7 @@ with the playfield focused".
 Every WSL helper is stubbed before anything is built: nothing here may reach
 wsl.exe or a rig.
 """
+import json
 import os
 import shutil
 import struct
@@ -200,3 +201,50 @@ def test_the_switch_list_gets_its_trough_strip_back_when_the_panel_goes(
     assert frame.get("layout") and ctl.key_panel is None
     assert view.trough is not None and view.trough.clickable
     assert ctl.state("main")["view"]["trough"]["pos"] == [1, 2, 3, 4, 5, 6]
+
+
+def _field_ctl(pf, monkeypatch):
+    monkeypatch.setattr(pf, "layout_is_usable", lambda: True)
+    monkeypatch.setattr(pf, "load_switches", lambda: [])
+    monkeypatch.setattr(pf, "load_switch_list", lambda: [])
+    monkeypatch.setattr(pf, "load_leds", lambda: [])
+    monkeypatch.setattr(pf, "load_coils", lambda: [])
+    monkeypatch.setattr(pf, "group_fixtures", lambda leds: [])
+    monkeypatch.setattr(pf, "layout_art", lambda: None)
+    monkeypatch.setattr(pf, "layout_extent", lambda pad=14: (100, 200))
+    return pf.Playfield()
+
+
+def test_the_picture_is_x_ray_until_switched_and_kept_for_the_next_run(pf, monkeypatch):
+    # PAD-628: the Modes tab's x-ray look by default; the switch is kept in
+    # the window's state file (the page's own storage is private to a run)
+    ctl = _field_ctl(pf, monkeypatch)
+    assert pf.art_look() == "xray"
+    assert ctl.state("main")["view"]["look"] == "xray"
+    with open(pf.STATE, "w") as f:
+        json.dump({"playfield_pos": [10, 20]}, f)
+    assert pf.Playfield.api_art_look(ctl, "drawing") == "drawing"
+    assert json.load(open(pf.STATE)) == {"playfield_pos": [10, 20], "art_look": "drawing"}
+    assert _field_ctl(pf, monkeypatch).state("main")["view"]["look"] == "drawing"
+    # anything else the page might send is the default, never stored as is
+    assert pf.Playfield.api_art_look(ctl, "sepia") == "xray"
+    assert pf.art_look() == "xray"
+    with open(pf.STATE, "w") as f:
+        json.dump({"art_look": 7}, f)
+    assert pf.art_look() == "xray"
+
+
+def test_the_page_has_the_switch_on_the_picture():
+    js = open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf-8").read()
+    body = js[js.index("function fieldView("):js.index("function draw()", js.index("function fieldView("))]
+    assert 'V.look === "drawing"' in body          # anything but "drawing" is the X-ray
+    assert '"X-ray"' in body and '"Drawing"' in body
+    assert 'api("art_look", k)' in body
+    assert ".blur()" in body                       # the space bar is the Action Button
+    css = open(os.path.join(RIG, "pfpage", "pf.css"), encoding="utf-8").read()
+    # the same look as the Modes tab's playfield picture
+    modes = open(os.path.join(os.path.dirname(RIG), "..", "pinball_decryptor", "webui", "static", "css",
+                              "tabs", "modes.css"), encoding="utf-8").read()
+    look = "filter: invert(.88) hue-rotate(180deg); opacity: .5;"
+    assert ".pf-art { " + look in modes
+    assert ".pf-stage.xray img.art { " + look in css

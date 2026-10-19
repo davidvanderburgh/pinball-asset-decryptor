@@ -147,7 +147,9 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
         self.publish_settings_items()
         if sys.platform == "win32":
             try:
-                self.ctx.loop.after(1500, self.start_disk_badge_check)
+                # the badge, after the automatic clean-up's first look
+                # (PAD-613), which re-arms itself every half hour
+                self.ctx.loop.after(1500, self._keeper_tick)
             except Exception:                           # noqa: BLE001
                 pass
 

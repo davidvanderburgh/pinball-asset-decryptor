@@ -339,6 +339,28 @@ def _title_from_filename(s):
 _UUID8_RE = re.compile(r"^[0-9a-f]{8}$")
 
 
+#: Jersey Jack's extract / write scratch (plugins/jjp/pipeline.py).  The
+#: other ``jjp_*`` names in /var/tmp are the JJP EMULATOR's: its restored
+#: machine image per ISO (``jjp_<iso>``, tools/jjp_emu/padpath.sh - a cache,
+#: treated like an unpacked game), the run's jail and overlay, its logs and
+#: its settings (jjp_devices.json).  Only these are leftovers.
+JJP_SCRATCH = ("jjp_raw_", "jjp_iso_", "jjp_chunks_", "jjp_debugfs_",
+               "jjp_ssd_", "jjp_sys_", "jjp_verify_", "jjp_orig_",
+               "jjp_encrypt", "jjp_decrypt", "jjp_capture", "jjp_manifest",
+               "jjp_replacements", "jjp_mnt", "jjp_dev_capture", "jjp_diag")
+#: The JJP emulator's own fixed names, never an image of a title.
+JJP_EMU_FIXED = ("jjp_current", "jjp_run", "jjp_ovl", "jjp_ovlb",
+                 "jjp_image")
+_JJP_IMAGE_RE = re.compile(r"^/var/tmp/(jjp_[A-Za-z0-9._-]+)$")
+
+
+def is_jjp_image(path):
+    """``/var/tmp/jjp_<iso>``: the JJP emulator's restored machine (PAD-613)."""
+    m = _JJP_IMAGE_RE.match(path)
+    return bool(m) and not m.group(1).startswith(JJP_SCRATCH) \
+        and m.group(1) not in JJP_EMU_FIXED
+
+
 def _jjp_detail(base):
     """Pull the game title out of a `jjp_*` staging name.
 
@@ -364,7 +386,12 @@ def _jjp_detail(base):
             if head and _UUID8_RE.match(tail):
                 return f"{_title_from_filename(head)} ({role})"
             return role  # bare-uuid form -- no title in the path
-    return "extract / write staging"
+    if base.startswith(JJP_SCRATCH):
+        return "extract / write staging"
+    if base in JJP_EMU_FIXED or re.search(r"\.(log|json|pid|[cho]|sh|so)$",
+                                          base):
+        return "the emulator's own files"
+    return "Emulator image: %s" % _title_from_filename(base[len("jjp_"):])
 
 
 def _bof_detail(base):
@@ -452,6 +479,11 @@ RIG_MAKERS = {
     "pad_proc": "P-ROC board", "pad_spooky": "Spooky Pinball",
     "pad_spkproc": "Spooky Pinball", "pad_spkproc_decomp": "Spooky Pinball",
 }
+#: The multi-boot builder's own cache (tools/bof_emu/mkbofmulti.py): each
+#: entry is a .fun unpacked once, beside its ``.media`` pictures.  Flat, with
+#: no ``cache/`` level, so the scan saw its entries as leftovers.
+BOFMULTI_ROOT = "pad_bofmulti_cache"
+RIG_MAKERS[BOFMULTI_ROOT] = "Barrels of Fun"
 #: Roots that are a second rig of the same maker: said beside each entry.
 RIG_VARIANTS = {"pad_apav": "A/V rig", "pad_spkproc": "P-ROC rig",
                 "pad_pbio": "I/O-board rig", "pad_cgcpf": "playfield rig"}
@@ -461,8 +493,11 @@ _RIG_ENVS = ("py27", "py3", "mamba", "env", "bin", "site")
 #: points and scratch too small to matter.
 _RIG_KEEP_RE = re.compile(r"^(nv\d*|home|lower|loctmp)$")
 _RIG_MIN_BYTES = 1 << 20
+#: ``+`` is in the name class because rigs join several sources with it: Dutch
+#: Pinball's ``TBL_justin_113_v10+TBL-v1.15`` (a 3.8 GB game) and the PB I/O
+#: board's ``build-pbap141+pbap145`` were never listed without it (PAD-613).
 _RIG_PATH_RE = re.compile(
-    r"^/var/tmp/(pad_[a-z0-9_]+)/(cache/)?([A-Za-z0-9_.\- ]+)$")
+    r"^/var/tmp/(pad_[a-z0-9_]+)/(cache/)?([A-Za-z0-9_.+\- ]+)$")
 
 # One pass as root: for each rig root, whether a game of it is running (a
 # live pid in any of its *.pid files, or a process whose command line names
@@ -514,6 +549,10 @@ true
 
 def _rig_detail(root, sub, name):
     """(what it is, kind) for one entry of a rig's root."""
+    if root == BOFMULTI_ROOT:
+        if name.endswith(".media"):
+            return "Multi-boot pictures: %s" % name[:-len(".media")], "game"
+        return "Unpacked for a multi-boot image: %s" % name, "game"
     if root == "pad_spkproc_decomp":
         return "Leftover: decompiled %s" % name, "leftover"
     if sub:

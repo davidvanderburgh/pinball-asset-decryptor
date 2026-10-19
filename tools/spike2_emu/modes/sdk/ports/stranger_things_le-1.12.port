@@ -421,3 +421,5 @@ text  challenge_name_2  Light the Fire
 site  challenge_go_3    0x00198728 0xe92d4008 0xeb038747
 value challenge_flag_3  142
 text  challenge_name_3  Final Showdown
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x0042841c 0xe3032456 0xe3402082

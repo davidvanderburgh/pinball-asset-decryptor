@@ -3779,6 +3779,22 @@ of our own: 9 entries and `no room for EXTRA WIZARD`, the last entry picked and 
 `mode_project.CHALLENGE_MENU_PROVEN`. Stranger Things' menu is other code: there a mode takes a challenge's place under
 the challenge's own name, and cannot add one.
 
+**The challenge's end ends the ball (PAD-630).** The game's own challenge, once it is over, ends the ball: Ahoy Mr.
+Bond's ending (LE `0x1cda4`), in a challenge game, clears its running flag and calls the framework's "end this ball
+now" (LE `0x3f79bc(1, 1)`: the status bits `0x202`, the flippers and devices off by bus 177, as the game's wizard
+endings do), so the ball drains dead and `GAME OVER` follows. A mode that took the pick left the ball live, and the
+game's own modes could start before the drain. So when THE MODE THAT TOOK THIS CHALLENGE GAME'S PICK ends (its clock,
+its own end, a stop) outside a ball end, the runtime calls the same function, and nothing of ours begins again in
+that game (`not started: this challenge game's challenge is over`); a mode ended by the drain needs no call. The
+site, found by its words (`movw/movt r2` the status, a push, `ldrh r3,[r2]`, `orr #0x200`, `orr #2`, `strh`; one
+per build):
+
+```
+site  challenge_end_ball  0x003f79bc 0xe305211e 0xe3402082    # Bond LE 1.06 (Pro 0x2665b0, ST 1.13 0x2bd8d4, ...)
+```
+
+A port without it logs `this port has no challenge_end_ball, so the ball plays on`.
+
 **Other titles:** their challenges are other things - Godzilla's King of the Monsters / Time Attack, Rush's 2112,
 Venom's Knull levels, Jaws' 4th of July, a timed whole game on Bond 60th - no `FG_<name>_CHALLENGE` flag with a
 handler of this shape, so `challenge_lines.py` writes nothing and the tab offers no such start there.

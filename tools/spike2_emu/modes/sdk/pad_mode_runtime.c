@@ -807,11 +807,18 @@ static int refused_said(const struct pm_mode *m)    /* 1 = already said for m; e
 }
 
 static unsigned long lit_hold_until;  /* PAD-503: a lit mode's claimed shot holds the game's starts off until then */
+static int chg_refuses(void);         /* PAD-630: the challenge section, below */
+static void chg_began(void);
+static void chg_mode_ended(int was_taker);
 
 int pm_begin(void)
 {
     if (running && running != current) {
         if (!refused_said(current)) pm_log("not started: %s is running", mode_name(running, "another mode"));
+        return 0;
+    }
+    if (running != current && chg_refuses()) {     /* PAD-630: the challenge game's challenge is over */
+        if (!refused_said(current)) pm_log("not started: this challenge game's challenge is over - its ball ends");
         return 0;
     }
     if (running != current) {
@@ -820,6 +827,7 @@ int pm_begin(void)
         begun++;
     }
     running = current;
+    chg_began();                     /* PAD-630 */
     lit_hold_until = 0;              /* PAD-503: a lit mode's claimed shot has done its work */
     disp_linger_other_began();
     clip_other_began();
@@ -851,8 +859,10 @@ static const struct pm_mode *show_ended_by;   /* PAD-411: a mode's ending may st
 static unsigned long show_ended_ms;
 void pm_end(void)
 {
+    int was_taker = running && running == current;
     if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0, refused_forget();
+    if (was_taker) chg_mode_ended(1);   /* PAD-630: a challenge game's mode ended - its ball ends */
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();
@@ -8577,6 +8587,75 @@ static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start m
 static struct { int (*fn)(unsigned slot); const struct pm_mode *by; char name[40]; } own_challenge[N_OWN_CHALLENGE];
 static volatile int own_pending = -1;    /* the own challenge picked on the start menu, until its ball starts */
 
+/* PAD-630 (luvthatapex, Bond LE): the game's own challenge ENDS THE BALL when it is over. Ahoy Mr. Bond's ending
+ * (LE 0x1cda4), in a challenge game: clear its running flag, call the framework's "end this ball now" (LE
+ * 0x3f79bc(1, 1): the status bits 0x202, the flippers and devices off by bus 177 - what the game's own wizard
+ * endings call), and wait 3750 ticks at the end of ball (0x7aa9cc) - so the ball drains dead and GAME OVER
+ * follows. A mode of ours that took the pick left the ball live: the player played on, the game's modes started.
+ * So when the mode that took this challenge game's pick ends, outside a ball end, the runtime calls the same
+ * function (`site challenge_end_ball`, found by its words: portchallenge.py), and nothing of ours begins again in
+ * that game. */
+static struct {
+    const struct pm_mode *by;            /* the mode that took this challenge game's pick */
+    unsigned game;                       /* the game_start count it belongs to */
+    int state;                           /* 0 none, 1 picked, 2 its mode runs, 3 over: the ball ends */
+} chg;
+
+static unsigned chg_game_now(void)
+{
+    int ev = pm_event("game_start");
+    return ev >= 0 ? event_count(ev) : 0;
+}
+
+/* the challenge state of THIS game (a new game, or none, forgets it) */
+static int chg_state(void)
+{
+    if (chg.state && (chg.game != chg_game_now() || !pm_player())) chg.state = 0, chg.by = 0;
+    return chg.state;
+}
+
+static void chg_picked(const struct pm_mode *by)
+{
+    chg.by = by;
+    chg.game = chg_game_now();
+    chg.state = 1;
+}
+
+/* What the end of a mode does to a challenge game, from the state alone (tests lift it verbatim): 1 = end the ball
+ * now (the mode that took the pick ended, live, in its game); 0 = nothing. */
+static int chg_ends_ball(int state, int is_taker, int in_game, int at_ball_end)
+{
+    return state == 2 && is_taker && in_game && !at_ball_end;
+}
+
+static int chg_refuses(void)
+{
+    return chg_state() == 3 && pm_in_game();
+}
+
+static void chg_began(void)
+{
+    if (chg_state() == 1 && current == chg.by) chg.state = 2;
+}
+
+static void chg_mode_ended(int ran)
+{
+    int is_taker = ran && current && current == chg.by, state = chg_state();
+    unsigned f = fn("challenge_end_ball");
+    if (state != 2 || !is_taker) return;
+    chg.state = 3;
+    if (!chg_ends_ball(state, is_taker, pm_in_game(), beh.asking)) {
+        say("challenge: its mode ended with the ball - nothing more of ours starts in this game");
+        return;
+    }
+    if (!f) {
+        say("challenge: its mode ended - this port has no challenge_end_ball, so the ball plays on");
+        return;
+    }
+    say("challenge: its mode ended - the ball ends now, as the game's own challenges do (0x%08x)", f);
+    ((int (*)(int, int))(unsigned long)f)(1, 1);
+}
+
 int pm_challenge_slots(void)
 {
     return (can & PM_CAN_CHALLENGE) ? challenges_n : 0;
@@ -8706,7 +8785,10 @@ static int challenge_veto(unsigned *r, unsigned n)
             current = was;
             say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
                 took ? "its mode starts - the game's own challenge does not" : "the mode let it go - the game's own starts");
-            if (took) return 1;
+            if (took) {
+                chg_picked(own_challenge[k].by);
+                return 1;
+            }
         }
     }
     if (n >= N_CHALLENGE || !challenge_fn[n]) return 0;          /* nobody holds it: the game's own runs */
@@ -8720,6 +8802,7 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
+    if (took) chg_picked(challenge_by[n]);
     return took != 0;
 }
 

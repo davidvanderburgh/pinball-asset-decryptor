@@ -1639,6 +1639,37 @@ the coil (the record's latest request is not ours) refuses a hold and ends one. 
 uncontrolled coil off, the port also names its object (`site <name>_get` or `data <name>_obj`), where it keeps its
 controlling process (`value <name>_ctl`) and its "disabled" virtual (`value <name>_off_slot`).
 
+**The ball held at a post as the mode starts, its clock waiting (PAD-621).** luvthatapex (James Bond LE): "when mini
+wizard modes are started at the right ramp, the up post holds the ball so the player can see the beginning mode
+movie clip, then ball is released, timer starts". A mode file's `coil_hold <name> <ms> [mask] wait` (the Modes tab's
+Other mechanisms > Its clock waits until it lets go; the blocks' Hold "its clock waits until it lets go") stands the
+mode's clock still while that hold holds and starts it when the hold lets go (`mode.log`: `... holding, its clock
+waits until it lets go`, then `the <name> let go - its clock runs, <n> s`). Not as a challenge's ball starts (`challenge
+pick`; blocks: the When the player picks a challenge script): that ball is in the shooter lane, so there is no hold and
+the clock runs.
+
+James Bond LE/Pro 1.06's right return up post is a held coil for it: `coil_hold right_return_up 6000 wait` in a mode
+that starts at the Right ramp holds the ball the way the game's own mini-wizards do. The post is a Device-framework
+object (BottomLaneUpPost, device 9, node 8 coil 7) the game drives itself: its update OFFs it on most switch hits and
+its tick raises it for 1875 ticks on a pending raise when the game wants the ball held (the first Right ramp of a
+ball, for its own mode's start: about 12 s), unless a process controls it (`+0x10`). So a hold takes it - the
+framework's own take / give (`site right_return_up_take` / `_give`, `value right_return_up_ctl 16`) - sends the game's
+own command (255 for 64 ms, then AD_BOTTOM_LANE_UP_POST_POWER), and before giving it back clears the device's
+countdown and pending raise (`value <name>_left`, `value <name>_pending`), so the give's own update lowers it.
+`value <name>_max_ms` lets the one command's hold run past the runtime's 5 s, to the game's own longest there (the
+post: 14 s, its own command on it 20 s); `value <name>_no_hold_flag` refuses a hold while that game flag is set
+(FG_MODES_DO_NOT_HOLD_BALL, 166).
+
+**Emulator-proven** (2026-10-19, the stock LE and Pro cards, hidden, muted; C:/tmp/PAD-621 proof.sh, a mode file
+`trigger 0x4 1` on Right ramp exit, `seconds 20`, `coil_hold right_return_up <ms> wait`): control (no mode) - the
+game's own mini-wizard off the Right ramp raised the post 255/60 then 48 and held it 14.1 s, and a plain first Right
+ramp held it ~12 s; LE with the game's modes held off and stacked - HOLD 6000 ms, the process controlling it, ONE
+command (`[coildrive]` node 8 coil 7: 255 for 60 ms, hold 48 for 5930 ms), no OFF of the game's during it through
+slingshot hits every 2 s, let go at 6011 ms, the clock 20 s from then (END 26.0 s after the start); Pro with a 9 s
+hold - one command, 255 for 60 ms then 48 for 8930 ms, let go at 9011 ms, the clock 20 s from then. After a let-go
+the game may raise the post again at the next switch hit for its own first-ramp hold (the ball is past it by then).
+Desk: tests/test_stern_mode_post_hold.py (the clock standing still while held, a challenge ball not held).
+
 ## The scoop (PAD-381)
 
 A mode may hold a ball that lands in the scoop - while its screen or a callout plays - and nothing more:

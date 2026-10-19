@@ -234,7 +234,13 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
+#: PAD-621: a post the game keeps up itself is held up to its own longest (James Bond's right return up post: 14 s);
+#: the C clamps to this and the runtime to each mechanism's own limit
+HOLD_LONGEST_MS = MP.COIL_LONGEST_MS
 SCOOP_MIN_MS, SCOOP_MAX_MS = MP.SCOOP_MIN_MS, MP.SCOOP_MAX_MS
+#: PAD-621: a hold's "clock": the mode's clock runs on (""), or stands still until the hold lets go ("wait": the
+#: ball held at the start while its clip plays, as the game's own mini-wizards do at Bond's right return up post)
+HOLD_CLOCK = {"": "its clock runs", "wait": "its clock waits until it lets go"}
 #: a scoop hold's reach: the next ball that settles there, or every one while the mode runs
 SCOOP_WHICH = {"next": "the next ball", "every": "every ball"}
 #: PAD-392: where a block turns the shield targets (Godzilla Premium/LE's platform), kept there while the mode runs;
@@ -727,7 +733,7 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
-             game_wizards=None, inserts=None, building=None, modes=None, challenges=None):
+             game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -784,6 +790,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds,
            "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield,
+           "hold_caps": dict(hold_caps or {}),        # PAD-621: {name: ms} a mechanism held longer than 5 s
            "building": building,
            "game_shows": list(game_shows) if game_shows is not None else None,
            "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None,
@@ -1132,7 +1139,10 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["mechs"] is not None and what not in ctx["mechs"]:
                 ctx["out"].append("%s holds the %s, which a mode cannot hold on this card's game."
                                   % (where, what))
-            _check_ms(b.get("ms"), HOLD_MIN_MS, HOLD_MAX_MS, "%s holds it" % where, ctx)
+            _check_ms(b.get("ms"), HOLD_MIN_MS, max(HOLD_MAX_MS, min(ctx["hold_caps"].get(what, 0), HOLD_LONGEST_MS)),
+                      "%s holds it" % where, ctx)
+            if b.get("clock", "") not in HOLD_CLOCK:                       # PAD-621
+                ctx["out"].append("%s holds it: the clock runs or waits." % where)
         elif op == "scoop_hold":
             if b.get("which", "next") not in SCOOP_WHICH:
                 ctx["out"].append("%s holds a ball in the scoop: the next one or every one." % where)
@@ -1669,7 +1679,8 @@ class _Gen:
                     self.mech = True
                     if what not in self.holds:
                         self.holds.append(what)
-                    out.append(pad + "hold(%s, %s);" % (_c_str(what), self.num(b.get("ms"))))
+                    out.append(pad + "%s(%s, %s);" % ("hold_wait" if b.get("clock") == "wait" else "hold",   # PAD-621
+                                                      _c_str(what), self.num(b.get("ms"))))
             elif op == "scoop_hold":
                 self.mech = True
                 out.append(pad + "scoop_hold(%s, %d);" % (self.num(b.get("ms")), 0 if b.get("which") == "every" else 1))
@@ -2282,7 +2293,7 @@ def to_c(program, slug):
     if g.game_wizard:
         L.extend(_GAME_WIZARD_C.split("\n"))
     if g.mech:
-        L.extend((_MECH_C % {"lo": HOLD_MIN_MS, "hi": HOLD_MAX_MS, "slo": SCOOP_MIN_MS, "shi": SCOOP_MAX_MS,
+        L.extend((_MECH_C % {"lo": HOLD_MIN_MS, "hi": HOLD_LONGEST_MS, "slo": SCOOP_MIN_MS, "shi": SCOOP_MAX_MS,
                              "release": "".join("    pm_coil_release(%s);\n" % _c_str(n) for n in g.holds)}
                   ).split("\n"))
     L.append("/* What of the game's own is running (a battle, a multiball, one of its timed modes), or 0. A port that")
@@ -2372,6 +2383,7 @@ def to_c(program, slug):
         L.append("    bar_show(1);                      /* PAD-521: its name in the game's bar */")
     if g.mech:
         L.append("    scoop_next = 0;")
+        L.append("    clock_hold = 0;                   /* PAD-621 */")
     L.append("    hide_ticks = 0;")
     L.append('    reset_mode();')
     if watch:
@@ -2655,7 +2667,11 @@ def to_c(program, slug):
         L.append("        unsigned picked = challenge_picked;")
         L.append("        challenge_picked = 0;")
         L.append("        if (in_game) {")
+        if g.mech:
+            L.append("            ball_starting = 1;            /* PAD-621: no hold that waits for a ball at the post */")
         L.extend("        " + line if line else line for code in challenge_scripts for line in code.split("\n"))
+        if g.mech:
+            L.append("            ball_starting = 0;")
         L.append("        }")
         L.append("    }")
     timer_scripts = scripts_of("timer_done")
@@ -2681,7 +2697,7 @@ def to_c(program, slug):
     L.append("        return;")
     L.append("    }")
     L.append("    run.elapsed++;")
-    L.append("    if (RUN_SECONDS) {")
+    L.append("    if (RUN_SECONDS%s) {" % (" && !clock_held()" if g.mech else ""))   # PAD-621: a hold_wait stops it
     L.append("        if (run.ticks_left) run.ticks_left--;")
     L.append("        seconds = secs_left();")
     L.append("        if (seconds != run.seconds_shown) {")
@@ -3305,13 +3321,47 @@ def _lit_c(g):
 _MECH_C = """/* ---- the mechanisms (PAD-395; MODE_SDK.md "The magnet", "The scoop") ---- */
 static int scoop_next;                  /* 1 = the next ball only, 2 = it is held now: then no more */
 
-/* hold a mechanism (the port's name for it) this many ms; refused, mode.log says why */
+/* hold a mechanism (the port's name for it) this many ms (the runtime keeps each one's own limit: 5 s, or a post's
+ * own longest); refused, mode.log says why */
 UNUSED static void hold(const char *what, long long ms)
 {
     if (!run.on) return;
     if (ms < %(lo)d) ms = %(lo)d;
     if (ms > %(hi)d) ms = %(hi)d;
     if (!pm_coil_hold(what, (unsigned)ms)) pm_log("hold %%s: refused (the runtime's line says why)", what);
+}
+
+/* PAD-621: a hold the clock waits for (the ball held at the start while its clip plays); 0 = the clock runs */
+static const char *clock_hold;
+static int ball_starting;               /* PAD-621: a challenge's scripts run as the ball starts (it is in the shooter lane) */
+
+/* hold it, and the mode's clock stands still until it lets go */
+UNUSED static void hold_wait(const char *what, long long ms)
+{
+    if (!run.on) return;
+    if (ball_starting) {                /* PAD-621 (luvthatapex): a challenge starts at the shooter lane */
+        pm_log("hold %%s: no hold, the mode started as the ball starts (the ball is in the shooter lane) - its clock runs",
+               what);
+        return;
+    }
+    if (ms < %(lo)d) ms = %(lo)d;
+    if (ms > %(hi)d) ms = %(hi)d;
+    if (!pm_coil_hold(what, (unsigned)ms)) {
+        pm_log("hold %%s: refused (the runtime's line says why) - its clock runs", what);
+        return;
+    }
+    clock_hold = what;
+    pm_log("hold %%s: its clock waits until it lets go", what);
+}
+
+/* 1 = the clock waits this tick: a hold_wait still holds */
+static int clock_held(void)
+{
+    if (!clock_hold) return 0;
+    if (run.on && pm_coil_holding(clock_hold)) return 1;
+    pm_log("hold %%s: let go - its clock runs", clock_hold);
+    clock_hold = 0;
+    return 0;
 }
 
 /* hold a ball that settles in the scoop this many ms, then the game kicks it out as always;

@@ -30,7 +30,8 @@ Store keys (namespace ``video``):
                with the clip (:mod:`..plugins.stern.clip_sounds`), named by the extract's
                ``sound_requests.tsv`` and audio files; each item's ``rel`` is its Audio row
                (``open_sound`` shows it there) and ``path`` the file the page plays. A clip
-               with no sure sound lists the ones that MAY be its (PAD-592)
+               with no sure sound lists the ones that MAY be its (PAD-592); one the reading
+               can't pair says why in ``none``, never nothing (PAD-627)
 """
 
 import os
@@ -79,6 +80,12 @@ MAYBE_HOW = {"function": "asked for in the same part of the program",
              "names": "named like it", "part": "named like part of its name"}
 NONE_TEXT = ("No sound found for this clip in the game's program. It may have none (a loop or a "
              "backdrop), or the game picks its sound in a way the program does not show.")
+#: PAD-627: the clips no bank names, each in words (a callout always says why it lists no sound)
+SCENE_TEXT = ("This clip belongs to a scene that plays it on its own, so the game's program "
+              "never asks for it by name and does not say which sound goes with it.")
+UNKNOWN_TEXT = ("This clip is not one the app found in the card's clip banks, so it can't tell "
+                "which sound goes with it.")
+UNREAD_TEXT = "The sounds that go with the clips were not read: %s."
 #: a sound's link and play button (the page's words, here for the tests)
 OPEN_TIP = "Show this sound on the Audio tab"
 
@@ -444,15 +451,23 @@ class ModesMixin:
 
     def _m_sounds(self, rel):
         """The callout's sounds part for the row on show, or None."""
-        if not rel or self._m_clips is None or not self._m_clips.sounds:
-            return None
-        reading = self._m_sound_reading()
-        names = self._m_clips.name_of
-        name = names.get(rel) or names.get(self._m_of.get(rel) or "")
-        if not name:
+        clips = self._m_clips
+        if not rel or clips is None:
             return None
         out = {"rel": rel, "head": SOUNDS_HEAD, "items": [], "more": "", "maybe_head": "",
                "maybe": [], "maybe_more": "", "none": "", "foot": ""}
+        if not clips.sounds:
+            out.update(head="", none=UNREAD_TEXT % (clips.note or "the card was not read"))
+            return out
+        reading = self._m_sound_reading()
+        names = clips.name_of
+        # a clip a second bank holds too plays as its name does (PAD-627)
+        name = (names.get(rel) or names.get(self._m_of.get(rel) or "")
+                or (clips.twin_of or {}).get(rel))
+        if not name:
+            out.update(head="", none=SCENE_TEXT if rel in (clips.scene_of or {})
+                       else UNKNOWN_TEXT)
+            return out
         sounds = reading.sounds_of(name)
         if not sounds:
             if reading.note and not reading.pairs and rel not in self._m_unplayed:
@@ -460,7 +475,7 @@ class ModesMixin:
                 return out
             if rel in self._m_unplayed:
                 return None
-            out["none"] = NONE_TEXT
+            out.update(head="", none=NONE_TEXT)
             return out
         # "function" (a call elsewhere in the code naming the clip) was right 6 times in 28:
         # with nothing surer it is one that MAY be the clip's (PAD-592)

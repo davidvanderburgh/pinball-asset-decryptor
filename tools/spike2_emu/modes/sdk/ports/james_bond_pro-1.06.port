@@ -424,7 +424,25 @@ data gate_obj            0x00821318
 value gate_ctl            28
 value gate_off_slot       3
 value gate_devoff         18
-text held_coils            gate
+# PAD-621: the right return up post, as the game's own mini-wizards hold the ball with it through their start
+# clip when the Right ramp starts them (BottomLaneUpPost, device 9; the game's own command 255 for 64 ms, then
+# AD_BOTTOM_LANE_UP_POST_POWER - adjustment 178 - for 20 s; its v[3] reads AD_BOTTOM_LANE_UP_POST_DISABLED).
+# A Device-framework object: its update OFFs it on most switch hits and its tick raises it 1875 ticks on a pending
+# raise, unless a process controls it (+0x10). So a hold takes it (the framework's take / give), and clears its
+# countdown (+0x20) and pending raise (+0x24) before giving it back, so the give's update lowers it.
+text right_return_up_label Right return up post
+text right_return_up_drive 8 7 255 64 a178
+data right_return_up_obj   0x0081acf0
+site right_return_up_take  0x00079108 0xe92d40f0 0xe30676ac
+site right_return_up_give  0x000791bc 0xe3510000 0xe92d4038
+value right_return_up_ctl    16
+value right_return_up_devoff 18
+value right_return_up_off_slot 3
+value right_return_up_left   32
+value right_return_up_pending 36
+value right_return_up_max_ms 14000
+value right_return_up_no_hold_flag 166   # FG_MODES_DO_NOT_HOLD_BALL
+text held_coils            gate right_return_up
 
 # PAD-420: the other modes' flags, from james_bond_le-1.06's proven port (the game's own ids; proven here by a stack run)
 value mode_flag_1           102

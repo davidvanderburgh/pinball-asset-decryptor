@@ -48,6 +48,7 @@ SAVE_DELAY_MS = 500
 _BOOL_FIELDS = ("screen", "countdown", "lights", "advanced", "stack", "light_shots_on", "multiball",
                 "start_save",                                                      # PAD-225
                 "magnet", "scoop", "coil_on_0", "coil_on_1", "coil_on_2",          # PAD-381
+                "coil_wait_0", "coil_wait_1", "coil_wait_2",                       # PAD-621
                 "shield",                                                          # PAD-392
                 "shake_on_start", "shake_on_shot", "shake_on_end",                 # PAD-414
                 "seq_reset_any")                                                   # PAD-314
@@ -101,6 +102,7 @@ _DEFAULTS = {
     "shake_s_start": "0.5", "shake_s_shot": "0.5", "shake_s_end": "1", "shake_shot": "",
     "coil_on_0": False, "coil_on_1": False, "coil_on_2": False, "coil_s_0": "2", "coil_s_1": "2", "coil_s_2": "2",
     "coil_when_0": "(when it starts)", "coil_when_1": "(when it starts)", "coil_when_2": "(when it starts)",
+    "coil_wait_0": False, "coil_wait_1": False, "coil_wait_2": False,                 # PAD-621
     "mb_on_shot": "(when it starts)",
     "also_shot_0": "(nothing else)", "also_count_0": "1", "also_shot_1": "(nothing else)",
     "also_count_1": "1", "after_mode": "(any time)", "after_when": "game",
@@ -314,7 +316,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "start_save_s": [1, MP.BALL_SAVE_MAX],                                  # PAD-225
         "magnet_s": [MP.MAGNET_MIN_MS / 1000, MP.MAGNET_MAX_MS / 1000, "any"],  # PAD-381
         "scoop_s": [MP.SCOOP_MIN_MS / 1000, MP.SCOOP_MAX_MS / 1000, "any"],     # PAD-381
-        "coil_s": [MP.COIL_MIN_MS / 1000, MP.COIL_MAX_MS / 1000, "any"],        # PAD-381: coil_s_0..2
+        "coil_s": [MP.COIL_MIN_MS / 1000, MP.COIL_LONGEST_MS / 1000, "any"],    # PAD-381: coil_s_0..2 (PAD-621: a
+                                                                                # coil's own longest, checked per coil)
         "also_count": [1, MP.START_COUNT_MAX],                                  # PAD-227; PAD-518
     }
 
@@ -1278,6 +1281,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             f["coil_on_%d" % i] = bool(row)
             f["coil_s_%d" % i] = "%g" % (ms / 1000.0) if ms else "2"
             f["coil_when_%d" % i] = (row[2] if row and len(row) > 2 and row[2] else self.MB_ON_START)
+            f["coil_wait_%d" % i] = bool(row and len(row) > 3 and row[3])                    # PAD-621
 
     def _collect_multiball(self, spec):
         def number(text):
@@ -1309,8 +1313,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         for i, (name, _label) in enumerate(held[:self.COIL_ROWS]):
             if self.f["coil_on_%d" % i]:
                 when = str(self.f["coil_when_%d" % i]).strip()
-                spec.coil_holds.append([name, self._magnet_ms(self.f["coil_s_%d" % i]),
-                                        "" if when == self.MB_ON_START else when])
+                row = [name, self._magnet_ms(self.f["coil_s_%d" % i]), "" if when == self.MB_ON_START else when]
+                if self.f["coil_wait_%d" % i]:
+                    row.append(True)            # PAD-621: its clock waits while it holds
+                spec.coil_holds.append(row)
 
     #: PAD-414: the form's shake choices of the mode's own, by strength (MP.SHAKE_STRENGTHS); one of the game's
     #: shakes is "game:<name>"
@@ -1704,7 +1710,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "game_modes": self._game_mode_rows(p),                           # PAD-363
                 "game_rules": [n for _i, n in getattr(p, "game_rules", ())],      # PAD-398
                 "magnet_shot": getattr(p, "magnet_shot", ""),                    # PAD-381
-                "held_coils": [{"name": n, "label": lab}
+                "held_coils": [{"name": n, "label": lab, "max_s": MP.coil_max_ms(p, n) / 1000}   # PAD-621: max_s
                                for n, lab in getattr(p, "held_coils", ())[:self.COIL_ROWS]],
                 "shield_rule": getattr(p, "shield_rule", ""),                   # PAD-392
                 # PAD-589: the floors a mode may send the building to, and the game's own feature it waits on
@@ -1843,6 +1849,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._probe_card(card.image)
                 text = "Card: %s. Reading which game it is from the card..." % MP.file_name(card.image)
                 no_port = "Reading which game the card is."
+            elif card.image and not os.path.isfile(card.image):
+                # PAD-623: said apart from a card that would not read, so the fix is plain
+                text = ("Card: %s is not on this computer any more (moved or deleted?), so which "
+                        "game it is cannot be read and modes cannot be made for it. Select card "
+                        "to point the project at it." % MP.file_name(card.image))
+                no_port = note = text
             else:
                 text = ("Card: %s. Which game it is could not be read, so modes cannot be made "
                         "for it." % MP.file_name(card.image))
@@ -2950,8 +2962,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         modes = [s for s, _n in self._blocks_modes()] if self.project() else None                     # PAD-600
         challenges = (list(getattr(p, "challenges", ()) or ())                                     # PAD-615
                       + ([BM.CHALLENGE_NEW] if getattr(p, "challenge_menu", 0) else [])) if p is not None else None
+        caps = {n: ms for n, ms in getattr(p, "coil_caps", ()) or ()} if p is not None else None             # PAD-621
         problems = BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards,   # PAD-436
-                               inserts, building, modes, challenges)                                         # PAD-589
+                               inserts, building, modes, challenges, hold_caps=caps)                         # PAD-589
         if self._code_slug and self.project() and self._blocks_own_challenge(program):   # PAD-615 round 3
             problems += self._own_challenge_problems(blocks=(self._code_slug, program)).get(self._code_slug, [])
         return problems, BM.notes(program)
@@ -3044,21 +3057,51 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                    "shots": [n for n, m in p.shots if m & i["shot"]]})
         game = p.game_dir
         card, _via = self._title_card(self.project())
-        if card is None or not card.image:
+        # PAD-623: the project's card first, then any other card of this game the app was pointed at, then the
+        # picture kept from an earlier read - a moved or deleted card still shows the playfield
+        images = self._playfield_cards(card, game)
+        try:
+            data, where = off_loop(self.ctx, PA.game_art, images, game)
+        except OSError as e:
+            data, where = None, str(e)
+        if data:
+            import base64
+            out["w"], out["h"] = PA.png_size(data)
+            out["art"] = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+        elif card is None or not card.image:
             out["why"] = "The project has no card to read the playfield picture from."
         elif card.game_dir != game:
-            out["why"] = "The project's card is another game's (%s)." % card.game_dir
+            out["why"] = "The project's card is another game's (%s)." % (card.game_dir or "not read")
         else:
+            out["why"] = "No playfield picture: %s." % str(where).rstrip(".")
+        return out
+
+    #: the remembered card paths (Settings' path history) a playfield picture may be read from
+    PLAYFIELD_HISTORY = ("extract_input", "write_original", "partition_image", "compare_a", "compare_b")
+
+    def _playfield_cards(self, card, game):
+        """PAD-623: card images of ``game`` to read its playfield picture from, best first: the project's card, the
+        "Try it on" card, then the cards the app was pointed at before whose Stern name or earlier read says
+        ``game``. Never opens an image."""
+        out = []
+        if card is not None and card.image and card.game_dir == game:
+            out.append(card.image)
+        var = self._export("emulate_card_var")
+        paths = [((var.get() if var is not None else "") or "").strip().strip('"')]
+        history = getattr(self.window, "path_history", None)
+        for field in self.PLAYFIELD_HISTORY:
             try:
-                data, where = off_loop(self.ctx, PA.card_art, card.image, game)
-            except OSError as e:
-                data, where = None, str(e)
-            if data:
-                import base64
-                out["w"], out["h"] = PA.png_size(data)
-                out["art"] = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
-            else:
-                out["why"] = "No playfield picture: %s." % str(where).rstrip(".")
+                paths += list(history(field) or ()) if history else []
+            except Exception:                               # noqa: BLE001 - a history is a nicety
+                continue
+        for path in paths:
+            if not path or path in out:
+                continue
+            got = MP.card_from_name(path)
+            if not got[0]:
+                got = MP.probed_card_title(path) or (None, None)
+            if got[0] == game:
+                out.append(path)
         return out
 
     @rpc

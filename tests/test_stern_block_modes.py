@@ -1056,7 +1056,7 @@ def test_the_hud_c_calls_only_the_header_and_the_kit():
     assert kit_used and kit_used <= kit, kit_used - kit
     assert 'static struct kit_hud hud = { .slug = "maser" };' in src
     # a HUD with no priority of its own takes a mode's 180 (PAD-377's choice wins when made)
-    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_MS + total_due" in src
+    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_NOW_MS + total_due" in src
     p = maser_hud()
     p["priority"] = 190
     assert re.search(r"#define DISPLAY_PRIORITY 190\b", BM.to_c(p, "maser"))
@@ -1241,7 +1241,9 @@ def test_the_mechanism_c_calls_only_the_header_and_only_when_a_block_holds():
     # every coil a block names is let go by Let go of everything; nothing fires a coil by number
     lets = re.search(r"static void let_go_all\(void\)\n\{(.*?)\n\}", src, re.S).group(1)
     assert [m for m in re.findall(r'pm_coil_release\("(\w+)"\)', lets)] == ["magnet", "bridge", "mg_magnet"]
-    assert "if (ms > 5000) ms = 5000;" in src and "if (ms > 10000) ms = 10000;" in src
+    # PAD-621: the C clamps a hold to the longest any mechanism allows (Bond's right return up post, 14 s); the
+    # runtime keeps each one's own limit (5 s for these)
+    assert "if (ms > 14000) ms = 14000;" in src and "if (ms > 10000) ms = 10000;" in src
     assert "pm_coil_hold" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
     assert "scoop_tick" not in BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")
 

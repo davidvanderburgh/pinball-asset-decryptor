@@ -389,6 +389,7 @@ static void shield_tick(void)
  * game with neither. */
 static struct { const char *name; unsigned long started, until, ended; } coil_h[] = {
     { "magnet", 0, 0, 0 }, { "mg_magnet", 0, 0, 0 }, { "bridge", 0, 0, 0 },
+    { "right_return_up", 0, 0, 0 },     /* PAD-621: James Bond's post, held up to the game's own 14 s */
 };
 #define N_COILS (int)(sizeof coil_h / sizeof coil_h[0])
 static unsigned scoop_ms;
@@ -437,7 +438,7 @@ int pm_coil_hold(const char *name, unsigned ms)
         return 0;
     }
     if (ms < 100) ms = 100;
-    if (ms > 5000) ms = 5000;
+    if (ms > (strcmp(name, "right_return_up") ? 5000u : 14000u)) ms = strcmp(name, "right_return_up") ? 5000u : 14000u;
     coil_h[i].started = now_ms;
     coil_h[i].until = now_ms + ms;
     printf("%6lu HOLD %s %u ms %s\n", now_ms, name, ms, current && current->name ? current->name : "?");

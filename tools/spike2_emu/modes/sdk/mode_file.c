@@ -99,6 +99,7 @@ struct mode_cfg {
     char coil_name[4][16];            /* PAD-381 `coil_hold <name> <ms> [mask]`: a held coil of the port's */
     unsigned coil_ms[4];
     uint64_t coil_bits[4];            /* ... on each hit of these shots; 0 = once, when the mode starts */
+    int coil_wait[4];                 /* PAD-621 ... `wait`: the mode's clock stands still while it holds */
     unsigned n_coil;
     /* PAD-414 `shake start|shot|end ...`: the cabinet's shaker, as it starts, on a shot, as it ends */
     unsigned char shake_when[4];      /* SHAKE_AT_* */
@@ -159,6 +160,9 @@ static struct {
     int by_challenge;                 /* PAD-619: started by a challenge pick - the challenge game is the mode's */
     unsigned long shield_due;         /* PAD-392: when the shield platform turns (0 = turned, or not asked) */
     unsigned long building_due;       /* PAD-589: when the building moves as it starts (0 = moved, or not asked) */
+    unsigned clock_wait;              /* PAD-621: coil line + 1 whose hold the clock waits for; 0 = it runs */
+    int at_ball_start;                /* PAD-621: it started as the ball starts (a challenge pick): the ball is in
+                                       * the shooter lane, so no `wait` hold as it starts */
 } run;
 
 static int running(const struct slot *M) { return run.active && run.slot == M; }
@@ -341,7 +345,10 @@ static void building_at(struct slot *M, uint64_t mask)   /* mask 0: as it starts
  *   coil_hold <name> <ms> [mask]   the port's held coil <name> (magnet, mg_magnet, bridge on a Godzilla
  *                                  Premium) held <ms> through pm_coil_hold, with all of its limits: on every
  *                                  hit of <mask> while the mode runs (the starting hit included), or once when
- *                                  the mode starts when there is no mask. Up to 4 lines. */
+ *                                  the mode starts when there is no mask. Up to 4 lines.
+ *   coil_hold <name> <ms> [mask] wait   PAD-621: the same, and the mode's clock stands still while that hold
+ *                                  holds the ball (Bond's right return up post as the mode starts at the Right
+ *                                  ramp: the start clip plays, the post drops, the clock starts) */
 static int coil_line(struct slot *M, const char *line)
 {
     const char *a = key_is(line, "coil_hold");
@@ -354,6 +361,8 @@ static int coil_line(struct slot *M, const char *line)
     while (*a && !is_space(*a)) a++;
     cfg.coil_ms[n] = (unsigned)num(&a);
     cfg.coil_bits[n] = (*a >= '0' && *a <= '9') ? num(&a) : 0;
+    while (is_space(*a)) a++;
+    cfg.coil_wait[n] = key_is(a, "wait") != 0;           /* PAD-621 */
     if (k && cfg.coil_ms[n]) cfg.n_coil++;
     return 1;
 }
@@ -362,10 +371,30 @@ static void coils_at(struct slot *M, uint64_t mask)   /* mask 0: the mode's star
 {
     unsigned i;
     for (i = 0; i < cfg.n_coil; i++) {
+        int held;
         if (mask ? !(mask & cfg.coil_bits[i]) : cfg.coil_bits[i] != 0) continue;
-        pm_log("%s: %s %u ms %s - %s", cfg.name, cfg.coil_name[i], cfg.coil_ms[i], mask ? "on its shot" : "as it starts",
-               pm_coil_hold(cfg.coil_name[i], cfg.coil_ms[i]) ? "holding" : "no hold (the runtime's line says why)");
+        if (!mask && cfg.coil_wait[i] && run.at_ball_start) {   /* PAD-621 (luvthatapex): a challenge's ball */
+            pm_log("%s: %s - no hold, it started as the ball starts (the ball is in the shooter lane); its clock runs",
+                   cfg.name, cfg.coil_name[i]);
+            continue;
+        }
+        held = pm_coil_hold(cfg.coil_name[i], cfg.coil_ms[i]);
+        pm_log("%s: %s %u ms %s - %s%s", cfg.name, cfg.coil_name[i], cfg.coil_ms[i], mask ? "on its shot" : "as it starts",
+               held ? "holding" : "no hold (the runtime's line says why)",
+               held && cfg.coil_wait[i] ? ", its clock waits until it lets go" : "");
+        if (held && cfg.coil_wait[i]) run.clock_wait = i + 1;    /* PAD-621 */
     }
+}
+
+/* PAD-621: the clock stands still while a `wait` hold holds the ball; 1 = it waits this tick */
+static int clock_waits(struct slot *M)
+{
+    if (!run.clock_wait) return 0;
+    if (run.clock_wait <= cfg.n_coil && pm_coil_holding(cfg.coil_name[run.clock_wait - 1])) return 1;
+    pm_log("%s: the %s let go - its clock runs, %u s", cfg.name,
+           run.clock_wait <= cfg.n_coil ? cfg.coil_name[run.clock_wait - 1] : "hold", run.secs_shown);
+    run.clock_wait = 0;
+    return 0;
 }
 
 #define SHAKE_AT_START 0
@@ -2310,6 +2339,8 @@ static void mode_start(struct slot *M, const char *why)
     }
     run.saving = !cfg.mball_balls && cfg.ball_save_s && pm_ball_save(cfg.ball_save_s);   /* no refusal stops the mode */
     if (cfg.scoop_ms) pm_scoop_hold(cfg.scoop_ms);       /* PAD-381: the runtime lets it go when the mode ends */
+    run.clock_wait = 0;                                  /* PAD-621: set by a `wait` hold below */
+    run.at_ball_start = name_is(why, "challenge pick");
     coils_at(M, 0);                                      /* PAD-381: held coils with no shot hold as it starts */
     shakes_at(M, SHAKE_AT_START, 0);                     /* PAD-414 */
     run.shield_due = cfg.shield ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-392 */
@@ -3016,6 +3047,7 @@ static void on_tick(void)
         if (!run.active) return;
     }
     if (run.no_clock) return;                /* item 167: a multiball with no clock */
+    if (clock_waits(M)) return;              /* PAD-621: the ball is held - the clock starts when it lets go */
     if (run.ticks_left) run.ticks_left--;
     secs = (run.ticks_left + TICKS_PER_S - 1) / TICKS_PER_S;
     if (secs != run.secs_shown) {

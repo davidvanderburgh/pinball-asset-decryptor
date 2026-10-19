@@ -549,7 +549,7 @@ function ImageInfo({ info }) {
         <span class="small dim grow">${info.loading ? "" : info.status}</span>
         <${Button} kind="primary" onClick=${close}>Close<//>`}>
     <div class="mono small dim x-wrapany">${info.path}</div>
-    ${info.loading ? html`<div class="x-loading"><${Spinner} /><span>Reading image…</span></div>` : null}
+    ${info.loading ? html`<div class="x-loading"><${Spinner} /><span>${sections.length ? info.status : "Reading image…"}</span></div>` : null}
     ${sections.map((sec) => html`<section class="x-isec">
         <div class="h2 x-isec-t">${sec.title}</div>
         <div class="kv x-ikv">${sec.rows.map(([k, v]) => html`<span class="k">${k}</span><span class="x-wrapany">${v}</span>`)}</div>

@@ -1639,6 +1639,37 @@ the coil (the record's latest request is not ours) refuses a hold and ends one. 
 uncontrolled coil off, the port also names its object (`site <name>_get` or `data <name>_obj`), where it keeps its
 controlling process (`value <name>_ctl`) and its "disabled" virtual (`value <name>_off_slot`).
 
+**The ball held at a post as the mode starts, its clock waiting (PAD-621).** luvthatapex (James Bond LE): "when mini
+wizard modes are started at the right ramp, the up post holds the ball so the player can see the beginning mode
+movie clip, then ball is released, timer starts". A mode file's `coil_hold <name> <ms> [mask] wait` (the Modes tab's
+Other mechanisms > Its clock waits until it lets go; the blocks' Hold "its clock waits until it lets go") stands the
+mode's clock still while that hold holds and starts it when the hold lets go (`mode.log`: `... holding, its clock
+waits until it lets go`, then `the <name> let go - its clock runs, <n> s`). Not as a challenge's ball starts (`challenge
+pick`; blocks: the When the player picks a challenge script): that ball is in the shooter lane, so there is no hold and
+the clock runs.
+
+James Bond LE/Pro 1.06's right return up post is a held coil for it: `coil_hold right_return_up 6000 wait` in a mode
+that starts at the Right ramp holds the ball the way the game's own mini-wizards do. The post is a Device-framework
+object (BottomLaneUpPost, device 9, node 8 coil 7) the game drives itself: its update OFFs it on most switch hits and
+its tick raises it for 1875 ticks on a pending raise when the game wants the ball held (the first Right ramp of a
+ball, for its own mode's start: about 12 s), unless a process controls it (`+0x10`). So a hold takes it - the
+framework's own take / give (`site right_return_up_take` / `_give`, `value right_return_up_ctl 16`) - sends the game's
+own command (255 for 64 ms, then AD_BOTTOM_LANE_UP_POST_POWER), and before giving it back clears the device's
+countdown and pending raise (`value <name>_left`, `value <name>_pending`), so the give's own update lowers it.
+`value <name>_max_ms` lets the one command's hold run past the runtime's 5 s, to the game's own longest there (the
+post: 14 s, its own command on it 20 s); `value <name>_no_hold_flag` refuses a hold while that game flag is set
+(FG_MODES_DO_NOT_HOLD_BALL, 166).
+
+**Emulator-proven** (2026-10-19, the stock LE and Pro cards, hidden, muted; C:/tmp/PAD-621 proof.sh, a mode file
+`trigger 0x4 1` on Right ramp exit, `seconds 20`, `coil_hold right_return_up <ms> wait`): control (no mode) - the
+game's own mini-wizard off the Right ramp raised the post 255/60 then 48 and held it 14.1 s, and a plain first Right
+ramp held it ~12 s; LE with the game's modes held off and stacked - HOLD 6000 ms, the process controlling it, ONE
+command (`[coildrive]` node 8 coil 7: 255 for 60 ms, hold 48 for 5930 ms), no OFF of the game's during it through
+slingshot hits every 2 s, let go at 6011 ms, the clock 20 s from then (END 26.0 s after the start); Pro with a 9 s
+hold - one command, 255 for 60 ms then 48 for 8930 ms, let go at 9011 ms, the clock 20 s from then. After a let-go
+the game may raise the post again at the next switch hit for its own first-ramp hold (the ball is past it by then).
+Desk: tests/test_stern_mode_post_hold.py (the clock standing still while held, a challenge ball not held).
+
 ## The scoop (PAD-381)
 
 A mode may hold a ball that lands in the scoop - while its screen or a callout plays - and nothing more:
@@ -3808,6 +3839,74 @@ the menu from a game-mode table (a list of table indices; Godzilla's challenges 
 their own, 40/41; Jaws', John Wick's and Metallica's are the index itself); Elvira keeps the count in a register;
 D&D, Foo Fighters, Jurassic Park, Mando, Star Wars LE/Pro, TMNT, Venom and Bond 60th have other menus. Until their
 lines are written the tab offers no challenge start there and says so.
+
+**The challenge's end ends the ball (PAD-630).** The game's own challenge, once it is over, ends the ball: Ahoy Mr.
+Bond's ending (LE `0x1cda4`), in a challenge game, clears its running flag and calls the framework's "end this ball
+now" (LE `0x3f79bc(1, 1)`: the status bits `0x202`, the flippers and devices off by bus 177, as the game's wizard
+endings do), so the ball drains dead and `GAME OVER` follows. A mode that took the pick left the ball live, and the
+game's own modes could start before the drain. So when THE MODE THAT TOOK THIS CHALLENGE GAME'S PICK ends (its clock,
+its own end, a stop) outside a ball end, the runtime calls the same function, and nothing of ours begins again in
+that game (`not started: this challenge game's challenge is over`); a mode ended by the drain needs no call. The
+site, found by its words (`movw/movt r2` the status, a push, `ldrh r3,[r2]`, `orr #0x200`, `orr #2`, `strh`; one
+per build):
+
+```
+site  challenge_end_ball  0x003f79bc 0xe305211e 0xe3402082    # Bond LE 1.06 (Pro 0x2665b0, ST 1.13 0x2bd8d4, ...)
+```
+
+A port without it logs `this port has no challenge_end_ball, so the ball plays on`.
+
+Proven (emulator, 2026-10-19, Bond LE 1.06 stock card, two challenge games in a row from the start menu): a mode
+file on its clock, and a blocks mode (`challenge new`) ended by its last shot (its Super Jackpot award, clip and
+sound still played). Before: the ball stayed in play after the end, slings scored, and the game's Goldfinger's
+Jackpot and a 2-ball multiball could start. After: the game left play at once (status `0x0202`), nothing scored,
+both refused (`no game`), and the next challenge game started its mode.
+
+
+## Holding the end of a ball (PAD-622)
+
+James Bond's own mini-wizards end on a drain with their TOTAL: the mode's last clip, then its TOTAL under the bar,
+and only then the bonus. Measured on the stock LE 1.06 (emulator, Goldfinger's Jackpot started by
+`pm_game_wizard_named`, then drained): the award clip about 2.5 s, the TOTAL about 6 s, the BONUS screen 8 s after
+the ball ended. The game does it in the process that runs its end of ball: Goldfinger's ending `0xc0928` loops on its
+clip, drawing frames and yielding (`0x2fd144`) until it is done, so the bonus (bus `0x27`) and the next ball wait.
+
+A mode does the same with one call from its `.ball_end`:
+
+```c
+static void on_ball_end(void)
+{
+    if (!running) return;
+    show_my_total();                       /* on the tick's thread from here on, as at any end */
+    if (!pm_ball_end_hold(6000)) take_my_total_down();
+}
+/* and in the tick: once pm_ball_end_holding() is 0 again, take it down */
+```
+
+- Once every mode's `.ball_end` has run, the runtime - inside the game's end-of-ball dispatch, on the game's own
+  thread - sleeps a tick at a time (`site proc_sleep`, as the scoop's hold) for the longest time any mode asked
+  (10000 ms at most), then returns and the game's end of ball goes on exactly as before. The mode's tick runs
+  meanwhile on its own thread (Bond LE: dispatch thread 1, ticks another), so what it shows is drawn: the emulator
+  shows the TOTAL under the bar and the mode's clip still playing through the hold.
+- `pm_ball_end_release()` (from a tick) lets it go early; `pm_ball_end_holding()` is 1 from the ask until the end
+  of ball goes on.
+- Never on a tilted ball: the port's `tilt` event counted since the last ball ended refuses the ask, and a tilt
+  during a hold ends it.
+- The held coils (magnet, building, shield, shaker) still let go at the drain, before the hold; the display
+  priority's ending and the backdrop are given back after it.
+
+A blocks mode that the drain ends does it by itself (`drain_end` in its C): it ends as its clock would - an Award it
+ended on, then its TOTAL on its HUD or its own screen, its bar kept - and holds the end of ball for `DRAIN_TOTAL_MS`
+(6000, the game's own TOTAL) plus that Award, or for the rest of a total already showing. A mode started again
+before its drain's TOTAL went takes it down first.
+
+Proven (emulator, 2026-10-19, James Bond LE 1.06 stock card, hidden, muted; the owner's BON APPETIT blocks): main's
+code ended the mode at the drain and showed no TOTAL; the branch logged `its TOTAL at the drain: the end of ball
+waits 8000 ms` (its When the mode ends Award, then the TOTAL), `ball end: let go after 8015 ms (its time ran out)`,
+TOTAL 3,500,000 under the bar for 6 s, then the game's BONUS and ball 2 as ever (the next ball 12.6 s after the
+drain, main's 4.6 s). The same mode in Ahoy Mr. Bond's place in a Player Challenge game (`AD_DEFAULT_GAME_MODE` 3):
+`START` at the pick, the drain held 8015 ms with its TOTAL up, then the game's GAME OVER and MATCH. Not measured: a
+machine; a title other than Bond (every port with `site proc_sleep` offers it).
 
 ## Display priority: a mode layered on the game's display (item 154 display)
 

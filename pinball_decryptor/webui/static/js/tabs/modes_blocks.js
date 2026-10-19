@@ -35,6 +35,7 @@ const LIT_INSERTS_MAX = 8;                                        // PAD-521: bl
 const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
 const SCOOP_WHICH = [["next", "the next ball"], ["every", "every ball"]];   // PAD-395
+const HOLD_CLOCK = [["", "its clock runs"], ["wait", "its clock waits until it lets go"]];   // PAD-621 (block_modes.HOLD_CLOCK)
 const SHIELD_WHERE = [["toward", "toward the player"], ["away", "away"], ["leave", "where they are"]];   // PAD-392
 const BUILDING_FLOOR = [["1", "floor 1"], ["2", "floor 2"], ["3", "floor 3"], ["0", "back where the game keeps it"]];   // PAD-589
 const SHAKE_STRENGTH = [["hard", "a hard"], ["strong", "a strong"], ["medium", "a medium"], ["soft", "a soft"]];   // PAD-414
@@ -97,6 +98,7 @@ const TIP = {
   lightShot: "Lights a shot's inserts, or one of the game's own lights by name (an insert, a GI string or a flasher, under The game's lights), in this color and pattern, over what the game shows there; off holds it dark. It stays so until a Hand back block or the end of the mode gives it back: to another of your modes that had it lit before, else to the game. To light the mode itself, so that a shot starts it, use Light the mode at.",
   handBack: "Gives these lights back: to another of your modes that had one lit before this mode lit it over theirs (its light comes back as it was), else to the game. The end of the mode gives back every light it holds.",
   gi: "The lights between the inserts (the general illumination) during this step: the game's, dark, or flashing white.",
+  holdClock: "Its clock runs: the mode's seconds go on counting while it holds. Its clock waits: the seconds stand still until the hold lets go, so a ball held as the mode starts (James Bond's right return up post when the mode starts at the Right ramp, as the game's own mini-wizards do) waits out the start clip and the clock starts when the ball is let go.",
   hold: "Holds the mechanism this many ms (100 to 5000) at its own power settings, then lets go. Only while the mode runs, never while the game uses it, 3 s apart and 6 a minute at most; the mode ending, the ball draining or a tilt lets go at once. Any value: a number, a variable, a sum.",
   scoopHold: "A ball that settles in the scoop waits this many ms (100 to 10000), then the game kicks it out as always. The next ball, or every ball while the mode runs. The game's own use of the scoop comes first; the mode ending lets it go.",
   letGo: "Lets go of a held mechanism now, or stops holding balls in the scoop (a ball held there goes).",
@@ -433,7 +435,8 @@ function StmtBody({ b, path, ed }) {
     }
     case "hold": return html`<span class="bk-w" ...${tip(TIP.hold)}>Hold the</span><${Pick} value=${b.what}
         options=${(ed.ch.mechs || []).map((m) => [m.name, m.label])} missing="(not on this game)" onChange=${(v) => set("what", v)} />
-      <span class="bk-w">for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
+      <span class="bk-w">for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms,</span>
+      <${Pick} value=${b.clock || ""} options=${HOLD_CLOCK} title=${TIP.holdClock} onChange=${(v) => set("clock", v)} />`;
     case "scoop_hold": return html`<span class="bk-w" ...${tip(TIP.scoopHold)}>Hold</span><${Pick} value=${b.which || "next"} options=${SCOOP_WHICH} onChange=${(v) => set("which", v)} />
       <span class="bk-w">in the scoop for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
     case "let_go": return html`<span class="bk-w" ...${tip(TIP.letGo)}>Let go of</span><${Pick} value=${b.what}

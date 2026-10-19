@@ -294,6 +294,60 @@ int main(void)
     assert took == ["122"]                          # held, a challenge game (1) and that pick (1); -1 = no bitmap
 
 
+def test_the_challenge_mode_ending_live_ends_the_ball_and_nothing_else(tmp_path):
+    """PAD-630: only the mode that took the pick, ending while it runs in its game and not at a ball end."""
+    R = _host()
+    src = R.RUNTIME.read_text(encoding="utf-8")
+    code = "#include <stdio.h>\n" + R._lift(src, "static int chg_ends_ball(int state, int is_taker, int in_game, "
+                                                  "int at_ball_end)") + """
+int main(void)
+{
+    int s, t, g, b;
+    for (s = 0; s < 4; s++) for (t = 0; t < 2; t++) for (g = 0; g < 2; g++) for (b = 0; b < 2; b++)
+        printf("%d%d%d%d:%d\\n", s, t, g, b, chg_ends_ball(s, t, g, b));
+    return 0;
+}
+"""
+    out = R._host_run(tmp_path, code).split()
+    assert [line[:4] for line in out if line.endswith(":1")] == ["2110"]
+
+
+def test_the_runtime_ends_a_challenge_ball_and_starts_nothing_after():
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    begin = src[src.index("int pm_begin(void)"):]
+    begin = begin[:begin.index("\n}\n")]
+    assert "chg_refuses()" in begin and "chg_began();" in begin
+    end = src[src.index("void pm_end(void)"):]
+    end = end[:end.index("\n}\n")]
+    assert "chg_mode_ended(1)" in end
+    ended = src[src.index("static void chg_mode_ended(int ran)"):]
+    ended = ended[:ended.index("\n}\n")]
+    assert 'fn("challenge_end_ball")' in ended and "(1, 1)" in ended and "beh.asking" in ended
+    veto = src[src.index("static int challenge_veto("):]
+    veto = veto[:veto.index("\n}\n")]
+    assert veto.count("chg_picked(") == 2                         # a claimed challenge, and one of a mode's own
+
+
+def test_the_finder_reads_the_end_of_ball_call():
+    def elf(words):
+        return type("E", (), {"words": tuple(words), "text_va": 0x10000})()
+    two = [0xE305211E, 0xE3402082, 0xE92D4038, 0xE1A05001, 0xE1D230B0, 0xE1A04000, 0xE3833C02, 0xE3833002,
+           0xE1C230B0, 0xEB000000, 0, 0, 0]
+    one = [0xE3032456, 0xE3402082, 0xE1D230B0, 0xE92D4010, 0xE1A04000, 0xE30E0A68, 0xE3833C02, 0xE3400071,
+           0xE3833002, 0xE1C230B0, 0, 0, 0]                    # Stranger Things LE 1.12: the one-word form
+    for words in (two, one):
+        lines = PC.end_ball_lines(elf([0] * 4 + words))
+        assert lines[-1] == "site  challenge_end_ball  0x%08x 0x%08x 0x%08x" % (0x10010, words[0], words[1])
+    assert PC.end_ball_lines(elf(two + two)) == []                # two of them: not the one
+    assert PC.end_ball_lines(elf(two[:6] + [0xE3833C04] + two[7:])) == []
+
+
+@pytest.mark.parametrize("key", sorted(PORTS))
+def test_each_challenge_port_names_its_end_of_ball_call(key):
+    port = MP.read_port(str(SDK / "ports" / ("%s.port" % key)))
+    assert "challenge_end_ball" in port["site"]
+
+
 def test_the_runtime_hooks_every_named_handler_and_refuses_with_its_own_1():
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
     arm = src[src.index("static void challenges_arm(void)"):]
@@ -537,7 +591,8 @@ def _menu(tmp_path, own):
     R = _host()
     src = R.RUNTIME.read_text(encoding="utf-8")
     code = MENU_CONTEXT + "#include <stdlib.h>\n#define CHALLENGE_MENU_KIND 0x100u\n" \
-        + "static int challenge_menu_said, challenge_menu_room_said;\n" \
+        + "static int challenge_menu_said, challenge_menu_room_said;\n#define pm_snprintf snprintf\n" \
+        + R._lift(src, "static int own_entry(const unsigned *ent)") + "\n" \
         + R._lift(src, "static void challenge_menu_built(unsigned *r)") + "\n" \
         + R._lift(src, "static void challenge_menu_picked(unsigned *r)") + MENU_MAIN
     return R._host_run(tmp_path, code, args=(str(own),)).splitlines()
@@ -583,5 +638,49 @@ def test_the_tab_offers_a_challenge_of_its_own_on_bond(tmp_path):
             _project(w, proj)
             w.call("modes.new")
             assert w.state("modes")["profile"]["challenge_new"] == ""
+    finally:
+        preview.enabled = old
+
+
+def test_own_challenge_problems_name_twins_and_the_menus_room():
+    entries = [("a", "BOND VS SUMO", "the form mode BOND VS SUMO"), ("b", "Bond vs Sumo", "the blocks mode Bond vs Sumo"),
+               ("c", "DIAMOND DEATH THREAT", "the blocks mode DIAMOND DEATH THREAT")]
+    out = MP.own_challenge_problems(entries, 2)
+    assert any("Another mode (the blocks mode Bond vs Sumo) is also a new challenge of its own called BOND VS SUMO"
+               in p for p in out["a"])
+    assert all(any("3 modes in this project are new challenges of their own" in p for p in out[k]) for k in "abc")
+    assert not any("Another mode" in p for p in out["c"])
+    assert MP.own_challenge_problems(entries[:1] + entries[2:], 2) == {}
+
+
+def test_the_tab_refuses_a_form_and_a_blocks_mode_both_new_under_one_name(tmp_path):
+    """The reporter's project: BOND VS SUMO as a form mode and as a blocks mode, each A new challenge of its own -
+    the menu would list it twice and both of Bond's free places would go to one mode."""
+    from tests.test_webui_modes import _card_project, _project, _wait
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import preview
+    old = preview.enabled
+    preview.enabled = lambda feature: feature == "modes"
+    try:
+        proj = _card_project(tmp_path / "bond", "james_bond_le-1_06_0.Release.16G.sdcard.raw")
+        bslug, _ = BM.new_blocks_mode(str(proj), "BOND VS SUMO")
+        BM.save(str(proj), bslug, {"name": "BOND VS SUMO", "seconds": 30, "scripts": [
+            {"hat": {"kind": "challenge", "challenge": BM.CHALLENGE_NEW}, "do": [{"op": "start_mode"}]}]})
+        with web_app(tmp_path, mfr="stern") as w:
+            _project(w, proj)
+            slug = w.call("modes.new")
+            w.call("ui.set", "modes", "f:name", "BOND VS SUMO")
+            w.call("ui.set", "modes", "f:challenge", "A new challenge of its own")
+            w.call("ui.set", "modes", "f:starts_kind", "challenge")
+            assert _wait(w, lambda: "is also a new challenge of its own called BOND VS SUMO"
+                         in w.state("modes")["status"])
+            w.call("modes.select", bslug, "code")                    # the blocks twin says so too
+            assert _wait(w, lambda: any("the form mode BOND VS SUMO" in p for p in
+                                        ((w.state("modes").get("code") or {}).get("blocks") or {}).get("problems", [])))
+            w.call("modes.select", slug, "form")
+            w.call("ui.set", "modes", "f:starts_kind", "shot")      # one is enough: the other back on its shot
+            assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")
+            w.call("modes.select", bslug, "code")
+            assert _wait(w, lambda: (w.state("modes").get("code") or {}).get("blocks", {}).get("problems") == [])
     finally:
         preview.enabled = old

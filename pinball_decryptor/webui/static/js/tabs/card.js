@@ -98,14 +98,15 @@ function Glass({ p }) {
 
 // ------------------------------------------------------ the card details
 // The Image Info report, under the card tile.  While it is read the rows it
-// will fill shimmer in place.
+// will fill shimmer in place; the quick rows show as soon as they are read,
+// the video count following (PAD-626: "partial").
 const SKELETON = [[38, 62], [30, 48], [44, 70], [26, 40], [34, 56]];
 function Details({ info }) {
   const loading = info.state === "loading";
   const sections = info.sections || [];
   return html`<${Card} cls="c-info" title="Card details"
       extra=${html`<span class="small dim">${loading ? "" : info.status}</span>
-        <${Button} kind="ghost" size="sm" icon="copy" disabled=${loading || !sections.length}
+        <${Button} kind="ghost" size="sm" icon="copy" disabled=${loading || info.state === "partial" || !sections.length}
           onClick=${() => call("card.info_copy")} title="Copy the report">Copy<//>
         <${Button} kind="ghost" size="sm" icon="refresh" disabled=${loading}
           onClick=${() => call("card.refresh")} title="Read the card again" />`}>

@@ -682,7 +682,25 @@ data gate_obj            0x0081fad8
 value gate_ctl            28
 value gate_off_slot       3
 value gate_devoff         18
-text held_coils            jet_pack_magnet gate
+# PAD-621: the right return up post, as the game's own mini-wizards hold the ball with it through their start
+# clip when the Right ramp starts them (BottomLaneUpPost, device 9; the game's own command 255 for 64 ms, then
+# AD_BOTTOM_LANE_UP_POST_POWER - adjustment 183 - for 20 s; its v[3] reads AD_BOTTOM_LANE_UP_POST_DISABLED).
+# A Device-framework object: its update OFFs it on most switch hits and its tick raises it 1875 ticks on a pending
+# raise, unless a process controls it (+0x10). So a hold takes it (the framework's take / give), and clears its
+# countdown (+0x20) and pending raise (+0x24) before giving it back, so the give's update lowers it.
+text right_return_up_label Right return up post
+text right_return_up_drive 8 7 255 64 a183
+data right_return_up_obj   0x00819488
+site right_return_up_take  0x00079100 0xe92d40f0 0xe3067dfc
+site right_return_up_give  0x000791b4 0xe3510000 0xe92d4038
+value right_return_up_ctl    16
+value right_return_up_devoff 18
+value right_return_up_off_slot 3
+value right_return_up_left   32
+value right_return_up_pending 36
+value right_return_up_max_ms 14000
+value right_return_up_no_hold_flag 166   # FG_MODES_DO_NOT_HOLD_BALL
+text held_coils            jet_pack_magnet gate right_return_up
 # PAD-420: Mode > Magnet holds the ball with the held coil jet_pack_magnet, on a hit of the shot nearest it on the
 # playfield picture (Tank hood target, 17 px from the jet pack magnet)
 text magnet_coil           jet_pack_magnet
@@ -812,3 +830,5 @@ value challenge_menu_caption   1921
 
 # ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
 site  challenge_balls     0x0026847c 0xe92d4030 0xe1a05000
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x003f79bc 0xe305211e 0xe3402082

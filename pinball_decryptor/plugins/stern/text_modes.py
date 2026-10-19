@@ -48,8 +48,8 @@ import bisect
 import re
 from dataclasses import dataclass, field
 
-#: bumped when what :func:`read` finds changes
-READ_REV = 1
+#: bumped when what :func:`read` finds changes (2: the modes of every C++ title, PAD-624)
+READ_REV = 2
 #: how close (in line numbers) a ``near`` use must be to one of the same mode's ``exact`` ones
 NEAR = 16
 #: the words of one line of the table: five language pointers and a zero
@@ -439,7 +439,7 @@ def _read(raw, spans, census):
     except S.ScanError:
         return out
     model = S.class_model(prog)
-    modes = CM._mode_classes(S, model)
+    modes = CM._mode_classes(S, model, prog)
     if not modes:
         return out
     layers = CM._layers(model, modes)

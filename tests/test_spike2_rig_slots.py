@@ -552,6 +552,35 @@ kill $a $c; rm -f "$S"
     assert "ok1" in out and "only slot 2 died" in out, out + err
 
 
+@needs_proc
+def test_a_sweeps_card_copier_is_no_rigs_run_script():
+    """PAD-632: rigbatch's stager runs `cardmount.sh <card> --cache-now` with
+    no PAD_SLOT; read as rig 0's run script it put "1 running" and only "Stop
+    emulator" on the main rig with nothing running there."""
+    rc, out, err = _sh(r'''
+. "$R/padslot.sh"
+d=$(mktemp -d)
+printf 'sleep 30\n' > "$d/cardmount.sh"; cp "$d/cardmount.sh" "$d/watch.sh"
+env -u PAD_SLOT bash "$d/cardmount.sh" /x/card.raw --cache-now & c=$!
+env -u PAD_SLOT bash "$d/cardmount.sh" /x/card.raw & m=$!
+env -u PAD_SLOT bash "$d/watch.sh" 0 & w=$!
+sleep 0.3
+got=$(PAD_SLOT=0 pad_run_script_pids | sort -n | tr '\n' ' ')
+want=$(printf '%s\n' "$m" "$w" | sort -n | tr '\n' ' ')
+[ "$got" = "$want" ] && echo ok
+echo "got=$got want=$want copier=$c"
+kill $c $m $w; rm -rf "$d"
+''')
+    assert "ok" in out.splitlines(), out + err
+
+
+def test_status_and_stop_ask_the_one_run_script_list():
+    assert "SCRIPT=$(pad_run_script_pids |" in _src("alive.sh")
+    k = _src("killgame.sh")
+    assert "_rs=$(pad_run_script_pids)" in k
+    assert "(watch|runbridge|nbrun|run_game|cardmount)" not in k
+
+
 def test_a_save_state_load_keeps_a_rigs_overlay_root():
     """restorestate.sh sweeps every mount out of the restore's namespace; a
     rig's rootfs IS a mount, and sweeping it left criu an empty root ("Can't

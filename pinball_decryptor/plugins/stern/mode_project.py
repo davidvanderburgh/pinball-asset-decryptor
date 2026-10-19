@@ -82,7 +82,9 @@ class TitleProfile:
     magnet_shot: str = ""            # PAD-381: the shot whose hit is the ball over the magnet; "" = no magnet
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
     coil_caps: tuple = ()            # PAD-420: ((name, ms), ...) a held coil's longest hold where the game's own
-    #                                  longest command on it is shorter than COIL_MAX_MS (its `_drive` line's last word)
+    #                                  longest command on it is shorter than COIL_MAX_MS (its `_drive` line's last word);
+    #                                  PAD-621: or longer, where the port names the game's own longest hold there
+    #                                  (`value <name>_max_ms`: a post the game holds the ball with itself)
     shield_rule: str = ""            # PAD-392: the game's own shield feature (the port's `text shield_rule`, one of
     #                                  game_rules): it turns the platform back while it counts shots
     roster: tuple = ()               # PAD-589: the battle selection's slots a mode may take (their names, slot order);
@@ -1364,6 +1366,10 @@ def _wizards_cannot(key, label, port=None):
 #: the emulator; a coil not here is not offered.
 COIL_MIN_MS = 100
 COIL_MAX_MS = 5000                     # pad_mode_runtime.c MAGNET_MAX_MS: every held coil's cap
+#: PAD-621: the longest hold of any held coil: a post the game holds the ball with for longer than COIL_MAX_MS may be
+#: held as long as the game's own longest there (`value <name>_max_ms`: James Bond's right return up post, 14 s at a
+#: mini-wizard's start); never above this
+COIL_LONGEST_MS = 14000
 HELD_COILS_PROVEN = frozenset({
     ("godzilla_le-1.16", "mg_magnet"),  # 2026-10-05 rig 1, the stock Premium/LE card: held 2000 ms as the mode started (255 for 250, then 80 for 1750: its own adjustments), OFF at its end
     ("godzilla_le-1.16", "bridge"),     # the same run: held 2000 ms on the left ramp (255 for 300, then 25 for 1700), a hit mid-hold refused, held again, a mode stop let go 617 ms early; no abort
@@ -1426,7 +1432,9 @@ HELD_COILS_PROVEN = frozenset({
     ("venom_le-1.07", "up_post"),                # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 1, 255 for 32 ms then 48 (the game's own), at most 1032 ms; held 1030 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("james_bond_le-1.06", "jet_pack_magnet"),   # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 1000 ms then 15 (the game's own); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("james_bond_le-1.06", "gate"),              # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("james_bond_le-1.06", "right_return_up"),  # PAD-621 2026-10-19 (stock card, hidden, muted; a mode started on the Right ramp exit, `coil_hold right_return_up 6000 wait`): process 13187 took control, ONE command node 8 coil 7 255 for 60 ms then 48 for 5930 ms (the game's own, AD_BOTTOM_LANE_UP_POST_POWER), no OFF of the game's through slingshot hits, let go at 6011 ms, the clock 20 s from then; the game's modes held off and stacked alike; no abort
     ("james_bond_pro-1.06", "gate"),             # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 6, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
+    ("james_bond_pro-1.06", "right_return_up"), # PAD-621 2026-10-19 (stock card, hidden, muted; a mode started on the Right ramp exit, `coil_hold right_return_up 9000 wait`): process 13186 took control, ONE command node 8 coil 7 255 for 60 ms then 48 for 8930 ms (past the 5 s: the post's own longest is 14 s), let go at 9011 ms, the clock 20 s from then; no abort
     ("elvira3-1.13", "gate"),                    # PAD-420 2026-10-08 coil_job_c2 (stock card, hidden, muted; coins one at a time): node 9 coil 5, 255 for 64 ms then 96 (the game's own); held 1990 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
     ("aerosmith_le-1.16", "upper_gate"),         # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 10 coil 0, 255 for 250 ms then 255 (the game's own), at most 1488 ms; held 1480 ms to its end; when the game raised it mid-hold, let go with no OFF of its own; no abort
     ("aerosmith_le-1.16", "toy_box_magnet"),     # PAD-420 2026-10-08 coil_job_c (stock card, hidden, muted): node 9 coil 0, 255 for 1000 ms then 16 (the game's own, its ToyBoxMagnet's grab - device 17 by its static object; its hold runs 5 s, so the runtime's 5 s cap); held 2000 ms to its end; a mode stop 0.7 s in sent the game's OFF; no abort
@@ -1479,13 +1487,24 @@ def _held_coils(port):
 
 def _coil_caps(port, names):
     """PAD-420: ``((name, ms), ...)`` for the held coils whose `_drive` line names the game's own longest command
-    on the coil, where that is shorter than COIL_MAX_MS: a hold of it is never longer (pad_mode_runtime.c)."""
+    on the coil, where that is shorter than COIL_MAX_MS: a hold of it is never longer (pad_mode_runtime.c).
+    PAD-621: and a coil whose port names `value <name>_max_ms`: the game's own longest hold there (a post the game
+    holds the ball with longer than COIL_MAX_MS), up to COIL_LONGEST_MS."""
     out = []
     for name in names:
         words = port["text"].get("%s_drive" % name, "").split("#")[0].split() if port else []
-        if len(words) == 6 and words[5].isdigit() and int(words[5]) < COIL_MAX_MS:
+        top = port["value"].get("%s_max_ms" % name) if port else None
+        if isinstance(top, int) and COIL_MIN_MS <= top:
+            out.append((name, min(top, COIL_LONGEST_MS)))
+        elif len(words) == 6 and words[5].isdigit() and int(words[5]) < COIL_MAX_MS:
             out.append((name, int(words[5])))
     return tuple(out)
+
+
+def coil_max_ms(p, name):
+    """PAD-621: the longest hold of held coil ``name`` on title ``p``: its own cap (shorter or, for a post the game
+    keeps up itself, longer), else COIL_MAX_MS."""
+    return dict(getattr(p, "coil_caps", ()) or ()).get(name, COIL_MAX_MS)
 
 
 def _coils_cannot(key, label, port=None):
@@ -2816,7 +2835,59 @@ def project_card(project):
     card's index, off the UI thread (:func:`project_profile` with ``probe=True``). Before
     2026-09-22 a renamed record lost to the ``.pinproj`` anchor's stock image or Write
     original when one of those parsed, and a set could be prepared for a card the project
-    was never measured on. The anchor's paths are read only when the record is absent."""
+    was never measured on. The anchor's paths are read only when the record is absent.
+
+    PAD-623: a card whose game cannot be read - its file is not on this computer any more
+    (moved or deleted), or its own index was read and named no game - takes the game the
+    project's saved modes were made for (:func:`modes_title`), so the tab still knows it."""
+    card = _project_card(project)
+    if card is None or card.game_dir or not card.image:
+        return card
+    if os.path.isfile(card.image) and probed_card_title(card.image) != (None, None):
+        return card                    # not read yet: the probe answers first
+    made_for = modes_title(project)
+    if made_for is None:
+        return card
+    return ProjectCard(card.image, made_for.game_dir, made_for.version,
+                       MODES_TITLE_SOURCE if not os.path.isfile(card.image)
+                       else MODES_TITLE_UNREAD)
+
+
+#: PAD-623: where :func:`project_card` found the game when the card file is gone
+MODES_TITLE_SOURCE = "the game this project's modes were made for; the card file is not there"
+#: ... and when the card is there but its index names no game
+MODES_TITLE_UNREAD = "the game this project's modes were made for; the card names none"
+
+
+def modes_title(project):
+    """PAD-623: the :class:`TitleProfile` every saved mode in ``project`` names as its game
+    (a mode.json's ``title``, a code or blocks mode's assets.json ``title`` when that is a
+    game this app has modes for - there it may also be the mode's screen title), or None
+    when none names one, or two name different games. Reads the modes' small files only."""
+    found = {}
+    d = modes_dir(project)
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return None
+    for slug in names:
+        for fname in (MODE_FILE, "assets.json"):
+            try:
+                with open(os.path.join(d, slug, fname), "r", encoding="utf-8") as f:
+                    key = (json.load(f) or {}).get("title")
+            except (OSError, ValueError, AttributeError):
+                continue
+            if not isinstance(key, str) or not key.strip():
+                continue
+            try:
+                prof = profile(key.strip())
+            except ModeProjectError:
+                continue
+            found[prof.key] = prof
+    return next(iter(found.values())) if len(found) == 1 else None
+
+
+def _project_card(project):
     if not project or not os.path.isdir(project):
         return None
     from ...core import extract_source, project_file
@@ -3427,9 +3498,9 @@ def _map_shots(spec, fn):
         spec.end_shot = one(spec.end_shot)
     spec.add_ball_shot = one(spec.add_ball_shot)
     spec.multiball_on_shot = one(spec.multiball_on_shot)
-    if isinstance(spec.coil_holds, list):
-        spec.coil_holds = [[r[0], r[1], one(r[2])] if isinstance(r, (list, tuple)) and len(r) == 3 else r
-                           for r in spec.coil_holds]
+    if isinstance(spec.coil_holds, list):              # PAD-621: [name, ms, shot] or [name, ms, shot, wait]
+        spec.coil_holds = [[r[0], r[1], one(r[2])] + list(r[3:]) if isinstance(r, (list, tuple)) and len(r) in (3, 4)
+                           else r for r in spec.coil_holds]
     if isinstance(spec.shakes, list):                  # PAD-414
         spec.shakes = [[r[0], r[1], r[2], one(r[3])] if isinstance(r, (list, tuple)) and len(r) == 4 else r
                        for r in spec.shakes]
@@ -4458,7 +4529,7 @@ def validate_coils(spec, p):
             out.append("%s has no mechanism called %r a mode can hold." % (p.label, name))
             continue
         n = _int_or_none(ms)
-        top = min(COIL_MAX_MS, dict(getattr(p, "coil_caps", ()) or ()).get(name, COIL_MAX_MS))   # PAD-420: the game's own
+        top = coil_max_ms(p, name)              # PAD-420: the game's own longest; PAD-621: longer for a post it keeps up
         if n is None or not COIL_MIN_MS <= n <= top:
             out.append("The %s holds %g to %g seconds." % (label, COIL_MIN_MS / 1000, top / 1000))
         if shot and shot not in shots:
@@ -4469,14 +4540,16 @@ def validate_coils(spec, p):
 
 
 def coil_lines(spec, p):
-    """The runtime lines of the held mechanisms: ``coil_hold <name> <ms> [mask]``."""
+    """The runtime lines of the held mechanisms: ``coil_hold <name> <ms> [mask] [wait]`` (PAD-621: ``wait``, the
+    row's fourth item - the mode's clock stands still while it holds)."""
     if not p.can("coils"):
         return []
     held, out = dict(p.held_coils), []
     for row in spec.coil_holds or ():
-        name, ms, shot = (list(row) + ["", 0, ""])[:3]
+        name, ms, shot, wait = (list(row) + ["", 0, "", False])[:4]
         if name in held and _int_or_none(ms):
-            out.append("coil_hold      %s %d%s" % (name, int(ms), " 0x%08x" % p.mask([shot]) if shot else ""))
+            out.append("coil_hold      %s %d%s%s" % (name, int(ms), " 0x%08x" % p.mask([shot]) if shot else "",
+                                                     " wait" if wait else ""))
     return out
 
 
@@ -4987,6 +5060,32 @@ def more_to_start_lines(spec, p):
     if isinstance(spec.after, str) and spec.after.strip():
         lines.append("%-14s %s %s" % ("after", spec.after_when, spec.after.strip()))
     return lines
+
+
+def own_challenge_problems(entries, room):
+    """PAD-615 round 3: ``{key: [sentence]}`` for the project's modes that are new challenges of their own on the
+    game's start menu. ``entries`` is ``[(key, name, what)]`` - one per such mode, form or blocks (``what``: "the
+    blocks mode" / "the form mode", for the sentence) - and ``room`` how many the menu holds. Two under one name would
+    be listed twice (the menu shows names in capitals, so case does not tell them apart); more than ``room`` would
+    leave some off the menu, which ones depending on the order the card loads them."""
+    out = {}
+    by_name = {}
+    for key, name, what in entries:
+        by_name.setdefault(name.strip().upper(), []).append((key, name.strip(), what))
+    for same in by_name.values():
+        if len(same) < 2:
+            continue
+        for key, name, _what in same:
+            others = ", ".join(w for k, _n, w in same if k != key)
+            out.setdefault(key, []).append(
+                "Another mode (%s) is also a new challenge of its own called %s: the game's start menu would list it "
+                "twice. One mode per challenge is enough: set the other one's start back, or delete it." % (others, name))
+    if room and len(entries) > room:
+        for key, _name, _what in entries:
+            out.setdefault(key, []).append(
+                "%d modes in this project are new challenges of their own, and the game's start menu has room for "
+                "%d: take one off." % (len(entries), room))
+    return out
 
 
 def after_problems(modes):

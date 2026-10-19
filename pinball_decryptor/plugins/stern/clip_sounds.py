@@ -33,7 +33,10 @@ clip a PAD build added as a random copy of another (``<name>__PadVar<k>``,
 :mod:`.clip_variants`) plays in that clip's place, so it gets that clip's sounds. EMULATOR-PROVEN on Godzilla Premium/LE 1.16 (``docs/architecture/stern.md``):
 pairs whose clip showed and whose request fired within a second of it, record 38 of 38, next 16
 of 18, name 56 of 59; function 6 of 28, and the two kinds dropped here, a table's loader 1 of 23
-and the same mode's code 17 of 478.
+and the same mode's code 17 of 478. PAD-624, on the clips handed a surface (``sound_census.c``'s V
+lines): Uncanny X-Men Pro 0.98 record 5 of 5, next 11 of 14, function 9 of 42; Godzilla Pro 1.16
+record 7 of 9, name 4 of 4, and the Xilien broadcast's scene clips (no video bank) 2 of 2, their
+voice 2.5-3.2 s into the clip.
 
 A request is named by the Sound Test (the menu's node id IS the request id, MODE_API.md item 150:
 :func:`menu_names`) and, once Extract has written :data:`REQUESTS_TSV`, by the ``idx`` records

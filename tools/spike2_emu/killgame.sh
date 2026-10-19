@@ -164,8 +164,12 @@ pad_pkill -9 -f 'padplay\.py'
 # that leaves it running keeps wsl.exe from reaching EOF, so the GUI sat out
 # its full 20 s wait timeout on every mid-copy Stop. The DETACHED copier is
 # deliberately not matched: it survives a Stop on purpose, so the copy is not
-# lost, and its output goes to the cardcache log, not the pipe.
-pad_pkill -9 -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh'
+# lost, and its output goes to the cardcache log, not the pipe. So is a
+# library sweep's copier (cardmount.sh --cache-now): it has no slot, and a
+# Stop on rig 0 took it for its own (PAD-632, padslot.sh).
+_rs=$(pad_run_script_pids)
+# shellcheck disable=SC2086
+[ -n "$_rs" ] && kill -9 $_rs 2>/dev/null
 pad_pkill -9 -f '^unshare (-r )?-m -p -f'
 # longplay.sh is started BESIDE a run rather than by one, so it is not in the
 # group above - and watch.sh's own teardown was the only thing that ever killed

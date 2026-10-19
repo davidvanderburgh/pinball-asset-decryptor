@@ -821,11 +821,18 @@ static int refused_said(const struct pm_mode *m)    /* 1 = already said for m; e
 }
 
 static unsigned long lit_hold_until;  /* PAD-503: a lit mode's claimed shot holds the game's starts off until then */
+static int chg_refuses(void);         /* PAD-630: the challenge section, below */
+static void chg_began(void);
+static void chg_mode_ended(int was_taker);
 
 int pm_begin(void)
 {
     if (running && running != current) {
         if (!refused_said(current)) pm_log("not started: %s is running", mode_name(running, "another mode"));
+        return 0;
+    }
+    if (running != current && chg_refuses()) {     /* PAD-630: the challenge game's challenge is over */
+        if (!refused_said(current)) pm_log("not started: this challenge game's challenge is over - its ball ends");
         return 0;
     }
     if (running != current) {
@@ -834,6 +841,7 @@ int pm_begin(void)
         begun++;
     }
     running = current;
+    chg_began();                     /* PAD-630 */
     lit_hold_until = 0;              /* PAD-503: a lit mode's claimed shot has done its work */
     disp_linger_other_began();
     clip_other_began();
@@ -865,8 +873,10 @@ static const struct pm_mode *show_ended_by;   /* PAD-411: a mode's ending may st
 static unsigned long show_ended_ms;
 void pm_end(void)
 {
+    int was_taker = running && running == current;
     if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0, refused_forget();
+    if (was_taker) chg_mode_ended(1);   /* PAD-630: a challenge game's mode ended - its ball ends */
     if (!running) bd_reset("the mode ended");
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();
@@ -4518,7 +4528,19 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  *     where a static initializer builds it once and nothing gets it), `value <name>_ctl` (where it keeps the id of
  *     the process controlling it), and the take/give calls (`site <name>_take` / `<name>_give`, or the
  *     port's `coil_take` / `coil_give`); `value <name>_devoff` checks the object's device against the
- *     record's. The process takes it, sends, and gives it back (the give's own update switches it off). */
+ *     record's. The process takes it, sends, and gives it back (the give's own update switches it off).
+ *   - PAD-621: a post the game keeps up by a countdown of its own (James Bond LE/Pro 1.06's right return up post, a
+ *     Device-framework BottomLaneUpPost: `+0x20` ticks left, `+0x24` a raise pending, which most switch hits set and
+ *     its tick turns into 1875 ticks up) is held this way too, its object taken (`value <name>_ctl 16`, the
+ *     framework's controlling process; take 0x79100, give 0x791b4 on the LE): while a process controls it the
+ *     device's own update leaves it alone. Before control is given back the runtime clears that countdown and
+ *     the pending raise (`value <name>_left`, `value <name>_pending`), so the give's update LOWERS it - else it
+ *     would raise it again for the rest of a countdown its tick armed meanwhile.
+ *   - PAD-621: `value <name>_max_ms`: the game's own longest hold there, longer than the runtime's 5 s for one command
+ *     (the post: 14 s, as its own mini-wizards hold the ball through their start clip; its own command on it is 255 for
+ *     64 ms then its hold power for 20 s); the hold part of the one command runs to the time asked, at most that.
+ *   - PAD-621: `value <name>_no_hold_flag`: a game flag that, set, refuses every hold of it (James Bond's
+ *     FG_MODES_DO_NOT_HOLD_BALL, 166). */
 #define COIL_REC_SIZE  0x68u   /* the framework's coil record, the same on every newest build (coilrec.py) */
 #define COIL_REC_ID    0x14u   /* u32: the latest request's id; 0 when its command has run out */
 #define COIL_REC_LINK  0x10u   /* u32: 0x60000 = a coil linked to another (a flipper's pair): never held */
@@ -4551,6 +4573,7 @@ struct held_coil {
 };
 static struct held_coil coils[COILS_MAX];
 static int n_coils;
+static void coil_clear_countdown(const struct held_coil *c);   /* PAD-621: below */
 
 static int proc_alive(unsigned id)
 {
@@ -4728,6 +4751,7 @@ static void magnet_proc(struct held_coil *c)
     }
     if (c->release && c->why) end = c->why;
     if (has_obj) {
+        coil_clear_countdown(c);            /* PAD-621: its own update lowers it, never raises it again */
         ((unsigned (*)(unsigned, unsigned))(unsigned long)coil_call(c, "give"))(c->obj, 1);
         say("%s: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
             "game's coil update switches it off", c->name, end, pm_ms() - sent, (long)(c->until - pm_ms()));
@@ -4843,6 +4867,45 @@ static int coil_device_ok(struct held_coil *c)
     return 1;
 }
 
+/* PAD-621: `value <name>_no_hold_flag`: the game's own "no mode holds the ball now", set - why not; else 0 */
+static const char *coil_no_hold(const struct held_coil *c)
+{
+    static char why[64];
+    char key[40];
+    long id;
+    pm_snprintf(key, sizeof key, "%s_no_hold_flag", c->name);
+    if ((id = pm_port_value(key, 0)) <= 0 || game_flag((unsigned)id) != 1) return 0;
+    pm_snprintf(why, sizeof why, "the game says no mode holds the ball now (its flag %ld)", id);
+    return why;
+}
+
+/* PAD-621: `value <name>_max_ms` above MAGNET_MAX_MS - the game's own longest hold there: the one command's hold part
+ * runs to the time asked (magnet_plan stopped it at MAGNET_MAX_MS), at most that */
+static void long_hold(const struct held_coil *c, unsigned ms, struct magnet_cmd *cmd)
+{
+    char key[40];
+    unsigned top;
+    pm_snprintf(key, sizeof key, "%s_max_ms", c->name);
+    top = (unsigned)pm_port_value(key, 0);
+    if (top <= MAGNET_MAX_MS || ms <= MAGNET_MAX_MS) return;
+    if (ms > top) ms = top;
+    if (ms > cmd->draw_ms) cmd->hold_ms = ms - cmd->draw_ms;
+}
+
+/* PAD-621: before control of a post the game keeps up by its own countdown goes back - the countdown and its pending
+ * raise cleared, so the give's update lowers it (`value <name>_left` / `<name>_pending`: their offsets) */
+static void coil_clear_countdown(const struct held_coil *c)
+{
+    char key[40];
+    long off;
+    pm_snprintf(key, sizeof key, "%s_left", c->name);
+    if ((off = pm_port_value(key, 0)) > 0 && maps_has(c->obj + (unsigned)off, 4, MAP_R))
+        *(volatile unsigned *)(unsigned long)(c->obj + (unsigned)off) = 0;
+    pm_snprintf(key, sizeof key, "%s_pending", c->name);
+    if ((off = pm_port_value(key, 0)) > 0 && maps_has(c->obj + (unsigned)off, 1, MAP_R))
+        *(volatile unsigned char *)(unsigned long)(c->obj + (unsigned)off) = 0;
+}
+
 int pm_coil_hold(const char *name, unsigned ms)
 {
     struct held_coil *c = coil_named(name);
@@ -4854,9 +4917,12 @@ int pm_coil_hold(const char *name, unsigned ms)
     why = magnet_refusal(pm_running(), pm_in_game(), coil_disabled(c), coil_game_busy(c), c->until, c->ended, now,
                          c->starts);
     if (!why && proc_alive(c->id)) why = "the last hold's process is still ending";
+    if (!why) why = coil_no_hold(c);                     /* PAD-621: the game says no mode holds the ball now */
     if (c->route && c->cap_ms && ms > c->cap_ms) ms = c->cap_ms;   /* PAD-420: never longer than the game's own */
-    if (!why && c->route)
+    if (!why && c->route) {
         magnet_plan(ms, coil_drive(c, 0), coil_drive(c, 1), coil_drive(c, 2), &cmd, &why);
+        long_hold(c, ms, &cmd);                          /* PAD-621: a post the game holds longer itself */
+    }
     else if (!why)
         magnet_plan(ms, coil_virtual(c->obj, 29) & 0xffu, coil_virtual(c->obj, 30) & 0xffffu,
                     coil_virtual(c->obj, 31) & 0xffu, &cmd, &why);
@@ -8167,6 +8233,71 @@ static void on_shot(unsigned *r)
     current = 0;
 }
 
+/* ---- the end of a ball held for a mode's total (PAD-622) ------------------------------------------
+ * luvthatapex (Bond LE): a drain in one of the game's own mini-wizards shows its TOTAL for a few seconds before
+ * the bonus; a drain in a mode of his own went straight to the bonus. The game's own ending is a loop in the
+ * process that runs the end of ball (Goldfinger 0xc0928: it draws its own frames, 0x2fd144 between them), so
+ * its bonus (bus 0x27) and next ball wait. A mode asks the same from its .ball_end (pm_ball_end_hold): when every
+ * mode's .ball_end has run, on_ball_end - inside the game's end-of-ball dispatch, on the game's own thread -
+ * sleeps a tick at a time (`site proc_sleep`, as the scoop's hold does) while the modes' tick, on its own
+ * thread, draws the total; then returns, and the game's end of ball goes on exactly as before. Never on a tilted
+ * ball (the port's `tilt` event counted since the last ball ended). The limit is the runtime's, not the mode's. */
+#define BALL_END_HOLD_MAX_MS 10000u
+
+static struct {
+    unsigned ms;                            /* the longest any mode asked this ball end; 0 = none */
+    volatile int release;                   /* pm_ball_end_release, from a tick */
+    volatile int holding;                   /* from the ask until the game's end of ball goes on */
+    int asking;                             /* the modes' .ball_end are running: they may ask */
+    unsigned tilts;                         /* the tilt event's count when the last ball ended */
+} beh;
+
+static unsigned event_count(int id);        /* the events section, below */
+
+static int ball_tilted(void)
+{
+    return pm_event("tilt") >= 0 && event_count(pm_event("tilt")) != beh.tilts;
+}
+
+int pm_ball_end_hold(unsigned ms)
+{
+    if (!(can & PM_CAN_BALL_END_HOLD) || !beh.asking || !ms) return 0;
+    if (ball_tilted()) {
+        say("ball end: %s asked to hold it - not on a tilted ball", current && current->name ? current->name : "a mode");
+        return 0;
+    }
+    if (ms > BALL_END_HOLD_MAX_MS) ms = BALL_END_HOLD_MAX_MS;
+    if (ms > beh.ms) beh.ms = ms;
+    beh.holding = 1;
+    return 1;
+}
+
+void pm_ball_end_release(void) { if (beh.holding) beh.release = 1; }
+
+int pm_ball_end_holding(void) { return beh.holding; }
+
+/* after the modes' .ball_end: the game's end of ball waits for the total they asked for */
+static void ball_end_hold_run(void)
+{
+    unsigned long t0 = pm_ms(), until;
+    const char *why;
+    if (!beh.ms) return;
+    until = t0 + beh.ms;
+    say("ball end: held up to %u ms for a mode's total - then the game's end of ball goes on", beh.ms);
+    while (!beh.release && !ball_tilted() && pm_ms() < until)
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    why = beh.release ? "the mode let go" : ball_tilted() ? "the ball tilted" : "its time ran out";
+    say("ball end: let go after %lu ms (%s)", pm_ms() - t0, why);
+}
+
+static void ball_end_hold_arm(void)
+{
+    static const char *const s[] = { "proc_sleep", 0 };
+    if (!have_sites(s)) return;
+    can |= PM_CAN_BALL_END_HOLD;
+    say("ball end: a mode may hold it for its total, up to %u ms", BALL_END_HOLD_MAX_MS);
+}
+
 static void roster_owed_ball_end(void);   /* item 146 */
 static void on_ball_end(unsigned *r)
 {
@@ -8176,14 +8307,21 @@ static void on_ball_end(unsigned *r)
     note_thread("ball_end", &said);
     stock_ball_ends++;
     ball_end_at = pm_ms() | 1;                /* PAD-411: no show of the game's starts now */
+    beh.ms = 0;
+    beh.release = 0;
+    beh.asking = 1;
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
-    if (disp_linger_until) disp_release("the ball ended");
-    bd_reset("the ball ended");
+    beh.asking = 0;
     magnet_let_go("the ball ended");          /* PAD-381 */
     building_let_go("the ball ended");        /* PAD-393 */
     shield_let_go("the ball ended");          /* PAD-392 */
     shake_let_go("the ball ended");           /* PAD-414 */
+    ball_end_hold_run();                      /* PAD-622: a mode's total first, as the game's own mini-wizards */
+    beh.holding = 0;
+    beh.tilts = pm_event("tilt") >= 0 ? event_count(pm_event("tilt")) : 0;
+    if (disp_linger_until) disp_release("the ball ended");
+    bd_reset("the ball ended");
     roster_owed_ball_end();
 }
 
@@ -8481,6 +8619,75 @@ static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start m
 static struct { int (*fn)(unsigned slot); const struct pm_mode *by; char name[40]; } own_challenge[N_OWN_CHALLENGE];
 static volatile int own_pending = -1;    /* the own challenge picked on the start menu, until its ball starts */
 
+/* PAD-630 (luvthatapex, Bond LE): the game's own challenge ENDS THE BALL when it is over. Ahoy Mr. Bond's ending
+ * (LE 0x1cda4), in a challenge game: clear its running flag, call the framework's "end this ball now" (LE
+ * 0x3f79bc(1, 1): the status bits 0x202, the flippers and devices off by bus 177 - what the game's own wizard
+ * endings call), and wait 3750 ticks at the end of ball (0x7aa9cc) - so the ball drains dead and GAME OVER
+ * follows. A mode of ours that took the pick left the ball live: the player played on, the game's modes started.
+ * So when the mode that took this challenge game's pick ends, outside a ball end, the runtime calls the same
+ * function (`site challenge_end_ball`, found by its words: portchallenge.py), and nothing of ours begins again in
+ * that game. */
+static struct {
+    const struct pm_mode *by;            /* the mode that took this challenge game's pick */
+    unsigned game;                       /* the game_start count it belongs to */
+    int state;                           /* 0 none, 1 picked, 2 its mode runs, 3 over: the ball ends */
+} chg;
+
+static unsigned chg_game_now(void)
+{
+    int ev = pm_event("game_start");
+    return ev >= 0 ? event_count(ev) : 0;
+}
+
+/* the challenge state of THIS game (a new game, or none, forgets it) */
+static int chg_state(void)
+{
+    if (chg.state && (chg.game != chg_game_now() || !pm_player())) chg.state = 0, chg.by = 0;
+    return chg.state;
+}
+
+static void chg_picked(const struct pm_mode *by)
+{
+    chg.by = by;
+    chg.game = chg_game_now();
+    chg.state = 1;
+}
+
+/* What the end of a mode does to a challenge game, from the state alone (tests lift it verbatim): 1 = end the ball
+ * now (the mode that took the pick ended, live, in its game); 0 = nothing. */
+static int chg_ends_ball(int state, int is_taker, int in_game, int at_ball_end)
+{
+    return state == 2 && is_taker && in_game && !at_ball_end;
+}
+
+static int chg_refuses(void)
+{
+    return chg_state() == 3 && pm_in_game();
+}
+
+static void chg_began(void)
+{
+    if (chg_state() == 1 && current == chg.by) chg.state = 2;
+}
+
+static void chg_mode_ended(int ran)
+{
+    int is_taker = ran && current && current == chg.by, state = chg_state();
+    unsigned f = fn("challenge_end_ball");
+    if (state != 2 || !is_taker) return;
+    chg.state = 3;
+    if (!chg_ends_ball(state, is_taker, pm_in_game(), beh.asking)) {
+        say("challenge: its mode ended with the ball - nothing more of ours starts in this game");
+        return;
+    }
+    if (!f) {
+        say("challenge: its mode ended - this port has no challenge_end_ball, so the ball plays on");
+        return;
+    }
+    say("challenge: its mode ended - the ball ends now, as the game's own challenges do (0x%08x)", f);
+    ((int (*)(int, int))(unsigned long)f)(1, 1);
+}
+
 int pm_challenge_slots(void)
 {
     return (can & PM_CAN_CHALLENGE) ? challenges_n : 0;
@@ -8619,7 +8826,11 @@ static int challenge_veto(unsigned *r, unsigned n)
             current = was;
             say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
                 took ? "its mode starts - the game's own challenge does not" : "the mode let it go - the game's own starts");
-            if (took) { challenge_ours = 1; return 1; }
+            if (took) {
+                challenge_ours = 1;
+                chg_picked(own_challenge[k].by);
+                return 1;
+            }
         }
     }
     if (n >= N_CHALLENGE || !challenge_fn[n]) return 0;          /* nobody holds it: the game's own runs */
@@ -8633,7 +8844,7 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
-    if (took) challenge_ours = 1;
+    if (took) { challenge_ours = 1; chg_picked(challenge_by[n]); }
     return took != 0;
 }
 
@@ -8809,7 +9020,7 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
             took ? "its mode starts as the ball starts" : "the mode let it go");
-        if (took) challenge_ours = 1;
+        if (took) { challenge_ours = 1; chg_picked(own_challenge[k].by); }
         return;
     }
     for (n = 0; n < (unsigned)challenges_n; n++) {
@@ -8824,7 +9035,7 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
             took ? "the mode takes it - its pick cleared, the game's own does not start" : "the mode let it go");
-        if (took) challenge_ours = 1;
+        if (took) { challenge_ours = 1; chg_picked(challenge_by[n]); }
         return;
     }
 }
@@ -10871,6 +11082,7 @@ static void pad_mode_start(void)
     multiball_arm();                                /* item 167: a multiball of the mode's own */
     coils_arm();                                    /* PAD-381: a magnet grab of the mode's own */
     scoop_arm();                                    /* PAD-381: a ball held in the scoop */
+    ball_end_hold_arm();                            /* PAD-622: the end of a ball held for a mode's total */
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
     building_arm();                                 /* PAD-393: the Premium's building */
     shake_arm();                                    /* PAD-414: the shaker motor */
@@ -10891,7 +11103,7 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
@@ -10900,7 +11112,8 @@ static void pad_mode_start(void)
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
         can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
         can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "",
-        can & PM_CAN_STATUS_BAR ? " status-bar" : "", can & PM_CAN_CHALLENGE ? " challenges" : "");
+        can & PM_CAN_STATUS_BAR ? " status-bar" : "", can & PM_CAN_CHALLENGE ? " challenges" : "",
+        can & PM_CAN_BALL_END_HOLD ? " ball-end-hold" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

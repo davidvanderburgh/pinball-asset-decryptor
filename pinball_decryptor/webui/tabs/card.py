@@ -15,8 +15,16 @@ worker so the tab never waits on them:
 
 The page says which card it is showing (:meth:`look`); a card already
 looked at is not read again.
+
+The report is quick to show (PAD-626): the rows that are quick to read come
+first (``state`` "partial", the video count still running - on a card on a
+spinning disk that count is most of the read), and the finished report and
+the games on the card are kept beside its cached pictures, so the next look
+at the same card file (the next time the app opens, typically) shows it all
+at once.
 """
 
+import json
 import os
 import threading
 
@@ -85,13 +93,15 @@ class CardTab(TabService):
 
     @rpc
     def refresh(self):
-        """Read the card on the page again, its cached pictures included."""
+        """Read the card on the page again, its cached pictures and report
+        included."""
         path = self._path
         if not path:
             return False
         ck = CP.card_key(path)
         if ck:
-            for name in ("splash.png", "boot.png", "menu.png"):
+            for name in ("splash.png", "boot.png", "menu.png", INFO_FILE,
+                         GAMES_FILE):
                 try:
                     os.remove(os.path.join(CP.cache_root(), ck, name))
                 except OSError:
@@ -115,7 +125,11 @@ class CardTab(TabService):
         self.set(preview={"state": "loading", "stage": "Reading the card…"})
 
         def _work():
-            games = CP.games_on(path)
+            games = _kept_games(out) if ck else None
+            if games is None:
+                games = CP.games_on(path)
+                if ck:
+                    _keep_games(out, games)
             why = ""
             if len(games) >= 2:
                 self._post(seq, self._preview, games=len(games))
@@ -171,35 +185,137 @@ class CardTab(TabService):
         from ...core import image_info as _info_mod
         ext = self.window.service("extract")
         assets = ext._info_assets_dir() if ext is not None else None
+        ck = CP.card_key(path)
+        stamp = _info_stamp(mfr, assets)
+        kept = _kept_info(ck, stamp)
+        if kept is not None:
+            self._apply_info(path, kept)
+            return
         self.set(info={"state": "loading", "path": path, "sections": []})
+
+        def _early(sections):
+            self._post(seq, self._apply_info, path, sections, "partial")
 
         def _work():
             try:
-                sections = _info_mod.collect(mfr, path, assets)
+                sections = _info_mod.collect(mfr, path, assets,
+                                             partial=_early)
             except Exception as e:                      # noqa: BLE001
                 sections = [("Error", [("Could not read", str(e))])]
+            else:
+                _keep_info(ck, stamp, sections)
             self._post(seq, self._apply_info, path, sections)
 
         threading.Thread(target=_work, daemon=True, name="card-info").start()
 
-    def _apply_info(self, path, sections):
+    def _apply_info(self, path, sections, state="ready"):
+        if state == "partial" and (self.get("info") or {}).get(
+                "state") == "ready":
+            return                  # the full report beat it to the loop
         self._info_sections = list(sections or [])
         out = [{"title": str(title),
                 "rows": [[str(r[0]), str(r[1])] for r in rows]}
                for title, rows in self._info_sections]
-        self.set(info={"state": "ready", "path": path, "sections": out,
-                       "status": ""})
+        self.set(info={"state": state, "path": path, "sections": out,
+                       "status": "Counting the videos…"
+                       if state == "partial" else ""})
 
     @rpc
     def info_copy(self):
         from ...core import image_info as _info_mod
-        if not self._info_sections:
+        if not self._info_sections or (self.get("info") or {}).get(
+                "state") != "ready":
             return ""
         text = _info_mod.as_text(self._info_sections)
         self.ctx.bus.publish("clipboard", text=text)
         self.set(info=dict(self.get("info") or {},
                            status="Report copied to clipboard."))
         return text
+
+
+# -- the kept report (PAD-626) ---------------------------------------------
+#: The finished report, beside the card's cached pictures.
+INFO_FILE = "info.json"
+#: The games on the card (CP.games_on), beside its cached pictures: with the
+#: picture cached, reading them was the one card read left in the preview,
+#: and the glass said "Reading the card…" behind a report already shown.
+GAMES_FILE = "games.json"
+
+
+def _kept_games(out):
+    try:
+        with open(os.path.join(out, GAMES_FILE), encoding="utf-8") as f:
+            got = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if isinstance(got, list) and got and all(isinstance(g, str) for g in got):
+        return got
+    return None
+
+
+def _keep_games(out, games):
+    if not games:                   # nothing read is not kept: try again
+        return
+    tmp = os.path.join(out, GAMES_FILE + ".tmp")
+    try:
+        os.makedirs(out, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(list(games), f)
+        os.replace(tmp, os.path.join(out, GAMES_FILE))
+    except OSError:
+        pass
+
+
+def _info_stamp(mfr, assets):
+    """What a kept report must have been read under to be shown again: this
+    build of the app (a new one may read more, or differently), the
+    manufacturer, and the project folder (BOF reads a date from it)."""
+    from ... import __version__
+    return {"app": __version__, "mfr": getattr(mfr, "key", ""),
+            "assets": os.path.normcase(assets or "")}
+
+
+def _kept_info(ck, stamp):
+    """The sections a previous read of this card file left, or ``None``."""
+    if not ck:
+        return None
+    try:
+        with open(os.path.join(CP.cache_root(), ck, INFO_FILE),
+                  encoding="utf-8") as f:
+            got = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(got, dict) or got.get("stamp") != stamp:
+        return None
+    try:
+        return [(str(t), [(str(r[0]), str(r[1])) for r in rows])
+                for t, rows in got["sections"]]
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
+#: Rows that say the read went wrong: such a report is not kept, so the
+#: next look tries again.
+_FAILED_ROWS = {"Error", "Could not read", "Card read",
+                "Could not read the card"}
+
+
+def _keep_info(ck, stamp, sections):
+    if not ck or any(str(r[0]) in _FAILED_ROWS
+                     for _t, rows in sections for r in rows):
+        return
+    out = os.path.join(CP.cache_root(), ck)
+    tmp = os.path.join(out, INFO_FILE + ".tmp")
+    try:
+        os.makedirs(out, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"stamp": stamp,
+                       "sections": [[str(t), [[str(r[0]), str(r[1])]
+                                              for r in rows]]
+                                    for t, rows in sections]}, f)
+        os.replace(tmp, os.path.join(out, INFO_FILE))
+    except OSError:
+        pass
 
 
 TAB = CardTab

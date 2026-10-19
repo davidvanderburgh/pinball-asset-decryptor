@@ -711,4 +711,18 @@ int pm_challenge_menu(void);                                         /* 1 = the 
 int pm_challenge_title(unsigned slot, const char *words);            /* 1 = shown; the holder only */
 int pm_challenge_add(const char *words, int (*on_pick)(unsigned slot)); /* its slot, or -1 */
 
+/* ---- the end of a ball held for a mode's total (PAD-622; MODE_SDK.md "Holding the end of a ball") ------------
+ * The game's own mini-wizards (James Bond) show their TOTAL when the ball drains in one, and the game's end of ball
+ * (its bonus, the next ball, a challenge game's end) waits for it. Called from your .ball_end, pm_ball_end_hold
+ * does the same for your mode: once every mode's .ball_end has run, the game's end of ball waits up to `ms` (the
+ * longest any mode asked; 10000 at most), the game's own process sleeping a tick at a time as the scoop's hold does.
+ * Your tick goes on meanwhile, so the total you show then is drawn. The hold ends at its time, on
+ * pm_ball_end_release (from your tick), or at once on a tilted ball. 1 = it will hold; 0 = not from .ball_end, a
+ * tilted ball, or no PM_CAN_BALL_END_HOLD (the port's `site proc_sleep`). pm_ball_end_holding: 1 from the ask until
+ * the game's end of ball goes on (watch it from your tick to take the total down then). */
+#define PM_CAN_BALL_END_HOLD 0x0800u  /* pm_ball_end_hold / pm_ball_end_release / pm_ball_end_holding */
+int pm_ball_end_hold(unsigned ms);
+void pm_ball_end_release(void);
+int pm_ball_end_holding(void);
+
 #endif

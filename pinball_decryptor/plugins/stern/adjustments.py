@@ -143,20 +143,7 @@ class AdjustmentTable:
             if va is not None:
                 ad_va[va] = self.data[m.start():m.end() - 1].decode("latin1")
         va_set = set(ad_va)
-        best = []
-        for po, pv, fsz in self._loads:
-            base, words = self._words(po, fsz)
-            run = []
-            for j, w in enumerate(words):
-                if w in va_set:
-                    v = pv + (base + 4 * j - po)
-                    if run and v - run[-1] != 4:
-                        if len(run) > len(best):
-                            best = run
-                        run = []
-                    run.append(v)
-            if len(run) > len(best):
-                best = run
+        best = self._longest_name_run(va_set)
         if not best:
             raise ValueError("no AD_ name array found")
         # Walk contiguously from the run base so any non-AD slot is still
@@ -176,14 +163,54 @@ class AdjustmentTable:
                 break
         return names
 
+    def _longest_name_run(self, va_set):
+        """The VAs of the longest run of consecutive words that all point at
+        an ``AD_`` name (*va_set*) - the first such run when two tie.
+
+        numpy over the words rather than a Python loop: 1.5 s on Rush's
+        190 MB program, part of what Card details took (PAD-626)."""
+        import numpy as np
+        names = np.array(sorted(va_set), dtype=np.uint32)
+        best = []
+        for po, pv, fsz in self._loads:
+            base, words = self._words(po, fsz)
+            if not len(words) or not len(names):
+                continue
+            w = np.frombuffer(words, dtype=np.uint32)
+            # the names sit together in the string pool: most words are out
+            # of their range, and only the rest are looked up
+            j = np.flatnonzero((w >= names[0]) & (w <= names[-1]))
+            pos = np.searchsorted(names, w[j])
+            pos[pos >= len(names)] = 0
+            j = j[names[pos] == w[j]]
+            if not len(j):
+                continue
+            v = pv + (base - po) + 4 * j
+            cuts = np.flatnonzero(np.diff(v) != 4) + 1
+            starts = np.concatenate(([0], cuts))
+            ends = np.concatenate((cuts, [len(v)]))
+            k = int(np.argmax(ends - starts))          # the first longest
+            if ends[k] - starts[k] > len(best):
+                best = v[starts[k]:ends[k]].tolist()
+        return best
+
     def _find_section(self):
         target = len(self.names)
+        # The count word is looked for with bytes.find, not a word-by-word
+        # walk: the walk was most of the second Card details took (PAD-626).
+        pat = struct.pack("<I", target)
         for po, pv, fsz in self._loads:
-            i = po
-            while i <= po + fsz - 20:      # record spans i..i+20 (node @ +16)
-                count = struct.unpack_from("<I", self.data, i + 8)[0]
+            # record spans i..i+20 (node @ +16), i = po, po+4, ... <=
+            # po+fsz-20, so its count word sits in [po+8, po+fsz-8)
+            stop = po + fsz - 8
+            p = self.data.find(pat, po + 8, stop)
+            while p >= 0:
+                i = p - 8
+                p = self.data.find(pat, p + 1, stop)
+                if (i - po) % 4:
+                    continue
                 elem = struct.unpack_from("<I", self.data, i + 12)[0]
-                if count == target and 24 <= elem <= 96 and elem % 4 == 0:
+                if 24 <= elem <= 96 and elem % 4 == 0:
                     table = struct.unpack_from("<I", self.data, i + 4)[0]
                     node = struct.unpack_from("<I", self.data, i + 16)[0]
                     node_s = self._cstr(node, 16)
@@ -192,8 +219,7 @@ class AdjustmentTable:
                         # ``record + 4`` (table/count/elem) to the accessor the
                         # operator menu walks, which is how
                         # :mod:`.menu_visibility` finds the menu's pages.
-                        return table, count, elem, node_s, self._va(i)
-                i += 4
+                        return table, target, elem, node_s, self._va(i)
         raise ValueError("adjustment section record not found")
 
     # --- read ---

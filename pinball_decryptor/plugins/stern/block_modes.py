@@ -134,7 +134,7 @@ What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 g
   one of the game's own modes runs (the kit's ``kit_wait_game``); the mode stays ready, so the
   next block that starts it afterwards does. "the mode could start now" asks the same.
 - A DISPLAY PRIORITY (``priority``): held while the mode runs (``kit_display``), kept for the
-  total its own screen shows at the end, given back at once at a drain.
+  total its own screen shows at the end (PAD-622: and at a drain, through its TOTAL there).
 
 THE HUD (PAD-375). Ticked on, the mode has what the examples have at the glass's edges, built by the
 card build like theirs (:mod:`.mode_hud`, from the ``hud`` this module writes into assets.json): the
@@ -147,8 +147,14 @@ kit_hud``, copied into the folder at every save), so it steps aside exactly as t
 display of the game's (``pm_display_covered``) its words are blank and the edges stay; while one of
 the game's own modes runs (``pm_aside``) its lines go into the award line, the counters hide, and the
 badge moves one slot down for a battle. The mode's own screen, when it has one, is hidden then too.
-At the end the HUD shows the mode's TOTAL for three seconds (a drain or the game moving on takes it
-down at once).
+At the end the HUD shows the mode's TOTAL for three seconds (the game moving on takes it down at once).
+
+A DRAIN (PAD-622). The game's own mini-wizards (James Bond) show their TOTAL when the ball drains in one,
+and the bonus waits for it. A mode the ball's drain ends does the same: it ends as its clock would (an
+Award it ended on, then its TOTAL, on its HUD or its own screen, the bar kept) and asks the runtime to
+hold the game's end of ball (``pm_ball_end_hold``) for ``DRAIN_TOTAL_MS`` - the 6 s the game's own TOTAL
+shows - or for the rest of a total already showing; when the end of ball goes on, it all goes. A tilted
+ball, or a port without the hold, takes it down at once as before.
 
 PAD-373: what it does about the game's own modes is the form's choice (PAD-363): they may start
 (``stack``), it gives way (``give_way``: it starts only while none of them runs - a Start the mode
@@ -228,7 +234,13 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
+#: PAD-621: a post the game keeps up itself is held up to its own longest (James Bond's right return up post: 14 s);
+#: the C clamps to this and the runtime to each mechanism's own limit
+HOLD_LONGEST_MS = MP.COIL_LONGEST_MS
 SCOOP_MIN_MS, SCOOP_MAX_MS = MP.SCOOP_MIN_MS, MP.SCOOP_MAX_MS
+#: PAD-621: a hold's "clock": the mode's clock runs on (""), or stands still until the hold lets go ("wait": the
+#: ball held at the start while its clip plays, as the game's own mini-wizards do at Bond's right return up post)
+HOLD_CLOCK = {"": "its clock runs", "wait": "its clock waits until it lets go"}
 #: a scoop hold's reach: the next ball that settles there, or every one while the mode runs
 SCOOP_WHICH = {"next": "the next ball", "every": "every ball"}
 #: PAD-392: where a block turns the shield targets (Godzilla Premium/LE's platform), kept there while the mode runs;
@@ -253,6 +265,7 @@ KIT_FILE = "intricate_kit.h"
 HUD_PRIORITY = 180               # a HUD mode with no priority of its own takes the kit's KIT_DISPLAY_MODE:
                                  # pm_display_covered watches for it
 TOTAL_MS = 3000                  # the HUD's TOTAL stays up this long after the end
+DRAIN_TOTAL_MS = 6000            # PAD-622: at a drain, held as the game's own mini-wizards hold theirs
 #: a lit shot's pattern: the SDK's, and its pace (ms) when the block gives none. "hurry" is a
 #: blink that quickens as the clock runs down (PAD-376, the kit's kit_hurry_ms); "off" holds it dark (PAD-601: the
 #: game's own light there does not show through, as it does when the light is handed back)
@@ -720,7 +733,7 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
-             game_wizards=None, inserts=None, building=None, modes=None, challenges=None):
+             game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -777,6 +790,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds,
            "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield,
+           "hold_caps": dict(hold_caps or {}),        # PAD-621: {name: ms} a mechanism held longer than 5 s
            "building": building,
            "game_shows": list(game_shows) if game_shows is not None else None,
            "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None,
@@ -1125,7 +1139,10 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["mechs"] is not None and what not in ctx["mechs"]:
                 ctx["out"].append("%s holds the %s, which a mode cannot hold on this card's game."
                                   % (where, what))
-            _check_ms(b.get("ms"), HOLD_MIN_MS, HOLD_MAX_MS, "%s holds it" % where, ctx)
+            _check_ms(b.get("ms"), HOLD_MIN_MS, max(HOLD_MAX_MS, min(ctx["hold_caps"].get(what, 0), HOLD_LONGEST_MS)),
+                      "%s holds it" % where, ctx)
+            if b.get("clock", "") not in HOLD_CLOCK:                       # PAD-621
+                ctx["out"].append("%s holds it: the clock runs or waits." % where)
         elif op == "scoop_hold":
             if b.get("which", "next") not in SCOOP_WHICH:
                 ctx["out"].append("%s holds a ball in the scoop: the next one or every one." % where)
@@ -1662,7 +1679,8 @@ class _Gen:
                     self.mech = True
                     if what not in self.holds:
                         self.holds.append(what)
-                    out.append(pad + "hold(%s, %s);" % (_c_str(what), self.num(b.get("ms"))))
+                    out.append(pad + "%s(%s, %s);" % ("hold_wait" if b.get("clock") == "wait" else "hold",   # PAD-621
+                                                      _c_str(what), self.num(b.get("ms"))))
             elif op == "scoop_hold":
                 self.mech = True
                 out.append(pad + "scoop_hold(%s, %d);" % (self.num(b.get("ms")), 0 if b.get("which") == "every" else 1))
@@ -1890,7 +1908,9 @@ def to_c(program, slug):
     L.append("#define DISPLAY_PRIORITY %d          /* held while it runs; 0 = none (MODE_SDK.md) */"
              % (program["priority"] or (HUD_PRIORITY if has_hud else 0)))
     L.append("#define TIMER_MAX_MS     %dL" % TIMER_MAX_MS)
-    L.append("#define ENDING_MS        3000        /* the total its own screen shows at the end */")
+    L.append("#define ENDING_MS        %d        /* the total its own screen shows at the end */" % TOTAL_MS)
+    L.append("#define DRAIN_TOTAL_MS   %d        /* PAD-622: ...and at a drain, the game's end of ball waiting */" % DRAIN_TOTAL_MS)
+    L.append("#define ENDING_NOW_MS    (drain_long ? DRAIN_TOTAL_MS : ENDING_MS)")
     words_only = program["screen"] and program["screen_style"] == "words"
     L.append("#define WORDS_ONLY       %d          /* PAD-521: its screen is words alone: shown a moment, not all along */"
              % (1 if words_only else 0))
@@ -1992,6 +2012,8 @@ def to_c(program, slug):
     L.append("static unsigned ended_begun;          /* PAD-413: pm_begun() at its end, while its total shows */")
     L.append("static unsigned award_ticks;          /* PAD-574: an Award's words up this much longer */")
     L.append("static unsigned total_due;            /* PAD-574: ticks until its TOTAL: an Award it ended on shows first */")
+    L.append("static int drain_long;                 /* PAD-622: its TOTAL at a drain, as long as the game's own */")
+    L.append("static int drain_hold;                 /* PAD-622: the game's end of ball waits on it (set once it does) */")
     if not has_hud:
         L.append("static char award_next[96];           /* PAD-574: an Award of When the mode ends, after the one showing */")
         L.append("static unsigned award_next_ticks;")
@@ -2145,7 +2167,7 @@ def to_c(program, slug):
         L.append("    }")
     else:
         L.append('    words("TOTAL", (long long)run.total, 1);')
-    L.append("    hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
+    L.append("    hide_ticks = ENDING_NOW_MS / 1000 * TICKS_PER_SECOND;")
     L.append("}")
     L.append("")
     L.append("static void total_hide(void)")
@@ -2271,7 +2293,7 @@ def to_c(program, slug):
     if g.game_wizard:
         L.extend(_GAME_WIZARD_C.split("\n"))
     if g.mech:
-        L.extend((_MECH_C % {"lo": HOLD_MIN_MS, "hi": HOLD_MAX_MS, "slo": SCOOP_MIN_MS, "shi": SCOOP_MAX_MS,
+        L.extend((_MECH_C % {"lo": HOLD_MIN_MS, "hi": HOLD_LONGEST_MS, "slo": SCOOP_MIN_MS, "shi": SCOOP_MAX_MS,
                              "release": "".join("    pm_coil_release(%s);\n" % _c_str(n) for n in g.holds)}
                   ).split("\n"))
     L.append("/* What of the game's own is running (a battle, a multiball, one of its timed modes), or 0. A port that")
@@ -2294,6 +2316,7 @@ def to_c(program, slug):
     L.append("")
     L.append("static void start(const char *why, int counted);")
     L.append("static void end(const char *why);")
+    L.append("static void end_now(const char *why);")
     if g.lit:
         L.append("")
         L.extend(_lit_c(g).rstrip("\n").split("\n"))
@@ -2316,6 +2339,10 @@ def to_c(program, slug):
     L.append("static void start(const char *why, int counted)")
     L.append("{")
     L.append("    if (run.on || !pm_in_game()) return;")
+    L.append("    if (drain_hold || drain_long) {   /* PAD-622: the last drain's TOTAL goes before it starts again */")
+    L.append("        drain_hold = drain_long = 0;")
+    L.append("        end_now(\"ball ended\");")
+    L.append("    }")
     L.append("    if ((WAITS_OUT_MULTIBALL || GAME_MODES) && counted) {   /* it waits: the next Start the mode starts it */")
     L.append("        static unsigned long said_at;")
     L.append("        const char *what = game_busy();")
@@ -2356,6 +2383,7 @@ def to_c(program, slug):
         L.append("    bar_show(1);                      /* PAD-521: its name in the game's bar */")
     if g.mech:
         L.append("    scoop_next = 0;")
+        L.append("    clock_hold = 0;                   /* PAD-621 */")
     L.append("    hide_ticks = 0;")
     L.append('    reset_mode();')
     if watch:
@@ -2414,7 +2442,7 @@ def to_c(program, slug):
     L.append("    award_ticks = 0;")
     if has_bar:
         L.append("    bar_show(0);                      /* PAD-521: the bar full, kept through its total */")
-        L.append("    bar_hold = ENDING_MS / 1000 * TICKS_PER_SECOND + total_due;")
+        L.append("    bar_hold = ENDING_NOW_MS / 1000 * TICKS_PER_SECOND + total_due;")
         L.append("    ended_begun = pm_begun();")
     L.append("    if (screen) {")
     L.append("        flash_ticks = 0;")
@@ -2432,13 +2460,13 @@ def to_c(program, slug):
         L.append("        for (k = 0; k < 3; k++) kit_hud_counter(&hud, k, 0, 0, 0);")
         L.append("        kit_hud_timer(&hud, -1);")
         L.append("        kit_hud_gauge(&hud, -1, 0);")
-        L.append('        kit_hud_award(&hud, %du, kit_num(n, sizeof n, run.total), " ");' % TOTAL_MS)
-        L.append("        kit_hud_hide_in(&hud, %du);" % TOTAL_MS)
+        L.append('        kit_hud_award(&hud, ENDING_NOW_MS, kit_num(n, sizeof n, run.total), " ");')
+        L.append("        kit_hud_hide_in(&hud, ENDING_NOW_MS);")
         L.append("    }")
     L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
     L.append("    /* the total keeps the display watched for its moment on its HUD or its own screen (the kit's")
     L.append("     * kit_end_after, pm_end_holding); a drain or the game hands it back at once (end_now) */")
-    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
+    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_NOW_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
              % ("1" if has_hud else "screen"))
     L.append("        pm_display_priority(0);")
     L.append("        pm_end();")
@@ -2581,6 +2609,10 @@ def to_c(program, slug):
     L.append("    unsigned seconds = 0;")
     L.append("    int in_game = pm_in_game();")
     L.append("    find_screen();")
+    L.append("    if (drain_hold && !pm_ball_end_holding()) {   /* PAD-622: the game's end of ball goes on: so does its TOTAL */")
+    L.append("        drain_hold = drain_long = 0;")
+    L.append("        end_now(\"ball ended\");")
+    L.append("    }")
     if words_only:
         L.append("    find_total();")
     if has_info:
@@ -2635,7 +2667,11 @@ def to_c(program, slug):
         L.append("        unsigned picked = challenge_picked;")
         L.append("        challenge_picked = 0;")
         L.append("        if (in_game) {")
+        if g.mech:
+            L.append("            ball_starting = 1;            /* PAD-621: no hold that waits for a ball at the post */")
         L.extend("        " + line if line else line for code in challenge_scripts for line in code.split("\n"))
+        if g.mech:
+            L.append("            ball_starting = 0;")
         L.append("        }")
         L.append("    }")
     timer_scripts = scripts_of("timer_done")
@@ -2661,7 +2697,7 @@ def to_c(program, slug):
     L.append("        return;")
     L.append("    }")
     L.append("    run.elapsed++;")
-    L.append("    if (RUN_SECONDS) {")
+    L.append("    if (RUN_SECONDS%s) {" % (" && !clock_held()" if g.mech else ""))   # PAD-621: a hold_wait stops it
     L.append("        if (run.ticks_left) run.ticks_left--;")
     L.append("        seconds = secs_left();")
     L.append("        if (seconds != run.seconds_shown) {")
@@ -2694,12 +2730,38 @@ def to_c(program, slug):
         L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside());   /* PAD-547: out of the way of the game's */")
     L.append("}")
     L.append("")
+    L.append("/* PAD-622: a drain while it runs ends it as its clock would - an Award it ended on, then its TOTAL - and the")
+    L.append(" * game's end of ball (its bonus, the next ball, a challenge game's end) waits for that, as it does for the")
+    L.append(" * game's own mini-wizards' totals; a drain while its total still shows waits out the rest. Where the game cannot")
+    L.append(" * wait (a tilted ball, a port without the hold) it all goes at once, as before. */")
+    L.append("static void drain_end(void)")
+    L.append("{")
+    L.append("    unsigned ms;")
+    L.append("    drain_long = run.on && pm_can(PM_CAN_BALL_END_HOLD);   /* its TOTAL as long as the game's own then */")
+    if has_hud:
+        L.append("    ms = drain_long ? DRAIN_TOTAL_MS : 0;   /* the HUD's TOTAL */")
+    else:
+        L.append("    ms = 0;")
+    L.append("    end(\"ball ended\");")
+    L.append("    if (screen && (total_due || hide_ticks)) {   /* an Award it ended on, then its TOTAL; or the rest of one */")
+    L.append("        unsigned t = total_due ? total_due + ENDING_NOW_MS / 1000 * TICKS_PER_SECOND : hide_ticks;")
+    L.append("        if (t * 1000 / TICKS_PER_SECOND > ms) ms = t * 1000 / TICKS_PER_SECOND;")
+    L.append("    }")
+    L.append("    if (ms && pm_ball_end_hold(ms)) {")
+    L.append("        drain_hold = 1;                 /* after the ask: a tick between sees the hold, not its end */")
+    L.append('        pm_log("its TOTAL at the drain: the end of ball waits %u ms", ms);')
+    L.append("        return;")
+    L.append("    }")
+    L.append("    drain_long = 0;")
+    L.append("    end_now(\"ball ended\");")
+    L.append("}")
+    L.append("")
     L.append("static void on_ball_end(void)")
     L.append("{")
     L.append("    unsigned t;")
     L.append("    for (t = 0; t < %d; t++) T[t] = 0;   /* a ball ending stops every timer */" % ntimers)
     L.extend(scripts_of("ball_end"))
-    L.append("    if (ENDS_ON_DRAIN) end_now(\"ball ended\");")
+    L.append("    if (ENDS_ON_DRAIN) drain_end();")
     if media:
         L.append("    looping = 0;                      /* no backdrop outlives the ball */")
     L.append("    {")
@@ -3259,13 +3321,47 @@ def _lit_c(g):
 _MECH_C = """/* ---- the mechanisms (PAD-395; MODE_SDK.md "The magnet", "The scoop") ---- */
 static int scoop_next;                  /* 1 = the next ball only, 2 = it is held now: then no more */
 
-/* hold a mechanism (the port's name for it) this many ms; refused, mode.log says why */
+/* hold a mechanism (the port's name for it) this many ms (the runtime keeps each one's own limit: 5 s, or a post's
+ * own longest); refused, mode.log says why */
 UNUSED static void hold(const char *what, long long ms)
 {
     if (!run.on) return;
     if (ms < %(lo)d) ms = %(lo)d;
     if (ms > %(hi)d) ms = %(hi)d;
     if (!pm_coil_hold(what, (unsigned)ms)) pm_log("hold %%s: refused (the runtime's line says why)", what);
+}
+
+/* PAD-621: a hold the clock waits for (the ball held at the start while its clip plays); 0 = the clock runs */
+static const char *clock_hold;
+static int ball_starting;               /* PAD-621: a challenge's scripts run as the ball starts (it is in the shooter lane) */
+
+/* hold it, and the mode's clock stands still until it lets go */
+UNUSED static void hold_wait(const char *what, long long ms)
+{
+    if (!run.on) return;
+    if (ball_starting) {                /* PAD-621 (luvthatapex): a challenge starts at the shooter lane */
+        pm_log("hold %%s: no hold, the mode started as the ball starts (the ball is in the shooter lane) - its clock runs",
+               what);
+        return;
+    }
+    if (ms < %(lo)d) ms = %(lo)d;
+    if (ms > %(hi)d) ms = %(hi)d;
+    if (!pm_coil_hold(what, (unsigned)ms)) {
+        pm_log("hold %%s: refused (the runtime's line says why) - its clock runs", what);
+        return;
+    }
+    clock_hold = what;
+    pm_log("hold %%s: its clock waits until it lets go", what);
+}
+
+/* 1 = the clock waits this tick: a hold_wait still holds */
+static int clock_held(void)
+{
+    if (!clock_hold) return 0;
+    if (run.on && pm_coil_holding(clock_hold)) return 1;
+    pm_log("hold %%s: let go - its clock runs", clock_hold);
+    clock_hold = 0;
+    return 0;
 }
 
 /* hold a ball that settles in the scoop this many ms, then the game kicks it out as always;

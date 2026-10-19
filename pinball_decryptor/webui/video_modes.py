@@ -30,7 +30,8 @@ Store keys (namespace ``video``):
                with the clip (:mod:`..plugins.stern.clip_sounds`), named by the extract's
                ``sound_requests.tsv`` and audio files; each item's ``rel`` is its Audio row
                (``open_sound`` shows it there) and ``path`` the file the page plays. A clip
-               with no sure sound lists the ones that MAY be its (PAD-592)
+               with no sure sound lists the ones that MAY be its (PAD-592); one the reading
+               can't pair says why in ``none``, never nothing (PAD-627)
 """
 
 import os
@@ -79,8 +80,31 @@ MAYBE_HOW = {"function": "asked for in the same part of the program",
              "names": "named like it", "part": "named like part of its name"}
 NONE_TEXT = ("No sound found for this clip in the game's program. It may have none (a loop or a "
              "backdrop), or the game picks its sound in a way the program does not show.")
+#: PAD-627: the clips no bank names, each in words (a callout always says why it lists no sound)
+SCENE_TEXT = ("This clip belongs to a scene that plays it on its own, so the game's program "
+              "never asks for it by name and does not say which sound goes with it.")
+UNKNOWN_TEXT = ("This clip is not one the app found in the card's clip banks, so it can't tell "
+                "which sound goes with it.")
+UNREAD_TEXT = "The sounds that go with the clips were not read: %s."
 #: a sound's link and play button (the page's words, here for the tests)
 OPEN_TIP = "Show this sound on the Audio tab"
+#: PAD-624: the toolbar's one line when the card gives the tab nothing to show (the card is not
+#: on this PC, can't be read, or names no mode), and its tooltip's lines
+WHY_GONE = "Played in and clip sounds: the project's card is not on this PC"
+WHY_GONE_TIP = ("The card image this project was extracted from is not on this PC, so the app "
+                "can't read which part of the game plays each clip, or the sounds it plays with "
+                "them. Put the card back where it was, or extract it again.")
+WHY_UNREAD = "Played in and clip sounds: the card could not be read"
+WHY_NO_MODES = "Played in: not shown for this game"
+WHY_NO_MODES_TIP = ("The app can't tell which part of this game plays each clip from its "
+                    "program, so the Played in column is not shown.")
+WHY_SOUNDS_OK = "The sounds the game plays with a clip are shown under it."
+WHY_SOUNDS_NONE = "The sounds the game plays with its clips can't be read from it either."
+
+
+def _sentence(text):
+    text = (text or "").strip()
+    return (text[:1].upper() + text[1:] + ("" if text.endswith(".") else ".")) if text else ""
 
 
 def _and(words):
@@ -99,7 +123,8 @@ class ModesMixin:
         self._m_run = 0
         self._m_filter = ""           # a mode class, OTHER, UNPLAYED, or "" for every clip
         self._m_clear_state()
-        self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": ""})
+        self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": "",
+                        "why": None})
 
     def _m_clear_state(self):
         self._m_modes = {}            # rel -> [mode class] the row stands for
@@ -121,7 +146,8 @@ class ModesMixin:
         self._m_filter = ""
         self._m_drop_virtual()
         self._m_clear_state()
-        self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": ""})
+        self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": "",
+                        "why": None})
 
     # -- reading the card ------------------------------------------------------------------
     def _m_card(self, project):
@@ -282,7 +308,25 @@ class ModesMixin:
         self.set(modes={"ready": True, "busy": False, "note": note,
                         "list": [{"id": m, "label": reading.label(m), "n": counts[m]}
                                  for m in modes] + extra,
-                        "filter": self._m_filter})
+                        "filter": self._m_filter, "why": self._m_why(clips, modes or extra)})
+
+    def _m_why(self, clips, listed):
+        """PAD-624: ``{line, tip}`` for the toolbar when the card gives the tab nothing (no Played
+        in column, maybe no sounds either), so the page says why instead of showing nothing;
+        None when it lists something."""
+        if listed:
+            return None
+        if not clips.game:
+            gone = not clips.card or not os.path.isfile(clips.card)
+            return {"line": WHY_GONE if gone else WHY_UNREAD,
+                    "tip": {"head": WHY_GONE if gone else WHY_UNREAD,
+                            "lines": [WHY_GONE_TIP] if gone else
+                            [_sentence(clips.note or "the card could not be read")]}}
+        sounds = clips.sound_reading
+        return {"line": WHY_NO_MODES,
+                "tip": {"head": WHY_NO_MODES,
+                        "lines": [WHY_NO_MODES_TIP,
+                                  WHY_SOUNDS_OK if sounds.pairs else WHY_SOUNDS_NONE]}}
 
     # -- the followers' rows ---------------------------------------------------------------
     def _m_drop_virtual(self):
@@ -444,15 +488,23 @@ class ModesMixin:
 
     def _m_sounds(self, rel):
         """The callout's sounds part for the row on show, or None."""
-        if not rel or self._m_clips is None or not self._m_clips.sounds:
-            return None
-        reading = self._m_sound_reading()
-        names = self._m_clips.name_of
-        name = names.get(rel) or names.get(self._m_of.get(rel) or "")
-        if not name:
+        clips = self._m_clips
+        if not rel or clips is None:
             return None
         out = {"rel": rel, "head": SOUNDS_HEAD, "items": [], "more": "", "maybe_head": "",
                "maybe": [], "maybe_more": "", "none": "", "foot": ""}
+        if not clips.sounds:
+            out.update(head="", none=UNREAD_TEXT % (clips.note or "the card was not read"))
+            return out
+        reading = self._m_sound_reading()
+        names = clips.name_of
+        # a clip a second bank holds too plays as its name does (PAD-627)
+        name = (names.get(rel) or names.get(self._m_of.get(rel) or "")
+                or (clips.twin_of or {}).get(rel))
+        if not name:
+            out.update(head="", none=SCENE_TEXT if rel in (clips.scene_of or {})
+                       else UNKNOWN_TEXT)
+            return out
         sounds = reading.sounds_of(name)
         if not sounds:
             if reading.note and not reading.pairs and rel not in self._m_unplayed:
@@ -460,7 +512,7 @@ class ModesMixin:
                 return out
             if rel in self._m_unplayed:
                 return None
-            out["none"] = NONE_TEXT
+            out.update(head="", none=NONE_TEXT)
             return out
         # "function" (a call elsewhere in the code naming the clip) was right 6 times in 28:
         # with nothing surer it is one that MAY be the clip's (PAD-592)

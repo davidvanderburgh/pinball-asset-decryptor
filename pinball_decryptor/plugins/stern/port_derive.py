@@ -668,6 +668,12 @@ def merge(drafts, refs, tgt, game, version, family):
         body += events
     if lamps:
         body += [""] + lamps
+    from . import portchallenge
+    b = getattr(tgt, "b", None)
+    challenges, _why = portchallenge.find(b) if b else ([], [])   # PAD-615: read off the build's own code
+    if challenges:
+        body += ["", "# ---- the game's Challenge list (PAD-615, portchallenge.py): each challenge's own start on the "
+                     "ball's start event ----"] + challenges
     return body, provenance, missing, notes
 
 

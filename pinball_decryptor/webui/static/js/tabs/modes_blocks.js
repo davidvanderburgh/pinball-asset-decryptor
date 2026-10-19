@@ -131,6 +131,8 @@ export function hatTemplates(ch, timers) {
     { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 },
     { kind: "ball_end" }, { kind: "event", event: ev, when: "any" },
     { kind: "timer_done", timer: (timers[0] || {}).name || "" },
+    // PAD-615: only where the game names challenges a mode may take the place of
+    ...((ch.challenges || []).length ? [{ kind: "challenge", challenge: ch.challenges[0] }] : []),
   ];
 }
 
@@ -554,6 +556,9 @@ function addMenu(ed, path) {
 }
 
 // ------------------------------------------------------------------ scripts
+// PAD-615: what the challenge hat does
+const CHALLENGE_TIP = "In the game's own Player Challenge mode (a one-ball game picked on the game's menu as a game starts, or every game when the service menu's Default Game Mode is set to a challenge), this script runs as the ball starts when this challenge is picked, and the game's own challenge does not start: put Start the mode in it. The game ends when the ball ends, as it does after its own. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge.";
+
 export function HatBody({ h, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
   const when = html`<${Pick} value=${h.when || "any"} options=${WHEN} onChange=${(v) => set("when", v)} />`;
@@ -567,6 +572,7 @@ export function HatBody({ h, path, ed }) {
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
     case "event": return html`<span class="bk-w b">When</span><${Pick} value=${h.event} options=${(ed.ch.events || []).map((x) => [x.name, x.label])} onChange=${(v) => set("event", v)} />${when}`;
     case "timer_done": return html`<span class="bk-w b">When timer</span><${TimerPick} value=${h.timer} ed=${ed} onChange=${(v) => set("timer", v)} /><span class="bk-w b">runs out</span>`;
+    case "challenge": return html`<span class="bk-w b" ...${tip(CHALLENGE_TIP)}>When the player picks the challenge</span><${Pick} value=${h.challenge} options=${(ed.ch.challenges || []).map((x) => [x, x])} onChange=${(v) => set("challenge", v)} />`;
     default: return html`<span class="bk-w b">${h.kind}</span>`;
   }
 }
@@ -588,7 +594,8 @@ export function Script({ s, si, n, ed }) {
 export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", every: "Every N seconds", seconds_left: "When N seconds are left",
-    ball_end: "When the ball drains", event: "When the game does…", timer_done: "When a timer runs out" }[h.kind] || h.kind;
+    ball_end: "When the ball drains", event: "When the game does…", timer_done: "When a timer runs out",
+    challenge: "When the player picks a challenge" }[h.kind] || h.kind;
 }
 
 export function stmtLabel(b) {

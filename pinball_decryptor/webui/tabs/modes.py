@@ -74,7 +74,8 @@ _STR_FIELDS = (
     "shake_s_start", "shake_s_shot", "shake_s_end", "shake_shot",
     "show_start", "show_end",                                                         # PAD-418
     "game_wizard", "wizard_how",                                                      # PAD-436
-    "building_floor", "building_shot", "roster_slot")                                 # PAD-589
+    "building_floor", "building_shot", "roster_slot",                                 # PAD-589
+    "challenge")                                                                      # PAD-615
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -92,6 +93,7 @@ _DEFAULTS = {
     "shield": False,                                                           # PAD-392
     "building_floor": "(leave it where it is)", "building_shot": "(when it starts)",   # PAD-589
     "roster_slot": "",                                                              # PAD-589
+    "challenge": "",                                                                # PAD-615: by its name
     # PAD-414: the shaker - as it starts, on a shot, as it ends; a shake of the mode's own (strength + seconds) or
     # one of the game's ("game:<name>")
     "shake_on_start": False, "shake_on_shot": False, "shake_on_end": False,
@@ -265,7 +267,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     _LIGHT_PATTERN_WORDS = (("solid", "Solid"), ("blink", "Blink"), ("pulse", "Pulse"),
                             ("chase", "Chase"))
     _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save", "magnet", "scoop", "coils", "shield",
-                      "building", "shaker", "shows", "wizard", "roster")
+                      "building", "shaker", "shows", "wizard", "roster", "challenge")
     _TWO_COLUMN_SHOTS = 18
     _PROBE_TRIES = 240
     _FILM_PARTS = (("clip", "clip", "a clip"), ("still", "screen", "a picture for the screen"),
@@ -1454,10 +1456,14 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         by_name.update({n: label for n, label in MP.EVENT_LABELS.items() if n not in by_name})
         start = MP.starts_on_event(spec)
         self.f["starts_kind"] = ("event" if start else "sequence" if MP.starts_on_sequence(spec)
-                                 else "battle" if MP.starts_on_battle(spec) else "shot")
+                                 else "battle" if MP.starts_on_battle(spec)
+                                 else "challenge" if MP.starts_on_challenge(spec) else "shot")
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589: by its name
         slot = MP._int_or_none(getattr(spec, "roster_slot", -1))
         self.f["roster_slot"] = roster[slot] if slot is not None and 0 <= slot < len(roster) else ""
+        picks = list(getattr(self._shown or self._profile, "challenges", ()) or ())  # PAD-615: by its name
+        n = MP._int_or_none(getattr(spec, "challenge", -1))
+        self.f["challenge"] = picks[n] if n is not None and 0 <= n < len(picks) else ""
         self.f["start_event"] = by_name.get(start, start or "")
         kind, name = MP.ends_on_parts(spec)
         self.f["ends_kind"] = kind if kind in ("drain", "clock", "event") else "drain"
@@ -1483,11 +1489,16 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             spec.starts_on = "sequence"
         elif self.f["starts_kind"] == "battle":          # PAD-589
             spec.starts_on = "battle"
+        elif self.f["starts_kind"] == "challenge":       # PAD-615
+            spec.starts_on = "challenge"
         else:
             spec.starts_on = "shot"
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589
         name = str(self.f["roster_slot"]).strip()
         spec.roster_slot = roster.index(name) if spec.starts_on == "battle" and name in roster else -1
+        picks = list(getattr(self._shown or self._profile, "challenges", ()) or ())  # PAD-615
+        name = str(self.f["challenge"]).strip()
+        spec.challenge = picks.index(name) if spec.starts_on == "challenge" and name in picks else -1
         rows = [str(self.f["seq_shot_%d" % i]).strip() for i in range(self.SEQ_ROWS)]
         spec.start_sequence = [s for s in rows if s and s != self.SEQ_NONE] + list(self._seq_beyond)
         spec.sequence_reset_any = bool(self.f["seq_reset_any"])
@@ -1631,7 +1642,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                     "callouts": [], "callouts_none": "", "events": [],
                     "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
                     "mb_on_shots": [self.MB_ON_START], "game_modes": [], "magnet_shot": "",
-                    "held_coils": [], "shield_rule": "", "building_floors": [], "building_rule": "", "roster": [],
+                    "held_coils": [], "shield_rule": "", "building_floors": [], "building_rule": "", "roster": [], "challenges": [],
                     "game_shows": [], "shakes": [], "shake_max": [],
                     "game_wizards": [], "wizard_shot": "", "wizard_lights": [], "wizard_claims": False}
         names = [n for n, _m in p.shots]
@@ -1658,6 +1669,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "roster": list(getattr(p, "roster", ()) or ()),                   # PAD-589: the battle slots
                 # ... and whether the game has a battle selection at all (a game without one shows no such start)
                 "roster_found": bool(getattr(p, "roster", ())) or "has found" in p.why_not("roster"),
+                # PAD-615: the game's challenges a mode may take the place of, and whether it names any at all
+                "challenges": list(getattr(p, "challenges", ()) or ()),
+                "challenge_found": bool(getattr(p, "challenges", ())) or "has found" in p.why_not("challenge"),
                 # PAD-414: what a shake can be - one of the mode's own at a strength, or one of the game's
                 # (PAD-474: only the strengths the game itself shakes at; a one-power shaker has hard alone)
                 "shakes": ([{"value": w, "label": "a %s shake" % w} for k, w in MP.SHAKE_STRENGTHS.items()
@@ -1940,7 +1954,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                      "film_still", "film_sound", "own_extra", "lit_shots",
                                      "show_order", "multiball", "ball_save", "give_way", "block",
                                      "magnet", "scoop", "coils", "shield", "building", "shaker", "shows",
-                                     "wizard", "roster")}
+                                     "wizard", "roster", "challenge")}
             self.set(reasons={}, limits={}, dis=dis, hide={}, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
@@ -2826,6 +2840,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "wizard_claims": bool(getattr(p, "wizard_claims", False)) if p is not None else False,
                 # PAD-503: the inserts a Light the mode at block may light beside its shot's (a villain's)
                 "inserts": list(getattr(p, "inserts", ()) or ()) if p is not None else [],
+                # PAD-615: the game's challenges a script may take the place of ([] = none on this game)
+                "challenges": list(getattr(p, "challenges", ()) or ()) if p is not None else [],
                 # PAD-521: the game's own status bar a mode's name, colour and clock can go in (Bond LE)
                 "status_bar": bool(getattr(p, "status_bar", False)) if p is not None else False,
                 # PAD-547: an info line is a screen of its own, so it goes on every title that takes screens
@@ -2884,8 +2900,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         inserts = list(getattr(p, "inserts", ()) or ()) if p is not None else None                     # PAD-503
         building = (getattr(p, "building_rule", "") if p.can("building") else False) if p is not None else None
         modes = [s for s, _n in self._blocks_modes()] if self.project() else None                     # PAD-600
+        challenges = list(getattr(p, "challenges", ()) or ()) if p is not None else None             # PAD-615
         return (BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards,   # PAD-436
-                            inserts, building, modes), BM.notes(program))                                   # PAD-589
+                            inserts, building, modes, challenges), BM.notes(program))                       # PAD-589
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

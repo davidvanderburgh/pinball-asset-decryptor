@@ -125,7 +125,8 @@ def _mb(name):
         (set() if name in MP.MAGNET_PROVEN else {"magnet"}) | \
         (set() if name in MP.SCOOP_PROVEN else {"scoop"}) | \
         (set() if any(b == name for b, _c in MP.HELD_COILS_PROVEN) else {"coils"}) |         (set() if name in MP.SHIELD_PROVEN else {"shield"}) |         (set() if name in GAME_SHOW_PORTS else {"shows"}) | (set() if name in MP.SHAKER_PROVEN else {"shaker"}) | \
-        (set() if name in MP.WIZARDS_PROVEN else {"wizard"}) |         (set() if name in MP.BUILDING_PROVEN else {"building"}) |         (set() if name in MP.ROSTER_PROVEN else {"roster"})   # PAD-225; PAD-381 magnet, scoop, coils; PAD-392; PAD-418; PAD-414; PAD-436; PAD-589
+        (set() if name in MP.WIZARDS_PROVEN else {"wizard"}) |         (set() if name in MP.BUILDING_PROVEN else {"building"}) |         (set() if name in MP.ROSTER_PROVEN else {"roster"}) | \
+        (set() if name in MP.CHALLENGE_PROVEN else {"challenge"})   # PAD-225; PAD-381 magnet, scoop, coils; PAD-392; PAD-418; PAD-414; PAD-436; PAD-589; PAD-615
 
 
 def _check_runtime_file(p, spec, slug):
@@ -162,7 +163,7 @@ def test_a_profile_per_port(name):
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
     cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shaker", "shows",
-                             "wizard", "building", "roster"}) | _mb(name)
+                             "wizard", "building", "roster", "challenge"}) | _mb(name)
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)
@@ -209,7 +210,7 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
     assert not p.can("stack") and "tells that one of its own modes is running" in p.why_not("stack")
     assert [part for part in MP.PARTS if not p.can(part)] == ["stack", "multiball", "ball_save"] + \
-        ([] if "godzilla_le-1.16" in MP.MAGNET_PROVEN else ["magnet"]) + ["wizard"]   # no count: no multiball, no ball save; PAD-436: no mini-wizards
+        ([] if "godzilla_le-1.16" in MP.MAGNET_PROVEN else ["magnet"]) + ["wizard", "challenge"]   # no count: no multiball, no ball save; PAD-436: no mini-wizards; PAD-615: no challenge list
     # with the count alone it is the balls route, greyed until seen (item 164's STACK_BALLS_PROVEN)
     only = "\n".join(line for line in text.splitlines() if "stock_" not in line)
     (tmp_path / "godzilla_le-1.16.port").write_text(only, encoding="utf-8")

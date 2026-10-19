@@ -87,6 +87,8 @@ class TitleProfile:
     #                                  game_rules): it turns the platform back while it counts shots
     roster: tuple = ()               # PAD-589: the battle selection's slots a mode may take (their names, slot order);
     #                                  () where the title has no roster a mode can take
+    challenges: tuple = ()           # PAD-615: the game's Challenge list a mode may take a place in (the challenges'
+    #                                  names, in the game's menu order); () where the title names none a mode can take
     building_rule: str = ""          # PAD-589: the game's own building locks (one of game_rules, BUILDING_RULES): a
     #                                  mode moves the building only while it sees no shots
     shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
@@ -295,7 +297,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster")
+         "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster", "challenge")
 
 #: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
 HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "building", "shaker")
@@ -858,6 +860,45 @@ def _roster(game, port):
     n = int(port["value"].get("roster_slots", 0) or 0) if port else 0
     names = ROSTER_NAMES.get(game, ())
     return tuple(names[i] if i < len(names) else "Slot %d" % i for i in range(min(n, 16)))
+
+
+#: PAD-615: a mode that takes the place of one of the game's challenges in a Player Challenge game (the mode file's
+#: ``challenge`` line; MODE_SDK.md "A mode in the game's Challenge list"). What pad_mode_runtime.c's challenge list
+#: needs - (sites, data, values): at least the first challenge's own start (the port's `site challenge_go_<n>`, from
+#: portchallenge.py), the game flags it reads and the flag of a challenge game.
+CHALLENGE_NEEDS = (("challenge_go_0",), ("game_flags",), ("challenge_on_flag",))
+#: The builds where a mode holding a challenge was seen in the emulator: the game made a Player Challenge game with that
+#: pick by its own Default Game Mode setting (AD_DEFAULT_GAME_MODE), the mode started at the first ball's start instead
+#: of the game's challenge, and a control run (the same setting, no mode) started the game's own.
+CHALLENGE_PROVEN = frozenset({
+    "james_bond_le-1.06",              # PAD-615 2026-10-19 rig 1-2, the stock card, hidden, muted: Default Game Mode 3 (Ahoy Mr. Bond), challenge 1 claimed: YOLT TEST START (challenge pick) 8 ms after the pick, the game's Ahoy (flag 85) never set; the drain ended it, GAME OVER after the one ball. Control: the game's own Ahoy started (flag 85)
+    "james_bond_pro-1.06",             # PAD-615 2026-10-19: the same on the stock Pro card (Default Game Mode = adjustment 194): START 9 ms after the pick, GAME OVER after the ball; control: the game's own Ahoy started
+    "stranger_things-1.13",            # PAD-615 2026-10-19: Default Game Mode 2 (Demogorgon), challenge 0 claimed: DEMO TEST START 7 ms after the pick, the game's Demogorgon Challenge (flag 104) never set; control: it started
+    "stranger_things_le-1.12",         # PAD-615 2026-10-19: the same (its Demogorgon Challenge flag 99): mode started, the game's not; control: the game's started
+    "stranger_things_le-1.13",         # PAD-615 2026-10-19: the same (flag 104): mode started, the game's not; control: the game's started
+})
+
+
+def _challenge_cannot(key, label, port=None):
+    """The ``cannot`` entry for taking a challenge's place on build ``key``, or () when it can."""
+    sites, data, values = CHALLENGE_NEEDS
+    if not port or not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
+                        and all(n in port["value"] for n in values)):
+        return (("challenge", "%s's Player Challenge mode has no list of challenges a mode of yours can take a place "
+                              "in." % label),)
+    if key in CHALLENGE_PROVEN:
+        return ()
+    return (("challenge", "The app has found %s's challenges but has not yet seen a mode of yours start from one in "
+                          "the emulator, so it cannot here yet." % label),)
+
+
+def _challenges(port):
+    """The names of the port's challenges, in the game's menu order (``challenge_go_<n>`` from 0, no gap)."""
+    out = []
+    while port and "challenge_go_%d" % len(out) in port["site"] and len(out) < 8:
+        n = len(out)
+        out.append(port["text"].get("challenge_name_%d" % n, "").strip() or "Challenge %d" % (n + 1))
+    return tuple(out)
 
 
 #: PAD-589: Godzilla Premium/LE's building on its stepper (a Pro has none). What pad_mode_runtime.c's building_arm
@@ -1425,6 +1466,7 @@ GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, cannot=_multiball_cannot("godzill
                             + _shield_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _building_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _roster_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
+                            + _challenge_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _shaker_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15")
                             + _shows_cannot("Godzilla Pro 1.15")
                             + _wizards_cannot("godzilla_pro-1.15", "Godzilla Pro 1.15"))
@@ -2125,6 +2167,7 @@ def profile_from_port(path):
     cannot += list(_shield_cannot(key, label, port))         # PAD-392
     cannot += list(_building_cannot(key, label, port))       # PAD-589
     cannot += list(_roster_cannot(key, label, port))         # PAD-589
+    cannot += list(_challenge_cannot(key, label, port))      # PAD-615
     cannot += list(_shaker_cannot(key, label, port))         # PAD-414
     cannot += list(_shows_cannot(label, port))               # PAD-418
     cannot += list(_wizards_cannot(key, label, port))        # PAD-436
@@ -2186,6 +2229,7 @@ def profile_from_port(path):
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589
+        challenges=_challenges(port) if not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
         shakes=_shakes(port),                                                # PAD-414
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
@@ -2434,11 +2478,13 @@ try:
         roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
-                     if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster"))
+                     if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster",
+                                     "challenge"))
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
         + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
         + _building_cannot(_key_115, _label_115, _port_115)
         + _roster_cannot(_key_115, _label_115, _port_115)
+        + _challenge_cannot(_key_115, _label_115, _port_115)
         + _shows_cannot(_label_115, _port_115)
         + _shaker_cannot(_key_115, _label_115, _port_115),
         shakes=_shakes(_port_115), shake_max_ms=_shake_max_ms(_port_115))
@@ -2924,6 +2970,9 @@ class ModeSpec:
     # PAD-589: with starts_on "battle", the slot of the game's battle selection (the profile's roster) the mode takes:
     # picking it there starts the mode instead of that battle; -1 = none
     roster_slot: int = -1
+    # PAD-615: with starts_on "challenge", the game's challenge (the profile's challenges, menu order) the mode takes the
+    # place of: a Player Challenge game with that pick starts the mode at its ball's start instead; -1 = none
+    challenge: int = -1
     # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
     # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
     # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
@@ -3117,6 +3166,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.building_floor, spec.building_shot = 0, ""
     if not p.can("roster") and starts_on_battle(spec):
         spec.starts_on, spec.roster_slot = "shot", -1
+    if not p.can("challenge") and starts_on_challenge(spec):
+        spec.starts_on, spec.challenge = "shot", -1
     if not p.can("shaker"):
         spec.shakes = []
     if not p.can("shows"):
@@ -4599,6 +4650,12 @@ def starts_on_battle(spec):
     return bool(words) and words[0] == "battle"
 
 
+def starts_on_challenge(spec):
+    """True when a Player Challenge game with the mode's challenge picked starts it (``challenge``, PAD-615)."""
+    words = (spec.starts_on or "shot").split()
+    return bool(words) and words[0] == "challenge"
+
+
 def starts_on_sequence(spec):
     """True when the mode starts on its ``start_sequence`` made in order (PAD-314)."""
     words = (spec.starts_on or "shot").split()
@@ -4644,9 +4701,15 @@ def _validate_starts_ends(spec, p, ends=True):
     out = []
     words = (spec.starts_on or "shot").split()
     events = tuple(getattr(p, "events", ()) or ())
-    if words[0] not in ("shot", "event", "sequence", "battle"):
-        out.append("A mode starts on a shot, on shots made in order, on one of the game's events, or on a battle "
-                   "picked on the game's selection screen.")
+    if words[0] not in ("shot", "event", "sequence", "battle", "challenge"):
+        out.append("A mode starts on a shot, on shots made in order, on one of the game's events, on a battle "
+                   "picked on the game's selection screen, or as a challenge picked in the game's Challenge mode.")
+    elif words[0] == "challenge":                   # PAD-615
+        n = _int_or_none(spec.challenge)
+        if not p.can("challenge"):
+            out.append("Starting as one of the game's challenges is not on %s yet (Mode says why)." % p.label)
+        elif n is None or not 0 <= n < len(p.challenges):
+            out.append("Pick the game's challenge the mode takes the place of.")
     elif words[0] == "battle":                      # PAD-589
         slot = _int_or_none(spec.roster_slot)
         if not p.can("roster"):
@@ -5236,6 +5299,9 @@ def _starts_ends_lines(spec, lines, p, ends=True):
     elif starts_on_battle(spec) and p.can("roster"):   # PAD-589: only the pick starts it (no trigger line)
         out = [line for line in out if not line.startswith("trigger ")]
         out.insert(2, "roster_slot    %d" % int(spec.roster_slot))
+    elif starts_on_challenge(spec) and p.can("challenge"):   # PAD-615: only the challenge game's pick starts it
+        out = [line for line in out if not line.startswith("trigger ")]
+        out.insert(2, "challenge      %d" % int(spec.challenge))
     elif starts_on_sequence(spec):
         out = [line for line in out if not line.startswith("trigger ")]
         seq = ["%-14s 0x%08x" % ("trigger_seq", p.mask([s])) for s in spec.start_sequence]

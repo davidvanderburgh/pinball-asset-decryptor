@@ -683,4 +683,20 @@ int pm_lit_claim(uint64_t shots);
 #define PM_CAN_STATUS_BAR   0x4000000u /* pm_status_bar */
 int pm_status_bar(const char *words, unsigned rgb, int percent);
 
+/* ---- the game's Challenge list (PAD-615; title specific: James Bond LE/Pro 1.06, Stranger Things) ------------
+ * A Player Challenge game: the player picks one of the game's challenges as the game starts and plays it on one
+ * ball, the game ending at that ball's end. A mode can CLAIM one of the challenges (slot 0.. in the order of the
+ * game's menu; Bond: 0 Chaos at Crab Key, 1 Ahoy Mr. Bond, 2 Goldfinger's Jackpot, 3 Duel on the Disco Volante,
+ * 4 Her Majesty's Secret Service): when a challenge game with that pick reaches its ball's start, the game's own
+ * challenge does not start and on_pick(slot) runs instead, on the game's thread, at the moment it would have
+ * started. on_pick returns 1 when it took the pick (start your mode: pm_begin from the next tick) and 0 to let the
+ * game's own run. The menu cannot grow: a mode takes a challenge's place, under that challenge's name. A claim
+ * holds until released, game after game; one mode per challenge. */
+#define PM_CAN_CHALLENGE    0x8000000u /* pm_challenge_claim */
+int pm_challenge_slots(void);                                        /* 0 when the port names no challenges */
+const char *pm_challenge_name(unsigned slot);                        /* "Ahoy Mr. Bond", or 0 */
+int pm_challenge_named(const char *name);                            /* its slot, any case, or -1 */
+int pm_challenge_claim(unsigned slot, int (*on_pick)(unsigned slot)); /* 1 = claimed */
+void pm_challenge_release(unsigned slot);
+
 #endif

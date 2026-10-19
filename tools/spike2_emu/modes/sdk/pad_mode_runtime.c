@@ -8423,6 +8423,122 @@ static void on_roster_start(unsigned *r)
         took ? "claimed - the game's battle does not start" : "claimed but not taken - the game's battle runs");
 }
 
+/* ---- the game's Challenge list (PAD-615, optional, title specific) ------------------------------
+ * Stern's Player Challenge game: the player picks one of the game's challenges as the game starts and plays it on
+ * one ball; the game itself ends the game at that ball's end, whether its challenge mode ran or not (emulator,
+ * Bond LE 1.06: with the pick's flags set and the challenge's own start never called, the first drain past the
+ * ball save ended the ball and GAME OVER followed). Builds that name their challenges (Bond LE/Pro 1.06, Stranger
+ * Things) set one game flag per pick, and each challenge's module starts it from a handler on the ball's start
+ * event: `if (challenge game && its flag) start(...)`. The port names them (portchallenge.py / challenge_lines.py):
+ *   site  challenge_go_<n>    the handler (push {r3,lr}; bl <challenge game?>; ...), n from 0 in the menu's order
+ *   value challenge_flag_<n>  the flag the pick sets
+ *   text  challenge_name_<n>  its name
+ *   value challenge_on_flag   FG_PLAYER_CHALLENGE_MODE_ACTIVE
+ * with `data game_flags` (the bitmap both are read from). Every handler is hooked (hook_veto_n, refused with the 1
+ * the handler returns). A mode can CLAIM a challenge: in a challenge game with that pick the hook calls the
+ * holder's on_pick(n) on the game's thread, at the moment the game would have started its own, and the game's
+ * own start does not run (on_pick returning 0 lets it run). Nothing claimed, or not that pick: untouched. */
+#define N_CHALLENGE 8
+static int (*challenge_fn[N_CHALLENGE])(unsigned slot);
+static const struct pm_mode *challenge_by[N_CHALLENGE];
+static int challenges_n;                 /* the hooked handlers, 0..N_CHALLENGE; 0 = no challenge list */
+
+int pm_challenge_slots(void)
+{
+    return (can & PM_CAN_CHALLENGE) ? challenges_n : 0;
+}
+
+const char *pm_challenge_name(unsigned slot)
+{
+    char key[24];
+    if (slot >= (unsigned)pm_challenge_slots()) return 0;
+    pm_snprintf(key, sizeof key, "challenge_name_%u", slot);
+    return pm_port_text(key);
+}
+
+/* by the port's name, any case; -1 when it is not one of this game's */
+int pm_challenge_named(const char *name)
+{
+    int n, k;
+    const char *t;
+    for (n = 0; name && *name && n < pm_challenge_slots(); n++) {
+        t = pm_challenge_name((unsigned)n);
+        for (k = 0; t && name[k] && t[k] && (name[k] | 0x20) == (t[k] | 0x20); k++) ;
+        if (t && !name[k] && !t[k]) return n;
+    }
+    return -1;
+}
+
+int pm_challenge_claim(unsigned slot, int (*on_pick)(unsigned slot))
+{
+    if (!on_pick || slot >= (unsigned)pm_challenge_slots()) return 0;   /* unsigned: a huge slot is out of range too */
+    if (challenge_fn[slot] && challenge_by[slot] != current) return 0;  /* another mode holds it */
+    if (!challenge_fn[slot]) say("challenge %u (%s): claimed - picked, it starts the mode instead", slot, pm_challenge_name(slot));
+    challenge_fn[slot] = on_pick;
+    challenge_by[slot] = current;
+    return 1;
+}
+
+void pm_challenge_release(unsigned slot)
+{
+    if (slot < N_CHALLENGE && challenge_fn[slot] && challenge_by[slot] == current) {
+        challenge_fn[slot] = 0; challenge_by[slot] = 0;
+        say("challenge %u (%s): released - the game's own again", slot, pm_challenge_name(slot));
+    }
+}
+
+/* What the hook does, from the flags alone (tests lift it verbatim): 1 = the holder takes the pick. The game's
+ * own handler starts its challenge only in a challenge game (on_flag) with this pick (flag): so does ours. */
+static int challenge_takes(int held, int on, int picked)
+{
+    return held && on == 1 && picked == 1;
+}
+
+static int challenge_veto(unsigned *r, unsigned n)
+{
+    char key[24];
+    const struct pm_mode *was = current;
+    int took, on, picked;
+    static int said;
+    (void)r;
+    if (n >= N_CHALLENGE || !challenge_fn[n]) return 0;          /* nobody holds it: the game's own runs */
+    pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
+    on = game_flag((unsigned)pm_port_value("challenge_on_flag", 0));
+    picked = game_flag((unsigned)pm_port_value(key, 0));
+    if (!challenge_takes(1, on, picked)) {                        /* not a challenge game, or another pick */
+        if (on == 1) say("challenge %u (%s): a challenge game, another pick - the game's own runs", n, pm_challenge_name(n));
+        return 0;
+    }
+    note_thread("challenge pick", &said);
+    current = challenge_by[n];
+    took = challenge_fn[n](n);
+    current = was;
+    say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
+        took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
+    return took != 0;
+}
+
+static void challenges_arm(void)
+{
+    char key[24];
+    unsigned n;
+    challenges_n = 0;
+    if (!data("game_flags") || pm_port_value("challenge_on_flag", 0) <= 0) return;
+    for (n = 0; n < N_CHALLENGE; n++) {
+        pm_snprintf(key, sizeof key, "challenge_go_%u", n);
+        if (!site(key)) break;
+        if (!fn(key) || !hook_veto_n(fn(key), challenge_veto, n, 1)) {
+            say("challenge %u: its handler at 0x%08x could not be hooked - no challenge list", n, fn(key));
+            return;   /* the hooks already placed stay unclaimed, so they pass through */
+        }
+        challenges_n = (int)n + 1;
+    }
+    if (!challenges_n) return;
+    can |= PM_CAN_CHALLENGE;
+    say("challenges: %d of the game's a mode may take the place of (flag %ld for a challenge game)", challenges_n,
+        pm_port_value("challenge_on_flag", 0));
+}
+
 /* ---- events (item 147) ------------------------------------------------------------------------
  * The game's rules talk through one event bus: dispatch(id, arg) calls every handler
  * subscribed to id (0..207). The port names the events measured for its build, in two kinds:
@@ -10390,6 +10506,7 @@ static void pad_mode_start(void)
     shake_arm();                                    /* PAD-414: the shaker motor */
     shows_arm();                                    /* PAD-411: the game's own light shows */
     wizards_arm();                                  /* PAD-436: the game's own mini-wizards */
+    challenges_arm();                               /* PAD-615: the game's Challenge list */
     if (pm_hit_sounds()) {                          /* PAD-415: the game's own hit sounds */
         char key[20];
         pm_snprintf(key, sizeof key, "hit_sound_%d", pm_hit_sounds());
@@ -10404,7 +10521,7 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
@@ -10413,7 +10530,7 @@ static void pad_mode_start(void)
         can & PM_CAN_SCOOP ? " scoop" : "", can & PM_CAN_SHIELD ? " shield" : "",
         can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
         can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "",
-        can & PM_CAN_STATUS_BAR ? " status-bar" : "");
+        can & PM_CAN_STATUS_BAR ? " status-bar" : "", can & PM_CAN_CHALLENGE ? " challenges" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

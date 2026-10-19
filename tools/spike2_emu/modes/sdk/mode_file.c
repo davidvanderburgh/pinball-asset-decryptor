@@ -76,6 +76,7 @@ struct mode_cfg {
     char start_event_name[40], end_event_name[40];
     unsigned roster_slot_1;           /* item 146: `roster_slot <n>` + 1; 0 = no roster slot */
     unsigned roster_callout_1;        /* item 146: `roster_callout <id>` + 1; 0 = not given (the slot is silent) */
+    unsigned challenge_1;             /* PAD-615: `challenge <n>` + 1; 0 = takes no challenge's place */
     unsigned display_priority;        /* item 154 display: `priority <n>`, 0 = none (the display as before) */
     /* item 167: `multiball <balls> [ball save s]` - the mode is a multiball of its own; `seconds 0` is then no
      * clock (it ends when one ball is left). `add_ball <mask> [times]`: a shot that adds a ball */
@@ -573,6 +574,30 @@ static int roster_line(struct slot *M, const char *line)
 }
 static void roster_sync(struct slot *M);
 static void roster_ended(void);
+
+/* PAD-615: `challenge <n>` - the mode takes the place of the game's challenge n (Player Challenge mode; the game's
+ * menu order, pm_challenge_name: Bond's 1 is Ahoy Mr. Bond). Parsed here; claimed in challenge_sync() after a
+ * (re)load. A mode with it needs no trigger: picking that challenge starts it. */
+static int challenge_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "challenge");
+    uint64_t n;
+    if (!a) return 0;
+    if (a[0] < '0' || a[0] > '9') {                  /* `-1`, a word: num() would read 0 and claim challenge 0 */
+        pm_log("challenge needs a challenge number 0-7 - \"%.40s\" ignored", a);
+        cfg.challenge_1 = 0;
+        return 1;
+    }
+    n = num(&a);
+    if (n > 7) {                                     /* never truncated into range */
+        pm_log("challenge %llu is not a challenge number 0-7 - ignored", (unsigned long long)n);
+        cfg.challenge_1 = 0;
+        return 1;
+    }
+    cfg.challenge_1 = (unsigned)n + 1;
+    return 1;
+}
+static void challenge_sync(struct slot *M);
 
 /* item 154 display: `priority <n>` (1-255, the game's display-effect scale; MODE_SDK.md "Display
  * priority"): while the mode runs, the game's displays that do not beat n wait, so its clip plays
@@ -1975,6 +2000,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
+    if (challenge_line(M, line)) return;     /* PAD-615 */
     if (own_lights_key(M, line)) return;     /* item mode-leds */
     if (display_line(M, line)) return;
     if (more_line(M, line)) return;          /* PAD-227 */
@@ -2076,6 +2102,7 @@ static int cfg_reload(struct slot *M)
         cfg.valid = 0;
         pm_log("mode file gone: slot %u (\"%s\") is not armed", M->index, cfg.name);
         roster_sync(M);
+        challenge_sync(M);
         return 1;
     }
     if (M->said_which != k) {
@@ -2090,6 +2117,7 @@ static int cfg_reload(struct slot *M)
     M->raw_len = n;
     cfg_parse(M, M->raw, n);
     roster_sync(M);
+    challenge_sync(M);
     M->node = M->text = 0;
     M->said[0] = 0;                          /* PAD-390: a new file's screen has said nothing yet */
     return 1;
@@ -2481,6 +2509,92 @@ static void roster_sync(struct slot *M)
     }
 }
 
+/* ---- PAD-615: a mode in the game's Challenge list ------------------------------------------
+ * The runtime calls challenge_pick on the game's thread when a Player Challenge game with the held pick reaches
+ * its ball's start; the game's own challenge then does not start. The mode starts on the next tick (never inside
+ * the game's handler). The game ends the challenge game at that ball's end, as it does after its own. */
+static unsigned challenge_held[MODES_MAX];  /* challenge + 1 each mode file holds; 0 = none */
+static unsigned challenge_wait;             /* mode file slot + 1 picked but not started yet; 0 = none */
+static unsigned challenge_wait_player;
+
+static void challenge_tick(void)
+{
+    struct slot *M;
+    if (!challenge_wait || run.active) return;   /* a mode already running: this one starts when it ends */
+    M = &slots[challenge_wait - 1];
+    challenge_wait = 0;
+    if (!pm_in_game() || pm_player() != challenge_wait_player) {
+        pm_log("%s: the challenge pick lapsed - the player changed or the game ended", cfg.name);
+        return;
+    }
+    mode_start(M, "challenge pick");
+    if (!running(M))
+        pm_log("%s: picked as the challenge but not started (its starts, cooldown or the stack said no) - the "
+               "challenge game goes on with nothing of its own or the game's", cfg.name);
+}
+
+static void challenge_ball_end(void)
+{
+    if (!challenge_wait) return;
+    pm_log("%s: the ball ended before the challenge pick started", slots[challenge_wait - 1].c.name);
+    challenge_wait = 0;
+}
+
+static int challenge_pick(unsigned challenge)
+{
+    unsigned k;
+    for (k = 0; k < MODES_MAX; k++) {
+        struct slot *M = &slots[k];
+        if (challenge_held[k] != challenge + 1) continue;
+        if (running(M)) {
+            pm_log("%s: challenge %u picked while it runs - the pick is taken, nothing restarts", cfg.name, challenge);
+            return 1;
+        }
+        challenge_wait = k + 1;
+        challenge_wait_player = pm_player();
+        pm_log("%s: challenge %u (%s) picked - it starts now, in the game's own challenge's place", cfg.name,
+               challenge, pm_challenge_name(challenge) ? pm_challenge_name(challenge) : "?");
+        return 1;
+    }
+    return 0;
+}
+
+static void challenge_sync(struct slot *M)
+{
+    unsigned want, k;
+    if (M->raw_len >= 0 && cfg.challenge_1 && cfg.seconds && !cfg.valid && cfg.trigger_bits && !cfg.trigger_count) {
+        /* `trigger <shots> 0` never starts a mode: keep that meaning */
+        pm_log("%s: trigger %08x_%08x with a count of 0 starts nothing - only picking challenge %u starts it", cfg.name,
+               (unsigned)(cfg.trigger_bits >> 32), (unsigned)cfg.trigger_bits, cfg.challenge_1 - 1);
+        cfg.trigger_bits = 0;
+    }
+    if (M->raw_len >= 0 && cfg.challenge_1 && cfg.seconds && !cfg.valid) {
+        cfg.valid = 1;
+        pm_log("%s: valid without a trigger (the NOT VALID above is the trigger modes' rule) - picking challenge %u "
+               "starts it", cfg.name, cfg.challenge_1 - 1);
+    }
+    want = cfg.valid ? cfg.challenge_1 : 0;
+    if (challenge_held[M->index] == want) return;
+    if (challenge_held[M->index]) {
+        pm_challenge_release(challenge_held[M->index] - 1);
+        pm_log("challenge %u released (mode file slot %u)", challenge_held[M->index] - 1, M->index);
+        challenge_held[M->index] = 0;
+    }
+    if (!want) return;
+    for (k = 0; k < MODES_MAX; k++)
+        if (k != M->index && challenge_held[k] == want) {
+            pm_log("%s: challenge %u NOT claimed - %s holds it", cfg.name, want - 1, slots[k].c.name);
+            return;
+        }
+    if (pm_challenge_claim(want - 1, challenge_pick)) {
+        challenge_held[M->index] = want;
+        pm_log("%s claims challenge %u (%s)", cfg.name, want - 1, pm_challenge_name(want - 1));
+    } else {
+        pm_log("%s: challenge %u NOT claimed (%s)", cfg.name, want - 1,
+               pm_can(PM_CAN_CHALLENGE) ? "out of range or held by a mode in C" : "this game's port names no challenges");
+    }
+}
+
 /* ---- item 167: the multiball, while it runs ------------------------------------------------
  * The game's own end of ball comes only when the LAST ball drains, so the mode watches the
  * framework's count: two or more balls means the multiball is on; one (or none) for MBALL_ONE_S,
@@ -2723,6 +2837,7 @@ static void on_ball_end(void)
         }
     starts_ball_end();
     roster_ball_end();                       /* item 146: a pick not started yet is given back */
+    challenge_ball_end();                    /* PAD-615: a challenge pick not started yet lapses */
 }
 
 /* The files are numbered with no gaps (the app writes slot order), so a new one appears at
@@ -2768,6 +2883,7 @@ static void on_tick(void)
     ++ticks;
     events_tick();
     roster_tick();                           /* item 146: a taken roster pick starts when it may */
+    challenge_tick();                        /* PAD-615: a taken challenge pick starts */
     for (k = 0; k < MODES_MAX; k++) {
         M = &slots[k];
         if (ticks % POLL_TICKS == 0 && k < poll_n) {

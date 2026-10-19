@@ -3652,6 +3652,65 @@ BLOW!"). They are program text, which `progtext.py` can rename within each strin
   not through the screen (item 144, seen live), so inside it the replaced battle runs as stock.
 - A mode is not resumed after a drain the way the game resumes its own battles (above).
 
+## A mode in the game's Challenge list (PAD-615)
+
+Stern's framework has a **Player Challenge** game on every Spike 2 title: the player picks it on the game's own
+menu as a game starts (`PLAYER GAME MODE`, "press both flipper buttons to select game mode"), or every game starts
+as one when the operator sets the service menu's `DEFAULT GAME MODE` (`AD_DEFAULT_GAME_MODE`: 0 standard,
+1 competition, then one value per challenge). It is a ONE-BALL game: the game ends at the first ball's end.
+
+Some builds name the challenges a player can pick, one game flag each, set at the game's start (from the pick, or
+from `AD_DEFAULT_GAME_MODE` by the game-start handler, Bond LE `0xaca0c`: `FG_PLAYER_CHALLENGE_MODE_ACTIVE` (18)
+and the pick's flag):
+
+| build | the challenges (menu order = slot) | their flags |
+|---|---|---|
+| James Bond LE / Pro 1.06 | 0 Chaos at Crab Key (Dr. No multiball), 1 Ahoy Mr. Bond, 2 Goldfinger's Jackpot, 3 Duel on the Disco Volante, 4 Her Majesty's Secret Service (the wizard mode multiball) | 185-189 |
+| Stranger Things 1.13, LE 1.12, LE 1.13 | 0 Demogorgon, 1 Send It Back, 2 Light the Fire, 3 Final Showdown | 144-147 (LE 1.12: 139-142) |
+
+Each challenge's module starts it from a handler on the ball's start event (bus 38, the last broadcast of the
+framework's ball start, after `ball_start` 37): `if (challenge game && its flag) start(...)` (Bond LE: Crab Key
+`0x92e44` -> `0x92bd8`, Ahoy `0x207f0` -> `0x20530(1)`, Goldfinger's Jackpot `0xbd6f8`, Disco Volante `0x7e2d8`,
+HMSS `0x1d9a24` -> `0x1d97e0(1, 0)`). `portchallenge.py` (command line: `challenge_lines.py <game ELF>`) finds
+those handlers by that shape and writes the port lines; a derived port gets them the same way:
+
+```
+value challenge_on_flag   18
+site  challenge_go_<n>    <the handler> <its first two words>
+value challenge_flag_<n>  <the pick's flag>
+text  challenge_name_<n>  <its name, from the flag's>
+```
+
+The runtime hooks every handler (`hook_veto_n`, refused with the handler's own 1). A mode CLAIMS a challenge
+(`pm_challenge_claim(slot, on_pick)`, or `pm_challenge_named("Ahoy Mr. Bond")` for its slot): in a challenge game
+with that pick, the hook calls `on_pick(slot)` on the game's thread at the moment the game would have started its
+own, and the game's own does not start (on_pick returning 0 lets it). Not a challenge game, another pick, or nothing
+claimed: the handler runs as it always did. The menu cannot grow; a mode takes a challenge's place under that
+challenge's name. **The game still ends the challenge game at the first ball's end** - proven with nothing of the
+challenge's own running: Bond LE, `DEFAULT GAME MODE` Ahoy and the handler never letting Ahoy start, the first drain
+past the ball save ended the ball and `GAME OVER` followed. A one-ball game whose challenge never ran also has no
+challenge ball save (Ahoy's is its own 60 s, `AD_AHOY_MR_BOND_WIZARD_MODE_CHALLENGE_BALL_SAVE_TIMER`, set by its
+start): give the mode a ball save of its own if it wants one.
+
+**In a mode file:** `challenge <n>` (0-7) in place of the trigger: the file needs `seconds` but no trigger, and only
+the pick starts it (on the tick after the pick; a pick while it runs is taken and restarts nothing, a pick while
+another of our modes runs starts it when that one ends, the ball ending first lets the pick lapse). A word, `-1` or
+a number above 7 logs and claims nothing; a port with no challenge list logs `NOT claimed`. **On the Modes tab:**
+Mode > Starts on > *a challenge game of* <challenge>. **In blocks:** the When block *When the player picks the
+challenge* <challenge> (its script runs on the tick after the pick: put Start the mode in it; the mode claims the
+challenge as it loads).
+
+**Proven** (emulator, 2026-10-19, the stock cards, hidden, muted; the game made a challenge game by its own
+`DEFAULT GAME MODE`, set live by the rig instrument `ch615.c`: the adjustment's live value and its check byte
+~(sum of its 4 bytes); a control run with the same setting and no mode started the game's own challenge every time):
+Bond LE 1.06 (a mode file on challenge 1: `START (challenge pick)` 8 ms after the pick, Ahoy's flag 85 never set,
+the drain ended it and the game; a blocks mode lit by its film and holding Ahoy the same), Bond Pro 1.06, Stranger
+Things 1.13, LE 1.12 and LE 1.13 (challenge 0, Demogorgon). `mode_project.CHALLENGE_PROVEN` lists them.
+
+**Other titles:** their challenges are other things - Godzilla's King of the Monsters / Time Attack, Rush's 2112,
+Venom's Knull levels, Jaws' 4th of July, a timed whole game on Bond 60th - no `FG_<name>_CHALLENGE` flag with a
+handler of this shape, so `challenge_lines.py` writes nothing and the tab offers no such start there.
+
 ## Display priority: a mode layered on the game's display (item 154 display)
 
 > **PAD-353 (2026-10-04): the hold is WITHDRAWN.** On a Godzilla Premium, KING GHIDORAH held 180 and

@@ -212,6 +212,7 @@ HATS = {
     "ball_end": "When the ball drains",
     "event": "When the game does something",
     "timer_done": "When a timer runs out",
+    "challenge": "When the player picks a challenge",
 }
 #: a shot / event hat's "when": the mode's state it runs in
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
@@ -717,7 +718,7 @@ def new_blocks_mode(project, name, shots=(), example=None):
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
-             game_wizards=None, inserts=None, building=None, modes=None):
+             game_wizards=None, inserts=None, building=None, modes=None, challenges=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -730,7 +731,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     ``game_wizards`` (PAD-436): the names of the game's own mini-wizards ([] = none a mode may hand over on this game);
     so is ``inserts`` (PAD-503): the names of the inserts a mode may light ([] = none on this game: a mode lit at a
     shot is lit without them); so is ``modes`` (PAD-600): the slugs of the project's blocks modes another mode's
-    light may be put out in.
+    light may be put out in; so is ``challenges`` (PAD-615): the names of the game's challenges a mode may take the
+    place of ([] = none on this game).
     The C is written anyway (a missing shot is 0 to the game, which never matches),
     so a half-made program always saves."""
     program = normalize(program)
@@ -777,7 +779,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "game_shows": list(game_shows) if game_shows is not None else None,
            "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None,
            "inserts": list(inserts) if inserts is not None else None,
-           "modes": set(modes) if modes is not None else None}
+           "modes": set(modes) if modes is not None else None,
+           "challenges": list(challenges) if challenges is not None else None, "picked": set()}
     hud = program["hud"]
     if hud["on"]:
         for k, c in enumerate(hud["counters"]):
@@ -885,6 +888,10 @@ def notes(program):
             out.append("A block fills the HUD's gauge, which is switched off: tick Gauge under Its HUD.")
         if hud["timer"]["on"] and not program["seconds"]:
             out.append("The HUD's timer badge counts the mode's clock, and it has none: it is not shown.")
+    if any((s.get("hat") or {}).get("kind") == "challenge"
+           and not any(b.get("op") == "start_mode" for b in _walk(s.get("do") or [])) for s in program["scripts"]):
+        out.append("A When the player picks a challenge script with no Start the mode in it starts nothing: the "
+                   "game's own challenge does not run either.")
     idle = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") in ("mode_end", "ball_end")
             or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "event")
                 and (s.get("hat") or {}).get("when") == "idle")]
@@ -960,6 +967,19 @@ def _check_hat(hat, n, ctx):
             ctx["out"].append("%s's seconds must be 1 to %d." % (where, SECONDS_MAX))
     if kind == "timer_done":
         _check_timer(hat.get("timer"), where + "'s When", ctx)
+    if kind == "challenge":                                                          # PAD-615
+        name = hat.get("challenge")
+        if ctx["challenges"] is not None and not ctx["challenges"]:
+            ctx["out"].append("%s waits for a challenge to be picked, which a mode cannot take the place of on this "
+                              "card's game." % where)
+        elif not name:
+            ctx["out"].append("%s's When has no challenge chosen." % where)
+        elif ctx["challenges"] is not None and name not in ctx["challenges"]:
+            ctx["out"].append("%s waits for the challenge %s, which this card's game does not have." % (where, name))
+        elif name in ctx["picked"]:
+            ctx["out"].append("%s waits for %s too: one script per challenge." % (where, name))
+        else:
+            ctx["picked"].add(name)
 
 
 def _check_timer(name, where, ctx):
@@ -1779,6 +1799,7 @@ def to_c(program, slug):
         bodies[kind].append((i + 1, hat, body))
     # the hats' own shots and events
     hat_code = {k: [] for k in HATS}
+    challenge_names = []                    # PAD-615: the game's challenges its scripts take the place of
     for kind, items in bodies.items():
         for n, hat, body in items:
             head = "    /* script %d: %s */" % (n, _comment(_hat_words(hat)))
@@ -1807,6 +1828,11 @@ def to_c(program, slug):
             elif kind == "timer_done":
                 t = g.timer(hat.get("timer"))
                 test = "(due[%d])" % t if t is not None else "(0)"
+            elif kind == "challenge":                    # PAD-615: picked on the game's thread, run on the tick
+                name = str(hat.get("challenge") or "")
+                if name not in challenge_names:
+                    challenge_names.append(name)
+                test = "(picked & %du)" % (1 << challenge_names.index(name))
             else:
                 test = None
             if test is None:
@@ -2437,6 +2463,25 @@ def to_c(program, slug):
         L.append("    kit_hud_drop_now();")
     L.append("}")
     L.append("")
+    if challenge_names:                     # PAD-615
+        L.append("/* PAD-615: the game's challenges this mode takes the place of (a Player Challenge game with one picked")
+        L.append(" * starts its script instead of the game's own challenge), claimed as it loads */")
+        L.append("static const char *const CHALLENGE_NAMES[%d] = { %s };"
+                 % (len(challenge_names), ", ".join(_c_str(n) for n in challenge_names)))
+        L.append("static int CHALLENGE_AT[%d];" % len(challenge_names))
+        L.append("static volatile unsigned challenge_picked;   /* set on the game's thread, run on the tick */")
+        L.append("")
+        L.append("static int on_challenge(unsigned at)")
+        L.append("{")
+        L.append("    int k;")
+        L.append("    for (k = 0; k < %d; k++)" % len(challenge_names))
+        L.append("        if (CHALLENGE_AT[k] == (int)at) {")
+        L.append("            challenge_picked |= 1u << k;")
+        L.append("            return 1;                 /* the game's own challenge does not start */")
+        L.append("        }")
+        L.append("    return 0;")
+        L.append("}")
+        L.append("")
     L.append("/* ---- the callbacks ---- */")
     L.append("static void on_init(void)")
     L.append("{")
@@ -2454,6 +2499,12 @@ def to_c(program, slug):
         L.append("    pa_load(&own);")
     for name in g.wizard_names:                     # PAD-457: the game's own lighting leaves them to this mode
         L.append("    pm_game_wizard_claim_named(%s);" % _c_str(name))
+    if challenge_names:                             # PAD-615
+        L.append("    for (i = 0; i < %d; i++) {" % len(challenge_names))
+        L.append("        CHALLENGE_AT[i] = pm_challenge_named(CHALLENGE_NAMES[i]);")
+        L.append("        if (CHALLENGE_AT[i] < 0 || !pm_challenge_claim((unsigned)CHALLENGE_AT[i], on_challenge))")
+        L.append('            pm_log("the challenge %s is not one this game lets a mode take the place of", CHALLENGE_NAMES[i]);')
+        L.append("    }")
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
     L.append("")
@@ -2569,6 +2620,15 @@ def to_c(program, slug):
         L.append("        award_next_ticks = 0;")
         L.append("    }")
     L.append("    if (total_due && !run.on && --total_due == 0) total_show();   /* PAD-574: the Award it ended on has shown */")
+    challenge_scripts = scripts_of("challenge")
+    if challenge_scripts:                           # PAD-615: the challenge picked at the ball's start
+        L.append("    if (challenge_picked) {")
+        L.append("        unsigned picked = challenge_picked;")
+        L.append("        challenge_picked = 0;")
+        L.append("        if (in_game) {")
+        L.extend("        " + line if line else line for code in challenge_scripts for line in code.split("\n"))
+        L.append("        }")
+        L.append("    }")
     timer_scripts = scripts_of("timer_done")
     if timer_scripts:
         L.append("    if (in_game) {                    /* the timers that ran out, then their scripts */")
@@ -3373,4 +3433,6 @@ def _hat_words(hat):
         return "when %s, %s" % (MP.EVENT_LABELS.get(hat.get("event"), hat.get("event")), when)
     if kind == "timer_done":
         return "when the timer %s runs out" % (hat.get("timer") or "(no timer)")
+    if kind == "challenge":
+        return "when the player picks the challenge %s" % (hat.get("challenge") or "(no challenge)")
     return HATS.get(kind, "?").lower()

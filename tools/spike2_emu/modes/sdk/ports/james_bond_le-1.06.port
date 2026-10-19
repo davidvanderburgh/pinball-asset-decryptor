@@ -776,3 +776,28 @@ text shake_setting_ms      0 2816 2816 2816
 text shake_short            0:200:0
 text shake_medium           0:384:0
 text shake_long             0:1024:0
+
+# ---- PAD-615: the game's Challenge list (MODE_SDK.md "A mode in the game's Challenge list"; challenge_lines.py):
+# each challenge's own start on the ball's start event, run in a Player Challenge game with its pick. A mode that holds
+# one starts instead of it; the game ends the challenge game at the first ball's end either way.
+value challenge_on_flag   18
+# Chaos at Crab Key: its handler starts 0x92bd8
+site  challenge_go_0    0x00092e44 0xe92d4008 0xeb115b2d
+value challenge_flag_0  185
+text  challenge_name_0  Chaos at Crab Key
+# Ahoy Mr. Bond: its handler starts 0x20530
+site  challenge_go_1    0x000207f0 0xe92d4008 0xeb1324c2
+value challenge_flag_1  186
+text  challenge_name_1  Ahoy Mr. Bond
+# Goldfinger's Jackpot: its handler starts 0xbd4dc
+site  challenge_go_2    0x000bd6f8 0xe92d4008 0xeb10b100
+value challenge_flag_2  187
+text  challenge_name_2  Goldfinger's Jackpot
+# Duel on the Disco Volante: its handler starts 0x7e0b0
+site  challenge_go_3    0x0007e2d8 0xe92d4008 0xeb11ae08
+value challenge_flag_3  188
+text  challenge_name_3  Duel on the Disco Volante
+# Her Majesty's Secret Service: its handler starts 0x1d97e0
+site  challenge_go_4    0x001d9a24 0xe92d4008 0xeb0c4035
+value challenge_flag_4  189
+text  challenge_name_4  Her Majesty's Secret Service

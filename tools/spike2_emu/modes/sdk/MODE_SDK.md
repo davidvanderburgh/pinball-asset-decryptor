@@ -3792,8 +3792,10 @@ before its drain's TOTAL went takes it down first.
 Proven (emulator, 2026-10-19, James Bond LE 1.06 stock card, hidden, muted; the owner's BON APPETIT blocks): main's
 code ended the mode at the drain and showed no TOTAL; the branch logged `its TOTAL at the drain: the end of ball
 waits 8000 ms` (its When the mode ends Award, then the TOTAL), `ball end: let go after 8015 ms (its time ran out)`,
-TOTAL 3,500,000 under the bar for 6 s, then the game's BONUS and ball 2 as ever. Not measured: a machine; a title
-other than Bond (every port with `site proc_sleep` offers it).
+TOTAL 3,500,000 under the bar for 6 s, then the game's BONUS and ball 2 as ever (the next ball 12.6 s after the
+drain, main's 4.6 s). The same mode in Ahoy Mr. Bond's place in a Player Challenge game (`AD_DEFAULT_GAME_MODE` 3):
+`START` at the pick, the drain held 8015 ms with its TOTAL up, then the game's GAME OVER and MATCH. Not measured: a
+machine; a title other than Bond (every port with `site proc_sleep` offers it).
 
 ## Display priority: a mode layered on the game's display (item 154 display)
 

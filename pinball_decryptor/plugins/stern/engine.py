@@ -808,7 +808,70 @@ def video_titler(reader, radiums):
     return _title_for
 
 
-def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
+def _unnamed_clip_base(path):
+    """The name of a clip no scene names, from where it sits on the card.
+
+    It used to be ``video_<n>`` with *n* its place in the card walk, so every
+    clip a Write added ahead of it moved it along (PAD-633: Godzilla LE 1.16's
+    one unnamed clip is ``video_0655`` on a stock card and ``video_0786`` on a
+    build with 131 more).  The card path is what a Write never moves:
+    ``.../<scene hash>/scene.assets/2.asset/584.asset`` -> ``video_<hash8>_2_584``.
+    """
+    p = path.replace("\\", "/")
+    if "/scene.assets/" in p:
+        hashdir, ref = p.rsplit("/scene.assets/", 1)
+        scene = hashdir.rstrip("/").rsplit("/", 1)[-1][:8]
+        parts = [os.path.splitext(x)[0] for x in ref.split("/") if x]
+        return _sanitize_title("video_%s_%s" % (scene, "_".join(parts)))
+    import zlib
+    stem = os.path.splitext(p.rstrip("/").rsplit("/", 1)[-1])[0]
+    return _sanitize_title("video_%s_%08x" % (stem, zlib.crc32(p.encode("utf-8"))))
+
+
+def _video_names(vids, title_for, keep=None):
+    """The output file name of each of *vids* (``find_card_videos`` order).
+
+    A clip is named by its scene element (duplicates get ``_2``, ``_3`` ...);
+    one no scene names gets :func:`_unnamed_clip_base`, unless *keep*
+    (``{card path: name}``, an earlier extract's ``manifest.txt``) already gave
+    that card path a ``video_`` name: a project keeps the names its edits and
+    records were made under.
+    """
+    keep = keep or {}
+    plan = []
+    for path, _node, brand in vids:
+        ext = ".mov" if brand == b"qt  " else ".mp4"
+        title = title_for(path)
+        old = keep.get(path)
+        if title:
+            plan.append((_sanitize_title(title), ext, None, True))
+        elif (old and old.lower().startswith("video_")
+              and os.path.splitext(old)[1].lower() == ext):
+            plan.append((os.path.splitext(old)[0], ext, old, False))
+        else:
+            plan.append((_unnamed_clip_base(path), ext, None, False))
+    # Kept names are claimed first so a new name can never take one of them.
+    taken = {old.lower() for _b, _e, old, _t in plan if old}
+    used = {}
+    out = []
+    for base, ext, old, titled in plan:
+        if old:
+            out.append((old, titled))
+            continue
+        k = used.get(base, 0)
+        while True:
+            k += 1
+            fname = (base if k == 1 else "%s_%d" % (base, k)) + ext
+            if fname.lower() not in taken:
+                break
+        used[base] = k
+        taken.add(fname.lower())
+        out.append((fname, titled))
+    return out
+
+
+def extract_videos(reader, output_dir, log=None, progress=None, cancel=None,
+                   keep_names=None):
     """Extract every directly-stored video (H.264 in an MP4/QuickTime ``ftyp``
     container) from the card's asset tree to ``output_dir/video/``.
 
@@ -831,24 +894,20 @@ def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
     vid_dir = os.path.join(output_dir, "video")
     os.makedirs(vid_dir, exist_ok=True)
     prev = _read_video_manifest(vid_dir)
+    if keep_names is None:
+        keep_names = {card: name for name, card in prev.items()}
+    names = _video_names(vids, _title_for, keep_names)
     log("Extracting %d video(s)..." % len(vids), "info")
     manifest = []
     written = {}       # card path -> output filename this run
-    used = {}
     named = 0
-    for i, (path, node, brand) in enumerate(vids):
+    for i, ((path, node, _brand), (fname, titled)) in enumerate(zip(vids, names)):
         if cancel():
             break
         if progress:
             progress(i, len(vids), "Extracting video %d/%d" % (i + 1, len(vids)))
-        ext = ".mov" if brand == b"qt  " else ".mp4"
-        title = _title_for(path)
-        base = _sanitize_title(title) if title else ("video_%04d" % (i + 1))
-        if title:
+        if titled:
             named += 1
-        k = used.get(base, 0)
-        used[base] = k + 1
-        fname = (base if k == 0 else "%s_%d" % (base, k + 1)) + ext
         reader.extract_file(node, os.path.join(vid_dir, fname))
         manifest.append("%s\t%s\t%d" % (fname, path, node["size"]))
         written[path] = fname
@@ -889,21 +948,15 @@ def scan_video_quality(reader, log=None, progress=None, cancel=None):
 
     _title_for = video_titler(reader, radiums)
     log("Measuring %d clip(s)..." % len(vids), "info")
-    used = {}
+    # Same naming rule as the extract, so a row in this report and a file in
+    # the user's video/ folder are recognisably the same clip.
+    names = _video_names(vids, _title_for)
     clips = []
-    for i, (path, node, brand) in enumerate(vids):
+    for i, ((path, node, _brand), (name, _titled)) in enumerate(zip(vids, names)):
         if cancel():
             break
         if progress:
             progress(i, len(vids), "Checking clip %d/%d" % (i + 1, len(vids)))
-        # Same naming rule as the extract, so a row in this report and a file
-        # in the user's video/ folder are recognisably the same clip.
-        ext = ".mov" if brand == b"qt  " else ".mp4"
-        title = _title_for(path)
-        base = _sanitize_title(title) if title else ("video_%04d" % (i + 1))
-        k = used.get(base, 0)
-        used[base] = k + 1
-        name = (base if k == 0 else "%s_%d" % (base, k + 1)) + ext
 
         clips.append(video_quality.read_clip_quality(
             lambda off, n, _nd=node: reader.read_range(_nd, off, n),
@@ -13258,7 +13311,11 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
             want_images = any(r.startswith("images/") for r in media_rels)
             try:
                 if want_video:
-                    extract_videos(reader, work, log=log, cancel=cancel)
+                    # The project's names, so video/<name> below is the same clip
+                    # whatever a build added to the card ahead of it.
+                    proj = _read_video_manifest(os.path.join(assets_dir, "video"))
+                    extract_videos(reader, work, log=log, cancel=cancel,
+                                   keep_names={c: n for n, c in proj.items()})
                 if want_images:
                     extract_images(reader, work, log=log, cancel=cancel)
                 if any(r.startswith("images/%s/" % _BOOT_IMAGE_SUBDIR)

@@ -3,8 +3,8 @@
     python scripts/shot_pad618.py <repo> <out_dir> <prefix>
 
 <repo> is the source tree to serve (the ticket branch, or a ``git archive`` of main for the "before" shots).
-Writes <prefix>_cards.png (the same before and after: cards use the Blocks wording) and <prefix>_story.png into <out_dir>: before, the rule's When read the bare word
-"challenge" and Story put it among the rules that work while the mode runs; after, it reads "When the player
+Writes <prefix>_cards.png (the same before and after: cards use the Blocks wording) and <prefix>_story.png into
+<out_dir>: before, the rule's When read the bare word "challenge" and Story put it among the rules that work while the mode runs; after, it reads "When the player
 picks the challenge Duel on the Disco Volante" and sits in the box of rules that work before the mode starts.
 """
 

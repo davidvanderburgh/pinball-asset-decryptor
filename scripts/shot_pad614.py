@@ -86,6 +86,7 @@ def main():
 
             def shoot(name):
                 pane.evaluate("(el) => el.scrollIntoView({block: 'start'})")
+                page.mouse.move(5, 5)
                 time.sleep(0.6)
                 page.screenshot(path=os.path.join(outdir, name + ".png"))
 
@@ -102,7 +103,15 @@ def main():
             for key, label in VIEWS:
                 has = open_tab(label)
                 print(key, "tab" if has else "(no tab: the Blocks tab instead)", flush=True)
-                if has and key in ("story", "table"):
+                if has and key == "story":
+                    shoot("story")
+                    page.locator(".rv-rule", has_text="Score 5,000,000").first.click()
+                    time.sleep(1.2)
+                    shoot("story_open")
+                    continue
+                if not has and key == "story":
+                    shoot("story_open")
+                if has and key == "table":
                     # a rule opened from the view: its blocks beside or under it
                     page.locator(".rv-rule, .sg-chip", has_text="Score 5,000,000").first.click()
                     time.sleep(1)

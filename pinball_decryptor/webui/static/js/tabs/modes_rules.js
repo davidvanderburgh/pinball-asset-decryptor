@@ -6,7 +6,7 @@
 // A rule is edited as the same blocks everywhere (modes_blocks.js Script, Stack, HatBody): the Rule cards draw them
 // as sentences, the other views open the rule they point at beside or under themselves.
 
-import { html, useState, Button, tip, cx, openMenu } from "../core/ui.js";
+import { html, useEffect, useRef, useState, Button, tip, cx, openMenu } from "../core/ui.js";
 import { Script, Stack, HatBody, useEd, hatTemplates, hatLabel } from "./modes_blocks.js";
 import { lights, hatWords, countBlocks, ruleLines, storyOf, storyArrows, MOVABLE, BOX_WHEN, shotGrid, cellHat,
   timelineOf, LANES, sharedUses } from "./modes_views.js";
@@ -55,8 +55,11 @@ function gist(sc, ch) {
 // The open rule's blocks, beside or under the view
 function OpenRule({ si, ed, onClose, hint }) {
   const scripts = ed.prog.scripts || [];
+  const box = useRef(null);
+  // a rule pressed in the view comes into sight (under the Story or the Timeline it is below the fold)
+  useEffect(() => { if (si != null && box.current && box.current.scrollIntoView) box.current.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [si]);
   if (si == null) return html`<div class="rv-open rv-hint small muted">${hint || "Press a rule to see and change its blocks."}</div>`;
-  return html`<div class="rv-open">
+  return html`<div class="rv-open" ref=${box}>
     <div class="rv-open-hd row"><span class="pf-group-h grow">Rule ${si + 1} of ${scripts.length}</span>
       <button type="button" class="bk-x rv-x" aria-label="Close" ...${tip("Close this rule")} onClick=${onClose}>×</button></div>
     <${Script} s=${scripts[si]} si=${si} n=${scripts.length} ed=${ed} />

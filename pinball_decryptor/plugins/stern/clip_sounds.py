@@ -862,7 +862,7 @@ def analyse(elf, names, fragments, game="", version="", refs=None, ctx=None):
 
 
 # ---- a request's sounds ------------------------------------------------------------------------
-def resolve_requests(emu, params, lists, fw=None, also=None):
+def resolve_requests(emu, params, lists, fw=None, also=None, ceiling=None):
     """``{request: [idx, ...]}``: the master-directory records (Extract's ``idxNNNN.wav``) each
     request's sound ids resolve to, through the firmware's own ``get_asset_descriptor`` on the
     booted codec emulator *emu* (the chain :mod:`.spike2.sfx_names` names the Sound Test's
@@ -872,21 +872,38 @@ def resolve_requests(emu, params, lists, fw=None, also=None):
     Each sound id counts by its descriptor's primary record. A dict *also* is filled with
     ``{request: [idx, ...]}`` of the records the request plays as a LATER part of a multi-part
     descriptor (:func:`.spike2.sfx_names._part_idxs`), which the Audio tab needs to tell a
-    sound the game never asks for (PAD-635)."""
+    sound the game never asks for (PAD-635).
+
+    With *ceiling* (the bank's fragment count) every sound id up to it is resolved first, so
+    each descriptor is read only as far as the next one starts: the resolver's window runs on
+    into it, and its records are not this request's (PAD-636: on Led Zeppelin Pro 1.22 sid
+    470's window carries sid 471's record)."""
     from .spike2 import sfx_names as SN
+    from .engine import _descriptor_extents
     key0 = {p["key0"]: p["idx"] for p in params if p.get("key0") is not None}
     if not key0:
         return {}
     resolver, buf = SN._find_resolver(emu, fw)
     if resolver is None:
         return {}
+    seen = {}
+    if ceiling:
+        for sid in range(int(ceiling) + 1):
+            r = SN.resolve_descriptor(emu, resolver, buf, sid)
+            if r is not None:
+                seen[sid] = (r[0], r[2])
+    extents = _descriptor_extents([d0 for d0, _d in seen.values()], SN.DESC_WINDOW)
     by_sid, out = {}, {}
     for req, sids in enumerate(lists):
         got, more = [], []
         for sid in sids:
             if sid not in by_sid:
-                desc = SN._try_resolve(emu, resolver, buf, sid)
-                by_sid[sid] = SN._part_idxs(desc, key0) if desc else []
+                if sid in seen:
+                    d0, desc = seen[sid]
+                    by_sid[sid] = SN._part_idxs(desc, key0, extents[d0])
+                else:
+                    desc = SN._try_resolve(emu, resolver, buf, sid)
+                    by_sid[sid] = SN._part_idxs(desc, key0) if desc else []
             parts = by_sid[sid]
             if parts and parts[0] not in got:
                 got.append(parts[0])

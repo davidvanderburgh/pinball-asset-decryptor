@@ -384,16 +384,18 @@ def test_no_clear_winner_is_refused():
         engine._desc_key_mask(p1 + p2, s1 + s2)
 
 
-def test_the_switch_off_plan_keeps_the_one_mask_it_always_had():
-    """The preview switch off (core/preview.py): the plan takes the mask a build
-    without the mode editor family takes, and on a Godzilla Pro 1.15 layout it
-    refuses exactly as that build does."""
+def test_the_switch_off_plan_measures_the_mask_too():
+    """The preview switch off (core/preview.py): the plan still measures the build's key
+    mask (PAD-636: Led Zeppelin's names 11 of Led Zeppelin Pro 1.22's 549 records, so every
+    longer replacement there failed the Write), and keeps the switch-off duration rounding."""
     params, sites = _named_card(GZ, 20)
+    new = _key(0x7777, 0x80000123)
     params[3].update(grown=True, stock_findkey=params[3]["findkey"],
-                     findkey=_key(0x7777, 0x80000123), length=176600,
-                     stock_length=83456)
-    with pytest.raises(RuntimeError, match="idx 3: no descriptor"):
-        engine._plan_descriptor_repoint(params, sites)
+                     findkey=new, length=176600, stock_length=83456)
+    _writes, expect = engine._plan_descriptor_repoint(params, sites, family=False)
+    s = sites[3]
+    assert expect == {s.sid: ({new}, s.duration + engine._duration_units(176600)
+                              - engine._duration_units(83456))}
     # ...and on Led Zeppelin's layout it re-points as it always did
     params, sites = _named_card(MASK, 20)
     new = _key(0x7777, 0x00000123)

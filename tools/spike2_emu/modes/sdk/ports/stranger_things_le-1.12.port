@@ -400,3 +400,24 @@ value block_ret_19          0
 value block_ret_20          0
 value block_ret_21          0
 value block_ret_22          0
+
+# ---- PAD-615: the game's Challenge list (MODE_SDK.md "A mode in the game's Challenge list"; challenge_lines.py):
+# each challenge's own start on the ball's start event, run in a Player Challenge game with its pick. A mode that holds
+# one starts instead of it; the game ends the challenge game at the first ball's end either way.
+value challenge_on_flag   16
+# Demogorgon: its handler starts 0x5ef8c
+site  challenge_go_0    0x0005f228 0xe92d4008 0xeb086c87
+value challenge_flag_0  139
+text  challenge_name_0  Demogorgon
+# Send It Back: its handler starts 0x12e0c4
+site  challenge_go_1    0x0012e31c 0xe92d4008 0xeb05304a
+value challenge_flag_1  140
+text  challenge_name_1  Send It Back
+# Light the Fire: its handler starts 0x1395c8
+site  challenge_go_2    0x0013981c 0xe92d4008 0xeb05030a
+value challenge_flag_2  141
+text  challenge_name_2  Light the Fire
+# Final Showdown: its handler starts 0x1984f0
+site  challenge_go_3    0x00198728 0xe92d4008 0xeb038747
+value challenge_flag_3  142
+text  challenge_name_3  Final Showdown

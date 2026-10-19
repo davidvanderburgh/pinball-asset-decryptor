@@ -435,3 +435,24 @@ site  wizard_go_2        0x0011d344 0xe92d41f0 0xe24dd008   # the same shape, 1 
 value wizard_arg_2       1
 value wizard_flag_2      78    # FG_SEASON_TWO_WIZARD_MODE_MULTIBALL_ACTIVE
 text  wizard_name_2      Season Two Wizard Mode
+
+# ---- PAD-615: the game's Challenge list (MODE_SDK.md "A mode in the game's Challenge list"; challenge_lines.py):
+# each challenge's own start on the ball's start event, run in a Player Challenge game with its pick. A mode that holds
+# one starts instead of it; the game ends the challenge game at the first ball's end either way.
+value challenge_on_flag   18
+# Demogorgon: its handler starts 0x5bf94
+site  challenge_go_0    0x0005c220 0xe92d4008 0xeb04a85c
+value challenge_flag_0  144
+text  challenge_name_0  Demogorgon
+# Send It Back: its handler starts 0x111fa0
+site  challenge_go_1    0x00112218 0xe92d4008 0xeb01d05e
+value challenge_flag_1  145
+text  challenge_name_1  Send It Back
+# Light the Fire: its handler starts 0x11d344
+site  challenge_go_2    0x0011d5b8 0xe92d4008 0xeb01a376
+value challenge_flag_2  146
+text  challenge_name_2  Light the Fire
+# Final Showdown: its handler starts 0x1772d8
+site  challenge_go_3    0x00177508 0xe92d4008 0xeb003ba2
+value challenge_flag_3  147
+text  challenge_name_3  Final Showdown

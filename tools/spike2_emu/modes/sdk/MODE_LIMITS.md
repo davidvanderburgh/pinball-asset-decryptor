@@ -22,6 +22,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Start it after another of my modes | Yes, with "Only after" |
 | Start it when the player picks one of the game's battles | Godzilla: yes, in that battle's place. [Example 1](#1-add-mothra-to-godzillas-battle-selection) |
 | Start it when the player beats one of the game's battles | No. No game reports a win. |
+| Start it as one of the game's challenges (a Player Challenge game, one ball, picked as the game starts or set by Default Game Mode) | James Bond 007 LE / Pro 1.06 (Chaos at Crab Key, Ahoy Mr. Bond, Goldfinger's Jackpot, Duel on the Disco Volante, Her Majesty's Secret Service) and Stranger Things 1.13 / LE 1.12 / LE 1.13 (Demogorgon, Send It Back, Light the Fire, Final Showdown): yes, in that challenge's place, at the first ball. Mode > Starts on > a challenge game of, or the block When the player picks the challenge. A quick way to play a mode that is hard to reach. Other games' challenges are not a list a mode can join |
 | Run two of mine at once | No. One at a time. |
 | Take points away | Form modes only (a minus number under Points per shot) |
 | Give it sounds of its own | Yes, up to 16. Each rides on a game sound that never plays; the card has a fixed number of those (21 on Godzilla), shared by every mode on it. |
@@ -90,7 +91,7 @@ The catches:
 
 | | What a mode of yours can do |
 |---|---|
-| Start | a shot made N times, several shots in one ball (any order or in order), after another mode, a game event, a battle picked on Godzilla's selection screen, a block |
+| Start | a shot made N times, several shots in one ball (any order or in order), after another mode, a game event, a battle picked on Godzilla's selection screen, a challenge game (Bond, Stranger Things), a block |
 | Score | any shot, with variables, conditions and timers for hurry-ups, combos, boss health or phases |
 | End | its clock, chosen shots, a block, a drain if ticked; always at game over or the next player |
 | Show | its own screen (a panel or your picture), full-screen clips, a countdown. On Godzilla, a HUD and clips behind the score; on James Bond LE, a clip that loops in the TV and comes back after the others, its name and clock in the game's own bar under the TV, and its words alone over the video. |
@@ -191,8 +192,8 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Iron Maiden LE 1.16 | ✓ | ✓ | ✓ | all |  |
 | Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards |
-| James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
+| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
 | Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
@@ -215,9 +216,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
 | Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all |  |
-| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
+| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all | challenges |
+| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
 | Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |

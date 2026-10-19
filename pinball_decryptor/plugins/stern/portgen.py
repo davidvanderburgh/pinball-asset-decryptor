@@ -856,10 +856,13 @@ def parse_port(text):
 
 
 #: PAD-363: the lines game_mode_blocks.py writes from a build's OWN program (each of its modes' start, object and
-#: name, the ones checked by default): never carried from a reference, and never part of what a recipe depends on
+#: name, the ones checked by default): never carried from a reference, and never part of what a recipe depends on.
+#: PAD-615: so are portchallenge.py's (the game's Challenge list), read off each build's own code
 _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block_name_\d+|text block_default|"
                         r"value block_default|value block_ret_\d+|"
-                        r"site block_rule_\d+|text block_rule_name_\d+|value block_rule_(?:lo|hi)_\d+)\b")   # PAD-398
+                        r"site block_rule_\d+|text block_rule_name_\d+|value block_rule_(?:lo|hi)_\d+|"   # PAD-398
+                        r"site challenge_go_\d+|value challenge_flag_\d+|text challenge_name_\d+|"   # PAD-615:
+                        r"value challenge_on_flag)\b")                                            # portchallenge.py
 
 
 def generated(key, rest):

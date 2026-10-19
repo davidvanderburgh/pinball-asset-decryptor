@@ -2889,8 +2889,9 @@ def modes_games_rows(ports=None):
             also.append("buttons")
         also += [w for k, w in (("magnet", "magnet"), ("scoop", "scoop"), ("coils", "mechanisms"),
                                 ("shield", "shield"), ("building", "building"), ("shaker", "shaker"),
-                                ("shows", "light shows"), ("wizard", "mini-wizards"), ("roster", "battle slot"))
-                 if p.can(k)]                                       # PAD-381: what a mode may hold; PAD-392
+                                ("shows", "light shows"), ("wizard", "mini-wizards"), ("roster", "battle slot"),
+                                ("challenge", "challenges"))
+                 if p.can(k)]                                       # PAD-381: what a mode may hold; PAD-392; PAD-615
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
         if not p.can("stack"):

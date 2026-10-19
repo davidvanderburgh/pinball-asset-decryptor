@@ -53,8 +53,9 @@ import struct
 from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes; older cached readings are read again
-#: (4: each clip's sounds, :mod:`.clip_sounds`)
-READ_REV = 4
+#: (4: each clip's sounds, :mod:`.clip_sounds`; 5: a bank's clip another bank also names, and the
+#: scenes that play their own clips, PAD-627)
+READ_REV = 5
 #: the most clip-name characters a project file keeps (engine._sanitize_title's cap)
 NAME_MAX = 64
 #: how far back from a table's pointer the table's start is looked for (words)
@@ -703,6 +704,17 @@ class CardClips:
     #: the sounds each clip's code asks for (:class:`.clip_sounds.SoundReading`, a dict here
     #: until :attr:`sound_reading` reads it)
     sounds: dict = field(default_factory=dict)
+    #: PAD-627: a clip name a second bank holds too (Godzilla's JUKEBOX loops are in the in-game
+    #: bank and the attract one): name -> [[directory, path], ...] past :attr:`bank_of`'s
+    twins: dict = field(default_factory=dict)
+    #: PAD-627: the scene directories read that are no bank: a scene that plays clips of its
+    #: own (Godzilla's Xilien broadcast, its city maps), shown with the scene, never by name
+    scenes: list = field(default_factory=list)
+    #: project rel -> clip name of a twin's row (:attr:`twins`; not :attr:`name_of`, whose
+    #: rows are the clips the modes and copies are about), and project rel -> scene directory
+    #: of a scene's own clip; both from the project's manifest, as :attr:`name_of`
+    twin_of: dict = field(default_factory=dict)
+    scene_of: dict = field(default_factory=dict)
 
     @property
     def sound_reading(self):
@@ -717,14 +729,16 @@ class CardClips:
         return {"rev": READ_REV, "card": self.card, "game": self.game, "version": self.version,
                 "reading": self.reading.to_json(), "name_of": dict(self.name_of),
                 "bank_of": dict(self.bank_of), "note": self.note,
-                "unplayed": list(self.unplayed), "sounds": dict(self.sounds)}
+                "unplayed": list(self.unplayed), "sounds": dict(self.sounds),
+                "twins": dict(self.twins), "scenes": list(self.scenes)}
 
     @classmethod
     def from_json(cls, d):
         return cls(d.get("card", ""), d.get("game", ""), d.get("version", ""),
                    Reading.from_json(d.get("reading") or {}), dict(d.get("name_of") or {}),
                    dict(d.get("bank_of") or {}), d.get("note", ""),
-                   list(d.get("unplayed") or ()), dict(d.get("sounds") or {}))
+                   list(d.get("unplayed") or ()), dict(d.get("sounds") or {}),
+                   dict(d.get("twins") or {}), list(d.get("scenes") or ()))
 
 
 def manifest_rows(project):
@@ -781,7 +795,7 @@ def read_card(card, rows, cancel=None):
         try:
             with open(cache, encoding="utf-8") as f:
                 got = CardClips.from_json(json.load(f))
-            got.name_of = _names_of(rows, got.bank_of, got)
+            _name_rows(got, rows)
             return got
         except (OSError, ValueError, KeyError, TypeError, IndexError):
             pass
@@ -793,7 +807,7 @@ def read_card(card, rows, cancel=None):
         out.note = str(e)
         return out
     out.game, out.version = game or "", version or ""
-    names, banks = set(), {}
+    names, banks, twins, scenes = set(), {}, {}, []
     fragments = None
     try:
         with CardImage(card) as img:
@@ -804,16 +818,22 @@ def read_card(card, rows, cancel=None):
             for d in _bank_dirs(rows):
                 if cancel is not None and cancel():
                     return out
+                data = bank = None
                 try:
                     data = img.preview(part, "%s/scene.radium" % d, cap=64 << 20)
                     bank = VB.parse(data) if data else None
                 except (OSError, ValueError, VB.VideoBankError):
                     bank = None
                 if bank is None:
+                    if data:
+                        scenes.append(d)
                     continue
                 for c in bank.library.entries:
                     names.add(c.name)
-                    banks.setdefault(c.name, [d, c.path])
+                    if c.name in banks:
+                        twins.setdefault(c.name, []).append([d, c.path])
+                    else:
+                        banks[c.name] = [d, c.path]
     except (OSError, ValueError) as e:
         out.note = "the card could not be read (%s)" % e
         return out
@@ -826,10 +846,11 @@ def read_card(card, rows, cancel=None):
     out.reading = analyse(elf, names, ctx=ctx)
     out.sounds = _sounds(elf, names, fragments, out, ctx)
     out.bank_of = {n: v for n, v in banks.items()}
+    out.twins, out.scenes = twins, scenes
     out.unplayed = unplayed(out.reading, banks)
     if not out.reading.labels:
         out.note = "the app can't tell this game's modes apart in its program"
-    out.name_of = _names_of(rows, out.bank_of, out)
+    _name_rows(out, rows)
     if cache:
         try:
             tmp = cache + ".tmp"
@@ -867,6 +888,23 @@ def unplayed(reading, bank_of):
         if names and len(named) * 3 >= len(names):
             out += [n for n in names if not reading.refs.get(n)]
     return sorted(out)
+
+
+def _name_rows(clips, rows):
+    """*clips*' row maps for the project's manifest *rows*: :attr:`CardClips.name_of`,
+    :attr:`~CardClips.twin_of` and :attr:`~CardClips.scene_of`."""
+    clips.name_of = _names_of(rows, clips.bank_of, clips)
+    twin = {"%s/scene.assets/%s" % (d, path): name
+            for name, at in clips.twins.items() for d, path in at}
+    scenes = set(clips.scenes)
+    clips.twin_of, clips.scene_of = {}, {}
+    for rel, path in rows.items():
+        if rel in clips.name_of:
+            continue
+        if path in twin:
+            clips.twin_of[rel] = twin[path]
+        elif "/scene.assets/" in path and path.split("/scene.assets/", 1)[0] in scenes:
+            clips.scene_of[rel] = path.split("/scene.assets/", 1)[0]
 
 
 def _names_of(rows, bank_of, clips):

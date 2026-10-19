@@ -529,6 +529,72 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
         assert not w.call("video.open_sound", "audio/nothing.wav")
 
 
+VO, TWIN, MINE = "video/vo.mp4", "video/intro_attract.mp4", "video/mine.mp4"
+
+
+def test_every_clip_says_why_it_lists_no_sound(tmp_path, monkeypatch):
+    """PAD-627: a clip a scene plays itself, a clip a second bank also names, a file no bank
+    holds and a card whose sounds were not read each get words, never an empty callout."""
+    from pinball_decryptor.webui import video_modes as VM
+    from tests.test_webui_video import _project, _scan, _wait
+    from tests.webui_harness import web_app
+    proj = _project(tmp_path, names=(INTRO, VO, TWIN, MINE))
+    card = tmp_path / "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw"
+    card.write_bytes(b"\0" * 16)
+    (proj / ".extract_source.json").write_text(json.dumps(
+        {"input_path": str(card), "input_name": card.name}), encoding="utf-8")
+    sounds = CS.SoundReading(origin="port", count=10, calls=1,
+                             pairs={"intro": [[3, "next", 4, 0x1000]]},
+                             names={3: "SE GZ VO ROAR"}, sids={3: [30]})
+    reading = CM.Reading(labels={GIGAN: "Battle vs Gigan"})
+    got = {"sounds": sounds.to_json(), "note": ""}
+
+    def fake(card_path, rows, cancel=None):
+        return CM.CardClips(card=card_path, game="godzilla_pro", version="1.16.0",
+                            reading=reading, name_of={INTRO: "intro"},
+                            bank_of={"intro": ["/g/b", "2.asset/0.asset"]},
+                            twin_of={TWIN: "intro"}, scene_of={VO: "/g/scene"},
+                            sounds=got["sounds"], note=got["note"])
+    monkeypatch.setattr(CM, "read_card", fake)
+
+    def shown(w, rel):
+        w.call("video.select", rel)
+        return _wait(w, lambda st: st["modes"]["ready"] and (st.get("preview") or {}).get(
+            "rel") == rel and (st["preview"].get("sounds") or {}).get("rel") == rel
+                     )["preview"]["sounds"]
+
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        snd = shown(w, VO)
+        assert snd["none"] == VM.SCENE_TEXT and snd["head"] == "" and not snd["items"]
+        # the second bank's copy of a clip plays as its name does: that name's sounds
+        snd = shown(w, TWIN)
+        assert [i["text"] for i in snd["items"]] == ["SE GZ VO ROAR"]
+        snd = shown(w, MINE)
+        assert snd["none"] == VM.UNKNOWN_TEXT and snd["head"] == ""
+    got.update(sounds={}, note="the card the project was extracted from is not on this PC")
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        snd = shown(w, INTRO)
+        assert snd["none"] == VM.UNREAD_TEXT % got["note"] and snd["head"] == ""
+
+
+def test_a_card_reading_names_its_twins_and_scene_clips():
+    """PAD-627: rows of a second bank's copy of a clip name, and of a scene that is no bank,
+    are told apart from the clips :attr:`name_of` holds; both ride the cache."""
+    clips = CM.CardClips(card="c", bank_of={"loop": ["/g/game", "2.asset/1.asset"]},
+                         twins={"loop": [["/g/attract", "2.asset/8.asset"]]},
+                         scenes=["/g/xilien"])
+    clips = CM.CardClips.from_json(json.loads(json.dumps(clips.to_json())))
+    CM._name_rows(clips, {"video/loop_2.mov": "/g/game/scene.assets/2.asset/1.asset",
+                          "video/loop.mov": "/g/attract/scene.assets/2.asset/8.asset",
+                          "video/vo.mp4": "/g/xilien/scene.assets/35.asset/30.asset",
+                          "video/far.mp4": "/g/unread/scene.assets/1.asset"})
+    assert clips.name_of == {"video/loop_2.mov": "loop"}
+    assert clips.twin_of == {"video/loop.mov": "loop"}
+    assert clips.scene_of == {"video/vo.mp4": "/g/xilien"}
+
+
 def test_the_page_draws_the_sounds_part_of_the_callout():
     js = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui",
                            "static", "js", "tabs", "video.js"), encoding="utf-8").read()

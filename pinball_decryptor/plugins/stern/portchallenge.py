@@ -153,6 +153,8 @@ def find(elf):
                       "text  challenge_name_%d  %s" % (n, pretty(_short(stem)))]
     elif not lines and generic:
         lines = ["value challenge_on_flag   %d" % on_flag]
+    if not lines and not generic:
+        lines = table_lines(e, names, on_flag)                  # PAD-619: Godzilla's game-mode table
     if not lines:
         return [], notes or ["no challenge list and no start menu of the known shape"]
     if generic:
@@ -501,6 +503,89 @@ def menu_generic(e, names, on_flag):
              "value challenge_menu_slot      %d" % (-1 if plain is not None else 0),
              "value challenge_menu_caption   %d" % caption]
     return {"lines": lines, "named": named, "plain": plain}
+
+
+#: PAD-619: Godzilla's game-mode table (Godzilla Pro 1.15 / 1.16, LE 1.16): 32-byte entries {u32 kind, u16 flag, u16
+#: flag2, u16 caption message, u16 name message, ...}, filled by one constructor, read by accessors of one shape:
+#:   cmp r1, #<last> ; movwls r3, <table> ; movtls r3, <table> ; addls r3, r3, r1, lsl #5 ; ldrhls r0, [r3, #4]
+#: An entry whose flag is the challenge game's and whose flag2 is set is a challenge, picked by flag2 (KOTM 40, Time
+#: Attack 41): taken by its flag alone as the ball starts, like Rush's.
+def table_lines(e, names, on_flag):
+    """The port lines of a game-mode table's challenges (see above), or []."""
+    w, base = e.words, e.text_va
+    tables = set()
+    for k in range(len(w) - 4):
+        x = w[k]
+        if x & 0xFFFFFF00 == 0xE3510000 and w[k + 1] & 0xFFF0F000 == 0x93003000 and w[k + 2] & 0xFFF0F000 == 0x93403000 \
+                and w[k + 3] == 0x90833281 and w[k + 4] == 0x91D300B4:
+            lo = ((w[k + 1] >> 16) & 0xF) << 12 | (w[k + 1] & 0xFFF)
+            hi = ((w[k + 2] >> 16) & 0xF) << 12 | (w[k + 2] & 0xFFF)
+            tables.add(((hi << 16) | lo, (x & 0xFF) + 1))
+    if len(tables) != 1:
+        return []
+    (tbl, n), = tables
+    entries = _table_entries(e, tbl, n)
+    if not entries:
+        return []
+    table, count = message_table(e)
+    lines, slot = [], 0
+    for i, (flag, flag2, name) in enumerate(entries):
+        if flag != on_flag or not flag2 or flag2 >= len(names) or names[flag2].startswith("FG_PLAYER_") and \
+                not names[flag2].endswith("_CHALLENGE") and not names[flag2].endswith("_CHALLENGE_MODE"):
+            continue
+        words = message_text(e, table, name) if table and name < count else ""
+        stem = re.sub(r"[^A-Z0-9]+", "_", words.upper()).strip("_") or re.sub(r"^FG_(PLAYER_)?", "", names[flag2])
+        lines += ["# entry %d of the game-mode table at 0x%08x: flags %d and %d" % (i, tbl, flag, flag2),
+                  "value challenge_flag_%d  %d" % (slot, flag2),
+                  "text  challenge_name_%d  %s" % (slot, pretty(_short(stem))),
+                  "value challenge_name_msg_%d  %d" % (slot, name)]     # where the start menu shows its name
+        slot += 1
+    return (["value challenge_on_flag   %d" % on_flag] + lines) if slot else []
+
+
+def _table_entries(e, tbl, n):
+    """[(flag, flag2, name message)] of the table's n entries, read off its constructor's stores: the function that
+    stores to tbl + 32 * i + 4 / 6 / 10 from immediates (mov/movw), the table in a register by movw/movt or a literal."""
+    w, base = e.words, e.text_va
+    for k in range(len(w) - 1):
+        x = w[k]
+        # the constructor names the table: movw/movt rX, tbl (or ldr rX, =tbl) followed by strh's through rX
+        reg = None
+        if x & 0x0FF00000 == 0x03000000 and (((x >> 16) & 0xF) << 12 | (x & 0xFFF)) == tbl & 0xFFFF:
+            for j in range(k + 1, min(k + 6, len(w))):
+                y = w[j]
+                if y & 0x0FF00000 == 0x03400000 and (y >> 12) & 0xF == (x >> 12) & 0xF \
+                        and (((y >> 16) & 0xF) << 12 | (y & 0xFFF)) == tbl >> 16:
+                    reg = (x >> 12) & 0xF
+                    break
+        elif x & 0xFFFF0000 == 0xE59F0000:
+            lit = base + 4 * k + 8 + (x & 0xFFF)
+            if e.off(lit) is not None and e.word(lit) == tbl:
+                reg = (x >> 12) & 0xF
+        if reg is None:
+            continue
+        regs, mem = {}, {}
+        for j in range(k, min(k + 600, len(w))):
+            y = w[j]
+            if y >> 28 != 0xE:
+                continue
+            rd = (y >> 12) & 0xF
+            if y & 0x0FFF0000 == 0x03A00000:
+                regs[rd] = rot_imm(y & 0xFFF)
+            elif y & 0x0FF00000 == 0x03000000:
+                regs[rd] = ((y >> 16) & 0xF) << 12 | (y & 0xFFF)
+            elif y & 0x0FFF0000 == 0x03E00000:
+                regs[rd] = ~rot_imm(y & 0xFFF) & 0xFFFFFFFF
+            elif y & 0x0FF000F0 == 0x01C000B0 and (y >> 16) & 0xF == reg:     # strh rd, [reg, #imm]
+                off = ((y >> 4) & 0xF0) | (y & 0xF)
+                if rd in regs:
+                    mem[off] = regs[rd] & 0xFFFF
+            elif (y & 0xFFFF0000) == 0xE8BD0000 or y == 0xE12FFF1E:
+                break
+        entries = [(mem.get(32 * i + 4), mem.get(32 * i + 6, 0), mem.get(32 * i + 10, 0)) for i in range(n)]
+        if sum(1 for f, _f2, _m in entries if f) >= 3:
+            return [(f or 0, f2, m) for f, f2, m in entries]
+    return []
 
 
 def missing_from(lines, port_text):

@@ -8516,10 +8516,15 @@ int pm_challenge_menu(void)
 
 int pm_challenge_title(unsigned slot, const char *words)
 {
-    if (!pm_challenge_menu() || slot >= (unsigned)pm_challenge_slots() || challenge_by[slot] != current
-        || !challenge_fn[slot]) return 0;                                /* the holder only */
-    challenge_words(challenge_title[slot], words);
-    return 1;
+    char key[28];
+    long msg;
+    if (slot >= (unsigned)pm_challenge_slots() || challenge_by[slot] != current || !challenge_fn[slot]) return 0;
+    challenge_words(challenge_title[slot], words);                       /* the holder only */
+    if (pm_challenge_menu()) return 1;
+    /* PAD-619: a menu drawn from message ids (Godzilla's game-mode table): the challenge's name message says ours */
+    pm_snprintf(key, sizeof key, "challenge_name_msg_%u", slot);
+    msg = pm_port_value(key, 0);
+    return msg > 0 && pm_message_set((unsigned)msg, challenge_title[slot]);
 }
 
 int pm_challenge_add(const char *words, int (*on_pick)(unsigned slot))
@@ -8558,6 +8563,10 @@ void pm_challenge_release(unsigned slot)
         return;
     }
     if (slot < N_CHALLENGE && challenge_fn[slot] && challenge_by[slot] == current) {
+        char key[28];
+        pm_snprintf(key, sizeof key, "challenge_name_msg_%u", slot);
+        if (challenge_title[slot][0] && !pm_challenge_menu() && pm_port_value(key, 0) > 0)
+            pm_message_restore((unsigned)pm_port_value(key, 0));     /* PAD-619: the game's own name again */
         challenge_title[slot][0] = 0;
         challenge_fn[slot] = 0; challenge_by[slot] = 0;
         say("challenge %u (%s): released - the game's own again", slot, pm_challenge_name(slot));

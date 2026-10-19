@@ -167,3 +167,17 @@ def test_the_tab_lets_a_build_with_only_its_own_choose_it():
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
     assert "const challengeOff = off || dis.challenge || (!challenges.length && !challengeNew);" in js
     assert "On James Bond" not in js.split("challenge:", 1)[1].split("\n", 1)[0]
+
+
+def test_a_challenge_pick_waits_for_the_games_mode_running_as_the_ball_starts():
+    # Avengers LE/Pro 1.10 run one of their modes at every ball's start: the pick waits for it to end (the ball's end
+    # lapses it) instead of giving up at once, and the refusal names what was in the way
+    src = (SDK / "mode_file.c").read_text(encoding="utf-8")
+    tick = src[src.index("static void challenge_tick(void)"):]
+    tick = tick[:tick.index("\n}\n")]
+    wait = tick.index("pm_stock_mode_running(PM_STOCK_ANY)")
+    assert wait < tick.index("challenge_wait = 0;\n    challenge_said_wait = 0;") < tick.index('mode_start(M, "challenge pick")')
+    assert "the challenge pick waits - %s is running" in tick
+    end = src[src.index("static void challenge_ball_end(void)"):]
+    assert "challenge_said_wait = 0;" in end[:end.index("\n}\n")]
+    assert "%s not started (%s): %s is running - its trigger count is kept" in src

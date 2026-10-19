@@ -36,9 +36,32 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
 ## What is left (next runs)
 
 1. Elvira 1.13: hook the menu where the builder has stored the count, before the loop loads it into r5.
-2. The index-list family: take a challenge's place (Godzilla: clear flag 40/41 as the ball starts - the flag route
+2. The index-list family (the framework's `GamePlayModes` singleton, typeinfo `13GamePlayModes`, on Godzilla, Jaws,
+   John Wick, JP LE/Pro, King Kong, Metallica, X-Men; not on Bond's generation): take a challenge's place (Godzilla: clear flag 40/41 as the ball starts - the flag route
    as it is; Jaws/JW/Metallica: the pick is the game-mode index, needs a per-title stop), our names (message ids:
    `pm_message_set` on the entry's name message), challenges of our own (the table's accessors are bounded to its
    entries - an entry of ours needs the accessors hooked or a spare entry borrowed).
 3. The other family: find each title's menu and what its challenge kinds do; Bond 60th's timed game says so in its
    cannot sentence.
+
+## Findings, round 2 (2026-10-19)
+
+- Avengers LE/Pro 1.10 run one of their own modes at every ball's start, so a challenge pick refused at once ("one of
+  the game's modes is running"). The pick now waits for it to end (the ball's end lapses it), and the refusal names the
+  mode in the way. Generic: any build's pick waits the same way.
+- Batman 66 (and others): slings and pops alone are not a valid playfield, the drains were ball-saved and the one-ball
+  game never ended in the job; the rerun job (job619b.sh) also hits ramps, loops and spinners.
+- Jaws Pro 1.02: `GamePlayModeAdapter` (vtable 0x6d78e8) over a table at 0x859ea0 + 0x18, 14 entries of 28 bytes
+  `{u32 0, u32 index, u16 flag, u16 msg, u16 msg, u16 msg, u32 kind, u8, u8}`, accessors `cmp r1,#13; rsbls r1,r1,r1,lsl
+  #3; movwls/movtls tbl; addls r1,r3,r1,lsl #2; ldr.. [r1,#off]`. The challenge games (4th of July 8, Shark Hunter 9,
+  Jaws the Revenge 11, The Shark is Broken 12) all set flag 18 alone: the pick is the current game-play-mode index,
+  held by the GamePlayModes singleton. Next: find that index on the rig (memory diff before/after picking 4th of July
+  on the start menu), then decide the take-over (switch the index to a plain entry at the ball's start, or hook the
+  challenge's own start).
+- The current game-play-mode index (Jaws Pro 1.02): the `GamePlayModes` singleton at 0x855368 (guard 0x85538c, built by
+  0x5e960, which stores the vptr 0x6d77b0), word +8; getter 0x5e9f0 (`ldr r3,[guard]; tst r3,#1; ... ldr r0,[single,#8]`),
+  and 0x5ea6c tests it against 7. That getter shape matches other singletons too (C:/tmp/PAD-619/gpmcur.py): the finder
+  must keep the one whose constructor stores the GamePlayModes vptr. Plan for the index family: `data game_play_mode`
+  + `value challenge_mode_<n>` (the entry's index); at the ball's start of a challenge game whose index is a held
+  challenge's, set the index to Standard's (1) and hand the ball to the mode - to prove on the rig that the game's
+  challenge (e.g. 4th of July, OB_JWS_FOURTH_OF_JULY_CHALLENGE_START) has not already started at the game's start.

@@ -634,3 +634,16 @@ text held_coils            magnet
 site scoop_handler         0x0007cd94 0xe30b3a5a 0xe2401002
 data scoop_slot            0x00744728
 value scoop_event          2
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x007a939c
+value game_flags_at       4
+data  game_flag_count     0x005eabe0
+value challenge_on_flag   18
+value challenge_flag_0  40
+text  challenge_name_0  King of the Monsters
+value challenge_name_msg_0  3275
+value challenge_flag_1  41
+text  challenge_name_1  King of the Monsters Time Attack
+value challenge_name_msg_1  3276
+site  challenge_balls     0x00460bd0 0xe92d4030 0xe1a05000

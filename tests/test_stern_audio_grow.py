@@ -431,6 +431,8 @@ def _grow_card(monkeypatch, tmp_path, params, grown_rows=None, places=None):
 
     staged_seen["repointed"] = repointed
     monkeypatch.setattr(engine, "_descriptor_sites", sites)
+    # every sound's codec re-encodes (an emulator step, PAD-636)
+    monkeypatch.setattr(engine, "_grows_reencodable", lambda gr, img, grows, byidx, log: grows)
     monkeypatch.setattr(engine, "_repoint_descriptors", repoint)
     monkeypatch.setattr(engine, "_locate",
                         lambda f, p: (reader, reader.fw_node, reader.img_node))

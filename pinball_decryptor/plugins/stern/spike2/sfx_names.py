@@ -418,6 +418,11 @@ _MUSIC_MIN_SECONDS = 20.0
 
 _OP11 = b"\x0b\x00\x00\x00"
 
+#: An op11 marker with its parameter byte, which :data:`_OP11` reads as 0 only (PAD-635: Led
+#: Zeppelin Pro 1.22 names 10 records, all requested, only behind ``0b 00 01 00`` /
+#: ``0b 00 04 00``; the byte is the record's band layout, PAD-636).
+_OP11_ANY = re.compile(rb"\x0b\x00.\x00", re.S)
+
 
 def _primary_idx(desc, key0_to_idx):
     """The extraction record a descriptor owns, or ``None``.
@@ -428,28 +433,27 @@ def _primary_idx(desc, key0_to_idx):
     or after offset 9 is the entry's own primary asset.  (Checking only the two
     fixed offsets 10 and 28, as v0.61.x did, silently lost a third of the
     coverage and pushed the rest onto a broad scan that matched references to
-    shared music masters.)"""
-    p = desc.find(_OP11, 9)
-    if p < 0 or p + 8 > len(desc):
+    shared music masters.)  The marker's parameter byte is read whatever it is:
+    a first marker behind ``0b 00 04 00`` read as none took the NEXT
+    descriptor's record (PAD-636: Led Zeppelin Pro 1.22 gave two records their
+    neighbours' Sound Test names)."""
+    m = _OP11_ANY.search(desc, 9)
+    if m is None or m.start() + 8 > len(desc):
         return None
-    return key0_to_idx.get(_u32(desc, p + 4))
+    return key0_to_idx.get(_u32(desc, m.start() + 4))
 
 
-#: An op11 marker with its parameter byte, which :data:`_OP11` reads as 0 only (PAD-635: Led
-#: Zeppelin Pro 1.22 names 10 records, all requested, only behind ``0b 00 01 00`` /
-#: ``0b 00 04 00``).
-_OP11_ANY = re.compile(rb"\x0b\x00.\x00", re.S)
-
-
-def _part_idxs(desc, key0_to_idx):
+def _part_idxs(desc, key0_to_idx, extent=None):
     """Every extraction record a descriptor plays, the first marker's first: a multi-part
     entry names each part with an op11 marker of its own, whatever its parameter byte
     (PAD-635: on Godzilla Pro 1.16, 6 records are only ever a later part, so the primary
-    alone called them unplayed)."""
+    alone called them unplayed). Only the markers in its first *extent* bytes are its own:
+    the resolver's window runs on into the next descriptor (PAD-636)."""
     out = []
+    end = len(desc) if extent is None else min(len(desc), int(extent))
     for m in _OP11_ANY.finditer(desc, 9):
         p = m.start()
-        if p + 8 > len(desc):
+        if p + 8 > end:
             break
         i = key0_to_idx.get(_u32(desc, p + 4))
         if i is not None and i not in out:

@@ -767,9 +767,10 @@ def verify_tables(gr_path, img_path, bank_path, cat, places, expect, rows, log, 
 # That is how the music titles play their own banks' songs: their request lists carry the
 # songs' ``cat << 16 | n`` sids.
 
-#: Longest sid list :func:`request_list_slots` follows (the longest on the cards seen is
-#: well under it; the walk stops at the list's zero).
-_LIST_MAX = 256
+#: Longest sid list :func:`request_list_slots` follows, a runaway guard: the walk stops at
+#: the list's zero (it was 256, and 16 titles have longer lists: PAD-635); the same
+#: bound as ``spike2.sound_requests.LIST_MAX``.
+_LIST_MAX = 1 << 16
 
 
 def request_list_slots(elf, head):

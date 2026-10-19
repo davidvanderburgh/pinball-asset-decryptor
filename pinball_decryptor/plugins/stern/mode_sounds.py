@@ -649,7 +649,9 @@ def request_sids(game_elf_bytes, fragments, requests):
             o = va2off(w) if w else None
             if o is None or o < end:
                 continue
-            for i in range(256):
+            for i in range(SR.LIST_MAX):
+                if o + 4 * i + 4 > len(game_elf_bytes):
+                    break
                 (s,) = struct.unpack_from("<I", game_elf_bytes, o + 4 * i)
                 if s == 0:
                     break

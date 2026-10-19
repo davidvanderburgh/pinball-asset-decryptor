@@ -79,7 +79,9 @@ def request_table(fw, fragments):
             o = va2off(w) if w else None
             if o is None or o < end:
                 continue
-            for i in range(256):
+            for i in range(1 << 16):      # to the list's zero (sound_requests.LIST_MAX)
+                if o + 4 * i + 4 > len(fw):
+                    break
                 (s,) = struct.unpack_from("<I", fw, o + 4 * i)
                 if s == 0:
                     break

@@ -448,7 +448,7 @@ def request_sids(game_elf, image_head, request):
         if o is None or o <= table:
             continue
         out = []
-        for i in range(64):
+        for i in range(SR.LIST_MAX):
             if o + 4 * i + 4 > len(game_elf):
                 break
             (s,) = struct.unpack_from("<I", game_elf, o + 4 * i)

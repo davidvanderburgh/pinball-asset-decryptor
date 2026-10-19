@@ -152,7 +152,22 @@ def main():
             time.sleep(0.6)
             print("C editor:", page.locator(".ce-cmode .ce-ta").count(), "lines:",
                   page.locator(".ce-cmode .ce-gutter > div").count(), flush=True)
+            page.mouse.move(5, 5)
+            time.sleep(0.5)
             page.screenshot(path=os.path.join(outdir, "ceditor.png"))
+            ta = page.locator(".ce-cmode .ce-ta")
+            if ta.count():
+                # typed in the app and saved with Ctrl+S: the file on disk is what was typed
+                ta.first.evaluate("(el) => { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }")
+                page.keyboard.type("/* typed in the app */")
+                time.sleep(0.4)
+                dirty = page.locator(".ce-cmode .warn").count()
+                page.keyboard.press("Control+s")
+                time.sleep(1.2)
+                src = os.path.join(project, "modes", "laser_show", "laser_show.c")
+                with open(src, encoding="utf-8") as f:
+                    print("C saved from the page:", f.read().rstrip().endswith("/* typed in the app */"),
+                          "| 'Not saved' shown before Ctrl+S:", bool(dirty), flush=True)
             with open(blocks_json, encoding="utf-8") as f:
                 print("blocks.json scripts:", len(json.load(f).get("scripts", [])), flush=True)
             browser.close()

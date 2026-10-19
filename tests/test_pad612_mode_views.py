@@ -91,6 +91,7 @@ def test_blocks_playfield_gives_the_picture_and_the_inserts(tmp_path, monkeypatc
     from pinball_decryptor.webui.tabs import modes as tab
     monkeypatch.setattr(preview, "enabled", lambda feature: True)
     card = MP.ProjectCard(str(tmp_path / "godzilla_pro-1_15_0.raw"), "godzilla_pro", "1.15.0", "test")
+    (tmp_path / "godzilla_pro-1_15_0.raw").write_bytes(b"")      # PAD-623: only a card that is there is read
     monkeypatch.setattr(tab.ModesTab, "_title_card", lambda self, project: (card, "project"))
     png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\x019\0\0\x02\xc6" + b"\0" * 8
     asked = []
@@ -102,12 +103,17 @@ def test_blocks_playfield_gives_the_picture_and_the_inserts(tmp_path, monkeypatc
         assert asked == [(card.image, "godzilla_pro")]
         assert (got["w"], got["h"], got["why"]) == (313, 710, "")
         assert got["art"].startswith("data:image/png;base64,")
+        got_art = got["art"]
         ramp = next(i for i in got["inserts"] if i["name"] == "RIGHT RAMP")
         assert ramp == {"name": "RIGHT RAMP", "x": 199, "y": 189, "shots": ["Right ramp"]}
         assert len(got["inserts"]) == 81
         # a card of another game: the inserts still, no picture, and why
         monkeypatch.setattr(tab.ModesTab, "_title_card", lambda self, project: (
             MP.ProjectCard(card.image, "godzilla_le", "1.15.0", "test"), "project"))
+        # PAD-623: the shown game's picture read before is kept on this computer, so it still shows ...
+        assert w.call("modes.blocks_playfield")["art"] == got_art
+        os.remove(PA._kept_path("godzilla_pro"))
+        # ... and with none kept, why not
         got = w.call("modes.blocks_playfield")
         assert got["art"] == "" and "another game's (godzilla_le)" in got["why"] and len(got["inserts"]) == 81
         monkeypatch.setattr(PA, "card_art", lambda image, game: (None, "godzilla_pro ships no playfield picture"))

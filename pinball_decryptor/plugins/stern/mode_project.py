@@ -2804,7 +2804,59 @@ def project_card(project):
     card's index, off the UI thread (:func:`project_profile` with ``probe=True``). Before
     2026-09-22 a renamed record lost to the ``.pinproj`` anchor's stock image or Write
     original when one of those parsed, and a set could be prepared for a card the project
-    was never measured on. The anchor's paths are read only when the record is absent."""
+    was never measured on. The anchor's paths are read only when the record is absent.
+
+    PAD-623: a card whose game cannot be read - its file is not on this computer any more
+    (moved or deleted), or its own index was read and named no game - takes the game the
+    project's saved modes were made for (:func:`modes_title`), so the tab still knows it."""
+    card = _project_card(project)
+    if card is None or card.game_dir or not card.image:
+        return card
+    if os.path.isfile(card.image) and probed_card_title(card.image) != (None, None):
+        return card                    # not read yet: the probe answers first
+    made_for = modes_title(project)
+    if made_for is None:
+        return card
+    return ProjectCard(card.image, made_for.game_dir, made_for.version,
+                       MODES_TITLE_SOURCE if not os.path.isfile(card.image)
+                       else MODES_TITLE_UNREAD)
+
+
+#: PAD-623: where :func:`project_card` found the game when the card file is gone
+MODES_TITLE_SOURCE = "the game this project's modes were made for; the card file is not there"
+#: ... and when the card is there but its index names no game
+MODES_TITLE_UNREAD = "the game this project's modes were made for; the card names none"
+
+
+def modes_title(project):
+    """PAD-623: the :class:`TitleProfile` every saved mode in ``project`` names as its game
+    (a mode.json's ``title``, a code or blocks mode's assets.json ``title`` when that is a
+    game this app has modes for - there it may also be the mode's screen title), or None
+    when none names one, or two name different games. Reads the modes' small files only."""
+    found = {}
+    d = modes_dir(project)
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return None
+    for slug in names:
+        for fname in (MODE_FILE, "assets.json"):
+            try:
+                with open(os.path.join(d, slug, fname), "r", encoding="utf-8") as f:
+                    key = (json.load(f) or {}).get("title")
+            except (OSError, ValueError, AttributeError):
+                continue
+            if not isinstance(key, str) or not key.strip():
+                continue
+            try:
+                prof = profile(key.strip())
+            except ModeProjectError:
+                continue
+            found[prof.key] = prof
+    return next(iter(found.values())) if len(found) == 1 else None
+
+
+def _project_card(project):
     if not project or not os.path.isdir(project):
         return None
     from ...core import extract_source, project_file

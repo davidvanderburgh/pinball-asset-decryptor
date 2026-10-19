@@ -176,15 +176,37 @@ can do. What would make it easier:
 | Node graph | ★★☆☆☆ | full | who uses which variable | high |
 | C | ★☆☆☆☆ | beyond the blocks | anything the SDK does | editor: medium |
 
+## David's decision (2026-10-18): switch views at any time
+
+David reviewed the mockups: "I especially like having the visualization of the playfield. We should be able to
+switch visualizations at any point and not be beholden to one or another; for example I should be able to switch
+from blocks to any of these others."
+
+So the views are **tabs over one mode, never kinds of mode**:
+
+- Blocks, Rule cards, Story, Playfield, Shot table, Timeline, Node graph and Script are tabs on the same
+  `blocks.json`. A mode is never a "cards mode" or a "playfield mode". Switching tabs never converts anything and
+  never asks first.
+- An edit in any tab saves the one `blocks.json`. Every other tab redraws from it when it is opened. Undo/redo is
+  one history for the mode, so an undo in Cards takes back an edit made in Blocks.
+- A tab that cannot show a rule in its own way still lists it, so nothing is ever hidden. Examples: the clock
+  and drain rules beside the Playfield, shot reactions under the Timeline.
+- The Script tab already meets this: any `blocks.json` goes to text and back exactly (the tests). Each tab built
+  later gets the same test: every block there is, edited through that tab, saved, and read back unchanged.
+- **C is the one exception.** Free C cannot be read back into blocks. It stays behind "Edit as C", which warns
+  that it is a one-way step, and is not one of the tabs. The Script tab is the typed form that switches freely.
+
 ## What to build, in order
 
-1. **Rule cards** as a second tab beside Blocks, on the same `blocks.json`. It is the biggest gain in ease for
-   the least work.
-2. **Story** above the cards: the overview, with drag-a-rule-between-states.
-3. **Script** tab, with the in-app editor; the C editor reuses it.
-4. **Playfield** shot picker, used by every view wherever a shot is chosen.
-5. Timeline for the shows only; node graph only as a "who uses this variable" overlay; shot table if people ask
-   for it.
+1. **The tab strip and one shared program/undo** in the Modes tab, so a view is just a tab (the switch David
+   asked for). Blocks stays the first tab.
+2. **Playfield**, the view David singled out: the game's own playfield picture and insert positions from the
+   person's card (`lampmap.py`), lit shots in their colours, a shot's card editable in place, other rules listed
+   beside it. Every other tab also uses it as its shot picker.
+3. **Rule cards**: the biggest gain in ease for the least work.
+4. **Story** above the cards, with drag-a-rule-between-states.
+5. **Script** tab with the in-app editor; the C editor reuses it.
+6. Shot table, Timeline (for shows) and Node graph (as a "who uses this variable" overlay) as further tabs.
 
 Every view writes the same program, so the blocks' limits (48 scripts, 400 blocks), checks (`problems`) and C
 (`to_c`) stay exactly as they are. A view adds nothing that has to be compiled differently and cannot make a mode

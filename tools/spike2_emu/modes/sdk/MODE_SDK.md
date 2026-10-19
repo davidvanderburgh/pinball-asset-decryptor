@@ -3795,6 +3795,12 @@ site  challenge_end_ball  0x003f79bc 0xe305211e 0xe3402082    # Bond LE 1.06 (Pr
 
 A port without it logs `this port has no challenge_end_ball, so the ball plays on`.
 
+Proven (emulator, 2026-10-19, Bond LE 1.06 stock card, two challenge games in a row from the start menu): a mode
+file on its clock, and a blocks mode (`challenge new`) ended by its last shot (its Super Jackpot award, clip and
+sound still played). Before: the ball stayed in play after the end, slings scored, and the game's Goldfinger's
+Jackpot and a 2-ball multiball could start. After: the game left play at once (status `0x0202`), nothing scored,
+both refused (`no game`), and the next challenge game started its mode.
+
 **Other titles:** their challenges are other things - Godzilla's King of the Monsters / Time Attack, Rush's 2112,
 Venom's Knull levels, Jaws' 4th of July, a timed whole game on Bond 60th - no `FG_<name>_CHALLENGE` flag with a
 handler of this shape, so `challenge_lines.py` writes nothing and the tab offers no such start there.

@@ -222,8 +222,12 @@ def test_compare_full_report(tmp_path, monkeypatch):
     assert scenes["Added"] == "1:" and scenes["Modified"] == "1:"
     assert "assets/cc33" in report and "assets/aa11" in report
     assert "bb22" not in report               # untouched scene stays unlisted
-    # The changed scene ASSET counts as its scene, not as a loose video.
-    assert "aa11/scene.assets/0.asset" not in report
+    # A changed scene VIDEO is listed as a video AND counted in its scene
+    # (PAD-631: Godzilla keeps every video in a scene folder, so "counts as
+    # its scene only" left the Videos section empty on every mod).
+    assert videos["Modified"] == "1:"
+    assert "aa11/scene.assets/0.asset" in report
+    assert "assets/aa11 — 1 file(s) changed" in report
 
     other = _named(by_title["Other files"])
     assert other["Added"] == "1:" and other["Modified"] == "1:"
@@ -293,6 +297,138 @@ def test_compare_uses_the_card_not_a_disagreeing_filename(tmp_path,
     assert "Filename version (B)" not in head       # B's name agrees
 
 
+# ---------------------------------------------------------------------------
+# PAD-631: a mod whose manifest still describes the stock card
+# ---------------------------------------------------------------------------
+
+def _stale_mod_spec(files, replaced, mtime=None, stock_mtime=None):
+    """A card carrying *files*, its manifest written for *files* (the stock
+    card), with *replaced* = ``{rel: new bytes}`` swapped in AFTER — the
+    way the Heisei Godzilla card left 534 video records as Stern wrote
+    them.  With *mtime*, the replaced files carry that time and the rest
+    *stock_mtime*."""
+    spec = _card_spec("turtles_pro", "turtles_pro-1_58_0.sidx", files)
+    for rel, data in replaced.items():
+        node = spec["turtles_pro"]
+        parts = rel.split("/")
+        for d in parts[:-1]:
+            node = node[d]
+        node[parts[-1]] = ("file", data, mtime) if mtime else data
+    if stock_mtime is not None:
+        def stamp(tree):
+            for k, v in tree.items():
+                if isinstance(v, dict):
+                    stamp(v)
+                elif isinstance(v, (bytes, bytearray)):
+                    tree[k] = ("file", v, stock_mtime)
+        stamp(spec["turtles_pro"])
+    return spec
+
+
+def test_a_replaced_file_the_manifest_still_calls_stock_is_listed(
+        tmp_path, monkeypatch):
+    """The ticket's card: same build both sides, B's videos swapped (another
+    size) with their manifest records left as Stern's.  The report said
+    "Videos: No changes"; it now lists them, and says why it looked."""
+    spec_a = _card_spec("turtles_pro", "turtles_pro-1_58_0.sidx", _FILES_A)
+    spec_b = _stale_mod_spec(_FILES_A, {
+        "clip.asset": _FAKE_MP4 + b"A-reencoded-longer",
+        "assets/aa11/scene.assets/0.asset": _FAKE_MP4 + b"scene-A-new!"})
+    a, b = _two_cards(tmp_path, monkeypatch, spec_a=spec_a, spec_b=spec_b,
+                      name_b="turtles_pro-1_58_0.mod.raw")
+    sections = compare_cards(a, b)
+    by_title = dict(sections)
+    report = as_text(sections, title="Compare Report")
+    head = _named(by_title["Compared"])
+    assert head["Version"] == "1.58.0 (same)"
+    assert head["Validated files"] == "10 (unchanged)"
+    assert head["Manifest out of date (B)"].startswith("2 file(s)")
+    assert "Manifest out of date (A)" not in head
+    assert _named(by_title["Videos"])["Modified"] == "2:"
+    assert "clip.asset" in report
+    assert "aa11/scene.assets/0.asset" in report
+    assert "assets/aa11 — 1 file(s) changed" in report
+    # the rows open B's file: it is the one the user wants to see
+    assert {r["side"] for r in _refs(by_title["Videos"])} == {"B"}
+
+
+def test_a_same_size_swap_is_found_by_its_later_write(tmp_path, monkeypatch):
+    """Same size AND an untouched record: only the bytes differ.  Both cards
+    are copies of one base image (shared files keep their times), so the
+    file B wrote later is sampled on both cards and caught."""
+    stock = 1787676320
+    spec_a = _stale_mod_spec(_FILES_A, {}, stock_mtime=stock)
+    swapped = bytearray(_FILES_A["gfx/logo.png"])
+    swapped[0] ^= 0xFF                                  # same length
+    spec_b = _stale_mod_spec(_FILES_A, {"gfx/logo.png": bytes(swapped)},
+                             mtime=stock + 1000000, stock_mtime=stock)
+    a, b = _two_cards(tmp_path, monkeypatch, spec_a=spec_a, spec_b=spec_b,
+                      name_b="turtles_pro-1_58_0.mod.raw")
+    by_title = dict(compare_cards(a, b))
+    assert _named(by_title["Images"])["Modified"] == "1:"
+    for title in ("Videos", "Scenes", "Other files", "Music banks"):
+        assert _named(by_title[title]) == {"No changes": ""}
+
+
+def test_two_releases_never_have_their_files_read(tmp_path, monkeypatch):
+    """Different Stern builds carry different times on EVERY file; their
+    manifests are Stern's own and tell every change, so the same-size
+    sampling must not read thousands of files there."""
+    from pinball_decryptor.plugins.stern import compare as cmp
+    spec_a = _stale_mod_spec(_FILES_A, {}, stock_mtime=100)
+    spec_b = _stale_mod_spec(_FILES_A, {}, stock_mtime=200)
+    a, b = _two_cards(tmp_path, monkeypatch, spec_a=spec_a, spec_b=spec_b,
+                      name_b="turtles_pro-1_58_0.other.raw")
+    read = []
+    monkeypatch.setattr(cmp, "_sample",
+                        lambda r, n: read.append(n) or "x")
+    by_title = dict(compare_cards(a, b))
+    assert read == []
+    assert _named(by_title["Images"]) == {"No changes": ""}
+
+
+def test_same_build_container_names_the_card_that_is_not_stern(
+        tmp_path, monkeypatch):
+    """Between two builds the container digest says nothing; between two
+    cards of the SAME build it says the sounds were replaced, and the
+    official-release table says on which card."""
+    from pinball_decryptor.plugins.stern import stock_prints
+    files_b = dict(_FILES_A, **{"image.bin": _container_header(578, 549)
+                                + b"replaced sounds"})
+    spec_a = _card_spec("turtles_pro", "turtles_pro-1_58_0.sidx", _FILES_A)
+    spec_b = _card_spec("turtles_pro", "turtles_pro-1_58_0.sidx", files_b)
+    a, b = _two_cards(tmp_path, monkeypatch, spec_a=spec_a, spec_b=spec_b,
+                      name_b="turtles_pro-1_58_0.mod.raw")
+    bank = _FILES_A["image.bin"]
+    release = {"files": {"turtles_pro/image.bin": [
+        len(bank), hashlib.md5(bank).hexdigest()[:stock_prints.FILE_DIGITS]]}}
+    monkeypatch.setattr(stock_prints, "release_for",
+                        lambda name, table=None: release)
+    snd = _named(dict(compare_cards(a, b))["Sounds"])
+    assert "both are build 1.58.0" in snd["Container bytes"]
+    assert ("image B's sounds were replaced (A's are Stern's)"
+            in snd["Container bytes"])
+    monkeypatch.setattr(stock_prints, "release_for",
+                        lambda name, table=None: None)
+    snd = _named(dict(compare_cards(a, b))["Sounds"])
+    assert "one card's sounds were replaced" in snd["Container bytes"]
+
+
+def test_a_multi_boot_card_says_which_image_was_compared(tmp_path,
+                                                        monkeypatch):
+    from pinball_decryptor.plugins.stern import multiimage
+    a, b = _two_cards(tmp_path, monkeypatch)
+    imgs = [multiimage.CardImage(3, "", "turtles_pro"),
+            multiimage.CardImage(7, "", "turtles_pro")]
+    monkeypatch.setattr(multiimage, "images_for_path",
+                        lambda p: imgs if p == b else imgs[:1])
+    head = _named(dict(compare_cards(a, b))["Compared"])
+    assert head["Multi-boot (B)"].startswith(
+        "this card carries 2 game images; compared is the first, "
+        "Turtles Pro (p3)")
+    assert "Multi-boot (A)" not in head
+
+
 def test_compare_unopenable_card_reports_error(tmp_path):
     bad = tmp_path / "junk.raw"
     bad.write_bytes(b"junk")
@@ -348,8 +484,10 @@ def test_listed_file_rows_carry_the_card_they_are_on(tmp_path, monkeypatch):
         assert ref["name"] == ref["path"].rsplit("/", 1)[-1]
 
     videos = by_title["Videos"]
-    assert [(r["side"], r["path"]) for r in _refs(videos)] \
-        == [("A", "turtles_pro/clip.asset")]                      # deleted
+    assert [(r["side"], r["path"]) for r in _refs(videos)] == [
+        ("B", "turtles_pro/assets/cc33/scene.assets/0.asset"),    # added
+        ("B", "turtles_pro/assets/aa11/scene.assets/0.asset"),    # modified
+        ("A", "turtles_pro/clip.asset")]                          # deleted
 
     # Count rows ("Added", "1:") carry nothing to open.
     assert all(len(r) == 2 for r in images if r[0])

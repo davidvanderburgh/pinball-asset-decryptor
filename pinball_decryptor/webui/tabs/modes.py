@@ -2993,6 +2993,25 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return out
 
     @rpc
+    def blocks_script(self, program):
+        """PAD-614: the Script tab's text: ``program`` (the page's blocks.json) as a script, the settings left at
+        their defaults left out. ``{"text"}``."""
+        from pinball_decryptor.plugins.stern import mode_script as MS
+        return {"text": MS.to_script(BM.normalize(program), defaults=BM.normalize({}))}
+
+    @rpc
+    def blocks_read_script(self, text):
+        """PAD-614: the program typed script text is, for the Script tab to put in place of the blocks (one step of
+        the mode's history): ``{"program"}``, or ``{"error", "line"}`` saying what is wrong and on which line."""
+        from pinball_decryptor.plugins.stern import mode_script as MS
+        try:
+            return {"program": BM.normalize(MS.from_script(str(text or "")))}
+        except MS.ScriptError as e:
+            return {"error": str(e), "line": e.line}
+        except (ValueError, TypeError, RecursionError, MemoryError) as e:   # literal_eval on something odd
+            return {"error": "this text could not be read: %s" % e, "line": 0}
+
+    @rpc
     def blocks_pick(self, what, taken=()):
         """PAD-374: "+ Clip…", "+ Sound…" and "Music…" in the block editor: pick a video or a
         WAV, copy it into the open blocks mode's folder and return ``{"name", "file", "path"}``
@@ -3123,6 +3142,40 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import code_modes as CM
         self.open_path(CM.source_path(self.project(), self._code_slug))
         return True
+
+    @rpc
+    def code_text(self):
+        """PAD-614: the selected code mode's C, for the editor on its Code page: ``{"text", "error"}``."""
+        if not self._code_slug:
+            return {"text": "", "error": "No mode written in C is open."}
+        from ...plugins.stern import code_modes as CM
+        try:
+            with open(CM.source_path(self.project(), self._code_slug), encoding="utf-8", errors="replace") as f:
+                return {"text": f.read(), "error": ""}
+        except OSError as e:
+            return {"text": "", "error": "Its C could not be read: %s" % e}
+
+    @rpc
+    def code_save(self, text):
+        """PAD-614: the editor's text written over the selected code mode's C (whole, then put in place); the mode
+        is read again so its summary and checks follow. ``{"ok", "error"}``."""
+        if not self._code_slug:
+            return {"ok": False, "error": "No mode written in C is open."}
+        from ...plugins.stern import code_modes as CM
+        slug = self._code_slug
+        path = CM.source_path(self.project(), slug)
+        tmp = path + ".saving"
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                f.write(str(text or ""))
+            os.replace(tmp, path)
+        except OSError as e:
+            return {"ok": False, "error": "It could not be saved: %s" % e}
+        try:
+            self._show_code(slug)
+        except Exception:                                   # noqa: BLE001 - the file is saved; the page shows what it can
+            pass
+        return {"ok": True, "error": ""}
 
     @rpc
     def open_sdk_doc(self):

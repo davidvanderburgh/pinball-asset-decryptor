@@ -155,6 +155,8 @@ def find(elf):
         lines = ["value challenge_on_flag   %d" % on_flag]
     if not lines and not generic:
         lines = table_lines(e, names, on_flag)                  # PAD-619: Godzilla's game-mode table
+    if not lines and not generic:
+        lines = gpm_lines(e, names, on_flag)                    # PAD-619: the GamePlayModes index (Jaws, ...)
     if not lines:
         return [], notes or ["no challenge list and no start menu of the known shape"]
     if generic:
@@ -586,6 +588,208 @@ def _table_entries(e, tbl, n):
         if sum(1 for f, _f2, _m in entries if f) >= 3:
             return [(f or 0, f2, m) for f, f2, m in entries]
     return []
+
+
+#: PAD-619: the GamePlayModes builds whose challenges set FG_PLAYER_CHALLENGE_MODE_ACTIVE alone (Jaws, John Wick,
+#: Metallica, King Kong, X-Men, Jurassic Park LE/Pro): the framework's singleton GamePlayModes (typeinfo
+#: `13GamePlayModes`) holds the current game-play mode's index at +8 (Jaws Pro 1.02: 0x855368, read by 0x5e9f0). The
+#: game's table of them (GamePlayModeAdapter's) is 28-byte entries {u32 index, u16 flag, u16 msg x3, u32 kind, u8 x2,
+#: std::string name at +20}, read by accessors of one shape:
+#:   cmp r1, #<last> ; rsbls r1, r1, r1, lsl #3 ; movwls r3, <tbl> ; movtls r3, <tbl> ; addls r1, r3, r1, lsl #2
+#: and filled by one constructor (read here by a small emulation of its stores). An entry whose flag is the challenge
+#: game's is a challenge, picked by its index; Standard's (the first sys_standard with no flag) is what a mode's
+#: challenge game plays instead.
+GPM_ENTRY = 28
+
+
+def _imm16(x):
+    return ((x >> 16) & 0xF) << 12 | (x & 0xFFF)
+
+
+def _lit(e, va, x):
+    """The word an `ldr rX, [pc, #+/-imm]` at va loads, or None (not one, or off the image)."""
+    if x & 0xFF7F0000 != 0xE51F0000:
+        return None
+    lit = va + 8 + ((x & 0xFFF) if x & 0x00800000 else -(x & 0xFFF))
+    return e.word(lit) if e.off(lit) is not None else None
+
+
+def _refs(d, v):
+    p, out = struct.pack("<I", v), []
+    i = d.find(p)
+    while i >= 0:
+        if i % 4 == 0:
+            out.append(i)
+        i = d.find(p, i + 1)
+    return out
+
+
+def _gpm_singleton(e):
+    """The GamePlayModes singleton's address, or None: its vtable (by the typeinfo name), the constructor that stores
+    that vptr, and the one movw/movt r0 + bl that constructor."""
+    d = e.d
+    i = d.find(b"\x0013GamePlayModes\x00")
+    if i < 0:
+        return None
+    name = e.va(i + 1)
+    vptrs = set()
+    for ti_off in _refs(d, name):
+        ti = e.va(ti_off) - 4
+        for vt_off in _refs(d, ti):
+            vptrs.add(e.va(vt_off) + 4)
+    w, base = e.words, e.text_va
+    ctors, lo = set(), {}
+    for k, x in enumerate(w):
+        hit = False
+        if x & 0x0FF00000 == 0x03000000:
+            lo[(x >> 12) & 0xF] = (k, _imm16(x))
+        elif x & 0x0FF00000 == 0x03400000 and (x >> 12) & 0xF in lo and k - lo[(x >> 12) & 0xF][0] < 8:
+            hit = (_imm16(x) << 16 | lo[(x >> 12) & 0xF][1]) in vptrs
+        elif x & 0xFF7F0000 == 0xE51F0000:
+            hit = _lit(e, base + 4 * k, x) in vptrs
+        if hit:
+            for j in range(k, max(k - 12, 0), -1):           # the function starts after the one before returns
+                if w[j - 1] == 0xE12FFF1E or w[j - 1] & 0xFFFF8000 == 0xE8BD8000:
+                    ctors.add(base + 4 * j)
+                    break
+    singles = set()
+    for k in range(2, len(w)):
+        if w[k] & 0x0F000000 == 0x0B000000 and bl_target(base + 4 * k, w[k]) in ctors:
+            a, b = w[k - 2], w[k - 1]
+            if a & 0xFFF0F000 == 0xE3000000 and b & 0xFFF0F000 == 0xE3400000 and (a >> 12) & 0xF == 0 \
+                    and (b >> 12) & 0xF == 0:
+                singles.add(_imm16(b) << 16 | _imm16(a))
+    return singles.pop() if len(singles) == 1 else None
+
+
+def _gpm_table(e):
+    """(table va, entries) of the GamePlayModeAdapter's table, by its accessors' one shape; (None, 0)."""
+    w, found = e.words, set()
+    for k in range(len(w) - 4):
+        if w[k] & 0xFFFFFF00 == 0xE3510000 and w[k + 1] == 0x90611181 and w[k + 2] & 0xFFF0F000 == 0x93003000 \
+                and w[k + 3] & 0xFFF0F000 == 0x93403000 and w[k + 4] == 0x90831101:
+            found.add((_imm16(w[k + 3]) << 16 | _imm16(w[k + 2]), (w[k] & 0xFF) + 1))
+    return found.pop() if len(found) == 1 else (None, 0)
+
+
+def _gpm_entries(e, tbl, n):
+    """{i: {"index", "flag", "msgs", "name"}} of the table, read off the constructor that loads tbl into a register:
+    its stores (str/strh/strb, immediate, register and post-indexed offsets) emulated from immediates, and its string
+    assignments (bl with r0 = an entry's name field, r1 = a C string)."""
+    w, base = e.words, e.text_va
+    for k in range(len(w) - 1):
+        x = w[k]
+        if x & 0xFF7F0000 == 0xE51F0000:                     # ldr rX, =tbl
+            if _lit(e, base + 4 * k, x) != tbl:
+                continue
+        elif not (x & 0xFFF00000 == 0xE3000000 and _imm16(x) == tbl & 0xFFFF and any(
+                z & 0xFFF00000 == 0xE3400000 and (z >> 12) & 0xF == (x >> 12) & 0xF and _imm16(z) == tbl >> 16
+                for z in w[k + 1:k + 4])):
+            continue
+        regs, mem, names = {}, {}, {}
+        for j in range(k, min(k + 1200, len(w))):
+            z = w[j]
+            if z >> 28 != 0xE:
+                continue
+            r_d, r_n = (z >> 12) & 0xF, (z >> 16) & 0xF
+            if z & 0x0FFF0000 == 0x03A00000:
+                regs[r_d] = rot_imm(z & 0xFFF)
+            elif z & 0x0FFF0000 == 0x03E00000:
+                regs[r_d] = ~rot_imm(z & 0xFFF) & 0xFFFFFFFF
+            elif z & 0x0FF00000 == 0x03000000:
+                regs[r_d] = _imm16(z)
+            elif z & 0x0FF00000 == 0x03400000:
+                regs[r_d] = (regs[r_d] & 0xFFFF) | _imm16(z) << 16 if regs.get(r_d) is not None else None
+            elif z & 0x0FE00000 == 0x02800000:                                                 # add rd, rn, #imm
+                regs[r_d] = (regs[r_n] + rot_imm(z & 0xFFF)) & 0xFFFFFFFF if regs.get(r_n) is not None else None
+            elif z & 0x0FE00000 == 0x02400000:                                                 # sub rd, rn, #imm
+                regs[r_d] = (regs[r_n] - rot_imm(z & 0xFFF)) & 0xFFFFFFFF if regs.get(r_n) is not None else None
+            elif z & 0x0FFF0FF0 == 0x01A00000:                                                 # mov rd, rm
+                regs[r_d] = regs.get(z & 0xF)
+            elif z & 0xFF7F0000 == 0xE51F0000:
+                regs[r_d] = _lit(e, base + 4 * j, z)
+            elif z & 0x0F000000 == 0x0B000000:                                                 # bl
+                a0, a1 = regs.get(0), regs.get(1)
+                if a0 is not None and a1 is not None and tbl <= a0 < tbl + GPM_ENTRY * n:
+                    c = e.cstr(a1)
+                    if c:
+                        names[(a0 - tbl) // GPM_ENTRY] = c
+                for r in (0, 1, 2, 3, 12, 14):
+                    regs.pop(r, None)
+            elif (z & 0xFFFF0000) == 0xE8BD0000 or z == 0xE12FFF1E:
+                break
+            else:
+                addr, size = None, None
+                if z & 0x0E100000 == 0x04000000 and z & 0x01000000 and regs.get(r_n) is not None:   # str/strb imm
+                    off = z & 0xFFF
+                    addr = regs[r_n] + (off if z & 0x00800000 else -off)
+                    size = 1 if z & 0x00400000 else 4
+                elif z & 0x0E1000F0 == 0x000000B0 and regs.get(r_n) is not None:                  # strh
+                    off = ((z >> 4) & 0xF0) | (z & 0xF) if z & 0x00400000 else regs.get(z & 0xF)
+                    if off is not None:
+                        size = 2
+                        if z & 0x01000000:
+                            addr = regs[r_n] + (off if z & 0x00800000 else -off)
+                        else:                                                   # post-indexed: rn, then rn += off
+                            addr = regs[r_n]
+                            regs[r_n] = regs[r_n] + (off if z & 0x00800000 else -off)
+                if addr is not None:
+                    v = regs.get(r_d)
+                    if v is not None:
+                        mem[addr] = v & ((1 << 8 * size) - 1)
+                    else:
+                        mem.pop(addr, None)
+        if sum(1 for v in names.values() if v) < 3:
+            continue
+        out = {}
+        for i in range(n):
+            a = tbl + GPM_ENTRY * i
+            out[i] = {"index": mem.get(a), "flag": mem.get(a + 4),
+                      "msgs": tuple(mem.get(a + o) for o in (6, 8, 10)), "name": names.get(i, "")}
+        return out
+    return {}
+
+
+def gpm_lines(e, names, on_flag, debug=False):
+    """The port lines of a GamePlayModes build's challenges (see above), or []."""
+    single = _gpm_singleton(e)
+    tbl, n = _gpm_table(e)
+    if not single or not tbl:
+        return ["no singleton (%s) or table (%s)" % (single, tbl)] if debug else []
+    entries = _gpm_entries(e, tbl, n)
+    table, count = message_table(e)
+
+    def text(m):
+        return message_text(e, table, m) if table and m is not None and m < count else ""
+    if debug:
+        out = ["singleton 0x%x table 0x%x n %d" % (single, tbl, n)]
+        for i, v in sorted(entries.items()):
+            out.append("%2d idx %s flag %s %s msgs %s" % (i, v["index"], v["flag"], v["name"],
+                                                          [(m, text(m)) for m in v["msgs"]]))
+        return out
+    plain = next((i for i, v in sorted(entries.items()) if v["name"] == "sys_standard" and not v["flag"]), None)
+    if plain is None:
+        return []
+    lines, slot = [], 0
+    for i, v in sorted(entries.items()):
+        if v["flag"] != on_flag or v["index"] != i or v["name"].endswith("_test"):     # Jaws: a video-mode test
+            continue
+        msg = v["msgs"][0]
+        stem = re.sub(r"[^A-Z0-9]+", "_", text(msg).upper()).strip("_") \
+            or re.sub(r"^[a-z]+_(cm_)?", "", v["name"]).upper()
+        lines += ["# entry %d of the game-play-mode table at 0x%08x (%s): flag %d alone - picked by its index"
+                  % (i, tbl, v["name"], on_flag),
+                  "value challenge_mode_%d  %d" % (slot, i),
+                  "text  challenge_name_%d  %s" % (slot, pretty(_short(stem)))]
+        if msg:
+            lines.append("value challenge_name_msg_%d  %d" % (slot, msg))
+        slot += 1
+    if not slot:
+        return []
+    return ["value challenge_on_flag   %d" % on_flag,
+            "data  game_play_modes     0x%08x   # the GamePlayModes singleton: the current game-play mode at +8" % single,
+            "value game_play_mode_at   8",
+            "value challenge_mode_plain  %d   # Standard: what a mode's challenge game plays" % plain] + lines
 
 
 def missing_from(lines, port_text):

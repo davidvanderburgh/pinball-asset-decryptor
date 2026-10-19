@@ -609,3 +609,25 @@ text  wizard_film_5   all five beaches closed
 data  wizard_obj_6    0x0086add8   # cmode_great_white_multiball, a multiball
 text  wizard_name_6   Great White Multiball
 text  wizard_film_6   Quint's gear or the bounty sharks
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x0087bc54
+value game_flags_at       4
+data  game_flag_count     0x006ad1c4
+value challenge_on_flag   18
+data  game_play_modes     0x00860078   # the GamePlayModes singleton: the current game-play mode at +8
+value game_play_mode_at   8
+value challenge_mode_plain  1   # Standard: what a mode's challenge game plays
+value challenge_mode_0  8
+text  challenge_name_0  4th of July
+value challenge_name_msg_0  4102
+value challenge_mode_1  9
+text  challenge_name_1  Shark Hunter
+value challenge_name_msg_1  4107
+value challenge_mode_2  11
+text  challenge_name_2  Jaws the Revenge
+value challenge_name_msg_2  4110
+value challenge_mode_3  12
+text  challenge_name_3  The Shark Is Broken
+value challenge_name_msg_3  4111
+site  challenge_balls     0x002a2704 0xe92d4030 0xe1a05000

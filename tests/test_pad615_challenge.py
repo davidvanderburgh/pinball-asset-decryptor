@@ -34,7 +34,7 @@ PORTS = {"james_bond_le-1.06": BOND, "james_bond_pro-1.06": BOND, "stranger_thin
 
 LE = MP.profile_from_port(str(SDK / "ports" / "james_bond_le-1.06.port"))
 STP = MP.profile_from_port(str(SDK / "ports" / "stranger_things-1.13.port"))
-BARE = MP.profile_from_port(str(SDK / "ports" / "jaws_pro-1.02.port"))   # PAD-619: no challenge found (Godzilla has its own now)
+BARE = MP.profile_from_port(str(SDK / "ports" / "king_kong_pro-0.97.port"))   # PAD-619: no challenge in its game modes
 UNPROVEN = replace(LE, key="james_bond_le_1_06_challengenot", challenges=(),
                    cannot=tuple(LE.cannot) + MP._challenge_cannot(
                        "james_bond_le-9.99", LE.label, MP.read_port(str(SDK / "ports" / "james_bond_le-1.06.port"))))
@@ -160,7 +160,7 @@ def test_the_named_builds_can_and_the_others_say_why_not():
     assert LE.can("challenge") and LE.challenges == BOND
     assert STP.can("challenge") and STP.challenges == ST
     assert not BARE.can("challenge") and BARE.challenges == ()
-    assert BARE.why_not("challenge") == ("Jaws Pro 1.02's Player Challenge mode has no list of challenges a "
+    assert BARE.why_not("challenge") == ("King Kong Pro 0.97's Player Challenge mode has no list of challenges a "
                                        "mode of yours can take a place in, and no start menu the app can add one to.")
     assert "has not yet seen a mode of yours start from one in the emulator" in UNPROVEN.why_not("challenge")
     assert not MP.GODZILLA_PRO_1_15.can("challenge")
@@ -208,7 +208,7 @@ def test_its_refusals():
     assert MP.validate(_spec(LE, starts_on="challenge")) == pick
     assert MP.validate(_spec(LE, starts_on="challenge", challenge=5)) == pick
     assert MP.validate(_spec(BARE, starts_on="challenge", challenge=0)) == [
-        "Starting as one of the game's challenges is not on Jaws Pro 1.02 yet (Mode says why)."]
+        "Starting as one of the game's challenges is not on King Kong Pro 0.97 yet (Mode says why)."]
 
 
 def test_it_round_trips_and_a_game_without_a_list_starts_on_its_shot(tmp_path):
@@ -401,7 +401,7 @@ def test_the_tab_offers_the_challenges_on_bond_and_nothing_elsewhere(tmp_path):
             assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")
             w.call("ui.set", "modes", "f:starts_kind", "shot")
             assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("challenge") == -1)
-        proj = _card_project(tmp_path / "jaws", "jaws_pro-1_02_0.Release.16G.sdcard.raw")
+        proj = _card_project(tmp_path / "kk", "king_kong_pro-0_97_0.Release.16G.sdcard.raw")
         with web_app(tmp_path, mfr="stern") as w:
             _project(w, proj)
             w.call("modes.new")

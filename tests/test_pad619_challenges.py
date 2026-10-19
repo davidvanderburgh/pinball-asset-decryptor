@@ -181,3 +181,42 @@ def test_a_challenge_pick_waits_for_the_games_mode_running_as_the_ball_starts():
     end = src[src.index("static void challenge_ball_end(void)"):]
     assert "challenge_said_wait = 0;" in end[:end.index("\n}\n")]
     assert "%s not started (%s): %s is running - its trigger count is kept" in src
+
+
+# ---- the GamePlayModes builds: a challenge is the game-play mode's index ---------------------------
+GPM_PORTS = ("jaws_le-1.02", "jaws_pro-1.02", "john_wick_le-1.01", "john_wick_le-1.02", "john_wick_pro-1.02",
+             "metallica_spike-1.03", "metallica_spike-1.04")
+
+
+@pytest.mark.parametrize("key", GPM_PORTS + ("godzilla_le-1.16", "godzilla_pro-1.15", "godzilla_pro-1.16"))
+def test_the_game_mode_table_ports_carry_what_the_finder_reads(key):
+    test_the_ports_carry_what_the_finder_reads_off_the_game(key)
+
+
+def test_jaws_names_its_four_challenges_by_their_index_and_standard_plays_instead():
+    port = _port("jaws_pro-1.02")
+    v = port["value"]
+    assert port["data"]["game_play_modes"] and int(v["game_play_mode_at"]) == 8 and int(v["challenge_mode_plain"]) == 1
+    assert [int(v["challenge_mode_%d" % n]) for n in range(4)] == [8, 9, 11, 12]     # 10 is a video-mode test
+    assert MP._challenges(port) == ("4th of July", "Shark Hunter", "Jaws the Revenge", "The Shark Is Broken")
+    assert MP._challenges(_port("john_wick_pro-1.02")) == (
+        "Red Circle Reckoning", "The Staircase", "The Duel", "Special Assignment", "Tick Tock Mr. Wick")
+
+
+def test_the_game_modes_with_no_challenge_say_so():
+    for key in ("king_kong_pro-0.97", "uncanny_xmen_le-0.98"):
+        p = MP.profile_from_port(str(PORTS / ("%s.port" % key)))
+        assert not p.can("challenge") and "has no list of challenges" in p.why_not("challenge"), key
+
+
+def test_the_runtime_takes_a_pick_by_its_flag_or_its_game_play_mode():
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    picked = src[src.index("static int challenge_picked(unsigned n)"):]
+    picked = picked[:picked.index("\n}\n")]
+    assert 'pm_port_value("game_play_mode_at", 8)' in picked and '"challenge_mode_%u"' in picked
+    unpick = src[src.index("static void challenge_unpick(unsigned n)"):]
+    unpick = unpick[:unpick.index("\n}\n")]
+    assert "game_flag_clear(" in unpick and 'pm_port_value("challenge_mode_plain", 1)' in unpick
+    start = src[src.index("static void challenge_ball_start(void)"):]
+    start = start[:start.index("\n}\n")]
+    assert "picked = challenge_picked(n);" in start and "challenge_unpick(n);" in start

@@ -696,3 +696,31 @@ text  wizard_name_1      Blackened Multiball
 site  wizard_go_2        0x00140fe4 0xe30c1d84 0xe3a000df   # AUD_THE_END_OF_THE_LINE_MODE_STARTED
 value wizard_proc_2      223   # its own process, which the start creates
 text  wizard_name_2      The End of the Line
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+data  game_play_modes     0x06fc26c0   # the GamePlayModes singleton: the current game-play mode at +8
+value game_play_mode_at   8
+value challenge_mode_plain  1   # Standard: what a mode's challenge game plays
+value challenge_mode_0  8
+text  challenge_name_0  Lux Aeterna Combo
+value challenge_name_msg_0  3689
+value challenge_mode_1  9
+text  challenge_name_1  For Whom the Bell Tolls
+value challenge_name_msg_1  3650
+value challenge_mode_2  10
+text  challenge_name_2  Fade to Black
+value challenge_name_msg_2  3651
+value challenge_mode_3  11
+text  challenge_name_3  Battery
+value challenge_name_msg_3  3652
+value challenge_mode_4  12
+text  challenge_name_4  Enter Sandman
+value challenge_name_msg_4  3653
+value challenge_mode_5  13
+text  challenge_name_5  The End of the Line
+value challenge_name_msg_5  3654
+value challenge_mode_6  14
+text  challenge_name_6  The Unforgiven
+value challenge_name_msg_6  3655
+site  challenge_balls     0x004481f0 0xe92d4030 0xe1a05000

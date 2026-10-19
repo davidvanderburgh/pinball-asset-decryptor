@@ -8442,7 +8442,12 @@ static void on_roster_start(unsigned *r)
  * flag - `value challenge_flag_<n>` without the site. The runtime takes it as the ball starts instead: at the game's
  * dispatch of the port's `event ball_start` (on the game's thread, before any of the game's own handlers of it run),
  * a challenge game with that flag set and a mode holding it has the flag cleared - so the game's own challenge sees no
- * pick and never starts - and the holder's on_pick called. */
+ * pick and never starts - and the holder's on_pick called.
+ * PAD-619: the GamePlayModes builds (Jaws, John Wick, Metallica, ...) set FG_PLAYER_CHALLENGE_MODE_ACTIVE alone for
+ * every challenge; which one is the framework's current game-play mode, an index into the game's mode table (the
+ * singleton `data game_play_modes`, the index at `value game_play_mode_at`). Their challenges name it - `value
+ * challenge_mode_<n>` (the entry's index) instead of a flag - and the ball's start takes one by setting the index to
+ * Standard's (`value challenge_mode_plain`): the game plays a plain challenge game, the mode's. */
 #define N_CHALLENGE 8
 static int (*challenge_fn[N_CHALLENGE])(unsigned slot);
 static const struct pm_mode *challenge_by[N_CHALLENGE];
@@ -8705,6 +8710,36 @@ static void challenge_menu_picked(unsigned *r)
     }
 }
 
+static void game_flag_clear(unsigned id);
+
+/* PAD-619: challenge n's pick in this game - 1 / 0, -1 unknown: its flag, or the game-play mode's index */
+static int challenge_picked(unsigned n)
+{
+    char key[24];
+    long want;
+    pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
+    if (pm_port_value(key, 0) > 0) return game_flag((unsigned)pm_port_value(key, 0));
+    pm_snprintf(key, sizeof key, "challenge_mode_%u", n);
+    want = pm_port_value(key, -1);
+    if (want < 0 || !data("game_play_modes")) return -1;
+    return *(const unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8))
+           == (unsigned)want;
+}
+
+/* PAD-619: the game's own challenge n sees no pick: its flag cleared, or the game-play mode made Standard */
+static void challenge_unpick(unsigned n)
+{
+    char key[24];
+    pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
+    if (pm_port_value(key, 0) > 0) {
+        game_flag_clear((unsigned)pm_port_value(key, 0));
+        return;
+    }
+    if (data("game_play_modes") && pm_port_value("challenge_mode_plain", -1) >= 0)
+        *(unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8))
+            = (unsigned)pm_port_value("challenge_mode_plain", 1);
+}
+
 static void game_flag_clear(unsigned id)
 {
     unsigned char *bits;
@@ -8728,7 +8763,6 @@ static void challenge_ball_start(void)
 {
     const struct pm_mode *was = current;
     static int said;
-    char key[24];
     int on = game_flag((unsigned)pm_port_value("challenge_on_flag", 0)), k = own_pending, took;
     long slot = pm_port_value("challenge_menu_slot", 0);
     unsigned n;
@@ -8738,10 +8772,7 @@ static void challenge_ball_start(void)
         if (!challenge_ball_takes(on, how, 0, 0)) return;          /* challenge 0's own handler hands it over */
         own_pending = -1;
         if (!own_challenge[k].fn) return;
-        if (how >= 0) {                                             /* the challenge it stood in for: stopped */
-            pm_snprintf(key, sizeof key, "challenge_flag_%d", how);
-            game_flag_clear((unsigned)pm_port_value(key, 0));
-        }
+        if (how >= 0) challenge_unpick((unsigned)how);              /* the challenge it stood in for: stopped */
         note_thread("challenge pick", &said);
         current = own_challenge[k].by;
         took = own_challenge[k].fn(CHALLENGE_OWN + (unsigned)k);
@@ -8754,16 +8785,15 @@ static void challenge_ball_start(void)
     for (n = 0; n < (unsigned)challenges_n; n++) {
         int picked;
         if (challenge_site[n] || !challenge_fn[n]) continue;
-        pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
-        picked = game_flag((unsigned)pm_port_value(key, 0));
+        picked = challenge_picked(n);
         if (!challenge_ball_takes(on, -3, 1, picked)) continue;
-        game_flag_clear((unsigned)pm_port_value(key, 0));          /* the game's own sees no pick */
+        challenge_unpick(n);                                        /* the game's own sees no pick */
         note_thread("challenge pick", &said);
         current = challenge_by[n];
         took = challenge_fn[n](n);
         current = was;
         say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
-            took ? "the mode takes it - its flag cleared, the game's own does not start" : "the mode let it go");
+            took ? "the mode takes it - its pick cleared, the game's own does not start" : "the mode let it go");
         if (took) challenge_ours = 1;
         return;
     }
@@ -8790,8 +8820,11 @@ static void challenges_arm(void)
         pm_snprintf(key, sizeof key, "challenge_go_%u", n);
         if (!site(key)) {
             pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
-            if (pm_port_value(key, 0) <= 0) break;
-            challenge_site[n] = 0;                    /* PAD-619: by its flag alone, as the ball starts */
+            if (pm_port_value(key, 0) <= 0) {
+                pm_snprintf(key, sizeof key, "challenge_mode_%u", n);   /* PAD-619: or its game-play mode's index */
+                if (pm_port_value(key, -1) < 0 || !data("game_play_modes")) break;
+            }
+            challenge_site[n] = 0;                    /* PAD-619: by its flag (or mode index) alone, as the ball starts */
             challenges_n = (int)n + 1;
             continue;
         }

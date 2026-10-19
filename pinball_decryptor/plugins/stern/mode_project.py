@@ -930,12 +930,14 @@ def _challenge_cannot(key, label, port=None):
 
 def _challenges(port):
     """The names of the port's challenges, in the game's menu order, from 0 with no gap: each one's own start
-    (``challenge_go_<n>``) or, PAD-619, its flag where the port has the ball's start to take it on."""
+    (``challenge_go_<n>``) or, PAD-619, its flag - or its game-play mode's index (``challenge_mode_<n>``, the
+    GamePlayModes builds) - where the port has the ball's start to take it on."""
     out = []
     ball = any(e[0] == "ball_start" for e in (port or {}).get("event", ()))
     while port and len(out) < 8:
         n = len(out)
-        if not ("challenge_go_%d" % n in port["site"]
+        by_mode = ball and port["data"].get("game_play_modes")             and str(port["value"].get("challenge_mode_%d" % n, "")).strip() not in ("", "-1")   # the mode's index
+        if not ("challenge_go_%d" % n in port["site"] or by_mode
                 or ball and str(port["value"].get("challenge_flag_%d" % n, "0")).strip() not in ("", "0")):
             break
         out.append(port["text"].get("challenge_name_%d" % n, "").strip() or "Challenge %d" % (n + 1))

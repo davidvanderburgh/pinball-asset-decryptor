@@ -87,3 +87,13 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   in-game feature flag, not a menu challenge (to confirm).
 - Rig notes: cards on D: copy at ~9 MB/s while another ticket reads D:; never stage from two batches at once (the
   cache refused a card and it booted uncached and crashed); Tech Alerts boots must wait for the game loop (proof619c).
+- Star Wars LE 1.30/1.31, Pro 1.31: done in code (a4fe926b) - compare-chain pick hooked a word early, ours by name
+  pointer, Standard's kind, `challenge_menu_sets_on`; list sized for the game's own (cap 3/4). Rig proof queued.
+- The other plain-challenge menus (C:/tmp/PAD-619/menuscan.py <key> <va near message 1911's use>):
+  Elvira 1.13 fn 0x99198: frame 0x99764, Bond's jump at 0x99900 (`ldr r3,[r3,#-0x350]; sub; cmp #6; ldrls pc`) -
+  menu_generic misses only its count (kept in r5); JP Pro 1.16 fn 0xe29dc: frame 0xe382c, count sp+0x3c, chain at
+  0xe3960 (`ldr r3,[r3,#-0xb8]; cmp #1; beq; cmp #2`); Foo Fighters Pro 1.04 fn 0xcc15c: frame 0xcd220, count sp+0x28,
+  pick not in this function; Mando Pro 1.45 fn 0x103114: count sp+0x40, kind test at 0x1046a4 (`ldr r3,[r3,#-0xcc];
+  cmp #1; movne`); TMNT Pro 1.59 fn 0xa7710: frame 0xa8f40, kinds compared to 10 and 12 (0xa8f94, 0xa9368); Bond 60th
+  LE 1.11: message 1911 not loaded by an immediate - find its menu another way.
+- Proofs so far this round: Jaws Pro 1.02, John Wick Pro 1.02 (mode run; control pending).

@@ -230,6 +230,63 @@ void pad_present(void)
     }
 }
 
+/* PAD-617: WHO STILL NEEDS A VIDEO RING SLOT. gstvid.c hands the game a frame
+ * by pointing it at a padvid ring slot, and the renderer reads that slot only
+ * when it reaches the upload command - a frame or two after the game named
+ * it, and the game names it again every tick until it picks up the next
+ * frame. A slot freed the moment the next frame is HANDED can be refilled by
+ * the decoder before then, and the renderer shows a frame from the future
+ * followed by the one it should have shown: video that stutters and runs
+ * back (DragonRR, Godzilla).
+ *
+ * So the bridge remembers, per ring offset, the command-stream position of
+ * the last upload that named it and the frame it was in, and gstvid.c asks
+ * before it lets the host reuse a slot. Positions are the low 32 bits of
+ * head/tail, compared by difference: one store on this 32-bit guest, so the
+ * video thread can never read half of one. A libGLESv2 without these
+ * (gstvid finds them with dlsym) leaves gstvid freeing at handoff, as before. */
+#define VIDREF_MAX 64
+static struct { long off; volatile unsigned pos; volatile int frame; }
+    vidref[VIDREF_MAX];
+static volatile int vidref_n;
+
+static void vidref_note(long off)
+{
+    int i, n = vidref_n;
+    for (i = 0; i < n; i++)
+        if (vidref[i].off == off) break;
+    if (i == n) {
+        if (n == VIDREF_MAX) return;
+        vidref[i].off = off;
+    }
+    vidref[i].frame = frame_no;
+    vidref[i].pos = (unsigned)hdr->head;
+    if (i == n) vidref_n = n + 1;      /* published last: entry is whole */
+}
+
+/* 1 and the slot's last upload (position, frame) if one ever named `off`. */
+int pad_gl_vid_ref(long off, unsigned *pos, int *frame)
+{
+    int i, n = vidref_n;
+    for (i = 0; i < n; i++)
+        if (vidref[i].off == off) {
+            *frame = vidref[i].frame;
+            *pos = vidref[i].pos;
+            return 1;
+        }
+    return 0;
+}
+
+/* How far the renderer has read, and the frame being built. 0 when there is
+ * no renderer to wait for. */
+int pad_gl_vid_progress(unsigned *tail, int *frame)
+{
+    if (!hdr || bridge_dead) return 0;
+    *tail = (unsigned)*(volatile unsigned long long *)&hdr->tail;
+    *frame = frame_no;
+    return 1;
+}
+
 /* ---------------- GL entry points ---------------- */
 #define U(...) do { unsigned int _v[] = { __VA_ARGS__ }; \
                     emit_u(op_, _v, sizeof _v / 4u); } while (0)
@@ -1179,6 +1236,7 @@ void glTexDirectInvalidateVIV(unsigned int target)
         /* The pixels are already in a block the host has open. Send six words. */
         a[3] = PADGL_SRC_VIDSHM; a[4] = (unsigned)off; a[5] = bytes;
         emit(PADGL_TEXDIRECT, a, sizeof a, 0, 0);
+        vidref_note(off);                              /* PAD-617 */
     } else {
         a[3] = PADGL_SRC_INLINE; a[4] = 0; a[5] = bytes;
         emit(PADGL_TEXDIRECT, a, sizeof a, r->px, bytes);

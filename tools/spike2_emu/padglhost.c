@@ -381,6 +381,41 @@ static int vid_note_offset(unsigned off, unsigned bytes, unsigned w, unsigned h)
     return 1;
 }
 
+/* PAD-617: VIDEO SHOWN OUT OF ORDER, counted where it is read. This process
+ * reads a frame's pixels out of the ring when it gets to the upload command,
+ * which is later than the moment the game named the slot - and the decoder
+ * refills a slot as soon as the guest's read_idx frees it. The frame a slot
+ * holds right now is the newest one written into it, so it can be inferred
+ * from write_idx alone. Within one request (same req_gen) that number must
+ * never go down; when it does, the screen just ran backwards, which is what a
+ * tester described ("frames will even run back slightly"). A jump forward of
+ * more than one frame is the other half of the same read - the frame from the
+ * future that came before the run back. */
+static long vid_back, vid_skip;
+static struct { unsigned gen, f, have; } vid_order[PADVID_CHANNELS];
+
+static void vid_order_note(unsigned off)
+{
+    unsigned chan_span = (unsigned)PADVID_SLOTS * PADVID_SLOT_BYTES;
+    unsigned ch = off / chan_span;
+    unsigned slot = (off % chan_span) / PADVID_SLOT_BYTES;
+    const volatile struct padvid_chan *c;
+    unsigned wi, gen, f;
+    if (!vid_hdr || ch >= PADVID_CHANNELS) return;
+    c = &vid_hdr->ch[ch];
+    gen = c->req_gen;
+    wi = c->write_idx;
+    if (wi <= slot) return;                 /* the slot holds nothing yet */
+    f = wi - 1 - ((wi - 1 - slot) % PADVID_SLOTS);
+    if (vid_order[ch].have && vid_order[ch].gen == gen) {
+        if (f < vid_order[ch].f) vid_back++;
+        else if (f > vid_order[ch].f + 1) vid_skip++;
+    }
+    vid_order[ch].gen = gen;
+    vid_order[ch].f = f;
+    vid_order[ch].have = 1;
+}
+
 /* Every distinct size the game has asked to upload, and how often. Eight is
  * more than a run has ever needed: Godzilla uses two (1360x768 and the
  * 520x294 TV inset) and Jaws adds its RGBA surfaces. */
@@ -5403,6 +5438,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                     vid_dropped++;
                     break;
                 }
+                vid_order_note(u[4]);              /* PAD-617 */
             }
         } else if (len >= 24 + u[5]) {
             yuv = pl + 24;
@@ -6244,6 +6280,12 @@ int main(int argc, char **argv)
                         nf ? swap_us / nf / 1000.0 : 0.0, vid_texsub);
                 last_up = vid_uploads; last_dist = vid_distinct;
                 conv_us = up_us = swap_us = 0;
+                if (vid_back || vid_skip) {
+                    fprintf(stderr, "[padglhost] video OUT OF ORDER: %ld frame"
+                            "(s) shown after a later one, %ld jump(s) ahead "
+                            "(PAD-617)\n", vid_back, vid_skip);
+                    vid_back = vid_skip = 0;
+                }
                 if (vid_swaphist[1] + vid_swaphist[2] + vid_swaphist[3] +
                     vid_swaphist[4] + vid_swaphist[5]) {
                     long h = vid_swaphist[3] + vid_swaphist[4] + vid_swaphist[5];

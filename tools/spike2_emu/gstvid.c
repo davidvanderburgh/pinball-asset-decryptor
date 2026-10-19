@@ -745,6 +745,105 @@ static unsigned long vid_us(void)
  * The door is game logic's business; video answers the truth and nothing
  * else. */
 
+/* ★ PAD-617: A SLOT IS FREE WHEN NOTHING CAN STILL READ IT, NOT WHEN THE NEXT
+ * FRAME IS HANDED. read_idx used to move the moment a handoff returned, and
+ * the host refills a slot as soon as read_idx lets it. But the game only
+ * NAMES the slot (glTexDirectVIVMap on the ring pointer); padglhost reads the
+ * pixels when it reaches that upload, a frame or two behind the game, and the
+ * game keeps re-uploading the frame it has until it picks up the next one.
+ * On a busy machine the host had often already written a frame three ahead
+ * into the slot by then: the screen showed a frame from the future and then
+ * the one it should have shown - video that stutters and "runs back
+ * slightly" (DragonRR). Godzilla LE attract with the CPU loaded: 28 backward
+ * frames in 90 s, 0 with the CPU idle.
+ *
+ * So a handed frame keeps its slot while the GL bridge says an upload that
+ * named it is not read yet, or while it is the channel's most recently named
+ * slot in a recent frame (the game may name it again). Asked per slot rather
+ * than by a fixed count of swaps: the first cut of this waited three swaps,
+ * which at a hidden rig's 30 fps held read_idx 100 ms back, starved the
+ * decoder and made the delivery itself stutter. A hold longer than
+ * VID_HOLD_MAX_US is let go - a game that keeps one frame on screen forever
+ * (the service menu does) must not stall the stream behind it - and a
+ * libGLESv2 without the bridge calls (an older build) frees at handoff,
+ * exactly as before. */
+#define VID_HOLD_MAX_US 250000ul
+
+static int (*gl_vid_ref)(long, unsigned *, int *);
+static int (*gl_vid_progress)(unsigned *, int *);
+
+static unsigned vid_safe_read(unsigned char *ring, unsigned consumed)
+{
+    unsigned tail, pos, cur_pos = 0, best = consumed, f, f0, k;
+    int fnow, fr, cur_fr = 0;
+    long base, off, cur_off = -1;
+    if (!gl_vid_ref || !gl_vid_progress || !gl_vid_progress(&tail, &fnow))
+        return consumed;
+    base = pad_vid_ring_offset(ring);
+    if (base < 0) return consumed;
+    /* The channel's current frame: the slot an upload named most recently. */
+    for (k = 0; k < PADVID_SLOTS; k++) {
+        off = base + (long)k * PADVID_SLOT_BYTES;
+        if (gl_vid_ref(off, &pos, &fr) &&
+            (cur_off < 0 || (int)(pos - cur_pos) > 0)) {
+            cur_off = off; cur_pos = pos; cur_fr = fr;
+        }
+    }
+    /* Handed frames still in their slots, newest first; the oldest one still
+     * needed sets the limit. The current one is protected only while it is
+     * one of the last two handed - a game that stopped taking frames is not
+     * picking them up any more, and holding for it would stall the stream. */
+    f0 = consumed > PADVID_SLOTS - 1 ? consumed - (PADVID_SLOTS - 1) : 0;
+    for (f = consumed; f-- > f0; ) {
+        off = base + (long)(f % PADVID_SLOTS) * PADVID_SLOT_BYTES;
+        if (!gl_vid_ref(off, &pos, &fr)) continue;
+        if ((int)(tail - pos) < 0 ||
+            (off == cur_off && fnow - cur_fr <= 2 && f + 2 >= consumed))
+            best = f;
+    }
+    return best;
+}
+
+/* Move read_idx as far as nothing still reads. */
+static void vid_free_slots(struct padvid_chan *c, unsigned char *ring,
+                           unsigned gen, unsigned consumed, unsigned *freed,
+                           unsigned long *held_at)
+{
+    unsigned ok;
+    if (*freed >= consumed) return;
+    /* Taken over: read_idx is the new request's now, and the host has reset
+     * it. A late store from here is the "doomed previous thread" padvidhost
+     * already has to clamp. */
+    if (c->req_gen != gen) return;
+    ok = vid_safe_read(ring, consumed);
+    /* One past the oldest frame still needed: padvidhost writes no further
+     * than read_idx + SLOTS-2, so that frame's slot (SLOTS frames on) stays
+     * out of its reach. Publishing the frame itself held the decoder a
+     * frame shorter than it has to be, and on a 30 fps game that made it
+     * late often enough to show as skipped frames. Never past `consumed`:
+     * padvidhost reads a read_idx beyond what it wrote as stale. */
+    if (ok < consumed) ok++;
+    /* The game's current frame is held as a matter of course, so the clock
+     * runs from read_idx last MOVING, not from being short. */
+    if (ok > *freed) *held_at = 0;
+    else if (!*held_at) *held_at = vid_us();
+    else if (vid_us() - *held_at >= VID_HOLD_MAX_US) {
+        static unsigned budget = 20;
+        if (budget) {
+            char m[136];
+            budget--;
+            snprintf(m, sizeof m, "[vid] a ring slot was still named after "
+                     "%lu ms (read_idx %u, handed %u) - giving it to the "
+                     "decoder anyway\n", VID_HOLD_MAX_US / 1000, *freed,
+                     consumed);
+            pad_say(m);
+        }
+        ok = consumed;
+        *held_at = 0;
+    }
+    if (ok > *freed) c->read_idx = *freed = ok;
+}
+
 static void *vid_thread(void *arg)
 {
     struct stream *s = (struct stream *)arg;
@@ -763,16 +862,37 @@ static void *vid_thread(void *arg)
      * other pipeline took the channel - whatever size it took it at. */
     unsigned my_gen = vshm->ch[hw_of(s)].req_gen;
     unsigned consumed = 0;
+    unsigned freed = 0;           /* PAD-617: what read_idx says */
+    unsigned long held_at = 0;    /* PAD-617: when freed stopped short */
     unsigned delay = 33333;
     unsigned long t_epoch = 0;   /* set at frame 0; the schedule's zero */
     /* PAD-456: the run's first frame is the one at start_ms, not frame 0. */
     long long start_ns = (long long)s->start_ms * 1000000ll;
+    if (!gl_vid_ref || !gl_vid_progress) {
+        gl_vid_ref = (int (*)(long, unsigned *, int *))
+            dlsym((void *)0, "pad_gl_vid_ref");
+        gl_vid_progress = (int (*)(unsigned *, int *))
+            dlsym((void *)0, "pad_gl_vid_progress");
+        {
+            static int said;
+            if (!said) {
+                said = 1;
+                pad_say(gl_vid_ref && gl_vid_progress
+                        ? "[vid] ring slots are freed once the renderer has "
+                          "read them (PAD-617)\n"
+                        : "[vid] the GL bridge cannot say which ring slots it "
+                          "still reads - freeing at handoff, as before "
+                          "PAD-617\n");
+            }
+        }
+    }
     if (c->fps_num && c->fps_den)
         delay = (unsigned)(1000000ull * c->fps_den / c->fps_num);
     VLOG("[vid] ch%d streaming %ux%u at %u/%u fps (%u us/frame)\n",
          chan_of(s), c->width, c->height, c->fps_num, c->fps_den, delay);
     while (s->run_id == my_run && s->playing && c->playing) {
         unsigned produced;
+        vid_free_slots(c, ring, my_gen, consumed, &freed, &held_at);   /* PAD-617 */
         /* item 43: REAL PAUSED SEMANTICS. While the game's last set_state is
          * PAUSED, hold - consume nothing, hand nothing over. The thread stays
          * alive (item 11's absorb is the reason it exists across a re-arm) but
@@ -1016,8 +1136,8 @@ static void *vid_thread(void *arg)
              * a return that forgot to record it would read as a runaway. */
             s->delivered = consumed;
             s->pos_ns = start_ns + (long long)consumed * delay * 1000ll;
-            /* Only now may the host reuse this slot. */
-            c->read_idx = consumed;
+            /* The host may reuse a slot once nothing reads it any more
+             * (PAD-617) - see vid_safe_read; the loop top publishes it. */
         }
         /* ★ ITEM 11's CADENCE FIX: SCHEDULE FRAMES ABSOLUTELY, DO NOT SLEEP
          * A PERIOD. The old `usleep(delay)` ran AFTER each frame's work, so
@@ -1043,7 +1163,13 @@ static void *vid_thread(void *arg)
         {
             unsigned long target = t_epoch + (unsigned long)consumed * delay;
             long ahead = (long)(target - vid_us());
-            if (ahead > 0) usleep((unsigned)ahead);
+            /* PAD-617: in short steps, so a slot the renderer has finished
+             * with goes back to the decoder now rather than a frame later. */
+            while (ahead > 0) {
+                usleep((unsigned)(ahead > 5000 ? 5000 : ahead));
+                vid_free_slots(c, ring, my_gen, consumed, &freed, &held_at);
+                ahead = (long)(target - vid_us());
+            }
         }
     }
     /* Reaching here means someone else already cleared a flag (stop, or a new

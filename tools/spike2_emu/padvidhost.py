@@ -662,7 +662,14 @@ def serve(m, c, path, w, h, native, gen, old_read, start_ms=0):
         tick, up to ~16 ms later. At full depth the very next write is
         allowed to land in the slot of the frame the game was JUST handed -
         the steady-state intermittent tear. One slot of distance keeps the
-        write head a full frame period behind the display."""
+        write head a full frame period behind the display.
+
+        PAD-617: a frame period was not always enough - a renderer two
+        30 fps frames behind read a slot this had already refilled, and the
+        video ran back. The guest now holds read_idx at one past the oldest
+        frame an unread upload still names (gstvid.c vid_free_slots), and
+        that "one past" leans on this one slot of distance: going to SLOTS
+        here would hand it straight back."""
         r = get(m, c, "read_idx")
         if r > p:      # stale: the doomed previous thread published one last
             r = 0      # read_idx after chan_loop zeroed it. Without this

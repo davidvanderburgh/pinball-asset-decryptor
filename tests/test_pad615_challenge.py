@@ -583,3 +583,47 @@ def test_the_tab_offers_a_challenge_of_its_own_on_bond(tmp_path):
             assert w.state("modes")["profile"]["challenge_new"] == ""
     finally:
         preview.enabled = old
+
+
+def test_own_challenge_problems_name_twins_and_the_menus_room():
+    entries = [("a", "BOND VS SUMO", "the form mode BOND VS SUMO"), ("b", "Bond vs Sumo", "the blocks mode Bond vs Sumo"),
+               ("c", "DIAMOND DEATH THREAT", "the blocks mode DIAMOND DEATH THREAT")]
+    out = MP.own_challenge_problems(entries, 2)
+    assert any("Another mode (the blocks mode Bond vs Sumo) is also a new challenge of its own called BOND VS SUMO"
+               in p for p in out["a"])
+    assert all(any("3 modes in this project are new challenges of their own" in p for p in out[k]) for k in "abc")
+    assert not any("Another mode" in p for p in out["c"])
+    assert MP.own_challenge_problems(entries[:1] + entries[2:], 2) == {}
+
+
+def test_the_tab_refuses_a_form_and_a_blocks_mode_both_new_under_one_name(tmp_path):
+    """The reporter's project: BOND VS SUMO as a form mode and as a blocks mode, each A new challenge of its own -
+    the menu would list it twice and both of Bond's free places would go to one mode."""
+    from tests.test_webui_modes import _card_project, _project, _wait
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import preview
+    old = preview.enabled
+    preview.enabled = lambda feature: feature == "modes"
+    try:
+        proj = _card_project(tmp_path / "bond", "james_bond_le-1_06_0.Release.16G.sdcard.raw")
+        bslug, _ = BM.new_blocks_mode(str(proj), "BOND VS SUMO")
+        BM.save(str(proj), bslug, {"name": "BOND VS SUMO", "seconds": 30, "scripts": [
+            {"hat": {"kind": "challenge", "challenge": BM.CHALLENGE_NEW}, "do": [{"op": "start_mode"}]}]})
+        with web_app(tmp_path, mfr="stern") as w:
+            _project(w, proj)
+            slug = w.call("modes.new")
+            w.call("ui.set", "modes", "f:name", "BOND VS SUMO")
+            w.call("ui.set", "modes", "f:challenge", "A new challenge of its own")
+            w.call("ui.set", "modes", "f:starts_kind", "challenge")
+            assert _wait(w, lambda: "is also a new challenge of its own called BOND VS SUMO"
+                         in w.state("modes")["status"])
+            w.call("modes.select", bslug, "code")                    # the blocks twin says so too
+            assert _wait(w, lambda: any("the form mode BOND VS SUMO" in p for p in
+                                        ((w.state("modes").get("code") or {}).get("blocks") or {}).get("problems", [])))
+            w.call("modes.select", slug, "form")
+            w.call("ui.set", "modes", "f:starts_kind", "shot")      # one is enough: the other back on its shot
+            assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")
+            w.call("modes.select", bslug, "code")
+            assert _wait(w, lambda: (w.state("modes").get("code") or {}).get("blocks", {}).get("problems") == [])
+    finally:
+        preview.enabled = old

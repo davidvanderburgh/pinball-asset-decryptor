@@ -4958,6 +4958,32 @@ def more_to_start_lines(spec, p):
     return lines
 
 
+def own_challenge_problems(entries, room):
+    """PAD-615 round 3: ``{key: [sentence]}`` for the project's modes that are new challenges of their own on the
+    game's start menu. ``entries`` is ``[(key, name, what)]`` - one per such mode, form or blocks (``what``: "the
+    blocks mode" / "the form mode", for the sentence) - and ``room`` how many the menu holds. Two under one name would
+    be listed twice (the menu shows names in capitals, so case does not tell them apart); more than ``room`` would
+    leave some off the menu, which ones depending on the order the card loads them."""
+    out = {}
+    by_name = {}
+    for key, name, what in entries:
+        by_name.setdefault(name.strip().upper(), []).append((key, name.strip(), what))
+    for same in by_name.values():
+        if len(same) < 2:
+            continue
+        for key, name, _what in same:
+            others = ", ".join(w for k, _n, w in same if k != key)
+            out.setdefault(key, []).append(
+                "Another mode (%s) is also a new challenge of its own called %s: the game's start menu would list it "
+                "twice. One mode per challenge is enough: set the other one's start back, or delete it." % (others, name))
+    if room and len(entries) > room:
+        for key, _name, _what in entries:
+            out.setdefault(key, []).append(
+                "%d modes in this project are new challenges of their own, and the game's start menu has room for "
+                "%d: take one off." % (len(entries), room))
+    return out
+
+
 def after_problems(modes):
     """``{slug: [sentence]}`` for each of ``modes`` (``[(slug, ModeSpec)]``, one project's)
     whose ``after`` names no mode of the project: on the card it would never start."""

@@ -741,6 +741,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                       "saves it. Until then its file is unchanged, and a "
                                       "build refuses it.")
             problems = MP.validate(spec, MP.mode_folder(project, slug))
+            if self._is_own_challenge(spec):                # PAD-615 round 3: a twin, or past the menu's room
+                problems += self._own_challenge_problems().get(slug, [])
         except Exception:                                   # noqa: BLE001
             return "", ""
         if not problems:
@@ -1102,6 +1104,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         problems = MP.validate(spec, folder) if spec else []
         if spec is not None:                      # PAD-227: a mode it waits for that is not here
             problems += MP.after_problems([(self._slug, spec)] + self._other_modes()).get(self._slug, [])
+        if spec is not None and self._is_own_challenge(spec):     # PAD-615 round 3: the menu's room, its names
+            problems += self._own_challenge_problems(form=(self._slug, spec)).get(self._slug, [])
         status = ("Ready to build." if not problems
                   else "To fix before it can be built: " + " ".join(problems))
         self._problems = list(problems)
@@ -1408,6 +1412,43 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.wizard_how = self.f["wizard_how"] if self.f["wizard_how"] in MP.WIZARD_HOW else "light"
 
     # PAD-227: more than one thing to meet before it starts
+    @staticmethod
+    def _is_own_challenge(spec):
+        return MP.starts_on_challenge(spec) and MP._int_or_none(spec.challenge) == MP.CHALLENGE_NEW
+
+    @staticmethod
+    def _blocks_own_challenge(program):
+        return any((s.get("hat") or {}).get("kind") == "challenge"
+                   and (s.get("hat") or {}).get("challenge") == BM.CHALLENGE_NEW for s in program.get("scripts") or [])
+
+    def _own_challenge_problems(self, form=None, blocks=None):
+        """PAD-615 round 3: MP.own_challenge_problems over every mode of the project that is a new challenge of its
+        own - the form modes as found, the blocks modes as saved - with the open one as it is now (``form`` or
+        ``blocks``: ``(slug, spec or program)``)."""
+        p = self._shown or self._profile
+        room = int(getattr(p, "challenge_menu", 0) or 0) if p is not None else 0
+        entries = []
+        for slug, spec in (self._found or {}).items():
+            if form and slug == form[0]:
+                spec = form[1]
+            if self._is_own_challenge(spec):
+                entries.append((slug, spec.name.strip(), "the form mode %s" % spec.name.strip()))
+        if form and form[0] not in (self._found or {}) and self._is_own_challenge(form[1]):
+            entries.append((form[0], form[1].name.strip(), "the form mode %s" % form[1].name.strip()))
+        project = self.project()
+        for slug, name in (self._blocks_modes() if project else []):
+            if blocks and slug == blocks[0]:
+                program = blocks[1]
+            else:
+                try:
+                    program = BM.load(project, slug)
+                except (OSError, ValueError):
+                    continue
+            if self._blocks_own_challenge(program):
+                title = str(program.get("name") or name).strip()
+                entries.append((slug, title, "the blocks mode %s" % title))
+        return MP.own_challenge_problems(entries, room)
+
     def _other_modes(self):
         """``[(slug, ModeSpec)]`` of the project's other form modes."""
         return [(slug, spec) for slug, spec in (self._found or {}).items() if slug != self._slug]
@@ -2909,8 +2950,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         modes = [s for s, _n in self._blocks_modes()] if self.project() else None                     # PAD-600
         challenges = (list(getattr(p, "challenges", ()) or ())                                     # PAD-615
                       + ([BM.CHALLENGE_NEW] if getattr(p, "challenge_menu", 0) else [])) if p is not None else None
-        return (BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards,   # PAD-436
-                            inserts, building, modes, challenges), BM.notes(program))                       # PAD-589
+        problems = BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards,   # PAD-436
+                               inserts, building, modes, challenges)                                         # PAD-589
+        if self._code_slug and self.project() and self._blocks_own_challenge(program):   # PAD-615 round 3
+            problems += self._own_challenge_problems(blocks=(self._code_slug, program)).get(self._code_slug, [])
+        return problems, BM.notes(program)
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

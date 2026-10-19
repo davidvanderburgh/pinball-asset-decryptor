@@ -212,6 +212,26 @@ Every view writes the same program, so the blocks' limits (48 scripts, 400 block
 (`to_c`) stay exactly as they are. A view adds nothing that has to be compiled differently and cannot make a mode
 the blocks could not.
 
+## Built so far (PAD-612)
+
+Steps 1 and 2 are in the Modes tab:
+
+- **The tab strip.** A blocks mode's pane has the tabs **Blocks | Playfield | C it makes**, with one Undo / Redo and
+  the saved line beside them. `modes_blocks.js useModeProgram` holds the one program, its one history and its saving;
+  each view makes its own `useEd` (its pick and drop line) over it, so a block edited in any view is a step of the
+  same history and is saved to the same `blocks.json`. A later view is one more entry in `modes.js BLOCKS_PAGES`.
+- **Playfield.** `plugins/stern/playfield_art.py` reads the game's own playfield drawing off the project's card
+  (`<game>/assets/nuk/images/<a test folder>/*playfield*.png`, chosen by the emulator window's rules) and the
+  inserts' places from the port's `lamp ... at X,Y` lines; `modes.blocks_playfield` hands both to the page. The
+  view (`modes_playfield.js`, its reading of the program in `modes_views.js`) draws every insert, the mode's lit
+  ones in their color and pattern; a shot picked (on the picture or from the shot list) shows its rules as blocks,
+  editable in place, grouped by when they run, with Add a rule for each, and the other rules that name it; rules not
+  tied to a shot are listed below. With no picture (no card, another game's card, a title that ships none) the
+  inserts are drawn on an outline and the reason is said under it.
+
+Left for later tickets: Rule cards, Story, Script with its editor, Shot table, Timeline, Node graph, and the
+Playfield as the shot picker of the other views.
+
 ## Files
 
 - `tools/mode_views/mode_script.py`: `blocks.json` ⇄ script text (`to_script`, `from_script`).
@@ -220,3 +240,5 @@ the blocks could not.
 - `tools/mode_views/showcase.py`: RAMP FRENZY.
 - `scripts/shot_pad611.py`: the blocks page with RAMP FRENZY loaded, and the seven views of the same file.
 - `tests/test_pad611_mode_script.py`: the round trip and the views (39 tests).
+- `plugins/stern/playfield_art.py`, `webui/static/js/tabs/modes_playfield.js`, `modes_views.js`: the Playfield view
+  (PAD-612); `tests/test_pad612_mode_views.py`; `scripts/shot_pad612.py`: its proof shots.

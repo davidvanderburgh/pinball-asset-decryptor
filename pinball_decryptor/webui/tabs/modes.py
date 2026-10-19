@@ -2958,6 +2958,41 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return {"problems": b.get("problems", []), "notes": b.get("notes", [])}
 
     @rpc
+    def blocks_playfield(self):
+        """PAD-612: what the Playfield view draws for the shown title: the game's own playfield picture off the
+        project's card (a data: URL, "" with ``why`` when there is none) and the port's inserts on it, each with the
+        shots it lights for. ``{"art", "w", "h", "why", "inserts": [{name, x, y, shots}]}``."""
+        from pinball_decryptor.plugins.stern import playfield_art as PA
+        from ..shellx_common import off_loop
+        p = self._shown or self._profile
+        out = {"art": "", "w": 0, "h": 0, "why": "", "inserts": []}
+        if p is None:
+            out["why"] = "No card picked yet."
+            return out
+        port = p.port if os.path.isabs(p.port) else os.path.join(MP.PORTS_DIR, p.port)
+        for i in PA.insert_places(port):
+            out["inserts"].append({"name": i["name"], "x": i["x"], "y": i["y"],
+                                   "shots": [n for n, m in p.shots if m & i["shot"]]})
+        game = p.game_dir
+        card, _via = self._title_card(self.project())
+        if card is None or not card.image:
+            out["why"] = "The project has no card to read the playfield picture from."
+        elif card.game_dir != game:
+            out["why"] = "The project's card is another game's (%s)." % card.game_dir
+        else:
+            try:
+                data, where = off_loop(self.ctx, PA.card_art, card.image, game)
+            except OSError as e:
+                data, where = None, str(e)
+            if data:
+                import base64
+                out["w"], out["h"] = PA.png_size(data)
+                out["art"] = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+            else:
+                out["why"] = "No playfield picture: %s." % str(where).rstrip(".")
+        return out
+
+    @rpc
     def blocks_pick(self, what, taken=()):
         """PAD-374: "+ Clip…", "+ Sound…" and "Music…" in the block editor: pick a video or a
         WAV, copy it into the open blocks mode's folder and return ``{"name", "file", "path"}``

@@ -562,7 +562,7 @@ function HatBody({ h, path, ed }) {
   }
 }
 
-function Script({ s, si, n, ed }) {
+export function Script({ s, si, n, ed }) {
   return html`<div class="bk-script">
     <div class="bk bk-hat"><div class="bk-line">
       <${HatBody} h=${s.hat || {}} path=${["scripts", si, "hat"]} ed=${ed} />
@@ -819,11 +819,12 @@ function OwnMedia({ prog, ed, s, folder }) {
   </div>`;
 }
 
-export function BlocksEditor({ s, c }) {
+// PAD-612: the one program every view of a mode edits (David, 2026-10-18: "switch visualizations at any point"), with
+// its one history and its saving. A view is a tab over it: an edit in any tab is a step here, Undo in another tab
+// takes it back, and the next tab opened draws what is here.
+export function useModeProgram(c) {
   const b = c.blocks || {};
   const [prog, setProg] = useState(() => clone(b.program || {}));
-  const [target, setTarget] = useState(null);
-  const [over, setOver] = useState(null);
   const [saving, setSaving] = useState(false);
   const timer = useRef(null);
   const slugRef = useRef(c.slug);
@@ -832,10 +833,11 @@ export function BlocksEditor({ s, c }) {
   const hist = useRef({ past: [], future: [], key: null, when: 0 });
   // another mode opened (or this one duplicated, or put back by Python): take its program
   useEffect(() => {
+    if (slugRef.current === c.slug) return;
     slugRef.current = c.slug;
     progRef.current = clone(b.program || {});
     hist.current = { past: [], future: [], key: null, when: 0 };
-    setProg(progRef.current); setTarget(null);
+    setProg(progRef.current);
   }, [c.slug]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -870,9 +872,7 @@ export function BlocksEditor({ s, c }) {
     if (!from.length) return;
     to.push(progRef.current);
     h.key = null;
-    const p = from.pop();
-    show(p);
-    setTarget((t) => (t && Array.isArray(at(p, t)) ? t : null));
+    show(from.pop());
   };
   const undoRef = useRef(undo);
   undoRef.current = undo;
@@ -888,8 +888,28 @@ export function BlocksEditor({ s, c }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  return { prog, edit, undo, saving, canUndo: hist.current.past.length > 0, canRedo: hist.current.future.length > 0 };
+}
+
+// Undo, Redo and the saved line: one for the mode, above whichever view is open.
+export function ProgramBar({ pg }) {
+  return html`<div class="bk-progbar row">
+    <${Button} size="sm" kind="ghost" icon="undo" disabled=${!pg.canUndo} title=${TIP.undo} onClick=${() => pg.undo()}>Undo<//>
+    <${Button} size="sm" kind="ghost" icon="redo" disabled=${!pg.canRedo} title=${TIP.redo} onClick=${() => pg.undo(true)}>Redo<//>
+    <span class="small muted">${pg.saving ? "Saving…" : "Saved · Try it builds it in"}</span>
+  </div>`;
+}
+
+// What a view's blocks edit through: the program's paths, and the view's own pick (the stack a pressed palette
+// block goes to) and drop line. Every view that shows blocks makes its own.
+export function useEd(pg, ch) {
+  const [picked, setTarget] = useState(null);
+  const [over, setOver] = useState(null);
+  const { prog, edit } = pg;
+  // a stack that an undo (here or in another tab) took away is not picked
+  const target = picked && Array.isArray(at(prog, picked)) ? picked : null;
   const ed = {
-    prog, ch: b.choices || {}, vars: prog.vars || [], timers: prog.timers || [], target, over, setOver,
+    prog, ch, vars: prog.vars || [], timers: prog.timers || [], target, over, setOver,
     setTarget, edit,
     set: (path, v) => edit((d) => put(d, path, v), path.join("/")),
     remove: (stack, i) => edit((d) => { at(d, stack).splice(i, 1); }),
@@ -961,6 +981,14 @@ export function BlocksEditor({ s, c }) {
       });
     },
   };
+  return ed;
+}
+
+// The Blocks view: the palette, the mode's settings and its scripts as snapped blocks.
+export function BlocksEditor({ s, c, pg }) {
+  const b = c.blocks || {};
+  const { prog } = pg;
+  const ed = useEd(pg, b.choices || {});
   // a hat dropped on the workspace starts a new script
   const wsDrop = {
     onDragOver: (e) => { if (dragging && dragging.tpl && dragging.tpl.hat) e.preventDefault(); },
@@ -969,13 +997,7 @@ export function BlocksEditor({ s, c }) {
   const scripts = prog.scripts || [];
   return html`<div class="bk-editor">
     <${Palette} ed=${ed} />
-    <div class="bk-ws" ...${wsDrop} onClick=${() => setTarget(null)}>
-      <div class="bk-bar row" onClick=${(e) => e.stopPropagation()}>
-        <${Button} size="sm" kind="ghost" icon="undo" disabled=${!hist.current.past.length} title=${TIP.undo} onClick=${() => undo()}>Undo<//>
-        <${Button} size="sm" kind="ghost" icon="redo" disabled=${!hist.current.future.length} title=${TIP.redo} onClick=${() => undo(true)}>Redo<//>
-        <span class="sp"></span>
-        <span class="small muted">${saving ? "Saving…" : "Saved · Try it builds it in"}</span>
-      </div>
+    <div class="bk-ws" ...${wsDrop} onClick=${() => ed.setTarget(null)}>
       <div class="bk-settings row wrap">
         <label class="lbl" for="bk-name">Name</label>
         <${Field} id="bk-name" sm width=${180} value=${prog.name || ""} maxLength=${40} onChange=${(t) => ed.set(["name"], t)} />

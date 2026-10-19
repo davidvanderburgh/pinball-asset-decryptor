@@ -14,7 +14,8 @@ import { html, useEffect, useRef, useState, Button, Field, Select, Check, Radio,
          InfoBadge, Icon, Progress, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
-import { BlocksEditor, BlocksCode, BLOCKS_WORDS } from "./modes_blocks.js";
+import { BlocksEditor, BlocksCode, BLOCKS_WORDS, ProgramBar, useModeProgram } from "./modes_blocks.js";
+import { PlayfieldView } from "./modes_playfield.js";
 
 export const css = true;
 
@@ -919,9 +920,14 @@ function Editor({ s, showClip }) {
   </section>`;
 }
 
-// A mode made of blocks (PAD-232): the block editor, and the C it makes.
+// A mode made of blocks (PAD-232): its views, and the C it makes. PAD-612: each view is a tab over the one program
+// (David, 2026-10-18: "switch visualizations at any point and not be beholden to one or another"), with one Undo and
+// Redo for the mode beside the tabs; switching never converts or asks.
+const BLOCKS_PAGES = [["blocks", "Blocks", "The mode's rules as snapped blocks, with its settings."],
+  ["playfield", "Playfield", "The game's playfield with the mode's lit shots: press a shot to see and change what it does."],
+  ["c", "C it makes", "What Try it and Write build: the C the blocks make, to read."]];
+
 function BlocksPane({ s }) {
-  const [page, setPage] = useStored("pad.modes.blockspage", "blocks");
   const c = s.code || {};
   const b = c.blocks || {};
   const ready = c.status === "Ready to build.";
@@ -933,13 +939,25 @@ function BlocksPane({ s }) {
     </div>
     ${c.status && !ready ? html`<div class="modes-status warn">${c.status}</div>` : null}
     ${c.error || b.error ? html`<div class="modes-status warn">${c.error || b.error}</div>` : null}
-    <div class="pages" role="tablist">
-      ${[["blocks", "Blocks"], ["c", "C it makes"]].map(([k, l]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${page === k ? "on" : ""} onClick=${() => setPage(k)}>${l}</button>`)}
+    ${b.program ? html`<${BlocksViews} s=${s} c=${c} key=${c.slug} />` : null}
+  </section>`;
+}
+
+function BlocksViews({ s, c }) {
+  const [stored, setPage] = useStored("pad.modes.blockspage", "blocks");
+  const page = BLOCKS_PAGES.some(([k]) => k === stored) ? stored : "blocks";
+  const pg = useModeProgram(c);
+  return html`<div class="bk-views row">
+      <div class="pages" role="tablist">
+        ${BLOCKS_PAGES.map(([k, l, t]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${page === k ? "on" : ""}
+          title=${t} onClick=${() => setPage(k)}>${l}</button>`)}
+      </div>
+      <${ProgramBar} pg=${pg} />
     </div>
     <div class="bd modes-editor-bd bk-pane-bd">
-      ${b.program ? (page === "c" ? html`<${BlocksCode} c=${c} />` : html`<${BlocksEditor} s=${s} c=${c} key=${c.slug} />`) : null}
-    </div>
-  </section>`;
+      ${page === "c" ? html`<${BlocksCode} c=${c} />` : page === "playfield" ? html`<${PlayfieldView} c=${c} pg=${pg} />`
+        : html`<${BlocksEditor} s=${s} c=${c} pg=${pg} />`}
+    </div>`;
 }
 
 function CodePane({ s }) {

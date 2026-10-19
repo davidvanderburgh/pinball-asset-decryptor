@@ -182,9 +182,11 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk-pal.bk-num, .bk-pal.bk-bool { border-radius: 999px; }
 .bk-ws { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px; }
 .bk-settings { gap: 8px; align-items: center; }
-/* PAD-378: Undo / Redo and the saved line, kept in sight while the scripts scroll */
-.bk-bar { gap: 6px; align-items: center; position: sticky; top: -12px; z-index: 3; margin: -12px -16px 0; padding: 6px 16px;
-  background: var(--panel); border-bottom: 1px solid var(--line); }
+/* PAD-612: the views are tabs over the one mode; Undo / Redo (PAD-378) and the saved line are the mode's, beside them */
+.bk-views { gap: 8px; align-items: stretch; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.bk-views .pages { flex: 1 1 auto; border-bottom: 0; }
+.bk-progbar { gap: 6px; align-items: center; padding: 0 12px; flex-wrap: nowrap; }
+.bk-progbar .small { white-space: nowrap; }
 .bk-gamemodes { display: flex; flex-direction: column; gap: 6px; }
 .bk-gamemodes .row { gap: 8px; align-items: center; }
 .bk-gamemodes .modes-shots { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); padding-left: 12px; }
@@ -260,3 +262,48 @@ html.bp-860 .bk-palette { flex-direction: row; flex-wrap: wrap; border-right: 0;
 .bk-pal[aria-disabled="true"] { opacity: .4; cursor: not-allowed; filter: grayscale(.6); }
 .bk-ownbox { background: #b8458f22; border-color: #b8458f66; }
 .bk-file { max-width: 140px; }
+
+/* ---- PAD-612: the Playfield view - the game's playfield picture off the card, the mode's lit shots on it ---------- */
+.pf-view { display: flex; height: 100%; min-height: 0; }
+.pf-field { flex: 0 0 auto; height: 100%; padding: 12px; display: flex; flex-direction: column; gap: 6px; align-items: center;
+  border-right: 1px solid var(--line); background: var(--panel-2); max-width: 46%; }
+.pf-svg { flex: 1 1 auto; min-height: 0; height: 100%; width: auto; max-width: 100%; display: block; }
+/* the game's drawing is black lines on white: shown darkened, so the mode's colors stand out on it */
+.pf-art { filter: invert(.88) hue-rotate(180deg); opacity: .5; }
+html.light .pf-art { filter: none; opacity: .45; }
+.pf-outline { fill: none; stroke: var(--line-2); stroke-width: 3; }
+.pf-ins { fill: rgba(170,180,195,.45); stroke: rgba(225,232,242,.8); stroke-width: 1.2; cursor: pointer; color: transparent; }
+.pf-ins:hover { stroke: #fff; stroke-width: 2; }
+.pf-ins.lit { stroke: rgba(0,0,0,.45); filter: drop-shadow(0 0 4px currentColor); }
+.pf-ins.sel { stroke: #fff; stroke-width: 2.6; }
+.pf-blink { animation: pf-blink 1s steps(1) infinite; }
+.pf-blink.fast { animation-duration: .4s; }
+.pf-pulse { animation: pf-pulse 1.4s ease-in-out infinite; }
+@keyframes pf-blink { 50% { fill-opacity: .2; } }
+@keyframes pf-pulse { 50% { fill-opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .pf-blink, .pf-pulse { animation: none; } }
+.pf-label { font: 600 11px var(--sans); fill: #fff; stroke: rgba(10,12,16,.85); stroke-width: 3px; paint-order: stroke; pointer-events: none; }
+.pf-label.sel { fill: var(--accent); }
+.pf-reading, .pf-why { max-width: 300px; text-align: center; }
+.pf-side { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+.pf-shots { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-shot { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-2); background: transparent; color: var(--ink-3);
+  border-radius: 999px; padding: 3px 11px; font: 500 12.5px var(--sans); cursor: pointer; }
+.pf-shot.used { color: var(--ink); }
+.pf-shot:hover { border-color: var(--ink-3); }
+.pf-shot.on { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.pf-swatch { width: 10px; height: 10px; border-radius: 999px; flex: none; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.pf-swatch.dark { background: #000; box-shadow: 0 0 0 1px var(--line-2); }
+.pf-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.pf-card-hd { gap: 10px; align-items: center; }
+.pf-litword { gap: 6px; align-items: center; }
+.pf-group { display: flex; flex-direction: column; gap: 8px; }
+.pf-group-h { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.pf-empty { padding: 2px 0 2px 2px; }
+.pf-rule { display: flex; flex-direction: column; gap: 6px; }
+.pf-rule-h { display: flex; align-items: center; gap: 8px; text-align: left; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 8px; padding: 6px 10px; font: 500 13px var(--sans); cursor: pointer; }
+.pf-rule-h:hover { border-color: var(--line-2); }
+.pf-rule-k { color: var(--ink-3); width: 10px; }
+html.bp-860 .pf-view { flex-direction: column; height: auto; }
+html.bp-860 .pf-field { max-width: none; height: 520px; border-right: 0; border-bottom: 1px solid var(--line); }

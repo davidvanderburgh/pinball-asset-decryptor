@@ -65,3 +65,25 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   + `value challenge_mode_<n>` (the entry's index); at the ball's start of a challenge game whose index is a held
   challenge's, set the index to Standard's (1) and hand the ball to the mode - to prove on the rig that the game's
   challenge (e.g. 4th of July, OB_JWS_FOURTH_OF_JULY_CHALLENGE_START) has not already started at the game's start.
+
+## Round 3 (2026-10-19, afternoon)
+
+- GamePlayModes builds, by index (portchallenge.gpm_lines): Jaws LE/Pro (4th of July 8, Shark Hunter 9, Jaws the
+  Revenge 11, The Shark Is Broken 12; 10 is a video-mode test), John Wick LE 1.01 (Tick Tock 5) / 1.02 (Red Circle
+  Reckoning 4, The Staircase 5, The Duel 6, Special Assignment 7, Tick Tock 9), Metallica 1.03 (7-13, flag 17) / 1.04
+  (8-14). Standard is 1. King Kong 0.97, X-Men 0.98: no challenge among their game modes.
+- Venom (portchallenge.adapter_lines): the adapter keeps the current mode in a global (+4) and u16 arrays; Challenge
+  Mode Low / Medium / High = 11-13, Standard 0. D&D's adapter: no challenge.
+- Jaws' Default Game Mode reaches only entries 3-7 (0x5ec90: value v -> [0x6d7824 + 4 (v - 1)]), so a challenge game
+  comes only from the start menu (unlocked by shark teeth). The rig proof sets the index in attract as the pick does
+  (rig/ch619.c `gpm` / `set`, jobgpm.sh / jobgpm4.sh with AT= and PLAIN=).
+- PROVEN: Jaws Pro 1.02 (8 -> 1 at the ball's start, mode started, one ball, GAME OVER; control: the game's own 4th
+  of July). Godzilla Pro 1.16: KOTM taken by its flag (40 never set; control set it) but the mode waited the whole
+  ball on the game's "any mode running" - the pick now waits at most 3 s (CHALLENGE_GRACE_MS); rerun pending.
+- Plain-challenge titles (only sys_challenge, Insider's): TMNT, Star Wars LE/Pro, Mando, Foo Fighters, Bond 60th,
+  Elvira, JP LE/Pro. All have CHOOSE YOUR MODE OF PLAY (message 1911, CHALLENGE 1921); their menu picks with a chain
+  of compares (Star Wars Pro 1.31 0x5fc40: kind 1/2/3 -> set flag 16/17/18 via 0x18dd50), not Bond's jump table:
+  menu_generic needs that shape for "a challenge of its own". TMNT's FG_PLAYER_ALL_TURTLE_CHALLENGE_ACTIVE is an
+  in-game feature flag, not a menu challenge (to confirm).
+- Rig notes: cards on D: copy at ~9 MB/s while another ticket reads D:; never stage from two batches at once (the
+  cache refused a card and it booted uncached and crashed); Tech Alerts boots must wait for the game loop (proof619c).

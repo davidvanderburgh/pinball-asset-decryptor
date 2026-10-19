@@ -150,6 +150,7 @@ html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 
    each mode of a clip two modes share, and the clips the game never plays */
 .vid-card .toolbar .vid-modefilter { flex: 0 1 230px; width: 230px; min-width: 150px; }
 .vid-modes-busy { display: inline-flex; align-items: center; gap: 6px; }
+.vid-modes-why { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .vid-modes-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .vid-modes-cell.pair { color: var(--accent); }
 .vid-modes-cell.unplayed, .vid-modes-cell.other { color: var(--ink-3); font-style: italic; }

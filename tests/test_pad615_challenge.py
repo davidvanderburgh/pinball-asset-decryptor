@@ -292,6 +292,60 @@ int main(void)
     assert took == ["122"]                          # held, a challenge game (1) and that pick (1); -1 = no bitmap
 
 
+def test_the_challenge_mode_ending_live_ends_the_ball_and_nothing_else(tmp_path):
+    """PAD-630: only the mode that took the pick, ending while it runs in its game and not at a ball end."""
+    R = _host()
+    src = R.RUNTIME.read_text(encoding="utf-8")
+    code = "#include <stdio.h>\n" + R._lift(src, "static int chg_ends_ball(int state, int is_taker, int in_game, "
+                                                  "int at_ball_end)") + """
+int main(void)
+{
+    int s, t, g, b;
+    for (s = 0; s < 4; s++) for (t = 0; t < 2; t++) for (g = 0; g < 2; g++) for (b = 0; b < 2; b++)
+        printf("%d%d%d%d:%d\\n", s, t, g, b, chg_ends_ball(s, t, g, b));
+    return 0;
+}
+"""
+    out = R._host_run(tmp_path, code).split()
+    assert [line[:4] for line in out if line.endswith(":1")] == ["2110"]
+
+
+def test_the_runtime_ends_a_challenge_ball_and_starts_nothing_after():
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    begin = src[src.index("int pm_begin(void)"):]
+    begin = begin[:begin.index("\n}\n")]
+    assert "chg_refuses()" in begin and "chg_began();" in begin
+    end = src[src.index("void pm_end(void)"):]
+    end = end[:end.index("\n}\n")]
+    assert "chg_mode_ended(1)" in end
+    ended = src[src.index("static void chg_mode_ended(int ran)"):]
+    ended = ended[:ended.index("\n}\n")]
+    assert 'fn("challenge_end_ball")' in ended and "(1, 1)" in ended and "beh.asking" in ended
+    veto = src[src.index("static int challenge_veto("):]
+    veto = veto[:veto.index("\n}\n")]
+    assert veto.count("chg_picked(") == 2                         # a claimed challenge, and one of a mode's own
+
+
+def test_the_finder_reads_the_end_of_ball_call():
+    def elf(words):
+        return type("E", (), {"words": tuple(words), "text_va": 0x10000})()
+    two = [0xE305211E, 0xE3402082, 0xE92D4038, 0xE1A05001, 0xE1D230B0, 0xE1A04000, 0xE3833C02, 0xE3833002,
+           0xE1C230B0, 0xEB000000, 0, 0, 0]
+    one = [0xE3032456, 0xE3402082, 0xE1D230B0, 0xE92D4010, 0xE1A04000, 0xE30E0A68, 0xE3833C02, 0xE3400071,
+           0xE3833002, 0xE1C230B0, 0, 0, 0]                    # Stranger Things LE 1.12: the one-word form
+    for words in (two, one):
+        lines = PC.end_ball_lines(elf([0] * 4 + words))
+        assert lines[-1] == "site  challenge_end_ball  0x%08x 0x%08x 0x%08x" % (0x10010, words[0], words[1])
+    assert PC.end_ball_lines(elf(two + two)) == []                # two of them: not the one
+    assert PC.end_ball_lines(elf(two[:6] + [0xE3833C04] + two[7:])) == []
+
+
+@pytest.mark.parametrize("key", sorted(PORTS))
+def test_each_challenge_port_names_its_end_of_ball_call(key):
+    port = MP.read_port(str(SDK / "ports" / ("%s.port" % key)))
+    assert "challenge_end_ball" in port["site"]
+
+
 def test_the_runtime_hooks_every_named_handler_and_refuses_with_its_own_1():
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
     arm = src[src.index("static void challenges_arm(void)"):]

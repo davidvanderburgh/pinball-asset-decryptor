@@ -168,7 +168,34 @@ def find(elf):
                   "text  challenge_name_%d  %s" % (n, pretty(stem))]
     if notes:
         return [], notes
-    return lines + menu_lines(e), notes
+    return lines + end_ball_lines(e) + menu_lines(e), notes
+
+
+#: PAD-630: the framework's "end this ball now" - what the game's own challenge endings call in a challenge game
+#: (Bond LE: Ahoy Mr. Bond's ending 0x1cda4 -> 0x3f79bc(1, 1)), so the ball drains dead and GAME OVER follows. It
+#: opens on the game's status halfword: movw r2 / movt r2 (its address), a push, ldrh r3, [r2], orr r3, r3, #0x200,
+#: orr r3, r3, #2, strh r3, [r2] (Bond LE/Pro, Stranger Things 1.13 and LE 1.13 take two words, LE 1.12 one).
+END_BALL_WORDS = (0xE1D230B0, 0xE3833C02, 0xE3833002, 0xE1C230B0)
+
+
+def end_ball_lines(e):
+    """The `site challenge_end_ball` line (empty when the build has no one function of that shape)."""
+    w, base = e.words, e.text_va
+    at = []
+    for k in range(len(w) - 12):
+        if (w[k] & 0xFFF0F000) != 0xE3002000 or (w[k + 1] & 0xFFF0F000) != 0xE3402000:
+            continue
+        body, q = w[k + 2:k + 12], 0
+        for x in body:
+            if q < len(END_BALL_WORDS) and x == END_BALL_WORDS[q]:
+                q += 1
+        if q == len(END_BALL_WORDS) and any(x & 0xFFFFF000 == 0xE92D4000 for x in body[:4]):
+            at.append(k)
+    if len(at) != 1:
+        return []
+    k = at[0]
+    return ["# the game's own challenges end the ball when they are over: so does a mode that took the pick",
+            "site  challenge_end_ball  0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
 
 
 def rot_imm(w):

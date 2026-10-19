@@ -3067,7 +3067,12 @@ PREVIEW_HELP = {
                 "the script picked last. A stack's own + adds one too.\n"
                 "- A variable holds a number for each player, and goes back to 0 each "
                 "ball, each time the mode starts, or each game.\n"
-                "- Every change saves itself; the line at the top says what is left to fix.",
+                "- Every change saves itself; the line at the top says what is left to fix.\n"
+                "- **Blocks** and **Playfield** are two views of the same mode: switch "
+                "between them at any time. **Playfield** is the game's own playfield, read "
+                "from your card, with the shots the mode lights in their colors. Press a "
+                "shot to see and change what it does; rules not tied to a shot are listed "
+                "beside it. **Undo** takes back a change made in either view.",
                 {"note": "The app turns the blocks into a mode in C, which Try it and "
                          "Write build like any other. **C it makes** shows it, and "
                          "**Edit as C (one way)…** keeps that C and puts the blocks away, for "

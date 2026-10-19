@@ -78,7 +78,7 @@ def main():
             page.keyboard.press("Control+Shift+z")
             time.sleep(0.4)
             check("Ctrl+Shift+Z redoes too", n() == start - 1)
-            undo = page.locator(".bk-bar button", has_text="Undo")
+            undo = page.locator(".bk-progbar button", has_text="Undo")
             check("an Undo button", undo.count() == 1)
             if undo.count():
                 undo.click()

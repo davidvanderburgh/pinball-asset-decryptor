@@ -20,7 +20,8 @@
  *   multiball <0|1>     the game's own multiball is active or not
  *   timed <0|1>         one of the game's other modes is active (Jet Fighter Attack: PAD-347)
  *   balls <n>           the balls in play
- *   ball_end            the ball drained
+ *   ball_end            the ball drained (PAD-622: a hold a mode asks for runs as ticks, then "BALL END goes on")
+ *   tilt                the ball in play tilted: its ball_end holds nothing
  *   player <n>          the player up
  *   game_over           pm_in_game() falls
  *   new_game            a new game: player 1, every score 0, pm_in_game() 1
@@ -462,6 +463,20 @@ int pm_scoop_hold(unsigned ms)
 }
 void pm_scoop_release(void) { if (pm_running() && scoop_until) scoop_kick("the mode let go"); }
 int pm_scoop_holding(void) { return scoop_until != 0; }
+/* PAD-622: the end of a ball held for a mode's total (the runtime's ball_end_hold_run) */
+static unsigned beh_ms;
+static int beh_asking, beh_release, beh_holding, tilted;
+int pm_ball_end_hold(unsigned ms)
+{
+    if (!beh_asking || !ms || tilted) return 0;
+    if (ms > 10000) ms = 10000;
+    if (ms > beh_ms) beh_ms = ms;
+    beh_holding = 1;
+    printf("%6lu BALL END HOLD %u %s\n", now_ms, ms, current && current->name ? current->name : "?");
+    return 1;
+}
+void pm_ball_end_release(void) { if (beh_holding) beh_release = 1; }
+int pm_ball_end_holding(void) { return beh_holding; }
 static void scoop_settle(void)
 {
     scoop_from = now_ms;
@@ -978,9 +993,23 @@ int main(int argc, char **argv)
         } else if (!strcmp(c, "balls")) { balls_in_play = atoi(argv[++k]); printf("%6lu >> balls in play %d\n", now_ms, balls_in_play); }
         else if (!strcmp(c, "ball_end")) {
             printf("%6lu >> ball_end\n", now_ms);
-            mechs_let_go("the ball ended");
+            beh_ms = 0;
+            beh_release = 0;
+            beh_asking = 1;
             EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
             current = 0;
+            beh_asking = 0;
+            mechs_let_go("the ball ended");
+            if (beh_ms) {                            /* the game's end of ball waits (the modes' ticks go on) */
+                unsigned long until = now_ms + beh_ms;
+                while (!beh_release && now_ms < until) tick();
+            }
+            beh_holding = 0;
+            tilted = 0;
+            printf("%6lu BALL END goes on\n", now_ms);
+        } else if (!strcmp(c, "tilt")) {           /* PAD-622: this ball tilted */
+            printf("%6lu >> tilt\n", now_ms);
+            tilted = 1;
         } else if (!strcmp(c, "scoop")) {          /* PAD-395: a ball settles in the scoop */
             printf("%6lu >> scoop\n", now_ms);
             scoop_settle();

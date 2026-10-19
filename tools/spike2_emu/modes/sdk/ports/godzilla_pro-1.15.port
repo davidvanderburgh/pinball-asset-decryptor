@@ -647,3 +647,5 @@ value challenge_flag_1  41
 text  challenge_name_1  King of the Monsters Time Attack
 value challenge_name_msg_1  3276
 site  challenge_balls     0x00460bd0 0xe92d4030 0xe1a05000
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x0039a630 0xe30b2a5a 0xe340207a

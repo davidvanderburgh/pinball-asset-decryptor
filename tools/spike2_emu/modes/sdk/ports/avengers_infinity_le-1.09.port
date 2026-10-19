@@ -643,3 +643,5 @@ value challenge_menu_entry     12
 value challenge_menu_kind      2
 value challenge_menu_slot      -1
 value challenge_menu_caption   1901
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x00191958 0xe3012cfe 0xe340206e

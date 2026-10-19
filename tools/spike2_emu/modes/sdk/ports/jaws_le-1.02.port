@@ -631,3 +631,5 @@ value challenge_mode_3  12
 text  challenge_name_3  The Shark Is Broken
 value challenge_name_msg_3  4111
 site  challenge_balls     0x002a2704 0xe92d4030 0xe1a05000
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x00560e4c 0xe3042d0e 0xe3402087

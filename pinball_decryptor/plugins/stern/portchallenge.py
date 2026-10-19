@@ -143,7 +143,10 @@ def find(elf):
         return [], ["no FG_PLAYER_CHALLENGE_MODE_ACTIVE flag"]
     lines, notes = _handler_route(e, names, on_flag)
     menu = menu_lines(e) if lines else []                       # Bond's own menu code (PAD-615 round 2)
-    end_ball = end_ball_lines(e) if lines else []               # PAD-630: the handler builds' end of the ball
+    # PAD-630's end of the ball when the mode that took the pick ends - PAD-619: on every build that has it, not only
+    # the handler builds: a plain challenge game (Avengers, The Beatles, Led Zeppelin, Godzilla) re-serves every
+    # drain until its challenge ends the ball, so a mode's challenge game never ended without it
+    end_ball = end_ball_lines(e)
     generic = None if menu else menu_generic(e, names, on_flag)
     if not lines and generic and generic["named"]:
         lines = ["value challenge_on_flag   %d" % on_flag]

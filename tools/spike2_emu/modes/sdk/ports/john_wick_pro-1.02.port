@@ -639,3 +639,5 @@ value challenge_mode_4  9
 text  challenge_name_4  Tick Tock Mr. Wick
 value challenge_name_msg_4  2896
 site  challenge_balls     0x003f5a94 0xe92d4030 0xe1a05000
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x002a8ccc 0xe307274a 0xe340206d

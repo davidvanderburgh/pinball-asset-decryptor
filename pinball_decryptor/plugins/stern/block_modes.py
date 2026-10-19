@@ -134,7 +134,7 @@ What a mode in C does with the kit (``sdk/examples/intricate_kit.h``), PAD-377 g
   one of the game's own modes runs (the kit's ``kit_wait_game``); the mode stays ready, so the
   next block that starts it afterwards does. "the mode could start now" asks the same.
 - A DISPLAY PRIORITY (``priority``): held while the mode runs (``kit_display``), kept for the
-  total its own screen shows at the end, given back at once at a drain.
+  total its own screen shows at the end (PAD-622: and at a drain, through its TOTAL there).
 
 THE HUD (PAD-375). Ticked on, the mode has what the examples have at the glass's edges, built by the
 card build like theirs (:mod:`.mode_hud`, from the ``hud`` this module writes into assets.json): the
@@ -147,8 +147,14 @@ kit_hud``, copied into the folder at every save), so it steps aside exactly as t
 display of the game's (``pm_display_covered``) its words are blank and the edges stay; while one of
 the game's own modes runs (``pm_aside``) its lines go into the award line, the counters hide, and the
 badge moves one slot down for a battle. The mode's own screen, when it has one, is hidden then too.
-At the end the HUD shows the mode's TOTAL for three seconds (a drain or the game moving on takes it
-down at once).
+At the end the HUD shows the mode's TOTAL for three seconds (the game moving on takes it down at once).
+
+A DRAIN (PAD-622). The game's own mini-wizards (James Bond) show their TOTAL when the ball drains in one,
+and the bonus waits for it. A mode the ball's drain ends does the same: it ends as its clock would (an
+Award it ended on, then its TOTAL, on its HUD or its own screen, the bar kept) and asks the runtime to
+hold the game's end of ball (``pm_ball_end_hold``) for ``DRAIN_TOTAL_MS`` - the 6 s the game's own TOTAL
+shows - or for the rest of a total already showing; when the end of ball goes on, it all goes. A tilted
+ball, or a port without the hold, takes it down at once as before.
 
 PAD-373: what it does about the game's own modes is the form's choice (PAD-363): they may start
 (``stack``), it gives way (``give_way``: it starts only while none of them runs - a Start the mode
@@ -253,6 +259,7 @@ KIT_FILE = "intricate_kit.h"
 HUD_PRIORITY = 180               # a HUD mode with no priority of its own takes the kit's KIT_DISPLAY_MODE:
                                  # pm_display_covered watches for it
 TOTAL_MS = 3000                  # the HUD's TOTAL stays up this long after the end
+DRAIN_TOTAL_MS = 6000            # PAD-622: at a drain, held as the game's own mini-wizards hold theirs
 #: a lit shot's pattern: the SDK's, and its pace (ms) when the block gives none. "hurry" is a
 #: blink that quickens as the clock runs down (PAD-376, the kit's kit_hurry_ms); "off" holds it dark (PAD-601: the
 #: game's own light there does not show through, as it does when the light is handed back)
@@ -1890,7 +1897,9 @@ def to_c(program, slug):
     L.append("#define DISPLAY_PRIORITY %d          /* held while it runs; 0 = none (MODE_SDK.md) */"
              % (program["priority"] or (HUD_PRIORITY if has_hud else 0)))
     L.append("#define TIMER_MAX_MS     %dL" % TIMER_MAX_MS)
-    L.append("#define ENDING_MS        3000        /* the total its own screen shows at the end */")
+    L.append("#define ENDING_MS        %d        /* the total its own screen shows at the end */" % TOTAL_MS)
+    L.append("#define DRAIN_TOTAL_MS   %d        /* PAD-622: ...and at a drain, the game's end of ball waiting */" % DRAIN_TOTAL_MS)
+    L.append("#define ENDING_NOW_MS    (drain_long ? DRAIN_TOTAL_MS : ENDING_MS)")
     words_only = program["screen"] and program["screen_style"] == "words"
     L.append("#define WORDS_ONLY       %d          /* PAD-521: its screen is words alone: shown a moment, not all along */"
              % (1 if words_only else 0))
@@ -1992,6 +2001,8 @@ def to_c(program, slug):
     L.append("static unsigned ended_begun;          /* PAD-413: pm_begun() at its end, while its total shows */")
     L.append("static unsigned award_ticks;          /* PAD-574: an Award's words up this much longer */")
     L.append("static unsigned total_due;            /* PAD-574: ticks until its TOTAL: an Award it ended on shows first */")
+    L.append("static int drain_long;                 /* PAD-622: its TOTAL at a drain, as long as the game's own */")
+    L.append("static int drain_hold;                 /* PAD-622: the game's end of ball waits on it (set once it does) */")
     if not has_hud:
         L.append("static char award_next[96];           /* PAD-574: an Award of When the mode ends, after the one showing */")
         L.append("static unsigned award_next_ticks;")
@@ -2145,7 +2156,7 @@ def to_c(program, slug):
         L.append("    }")
     else:
         L.append('    words("TOTAL", (long long)run.total, 1);')
-    L.append("    hide_ticks = %d * TICKS_PER_SECOND;" % (TOTAL_MS // 1000))
+    L.append("    hide_ticks = ENDING_NOW_MS / 1000 * TICKS_PER_SECOND;")
     L.append("}")
     L.append("")
     L.append("static void total_hide(void)")
@@ -2294,6 +2305,7 @@ def to_c(program, slug):
     L.append("")
     L.append("static void start(const char *why, int counted);")
     L.append("static void end(const char *why);")
+    L.append("static void end_now(const char *why);")
     if g.lit:
         L.append("")
         L.extend(_lit_c(g).rstrip("\n").split("\n"))
@@ -2316,6 +2328,10 @@ def to_c(program, slug):
     L.append("static void start(const char *why, int counted)")
     L.append("{")
     L.append("    if (run.on || !pm_in_game()) return;")
+    L.append("    if (drain_hold || drain_long) {   /* PAD-622: the last drain's TOTAL goes before it starts again */")
+    L.append("        drain_hold = drain_long = 0;")
+    L.append("        end_now(\"ball ended\");")
+    L.append("    }")
     L.append("    if ((WAITS_OUT_MULTIBALL || GAME_MODES) && counted) {   /* it waits: the next Start the mode starts it */")
     L.append("        static unsigned long said_at;")
     L.append("        const char *what = game_busy();")
@@ -2414,7 +2430,7 @@ def to_c(program, slug):
     L.append("    award_ticks = 0;")
     if has_bar:
         L.append("    bar_show(0);                      /* PAD-521: the bar full, kept through its total */")
-        L.append("    bar_hold = ENDING_MS / 1000 * TICKS_PER_SECOND + total_due;")
+        L.append("    bar_hold = ENDING_NOW_MS / 1000 * TICKS_PER_SECOND + total_due;")
         L.append("    ended_begun = pm_begun();")
     L.append("    if (screen) {")
     L.append("        flash_ticks = 0;")
@@ -2432,13 +2448,13 @@ def to_c(program, slug):
         L.append("        for (k = 0; k < 3; k++) kit_hud_counter(&hud, k, 0, 0, 0);")
         L.append("        kit_hud_timer(&hud, -1);")
         L.append("        kit_hud_gauge(&hud, -1, 0);")
-        L.append('        kit_hud_award(&hud, %du, kit_num(n, sizeof n, run.total), " ");' % TOTAL_MS)
-        L.append("        kit_hud_hide_in(&hud, %du);" % TOTAL_MS)
+        L.append('        kit_hud_award(&hud, ENDING_NOW_MS, kit_num(n, sizeof n, run.total), " ");')
+        L.append("        kit_hud_hide_in(&hud, ENDING_NOW_MS);")
         L.append("    }")
     L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
     L.append("    /* the total keeps the display watched for its moment on its HUD or its own screen (the kit's")
     L.append("     * kit_end_after, pm_end_holding); a drain or the game hands it back at once (end_now) */")
-    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
+    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_NOW_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
              % ("1" if has_hud else "screen"))
     L.append("        pm_display_priority(0);")
     L.append("        pm_end();")
@@ -2581,6 +2597,10 @@ def to_c(program, slug):
     L.append("    unsigned seconds = 0;")
     L.append("    int in_game = pm_in_game();")
     L.append("    find_screen();")
+    L.append("    if (drain_hold && !pm_ball_end_holding()) {   /* PAD-622: the game's end of ball goes on: so does its TOTAL */")
+    L.append("        drain_hold = drain_long = 0;")
+    L.append("        end_now(\"ball ended\");")
+    L.append("    }")
     if words_only:
         L.append("    find_total();")
     if has_info:
@@ -2694,12 +2714,38 @@ def to_c(program, slug):
         L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside());   /* PAD-547: out of the way of the game's */")
     L.append("}")
     L.append("")
+    L.append("/* PAD-622: a drain while it runs ends it as its clock would - an Award it ended on, then its TOTAL - and the")
+    L.append(" * game's end of ball (its bonus, the next ball, a challenge game's end) waits for that, as it does for the")
+    L.append(" * game's own mini-wizards' totals; a drain while its total still shows waits out the rest. Where the game cannot")
+    L.append(" * wait (a tilted ball, a port without the hold) it all goes at once, as before. */")
+    L.append("static void drain_end(void)")
+    L.append("{")
+    L.append("    unsigned ms;")
+    L.append("    drain_long = run.on && pm_can(PM_CAN_BALL_END_HOLD);   /* its TOTAL as long as the game's own then */")
+    if has_hud:
+        L.append("    ms = drain_long ? DRAIN_TOTAL_MS : 0;   /* the HUD's TOTAL */")
+    else:
+        L.append("    ms = 0;")
+    L.append("    end(\"ball ended\");")
+    L.append("    if (screen && (total_due || hide_ticks)) {   /* an Award it ended on, then its TOTAL; or the rest of one */")
+    L.append("        unsigned t = total_due ? total_due + ENDING_NOW_MS / 1000 * TICKS_PER_SECOND : hide_ticks;")
+    L.append("        if (t * 1000 / TICKS_PER_SECOND > ms) ms = t * 1000 / TICKS_PER_SECOND;")
+    L.append("    }")
+    L.append("    if (ms && pm_ball_end_hold(ms)) {")
+    L.append("        drain_hold = 1;                 /* after the ask: a tick between sees the hold, not its end */")
+    L.append('        pm_log("its TOTAL at the drain: the end of ball waits %u ms", ms);')
+    L.append("        return;")
+    L.append("    }")
+    L.append("    drain_long = 0;")
+    L.append("    end_now(\"ball ended\");")
+    L.append("}")
+    L.append("")
     L.append("static void on_ball_end(void)")
     L.append("{")
     L.append("    unsigned t;")
     L.append("    for (t = 0; t < %d; t++) T[t] = 0;   /* a ball ending stops every timer */" % ntimers)
     L.extend(scripts_of("ball_end"))
-    L.append("    if (ENDS_ON_DRAIN) end_now(\"ball ended\");")
+    L.append("    if (ENDS_ON_DRAIN) drain_end();")
     if media:
         L.append("    looping = 0;                      /* no backdrop outlives the ball */")
     L.append("    {")

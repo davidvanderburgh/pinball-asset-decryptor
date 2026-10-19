@@ -3752,6 +3752,49 @@ the challenge's own name, and cannot add one.
 Venom's Knull levels, Jaws' 4th of July, a timed whole game on Bond 60th - no `FG_<name>_CHALLENGE` flag with a
 handler of this shape, so `challenge_lines.py` writes nothing and the tab offers no such start there.
 
+## Holding the end of a ball (PAD-622)
+
+James Bond's own mini-wizards end on a drain with their TOTAL: the mode's last clip, then its TOTAL under the bar,
+and only then the bonus. Measured on the stock LE 1.06 (emulator, Goldfinger's Jackpot started by
+`pm_game_wizard_named`, then drained): the award clip about 2.5 s, the TOTAL about 6 s, the BONUS screen 8 s after
+the ball ended. The game does it in the process that runs its end of ball: Goldfinger's ending `0xc0928` loops on its
+clip, drawing frames and yielding (`0x2fd144`) until it is done, so the bonus (bus `0x27`) and the next ball wait.
+
+A mode does the same with one call from its `.ball_end`:
+
+```c
+static void on_ball_end(void)
+{
+    if (!running) return;
+    show_my_total();                       /* on the tick's thread from here on, as at any end */
+    if (!pm_ball_end_hold(6000)) take_my_total_down();
+}
+/* and in the tick: once pm_ball_end_holding() is 0 again, take it down */
+```
+
+- Once every mode's `.ball_end` has run, the runtime - inside the game's end-of-ball dispatch, on the game's own
+  thread - sleeps a tick at a time (`site proc_sleep`, as the scoop's hold) for the longest time any mode asked
+  (10000 ms at most), then returns and the game's end of ball goes on exactly as before. The mode's tick runs
+  meanwhile on its own thread (Bond LE: dispatch thread 1, ticks another), so what it shows is drawn: the emulator
+  shows the TOTAL under the bar and the mode's clip still playing through the hold.
+- `pm_ball_end_release()` (from a tick) lets it go early; `pm_ball_end_holding()` is 1 from the ask until the end
+  of ball goes on.
+- Never on a tilted ball: the port's `tilt` event counted since the last ball ended refuses the ask, and a tilt
+  during a hold ends it.
+- The held coils (magnet, building, shield, shaker) still let go at the drain, before the hold; the display
+  priority's ending and the backdrop are given back after it.
+
+A blocks mode that the drain ends does it by itself (`drain_end` in its C): it ends as its clock would - an Award it
+ended on, then its TOTAL on its HUD or its own screen, its bar kept - and holds the end of ball for `DRAIN_TOTAL_MS`
+(6000, the game's own TOTAL) plus that Award, or for the rest of a total already showing. A mode started again
+before its drain's TOTAL went takes it down first.
+
+Proven (emulator, 2026-10-19, James Bond LE 1.06 stock card, hidden, muted; the owner's BON APPETIT blocks): main's
+code ended the mode at the drain and showed no TOTAL; the branch logged `its TOTAL at the drain: the end of ball
+waits 8000 ms` (its When the mode ends Award, then the TOTAL), `ball end: let go after 8015 ms (its time ran out)`,
+TOTAL 3,500,000 under the bar for 6 s, then the game's BONUS and ball 2 as ever. Not measured: a machine; a title
+other than Bond (every port with `site proc_sleep` offers it).
+
 ## Display priority: a mode layered on the game's display (item 154 display)
 
 > **PAD-353 (2026-10-04): the hold is WITHDRAWN.** On a Godzilla Premium, KING GHIDORAH held 180 and

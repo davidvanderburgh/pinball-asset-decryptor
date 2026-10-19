@@ -317,6 +317,21 @@ def test_tidy_never_starts_wsl_and_never_runs_in_captures(keeper,
     assert keeper["scan"] == 0
 
 
+def test_turned_off_it_skips_the_schedule_but_clean_up_now_still_runs(
+        keeper):
+    assert sk.auto_enabled()                    # on by default
+    sk.set_auto(False)
+    assert sk.tidy(now=NOW, wsl=True) is None
+    assert keeper["scan"] == 0 and keeper["deleted"] == []
+    assert sk.summary(now=NOW) == "It is turned off on this PC."
+    rec = sk.tidy(force=True, now=NOW, wsl=True)
+    assert rec["count"] == 2
+    assert sk.auto_enabled() is False           # a run keeps the choice
+    assert sk.summary(now=NOW).endswith("It is turned off on this PC.")
+    sk.set_auto(True)
+    assert sk.tidy(now=NOW + 7 * 3600, wsl=True) is not None
+
+
 def test_a_dry_run_decides_but_deletes_and_saves_nothing(keeper):
     rec = sk.tidy(dry_run=True, now=NOW, wsl=True)
     assert len(rec["removed"]) == 2 and keeper["deleted"] == []
@@ -354,6 +369,27 @@ def test_the_window_explains_the_automatic_clean_up_and_runs_it(
         assert ran[0]["force"] is True
         assert w.state("shellx")["disk"]["auto_summary"].startswith(
             "Last clean-up just now")
+        w.call("shellx.disk_close")
+
+
+def test_the_window_box_turns_the_automatic_clean_up_off_and_on(
+        tmp_path, monkeypatch):
+    from tests.test_webui_shellx import until
+    from tests.webui_harness import web_app
+    monkeypatch.setenv("PAD_SPACE_STATE", str(tmp_path / "keeper.json"))
+    monkeypatch.setattr(host_temp, "usage", lambda: None)
+    monkeypatch.setattr(host_temp, "scan", lambda: [])
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("shellx.disk_open")
+        assert until(w, lambda: not w.state("shellx")["disk"]["busy"])
+        assert w.state("shellx")["disk"]["auto_on"] is True
+        assert w.call("shellx.disk_set_auto", False) is False
+        d = w.state("shellx")["disk"]
+        assert d["auto_on"] is False
+        assert d["auto_summary"] == "It is turned off on this PC."
+        assert sk.load_state()["auto"] is False
+        assert w.call("shellx.disk_set_auto", True) is True
+        assert w.state("shellx")["disk"]["auto_on"] is True
         w.call("shellx.disk_close")
 
 

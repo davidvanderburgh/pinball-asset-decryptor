@@ -23,6 +23,9 @@ David's PC that day:
 `core/space_keeper.py`, run by the web UI (`webui/shellx_disk.py`) 1.5 s
 after start and every 30 minutes; a full run at most every 6 hours unless
 room is short. The WSL half runs only when WSL is already up.
+The window's "Clean up automatically" box (on by default, saved per PC in
+the keeper's state file as `auto`) stops the scheduled runs; Clean up now
+still runs. `PAD_SPACE_KEEPER=0` turns everything off for support.
 
 | What | Goes when |
 |---|---|

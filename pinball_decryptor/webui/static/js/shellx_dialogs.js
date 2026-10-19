@@ -383,6 +383,8 @@ function DiskSpaceDialog({ close }) {
     </div>
     <div class="stack" style="gap:4px">
       <span class="h2">Automatic clean-up</span>
+      <${Check} checked=${!d || d.auto_on !== false} disabled=${!d} label="Clean up automatically"
+        onChange=${(v) => call("shellx.disk_set_auto", v)} />
       <span class="small muted wrap">${d ? d.auto_note : ""}</span>
       <div class="row wrap"><span class="small grow">${d ? d.auto_summary : ""}</span>
         <${Button} onClick=${() => call("shellx.disk_tidy_now")} disabled=${!(d && d.can_tidy)}>Clean up now<//></div>

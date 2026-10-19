@@ -148,6 +148,15 @@ class DiskMixin:
                          daemon=True).start()
         return True
 
+    @rpc
+    def disk_set_auto(self, on):
+        """The "Clean up automatically" box (on by default): off stops the
+        scheduled runs on this PC; Clean up now still works."""
+        space_keeper.set_auto(bool(on))
+        self._disk_view(auto_on=space_keeper.auto_enabled(),
+                        auto_summary=space_keeper.summary())
+        return space_keeper.auto_enabled()
+
     def _disk_after_tidy(self):
         if self._disk is None:
             return
@@ -217,6 +226,7 @@ class DiskMixin:
                      "auto_note": AUTO_NOTE,
                      "auto_summary": space_keeper.summary(),
                      "can_tidy": False,
+                     "auto_on": space_keeper.auto_enabled(),
                      "resize_note": RESIZE_NOTE, "reclaim_note": RECLAIM_NOTE,
                      "bars": [
                          {"key": LOC_WSL, "text": "Checking WSL…",

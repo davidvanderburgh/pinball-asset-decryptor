@@ -127,6 +127,19 @@ def due(now=None, st=None):
     return now - float(st.get("checked") or 0) >= MIN_INTERVAL_SECS
 
 
+def auto_enabled(st=None):
+    """The window's "Clean up automatically" box: ON unless turned off.
+    Off stops the scheduled runs only; "Clean up now" still works."""
+    st = load_state() if st is None else st
+    return st.get("auto", True) is not False
+
+
+def set_auto(on):
+    st = load_state()
+    st["auto"] = bool(on)
+    _save_state(st)
+
+
 # ---------------------------------------------------------------------------
 # The WSL side: one pass as root lists every candidate
 # ---------------------------------------------------------------------------
@@ -428,6 +441,8 @@ def tidy(force=False, cards=None, now=None, dry_run=False, wsl=None):
     ran.  *dry_run* decides without deleting or saving."""
     if not dry_run and disabled():
         return None
+    if not (force or dry_run or auto_enabled()):
+        return None
     if not _lock.acquire(blocking=False):
         return None
     try:
@@ -508,6 +523,7 @@ def _tidy(force, cards, now, dry_run, wsl):
            "removed": [{k: p[k] for k in ("where", "what", "size", "why")}
                        for p in done][:200]}
     st["checked"] = now
+    st["auto"] = auto_enabled()     # the box may have changed meanwhile
     if done:
         st["last"] = rec
         st["freed_total"] = int(st.get("freed_total") or 0) + freed
@@ -520,11 +536,12 @@ def summary(st=None, now=None):
     st = load_state() if st is None else st
     now = time.time() if now is None else now
     last = st.get("last")
+    off = "" if auto_enabled(st) else " It is turned off on this PC."
     if not st.get("checked"):
-        return "It has not run on this PC yet."
+        return off.strip() or "It has not run on this PC yet."
     if not last:
         return ("Last checked %s: nothing needed removing."
-                % _when(st["checked"], now))
+                % _when(st["checked"], now)) + off
     s = ("Last clean-up %s removed %d item%s and freed %s"
          % (_when(last["at"], now), last["count"],
             "" if last["count"] == 1 else "s", _fmt(last["freed"])))
@@ -534,7 +551,7 @@ def summary(st=None, now=None):
     s += "."
     if st["checked"] > last["at"] + 60:
         s += " Last checked %s." % _when(st["checked"], now)
-    return s
+    return s + off
 
 
 def _fmt(n):
@@ -560,4 +577,5 @@ def _when(t, now):
 
 __all__ = ["tidy", "plan_wsl", "plan_host", "plan_cards", "parse_scan",
            "room_left", "summary", "load_state", "due", "disabled",
+           "auto_enabled", "set_auto",
            "FLOOR_BYTES", "STALE_SECS", "UNUSED_SECS"]

@@ -81,6 +81,23 @@ NONE_TEXT = ("No sound found for this clip in the game's program. It may have no
              "backdrop), or the game picks its sound in a way the program does not show.")
 #: a sound's link and play button (the page's words, here for the tests)
 OPEN_TIP = "Show this sound on the Audio tab"
+#: PAD-624: the toolbar's one line when the card gives the tab nothing to show (the card is not
+#: on this PC, can't be read, or names no mode), and its tooltip's lines
+WHY_GONE = "Played in and clip sounds: the project's card is not on this PC"
+WHY_GONE_TIP = ("The card image this project was extracted from is not on this PC, so the app "
+                "can't read which part of the game plays each clip, or the sounds it plays with "
+                "them. Put the card back where it was, or extract it again.")
+WHY_UNREAD = "Played in and clip sounds: the card could not be read"
+WHY_NO_MODES = "Played in: not shown for this game"
+WHY_NO_MODES_TIP = ("The app can't tell which part of this game plays each clip from its "
+                    "program, so the Played in column is not shown.")
+WHY_SOUNDS_OK = "The sounds the game plays with a clip are shown under it."
+WHY_SOUNDS_NONE = "The sounds the game plays with its clips can't be read from it either."
+
+
+def _sentence(text):
+    text = (text or "").strip()
+    return (text[:1].upper() + text[1:] + ("" if text.endswith(".") else ".")) if text else ""
 
 
 def _and(words):
@@ -99,7 +116,8 @@ class ModesMixin:
         self._m_run = 0
         self._m_filter = ""           # a mode class, OTHER, UNPLAYED, or "" for every clip
         self._m_clear_state()
-        self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": ""})
+        self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": "",
+                        "why": None})
 
     def _m_clear_state(self):
         self._m_modes = {}            # rel -> [mode class] the row stands for
@@ -121,7 +139,8 @@ class ModesMixin:
         self._m_filter = ""
         self._m_drop_virtual()
         self._m_clear_state()
-        self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": ""})
+        self.set(modes={"ready": False, "busy": False, "note": "", "list": [], "filter": "",
+                        "why": None})
 
     # -- reading the card ------------------------------------------------------------------
     def _m_card(self, project):
@@ -282,7 +301,25 @@ class ModesMixin:
         self.set(modes={"ready": True, "busy": False, "note": note,
                         "list": [{"id": m, "label": reading.label(m), "n": counts[m]}
                                  for m in modes] + extra,
-                        "filter": self._m_filter})
+                        "filter": self._m_filter, "why": self._m_why(clips, modes or extra)})
+
+    def _m_why(self, clips, listed):
+        """PAD-624: ``{line, tip}`` for the toolbar when the card gives the tab nothing (no Played
+        in column, maybe no sounds either), so the page says why instead of showing nothing;
+        None when it lists something."""
+        if listed:
+            return None
+        if not clips.game:
+            gone = not clips.card or not os.path.isfile(clips.card)
+            return {"line": WHY_GONE if gone else WHY_UNREAD,
+                    "tip": {"head": WHY_GONE if gone else WHY_UNREAD,
+                            "lines": [WHY_GONE_TIP] if gone else
+                            [_sentence(clips.note or "the card could not be read")]}}
+        sounds = clips.sound_reading
+        return {"line": WHY_NO_MODES,
+                "tip": {"head": WHY_NO_MODES,
+                        "lines": [WHY_NO_MODES_TIP,
+                                  WHY_SOUNDS_OK if sounds.pairs else WHY_SOUNDS_NONE]}}
 
     # -- the followers' rows ---------------------------------------------------------------
     def _m_drop_virtual(self):

@@ -439,7 +439,7 @@ def _read(raw, spans, census):
     except S.ScanError:
         return out
     model = S.class_model(prog)
-    modes = CM._mode_classes(S, model)
+    modes = CM._mode_classes(S, model, prog)
     if not modes:
         return out
     layers = CM._layers(model, modes)

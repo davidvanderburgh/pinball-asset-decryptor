@@ -13,6 +13,7 @@
  *     data sound_channels the 8 x 196-byte channel table      (optional)
  *     data sound_queue    the 8 x 20-byte delayed-request queue (optional)
  *     data city_variants  RuleCities' request -> request hash map (optional)
+ *     site surface_set_video  hooked when present: one V line per clip a surface is given (PAD-624)
  * A site is hooked or called only if its first two instruction words match the port.
  *
  * What it writes, all in /dump (wall-clock ms, so marks written outside line up):
@@ -20,6 +21,8 @@
  *                      (r2 = 1 for a numbered variant; lr = the entry point's return address;
  *                      caller = the word 9 slots up the entry point's frame, which is its own
  *                      caller for sound_play / sound_nth)
+ *                      "<ms> V <clip> <lr>"  one line per clip the game hands a surface (its
+ *                      std::string's text: the name the video bank is asked for)
  *                      "<ms> MARK <text>", "<ms> FIRE <req> [n] rc <rc>", "<ms> STOP <req> rc <rc>",
  *                      "<ms> ACTIVE <req> <0|1>", "<ms> CITY <n> <from>:<to> ...", "<ms> CALL ..."
  *   sound_census.chan  every 500 ms: u32 'SCH1', u32 ms low, u32 ms high, then the channel table
@@ -50,7 +53,7 @@ struct ts32 { long tv_sec, tv_nsec; };
 #define QUEUE_BYTES    160
 
 struct site { unsigned addr, w0, w1; int ok; };
-static struct site s_worker, s_tick, s_play, s_nth, s_stop, s_active;
+static struct site s_worker, s_tick, s_play, s_nth, s_stop, s_active, s_video;
 static unsigned d_channels, d_queue, d_city;
 static int log_fd = -1, chan_fd = -1;
 
@@ -179,6 +182,22 @@ static void on_worker(unsigned *r)
     o = put_hex(o, r[6]);
     *o++ = ' ';
     o = put_hex(o, r[7]);
+    emit(line, o);
+}
+
+/* ---- a surface's clip: one line per clip shown (PAD-624) ----------------------------------- */
+static void on_video(unsigned *r)
+{
+    /* r1 = the clip's name as a std::string, whose first word is its text */
+    char line[160], *o = line;
+    const char *name = r[1] ? *(const char *const *)(unsigned long)r[1] : 0;
+    int i;
+    o = put_dec(o, now_ms());
+    o = put_str(o, " V ");
+    for (i = 0; name && i < 96 && name[i] > ' ' && name[i] < 127; i++) *o++ = name[i];
+    if (!i) *o++ = '-';
+    *o++ = ' ';
+    o = put_hex(o, r[5]);
     emit(line, o);
 }
 
@@ -360,6 +379,7 @@ static void load_port(void)
             else if (word_is(q, "sound_nth")) x = &s_nth;
             else if (word_is(q, "sound_stop")) x = &s_stop;
             else if (word_is(q, "sound_active")) x = &s_active;
+            else if (word_is(q, "surface_set_video")) x = &s_video;
             if (!x) continue;
             while (*q && *q != ' ' && *q != '\t') q++;
             x->addr = hexval(&q);
@@ -423,7 +443,7 @@ static void census_start(void)
     load_port();
     if (!s_worker.addr || !s_tick.addr || !in_game(s_tick.addr)) return;
     log_fd = open("/dump/sound_census.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
-    check(&s_worker); check(&s_tick); check(&s_play); check(&s_nth); check(&s_stop); check(&s_active);
+    check(&s_worker); check(&s_tick); check(&s_play); check(&s_nth); check(&s_stop); check(&s_active); check(&s_video);
     o = put_dec(line, now_ms());
     o = put_str(o, " MARK census worker ");
     o = put_str(o, s_worker.ok ? "ok" : "MISMATCH");
@@ -436,9 +456,11 @@ static void census_start(void)
     o = put_str(o, " channels "); o = put_hex(o, d_channels);
     o = put_str(o, " queue "); o = put_hex(o, d_queue);
     o = put_str(o, " city "); o = put_hex(o, d_city);
+    o = put_str(o, " video "); o = put_dec(o, (unsigned)s_video.ok);
     emit(line, o);
     if (!s_worker.ok || !s_tick.ok) return;
     chan_fd = open("/dump/sound_census.chan", O_WRONLY | O_CREAT | O_APPEND, 0644);
     hook(s_worker.addr, on_worker);
     hook(s_tick.addr, on_tick);
+    if (s_video.ok) hook(s_video.addr, on_video);
 }

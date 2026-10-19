@@ -21,8 +21,10 @@ Every other mode keeps the shared clip. Nothing is moved: the shared clip, its n
 other reference stay where they are, so a card built without the copy is the card it was.
 
 WHOSE CODE (a C++ title; a title whose rules are plain C has no mode classes, and this reading
-then names no mode at all). A mode is a class ``cmode_<name>``, its screens are display-layer
-classes ``BDL<Name>...`` (paired by name, as the SDK's stock-mode reader pairs them), the
+then names no mode at all). A mode is a class ``cmode_<name>``, a class deriving from ``cmode``
+named freely (``cberserker_rage``), or on a title with no ``cmode`` a rule class that is its own
+``Singleton<>`` (``Mode_Stopping_A_Juggernaut``: :func:`_mode_classes`, PAD-624); its screens
+are display-layer classes ``BDL<Name>...`` (paired by name, as the SDK's stock-mode reader pairs them), the
 functions of one source file lie together, and the file's static initialiser - the function
 that builds its global objects, often holding clip names - is at the end of the file. A code
 reference belongs to a mode when its function is
@@ -49,12 +51,13 @@ import bisect
 import hashlib
 import json
 import os
+import re
 import struct
 from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes; older cached readings are read again
-#: (4: each clip's sounds, :mod:`.clip_sounds`)
-READ_REV = 4
+#: (4: each clip's sounds, :mod:`.clip_sounds`; 5: freely named and singleton mode classes, PAD-624)
+READ_REV = 5
 #: the most clip-name characters a project file keeps (engine._sanitize_title's cap)
 NAME_MAX = 64
 #: how far back from a table's pointer the table's start is looked for (words)
@@ -74,6 +77,11 @@ HOST_MAX = 256
 #: in-game bank holds most of a title's clips; a title with a clip in every scene is not
 #: read scene by scene)
 BANKS_MAX = 12
+#: a singleton rule class that serves every mode, not one (:func:`_mode_classes`): the mode
+#: select screen, the shared mode code, a manager, a display or lighting part (Uncanny X-Men
+#: ``Mode_Select``, ``Sentinels_Controller``)
+NOT_MODES = re.compile(r"(^|_)(Info|Shared|Select|Advance)$|(Manager|Controller|Display|"
+                       r"Lighting|Frame|Effect)$")
 
 
 class ClipModesError(ValueError):
@@ -132,25 +140,98 @@ class Reading:
 
 def mode_label(cls):
     """``cmode_battle_vs_ghidorah_and_gigan`` -> ``Battle vs Ghidorah and Gigan``, as the
-    Modes tab names the game's own modes (:class:`.stock_modes.Mode`)."""
-    from .stock_modes import Mode
-    return Mode(id=0, cls=cls).name
+    Modes tab names the game's own modes (:class:`.stock_modes.Mode`); ``cberserker_rage`` ->
+    ``Berserker Rage`` (:func:`.stock_scan.class_words`); a singleton rule class in words,
+    its kind's prefix dropped (``Mode_Stopping_A_Juggernaut`` -> ``Stopping a Juggernaut``,
+    ``Multiball_Berserker`` -> ``Berserker Multiball``, ``Rule_Danger_Room`` -> ``Danger
+    Room``)."""
+    if cls.startswith("cmode_"):
+        from .stock_modes import Mode
+        return Mode(id=0, cls=cls).name
+    if cls != cls.lower():
+        return _singleton_words(cls)
+    from .stock_scan import class_words
+    return re.sub(r"\bMball\b", "Multiball", class_words(cls))
+
+
+def _singleton_words(cls):
+    words = [w for w in cls.split("::")[-1].split("_") if w]
+    tail = []
+    if len(words) > 1 and words[0] in ("Mode", "Rule"):
+        words = words[1:]
+    elif len(words) > 1 and words[0] == "Multiball":
+        words, tail = words[1:], ["Multiball"]
+    out = []
+    for w in words + tail:
+        lw = w.lower()
+        out.append(lw if out and lw in _SMALL else w[:1].upper() + w[1:])
+    return " ".join(out)
+
+
+_SMALL = ("vs", "and", "of", "the", "a", "an", "to", "in", "on", "at", "for")
 
 
 def mode_slug(cls):
-    """The part of a mode's class a copy's name ends with: ``battle_vs_gigan``."""
-    return cls[6:] if cls.startswith("cmode_") else cls
+    """The part of a mode's class a copy's name ends with: ``battle_vs_gigan``
+    (``cberserker_rage`` -> ``berserker_rage``, ``Mode_Escape_Nimrod`` -> ``escape_nimrod``)."""
+    return _stem(cls).lower()
+
+
+def _stem(cls):
+    """A mode class less its kind's prefix: ``cmode_``, the ``c`` of a freely named class, a
+    singleton's ``Mode_`` / ``Multiball_`` / ``Rule_``."""
+    if cls.startswith("cmode_"):
+        return cls[6:]
+    if re.match(r"^c[a-z]", cls):
+        return cls[1:]
+    for pre in ("Mode_", "Multiball_", "Rule_"):
+        if cls.startswith(pre) and len(cls) > len(pre):
+            return cls[len(pre):]
+    return cls
 
 
 # ---- reading ---------------------------------------------------------------------------------
-def _mode_classes(S, model):
-    """The concrete mode classes: ``cmode_*`` that no other mode class derives from, less the
-    manager and the ``_null`` stand-ins."""
+def _mode_classes(S, model, prog=None):
+    """The concrete mode classes, less the manager and the ``_null`` stand-ins:
+
+    * ``cmode_*`` that no other mode class derives from (Godzilla, Jaws, King Kong);
+    * any other class deriving from ``cmode`` that none derives from, or that the game builds
+      an object of (:func:`.stock_scan_cpp.init_objects`: Deadpool's ``cbattle_juggernaut``
+      is a mode and the base of its Sauron variant) - the titles whose mode classes are
+      named freely (Deadpool, Star Wars, Mandalorian, Venom, TMNT: ``cberserker_rage``);
+    * on a title with no ``cmode`` (Uncanny X-Men, Jurassic Park the Pinball), each rule
+      class that is its own ``Singleton<>`` (``Mode_Stopping_A_Juggernaut``,
+      ``Multiball_Berserker``, ``Rule_Danger_Room``), less the parts that serve them all
+      (:data:`NOT_MODES`)."""
     allc = [c for c in model if c.startswith("cmode_") and c != "cmode_manager"]
     bases = set()
     for c in allc:
         bases.update(S.chain_of(model, c))
-    return [c for c in allc if c not in bases and not c.endswith("_null")]
+    out = [c for c in allc if c not in bases and not c.endswith("_null")]
+    if "cmode" in model:
+        free = [c for c in model if not c.startswith("cmode") and S.derives(model, c, "cmode")]
+        fb = set()
+        for c in free:
+            fb.update(S.chain_of(model, c))
+        got = {c for c in free if c not in fb}
+        if prog is not None and free:
+            try:
+                from . import stock_scan_cpp as SC
+                got |= {o["class"] for o in SC.init_objects(prog, model, "cmode")
+                        if o["class"] in free}
+            except Exception:                               # noqa: BLE001 - leaves alone
+                pass
+        if got:
+            # a framework class a freely named mode derives from is no mode (cmode_battle), nor
+            # a cmode_ class that is no cmode (Deadpool's cmode_song_player)
+            out = [c for c in out if c not in fb and S.derives(model, c, "cmode")]
+        out += sorted(c for c in got if not c.endswith("_null") and c != "cmode_manager")
+        return out
+    if out:
+        return out
+    return sorted(c for c in model if "Singleton<%s>" % c in S.chain_of(model, c)
+                  and not NOT_MODES.search(c))
+
 
 
 def _layers(model, modes):
@@ -159,7 +240,7 @@ def _layers(model, modes):
     multiball's, not king of the monsters')."""
     import re
     norm = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())          # noqa: E731
-    keys = sorted(((norm(c[6:]), c) for c in modes), key=lambda kc: -len(kc[0]))
+    keys = sorted(((norm(_stem(c)), c) for c in modes), key=lambda kc: -len(kc[0]))
     out = {}
     for layer in model:
         if not layer.startswith("BDL"):
@@ -342,7 +423,7 @@ def analyse(elf, names, ctx=None):
     if ctx is not None:
         ctx["prog"] = prog
     model = S.class_model(prog)
-    modes = _mode_classes(S, model)
+    modes = _mode_classes(S, model, prog)
     if not modes:
         return out
     layers = _layers(model, modes)

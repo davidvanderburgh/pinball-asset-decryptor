@@ -1178,7 +1178,8 @@ export default function VideoTab() {
         ${modesCol ? html`<${Select} cls="vid-modefilter" sm value=${md.filter || ""} title=${T.modeFilter}
           options=${[{ value: "", label: "Every mode" }].concat((md.list || []).map((m) => ({ value: m.id, label: `${m.label} (${m.n})` })))}
           onChange=${(v) => call("video.set_mode_filter", v)} />`
-          : md.busy ? html`<span class="small muted nw vid-modes-busy"><${Spinner} /> ${T.modesBusy}</span>` : null}
+          : md.busy ? html`<span class="small muted nw vid-modes-busy"><${Spinner} /> ${T.modesBusy}</span>`
+          : md.why ? html`<span class="small muted nw vid-modes-why" ...${tip(md.why.tip)}>${md.why.line}</span>` : null}
         <span class="sp"></span>
         <span class="vid-opts">
           <${Check} checked=${s.no_conversion} label=${T.noconv} title=${T.noconvTip} cls="small"

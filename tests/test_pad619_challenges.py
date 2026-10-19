@@ -188,7 +188,7 @@ def test_a_challenge_pick_waits_for_the_games_mode_running_as_the_ball_starts():
 
 # ---- the GamePlayModes builds: a challenge is the game-play mode's index ---------------------------
 GPM_PORTS = ("jaws_le-1.02", "jaws_pro-1.02", "john_wick_le-1.01", "john_wick_le-1.02", "john_wick_pro-1.02",
-             "metallica_spike-1.03", "metallica_spike-1.04")
+             "metallica_spike-1.03", "metallica_spike-1.04", "venom_le-1.07", "venom_pro-1.07")
 
 
 @pytest.mark.parametrize("key", GPM_PORTS + ("godzilla_le-1.16", "godzilla_pro-1.15", "godzilla_pro-1.16"))
@@ -206,8 +206,16 @@ def test_jaws_names_its_four_challenges_by_their_index_and_standard_plays_instea
         "Red Circle Reckoning", "The Staircase", "The Duel", "Special Assignment", "Tick Tock Mr. Wick")
 
 
+def test_venom_names_its_knull_challenges_from_the_adapters_own_tables():
+    port = _port("venom_pro-1.07")
+    v = port["value"]
+    assert int(v["game_play_mode_at"]) == 4 and int(v["challenge_mode_plain"]) == 0
+    assert [int(v["challenge_mode_%d" % n]) for n in range(3)] == [11, 12, 13]
+    assert MP._challenges(port) == ("Challenge Mode Low", "Challenge Mode Medium", "Challenge Mode High")
+
+
 def test_the_game_modes_with_no_challenge_say_so():
-    for key in ("king_kong_pro-0.97", "uncanny_xmen_le-0.98"):
+    for key in ("king_kong_pro-0.97", "uncanny_xmen_le-0.98", "dungeons_and_dragons_pro-1.10"):
         p = MP.profile_from_port(str(PORTS / ("%s.port" % key)))
         assert not p.can("challenge") and "has no list of challenges" in p.why_not("challenge"), key
 

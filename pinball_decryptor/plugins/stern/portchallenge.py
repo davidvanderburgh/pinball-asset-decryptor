@@ -157,6 +157,8 @@ def find(elf):
         lines = table_lines(e, names, on_flag)                  # PAD-619: Godzilla's game-mode table
     if not lines and not generic:
         lines = gpm_lines(e, names, on_flag)                    # PAD-619: the GamePlayModes index (Jaws, ...)
+    if not lines and not generic:
+        lines = adapter_lines(e, names, on_flag)                # PAD-619: the adapter's static tables (Venom)
     if not lines:
         return [], notes or ["no challenge list and no start menu of the known shape"]
     if generic:
@@ -791,6 +793,86 @@ def gpm_lines(e, names, on_flag, debug=False):
             "data  game_play_modes     0x%08x   # the GamePlayModes singleton: the current game-play mode at +8" % single,
             "value game_play_mode_at   8",
             "value challenge_mode_plain  %d   # Standard: what a mode's challenge game plays" % plain] + lines
+
+
+#: PAD-619: Venom's GamePlayModeAdapter keeps no table of objects: the current game-play mode is a plain global (the
+#: adapter's second method: movw/movt r3, <cur>; ldr r0, [r3, #<at>]; bx lr), and each mode's flag and name message
+#: are u16 arrays in the game's read-only data, read by the adapter's methods:
+#:   flag: sub r1, r1, #1 ; cmp r1, #<last> ; lslls r1, r1, #1 ; movwls/movtls r3, <arr> ; ldrhls r0, [r3, r1]
+#:   name: sub r2, r2, #1 ; cmp r2, #<last> ; push ; movwls/movtls r3, <arr> ; addls r3, r3, r2, lsl #1 ; ...
+#:         ldrhls r0, [r3, #<off>]
+#: (modes from 1; 0 is Standard, what the adapter's reset stores). Venom Pro/LE 1.07: Challenge Mode Low / Medium /
+#: High (Defeat Knull) are modes 11-13, flag 18 alone.
+def _adapter_vtable(e):
+    d = e.d
+    i = d.find(b"\x0019GamePlayModeAdapter\x00")
+    if i < 0:
+        return None
+    name = e.va(i + 1)
+    vts = [e.va(o) + 4 for ti in (e.va(o) - 4 for o in _refs(d, name)) for o in _refs(d, ti)]
+    return vts[0] if len(vts) == 1 else None
+
+
+def adapter_lines(e, names, on_flag):
+    """The port lines of a static-table GamePlayModeAdapter's challenges (see above), or []."""
+    vt = _adapter_vtable(e)
+    if not vt:
+        return []
+    fns = []
+    for j in range(16):
+        f = e.word(vt + 4 * j)
+        if not f or e.off(f) is None:
+            break
+        fns.append(f)
+    if len(fns) < 9:
+        return []
+
+    def words(va, n):
+        return [e.word(va + 4 * k) for k in range(n)]
+    a, b, c, r = words(fns[1], 4)
+    if not (a & 0xFFF0F000 == 0xE3003000 and b & 0xFFF0F000 == 0xE3403000 and c & 0xFFFFF000 == 0xE5930000
+            and r == 0xE12FFF1E):
+        return []
+    cur, at = _imm16(b) << 16 | _imm16(a), c & 0xFFF
+    flags = msgs = None
+    for f in fns:
+        w = words(f, 12)
+        if w[0] == 0xE2411001 and w[1] & 0xFFFFFF00 == 0xE3510000 and w[2] == 0x91A01081 \
+                and w[3] & 0xFFF0F000 == 0x93003000 and w[4] & 0xFFF0F000 == 0x93403000 and w[5] == 0x919300B1:
+            flags = (_imm16(w[4]) << 16 | _imm16(w[3]), (w[1] & 0xFF) + 1)
+        if w[0] == 0xE2422001 and w[1] & 0xFFFFFF00 == 0xE3520000 and msgs is None:
+            arr = None
+            for k in range(2, 10):
+                if w[k] & 0xFFF0F000 == 0x93003000 and w[k + 1] & 0xFFF0F000 == 0x93403000:
+                    arr = _imm16(w[k + 1]) << 16 | _imm16(w[k])
+                if arr and w[k] & 0xFFF000F0 == 0x91D000B0:                    # ldrhls r0, [r3, #off]
+                    msgs = arr + (((w[k] >> 4) & 0xF0) | (w[k] & 0xF))
+                    break
+    if not flags:
+        return []
+    arr, n = flags
+    table, count = message_table(e)
+    lines, slot = [], 0
+    for i in range(1, n + 1):
+        flag = struct.unpack_from("<H", e.d, e.off(arr + 2 * (i - 1)))[0]
+        if flag != on_flag:
+            continue
+        msg = struct.unpack_from("<H", e.d, e.off(msgs + 2 * (i - 1)))[0] if msgs else 0
+        words_ = message_text(e, table, msg) if table and msg and msg < count else ""
+        stem = re.sub(r"[^A-Z0-9]+", "_", words_.upper()).strip("_") or "CHALLENGE_%d" % i
+        lines += ["# game-play mode %d (the adapter's flag table at 0x%08x): flag %d alone - picked by its index"
+                  % (i, arr, on_flag),
+                  "value challenge_mode_%d  %d" % (slot, i),
+                  "text  challenge_name_%d  %s" % (slot, pretty(stem))]
+        if msg:
+            lines.append("value challenge_name_msg_%d  %d" % (slot, msg))
+        slot += 1
+    if not slot:
+        return []
+    return ["value challenge_on_flag   %d" % on_flag,
+            "data  game_play_modes     0x%08x   # the adapter's current game-play mode" % cur,
+            "value game_play_mode_at   %d" % at,
+            "value challenge_mode_plain  0   # Standard (what the adapter's reset stores)"] + lines
 
 
 def missing_from(lines, port_text):

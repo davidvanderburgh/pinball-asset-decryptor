@@ -126,7 +126,13 @@ def pretty(stem):
 
 
 def find(elf):
-    """(lines, notes): the port lines of `elf` (the game program's bytes or its path), and what was not found."""
+    """(lines, notes): the port lines of `elf` (the game program's bytes or its path), and what was not found.
+
+    PAD-619: two routes to a build's challenges. The named challenges' own ball-start handlers (Bond, Stranger
+    Things: the shape above) when every named challenge has one; otherwise the start menu's (:func:`menu_generic`):
+    each of its kinds that makes a challenge game with a flag of its own is a challenge, taken by its flag alone
+    (`value challenge_flag_<n>`, no site: the runtime clears the flag as the ball starts). A build whose menu has
+    no such kind (only the plain challenge game) still gets the menu lines: challenges of the modes' own."""
     e = Elf(elf)
     names = flag_names(e)
     if not names:
@@ -135,6 +141,100 @@ def find(elf):
         on_flag = names.index("FG_PLAYER_CHALLENGE_MODE_ACTIVE")
     except ValueError:
         return [], ["no FG_PLAYER_CHALLENGE_MODE_ACTIVE flag"]
+    lines, notes = _handler_route(e, names, on_flag)
+    menu = menu_lines(e) if lines else []                       # Bond's own menu code (PAD-615 round 2)
+    generic = None if menu else menu_generic(e, names, on_flag)
+    if not lines and generic and generic["named"]:
+        lines = ["value challenge_on_flag   %d" % on_flag]
+        for n, (kind, flag) in enumerate(generic["named"]):
+            stem = re.sub(r"^FG_|_ACTIVE$", "", names[flag])
+            lines += ["# %s: menu kind %d sets flags %d and %d" % (pretty(_short(stem)), kind, on_flag, flag),
+                      "value challenge_flag_%d  %d" % (n, flag),
+                      "text  challenge_name_%d  %s" % (n, pretty(_short(stem)))]
+    elif not lines and generic:
+        lines = ["value challenge_on_flag   %d" % on_flag]
+    if not lines:
+        return [], notes or ["no challenge list and no start menu of the known shape"]
+    if generic:
+        menu = generic["lines"]
+    return flag_lines(e) + lines + balls_lines(e) + menu, []
+
+
+def balls_lines(e):
+    """PAD-619: `site challenge_balls` - the framework's balls-per-game getter, one shape on every Spike 2 build:
+        push {r4, r5, lr} ; mov r5, r0 ; sub sp, sp, #12 ; mov r0, #<AD_BALLS_PER_GAME> ; bl <adjustment> ;
+        mov r4, r0 ; mov r0, r5 ; bl <...> ; cmp r0, #0 ...        (the setting, unless the game's mode says otherwise)
+    The runtime has it say 1 while a mode's challenge game runs. Empty when it is not there, or not once."""
+    from .adjustments import AdjustmentTable
+    try:
+        bpg = AdjustmentTable(e.d).by_name.get("AD_BALLS_PER_GAME")
+    except ValueError:
+        return []
+    if bpg is None:
+        return []
+    w, base = e.words, e.text_va
+    hits = [k for k in range(len(w) - 9) if w[k] == 0xE92D4030 and w[k + 1] == 0xE1A05000 and w[k + 2] == 0xE24DD00C
+            and w[k + 3] in mov_r0(bpg) and bl_target(base + 4 * k + 16, w[k + 4]) is not None
+            and w[k + 5] == 0xE1A04000 and w[k + 6] == 0xE1A00005
+            and bl_target(base + 4 * k + 28, w[k + 7]) is not None and w[k + 8] == 0xE3500000]
+    if len(hits) != 1:
+        return []
+    k = hits[0]
+    return ["site  challenge_balls     0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
+
+
+def _short(stem):
+    """A menu challenge's name from its flag's stem: CYGNUS_CHALLENGE_BOOK_1 -> CYGNUS_BOOK_1, RETRO_CHALLENGE ->
+    RETRO, 2112_CHALLENGE -> 2112."""
+    return re.sub(r"_+", "_", re.sub(r"(^|_)CHALLENGE(_|$)", "_", stem)).strip("_") or stem
+
+
+def flag_lines(e):
+    """PAD-619: the game's flag bitmap - `data game_flags` (the holder: the bitmap pointer at + game_flags_at) and
+    `data game_flag_count` (its size in bits) - read off the flag functions' one shape on every Spike 2 build:
+        cmp r0,#0 ; beq ; movw/movt r3,<count> ; ldr r3,[r3] ; cmp r0,r3 ; bhs ; movw r2,<holder> ; and r3,r0,#7 ;
+        movt r2,<holder> ; mov ip,#1 ; ldr r1,[r2,#4] ; ldrb r2,[r1,r0,asr #3] ; bic|orr r3,r2,ip,lsl r3 ...
+    Empty when it is not there, or not one holder."""
+    fl = flag_functions(e)
+    if not fl or fl["holder"] is None:
+        return []
+    return ["data  game_flags          0x%08x" % fl["holder"],
+            "value game_flags_at       4",
+            "data  game_flag_count     0x%08x" % fl["count"]]
+
+
+def flag_functions(e):
+    """{set, clear, holder, count} of the game's flag functions (see :func:`flag_lines`), or None."""
+    w, base = e.words, e.text_va
+    found, holders = {}, set()
+    for k in range(12, len(w) - 3):
+        if w[k] != 0xE5921004 or w[k + 1] != 0xE7D121C0:
+            continue
+        regs = {}
+        for j in range(k - 12, k):
+            x = w[j]
+            if x & 0x0FF00000 == 0x03000000:
+                regs[(x >> 12) & 0xF] = ((x >> 16) & 0xF) << 12 | (x & 0xFFF)
+            elif x & 0x0FF00000 == 0x03400000 and ((x >> 12) & 0xF) in regs:
+                r = (x >> 12) & 0xF
+                regs[r] = regs[r] | (((x >> 16) & 0xF) << 12 | (x & 0xFFF)) << 16
+                regs[("v", r)] = regs[r]
+        start = next((j for j in range(k - 1, k - 14, -1) if w[j] == 0xE3500000), None)
+        if start is None or ("v", 2) not in regs or ("v", 3) not in regs:
+            continue
+        kind = {0xE1C2331C: "clear", 0xE182331C: "set"}.get(w[k + 2])
+        if kind:
+            found[kind] = base + 4 * start
+            holders.add((regs[("v", 2)], regs[("v", 3)]))
+    if set(found) != {"set", "clear"} or len(holders) != 1:
+        return None
+    (holder, count), = holders
+    return dict(found, holder=holder, count=count)
+
+
+def _handler_route(e, names, on_flag):
+    """PAD-615's route: each named challenge's own ball-start handler. (lines, notes); lines empty unless every named
+    challenge has exactly one."""
     picks = [(i, CHALLENGE_FLAG.match(n).group(1)) for i, n in enumerate(names) if CHALLENGE_FLAG.match(n)]
     if not picks:
         return [], ["the build names no challenge (no FG_<name>_CHALLENGE flag)"]
@@ -168,7 +268,7 @@ def find(elf):
                   "text  challenge_name_%d  %s" % (n, pretty(stem))]
     if notes:
         return [], notes
-    return lines + menu_lines(e), notes
+    return lines, notes
 
 
 def rot_imm(w):
@@ -222,6 +322,185 @@ def menu_lines(e):
             "value challenge_menu_cap       %d" % cap,
             "value challenge_menu_kind      3",
             "value challenge_menu_caption   %d" % ((cw >> 4 & 0xF000) | (cw & 0xFFF))]
+
+
+#: PAD-619: the start menu on the other builds of Bond's generation (Aerosmith, Avengers, Batman 66, The Beatles, Deadpool,
+#: Elvira, Guardians, Iron Maiden, JP The Pin, Led Zeppelin, The Munsters, Rush, Star Wars ELG, Stranger Things, Sword
+#: of Rage, their versions): the same function shape as Bond's - the list on the stack (12- or 16-byte entries {u32
+#: kind, u16 caption message, char *name, ...}), a loop that reads the buttons every frame and, whenever the
+#: selection is shown, jumps on its kind to set the game's mode flags:
+#:   every frame:     mov rX, r0 ; tst rX, #0x80                  (the buttons just read; 0x80 = Start)
+#:   the kind jump:   ldr r3, [r3, #-back] ; sub r3, r3, #1 ; cmp r3, #N ; ldrls pc, [pc, r3, lsl #2]
+PICK_LDR = 0xE5103000          # ldr r3, [r3, #-imm]  (mask 0xFFF0F000)
+
+
+def _pick_sites(e):
+    w = e.words
+    return [k for k in range(len(w) - 4) if (w[k] & 0xFFF0F000) == PICK_LDR and w[k + 1] == 0xE2433001
+            and (w[k + 2] & 0xFFFFFF00) == 0xE3530000 and w[k + 3] == 0x979FF103]
+
+
+def _case_flags(e, va, r0, fl, limit=40):
+    """The flags one case of a kind jump sets (calls of the set function), following its branches until another
+    call (the shared tail's first) or a return. r0: what the code before the jump left in r0."""
+    w, base, out, seen = e.words, e.text_va, [], set()
+    for _ in range(limit):
+        k = (va - base) // 4
+        if va in seen or not 0 <= k < len(w):
+            break
+        seen.add(va)
+        x = w[k]
+        if x & 0x0FFF0000 == 0x03A00000 and x >> 28 == 0xE and (x >> 12) & 0xF == 0:
+            r0 = rot_imm(x & 0xFFF)
+        elif x & 0x0FF00000 == 0x03000000 and x >> 28 == 0xE and (x >> 12) & 0xF == 0:
+            r0 = ((x >> 16) & 0xF) << 12 | (x & 0xFFF)
+        t = bl_target(va, x)
+        if t is not None:
+            if t == fl["set"]:
+                out.append(r0)
+            elif t != fl["clear"]:
+                break
+            r0 = None
+        elif x & 0x0F000000 == 0x0A000000 and x >> 28 == 0xE:
+            off = x & 0xFFFFFF
+            va = va + 8 + 4 * (off - (1 << 24) if off & 0x800000 else off)
+            continue
+        elif (x & 0xFFFF0000) == 0xE8BD0000 or x == 0xE12FFF1E:
+            break
+        va += 4
+    return out
+
+
+def message_table(e):
+    """(va, count) of the game's message table: one pointer per message id to a record of five language strings,
+    found from the record of "CHOOSE YOUR MODE OF PLAY"; (None, 0) when not there."""
+    d, z = e.d, bytes(1)
+
+    def ok(off):
+        r = struct.unpack_from("<I", d, off)[0]
+        ro = e.off(r)
+        if ro is None:
+            return False
+        p = struct.unpack_from("<I", d, ro)[0]
+        po = e.off(p)
+        if po is None:
+            return False
+        end = d.find(z, po, po + 400)
+        return end >= 0 and all(32 <= c < 256 or c in (9, 10) for c in d[po:end])
+
+    i = d.find(z + b"CHOOSE YOUR MODE OF PLAY" + z)
+    if i < 0:
+        return None, 0
+    pk = struct.pack("<I", e.va(i + 1))
+    best = (None, 0)
+    rec = d.find(pk)
+    while rec >= 0:
+        if rec % 4 == 0:
+            pk2 = struct.pack("<I", e.va(rec))
+            a = d.find(pk2)
+            while a >= 0:
+                if a % 4 == 0:
+                    b = a
+                    while ok(b - 4):
+                        b -= 4
+                    n = 0
+                    while ok(b + 4 * n):
+                        n += 1
+                    if n > best[1]:
+                        best = (e.va(b), n)
+                a = d.find(pk2, a + 1)
+        rec = d.find(pk, rec + 1)
+    return best
+
+
+def message_text(e, table, i):
+    return e.cstr(e.word(e.word(table + 4 * i))) or ""
+
+
+def challenge_caption(e):
+    """The message id the start menu shows over a challenge (CHALLENGE; The Beatles: CHALLENGE MODE): the first after
+    CHOOSE YOUR MODE OF PLAY's."""
+    table, n = message_table(e)
+    if not table:
+        return None
+    head = next((i for i in range(n) if message_text(e, table, i) == "CHOOSE YOUR MODE OF PLAY"), None)
+    if head is None:
+        return None
+    return next((i for i in range(head, min(n, head + 40)) if message_text(e, table, i) in ("CHALLENGE", "CHALLENGE MODE")),
+                None)
+
+
+def menu_generic(e, names, on_flag):
+    """PAD-619: the start menu of a build of Bond's generation (see PICK_LDR). None when it is not there, else
+    {lines, named: [(kind, flag)], plain: kind or None}: the port lines, the kinds that make a challenge game with a
+    flag of their own (in kind order: challenge 0, 1, ..) and the kind of the plain one-ball challenge game."""
+    w, base = e.words, e.text_va
+    picks = _pick_sites(e)
+    fl = flag_functions(e)
+    if len(picks) != 1 or not fl:
+        return None
+    k = picks[0]
+    back = w[k] & 0xFFF
+    pre = w[k - 8:k]
+    tops = [rot_imm(x & 0xFFF) for x in pre if (x & 0xFFFF0000) == 0xE28D0000]
+    if not tops:
+        return None
+    top = tops[-1]
+    list_at = top - back
+    entry = 16 if any((x & 0xFFFF0FF0) == 0xE1A00200 for x in pre) else 12        # mov rd, rm, lsl #4
+    frames = [j for j in range(max(0, k - 1500), k) if (w[j] & 0xFFFF0FFF) == 0xE1A00000
+              and (w[j + 1] & 0xFFF0FFFF) == 0xE3100080 and ((w[j] >> 12) & 0xF) == ((w[j + 1] >> 16) & 0xF)]
+    if not frames:
+        return None
+    fr = frames[-1]
+    # the count: the cursor's wrap past the last entry - ldr r3, [sp, #count] ; ... sub r3, r3, #1 ; cmp r3, <cursor>
+    count_at = next((w[j] & 0xFFF for j in range(fr, min(len(w) - 4, fr + 600)) if (w[j] & 0xFFFFF000) == 0xE59D3000
+                     and 0xE2433001 in w[j + 1:j + 4] and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[j + 2:j + 5])),
+                    None)
+    start = next((j for j in range(fr, max(0, fr - 3000), -1) if (w[j] & 0xFFFF4000) == 0xE92D4000), None)
+    if count_at is None or start is None:
+        return None
+    # the room: up to the first local object above the list the function hands a call (add r0, sp, #x ; bl)
+    above = [rot_imm(w[j] & 0xFFF) for j in range(start, k + 1500) if (w[j] & 0xFFFFF000) == 0xE28D0000
+             and bl_target(base + 4 * j + 4, w[j + 1]) is not None]
+    above = [a for a in above if list_at < a and a != top]
+    if not above:
+        return None
+    cap = (min(above) - list_at) // entry
+    # what each kind sets: r0 as the code before the jump left it
+    r0 = None
+    for j in range(k - 6, k):
+        x = w[j]
+        if x & 0x0FFF0000 == 0x03A00000 and x >> 28 == 0xE and (x >> 12) & 0xF == 0:
+            r0 = rot_imm(x & 0xFFF)
+    n = (w[k + 2] & 0xFF) + 1
+    named, plain = [], None
+    for i in range(n):
+        flags = _case_flags(e, e.word(base + 4 * (k + 5) + 4 * i), r0, fl)
+        if on_flag not in flags:
+            continue
+        own = [f for f in flags if f != on_flag and not names[f].startswith("FG_PLAYER_")]
+        if not own and len(flags) == 1 and plain is None:
+            plain = i + 1
+        elif len(own) == 1 and len(flags) == 2:
+            named.append((i + 1, own[0]))
+    caption = challenge_caption(e)
+    if caption is None or (plain is None and not named):
+        return None
+    kind = plain if plain is not None else named[0][0]
+    lines = ["# the start menu (CHOOSE YOUR MODE OF PLAY): our names on the challenges modes take, and challenges of "
+             "their own - %s" % ("the plain challenge game (kind %d)" % plain if plain is not None
+                                 else "challenge 0's kind (%d), its own start stopped" % kind),
+             "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
+             "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * k + 4, w[k + 1], w[k + 2]),
+             "value challenge_menu_list_at   %d" % list_at,
+             "value challenge_menu_count_at  %d" % count_at,
+             "value challenge_menu_cap       %d" % cap,
+             "value challenge_menu_entry     %d" % entry,
+             "value challenge_menu_kind      %d" % kind,
+             "value challenge_menu_slot      %d" % (-1 if plain is not None else 0),
+             "value challenge_menu_caption   %d" % caption]
+    return {"lines": lines, "named": named, "plain": plain}
 
 
 def missing_from(lines, port_text):

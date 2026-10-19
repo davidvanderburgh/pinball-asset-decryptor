@@ -14,6 +14,8 @@
  *     data sound_queue    the 8 x 20-byte delayed-request queue (optional)
  *     data city_variants  RuleCities' request -> request hash map (optional)
  *     site surface_set_video  hooked when present: one V line per clip a surface is given (PAD-624)
+ *     site census_clip_r0 hooked when present: a V line per clip named by the std::string in r0
+ *                         (Deadpool's clip player, 0x1455e4 on LE 1.16; PAD-634)
  *     site census_audit   hooked when present: one A line per audit counted (PAD-634)
  *     site census_flag_on / census_flag_off  hooked when present: one F line per game flag set /
  *                         cleared (PAD-634: which mode runs when a clip shows)
@@ -36,6 +38,7 @@
  *   sc.fire    "<req> [n]"      sound_play(req), or sound_nth(req, n)
  *   sc.stop    "<req>"          sound_stop(req)        (0 stops every channel)
  *   sc.active  "<req>"          sound_active(req)
+ *   sc.call    "<obj> <slot>"   call the object's virtual <slot> (a C++ mode's START, PAD-634)
  *   sc.city    anything         dump the city-variant map (also done once, 60 s after the first tick)
  * Read the results with sound_census_read.py.
  */
@@ -58,7 +61,7 @@ struct ts32 { long tv_sec, tv_nsec; };
 
 struct site { unsigned addr, w0, w1; int ok; };
 static struct site s_worker, s_tick, s_play, s_nth, s_stop, s_active, s_video;
-static struct site s_audit, s_flag_on, s_flag_off;
+static struct site s_audit, s_flag_on, s_flag_off, s_clip0;
 static unsigned d_channels, d_queue, d_city;
 static int log_fd = -1, chan_fd = -1;
 
@@ -204,6 +207,15 @@ static void on_video(unsigned *r)
     *o++ = ' ';
     o = put_hex(o, r[5]);
     emit(line, o);
+}
+
+/* the same line for a clip player that takes the name's std::string in r0 (PAD-634) */
+static void on_clip_r0(unsigned *r)
+{
+    unsigned keep = r[1];
+    r[1] = r[0];
+    on_video(r);
+    r[1] = keep;
 }
 
 /* ---- audits and game flags: which mode runs (PAD-634) -------------------------------------- */
@@ -373,6 +385,26 @@ static void on_tick(unsigned *r)
         emit(line, o);
     }
     if (read_trigger("/dump/sc.city", buf, sizeof buf) >= 0) dump_city();
+    /* PAD-634: "<object hex> <slot>" calls the object's virtual <slot> with only the object - a C++
+     * mode's START (the port's stock_slot_start), as the game's own rule calls it */
+    if (read_trigger("/dump/sc.call", buf, sizeof buf) >= 0) {
+        const char *q = buf;
+        unsigned obj = hexval(&q), slot;
+        while (*q == ' ') q++;
+        slot = decval(&q, &got);
+        o = put_dec(line, now_ms());
+        o = put_str(o, " CALL ");
+        o = put_hex(o, obj);
+        *o++ = ' ';
+        o = put_dec(o, slot);
+        if (obj && got && slot < 256) {
+            unsigned fn = (*(const unsigned *const *)(unsigned long)obj)[slot];
+            ((void (*)(unsigned))(unsigned long)fn)(obj);
+            o = put_str(o, " done ");
+            o = put_hex(o, fn);
+        }
+        emit(line, o);
+    }
 }
 
 /* ---- the port ---------------------------------------------------------------------------- */
@@ -414,6 +446,7 @@ static void load_port(void)
             else if (word_is(q, "sound_active")) x = &s_active;
             else if (word_is(q, "surface_set_video")) x = &s_video;
             else if (word_is(q, "census_audit")) x = &s_audit;
+            else if (word_is(q, "census_clip_r0")) x = &s_clip0;
             else if (word_is(q, "census_flag_on")) x = &s_flag_on;
             else if (word_is(q, "census_flag_off")) x = &s_flag_off;
             if (!x) continue;
@@ -480,7 +513,7 @@ static void census_start(void)
     if (!s_worker.addr || !s_tick.addr || !in_game(s_tick.addr)) return;
     log_fd = open("/dump/sound_census.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
     check(&s_worker); check(&s_tick); check(&s_play); check(&s_nth); check(&s_stop); check(&s_active); check(&s_video);
-    check(&s_audit); check(&s_flag_on); check(&s_flag_off);
+    check(&s_audit); check(&s_flag_on); check(&s_flag_off); check(&s_clip0);
     o = put_dec(line, now_ms());
     o = put_str(o, " MARK census worker ");
     o = put_str(o, s_worker.ok ? "ok" : "MISMATCH");
@@ -494,6 +527,7 @@ static void census_start(void)
     o = put_str(o, " queue "); o = put_hex(o, d_queue);
     o = put_str(o, " city "); o = put_hex(o, d_city);
     o = put_str(o, " video "); o = put_dec(o, (unsigned)s_video.ok);
+    o = put_str(o, " clip_r0 "); o = put_dec(o, (unsigned)s_clip0.ok);
     o = put_str(o, " audit "); o = put_dec(o, (unsigned)s_audit.ok);
     o = put_str(o, " flags "); o = put_dec(o, (unsigned)(s_flag_on.ok + s_flag_off.ok));
     emit(line, o);
@@ -502,6 +536,7 @@ static void census_start(void)
     hook(s_worker.addr, on_worker);
     hook(s_tick.addr, on_tick);
     if (s_video.ok) hook(s_video.addr, on_video);
+    if (s_clip0.ok) hook(s_clip0.addr, on_clip_r0);
     if (s_audit.ok) hook(s_audit.addr, on_audit);
     if (s_flag_on.ok) hook(s_flag_on.addr, on_flag_on);
     if (s_flag_off.ok) hook(s_flag_off.addr, on_flag_off);

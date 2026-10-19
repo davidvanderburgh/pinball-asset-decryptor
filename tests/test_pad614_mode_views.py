@@ -132,6 +132,8 @@ console.log(JSON.stringify({
   c: [0, 1, 2].map(((st) => (i) => S.colorLine(['int a = 0x1F; /* one', 'two */ return f("s");', '#include <x.h>'][i], "c", st))({})),
   hat: S.hatText({ kind: "shot", shot: "Left ramp", when: "idle" }),
   stmt: S.stmtText({ op: "score", points: { k: "num", v: 1000 } }),
+  challenge: [V.hatWords({ kind: "challenge", challenge: "Ahoy Mr. Bond" }),
+              V.storyOf({ scripts: [{ hat: { kind: "challenge", challenge: "Ahoy Mr. Bond" }, do: [] }] }).waiting],
 }));
 """
 
@@ -158,6 +160,8 @@ def test_the_views_read_the_program(tmp_path):
     got = _node(tmp_path, _VIEWS, [prog, EVERY_BLOCK, shots])
     # every block has words of its own (none falls through to "(op)"), and the families match the Blocks tab's
     assert [w for w in got["words"] if w.startswith("(")] == []
+    # PAD-615: a challenge rule in words, and in the waiting box (the pick comes before the mode starts)
+    assert got["challenge"] == ["When the player picks the challenge Ahoy Mr. Bond", [0]]
     assert got["words"][EVERY_BLOCK.index({"op": "callout", "role": "ten_seconds"})] == "Say “Ten seconds left”"
     assert got["family"] == got["stmtClass"] and set(got["family"]) == set(BM.STATEMENTS)
     # the Story: RAMP FRENZY waits for its Left ramps, runs its shots and clock, ends on the clock or the drain

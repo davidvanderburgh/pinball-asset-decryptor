@@ -163,6 +163,10 @@ def find(elf):
         lines = gpm_lines(e, names, on_flag)                    # PAD-619: the GamePlayModes index (Jaws, ...)
     if not lines and not generic:
         lines = adapter_lines(e, names, on_flag)                # PAD-619: the adapter's static tables (Venom)
+    if not lines and not generic and not menu:
+        wide = menu_wide(e, names, on_flag)                   # PAD-619: TMNT's wide-entry start menu
+        if wide:
+            lines, menu = ["value challenge_on_flag   %d" % on_flag], wide
     if not lines:
         return [], notes or ["no challenge list and no start menu of the known shape"]
     if generic:
@@ -955,6 +959,87 @@ def adapter_lines(e, names, on_flag):
             "data  game_play_modes     0x%08x   # the adapter's current game-play mode" % cur,
             "value game_play_mode_at   %d" % at,
             "value challenge_mode_plain  0   # Standard (what the adapter's reset stores)"] + lines
+
+
+#: PAD-619: TMNT's start menu (TMNT LE/Pro 1.58/1.59): Bond's shape with its fields moved - 24-byte entries
+#: {+0 u8, +4 kind, +8 / +0xa caption message, +0xc char *name, +0x14 u32 ...}, the kind jump a few words after the kind
+#: load (`ldr r3, [r3, #-back] ; cmp r0, r2 ; bhi ; sub r3, r3, #1 ; cmp r3, #N ; ldrls pc, [pc, r3, lsl #2]`), the count
+#: wrapped through another register (`ldr r3, [sp, #count] ; ... sub r6, r3, #1 ; cmp r6, <cursor>`). Its plain
+#: challenge kind is FINAL BATTLE CHALLENGE's (11: flag 18 alone).
+def menu_wide(e, names, on_flag):
+    """The port lines of a wide-entry start menu (see above), or None."""
+    w, base = e.words, e.text_va
+    fl = flag_functions(e)
+    if not fl:
+        return None
+    sites = []
+    for k in range(8, len(w) - 8):
+        if (w[k] & 0xFFF0F000) != PICK_LDR:
+            continue
+        for j in range(k + 2, k + 6):
+            if w[j] == 0xE2433001 and (w[j + 1] & 0xFFFFFF00) == 0xE3530000 and w[j + 2] == 0x979FF103:
+                sites.append((k, j))
+                break
+    if len(sites) != 1:
+        return None
+    k, j = sites[0]
+    back = w[k] & 0xFFF
+    pre = w[k - 6:k]
+    tops = [rot_imm(x & 0xFFF) for x in pre if (x & 0xFFFF0000) == 0xE28D0000]
+    wide = any((x & 0x0FF00FF0) == 0x00800180 and x >> 28 == 0xE for x in pre)   # (cursor * 3) lsl #3: 24 bytes
+    if not tops or not wide:
+        return None
+    es, kind_addr = 24, tops[-1] - back
+    frames = [i for i in range(max(0, k - 6000), k) if (w[i] & 0xFFFF0FFF) == 0xE1A00000
+              and (w[i + 1] & 0xFFF0FFFF) == 0xE3100080 and ((w[i] >> 12) & 0xF) == ((w[i + 1] >> 16) & 0xF)]
+    if not frames:
+        return None
+    fr = frames[-1]
+    start = next((i for i in range(fr, max(0, fr - 6000), -1) if (w[i] & 0xFFFF4000) == 0xE92D4000), None)
+    if start is None:
+        return None
+    # the entry's start: the builder's own base (add rX, sp, #B) just below the kind - the kind is B's +kat
+    bases = [rot_imm(w[i] & 0xFFF) for i in range(start, fr) if (w[i] & 0xFFFF0000) == 0xE28D0000]
+    bases = [b_ for b_ in bases if kind_addr - es < b_ < kind_addr]
+    if not bases:
+        return None
+    list_at = max(bases)
+    kat = kind_addr - list_at
+    count_at = next((w[i] & 0xFFF for i in range(fr, min(len(w) - 4, fr + 600)) if (w[i] & 0xFFFFF000) == 0xE59D3000
+                     and any((x & 0xFFFF0FFF) == 0xE2430001 for x in w[i + 1:i + 4])
+                     and any((x & 0xFFF0FFF0) == 0xE1500000 for x in w[i + 2:i + 5])), None)
+    if count_at is None:
+        return None
+    above = [rot_imm(w[i] & 0xFFF) for i in range(start, k + 1500) if (w[i] & 0xFFFFF000) == 0xE28D0000
+             and bl_target(base + 4 * i + 4, w[i + 1]) is not None]
+    # the room: up to the first local above the list handed to a call, else the base the function indexes the list
+    # down from (TMNT: sp+0x430, 14 entries of 24)
+    above = [a for a in above if list_at + es <= a and a != tops[-1]] + [tops[-1]]
+    cap = (min(above) - list_at) // es
+    n = (w[j + 1] & 0xFF) + 1
+    plain = None
+    for i in range(n):
+        flags = _case_flags(e, e.word(base + 4 * (j + 4) + 4 * i), None, fl)
+        if on_flag in flags and len(flags) == 1 and plain is None:
+            plain = i + 1
+    caption = challenge_caption(e)
+    if plain is None or caption is None:
+        return None
+    return ["# the start menu (CHOOSE YOUR MODE OF PLAY), TMNT's wide entries: challenges of the modes' own - the plain "
+            "challenge game (kind %d)" % plain,
+            "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
+            "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * j, w[j], w[j + 1]),
+            "value challenge_menu_list_at   %d" % list_at,
+            "value challenge_menu_count_at  %d" % count_at,
+            "value challenge_menu_cap       %d" % cap,
+            "value challenge_menu_entry     %d" % es,
+            "value challenge_menu_kind_at   %d" % kat,
+            "value challenge_menu_caption_at %d" % (kat + 4),
+            "value challenge_menu_caption2_at %d" % (kat + 6),
+            "value challenge_menu_name_at   %d" % (kat + 8),
+            "value challenge_menu_kind      %d" % plain,
+            "value challenge_menu_slot      -1",
+            "value challenge_menu_caption   %d" % caption]
 
 
 def missing_from(lines, port_text):

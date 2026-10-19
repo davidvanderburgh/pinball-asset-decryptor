@@ -592,6 +592,8 @@ def _menu(tmp_path, own):
     src = R.RUNTIME.read_text(encoding="utf-8")
     code = MENU_CONTEXT + "#include <stdlib.h>\n#define CHALLENGE_MENU_KIND 0x100u\n" \
         + "static int challenge_menu_said, challenge_menu_room_said;\n#define pm_snprintf snprintf\n" \
+        + "".join(line + "\n" for line in src.splitlines() if line.startswith("#define MENU_")) \
+        + R._lift(src, "static int own_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)") + "\n" \
         + R._lift(src, "static int own_entry(const unsigned *ent)") + "\n" \
         + R._lift(src, "static void challenge_menu_built(unsigned *r)") + "\n" \
         + R._lift(src, "static void challenge_menu_picked(unsigned *r)") + MENU_MAIN

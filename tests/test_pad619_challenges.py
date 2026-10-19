@@ -51,13 +51,17 @@ def test_every_menu_port_names_the_whole_menu():
         cap, count_at, list_at = (int(v.get("challenge_menu_%s" % n, 1)) for n in ("cap", "count_at", "list_at"))
         assert "challenge_menu_count_at" in v or 4 <= int(v.get("challenge_menu_count_reg", -1)) <= 11, key
         low = 3 if int(v.get("challenge_menu_sets_on", 0)) else 5          # Star Wars sized its list for its own
-        assert low <= cap <= 9 and 0 < count_at < 1024 and 0 < list_at < 1024, key
-        assert int(v.get("challenge_menu_entry", 12)) in (12, 16), key
+        high = 14 if int(v.get("challenge_menu_entry", 12)) == 24 else 9         # TMNT: 13 kinds of its own
+        assert low <= cap <= high and 0 < count_at < 1024 and 0 < list_at < 1024, key
+        assert int(v.get("challenge_menu_entry", 12)) in (12, 16, 24), key
         assert 1890 < int(v["challenge_menu_caption"]) < 1930, key           # CHALLENGE: 1921, 1911, 1901 by era
         assert int(v.get("challenge_menu_slot", 0)) in (-1, 0), key
         if key.startswith("james_bond_"):
             continue                                                          # PAD-615's own menu lines
         assert "challenge_balls" in port["site"], key                       # a mode's challenge game is one ball
+        if key == "turtles_pro-1.58":
+            assert not port["event"], key                                   # its thin port names no events yet: the
+            continue                                                         # runtime leaves the menu alone there
         assert any(e[0] == "ball_start" for e in port["event"]), key        # where the plain one is handed over
 
 
@@ -247,9 +251,9 @@ def test_star_wars_menu_takes_ours_as_standard_through_the_entry(key):
 
 def test_the_runtime_reads_a_compare_chain_pick_through_its_entry_and_knows_ours_by_name():
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
-    own = src[src.index("static int own_entry(const unsigned *ent)"):]
+    own = src[src.index("static int own_entry_at("):]
     own = own[:own.index("\n}\n")]
-    assert "ent[2] == (unsigned)(unsigned long)own_challenge[k].name" in own
+    assert "name == (unsigned)(unsigned long)own_challenge[k].name" in src
     pick = src[src.index("static void challenge_menu_picked(unsigned *r)"):]
     pick = pick[:pick.index("\n}\n")]
     assert 'pm_port_value("challenge_menu_pick_back", 0)' in pick and "ent[0] = (unsigned)pm_port_value(" in pick
@@ -292,3 +296,16 @@ def test_the_runtime_vetoes_the_second_getter_and_portgen_keeps_the_pad630_line(
     assert 'hook_veto_n(fn("challenge_balls_2"), challenge_balls_veto, 1, 1)' in src
     from pinball_decryptor.plugins.stern import portgen as G
     assert G._GENERATED.match("site challenge_end_ball 0x1") and G._GENERATED.match("site challenge_balls_2 0x1")
+
+
+@pytest.mark.parametrize("key", ("turtles_le-1.59", "turtles_pro-1.58", "turtles_pro-1.59"))
+def test_tmnt_menu_has_its_fields_moved_and_the_runtime_follows_them(key):
+    test_the_ports_carry_what_the_finder_reads_off_the_game(key)
+    v = _port(key)["value"]
+    assert int(v["challenge_menu_entry"]) == 24 and int(v["challenge_menu_kind_at"]) == 4
+    assert int(v["challenge_menu_name_at"]) == 12 and int(v["challenge_menu_caption_at"]) == 8
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    built = src[src.index("static void challenge_menu_built(unsigned *r)"):]
+    built = built[:built.index("\n}\n")]
+    assert "list[es * i + k2] = list[es * tmpl + k2]" in built              # ours start as a copy of the game's entry
+    assert "*(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)own_challenge[k].name" in built

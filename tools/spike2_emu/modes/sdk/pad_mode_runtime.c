@@ -8873,13 +8873,24 @@ static int challenge_menu_said, challenge_menu_room_said;
 
 /* PAD-619: which of the modes' own an entry is: by its kind, or - once a compare-chain menu's pick made it a kind of the
  * game's (Star Wars: `challenge_menu_pick_back`) - by the name it points to; -1 = the game's */
+/* PAD-619: where an entry keeps its kind, caption message and name - Bond's {kind, caption, name} at 0 / 4 / 8 unless
+ * the port says otherwise (TMNT's 24-byte entries: 4 / 8 / 12) */
+#define MENU_KIND_AT ((unsigned)pm_port_value("challenge_menu_kind_at", 0))
+#define MENU_CAPTION_AT ((unsigned)pm_port_value("challenge_menu_caption_at", 4))
+#define MENU_NAME_AT ((unsigned)pm_port_value("challenge_menu_name_at", 8))
+
+static int own_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
+{
+    unsigned k, kind = *(const unsigned *)(ent + kat), name = *(const unsigned *)(ent + nat);
+    if (kind >= CHALLENGE_MENU_KIND && kind < CHALLENGE_MENU_KIND + N_OWN_CHALLENGE) return (int)(kind - CHALLENGE_MENU_KIND);
+    for (k = 0; k < N_OWN_CHALLENGE; k++)
+        if (own_challenge[k].fn && name == (unsigned)(unsigned long)own_challenge[k].name) return (int)k;
+    return -1;
+}
+
 static int own_entry(const unsigned *ent)
 {
-    unsigned k;
-    if (ent[0] >= CHALLENGE_MENU_KIND && ent[0] < CHALLENGE_MENU_KIND + N_OWN_CHALLENGE) return (int)(ent[0] - CHALLENGE_MENU_KIND);
-    for (k = 0; k < N_OWN_CHALLENGE; k++)
-        if (own_challenge[k].fn && ent[2] == (unsigned)(unsigned long)own_challenge[k].name) return (int)k;
-    return -1;
+    return own_entry_at((const unsigned char *)ent, 0, 8);
 }
 
 static void challenge_menu_built(unsigned *r)
@@ -8891,17 +8902,19 @@ static void challenge_menu_built(unsigned *r)
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), first = (unsigned)pm_port_value("challenge_menu_kind", 3);
     unsigned es = (unsigned)pm_port_value("challenge_menu_entry", 12);
     unsigned short caption = (unsigned short)pm_port_value("challenge_menu_caption", 0);
-    unsigned i, k, n0 = *count, mine = 0, tmpl = 0;
-    if (n0 > cap || !n0 || (es != 12 && es != 16)) return; /* not the list this hook knows: leave it alone */
+    unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
+    unsigned i, k, k2, n0 = *count, mine = 0, tmpl = 0;
+    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
+        return;                                            /* not the list this hook knows: leave it alone */
     for (i = 0; i < n0; i++) {
-        unsigned kind = *(unsigned *)(list + es * i);
-        if (own_entry((const unsigned *)(list + es * i)) >= 0) { mine++; continue; }
+        unsigned kind = *(unsigned *)(list + es * i + kat);
+        if (own_entry_at(list + es * i, kat, nat) >= 0) { mine++; continue; }
         if (kind == first) tmpl = i;                       /* the entry ours stand in for, when the menu shows it */
         if (kind >= first && kind < first + (unsigned)challenges_n) {
             if (!pm_port_value("challenge_menu_caption", 0))     /* PAD-619: the port's CHALLENGE, else the game's */
-                caption = *(unsigned short *)(list + es * i + 4);    /* own caption for a challenge */
+                caption = *(unsigned short *)(list + es * i + cat);  /* own caption for a challenge */
             if (challenge_fn[kind - first] && challenge_title[kind - first][0])
-                *(unsigned *)(list + es * i + 8) = (unsigned)(unsigned long)challenge_title[kind - first];   /* the game's u32 */
+                *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)challenge_title[kind - first];   /* the game's u32 */
         }
     }
     if (mine) return;                                      /* PAD-619: an every-frame site - already appended */
@@ -8913,12 +8926,16 @@ static void challenge_menu_built(unsigned *r)
             continue;
         }
         i = *count;
-        if (es == 16)                                      /* the fourth word: as the entry ours stand in for */
+        if (!plain)                                        /* PAD-619: another layout - start from the game's entry */
+            for (k2 = 0; k2 < es; k2++) list[es * i + k2] = list[es * tmpl + k2];
+        else if (es == 16)                                 /* the fourth word: as the entry ours stand in for */
             *(unsigned *)(list + es * i + 12) = *(unsigned *)(list + es * tmpl + 12);
-        *(unsigned *)(list + es * i) = CHALLENGE_MENU_KIND + k;
-        *(unsigned short *)(list + es * i + 4) = caption;
-        *(unsigned short *)(list + es * i + 6) = 0;
-        *(unsigned *)(list + es * i + 8) = (unsigned)(unsigned long)own_challenge[k].name;
+        *(unsigned *)(list + es * i + kat) = CHALLENGE_MENU_KIND + k;
+        *(unsigned short *)(list + es * i + cat) = caption;
+        if (plain) *(unsigned short *)(list + es * i + 6) = 0;
+        else if (pm_port_value("challenge_menu_caption2_at", -1) >= 0)     /* TMNT keeps the caption twice */
+            *(unsigned short *)(list + es * i + (unsigned)pm_port_value("challenge_menu_caption2_at", 0)) = caption;
+        *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)own_challenge[k].name;
         *count = i + 1;
     }
     if (*count != n0 || !challenge_menu_said++) {
@@ -8926,7 +8943,7 @@ static void challenge_menu_built(unsigned *r)
         unsigned at = 0;
         kinds[0] = 0;
         for (i = 0; i < *count && at < sizeof kinds - 8; i++)     /* PAD-619: the menu's order, for whoever steps it */
-            at += (unsigned)pm_snprintf(kinds + at, sizeof kinds - at, " %u", *(unsigned *)(list + es * i));
+            at += (unsigned)pm_snprintf(kinds + at, sizeof kinds - at, " %u", *(unsigned *)(list + es * i + kat));
         say("challenge menu: %u entries (%u of the modes' own) - kinds%s", *count, *count - n0, kinds);
     }
 }
@@ -8935,9 +8952,10 @@ static void challenge_menu_picked(unsigned *r)
 {
     long back = pm_port_value("challenge_menu_pick_back", 0);
     unsigned ptrk[3], *ent = back > 0 ? (unsigned *)(unsigned long)(r[3] - (unsigned)back) : ptrk;
+    unsigned char *e8 = back > 0 ? (unsigned char *)ent - MENU_KIND_AT : 0;   /* the entry's start */
     int was = own_pending, k;       /* the game runs this on every frame of the menu: say only a change */
     if (back <= 0) { ptrk[0] = r[3]; ptrk[1] = 0; ptrk[2] = 0; }   /* the kind in r3 (Bond's jump) */
-    k = own_entry(ent);
+    k = back > 0 ? own_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : own_entry(ent);
     if (k >= 0 && own_challenge[k].fn) {
         own_pending = k;
         if (back > 0) ent[0] = (unsigned)pm_port_value("challenge_menu_kind", 0);   /* PAD-619: the entry itself */

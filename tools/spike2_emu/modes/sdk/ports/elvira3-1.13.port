@@ -714,3 +714,19 @@ site  wizard_go_2        0x00181dd8 0xe5903000 0xe92d40f0   # TheyCameFromSpaceR
 value wizard_arg_2       0x00885e28   # its mode object
 data  wizard_running_2   0x00885e5a   # the rule's +0x32: its own running test (v[15]) reads it
 text  wizard_name_2      They Came From Space
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x0089362c
+value game_flags_at       4
+data  game_flag_count     0x005a9c90
+value challenge_on_flag   18
+site  challenge_balls     0x0030a098 0xe92d4030 0xe1a05000
+site  challenge_menu      0x00099764 0xe1a09000 0xe3190080
+site  challenge_menu_pick 0x00099904 0xe2433001 0xe3530006
+value challenge_menu_list_at   104
+value challenge_menu_count_reg 5   # the count in r5 (Elvira)
+value challenge_menu_cap       8
+value challenge_menu_entry     12
+value challenge_menu_kind      3
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921

@@ -524,6 +524,20 @@ static int hook(unsigned addr, hook_fn logger)
     return 1;
 }
 
+/* PAD-619: hook() with every register saved - push {r0-r12, lr} - so the logger reads and WRITES r4-r12 as well
+ * (regs[0..12], lr at regs[13]; the hooked function's sp is regs + 14). Elvira's start menu keeps its entry count in
+ * r5 for the whole loop, and the append changes it. */
+static int hook_full(unsigned addr, hook_fn logger)
+{
+    unsigned *t;
+    if (!hook(addr, logger)) return 0;
+    t = tramp + (tramp_used - 1) * 16;
+    t[0] = 0xe92d5fffu;   /* push {r0-r12, lr} */
+    t[5] = 0xe8bd5fffu;   /* pop {r0-r12, lr} */
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    return 1;
+}
+
 /* ---- a veto hook: the logger decides whether the function runs at all ----------------------
  * The trampoline above, with one more step. The logger gets the same saved registers and
  * returns non-zero to REFUSE: the function is not entered and its caller gets r0 = 1 (what the
@@ -8659,8 +8673,9 @@ static int own_entry(const unsigned *ent)
 
 static void challenge_menu_built(unsigned *r)
 {
-    unsigned char *fsp = (unsigned char *)(r + 6);         /* the menu function's sp: above the six words pushed */
-    unsigned *count = (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    long creg = pm_port_value("challenge_menu_count_reg", -1);  /* PAD-619: Elvira - the count in a register */
+    unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp: above what was pushed */
+    unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
     unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), first = (unsigned)pm_port_value("challenge_menu_kind", 3);
     unsigned es = (unsigned)pm_port_value("challenge_menu_entry", 12);
@@ -8867,9 +8882,12 @@ static void challenges_arm(void)
             pm_port_value("challenge_on_flag", 0));
     }
     if (site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
-        && pm_port_value("challenge_menu_list_at", 0) > 0 && pm_port_value("challenge_menu_count_at", 0) > 0
+        && pm_port_value("challenge_menu_list_at", 0) > 0
+        && (pm_port_value("challenge_menu_count_at", 0) > 0 || pm_port_value("challenge_menu_count_reg", -1) >= 4)
         && (challenges_n || (pm_port_value("challenge_menu_slot", 0) < 0 && challenge_ball_id >= 0))) {
-        if (fn("challenge_menu") && fn("challenge_menu_pick") && hook(fn("challenge_menu"), challenge_menu_built)
+        if (fn("challenge_menu") && fn("challenge_menu_pick")
+            && (pm_port_value("challenge_menu_count_reg", -1) >= 0 ? hook_full(fn("challenge_menu"), challenge_menu_built)
+                                                                    : hook(fn("challenge_menu"), challenge_menu_built))
             && hook(fn("challenge_menu_pick"), challenge_menu_picked)) {
             can |= PM_CAN_CHALLENGE_MENU;
             say("challenge menu: the start menu at 0x%08x shows our names and up to %ld entries", fn("challenge_menu"),

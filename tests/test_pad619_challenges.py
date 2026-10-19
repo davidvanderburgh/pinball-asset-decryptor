@@ -48,7 +48,8 @@ def test_every_menu_port_names_the_whole_menu():
         v = port["value"]
         assert {"challenge_menu", "challenge_menu_pick"} <= set(port["site"]), key
         assert port["data"].get("game_flags") and port["data"].get("game_flag_count"), key
-        cap, count_at, list_at = (int(v["challenge_menu_%s" % n]) for n in ("cap", "count_at", "list_at"))
+        cap, count_at, list_at = (int(v.get("challenge_menu_%s" % n, 1)) for n in ("cap", "count_at", "list_at"))
+        assert "challenge_menu_count_at" in v or 4 <= int(v.get("challenge_menu_count_reg", -1)) <= 11, key
         low = 3 if int(v.get("challenge_menu_sets_on", 0)) else 5          # Star Wars sized its list for its own
         assert low <= cap <= 9 and 0 < count_at < 1024 and 0 < list_at < 1024, key
         assert int(v.get("challenge_menu_entry", 12)) in (12, 16), key
@@ -254,3 +255,16 @@ def test_the_runtime_reads_a_compare_chain_pick_through_its_entry_and_knows_ours
     assert 'pm_port_value("challenge_menu_pick_back", 0)' in pick and "ent[0] = (unsigned)pm_port_value(" in pick
     start = src[src.index("static void challenge_ball_start(void)"):]
     assert 'pm_port_value("challenge_menu_sets_on", 0)) on = 1;' in start[:start.index("\n}\n")]
+
+
+def test_elvira_keeps_its_menu_count_in_a_register_and_the_frame_hook_saves_every_one():
+    test_the_ports_carry_what_the_finder_reads_off_the_game("elvira3-1.13")
+    v = _port("elvira3-1.13")["value"]
+    assert int(v["challenge_menu_count_reg"]) == 5 and "challenge_menu_count_at" not in v
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    full = src[src.index("static int hook_full(unsigned addr, hook_fn logger)"):]
+    full = full[:full.index("\n}\n")]
+    assert "0xe92d5fffu" in full and "0xe8bd5fffu" in full                  # push / pop {r0-r12, lr}
+    built = src[src.index("static void challenge_menu_built(unsigned *r)"):]
+    built = built[:built.index("\n}\n")]
+    assert "r + (creg >= 0 ? 14 : 6)" in built and "&r[creg]" in built

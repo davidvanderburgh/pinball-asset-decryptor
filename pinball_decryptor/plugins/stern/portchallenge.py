@@ -477,7 +477,14 @@ def menu_generic(e, names, on_flag):
                      and 0xE2433001 in w[j + 1:j + 4] and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[j + 2:j + 5])),
                     None)
     start = next((j for j in range(fr, max(0, fr - 3000), -1) if (w[j] & 0xFFFF4000) == 0xE92D4000), None)
-    if count_at is None or start is None:
+    count_reg = None
+    if count_at is None:
+        # PAD-619, Elvira 1.13: the count kept in a callee-saved register the whole loop - the cursor's wrap reads
+        # `sub r3, rN, #1 ; cmp r3, <cursor>`; the runtime then hooks the frame with every register saved
+        count_reg = next(((w[j] >> 16) & 0xF for j in range(fr, min(len(w) - 2, fr + 200))
+                          if (w[j] & 0xFFF0FFFF) == 0xE2403001 and 4 <= (w[j] >> 16) & 0xF <= 11
+                          and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[j + 1:j + 3])), None)
+    if (count_at is None and count_reg is None) or start is None:
         return None
     # the room: up to the first local object above the list the function hands a call (add r0, sp, #x ; bl)
     above = [rot_imm(w[j] & 0xFFF) for j in range(start, k + 1500) if (w[j] & 0xFFFFF000) == 0xE28D0000
@@ -534,7 +541,8 @@ def menu_generic(e, names, on_flag):
              "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
              "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * k + 4, w[k + 1], w[k + 2]),
              "value challenge_menu_list_at   %d" % list_at,
-             "value challenge_menu_count_at  %d" % count_at,
+             ("value challenge_menu_count_at  %d" % count_at if count_at is not None
+              else "value challenge_menu_count_reg %d   # the count in r%d (Elvira)" % (count_reg, count_reg)),
              "value challenge_menu_cap       %d" % cap,
              "value challenge_menu_entry     %d" % entry,
              "value challenge_menu_kind      %d" % kind,

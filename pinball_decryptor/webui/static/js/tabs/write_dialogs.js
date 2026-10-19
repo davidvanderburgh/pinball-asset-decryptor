@@ -195,14 +195,15 @@ export function InfoDialog({ info }) {
   };
   const footer = html`
     <${Button} onClick=${() => call("write.image_info_refresh")}>Refresh<//>
-    <${Button} disabled=${!(info.sections || []).length} onClick=${copy}>Copy Report<//>
+    <${Button} disabled=${info.busy || !(info.sections || []).length} onClick=${copy}>Copy Report<//>
     <span class="small muted grow">${info.busy ? "" : info.status}</span>
     <${Button} onClick=${() => call("write.image_info_close")}>Close<//>`;
   return html`<${Modal} title="Image Info" icon="info" wide onClose=${close} footer=${footer} cls="wr-infodlg">
     <div class="mono small dim wr-path">${info.path}</div>
-    ${info.busy
+    ${info.busy && !(info.sections || []).length
       ? html`<div class="wr-scan" role="status"><${Spinner} /><div class="msg">Reading image…</div></div>`
       : html`<div class="wr-info-list">
+        ${info.busy ? html`<div class="wr-scan" role="status"><${Spinner} /><div class="msg">${info.status}</div></div>` : null}
         ${(info.sections || []).map((sec) => html`<div class="wr-info-sec">
           <div class="wr-info-hd">${sec.title}</div>
           ${(sec.rows || []).map((r) => html`<div class="wr-info-row"><span class="k">${r[0]}</span><span class="v">${r[1]}</span></div>`)}

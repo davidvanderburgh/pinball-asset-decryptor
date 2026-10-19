@@ -1107,14 +1107,26 @@ class ImageInfo:
         self.publish()
         path = self.path
 
+        def _early(sections):
+            # the report but the video count (PAD-626)
+            self._host.post(self._early, seq, sections)
+
         def _worker():
             try:
-                sections = info_mod.collect(mfr, path, assets)
+                sections = info_mod.collect(mfr, path, assets,
+                                            partial=_early)
             except Exception as e:                      # noqa: BLE001
                 sections = [("Error", [("Could not read", str(e))])]
             self._host.post(self._done, seq, key, sections)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _early(self, seq, sections):
+        if seq != self._seq or not self.open or not self.busy:
+            return
+        self.sections = list(sections or [])
+        self.status = "Counting the videos…"
+        self.publish()
 
     def _done(self, seq, key, sections):
         if seq != self._seq or not self.open:
@@ -1127,7 +1139,7 @@ class ImageInfo:
 
     def report_text(self):
         from ..core import image_info as info_mod
-        if not self.sections:
+        if not self.sections or self.busy:     # not while it is half read
             return ""
         self.status = "Report copied to clipboard."
         self.publish()

@@ -906,7 +906,7 @@ class SternManufacturer(Manufacturer):
             return "%s  (multi-boot card, %d games)" % (name, len(images))
         return name
 
-    def image_info(self, path, assets_dir=None):
+    def image_info(self, path, assets_dir=None, partial=None):
         # Only the Spike 2 card probe — a Whitestar MAME zip or Spike 1 card
         # gets just the generic File/Detection sections (the Spike 2 probe
         # reads the card through the primary-partition explorer, which a
@@ -918,7 +918,7 @@ class SternManufacturer(Manufacturer):
         if detect_spike1_game(path) is not None:
             return []
         from .info import card_info
-        return card_info(path)
+        return card_info(path, partial=partial)
 
     def card_version(self, path):
         """``(version, exact)`` — the build a card image really is, read

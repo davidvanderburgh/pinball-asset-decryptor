@@ -180,7 +180,7 @@ def test_every_view_edits_one_program_with_one_history(tmp_path):
     assert got["afterEdits"]["scripts"][1] == {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"}, "do": []}
     assert got["afterUndo"] == {"name": "RAMP", "scripts": [{"hat": {"kind": "mode_start"}, "do": []}]}
     assert len(got["afterRedo"]["scripts"]) == 2 and got["afterRedo"]["name"] == "RAMP"
-    assert got["exports"] == ["PlayfieldView"]
+    assert got["exports"] == ["PickOnField", "PlayfieldView", "loadPlayfield"]     # PAD-614: the shot picker too
     assert got["saves"] == 3                                  # a save a moment after each burst, the whole program
 
 

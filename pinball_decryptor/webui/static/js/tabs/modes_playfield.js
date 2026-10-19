@@ -5,9 +5,12 @@
 //
 // It is a tab over the one program (modes_blocks.js useModeProgram): an edit here is a step of the mode's one
 // history and is saved to the same blocks.json; the Blocks tab shows it when opened.
+//
+// PAD-614: it is also every view's shot picker: beside each shot's list in a block, a button opens the same picture
+// and a click on an insert picks its shot (or, for a Light block, the light itself).
 
-import { html, useEffect, useState, Button, Note, tip, cx, call } from "../core/ui.js";
-import { Script, useEd } from "./modes_blocks.js";
+import { html, useEffect, useRef, useState, Button, Note, tip, cx, call, openMenu } from "../core/ui.js";
+import { Script, useEd, pickers } from "./modes_blocks.js";
 import { lights, names, usedShots, hatWords, countBlocks } from "./modes_views.js";
 
 const WHENS = [["idle", "While it is not running"], ["running", "While it runs"], ["any", "Any time"]];
@@ -24,7 +27,29 @@ const TIP = {
   add: "A new rule for this shot, at the end of the mode's rules: what it does when the shot is made.",
   lamp: "Not one of the game's shots: a Light block can light it by name, under The game's lights.",
   lampOff: "Not one of the game's shots, and not a light a block can light on this card.",
+  picker: "Pick it on the playfield: the game's own picture, with the mode's lit shots on it.",
+  pickHint: "Press an insert to pick its shot.",
+  pickLamp: "Press an insert to pick its shot, or a light that is no shot's to light it alone.",
 };
+
+// The picture and its inserts, read once per mode while the page is open (the Playfield tab reads it again)
+const fieldCache = new Map();
+export function loadPlayfield(slug, fresh = false) {
+  if (fresh || !fieldCache.has(slug)) {
+    fieldCache.set(slug, Promise.resolve(call("modes.blocks_playfield")).then((r) => r || {}, () => ({})));
+  }
+  return fieldCache.get(slug);
+}
+function usePlayfield(slug, fresh) {
+  const [pf, setPf] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setPf(null);
+    loadPlayfield(slug, fresh).then((r) => { if (live) setPf(r); });
+    return () => { live = false; };
+  }, [slug]);
+  return pf;
+}
 
 function Swatch({ l }) {
   return html`<span class=${cx("pf-swatch", !l.color && "dark")} style=${l.color ? { background: l.color } : null}></span>`;
@@ -42,7 +67,7 @@ function RuleRow({ sc, si, n, ed, open, onToggle }) {
 }
 
 // The picture and its inserts
-function Field({ pf, lit, pick, onPick, used }) {
+function Field({ pf, lit, pick, onPick, used, cls }) {
   const ins = pf.inserts || [];
   const w = pf.w || Math.max(300, ...ins.map((i) => i.x + 24));
   const h = pf.h || Math.max(600, ...ins.map((i) => i.y + 40));
@@ -54,7 +79,7 @@ function Field({ pf, lit, pick, onPick, used }) {
   ins.forEach((i) => i.shots.forEach((n) => {
     if (used.has(n) && !labelled.has(n)) { labelled.add(n); labels.push({ n, x: i.x, y: i.y + 17 }); }
   }));
-  return html`<svg class=${cx("pf-svg", !pf.art && "pf-none")} viewBox=${`0 0 ${w} ${h}`} style=${{ aspectRatio: `${w} / ${h}` }}
+  return html`<svg class=${cx("pf-svg", !pf.art && "pf-none", cls)} viewBox=${`0 0 ${w} ${h}`} style=${{ aspectRatio: `${w} / ${h}` }}
       role="img" aria-label="The playfield">
     ${pf.art ? html`<image class="pf-art" href=${pf.art} x="0" y="0" width=${w} height=${h} />`
       : html`<rect class="pf-outline" x="3" y="3" width=${w - 6} height=${h - 6} rx="48" />`}
@@ -64,7 +89,7 @@ function Field({ pf, lit, pick, onPick, used }) {
         l ? LIT_TIPS[l.color ? l.pattern || "solid" : "off"] : ""].filter(Boolean);
       return html`<circle key=${i.name + i.x} class=${cx("pf-ins", l && l.color && "lit", l && l.color && PACE[l.pattern], sel(i) && "sel")}
         cx=${i.x} cy=${i.y} r=${sel(i) ? 8 : 6} style=${l && l.color ? { fill: l.color, color: l.color } : null}
-        onClick=${() => onPick(i)} ...${tip({ head: words[0], lines: words.slice(1) })} />`;
+        onClick=${(e) => onPick(i, e)} ...${tip({ head: words[0], lines: words.slice(1) })} />`;
     })}
     ${labels.map((t) => html`<text key=${"t" + t.n} class=${cx("pf-label", pick.kind === "shot" && pick.name === t.n && "sel")} x=${t.x} y=${t.y}
       text-anchor="middle">${t.n}</text>`)}
@@ -75,14 +100,8 @@ export function PlayfieldView({ c, pg }) {
   const ch = (c.blocks || {}).choices || {};
   const ed = useEd(pg, ch);
   const { prog } = pg;
-  const [pf, setPf] = useState(null);
+  const pf = usePlayfield(c.slug, true);
   const [open, setOpen] = useState({});
-  useEffect(() => {
-    let live = true;
-    setPf(null);
-    Promise.resolve(call("modes.blocks_playfield")).then((r) => { if (live) setPf(r || {}); }, () => { if (live) setPf({}); });
-    return () => { live = false; };
-  }, [c.slug]);
   const shots = ch.shots || [];
   const used = usedShots(prog);
   const [pick, setPick] = useState(() => ({ kind: "shot", name: shots.find((n) => used.has(n)) || shots[0] || "" }));
@@ -158,3 +177,61 @@ export function PlayfieldView({ c, pg }) {
     </div>
   </div>`;
 }
+
+// PAD-614: the Playfield as a shot picker, beside a shot's list in any view's blocks. `lamps`: the prefix a light
+// that is no shot's is picked with (a Light block's), else only shots are picked.
+export function PickOnField({ value, ed, lamps, onPick }) {
+  const [at, setAt] = useState(null);
+  const box = useRef(null);
+  const btn = useRef(null);
+  const close = () => setAt(null);
+  useEffect(() => {
+    if (!at) return undefined;
+    const onDown = (e) => {
+      if (box.current && !box.current.contains(e.target) && !(btn.current && btn.current.contains(e.target))
+          && !e.target.closest(".menu")) close();
+    };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+    window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => { window.removeEventListener("mousedown", onDown, true); window.removeEventListener("keydown", onKey, true); };
+  }, [at]);
+  const toggle = (e) => {
+    e.stopPropagation();
+    if (at) { close(); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    const h = Math.min(620, window.innerHeight - 24);
+    setAt({ left: Math.max(8, Math.min(r.left, window.innerWidth - 360)), top: Math.max(12, Math.min(r.bottom + 4, window.innerHeight - h - 12)), h });
+  };
+  const choose = (v) => { onPick(v); close(); };
+  const picked = lamps && String(value || "").startsWith(lamps) ? { kind: "lamp", name: value.slice(lamps.length) }
+    : { kind: "shot", name: value || "" };
+  return html`<button type="button" ref=${btn} class=${cx("pf-pickbtn", at && "on")} aria-label="Pick it on the playfield"
+      ...${tip(TIP.picker)} onClick=${toggle}>◎</button>
+    ${at ? html`<${FieldPop} at=${at} box=${box} ed=${ed} lamps=${lamps} pick=${picked} onClose=${close} onChoose=${choose} />` : null}`;
+}
+
+function FieldPop({ at, box, ed, lamps, pick, onClose, onChoose }) {
+  const pf = usePlayfield(ed.slug, false);
+  const lit = lights(ed.prog);
+  const used = usedShots(ed.prog);
+  const onInsert = (i, e) => {
+    const shots = i.shots.filter((n) => (ed.ch.shots || []).includes(n));
+    const lamp = lamps && (ed.ch.inserts || []).includes(i.name);
+    if (!shots.length) { if (lamp) onChoose(lamps + i.name); return; }
+    if (shots.length === 1 && !lamp) { onChoose(shots[0]); return; }
+    openMenu(e.currentTarget, [{ header: i.name }, ...shots.map((n) => ({ label: n, onClick: () => onChoose(n) })),
+      ...(lamp ? [{ sep: true }, { label: `The light ${i.name} alone`, onClick: () => onChoose(lamps + i.name) }] : [])]);
+  };
+  return html`<div class="pf-pop" ref=${box} style=${{ left: at.left + "px", top: at.top + "px", height: at.h + "px" }}
+      role="dialog" aria-label="Pick on the playfield" onClick=${(e) => e.stopPropagation()}>
+    <div class="pf-pop-hd row"><span class="small muted grow">${lamps ? TIP.pickLamp : TIP.pickHint}</span>
+      <button type="button" class="bk-x pf-pop-x" aria-label="Close" onClick=${onClose}>×</button></div>
+    ${pf == null ? html`<div class="small muted pf-reading">Reading the playfield picture off the card…</div>`
+      : (pf.inserts || []).length ? html`<${Field} pf=${pf} lit=${lit} pick=${pick} onPick=${onInsert} used=${used} cls="pf-svg-pop" />`
+      : html`<div class="small muted pf-reading">The app has no places for this game's inserts, so the shots are picked from the list.</div>`}
+    ${pf && pf.why ? html`<div class="small muted pf-why">${pf.why}</div>` : null}
+  </div>`;
+}
+
+pickers.shot = PickOnField;

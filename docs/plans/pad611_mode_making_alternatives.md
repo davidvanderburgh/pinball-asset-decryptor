@@ -229,12 +229,54 @@ Steps 1 and 2 are in the Modes tab:
   tied to a shot are listed below. With no picture (no card, another game's card, a title that ships none) the
   inserts are drawn on an outline and the reason is said under it.
 
-Left for later tickets: Rule cards, Story, Script with its editor, Shot table, Timeline, Node graph, and the
-Playfield as the shot picker of the other views.
+## Built in PAD-614: steps 3-6
+
+A blocks mode's tabs are now **Blocks | Rule cards | Story | Playfield | Shot table | Timeline | Node graph | Script |
+C it makes** (`modes.js BLOCKS_PAGES`, each entry naming its view). Every one is a tab over the one program
+(`useModeProgram`), so an edit in any of them is a step of the one history and is saved to the one `blocks.json`.
+A rule is edited as the same blocks everywhere (`modes_blocks.js` `Script`, `Stack`, `HatBody`); what each view places
+where is read off the program by plain functions in `modes_views.js`, which the tests run under Node.
+
+- **Rule cards** (`modes_rules.js RuleCardsView`): a card per rule, the hat on top and its blocks under it, drawn as
+  sentences: no colored stacks, each block marked by its family's color, every blank an underlined choice.
+- **Story** (`StoryView`): WAITING → RUNNING → OVER. A shot's, an any-shot's or a game event's rule sits in the box of
+  its `when` (idle / running / any time, the last under the diagram); dragging it to another box sets its `when`. The
+  arrows say what starts the mode (every Start the mode block, with the Ifs around it, `storyArrows`) and what ends it
+  (the clock, the drain, End the mode), with When the mode starts / ends rules on them. The clock's rules (every, N
+  seconds left, a timer) work while it runs. Ball-drain rules and the variables and timers sit underneath.
+- **Shot table** (`ShotTableView`): a row per shot of the card, Any shot, and each game event the mode uses; columns
+  while it is not running / while it runs / any time. A cell's + adds a rule with that hat; rules tied to no shot are
+  listed under it; a pressed rule opens beside the table.
+- **Timeline** (`TimelineView`): the mode's seconds left to right, its moments (It starts, N s left, Every N s and its
+  repeats, It ends) and seven lanes (Mode and clock, Lights, Light shows, Sound, Screen and HUD, Score and variables,
+  the rest). Each block of a moment's rule is a clip on its lane (striped when an If decides it), packed into rows so
+  none covers another. What adds time from a shot is said under the lanes, and the rules with no fixed time are listed.
+- **Node graph** (`NodeGraphView`): the plan's "who uses this variable" overlay as its own tab. Every rule a node,
+  every variable, timer and shot count the rules share a node, wired solid (sets), dashed (reads) or dotted (a timer
+  running out sets the rule off). Pressing one lights up its rules and lists them; it needs no general graph layout.
+- **Script** (`modes_script.js ScriptView`): `mode_script.py` moved into the app (`plugins/stern/mode_script.py`;
+  `tools/mode_views/mode_script.py` is now its old name). `modes.blocks_script` writes the program as text,
+  `modes.blocks_read_script` reads typed text back (normalized, as `blocks.json` is) or answers the error and its line.
+  A block or trigger the plain form does not name is an error on its line (a misspelling is not kept as a block the
+  mode cannot run); one the app does not have in a saved file is written and read as `block({...})`, kept exactly.
+  Typing that reads goes into the blocks as one step (typing merges into it); text that does not read leaves the
+  blocks as they were, marks the line and offers Go to line. A side list puts any hat or block in at the cursor.
+- **The editor** (`CodeEditor`): a text box over its own colored copy, lines numbered, Tab and Enter keep the indent.
+  It shows the C the blocks make (read only, `CodeView`) and edits a mode written in C on its Code page (`CEditor`,
+  `modes.code_text` / `code_save`, Save or Ctrl+S), so C no longer needs the OS's editor.
+- **The Playfield as the shot picker** (`modes_playfield.js PickOnField`): every shot's list in a block (a hat, Light
+  the mode, Set hits, a hits value, Light and Hand back) has ◎ beside it, in every view. It opens the playfield picture
+  with the mode's lit shots; pressing an insert picks its shot (several shots: a menu), and for a Light block an insert
+  that is no shot's lights it alone. `modes_blocks.js pickers` holds the button, so the blocks need no import of it.
+
+Every view round-trips the mode (`tests/test_pad614_mode_views.py`): RAMP FRENZY and one of every block, hat, value and
+condition, set field by field through the blocks (no change, nothing saved), every movable rule dragged through every
+Story box and back, a Shot table rule added and undone, and the Script's text read back (no change) or typed (one step,
+undone), each ending on the program it began with.
 
 ## Files
 
-- `tools/mode_views/mode_script.py`: `blocks.json` ⇄ script text (`to_script`, `from_script`).
+- `plugins/stern/mode_script.py` (PAD-614; was `tools/mode_views/mode_script.py`): `blocks.json` ⇄ script text.
 - `tools/mode_views/describe.py`: every block, value, condition and trigger in words.
 - `tools/mode_views/render_views.py`: the seven views, drawn from any `blocks.json`.
 - `tools/mode_views/showcase.py`: RAMP FRENZY.
@@ -242,3 +284,5 @@ Playfield as the shot picker of the other views.
 - `tests/test_pad611_mode_script.py`: the round trip and the views (39 tests).
 - `plugins/stern/playfield_art.py`, `webui/static/js/tabs/modes_playfield.js`, `modes_views.js`: the Playfield view
   (PAD-612); `tests/test_pad612_mode_views.py`; `scripts/shot_pad612.py`: its proof shots.
+- `webui/static/js/tabs/modes_rules.js` (Rule cards, Story, Shot table, Timeline, Node graph), `modes_script.js`
+  (Script, the code editor): PAD-614; `tests/test_pad614_mode_views.py`; `scripts/shot_pad614.py`: one shot per view.

@@ -122,7 +122,7 @@ const TIP = {
 // ------------------------------------------------------------------ the blocks there are
 const num = (v) => ({ k: "num", v });
 
-function hatTemplates(ch, timers) {
+export function hatTemplates(ch, timers) {
   const shot = (ch.shots || [])[0] || "";
   const ev = ((ch.events || [])[0] || {}).name || "";
   return [
@@ -143,7 +143,7 @@ function litShot(ch) {
     || shots.find((n) => n.startsWith(ws)))) || shots[0] || "";
 }
 
-function stmtTemplates(ch, vars, prog = {}) {
+export function stmtTemplates(ch, vars, prog = {}) {
   const shot = (ch.shots || [])[0] || "";
   const v = (vars[0] || {}).name || "";
   const t = ((prog.timers || [])[0] || {}).name || "";
@@ -189,7 +189,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
   player: "the player up", op: "a sum" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs" };
-const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
+export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
@@ -234,6 +234,14 @@ function Pick({ value, options, onChange, width, title, missing = "(not on this 
   return html`<${Select} sm value=${value ?? ""} options=${opts} onChange=${onChange} width=${width} title=${title} />`;
 }
 
+// PAD-614: the Playfield is every view's shot picker: modes_playfield.js puts its button here (it imports this file,
+// so this one cannot import it back). A shot's list keeps working without it.
+export const pickers = { shot: null };
+function ShotPick({ value, onChange, ed, lamps = false, width }) {
+  const P = pickers.shot;
+  return html`<${Pick} value=${value} options=${ed.ch.shots || []} width=${width} onChange=${onChange} />${P ? html`<${P} value=${value} ed=${ed} lamps=${lamps} onPick=${onChange} />` : null}`;
+}
+
 // PAD-598: what a Light or Hand back block lights: a shot's inserts, or one of the game's own lights by name (an
 // insert, a GI string, a flasher: the port's lamp lines), kept in the block's `insert` instead of its `shot`
 const LAMP = "lamp:";
@@ -247,7 +255,9 @@ function LightPick({ b, path, ed, every }) {
     const t = at(d, path);
     if (v.startsWith(LAMP)) { t.insert = v.slice(LAMP.length); delete t.shot; } else { t.shot = v; delete t.insert; }
   });
-  return html`<${Pick} value=${b.insert ? LAMP + b.insert : b.shot} options=${opts} onChange=${pick} />`;
+  const P = pickers.shot;
+  return html`<${Pick} value=${b.insert ? LAMP + b.insert : b.shot} options=${opts} onChange=${pick} />${P
+    ? html`<${P} value=${b.insert ? LAMP + b.insert : b.shot} ed=${ed} lamps=${LAMP} onPick=${pick} />` : null}`;
 }
 
 function TimerPick({ value, ed, onChange }) {
@@ -299,7 +309,7 @@ function Val({ e, path, ed }) {
     case "num": return html`<${Num} value=${e.v} onChange=${(v) => set("v", v)} width=${96} />`;
     case "var": return html`<${Pick} value=${e.name} options=${ed.vars.map((v) => v.name)} missing="(no such variable)"
       onChange=${(v) => set("name", v)} />`;
-    case "hits": return html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${Pick} value=${e.shot} options=${ed.ch.shots || []} onChange=${(v) => set("shot", v)} />`;
+    case "hits": return html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
     case "timer_left": return html`<span class="bk-w" ...${tip(TIP.timerLeft)}>ms left on</span><${TimerPick} value=${e.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
     case "op": return html`<span class="bk-w">(</span><${Slot} kind="num" value=${e.a} path=${[...path, "a"]} ed=${ed} />
       <${Pick} value=${e.op} options=${OPS} width=${54} onChange=${(v) => set("op", v)} />
@@ -323,7 +333,6 @@ function Cond({ e, path, ed }) {
 // ------------------------------------------------------------------ statements
 function StmtBody({ b, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
-  const shots = ed.ch.shots || [];
   switch (b.op) {
     case "start_mode": return html`<span class="bk-w">Start the mode</span>`;
     case "end_mode": return html`<span class="bk-w">End the mode</span>`;
@@ -336,7 +345,7 @@ function StmtBody({ b, path, ed }) {
       const setNames = (list) => set("insert", list.filter(Boolean).join(","));
       const none = ins.length ? undefined : "This card's game has no inserts a mode can light: only the mode is lit.";
       const more = ins.find((n) => !names.includes(n));
-      return html`<span class="bk-w" ...${tip(TIP.lightMode)}>Light the mode at</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
+      return html`<span class="bk-w" ...${tip(TIP.lightMode)}>Light the mode at</span><${ShotPick} value=${b.shot} ed=${ed} onChange=${(v) => set("shot", v)} />
         <span class="bk-w">and the insert${names.length > 1 ? "s" : ""}</span>
         ${(names.length ? names : ["-"]).map((n, i) => html`<${Pick} value=${n} options=${opts} missing="(not on this game)" width=${200} title=${none}
           onChange=${(v) => { const l = [...names]; if (v === "-") l.splice(i, 1); else l[i] = v; setNames(l); }} />`)}
@@ -355,7 +364,7 @@ function StmtBody({ b, path, ed }) {
       return html`<span class="bk-w" ...${tip(TIP.unlight)}>Put out the light of</span><${Pick} value=${b.mode || "-"}
         options=${[["-", "this mode"], ...others]} missing="(no such mode)" width=${200} onChange=${(v) => set("mode", v === "-" ? "" : v)} />`;
     }
-    case "set_hits": return html`<span class="bk-w" ...${tip(TIP.setHits)}>Set the hits of</span><${Pick} value=${b.shot} options=${shots} onChange=${(v) => set("shot", v)} />
+    case "set_hits": return html`<span class="bk-w" ...${tip(TIP.setHits)}>Set the hits of</span><${ShotPick} value=${b.shot} ed=${ed} onChange=${(v) => set("shot", v)} />
       <span class="bk-w">to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />`;
     case "score": return html`<span class="bk-w">Score</span><${Slot} kind="num" value=${b.points} path=${[...path, "points"]} ed=${ed} /><span class="bk-w">points</span>`;
     case "set": return html`<span class="bk-w">Set</span><${Pick} value=${b.var} options=${ed.vars.map((v) => v.name)} missing="(no such variable)" onChange=${(v) => set("var", v)} />
@@ -524,7 +533,7 @@ function Gap({ path, i, ed }) {
     onDrop=${(e) => { if (!ok()) return; e.preventDefault(); e.stopPropagation(); ed.dropAt(path, i); }}></div>`;
 }
 
-function Stack({ list, path, ed }) {
+export function Stack({ list, path, ed }) {
   const picked = samePath(ed.target, path);
   return html`<div class=${cx("bk-stack", picked && "picked", !list.length && "bk-empty")} onClick=${(e) => { e.stopPropagation(); ed.setTarget(path); }}>
     <${Gap} path=${path} i=${0} ed=${ed} />
@@ -545,14 +554,14 @@ function addMenu(ed, path) {
 }
 
 // ------------------------------------------------------------------ scripts
-function HatBody({ h, path, ed }) {
+export function HatBody({ h, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
   const when = html`<${Pick} value=${h.when || "any"} options=${WHEN} onChange=${(v) => set("when", v)} />`;
   switch (h.kind) {
     case "mode_start": return html`<span class="bk-w b">When the mode starts</span>`;
     case "mode_end": return html`<span class="bk-w b">When the mode ends</span>`;
     case "ball_end": return html`<span class="bk-w b">When the ball drains</span>`;
-    case "shot": return html`<span class="bk-w b">When</span><${Pick} value=${h.shot} options=${ed.ch.shots || []} onChange=${(v) => set("shot", v)} /><span class="bk-w b">is made</span>${when}`;
+    case "shot": return html`<span class="bk-w b">When</span><${ShotPick} value=${h.shot} ed=${ed} onChange=${(v) => set("shot", v)} /><span class="bk-w b">is made</span>${when}`;
     case "any_shot": return html`<span class="bk-w b">When any shot is made</span>${when}`;
     case "every": return html`<span class="bk-w b">Every</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds while it runs</span>`;
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
@@ -576,13 +585,13 @@ export function Script({ s, si, n, ed }) {
 }
 
 // ------------------------------------------------------------------ the palette
-function hatLabel(h) {
+export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", every: "Every N seconds", seconds_left: "When N seconds are left",
     ball_end: "When the ball drains", event: "When the game does…", timer_done: "When a timer runs out" }[h.kind] || h.kind;
 }
 
-function stmtLabel(b) {
+export function stmtLabel(b) {
   return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
@@ -888,7 +897,7 @@ export function useModeProgram(c) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  return { prog, edit, undo, saving, canUndo: hist.current.past.length > 0, canRedo: hist.current.future.length > 0 };
+  return { prog, edit, undo, saving, slug: c.slug, canUndo: hist.current.past.length > 0, canRedo: hist.current.future.length > 0 };
 }
 
 // Undo, Redo and the saved line: one for the mode, above whichever view is open.
@@ -909,7 +918,7 @@ export function useEd(pg, ch) {
   // a stack that an undo (here or in another tab) took away is not picked
   const target = picked && Array.isArray(at(prog, picked)) ? picked : null;
   const ed = {
-    prog, ch, vars: prog.vars || [], timers: prog.timers || [], target, over, setOver,
+    prog, ch, slug: pg.slug, vars: prog.vars || [], timers: prog.timers || [], target, over, setOver,
     setTarget, edit,
     set: (path, v) => edit((d) => put(d, path, v), path.join("/")),
     remove: (stack, i) => edit((d) => { at(d, stack).splice(i, 1); }),
@@ -1038,7 +1047,7 @@ export function BlocksEditor({ s, c, pg }) {
 }
 
 // The C the blocks make, to read (and the way out to C for good: PAD-611 says it is one way, beside the button).
-export function BlocksCode({ c }) {
+export function BlocksCode({ c, View }) {
   const b = c.blocks || {};
   return html`<div class="stack" style="gap:10px">
     <div class="row wrap">
@@ -1046,7 +1055,7 @@ export function BlocksCode({ c }) {
       <${Button} size="sm" icon="edit" title=${TIP.asC} onClick=${() => call("modes.blocks_to_code")}>Edit as C (one way)…<//>
     </div>
     <${Note} kind="warn">Edit as C is a one-way step: the mode becomes C for good, and C can't be turned back into blocks. To try C and keep the blocks, press Duplicate first and turn the copy into C.<//>
-    <pre class="bk-c-src mono">${b.c || ""}</pre>
+    ${View ? html`<${View} text=${b.c || ""} lang="c" />` : html`<pre class="bk-c-src mono">${b.c || ""}</pre>`}
   </div>`;
 }
 

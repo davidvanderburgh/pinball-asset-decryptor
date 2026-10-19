@@ -16,6 +16,8 @@ import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
 import { BlocksEditor, BlocksCode, BLOCKS_WORDS, ProgramBar, useModeProgram } from "./modes_blocks.js";
 import { PlayfieldView } from "./modes_playfield.js";
+import { RuleCardsView, StoryView, ShotTableView, TimelineView, NodeGraphView } from "./modes_rules.js";
+import { ScriptView, CodeView, CEditor } from "./modes_script.js";
 
 export const css = true;
 
@@ -923,9 +925,16 @@ function Editor({ s, showClip }) {
 // A mode made of blocks (PAD-232): its views, and the C it makes. PAD-612: each view is a tab over the one program
 // (David, 2026-10-18: "switch visualizations at any point and not be beholden to one or another"), with one Undo and
 // Redo for the mode beside the tabs; switching never converts or asks.
-const BLOCKS_PAGES = [["blocks", "Blocks", "The mode's rules as snapped blocks, with its settings."],
-  ["playfield", "Playfield", "The game's playfield with the mode's lit shots: press a shot to see and change what it does."],
-  ["c", "C it makes", "What Try it and Write build: the C the blocks make, to read."]];
+// PAD-614: Rule cards, Story, Script, Shot table, Timeline and Node graph (PAD-611's plan, steps 3-6).
+const BLOCKS_PAGES = [["blocks", "Blocks", "The mode's rules as snapped blocks, with its settings.", BlocksEditor],
+  ["cards", "Rule cards", "Each rule as a card that reads When … Then, with a choice in every blank.", RuleCardsView],
+  ["story", "Story", "The mode's life: what starts it, what each rule does while it waits and while it runs, and what ends it.", StoryView],
+  ["playfield", "Playfield", "The game's playfield with the mode's lit shots: press a shot to see and change what it does.", PlayfieldView],
+  ["table", "Shot table", "One row per shot, one column for each time it can count: what every shot does, and which do nothing yet.", ShotTableView],
+  ["timeline", "Timeline", "The mode's clock as a track: what happens at its start, at each moment and at its end.", TimelineView],
+  ["graph", "Node graph", "Every rule wired to the variables and timers it shares with the others.", NodeGraphView],
+  ["script", "Script", "The same mode as text, to type: it goes to blocks and back with nothing lost.", ScriptView],
+  ["c", "C it makes", "What Try it and Write build: the C the blocks make, to read.", null]];
 
 function BlocksPane({ s }) {
   const c = s.code || {};
@@ -946,6 +955,7 @@ function BlocksPane({ s }) {
 function BlocksViews({ s, c }) {
   const [stored, setPage] = useStored("pad.modes.blockspage", "blocks");
   const page = BLOCKS_PAGES.some(([k]) => k === stored) ? stored : "blocks";
+  const View = BLOCKS_PAGES.find(([k]) => k === page)[3];
   const pg = useModeProgram(c);
   return html`<div class="bk-views row">
       <div class="pages" role="tablist">
@@ -955,8 +965,7 @@ function BlocksViews({ s, c }) {
       <${ProgramBar} pg=${pg} />
     </div>
     <div class="bd modes-editor-bd bk-pane-bd">
-      ${page === "c" ? html`<${BlocksCode} c=${c} />` : page === "playfield" ? html`<${PlayfieldView} c=${c} pg=${pg} />`
-        : html`<${BlocksEditor} s=${s} c=${c} pg=${pg} />`}
+      ${View ? html`<${View} s=${s} c=${c} pg=${pg} />` : html`<${BlocksCode} c=${c} View=${CodeView} />`}
     </div>`;
 }
 
@@ -988,11 +997,12 @@ function CodePane({ s }) {
           <span class="k">Summary</span><span class="small">${c.summary || ""}</span>
         </div>
         <div class="row wrap">
-          <${Button} icon="edit" onClick=${() => call("modes.open_code")}>Open ${c.slug}.c<//>
+          <${Button} icon="edit" title="Open it in the editor your computer uses for .c files" onClick=${() => call("modes.open_code")}>Open ${c.slug}.c in my editor<//>
           <${Button} icon="file" onClick=${() => call("modes.open_sdk_doc")}>Open MODE_SDK.md<//>
         </div>
         <${Note}>${s.code_words}<//>
-        <div class="small muted wrap">${T.codeMode}</div>`
+        <div class="small muted wrap">${T.codeMode}</div>
+        <${CEditor} c=${c} key=${c.slug} />`
       : html`
         <div class="kv">
           <span class="k">Runs for</span><span>${c.seconds != null ? c.seconds + " seconds" : ""}</span>

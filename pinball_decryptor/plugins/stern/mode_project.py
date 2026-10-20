@@ -3161,6 +3161,9 @@ class ModeSpec:
     # place of; CHALLENGE_NEW: a challenge of its own on the game's start menu, under its name (round 2)
     # place of: a Player Challenge game with that pick starts the mode at its ball's start instead; -1 = none
     challenge: int = -1
+    # PAD-643: with starts_on "challenge", who launches its ball and when: 0 the runtime, once the mode's start clip is
+    # over; -1 the player; a number of ms after the mode starts
+    challenge_launch: int = 0
     # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
     # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
     # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
@@ -5527,6 +5530,9 @@ def _starts_ends_lines(spec, lines, p, ends=True):
         out = [line for line in out if not line.startswith("trigger ")]
         n = int(spec.challenge)
         out.insert(2, "challenge      %s" % ("new" if n == CHALLENGE_NEW else n))
+        launch = _int_or_none(getattr(spec, "challenge_launch", 0)) or 0              # PAD-643
+        if launch:
+            out.insert(3, "challenge_launch %s" % ("player" if launch < 0 else max(1, min(60, launch // 1000))))
     elif starts_on_sequence(spec):
         out = [line for line in out if not line.startswith("trigger ")]
         seq = ["%-14s 0x%08x" % ("trigger_seq", p.mask([s])) for s in spec.start_sequence]

@@ -517,7 +517,9 @@ html.light .ls-svg .pf-art { filter: none; }
 .ls-centre circle { fill: none; stroke: var(--accent); stroke-width: 1.5; }
 .ls-centre line { stroke: var(--accent); stroke-width: 1.5; }
 .ls-transport { gap: 8px; align-items: center; width: 100%; max-width: 360px; }
-.ls-clock { margin-left: auto; }
+/* Play and Pause take the same room, and the clock its longest read: the column must not move as the show plays (PAD-653) */
+.ls-play { min-width: 6.4em; justify-content: center; }
+.ls-clock { margin-left: auto; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ls-scrub { width: 100%; max-width: 360px; }
 .ls-side { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 12px; }
 .ls-name { gap: 8px; align-items: center; flex-wrap: wrap; }

@@ -69,7 +69,7 @@ export function hatWords(h = {}, ch = {}) {
     case "seconds_left": return `When ${h.seconds} seconds are left`;
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
     case "timer_done": return `When timer ${h.timer} runs out`;
-    case "challenge": return `When the player picks the challenge ${h.challenge || "?"}`;   // PAD-615
+    case "challenge": return `When the player picks the challenge ${h.challenge || "?"}${h.launch === "player" ? ", the player launching its ball" : /^\d+$/.test(h.launch || "") ? `, its ball launched ${h.launch} s after it starts` : ""}`;   // PAD-615, PAD-643
     default: return h.kind || "";
   }
 }

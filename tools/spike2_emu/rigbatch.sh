@@ -193,13 +193,13 @@ SPID=""
 if [ "$NOSTAGE" = 0 ] && [ "$STAGE" = cache ]; then
     mkdir -p "$OUT/stage"
     say "caching cards on the WSL disk (cardmount.sh's cache), one copy at a time, $(cat "$OUT/ahead") ahead"
-    setsid bash "$RIG/cardstage.sh" "$OUT" cache "${#SLOTS[@]}" \
+    PAD_LABEL="$WHO" setsid bash "$RIG/cardstage.sh" "$OUT" cache "${#SLOTS[@]}" \
         >> "$OUT/stage.log" 2>&1 < /dev/null &
     SPID=$!
 elif [ "$NOSTAGE" = 0 ] && [ -n "$STAGE" ]; then
     mkdir -p "$STAGE" "$OUT/stage"
     say "staging cards to $STAGE, one copy at a time, $(cat "$OUT/ahead") ahead (kept up to ${KEEP} GB)"
-    setsid bash "$RIG/cardstage.sh" "$OUT" "$STAGE" "${#SLOTS[@]}" "$KEEP" \
+    PAD_LABEL="$WHO" setsid bash "$RIG/cardstage.sh" "$OUT" "$STAGE" "${#SLOTS[@]}" "$KEEP" \
         >> "$OUT/stage.log" 2>&1 < /dev/null &
     SPID=$!
 else
@@ -212,6 +212,10 @@ finish() {
     touch "$OUT/stop"
     [ -n "$SPID" ] && { kill -TERM -- "-$SPID" 2>/dev/null; kill -TERM "$SPID" 2>/dev/null; }
     for p in "${WPIDS[@]}"; do kill -TERM -- "-$p" 2>/dev/null; kill -TERM "$p" 2>/dev/null; done
+    # the batch's copy records on the board (a copy cut short leaves none behind)
+    for p in "$(pad_board_dir)"/copy-*.json; do
+        [ -f "$p" ] && grep -q "\"who\":\"$WHO\"" "$p" 2>/dev/null && rm -f "$p"
+    done
     for s in "${SLOTS[@]}"; do
         grep -qx "$s" "$OUT/released" 2>/dev/null && continue     # given back already (its worker found the queue empty)
         PAD_SLOT=$s PAD_LABEL="$WHO" bash "$RIG/killgame.sh" > /dev/null 2>&1 < /dev/null
@@ -226,7 +230,7 @@ trap 'say "STOPPED - stopping every rig"; finish; exit 130' INT TERM
 
 # ---- the workers ----------------------------------------------------------
 worker() {
-    local slot=$1 i line key card envs t0 rc v log cap capped
+    local slot=$1 i line key card envs t0 rc v log cap capped lbl
     while :; do
         i=$(flock "$OUT/next" bash -c 'i=$(cat "$1"); echo $((i + 1)) > "$1"; echo "$i"' _ "$OUT/next")
         if [ "$i" -ge "$TOTAL" ]; then
@@ -245,8 +249,10 @@ worker() {
         log=$OUT/$key.log
         card=$(echo "$card" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         if [ -n "$STAGE" ]; then
-            # the staged copy (cardstage.sh), not the slow disk's original
-            bash "$RIG/riglock.sh" note "$slot" "rigbatch $key (waiting for its card)" > /dev/null 2>&1 < /dev/null
+            # the staged copy (cardstage.sh), not the slow disk's original. The note names the card's cache
+            # label, which is how the dashboards tie the board's copy record to this rig (PAD-649)
+            lbl=$(basename "$card"); lbl=${lbl%%.Release*}; lbl=${lbl%%.raw}
+            bash "$RIG/riglock.sh" note "$slot" "rigbatch $key (waiting for its card: $lbl)" > /dev/null 2>&1 < /dev/null
             t0=0
             while [ ! -f "$OUT/stage/$i" ] && [ ! -f "$OUT/stage/$i.fail" ]; do
                 [ -e "$OUT/stop" ] && return 0

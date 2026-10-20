@@ -89,6 +89,68 @@ def exists() -> bool:
     return os.path.isfile(disk_path())
 
 
+# ---- the shared card store (PAD-651) -----------------------------------------
+#: A SECOND disk, made the same way, holding the Spike 2 card cache for every
+#: distro: `cardstore.ps1 create` (tools/spike2_emu) makes it, 400 GB
+#: expandable, since the newest build of every title is ~320 GB of used
+#: blocks - far more than the work disk above is sized for, and a unit of
+#: reclaim of its own (delete the file, the cache is gone, the work disk is
+#: not).  cardmount.sh keeps its cache at CARDS_MOUNT/cardcache whenever that
+#: is a mount; the app's part is only to ATTACH it at a rig start, as it does
+#: the work disk, so a WSL restart never silently sends a sweep back to D:.
+#: Never created here: 400 GB is a decision the user makes with the script.
+CARDS_MOUNT_NAME = "cards"
+CARDS_MOUNT = "/mnt/wsl/" + CARDS_MOUNT_NAME
+_CARDS_IS_MOUNTED = 'mountpoint -q "%s" && echo mounted || echo no' % CARDS_MOUNT
+
+
+def cards_disk_path() -> str:
+    override = os.environ.get("PAD_CARDS_DISK")
+    if override:
+        return override
+    base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+    return os.path.join(base, "pinball_decryptor", "data", "pad-cards.vhdx")
+
+
+def cards_exists() -> bool:
+    return os.path.isfile(cards_disk_path())
+
+
+def cards_attached(distro: str, runner=None) -> bool:
+    """Is the card store MOUNTED in the WSL VM right now?  Asked of the
+    mountpoint, for the same reason :func:`attached` is."""
+    run = runner or _run
+    try:
+        out = run(["bash", "-c", _CARDS_IS_MOUNTED], timeout=60, distro=distro)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0 and "mounted" in _text(out.stdout)
+
+
+def attach_cards(distro: str, runner=None) -> None:
+    run = runner or _run
+    out = run(["wsl.exe", "--mount", "--vhd", cards_disk_path(),
+               "--name", CARDS_MOUNT_NAME])
+    if out.returncode != 0:
+        raise RuntimeError(
+            "could not attach the card store: %s"
+            % (_text(out.stdout).strip() or "exit %d" % out.returncode))
+
+
+def ensure_cards(distro: str, log=None, runner=None) -> Optional[str]:
+    """Attach the card store if the file exists and it is not mounted.
+    Returns the mountpoint when it is attached, None when there is no store
+    (an ordinary install, or one made without it) - never an error for that:
+    cardmount.sh then uses the per-distro cache as it always did."""
+    if sys.platform != "win32" or not cards_exists():
+        return None
+    say = log or (lambda _m: None)
+    if not cards_attached(distro, runner=runner):
+        say("Attaching the Spike 2 card store (%s)…" % cards_disk_path())
+        attach_cards(distro, runner=runner)
+    return CARDS_MOUNT
+
+
 def size_on_disk() -> int:
     """Bytes the disk is actually costing, which is what a user deciding
     whether to delete it needs to know."""

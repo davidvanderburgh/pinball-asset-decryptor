@@ -214,16 +214,21 @@ def _carried_key(m):
     """How a file under mode *m* is keyed in a carried record: "2" for music mode 2, "t2" for a
     slot's file 2 in turn (PAD-565, :data:`.staged_changes.TURN_KEY`)."""
     from ...core.staged_changes import TURN_KEY
+    if SMo.is_mode_turn(m):                             # PAD-638: "m2t3"
+        return "m%dt%d" % SMo.mode_turn_of(m)
     return "%s%d" % (TURN_KEY, SMo.turn_of(m)) if SMo.is_turn(m) else str(int(m))
 
 
 def _key_ok(m):
     """A carried record's mode key this app takes: a music mode 2..MAX_MODES or a file k in turn
     (2..TURN_MAX)."""
-    from ...core.staged_changes import _turn_k
+    from ...core.staged_changes import _mode_turn_k, _turn_k
     k = _turn_k(m)
     if k is not None:
         return 2 <= k <= SMo.TURN_MAX
+    mk = _mode_turn_k(m)
+    if mk is not None:
+        return 2 <= mk[0] <= SMo.MAX_MODES and 2 <= mk[1] <= SMo.TURN_MAX
     try:
         return 2 <= int(m) <= SMo.MAX_MODES
     except (TypeError, ValueError):
@@ -266,6 +271,10 @@ def save_music_modes(project, path):
     rnd = sorted(rel for rel in modes.random if rel in slots)
     if rnd:
         head["random"] = rnd                            # PAD-638: files in turn at random
+    mrnd = {rel: sorted(str(m) for m in ms) for rel, ms in sorted(modes.mode_random.items())
+            if rel in slots and ms}
+    if mrnd:
+        head["mode_random"] = mrnd                      # PAD-638: a music mode's own, at random
     if attract:
         head["attract"] = attract
     every = {f for _r, _m, f in modes.files()} | set(modes.attract)
@@ -378,6 +387,8 @@ def load_music_modes(project, path):
         slots, levels, found, left, cache = {}, {}, [], [], {}
         rnd_in = head.get("random") if isinstance(head.get("random"), list) else []
         rnd = []
+        mrnd_in = head.get("mode_random") if isinstance(head.get("mode_random"), dict) else {}
+        mrnd = {}
         folder = os.path.join(project, MUSIC_DIR)
         for rel in sorted(slots_in):
             by_mode = slots_in[rel]
@@ -408,6 +419,8 @@ def load_music_modes(project, path):
             slots[to] = keep
             if rel in rnd_in:
                 rnd.append(to)
+            if isinstance(mrnd_in.get(rel), list) and mrnd_in[rel]:
+                mrnd[to] = [str(m) for m in mrnd_in[rel]]
             if how:
                 found.append((rel, to, how))
         # PAD-641: the flipper buttons' sounds in attract, which belong to no sound of the card
@@ -419,6 +432,8 @@ def load_music_modes(project, path):
               "slots": slots, "levels": levels}
     if rnd:
         record["random"] = sorted(rnd)
+    if mrnd:
+        record["mode_random"] = mrnd
     if attract:
         record["attract"] = attract
     return {"record": record, "loaded": len(slots), "files": len(cache), "found": found,
@@ -482,6 +497,7 @@ def put_music(project, record, keep_own=False):
     the project gives no file come in. The project's own mode names win where it has them.
     Returns how many slots got files."""
     from ...core import staged_changes
+    from ...core.staged_changes import _mode_turn_k
     rec = dict(record)
     if keep_own:
         now = SMo.load(project)
@@ -489,7 +505,8 @@ def put_music(project, record, keep_own=False):
         # PAD-565: a slot's files in turn come in only where it has none
         rec["slots"] = {rel: {m: f for m, f in by.items()
                               if (int(m) not in (have.get(rel) or {}) if str(m).isdigit()
-                                  else not now.turns.get(rel))}
+                                  else not ((now.mode_turns.get(rel) or {}).get(_mode_turn_k(m)[0]))
+                                  if _mode_turn_k(m) else not now.turns.get(rel))}
                         for rel, by in record.get("slots", {}).items()}
         rec["slots"] = {rel: by for rel, by in rec["slots"].items() if by}
         if now.attract:                     # PAD-641: its own flipper sounds in attract stay
@@ -602,7 +619,28 @@ def music_from_card(project, cfg_text):
             stem = os.path.splitext(_safe_name(f["name"], ""))[0] or "attract flipper sound %d" % f["k"]
             copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
         attract.append(copied[host])
+    # PAD-638: a music mode's own files in turn, each from the record holding it
+    for f in rec.get("mode_turns") or ():
+        slot, host = idx.get(f["slot"]), _card_host(project, idx, f)
+        mt = SMo.mode_turn(f["mode"], f["turn"])
+        if slot is None or host is None:
+            left.append((f["rel"], mt, _card_missing(f, slot)))
+            continue
+        if host not in copied:
+            stem = os.path.splitext(_safe_name(f["name"], ""))[0] or "%s - mode %d in turn %d" % (
+                os.path.splitext(os.path.basename(slot))[0], f["mode"], f["turn"])
+            copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
+        slots.setdefault(slot, {})[_carried_key(mt)] = copied[host]
+        if f["db"]:
+            levels.setdefault(slot, {})[_carried_key(mt)] = int(f["db"])
     out = {"names": rec["names"], "slots": slots, "levels": levels}
+    mrnd = {}
+    for f in rec.get("mode_random") or ():
+        rel = idx.get(f["slot"])
+        if rel in slots and any(k.startswith("m%dt" % f["mode"]) for k in slots[rel]):
+            mrnd.setdefault(rel, set()).add(str(f["mode"]))
+    if mrnd:
+        out["mode_random"] = {rel: sorted(ms) for rel, ms in mrnd.items()}
     # PAD-638: the slots whose files in turn play at random
     rnd = sorted({idx[f["slot"]] for f in rec.get("random") or () if idx.get(f["slot"]) in slots})
     if rnd:
@@ -643,6 +681,16 @@ def _built_project_modes(card):
             key = _carried_key(SMo.turn_mode(k))
             if db and key in files.get(rel, {}):
                 rec.setdefault("levels", {}).setdefault(rel, {})[key] = int(db)
+    for rel, by in modes.mode_turn_levels.items():    # PAD-638: a music mode's own, theirs
+        for m, v in by.items():
+            for k, db in v.items():
+                key = _carried_key(SMo.mode_turn(m, k))
+                if db and key in files.get(rel, {}):
+                    rec.setdefault("levels", {}).setdefault(rel, {})[key] = int(db)
+    mrnd = {rel: sorted(str(m) for m in ms) for rel, ms in modes.mode_random.items()
+            if rel in files and ms}
+    if mrnd:
+        rec["mode_random"] = mrnd
     return rec
 
 

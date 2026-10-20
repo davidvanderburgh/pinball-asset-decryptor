@@ -153,12 +153,15 @@ if [ "$STAGE" = cache ]; then
             *) echo "$card" > "$S/$i"; continue ;;   # on a Linux disk already: no 9p to save
         esac
         t0=$(date +%s)
+        # the board says this card's copy is queued until the copier's own "copying" record replaces it (PAD-649)
+        bash "$RIG/cardmount.sh" "$card" --board-copy queued 2>> "$OUT/stage.cache.log" < /dev/null
         # the same one-copier-at-a-time lock as every other batch's copies (they all read one disk)
         got=$( copy_lock
                PAD_CACHE_KEEP_FREE_GB=${PAD_CACHE_KEEP_FREE_GB:-30} \
                    bash "$RIG/cardmount.sh" "$card" --cache-now 2>> "$OUT/stage.cache.log" | tail -1 )
+        bash "$RIG/cardmount.sh" "$card" --board-copy clear 2>/dev/null < /dev/null
         case "$got" in
-            "$PAD_HOME"/cardcache/*)
+            "$PAD_HOME"/cardcache/*|/mnt/wsl/cards/cardcache/*|"${PAD_CARD_CACHE_DIR:-/nonexistent}"/*)
                 echo "$(date +%T) cached $(basename "$card")  in $(( $(date +%s) - t0 ))s" ;;
             *)
                 echo "$(date +%T) NOT cached $(basename "$card") (disk full?) - it boots from where it lies" ;;

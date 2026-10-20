@@ -40,6 +40,9 @@ _TURNS_MAX = 16
 #: PAD-638: the Replacement pane holds file k in turn as pseudo mode _TURN_BASE + k
 #: (sound_modes.TURN_BASE), so the loudness box is that file's own
 _TURN_BASE = 100
+#: PAD-638: music mode m's own file k in turn is pseudo mode _MODE_TURN_BASE + m * 20 + k
+#: (sound_modes.mode_turn)
+_MODE_TURN_BASE = 1000
 #: PAD-641: the most sounds the flipper buttons play in attract (sound_modes.ATTRACT_MAX)
 _ATTRACT_MAX = 16
 #: PAD-641: what the Attract flipper sounds button says it does
@@ -244,6 +247,11 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._random = set()
         # PAD-638: each file in turn's own loudness ({rel: {k: dB}}, k = 2..)
         self._turn_levels = {}
+        # PAD-638: a music mode's own files in turn ({rel: {m: [path, ...]}}), the modes of them
+        # that play at random ({rel: {m, ...}}) and their loudness ({rel: {m: {k: dB}}})
+        self._mode_turns = {}
+        self._mode_random = {}
+        self._mode_turn_levels = {}
         # PAD-641: the sounds the flipper buttons play in attract ([path, ...]), the same record
         self._attract = []
         self._cats = {}
@@ -739,6 +747,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._random &= set(self._turns)
             self._turn_levels = {rel: v for rel, v in self._turn_levels.items()
                                  if rel in self._turns}
+            self._mode_turns = {rel: v for rel, v in self._mode_turns.items()
+                                if rel in self._modes}
         self._loop = {
             s.rel_path: (bool(saved_loops[s.rel_path])
                          if s.rel_path in saved_loops
@@ -1250,10 +1260,11 @@ class AudioTab(FindOriginalsMixin, TabService):
             row["md"] = sorted(md)
             row["md_tip"] = self._modes_words(rel)
         tn = self._turns.get(rel)
-        if tn:
-            row["tn"] = len(tn) + 1
+        mtn = self._mode_turns.get(rel) or {}
+        if tn or mtn:
+            row["tn"] = (len(tn) + 1 if tn else 0) + sum(len(v) + 1 for v in mtn.values())
             row["tn_tip"] = self._turns_words(rel)
-            if rel in self._random:
+            if rel in self._random or self._mode_random.get(rel):
                 row["tr"] = True
         uses = self._uses.get(rel) if self._uses else None
         if uses is not None:
@@ -2006,7 +2017,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         if rel is not None or reset:
             self.set(level=str(self._rep_gain(rel) if rel else 0))
         self.set(level_enabled=bool(self._slots),
-                 level_label=(("Sound %d's loudness:" % (m - _TURN_BASE)) if m and m > _TURN_BASE
+                 level_label=(("Mode %d sound %d's loudness:" % divmod(m - _MODE_TURN_BASE, 20))
+                              if m and m > _MODE_TURN_BASE
+                              else ("Sound %d's loudness:" % (m - _TURN_BASE)) if m and m > _TURN_BASE
                               else ("Mode %d's loudness:" % m) if m else ""),
                  level_all=not m)
 
@@ -2577,6 +2590,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             return self._mode_action(action, rel)
         if action.startswith("turn_"):
             return self._turn_action(action, rel)
+        if action.startswith("mturn_"):
+            return self._mode_turn_action(action, rel)
         if action == "play_orig":
             self._load_track(rel, autoplay="orig")
         elif action == "choose":
@@ -2685,6 +2700,45 @@ class AudioTab(FindOriginalsMixin, TabService):
                     keep[k] = max(min(db, 12), -12)
             if keep:
                 self._turn_levels[rel] = keep
+        self._mode_turns, self._mode_random, self._mode_turn_levels = {}, {}, {}
+        mt = raw.get("mode_turns")
+        for rel, by in (mt.items() if isinstance(mt, dict) else ()):
+            for m, files in (by.items() if isinstance(by, dict) else ()):
+                try:
+                    m = int(m)
+                except (TypeError, ValueError):
+                    continue
+                keep = [f for f in (files if isinstance(files, (list, tuple)) else ())
+                        if isinstance(f, str) and f.strip()][:_TURNS_MAX - 1]
+                if keep and m in (self._modes.get(rel) or {}):
+                    self._mode_turns.setdefault(rel, {})[m] = keep
+        mr = raw.get("mode_random")
+        for rel, ms in (mr.items() if isinstance(mr, dict) else ()):
+            keep = set()
+            for m in (ms if isinstance(ms, (list, tuple)) else ()):
+                try:
+                    if int(m) in (self._mode_turns.get(rel) or {}):
+                        keep.add(int(m))
+                except (TypeError, ValueError):
+                    continue
+            if keep:
+                self._mode_random[rel] = keep
+        ml = raw.get("mode_turn_levels")
+        for rel, by in (ml.items() if isinstance(ml, dict) else ()):
+            for m, v in (by.items() if isinstance(by, dict) else ()):
+                try:
+                    m = int(m)
+                except (TypeError, ValueError):
+                    continue
+                files = (self._mode_turns.get(rel) or {}).get(m)
+                for k, db in (v.items() if files and isinstance(v, dict) else ()):
+                    try:
+                        k, db = int(k), int(round(float(db)))
+                    except (TypeError, ValueError):
+                        continue
+                    if 2 <= k <= len(files) + 1 and db:
+                        self._mode_turn_levels.setdefault(rel, {}).setdefault(m, {})[k] = \
+                            max(min(db, 12), -12)
         attract = raw.get("attract")
         self._attract = ([f for f in attract if isinstance(f, str) and f.strip()][:_ATTRACT_MAX]
                          if isinstance(attract, (list, tuple)) else [])
@@ -2715,6 +2769,24 @@ class AudioTab(FindOriginalsMixin, TabService):
             tl = {rel: v for rel, v in tl.items() if v}
             if tl:
                 out["turn_levels"] = tl
+        mt = {rel: {str(m): list(f) for m, f in sorted(by.items())
+                    if f and m in (self._modes.get(rel) or {})}
+              for rel, by in sorted(self._mode_turns.items())}
+        mt = {rel: by for rel, by in mt.items() if by}
+        if mt:
+            out["mode_turns"] = mt
+            mr = {rel: sorted(str(m) for m in ms if str(m) in mt.get(rel, {}))
+                  for rel, ms in sorted(self._mode_random.items())}
+            mr = {rel: ms for rel, ms in mr.items() if ms}
+            if mr:
+                out["mode_random"] = mr
+            ml = {rel: {str(m): {str(k): int(db) for k, db in sorted(v.items()) if db}
+                        for m, v in sorted(by.items()) if str(m) in mt.get(rel, {})}
+                  for rel, by in sorted(self._mode_turn_levels.items())}
+            ml = {rel: {m: v for m, v in by.items() if v} for rel, by in ml.items()}
+            ml = {rel: by for rel, by in ml.items() if by}
+            if ml:
+                out["mode_turn_levels"] = ml
         if self._attract:
             out["attract"] = list(self._attract)
         return out
@@ -2722,6 +2794,9 @@ class AudioTab(FindOriginalsMixin, TabService):
     def _mode_level(self, rel, m):
         """Mode *m*'s file's own loudness offset for slot *rel*, in dB (PAD-638: *m* past
         :data:`_TURN_BASE` is file m - _TURN_BASE in turn)."""
+        if m > _MODE_TURN_BASE:
+            mm, k = divmod(m - _MODE_TURN_BASE, 20)
+            return int(((self._mode_turn_levels.get(rel) or {}).get(mm) or {}).get(k, 0) or 0)
         if m > _TURN_BASE:
             return int((self._turn_levels.get(rel) or {}).get(m - _TURN_BASE, 0) or 0)
         return int((self._mode_levels.get(rel) or {}).get(m, 0) or 0)
@@ -2731,7 +2806,29 @@ class AudioTab(FindOriginalsMixin, TabService):
         slot's (the slot's offset is its own replacement's). PAD-638: or file k in turn's,
         *m* = :data:`_TURN_BASE` + k."""
         turn = m > _TURN_BASE
-        if turn:
+        if m > _MODE_TURN_BASE:
+            mm, k = divmod(m - _MODE_TURN_BASE, 20)
+            if not 2 <= k <= len((self._mode_turns.get(rel) or {}).get(mm) or []) + 1:
+                return False
+            lv = self._mode_turn_levels.setdefault(rel, {}).setdefault(mm, {})
+            if db:
+                lv[k] = db
+            else:
+                lv.pop(k, None)
+                if not lv:
+                    self._mode_turn_levels[rel].pop(mm, None)
+                if not self._mode_turn_levels[rel]:
+                    self._mode_turn_levels.pop(rel, None)
+            if rel == self._selected_rel() and self._pane_mode(rel) == m:
+                self.set(level=(str(typed).strip() if typed is not None else "") or str(db))
+            i = self._row_index.get(rel)
+            if i is not None:
+                self.patch_item("rows", i, tn_tip=self._turns_words(rel))
+            if self._pane_mode(rel) == m:
+                self._level_preview_soon(rel)
+            self._save_staged_changes()
+            return True
+        elif turn:
             if not 2 <= m - _TURN_BASE <= len(self._turns.get(rel) or []) + 1:
                 return False
             store, key = self._turn_levels, m - _TURN_BASE
@@ -2915,6 +3012,14 @@ class AudioTab(FindOriginalsMixin, TabService):
             md.pop(m, None)
             if not md:
                 self._modes.pop(rel, None)
+            # PAD-638: its own files in turn go with it
+            for store in (self._mode_turns, self._mode_turn_levels):
+                (store.get(rel) or {}).pop(m, None)
+                if not store.get(rel, True):
+                    store.pop(rel, None)
+            (self._mode_random.get(rel) or set()).discard(m)
+            if not self._mode_random.get(rel, True):
+                self._mode_random.pop(rel, None)
             (self._mode_levels.get(rel) or {}).pop(m, None)
             if not self._mode_levels.get(rel, True):
                 self._mode_levels.pop(rel, None)
@@ -2936,19 +3041,42 @@ class AudioTab(FindOriginalsMixin, TabService):
     def _turns_words(self, rel):
         """What the row says of a slot's files in turn, or "" for one with none."""
         tn = self._turns.get(rel) or []
-        if not tn:
+        mtn = self._mode_turns.get(rel) or {}
+        if not tn and not mtn:
             return ""
         own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
                else "the game's own sound")
-        names = [own] + [os.path.basename(f) + (
-            " at %s" % self._db_words(self._mode_level(rel, _TURN_BASE + k))
-            if self._mode_level(rel, _TURN_BASE + k) else "") for k, f in enumerate(tn, 2)]
-        if rel in self._random:
+        out = []
+        if tn:
+            names = [own] + [os.path.basename(f) + (
+                " at %s" % self._db_words(self._mode_level(rel, _TURN_BASE + k))
+                if self._mode_level(rel, _TURN_BASE + k) else "") for k, f in enumerate(tn, 2)]
+            out.append(self._turn_words(rel in self._random, names))
+        # PAD-638: each music mode's own
+        for m, files in sorted(mtn.items()):
+            mf = os.path.basename((self._modes.get(rel) or {}).get(m, ""))
+            names = [mf] + [os.path.basename(f) + (
+                " at %s" % self._db_words(self._mode_level(rel, self._mturn(m, k)))
+                if self._mode_level(rel, self._mturn(m, k)) else "")
+                for k, f in enumerate(files, 2)]
+            out.append("In %s: %s" % (self._mode_said(m), self._turn_words(
+                m in (self._mode_random.get(rel) or ()), names)[0].lower()
+                + self._turn_words(m in (self._mode_random.get(rel) or ()), names)[1:]))
+        return " ".join(out)
+
+    @staticmethod
+    def _turn_words(random, names):
+        listed = "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + "."
+        if random:
             return ("Each time the game plays this sound it plays one of these at random, never "
-                    "the same one twice in a row: "
-                    + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
+                    "the same one twice in a row: " + listed)
         return ("Each time the game plays this sound it plays the next of these, then starts "
-                "again: " + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
+                "again: " + listed)
+
+    @staticmethod
+    def _mturn(m, k):
+        """PAD-638: the pane's pseudo mode for music mode *m*'s own file *k* in turn."""
+        return _MODE_TURN_BASE + int(m) * 20 + int(k)
 
     def _turns_menu(self, rel):
         """The row menu's "Play in turn" entry and its submenu, or None where the plugin offers
@@ -2982,9 +3110,133 @@ class AudioTab(FindOriginalsMixin, TabService):
                                 "action": "turn_level:%d" % k, "icon": "wave"})
                 sub.append({"label": "Take off sound %d (%s)" % (k, os.path.basename(f)),
                             "action": "turn_off:%d" % k, "icon": "x"})
+        # PAD-638: a slot with music mode files: each mode's file can have files in turn of its own
+        md = self._modes.get(rel) or {}
+        if md and not why:
+            sub = [{"header": "Its own sound"}] + sub
+            for m, mf in sorted(md.items()):
+                files = (self._mode_turns.get(rel) or {}).get(m) or []
+                sub += [{"sep": True},
+                        {"header": "%s: %s" % (self._mode_label(m), os.path.basename(mf))}]
+                if len(files) + 1 < _TURNS_MAX:
+                    sub.append({"label": "Add a sound to play in turn…",
+                                "action": "mturn_add:%d" % m, "icon": "plus"})
+                if files:
+                    rnd = m in (self._mode_random.get(rel) or ())
+                    sub += [{"label": "One after another", "action": "mturn_order:%d:0" % m,
+                             "checked": not rnd, "radio": True},
+                            {"label": "At random", "action": "mturn_order:%d:1" % m,
+                             "checked": rnd, "radio": True}]
+                for k, f in enumerate(files, 2):
+                    # (the part's header names the mode)
+                    sub += [{"label": "Play sound %d (%s)" % (k, os.path.basename(f)),
+                             "action": "mturn_play:%d:%d" % (m, k), "icon": "play"},
+                            {"label": "Loudness of sound %d (%s)…" % (
+                                k, self._db_words(self._mode_level(rel, self._mturn(m, k)))),
+                             "action": "mturn_level:%d:%d" % (m, k), "icon": "wave"},
+                            {"label": "Take off sound %d (%s)" % (k, os.path.basename(f)),
+                             "action": "mturn_off:%d:%d" % (m, k), "icon": "x"}]
         return {"label": ("Play at random" if tn and rel in self._random else "Play in turn")
                 + (" (%d sounds)" % (len(tn) + 1) if tn else ""),
                 "icon": "shuffle", "submenu": sub}
+
+    def _mode_turn_action(self, action, rel):
+        """PAD-638: music mode m's own files in turn (``mturn_<what>:<m>[:<k>]``)."""
+        kind, _c, arg = action.partition(":")
+        try:
+            nums = [int(x) for x in arg.split(":")] if arg else []
+        except ValueError:
+            return False
+        if not nums or nums[0] not in (self._modes.get(rel) or {}) or self._turns_why(rel):
+            return False
+        m, k = nums[0], (nums[1] if len(nums) > 1 else 0)
+        files = (self._mode_turns.get(rel) or {}).get(m) or []
+        if kind == "mturn_add":
+            if len(files) + 1 >= _TURNS_MAX:
+                return False
+            self._cancel_select_job()
+            self.stop_all_preview_playback()
+            path = self._ask_path(
+                "open", "audio_replacement",
+                "Choose a sound %s plays in turn with its own in %s" % (rel, self._mode_said(m)),
+                filetypes=_AUDIO_FILETYPES)
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+            if not path:
+                return False
+            files = self._mode_turns.setdefault(rel, {}).setdefault(m, [])
+            files.append(os.path.normpath(path))
+            self.log("Replace Audio: %s plays %s in turn in %s (sound %d of %d)."
+                     % (rel, os.path.basename(path), self._mode_said(m), len(files) + 1,
+                        len(files) + 1), "info")
+            self._modes_changed(rel)
+            return True
+        if kind == "mturn_order":
+            if not files or bool(k) == (m in (self._mode_random.get(rel) or ())):
+                return False
+            if k:
+                self._mode_random.setdefault(rel, set()).add(m)
+            else:
+                self._mode_random.get(rel, set()).discard(m)
+                if not self._mode_random.get(rel, True):
+                    self._mode_random.pop(rel, None)
+            self.log("Replace Audio: %s plays its %d sounds in %s %s." % (
+                rel, len(files) + 1, self._mode_said(m),
+                "at random" if k else "one after another"), "info")
+            self._modes_changed(rel)
+            return True
+        if not 2 <= k <= len(files) + 1:
+            return False
+        f = files[k - 2]
+        if kind == "mturn_play":
+            if rel != self._current_rel:
+                self._load_track(rel)
+            self._pane_load("rep", f, autoplay=True,
+                            gain_db=self._mode_level(rel, self._mturn(m, k)),
+                            label="%s, sound %d in turn: %s" % (self._mode_label(m), k,
+                                                               os.path.basename(f)))
+            self._rep_mode = (rel, self._mturn(m, k))
+            self._level_sync()
+            return True
+        if kind == "mturn_level":
+            text = compat.simpledialog.askstring(
+                "Loudness of %s sound %d" % (self._mode_said(m), k),
+                "How loud sound %d (%s) plays in %s, in dB from -12 to +12. 0 matches the sound "
+                "it stands in for. It is this file's own." % (k, os.path.basename(f),
+                                                              self._mode_said(m)),
+                initialvalue=str(self._mode_level(rel, self._mturn(m, k))))
+            if text is None:
+                return False
+            db = self._level_value(text)
+            if db is None:
+                return False
+            self.log("Replace Audio: %s's sound %d in %s (%s) plays at %s." % (
+                rel, k, self._mode_said(m), os.path.basename(f), self._db_words(db)), "info")
+            return self._set_mode_level(rel, self._mturn(m, k), db)
+        if kind == "mturn_off":
+            del files[k - 2]
+            lv = (self._mode_turn_levels.get(rel) or {}).get(m) or {}
+            moved = {(j - 1 if j > k else j): db for j, db in lv.items() if j != k}
+            if moved:
+                self._mode_turn_levels.setdefault(rel, {})[m] = moved
+            else:
+                (self._mode_turn_levels.get(rel) or {}).pop(m, None)
+                if not self._mode_turn_levels.get(rel, True):
+                    self._mode_turn_levels.pop(rel, None)
+            if self._pane_mode(rel) and self._pane_mode(rel) > _MODE_TURN_BASE:
+                self._load_rep_pane(rel)
+            if not files:
+                self._mode_turns[rel].pop(m, None)
+                if not self._mode_turns[rel]:
+                    self._mode_turns.pop(rel, None)
+                (self._mode_random.get(rel) or set()).discard(m)
+                if not self._mode_random.get(rel, True):
+                    self._mode_random.pop(rel, None)
+            self.log("Replace Audio: %s no longer plays %s in turn in %s."
+                     % (rel, os.path.basename(f), self._mode_said(m)), "info")
+            self._modes_changed(rel)
+            return True
+        return False
 
     def _turn_action(self, action, rel):
         kind, _c, arg = action.partition(":")

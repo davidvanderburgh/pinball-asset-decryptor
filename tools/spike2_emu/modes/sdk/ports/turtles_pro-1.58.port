@@ -256,3 +256,8 @@ value switch_polarity_at    32
 site sound_play       0x002ae830 0xe92d4010 0xe303e3f8
 #   the drain's edges are not this port's shots (they keep their own route): only the flipper buttons' sounds in attract use it
 value switch_edge_shots     0
+
+# ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
+site  ball_launch         0x00184b24 0xe92d4010 0xe30449d0
+value ball_launch_flag       11
+value ball_launch_wait_flag  12

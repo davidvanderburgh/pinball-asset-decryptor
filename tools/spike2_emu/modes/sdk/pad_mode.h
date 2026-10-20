@@ -710,6 +710,16 @@ void pm_challenge_release(unsigned slot);             /* a challenge claimed, or
 int pm_challenge_menu(void);                                         /* 1 = the start menu is ours to change */
 int pm_challenge_title(unsigned slot, const char *words);            /* 1 = shown; the holder only */
 int pm_challenge_add(const char *words, int (*on_pick)(unsigned slot)); /* its slot, or -1 */
+/* PAD-643: a challenge game's ball waits in the shooter lane as the mode starts. Where the port names the game's
+ * launch (pm_ball_launch_known), the runtime launches it for the player - by default once the mode's start clip is
+ * over; pm_challenge_launch(slot, ms) changes that for a challenge the calling mode holds or added: ms after the mode
+ * began, or PM_LAUNCH_PLAYER (the player launches it). And the game's own ball-start work it leaves out of every
+ * challenge game (the port's challenge_plain sites: Bond's skill shot, with the left flipper button's loop at the
+ * launch) runs in a mode's challenge game as at a standard ball's start. */
+#define PM_LAUNCH_CLIP    0
+#define PM_LAUNCH_PLAYER  (-1)
+int pm_challenge_launch(unsigned slot, int ms);                     /* 1 = set; the holder only */
+int pm_ball_launch_known(void);                                      /* 1 = the port names the game's launch */
 
 /* ---- the end of a ball held for a mode's total (PAD-622; MODE_SDK.md "Holding the end of a ball") ------------
  * The game's own mini-wizards (James Bond) show their TOTAL when the ball drains in one, and the game's end of ball

@@ -167,6 +167,10 @@ def find(elf):
         wide = menu_wide(e, names, on_flag)                   # PAD-619: TMNT's wide-entry start menu
         if wide:
             lines, menu = ["value challenge_on_flag   %d" % on_flag], wide
+    if not lines and not generic and not menu:
+        live = menu_live(e, names, on_flag)                   # PAD-619: Foo Fighters' live-applied menu
+        if live:
+            lines, menu = ["value challenge_on_flag   %d" % on_flag], live
     if not lines:
         return [], notes or ["no challenge list and no start menu of the known shape"]
     if generic:
@@ -1044,6 +1048,57 @@ def menu_wide(e, names, on_flag):
             "value challenge_menu_name_at   %d" % (kat + 8),
             "value challenge_menu_kind      %d" % plain,
             "value challenge_menu_slot      -1",
+            "value challenge_menu_caption   %d" % caption]
+
+
+#: PAD-619: Foo Fighters LE/Pro 1.04's start menu applies the hovered entry live, every frame, from the frame's own load
+#: of its kind: `add r3, sp, #T ; ... ; add r3, r3, <cursor>, lsl #4 ; ldr r3, [r3, #-back] ; cmp r3, #0 ; bne` (0 =
+#: Standard; any other kind sets the game's mode there), and Start only leaves the menu. No kind of it makes a challenge
+#: game, so ours play as Standard: the pick is hooked on that load (r3 points into the entry) and ours becomes kind 0.
+def menu_live(e, names, on_flag):
+    """The port lines of a live-applied start menu (see above), or None."""
+    w, base = e.words, e.text_va
+    frames = [i for i in range(len(w) - 2) if (w[i] & 0xFFFF0FFF) == 0xE1A00000 and (w[i + 1] & 0xFFF0FFFF) == 0xE3100080
+              and ((w[i] >> 12) & 0xF) == ((w[i + 1] >> 16) & 0xF)]
+    hits = []
+    for fr in frames:
+        for k in range(fr + 2, fr + 14):
+            if (w[k] & 0xFFF0F000) == PICK_LDR and (w[k] >> 16) & 0xF == 3 and w[k + 1] == 0xE3530000 \
+                    and (w[k + 2] & 0xFF000000) == 0x1A000000 and (w[k - 1] & 0xFFFFFFF0) == 0xE0833200 \
+                    and any((x & 0xFFFFF000) == 0xE28D3000 for x in w[k - 4:k - 1]):
+                t = next(rot_imm(x & 0xFFF) for x in w[k - 4:k - 1] if (x & 0xFFFFF000) == 0xE28D3000)
+                hits.append((fr, k, t - (w[k] & 0xFFF), w[k] & 0xFFF, t))
+                break
+    if len(hits) != 1:
+        return None
+    fr, k, list_at, back, top = hits[0]
+    es = 16
+    count_at = next((w[i] & 0xFFF for i in range(fr, min(len(w) - 4, fr + 600)) if (w[i] & 0xFFFFF000) == 0xE59D3000
+                     and 0xE2433001 in w[i + 1:i + 4] and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[i + 2:i + 5])),
+                    None)
+    start = next((i for i in range(fr, max(0, fr - 6000), -1) if (w[i] & 0xFFFF4000) == 0xE92D4000), None)
+    caption = challenge_caption(e)
+    if count_at is None or start is None or caption is None:
+        return None
+    above = [rot_imm(w[i] & 0xFFF) for i in range(start, k + 1500) if (w[i] & 0xFFFFF000) == 0xE28D0000
+             and bl_target(base + 4 * i + 4, w[i + 1]) is not None]
+    above = [a for a in above if list_at + es <= a and a != top] + [top]
+    cap = (min(above) - list_at) // es
+    if cap < 2:
+        return None
+    return ["# the start menu (CHOOSE YOUR MODE OF PLAY), applied live as an entry is shown: challenges of the modes' own "
+            "- no kind of the game's makes a challenge game, so ours play as Standard (0) and the runtime hands the ball "
+            "to the mode",
+            "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
+            "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1]),
+            "value challenge_menu_pick_back %d" % back,
+            "value challenge_menu_list_at   %d" % list_at,
+            "value challenge_menu_count_at  %d" % count_at,
+            "value challenge_menu_cap       %d" % cap,
+            "value challenge_menu_entry     %d" % es,
+            "value challenge_menu_kind      0",
+            "value challenge_menu_slot      -1",
+            "value challenge_menu_sets_on   1",
             "value challenge_menu_caption   %d" % caption]
 
 

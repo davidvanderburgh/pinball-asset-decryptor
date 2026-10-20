@@ -872,3 +872,21 @@ data  wizard_obj_2    0x03bb7438   # cmode_dc_wizard, a multiball
 text  wizard_name_2   D.C.
 text  wizard_film_2   three van cities
 value wizard_slot_enable 42   # its base class's enable: sets the player's byte at +0x83 that START's check (v[46]) reads
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x03c28d1c
+value game_flags_at       4
+data  game_flag_count     0x004f0930
+value challenge_on_flag   18
+site  challenge_balls     0x002d2d34 0xe92d4030 0xe1a05000
+site  challenge_menu      0x000cd874 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x000cd894 0xe51330b0 0xe3530000
+value challenge_menu_pick_back 176
+value challenge_menu_list_at   576
+value challenge_menu_count_at  40
+value challenge_menu_cap       11
+value challenge_menu_entry     16
+value challenge_menu_kind      0
+value challenge_menu_slot      -1
+value challenge_menu_sets_on   1
+value challenge_menu_caption   1922

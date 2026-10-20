@@ -574,7 +574,8 @@ export default function AudioTab() {
     // a toggle entry reads as a box, ticked or not ("☑  Keep this song
     // whole…" / "☐  …", the Tk menu's own labels); PAD-494: an entry may open
     // a submenu of its own ("Music modes")
-    const item = (it) => it.sep ? { sep: true } : ({
+    // (PAD-638: a header names a part of a submenu, "Mode 2 (Custom A): Orch.wav")
+    const item = (it) => it.sep ? { sep: true } : it.header ? { header: it.header } : ({
       label: it.checked == null ? it.label : (it.checked ? "☑  " : "☐  ") + it.label,
       icon: it.icon, kbd: it.kbd, disabled: it.disabled,
       submenu: it.submenu ? it.submenu.map(item) : undefined,

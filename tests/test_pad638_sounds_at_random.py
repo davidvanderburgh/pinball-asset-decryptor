@@ -537,7 +537,10 @@ def test_the_audio_tab_gives_a_music_mode_files_in_turn_of_its_own(tmp_path, mon
         assert sm["mode_turns"] == {rel: {"2": [os.path.normpath(b), os.path.normpath(c)]}}
         assert sm["mode_random"] == {rel: ["2"]} and sm["mode_turn_levels"] == {rel: {"2": {"3": -3}}}
         labels = [s.get("label") for s in sub(w)]
-        assert "Loudness of mode 2 (Custom A) sound 3 (-3 dB)\u2026" in labels
+        assert labels[-6:] == [
+            "Play sound 2 (Orch B.wav)", "Loudness of sound 2 (0 dB)\u2026",
+            "Take off sound 2 (Orch B.wav)", "Play sound 3 (Orch C.wav)",
+            "Loudness of sound 3 (-3 dB)\u2026", "Take off sound 3 (Orch C.wav)"]
         assert [s["checked"] for s in sub(w) if str(s.get("action", "")).startswith("mturn_order")] \
             == [False, True]
         r = next(r for r in w.state("audio")["rows"] if r["k"] == rel)

@@ -3119,7 +3119,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                 sub += [{"sep": True},
                         {"header": "%s: %s" % (self._mode_label(m), os.path.basename(mf))}]
                 if len(files) + 1 < _TURNS_MAX:
-                    sub.append({"label": "Add a sound for %s…" % self._mode_said(m),
+                    sub.append({"label": "Add a sound to play in turn…",
                                 "action": "mturn_add:%d" % m, "icon": "plus"})
                 if files:
                     rnd = m in (self._mode_random.get(rel) or ())
@@ -3128,15 +3128,13 @@ class AudioTab(FindOriginalsMixin, TabService):
                             {"label": "At random", "action": "mturn_order:%d:1" % m,
                              "checked": rnd, "radio": True}]
                 for k, f in enumerate(files, 2):
-                    sub += [{"label": "Play %s sound %d (%s)" % (self._mode_said(m), k,
-                                                                 os.path.basename(f)),
+                    # (the part's header names the mode)
+                    sub += [{"label": "Play sound %d (%s)" % (k, os.path.basename(f)),
                              "action": "mturn_play:%d:%d" % (m, k), "icon": "play"},
-                            {"label": "Loudness of %s sound %d (%s)…" % (
-                                self._mode_said(m), k,
-                                self._db_words(self._mode_level(rel, self._mturn(m, k)))),
+                            {"label": "Loudness of sound %d (%s)…" % (
+                                k, self._db_words(self._mode_level(rel, self._mturn(m, k)))),
                              "action": "mturn_level:%d:%d" % (m, k), "icon": "wave"},
-                            {"label": "Take off %s sound %d (%s)" % (self._mode_said(m), k,
-                                                                     os.path.basename(f)),
+                            {"label": "Take off sound %d (%s)" % (k, os.path.basename(f)),
                              "action": "mturn_off:%d:%d" % (m, k), "icon": "x"}]
         return {"label": ("Play at random" if tn and rel in self._random else "Play in turn")
                 + (" (%d sounds)" % (len(tn) + 1) if tn else ""),

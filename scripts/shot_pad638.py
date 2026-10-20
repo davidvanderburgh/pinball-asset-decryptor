@@ -4,7 +4,8 @@
 
 The project's record says the tank-fire sound's three files play at random (``sound_modes``
 ``random``). Before (main) the app knows nothing of it: the menu offers files in turn only. After,
-"Play at random (3 sounds)" with One after another / At random, At random ticked; round 2 adds each file's own loudness (sound 3 at -4 dB).
+"Play at random (3 sounds)" with One after another / At random, At random ticked; round 2 adds each file's own loudness (sound 3 at -4 dB); round 3 a part per music mode
+(mode 2's file with two sounds of its own, at random).
 
 The tank-fire sound (idx 2) has a replacement and, in the sidecar's ``sound_modes`` ``turns``, two
 more files the game plays in turn with it. Writes <before_|after_>audio_tab.png (the Audio tab on
@@ -77,7 +78,13 @@ def _project(scratch):
                    "sound_modes": {"turns": {"audio/" + TANK: [own[TANK_FILES[1][0]],
                                                                own[TANK_FILES[2][0]]]},
                                    "random": ["audio/" + TANK],
-                                   "turn_levels": {"audio/" + TANK: {"3": -4}}}},
+                                   "turn_levels": {"audio/" + TANK: {"3": -4}},
+                                   # round 3: music mode 2's file, with two of its own at random
+                                   "slots": {"audio/" + TANK: {"2": own[ORCHESTRAL[0]]}},
+                                   "levels": {},
+                                   "mode_turns": {"audio/" + TANK: {"2": [own[HEISEI[0]],
+                                                                          own[STANDARD[0]]]}},
+                                   "mode_random": {"audio/" + TANK: ["2"]}}},
                   f, indent=2)
     return dst
 
@@ -123,7 +130,7 @@ def main():
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1500, "height": 900})
+            page = browser.new_page(viewport={"width": 1500, "height": 1100})
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.add_init_script("try { localStorage.setItem('pad.log.open', '0'); } catch (e) {}")

@@ -225,7 +225,7 @@ HELP_CONTENT = {
          "play after that is the next in turn.\n"
          "- In a music mode a sound has a file of its own for, that file plays every time, "
          "unless that mode's file has sounds in turn of its own: on a sound with music mode "
-         "files, the menu has a part for each mode (**Add a sound for mode 2 (…)…**), with "
+         "files, the menu has a part for each mode (headed **Mode 2 (…)**), with "
          "its own One after another / At random and loudness. Its own sound's part plays in "
          "every mode the sound has no file for. A mode's sounds play as long as its file.\n"
          "- Needs an image build, not a direct SD write. Each file takes room in the "

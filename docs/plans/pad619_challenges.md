@@ -200,6 +200,11 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   end-of-ball call does nothing in what the game takes for a Standard game; on LE 1.59 Start on our entry ("CHALLENGE /
   PAD CHALLENGE" on the glass) left the menu up - its lock test (0x194298's value against the entry's last word)
   refuses it. Pro 1.58's port is thin (no events): nothing to judge a rig run by.
-- Seen on the rig, not this ticket's: Star Wars LE 1.31 froze in its mission select (countdown stuck at 9) when the
-  scoop was hit after the challenge's end-of-ball call; the proof runs play only until the mode has run out.
+- Open (next run): Star Wars LE 1.31 sits in its mission select ("USE THE ACTION BUTTON TO SELECT YOUR MISSION", the
+  countdown stopped at 9, nothing logged) when playfield switches are hit after the challenge's end-of-ball call -
+  reproduced twice (batch_r27, r31; C:/tmp/PAD-619/job619s.sh). Our runtime's scoop wrapper logged nothing. With the
+  Action Button pressed after the hits (job619v.sh, batch_r32) the ball did end (ball_end, the balls getter said 1) but
+  66 s later and the end shot still showed the select - not settled whether the press closed it. The proof runs play
+  only until the mode has run out (job619t.sh). To find: what opens the select there, and whether a mode's challenge
+  should keep the game's mode starts blocked until the ball has really ended.
 - No challenge, said so: King Kong 0.97, X-Men 0.98, D&D x3, Bond 60th (a timed whole game).

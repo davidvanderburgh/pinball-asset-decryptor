@@ -182,6 +182,21 @@ paints every placed insert while it runs, and at its end hands them back and sen
 again; a blink that hurries is sent again each time the clock moves it to a faster pace; and the
 same light lit again is not sent again, so a blink keeps its beat. A show started in When the
 mode ends runs on after the mode, as the examples' end shows do.
+
+THE MODE'S OWN LIGHT SHOWS (PAD-646). David wanted light shows made from scratch, "in a beautiful and
+elegant way": presets with timing, a preview in the app, several shows through a mode. So a mode keeps
+its own named shows (``shows``: ``[{"name", "steps", "repeat"}]``, up to SHOWS_MAX, each up to SHOW_STEPS
+steps), made on the Modes tab's Light shows page (modes_lightshows.js: the show's steps as a timeline,
+each step's pattern, time, colors, centre, pace and GI, and the playfield picture playing the show with
+the very arithmetic the C runs, mirrored insert by insert), and a Run the light show block runs one by
+name (``{"op": "show", "show": "mine", "name": "Kaiju roar"}``) from any rule: at the start, at a shot,
+with N seconds left, at the end. The ready-made shows (SHOWS) and a block's own steps (``"own"``) stay.
+A step may BLEND in from the step before over its first ``blend`` ms (from dark when it is the first),
+centre on a point of its own (``at`` "xy" with ``x``, ``y``, picked on the picture), and the patterns
+gained a spiral out and in, ripples, a beam side to side, a fade up and a held color. A show's
+``repeat`` is how many times it runs (1-REPEAT_MAX), or 0: over and over until the mode ends, when the
+pass it is in finishes (``show_last_pass``). The C keeps one table per show the blocks run, however many
+blocks run it, and only the shows a block runs (an unused table would be a compiler warning).
 """
 from __future__ import annotations
 
@@ -286,20 +301,39 @@ FX = {"burst": ("FX_BURST", "a ring bursting out"), "implode": ("FX_IMPLODE", "a
       "strobe": ("FX_STROBE", "a strobe"), "sparkle": ("FX_SPARKLE", "sparkles"),
       "fire": ("FX_FIRE", "fire"), "pulse": ("FX_PULSE", "breathing"),
       "chase": ("FX_CHASE_RING", "a chase round"), "fade": ("FX_FADE_OUT", "a fade to dark"),
-      "bolts": ("FX_BOLTS", "lightning")}
-#: where a step centres: a place on the playfield picture (x 0-300 across, y 0-600 down)
+      "bolts": ("FX_BOLTS", "lightning"),
+      # PAD-646: the light-show editor's patterns
+      "spiral_out": ("FX_SPIRAL_OUT", "a spiral outwards"), "spiral_in": ("FX_SPIRAL_IN", "a spiral closing in"),
+      "ripple": ("FX_RIPPLE", "ripples outwards"), "bounce": ("FX_BOUNCE", "a beam side to side"),
+      "fade_in": ("FX_FADE_IN", "a fade up from dark"), "solid": ("FX_SOLID", "one color, held")}
+#: PAD-646: the patterns by family, as the editor's list groups them
+FX_GROUPS = (("Rings", ("burst", "implode", "spiral_out", "spiral_in", "ripple", "chase")),
+             ("Sweeps", ("sweep_up", "sweep_down", "sweep_lr", "sweep_rl", "bounce")),
+             ("Beams", ("spin", "rainbow")),
+             ("Flashes", ("strobe", "sparkle", "fire", "bolts", "pulse")),
+             ("Fades", ("fade_in", "fade", "solid")))
+#: where a step centres: a place on the playfield picture (x 0-300 across, y 0-600 down); PAD-646: "xy" is a point
+#: of the step's own (its ``x``, ``y``: picked on the preview's picture)
 PLACES = {"center": ("the middle", 150, 330), "top": ("the top", 150, 120),
           "flippers": ("the flippers", 150, 560), "left": ("the left", 60, 330),
-          "right": ("the right", 240, 330)}
+          "right": ("the right", 240, 330), "xy": ("a point of its own", 150, 330)}
+XY_MAX = 2000                    # a point of a step's own: within the picture's pixels
 #: what the general illumination does during a step (the kit's KIT_GI_*)
 GI = {"keep": "GI: the game's", "dark": "GI: dark", "flash": "GI: flashing"}
-SHOW_STEPS = 10                  # the kit's KIT_SHOW_STEPS
+SHOW_STEPS = 32                  # PAD-646: was the kit's KIT_SHOW_STEPS (10); the blocks' engine reads a table
 STEP_MS_MIN, STEP_MS_MAX = 50, 10000
 FX_RATE_MAX = 2000
+# PAD-646: a mode's own shows (``shows``: [{name, steps, repeat}]), run by name from a Light show block
+SHOW_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _'!-]{0,23}$")
+SHOWS_MAX = 24                   # shows a mode may keep
+REPEAT_MAX = 10                  # a show runs this many times at most; 0 = over and over until the mode ends
 
 
-def _step(fx, ms, a, b, at, rate=0, gi="keep"):
-    return {"fx": fx, "ms": ms, "a": a, "b": b, "at": at, "rate": rate, "gi": gi}
+def _step(fx, ms, a, b, at, rate=0, gi="keep", blend=0):
+    st = {"fx": fx, "ms": ms, "a": a, "b": b, "at": at, "rate": rate, "gi": gi}
+    if blend:
+        st["blend"] = blend
+    return st
 
 
 #: the ready-made shows a Light show block picks from (made after the examples' own)
@@ -340,6 +374,35 @@ SHOWS = {
         _step("spin", 1200, "#a000ff", "#000000", "center", 90, "dark"),
         _step("implode", 900, "#ffb000", "#a000ff", "center", 0, "dark"),
         _step("fade", 700, "#a000ff", "#000000", "center")]),
+    # PAD-646: the editor's own starting points
+    "spiral": ("A spiral outwards", [
+        _step("spiral_out", 1800, "#40c0ff", "#001040", "center", 0, "dark"),
+        _step("spiral_out", 1200, "#ffffff", "#0050ff", "center", 0, "dark", 300),
+        _step("fade", 500, "#0050ff", "#000000", "center", 0, "keep", 200)]),
+    "spiral_in": ("A spiral closing in", [
+        _step("spiral_in", 1800, "#ff40a0", "#200010", "center", 0, "dark"),
+        _step("burst", 700, "#ffffff", "#ff40a0", "center", 0, "flash", 150),
+        _step("fade", 500, "#ff40a0", "#000000", "center", 0, "keep", 200)]),
+    "fade_up": ("A fade up", [
+        _step("fade_in", 1500, "#ffb000", "#000000", "center", 0, "dark"),
+        _step("solid", 800, "#ffb000", "#000000", "center", 0, "dark"),
+        _step("solid", 800, "#ffffff", "#000000", "center", 0, "keep", 800),
+        _step("fade", 600, "#ffffff", "#000000", "center", 0, "keep")]),
+    "left": ("A sweep to the left", [
+        _step("sweep_rl", 700, "#ffffff", "#ff3000", "center", 0, "dark"),
+        _step("sweep_rl", 700, "#ffffff", "#ff3000", "center", 0, "dark"),
+        _step("fade", 400, "#ff3000", "#000000", "center", 0, "keep", 200)]),
+    "right": ("A sweep to the right", [
+        _step("sweep_lr", 700, "#ffffff", "#00c040", "center", 0, "dark"),
+        _step("sweep_lr", 700, "#ffffff", "#00c040", "center", 0, "dark"),
+        _step("fade", 400, "#00c040", "#000000", "center", 0, "keep", 200)]),
+    "ripples": ("Ripples", [
+        _step("ripple", 2400, "#00e0ff", "#002030", "center", 600, "dark"),
+        _step("fade", 600, "#00e0ff", "#000000", "center", 0, "keep", 300)]),
+    "scanner": ("A beam side to side", [
+        _step("bounce", 1600, "#ff0000", "#200000", "center", 0, "dark"),
+        _step("bounce", 1600, "#ff0000", "#200000", "center", 0, "dark"),
+        _step("fade", 400, "#ff0000", "#000000", "center", 0, "keep", 200)]),
 }
 #: the game's own callouts a block can name by what they say (every port carries these roles)
 CALLOUT_ROLES = {"ten_seconds": "Ten seconds left", "time_up": "Time is up"}
@@ -424,6 +487,7 @@ def normalize(data):
     out["sounds"] = [c for c in (out.get("sounds") or []) if isinstance(c, dict)]
     out["music"] = str(out.get("music") or "")
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
+    out["shows"] = _norm_shows(out.get("shows"))         # PAD-646
     out["hud"] = _norm_hud(out.get("hud"))
     out["bar"] = _norm_bar(out.get("bar"))
     out["info"] = _norm_info(out.get("info"))
@@ -433,6 +497,45 @@ def normalize(data):
             secs = b.get("seconds")
             if b.get("op") == "add_time" and isinstance(secs, (int, float)) and not isinstance(secs, bool):
                 b["seconds"] = {"k": "num", "v": b["seconds"]}
+    return out
+
+
+def _norm_shows(shows):
+    """PAD-646: the mode's own light shows, each ``{name, steps, repeat}`` and nothing else: a show that is not a
+    dict, or has no list of steps, is dropped; what is wrong inside one :func:`problems` names."""
+    out = []
+    for s in (shows if isinstance(shows, list) else [])[:SHOWS_MAX]:
+        if not isinstance(s, dict) or not isinstance(s.get("steps"), list):
+            continue
+        try:
+            repeat = max(0, min(REPEAT_MAX, int(s.get("repeat", 1))))
+        except (TypeError, ValueError):
+            repeat = 1
+        out.append({"name": str(s.get("name") or "").strip()[:24],
+                    "steps": [st for st in s["steps"] if isinstance(st, dict)], "repeat": repeat})
+    return out
+
+
+def show_named(program, name):
+    """PAD-646: the mode's own show called ``name`` (as typed, else by its letters alone), or None."""
+    want = str(name or "").strip()
+    shows = program.get("shows") or []
+    for s in shows:
+        if s.get("name") == want:
+            return s
+    for s in shows:
+        if str(s.get("name") or "").lower() == want.lower():
+            return s
+    return None
+
+
+def show_blocks(program):
+    """PAD-646: every Light show block in the program with the script it is in: ``[(script index, block)]``."""
+    out = []
+    for i, s in enumerate(program.get("scripts") or []):
+        for b in _walk(s.get("do") or []):
+            if b.get("op") == "show":
+                out.append((i, b))
     return out
 
 
@@ -796,7 +899,9 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None,
            "inserts": list(inserts) if inserts is not None else None,
            "modes": set(modes) if modes is not None else None,
-           "challenges": list(challenges) if challenges is not None else None, "picked": set()}
+           "challenges": list(challenges) if challenges is not None else None, "picked": set(),
+           "program": program}                        # PAD-646: a Light show block names one of its shows
+    _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
     if hud["on"]:
         for k, c in enumerate(hud["counters"]):
@@ -920,6 +1025,17 @@ def notes(program):
                    "drains (the game stops its shows then) or a script for while it is not running does nothing.")
     if "timer_done" in kinds and "timer_start" not in ops:
         out.append("No block starts a timer, so When a timer runs out never runs.")
+    # PAD-646: a show of the mode's own that no block runs, and one that runs until the mode ends started as it ends
+    run = {str(b.get("name") or "").lower() for _i, b in show_blocks(program) if b.get("show") == "mine"}
+    for s in program["shows"]:
+        if s["name"] and s["name"].lower() not in run:
+            out.append("No block runs the light show %r yet: put Run the light show in a script (Light shows "
+                       "names the rules that run each)." % s["name"])
+    for i, b in show_blocks(program):
+        s = show_named(program, b.get("name")) if b.get("show") == "mine" else None
+        if s is not None and not s["repeat"] and (program["scripts"][i].get("hat") or {}).get("kind") == "mode_end":
+            out.append("The light show %r runs over and over until the mode ends, and When the mode ends starts it "
+                       "as it does: it plays once there." % s["name"])
     if "behind" in wheres and "loop" not in wheres:
         out.append("A clip behind the HUD, once, plays in the place of the mode's loop: start a "
                    "clip over and over behind the HUD first (When the mode starts is the place).")
@@ -1274,21 +1390,17 @@ def _check_ms(ms, lo, hi, where, ctx):
         ctx["out"].append("%s %d to %d ms." % (where, lo, hi))
 
 
-def _check_show(b, where, ctx):
-    show = b.get("show")
-    if show in SHOWS:
-        return
-    if show != "own":
-        ctx["out"].append("%s runs a light show with none chosen." % where)
-        return
-    steps = b.get("steps")
+def _check_steps(steps, what, ctx):
+    """A show's steps (a block's own, or one of the mode's shows'): each a pattern over the inserts for some ms, in
+    two colors, from a place, at a pace, with the GI set; PAD-646: blending in from the step before for some ms, and
+    a point of its own when its place is "xy"."""
     if not isinstance(steps, list) or not steps:
-        ctx["out"].append("%s runs a light show of its own with no steps." % where)
+        ctx["out"].append("%s has no steps." % what)
         return
     if len(steps) > SHOW_STEPS:
-        ctx["out"].append("%s's light show has %d steps: %d at most." % (where, len(steps), SHOW_STEPS))
+        ctx["out"].append("%s has %d steps: %d at most." % (what, len(steps), SHOW_STEPS))
     for n, st in enumerate(steps, 1):
-        here = "%s's light show, step %d," % (where, n)
+        here = "%s, step %d," % (what, n)
         if not isinstance(st, dict) or st.get("fx") not in FX:
             ctx["out"].append("%s has no pattern." % here)
             continue
@@ -1298,28 +1410,87 @@ def _check_show(b, where, ctx):
             ctx["out"].append("%s has a color missing." % here)
         if st.get("at", "center") not in PLACES:
             ctx["out"].append("%s has no place." % here)
+        elif st.get("at") == "xy" and not (_int_ok(st.get("x"), 0, XY_MAX) and _int_ok(st.get("y"), 0, XY_MAX)):
+            ctx["out"].append("%s centers on a point of its own that is not on the picture." % here)
         if not _int_ok(st.get("rate", 0), 0, FX_RATE_MAX):
             ctx["out"].append("%s has a pace of 0 to %d ms." % (here, FX_RATE_MAX))
         if st.get("gi", "keep") not in GI:
             ctx["out"].append("%s says nothing of the lights between the inserts." % here)
+        if not _int_ok(st.get("blend", 0), 0, STEP_MS_MAX):
+            ctx["out"].append("%s blends in over 0 to %d ms." % (here, STEP_MS_MAX))
 
 
-def show_steps(b):
-    """The steps a Light show block runs: its ready-made show's, or its own."""
+def _check_shows(program, ctx):
+    """PAD-646: the mode's own shows: each named (its letters, digits, spaces, - _ ' !), no two alike, its steps
+    as :func:`_check_steps` wants them."""
+    seen = set()
+    for n, s in enumerate(program["shows"], 1):
+        name = s["name"]
+        what = "The light show %s" % (("%r" % name) if name else "%d" % n)
+        if not SHOW_NAME_RE.match(name):
+            ctx["out"].append("%s's name is not one: letters, digits, spaces, - _ ' and ! (24 at most)." % what
+                              if name else "Light show %d has no name." % n)
+        elif name.lower() in seen:
+            ctx["out"].append("Two of the mode's light shows are called %r: give one another name." % name)
+        seen.add(name.lower())
+        _check_steps(s["steps"], what, ctx)
+
+
+def _check_show(b, where, ctx):
+    show = b.get("show")
+    if show in SHOWS:
+        return
+    if show == "mine":                      # PAD-646: one of the mode's own, by name
+        if not b.get("name"):
+            ctx["out"].append("%s runs a light show of the mode's with none chosen: make one under Light shows." % where)
+        elif show_named(ctx["program"], b.get("name")) is None:
+            ctx["out"].append("%s runs the light show %r, which the mode does not have: make it under Light shows."
+                              % (where, b.get("name")))
+        return
+    if show != "own":
+        ctx["out"].append("%s runs a light show with none chosen." % where)
+        return
+    if not isinstance(b.get("steps"), list) or not b["steps"]:
+        ctx["out"].append("%s runs a light show of its own with no steps." % where)
+        return
+    _check_steps(b["steps"], "%s's light show" % where, ctx)
+
+
+def show_steps(b, program=None):
+    """The steps a Light show block runs: its ready-made show's, one of the mode's own (PAD-646, ``program``'s
+    ``shows`` by the block's ``name``), or its own."""
     if b.get("show") in SHOWS:
         return SHOWS[b["show"]][1]
-    steps = b.get("steps") if b.get("show") == "own" else None
+    if b.get("show") == "mine":
+        s = show_named(program or {}, b.get("name"))
+        steps = (s or {}).get("steps")
+    else:
+        steps = b.get("steps") if b.get("show") == "own" else None
     return [st for st in (steps or []) if isinstance(st, dict) and st.get("fx") in FX][:SHOW_STEPS]
 
 
+def show_repeat(b, program=None):
+    """PAD-646: how many times the block's show runs (0 = until the mode ends): a show of the mode's own says."""
+    if b.get("show") == "mine":
+        s = show_named(program or {}, b.get("name"))
+        if s is not None:
+            return int(s.get("repeat", 1))
+    return 1
+
+
 def show_choices():
-    """What the Light show block's boxes offer: the ready-made shows (with their steps, so "its
-    own steps" can start from one), the patterns, the places and the GI's settings."""
+    """What the Light show block's boxes and the Light shows editor offer: the ready-made shows (with their steps,
+    so a show of the mode's can start from one), the patterns (and their families), the places, the GI's settings,
+    and the editor's limits."""
     return {"shows": [{"key": k, "label": label, "steps": copy.deepcopy(steps)}
                       for k, (label, steps) in SHOWS.items()],
             "fx": [[k, words] for k, (_c, words) in FX.items()],
+            "fx_groups": [[g, list(keys)] for g, keys in FX_GROUPS],
             "places": [[k, p[0]] for k, p in PLACES.items()],
-            "gi": [[k, words] for k, words in GI.items()]}
+            "place_xy": {k: [p[1], p[2]] for k, p in PLACES.items() if k != "xy"},
+            "gi": [[k, words] for k, words in GI.items()],
+            "limits": {"steps": SHOW_STEPS, "shows": SHOWS_MAX, "repeat": REPEAT_MAX, "ms": [STEP_MS_MIN, STEP_MS_MAX],
+                       "rate": FX_RATE_MAX, "name": 24}}
 
 
 def _check_num(e, where, ctx, depth=0):
@@ -1423,7 +1594,8 @@ class _Gen:
                 self.timers[n.lower()] = len(self.timer_names)
                 self.timer_names.append(n)
         self.hits = []                  # shots whose hits this ball the program reads
-        self.shows = []                 # each Light show block's steps, in order: SHOW_<n>
+        self.shows = []                 # the shows the blocks run, in order: SHOW_<n> ({key, steps, name, repeat};
+                                        # PAD-646: one of the mode's own, by its key, once however many blocks run it)
         self.holds = []                 # PAD-395: the mechanisms its blocks hold or let go, by the port's name
         self.mech = False               # PAD-395: a block holds or lets go of something (the helpers go in)
         self.game_show = False          # PAD-418: a block plays one of the game's own light shows
@@ -1605,11 +1777,16 @@ class _Gen:
                 else:
                     out.append(pad + "unlight(%s);" % self.light_i(b))
             elif op == "show":
-                steps = show_steps(b)
+                steps = show_steps(b, self.p)
                 if steps:
-                    self.shows.append(steps)
-                    name = b.get("show") if b.get("show") in SHOWS else "its own"
-                    out.append(pad + "show_start(SHOW_%d, %d, %s);" % (len(self.shows) - 1, len(steps), _c_str(name)))
+                    # PAD-646: one of the mode's own shows has one table however many blocks run it
+                    name = b.get("show") if b.get("show") in SHOWS else b.get("name") if b.get("show") == "mine" else "its own"
+                    key = ("mine:" + str(name).lower()) if b.get("show") == "mine" else None
+                    i = next((i for i, s in enumerate(self.shows) if key and s["key"] == key), None)
+                    if i is None:
+                        self.shows.append({"key": key, "steps": steps, "name": name, "repeat": show_repeat(b, self.p)})
+                        i = len(self.shows) - 1
+                    out.append(pad + "show_start(SHOW_%d, %d, %s, %d);" % (i, len(steps), _c_str(name), self.shows[i]["repeat"]))
             elif op in ("add_time", "set_time"):
                 out.append(pad + "%s(%s);" % (op, self.num(b.get("seconds"))))
             elif op == "multiball":
@@ -2434,6 +2611,8 @@ def to_c(program, slug):
         L.append("        looping = 0;")
         L.append("    }")
         L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
+    if g.shows:
+        L.append("    show_last_pass();                 /* PAD-646: a show running until the mode ends finishes its pass */")
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
     if has_info:
         L.append("    info_show(0);                     /* PAD-547: its line goes with it */")
@@ -2897,40 +3076,62 @@ static void lamps_tick(void)                        /* a hurrying blink follows 
 """
 
 
+def step_xy(st):
+    """PAD-646: where a step centres on the playfield picture: its place's point, or its own (``at`` "xy")."""
+    at = PLACES.get(st.get("at"), PLACES["center"])
+    if st.get("at") == "xy" and _int_ok(st.get("x"), 0, XY_MAX) and _int_ok(st.get("y"), 0, XY_MAX):
+        return int(st["x"]), int(st["y"])
+    return at[1], at[2]
+
+
+def step_c(st):
+    """PAD-646: one step as its C table row's fields: ``(fx C name, ms, a, b, x, y, rate, GI C name, blend)``."""
+    gi_c = {"keep": "GI_KEEP", "dark": "GI_DARK", "flash": "GI_FLASH"}
+    col = [int(str(st.get(k))[1:], 16) if COLOR_RE.match(str(st.get(k) or "")) else 0 for k in ("a", "b")]
+    try:
+        ms = max(STEP_MS_MIN, min(STEP_MS_MAX, int(st.get("ms"))))
+    except (TypeError, ValueError):
+        ms = 500
+    try:
+        rate = max(0, min(FX_RATE_MAX, int(st.get("rate") or 0)))
+    except (TypeError, ValueError):
+        rate = 0
+    try:
+        blend = max(0, min(STEP_MS_MAX, int(st.get("blend") or 0)))
+    except (TypeError, ValueError):
+        blend = 0
+    x, y = step_xy(st)
+    return FX[st["fx"]][0], ms, col[0], col[1], x, y, rate, gi_c.get(st.get("gi"), "GI_KEEP"), blend
+
+
 def _show_decls(shows):
-    """The C of the light shows' steps (one table per Light show block) and their state."""
+    """The C of the light shows' steps (one table per show the blocks run: a ready-made one, a block's own steps,
+    or one of the mode's own shows, PAD-646) and their state. ``shows``: ``[{steps, name, repeat}]``."""
     out = ["/* ---- light shows (PAD-376): the kit's kit_show (intricate_kit.h). A show is a few STEPS,",
            " * each a pattern over the playfield's inserts by their PLACE (the port's \"at X,Y\": x 0-300",
            " * across, y 0-600 down) for some ms, in its two colors; the GI strings follow each step. A",
-           " * port with no placed inserts runs a show on the GI only. ---- */",
+           " * port with no placed inserts runs a show on the GI only. PAD-646: a step may BLEND in from",
+           " * the one before over its first ms, and a show may run several times, or until the mode",
+           " * ends (repeat 0: the pass it is in finishes as the mode ends). ---- */",
            "enum { %s };" % ", ".join(c for c, _w in FX.values()),
            "#define GI_KEEP   0                       /* the GI does what the game says */",
            "#define GI_DARK   1                       /* the GI off: only the show lights the playfield */",
            "#define GI_FLASH  2                       /* the GI flashing white with a strobe */",
-           "struct fx_step { int fx; unsigned ms, a, b; int x, y; unsigned rate; int gi; };"]
-    gi_c = {"keep": "GI_KEEP", "dark": "GI_DARK", "flash": "GI_FLASH"}
-    for n, steps in enumerate(shows):
+           "struct fx_step { int fx; unsigned ms, a, b; int x, y; unsigned rate; int gi; unsigned blend; };"]
+    for n, s in enumerate(shows):
+        steps = s["steps"] if isinstance(s, dict) else s
         out.append("static const struct fx_step SHOW_%d[] = {" % n)
         for st in steps:
-            at = PLACES.get(st.get("at"), PLACES["center"])
-            col = [int(str(st.get(k))[1:], 16) if COLOR_RE.match(str(st.get(k) or "")) else 0 for k in ("a", "b")]
-            try:
-                ms = max(STEP_MS_MIN, min(STEP_MS_MAX, int(st.get("ms"))))
-            except (TypeError, ValueError):
-                ms = 500
-            try:
-                rate = max(0, min(FX_RATE_MAX, int(st.get("rate") or 0)))
-            except (TypeError, ValueError):
-                rate = 0
-            out.append("    { %s, %d, 0x%06xu, 0x%06xu, %d, %d, %d, %s },   /* %s, at %s */" % (
-                FX[st["fx"]][0], ms, col[0], col[1], at[1], at[2], rate,
-                gi_c.get(st.get("gi"), "GI_KEEP"), FX[st["fx"]][1], at[0]))
+            fx, ms, a, b, x, y, rate, gi, blend = step_c(st)
+            where = PLACES[st["at"]][0] if st.get("at") in PLACES else PLACES["center"][0]
+            out.append("    { %s, %d, 0x%06xu, 0x%06xu, %d, %d, %d, %s, %d },   /* %s, at %s */" % (
+                fx, ms, a, b, x, y, rate, gi, blend, FX[st["fx"]][1], where))
         out.append("};")
     out += ["#define SHOW_LAMPS 256",
             "static struct {",
-            "    const struct fx_step *steps;",
+            "    const struct fx_step *steps, *prev;   /* prev: the step before the one on (a blend's), 0 = none */",
             "    const char *name;",
-            "    int n, step, on, gi[8], n_gi, placed;",
+            "    int n, step, on, left, forever, gi[8], n_gi, placed;",
             "    unsigned long t0, step_t0;",
             "    unsigned seed;",
             "} show;",
@@ -3005,13 +3206,17 @@ static int is_gi(const char *s)            /* a GI string: "GI" a word of its ow
     return 0;
 }
 
-static void show_start(const struct fx_step *steps, int n, const char *name)
+/* PAD-646: repeat = how many times it runs; 0 = over and over until the mode ends (the pass it is in finishes) */
+static void show_start(const struct fx_step *steps, int n, const char *name, int repeat)
 {
     int k, cnt = pm_lamp_count();
     show.steps = steps;
+    show.prev = 0;
     show.n = n;
     show.name = name;
     show.step = 0;
+    show.left = repeat > 0 ? repeat : 1;
+    show.forever = repeat <= 0;
     show.on = pm_can(PM_CAN_LAMPS) && n > 0;
     show.t0 = show.step_t0 = pm_ms();
     show.seed = (unsigned)show.t0 | 1u;
@@ -3021,7 +3226,20 @@ static void show_start(const struct fx_step *steps, int n, const char *name)
         if (pm_lamp_xy(k, &x, &y)) show.placed++;
         else if (show.n_gi < 8 && is_gi(pm_lamp_at(k, 0))) show.gi[show.n_gi++] = k;
     }
-    if (show.on) pm_log("show %s: %d step(s) over %d placed inserts, %d GI string(s)", name, n, show.placed, show.n_gi);
+    if (!show.on) return;
+    if (show.forever)
+        pm_log("show %s: %d step(s) over %d placed inserts, %d GI string(s), until the mode ends", name, n, show.placed, show.n_gi);
+    else if (show.left > 1)
+        pm_log("show %s: %d step(s) over %d placed inserts, %d GI string(s), %d times", name, n, show.placed, show.n_gi, show.left);
+    else
+        pm_log("show %s: %d step(s) over %d placed inserts, %d GI string(s)", name, n, show.placed, show.n_gi);
+}
+
+/* the mode ended: a show running until then finishes the pass it is in (one started as it ends plays once) */
+static void show_last_pass(void)
+{
+    show.forever = 0;
+    show.left = 1;
 }
 
 /* the color of the insert at (x, y) for step st at `t` ms into it */
@@ -3082,8 +3300,45 @@ static unsigned fx_colour(const struct fx_step *st, int x, int y, int idx, unsig
         w = x - r;
         if (w < 0) w = -w;
         return w < 18 && (t % rate) < rate * 2 / 3 ? st->a : st->b;
+    /* PAD-646: the editor's patterns */
+    case FX_SPIRAL_OUT:
+    case FX_SPIRAL_IN:
+        /* the burst's ring, its radius turning with the angle round (x, y): one turn = 140 px of radius */
+        d = fx_isqrt(dx * dx + dy * dy) + fx_angle(dx, dy) * 140 / 1536;
+        r = st->fx == FX_SPIRAL_OUT ? f * 840 / 256 : (256 - f) * 840 / 256;
+        w = d - r;
+        if (w > 0 && w < 60) return fx_scale(st->a, 256 - w * 4);
+        if (w <= 0 && w > -140) return fx_mix(st->a, st->b, -w * 256 / 140);
+        return w <= 0 ? st->b : 0;
+    case FX_RIPPLE:
+        /* rings 140 px apart rolling outwards, one every `rate` ms */
+        d = fx_isqrt(dx * dx + dy * dy);
+        v = ((d * 256 / 140 - (int)(t * 256u / rate)) % 256 + 256) % 256;
+        return fx_mix(st->a, st->b, v < 128 ? v * 2 : (256 - v) * 2);
+    case FX_BOUNCE:
+        /* a band from the left edge to the right and back over the step */
+        v = f < 128 ? f * 2 : (256 - f) * 2;
+        r = v * 380 / 256 - 40;
+        w = x - r;
+        if (w < 0) w = -w;
+        if (w < 30) return st->a;
+        return fx_mix(st->a, st->b, (w - 30) * 4);
+    case FX_FADE_IN:
+        return fx_scale(st->a, f);
+    case FX_SOLID:
+        return st->a;
     }
     return 0;
+}
+
+/* PAD-646: the insert's color for the step on, blending in from the step before over the step's first ms (from
+ * dark when there is none before it) */
+static unsigned fx_blend(const struct fx_step *st, int x, int y, int idx, unsigned t)
+{
+    unsigned c = fx_colour(st, x, y, idx, t);
+    if (st->blend && t < st->blend)
+        c = fx_mix(show.prev ? fx_colour(show.prev, x, y, idx, show.prev->ms) : 0u, c, (int)(t * 256u / st->blend));
+    return c;
 }
 
 /* every tick while the show runs: each placed insert painted, the GI as the step says; at its
@@ -3097,7 +3352,12 @@ static void show_tick(void)
     if (!show.on) return;
     while (show.step < show.n && now - show.step_t0 >= show.steps[show.step].ms) {
         show.step_t0 += show.steps[show.step].ms;
+        show.prev = &show.steps[show.step];
         show.step++;
+        if (show.step >= show.n && (show.forever || show.left > 1)) {   /* PAD-646: round again */
+            if (!show.forever) show.left--;
+            show.step = 0;
+        }
     }
     if (show.step >= show.n) {
         show.on = 0;
@@ -3111,7 +3371,7 @@ static void show_tick(void)
     cnt = pm_lamp_count();
     for (k = 0; k < cnt && k < SHOW_LAMPS; k++) {
         int x, y;
-        if (pm_lamp_xy(k, &x, &y)) pm_lamp_paint(k, fx_colour(st, x, y, k, t));
+        if (pm_lamp_xy(k, &x, &y)) pm_lamp_paint(k, fx_blend(st, x, y, k, t));
     }
     for (k = 0; k < show.n_gi; k++) {
         if (st->gi == GI_DARK) pm_lamp_paint(show.gi[k], 0);

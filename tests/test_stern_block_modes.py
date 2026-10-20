@@ -875,8 +875,8 @@ def test_light_show_and_pace_problems():
     for words in ("step 1, has no pattern", "step 2, lasts 50 to 10000 ms", "step 3, has a color missing",
                   "step 4, has no place", "step 5, has a pace of 0 to 2000", "step 6, says nothing"):
         assert words in said, words
-    eleven = {"op": "show", "show": "own", "steps": [GHIDORAH_START[0]] * 11}
-    assert any("11 steps: 10 at most" in t for t in probs(eleven))
+    many = {"op": "show", "show": "own", "steps": [GHIDORAH_START[0]] * (BM.SHOW_STEPS + 1)}   # PAD-646: 32 now
+    assert any("%d steps: %d at most" % (BM.SHOW_STEPS + 1, BM.SHOW_STEPS) in t for t in probs(many))
     assert any("pace of 20 to 5000 ms" in t for t in probs(_light("Building", rate=5)))
     assert any("empty number slot" in t for t in probs(_light("Building", rate={"k": "nope"})))
     # a solid light's pace is not asked for
@@ -895,8 +895,8 @@ def test_the_light_show_c_only_calls_what_the_header_declares_and_only_when_used
     used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
     assert used <= _header_calls(), used - _header_calls()
     assert "static const struct fx_step SHOW_0[] = {" in src and "SHOW_1[]" in src
-    assert "{ FX_BOLTS, 1500, 0xffb000u, 0x000000u, 150, 330, 190, GI_DARK }" in src
-    assert 'show_start(SHOW_1, 3, "rainbow");' in src
+    assert "{ FX_BOLTS, 1500, 0xffb000u, 0x000000u, 150, 330, 190, GI_DARK, 0 }" in src
+    assert 'show_start(SHOW_1, 3, "rainbow", 1);' in src
     assert "light(0, 0xffb000u, PM_LAMP_BLINK, (long long)secs_left(), 0);" in src
     assert "light(1, 0xffb000u, PM_LAMP_BLINK, 0LL, 1);" in src
     plain = BM.to_c(BM.starter("RAMP FRENZY", SHOTS), "ramp_frenzy")

@@ -291,7 +291,7 @@ def test_the_views_and_the_shot_picker_are_wired(tmp_path):
     assert got["picker"] is True                       # every view's shot lists get the playfield beside them
     src = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "modes.js"), encoding="utf-8").read()
     pages = src[src.index("const BLOCKS_PAGES"):src.index("function BlocksPane")]
-    assert [p for p in ("Blocks", "Rule cards", "Story", "Playfield", "Shot table", "Timeline", "Node graph", "Script",
-                        "C it makes") if '"%s"' % p in pages] == ["Blocks", "Rule cards", "Story", "Playfield",
-                                                                  "Shot table", "Timeline", "Node graph", "Script",
-                                                                  "C it makes"]
+    assert [p for p in ("Blocks", "Rule cards", "Story", "Playfield", "Light shows", "Shot table", "Timeline", "Node graph",
+                        "Script", "C it makes") if '"%s"' % p in pages] == ["Blocks", "Rule cards", "Story", "Playfield",
+                                                                            "Light shows", "Shot table", "Timeline",
+                                                                            "Node graph", "Script", "C it makes"]   # PAD-646

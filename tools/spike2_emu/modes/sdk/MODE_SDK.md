@@ -3911,6 +3911,42 @@ Jackpot and a 2-ball multiball could start. After: the game left play at once (s
 both refused (`no game`), and the next challenge game started its mode.
 
 
+**Its own high score (PAD-640).** The game keeps a champion per challenge (`CHAOS CHALLENGE`, `AHOY CHALLENGE`,
+...; the service menu's `CACK CHALLENGE CHAMPION` and the rest), and a challenge game's score that beats it goes in
+there, the initials entered under the challenge's name. A challenge of a mode's own plays, to the game, as Chaos at
+Crab Key's, so its score went in as the `CHAOS CHALLENGE` champion; a mode in a challenge's place filed its scores
+under that challenge. Now a challenge game a mode took keeps the MODE'S high score: the initials entry, when the
+game's score beats it, is under the mode's name (the menu's, in capitals), and the game's own champion is not
+touched. The game keeps its champions in one framework (Bond LE/Pro 1.06 and Stranger Things alike): categories
+`1..` (`HIGHEST SCORES`, `COMBO CHAMPION`, ..., one `<x> CHALLENGE CHAMPION` per challenge, in the menu's order), 36
+bytes each in one table (`{per-player bytes, score getter, reset, compare, qualify, fn, char **titles, u16 *entries,
+flags}`, Bond LE `0x7c3980`, the count at `0x5f7f08`), each a list of score entries (`{u32 record, char *initials,
+char *name, fn, fn, char *title, char **titles, u16 kind, u16 default-score adjustment, ...}`); a record is 96 bytes:
+the initials at +32, the score u64 at +72, `~(the byte sum of the first 88)` u16 at +88. At the game's end one
+function (LE `0x4e87dc`, between the game's other game-over calls at `0x1e29cc`) compares each category's score with
+its records - in a challenge game the game lets only the pick's challenge through - and runs the initials entry under
+the entry's title for each one beaten. `portchallenge.py` writes:
+
+```
+site  challenge_scores       0x004e87dc 0xe92d4ff0 0xe24dd0bc    # the end-of-game high scores (wrapped, hook_wrap)
+site  challenge_score_entry  0x004e7d10 0xe1a03000 0xe3050750    # (category, n) -> the score entry (called)
+value challenge_scores_cat_0  10                                 # DR. NO CHALLENGE CHAMPION ... _4 14 (Stranger Things 9..12)
+```
+
+While that function runs for a challenge game whose pick a mode took, the runtime points the challenge's entry at a
+record of the mode's own and its title at the mode's name, and puts all three back when it returns. The modes'
+records live in `/dump/pad_challenge_scores` (one line each: the record's 96 bytes in hex, a space, the name), a
+mode's first one the entry's default initials and a score of 0 (so the mode's first scoring game is its champion).
+Two modes under one name share one. The game's attract-mode high score pages show the game's own champions only. A
+port without the lines files the score under the game's challenge, as before, and logs nothing new.
+
+Proven (emulator, 2026-10-20, Bond LE 1.06 stock card, hidden, muted; a blocks mode `challenge new` picked on the
+start menu, two challenge games in a row): the first, 14,708,650 points, came to `PLAYER 1 - Enter Initials` under
+`BON APPETIT` (the mode's record was its first: 0, MXV) and kept `14708650, AAA` in `/dump/pad_challenge_scores`; the
+second read it back and the same score left it standing. The game's own `CHAOS CHALLENGE` record (`0x812ed8`: 25,000,000,
+MXV) read the same before, between and after both games. The control on the released runtime: the game's own
+`CHAOS CHALLENGE` initials entry, as reported.
+
 ## Holding the end of a ball (PAD-622)
 
 James Bond's own mini-wizards end on a drain with their TOTAL: the mode's last clip, then its TOTAL under the bar,

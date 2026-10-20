@@ -3930,7 +3930,7 @@ says which for a challenge the calling mode holds or added: `PM_LAUNCH_CLIP` (0)
 mode file: `challenge_launch clip | player | <seconds>` (1-60). The Modes tab: under Starts on > a challenge game of,
 *its ball launched* when its start clip is over / a set time after it starts / by the player. Blocks: the When the
 player picks the challenge hat's second choice. Logged: `challenge ball: launched for the player (its start clip
-over, 2021 ms after its mode began)`, or why not.
+over, 2021 ms after its mode began)`, or why not. Where no ball waits in the auto plunger at all (Led Zeppelin LE / Pro 1.22: the challenge game's first ball goes to the shooter lane for the player's plunge, the auto plunger only takes the later ones, which the game launches itself) it logs `no ball waited in the auto plunger` and leaves the ball to the player.
 
 Each `challenge_plain_<k>` (0-3) is wrapped (`hook_wrap`): in a challenge game a mode of ours took - or is about to
 take (its pick made on the menu, or a held challenge's flag set) - the runtime clears the challenge game's flag for

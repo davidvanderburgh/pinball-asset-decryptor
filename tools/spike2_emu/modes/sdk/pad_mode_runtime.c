@@ -9192,7 +9192,7 @@ static void launch_tick(void)
                 lch.how ? "its set time" : "its start clip over", lch.last - lch.began);
             lch.armed = 0;
         } else if (now - lch.due > LAUNCH_GIVE_UP_MS) {
-            say("challenge ball: no ball waited in the plunger - the player launched it");
+            say("challenge ball: no ball waited in the auto plunger (a manual shooter lane, or the game launched it) - left to the player");
             lch.armed = 0;
         }
         return;

@@ -164,3 +164,20 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   elsewhere); Rush LE 1.18's menu does not open on the rig with the flipper buttons held (settings as 1.19's);
   Aerosmith 1.16's rig sat with the coin door open (48V disabled) - rerun queued; TMNT's real pick; JP LE/Pro 1.16 and
   Mando LE 1.44 menus; Foo Fighters / Mando 1.45 proofs running (r10).
+
+## Status by build (2026-10-19, night)
+
+- Start menus proven (CHALLENGE_MENU_PROVEN, 46): Aerosmith LE 1.15/1.16, Avengers LE 1.09/1.10, Pro 1.10, Batman 66
+  1.13/1.14, The Beatles 1.29, Bond LE/Pro 1.06, Deadpool LE 1.14/1.16, Pro 1.16, Elvira 1.13, Foo Fighters LE/Pro
+  1.04, Guardians 1.15, LE 1.14/1.15, Iron Maiden LE 1.16/1.18, Pro 1.18, JP The Pin 1.05, JP Pro 1.16, Led Zeppelin
+  LE/Pro 1.22, Mando LE/Pro 1.45, Munsters LE/Pro 1.28, Rush LE 1.19, Pro 1.19, Star Wars Pro 1.31, Sword of Rage LE
+  1.18/1.19, Pro 1.19 (Stranger Things: its handlers, PAD-615).
+- A mode in a challenge's place proven (CHALLENGE_PROVEN, 13): Bond LE/Pro, Stranger Things x3, Rush Pro 1.19, Jaws
+  LE/Pro, John Wick Pro, Metallica 1.04, Venom LE/Pro, Godzilla LE 1.16 / Pro 1.15 / 1.16.
+- Running (batch_r14/r15): JP LE 1.16 (NVRAM wipe + second boot), Metallica 1.03, John Wick LE 1.01/1.02, Star Wars
+  LE 1.30/1.31.
+- Not proven, the app says so: Aerosmith 1.16 (the rig's switch table for it is a rewritten copy - coins and flippers
+  miss; a rig fix, not the feature), Rush LE 1.18 (the menu does not open with the flipper buttons held), Star Wars
+  ELG 1.10 (a mode's challenge game plays on to ball 2 - the getter is never asked), TMNT x3 (even the game's own
+  FINAL BATTLE pick plays Standard on the rig), Mando LE 1.44 (its menu resets the cursor every frame: Standard only).
+- No challenge, said so: King Kong 0.97, X-Men 0.98, D&D x3, Bond 60th (a timed whole game).

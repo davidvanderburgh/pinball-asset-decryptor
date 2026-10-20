@@ -623,6 +623,7 @@ text  wizard_film_1      level 3 in all five modes
 # ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
 value challenge_on_flag   18
 site  challenge_balls     0x00159bc0 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00198fb8 0xe3053578 0xe340305b
 site  challenge_menu      0x00024078 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x00024258 0xe2433001 0xe3530003
 value challenge_menu_list_at   216

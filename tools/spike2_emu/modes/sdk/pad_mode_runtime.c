@@ -9080,6 +9080,18 @@ static int challenge_balls_veto(unsigned *r, unsigned n)
     return 1;
 }
 
+/* PAD-619: `site challenge_extra_ball` - the game's take-an-extra-ball test (the count byte: non-zero takes one and the
+ * ball is played again, before the balls-per-game getter is ever asked). A mode's challenge game is one ball: an extra
+ * ball earned in it is not played (Star Wars ELG 1.10 earned one 17 s into the ball and played it as a second) */
+static int challenge_extra_veto(unsigned *r, unsigned n)
+{
+    static int said;
+    (void)r; (void)n;
+    if (!challenge_ours) return 0;
+    if (!said++) say("challenge game: a mode's - an extra ball earned in it is not played (one ball)");
+    return 1;
+}
+
 static int event_bus_id(const char *name);
 
 static void challenges_arm(void)
@@ -9116,6 +9128,8 @@ static void challenges_arm(void)
      * balls-per-game setting and the next one (`site challenge_balls_2`) when they decide the game is over */
     if (site("challenge_balls_2") && (!fn("challenge_balls_2") || !hook_veto_n(fn("challenge_balls_2"), challenge_balls_veto, 1, 1)))
         say("challenges: the per-player balls getter could not be hooked - an older build's challenge game may run on");
+    if (site("challenge_extra_ball") && (!fn("challenge_extra_ball") || !hook_veto_n(fn("challenge_extra_ball"), challenge_extra_veto, 0, 0)))
+        say("challenges: the extra-ball test could not be hooked - an extra ball earned in a mode's challenge game is played");
     for (n = 0; n < (unsigned)challenges_n; n++)
         if (!challenge_site[n] && challenge_ball_id < 0) {
             say("challenges: the port has no ball_start event - no challenge list");

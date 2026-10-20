@@ -452,6 +452,7 @@ text  wizard_name_1      Cherry Bomb Multiball
 # ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
 value challenge_on_flag   18
 site  challenge_balls     0x001220d4 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x001209f4 0xe3053440 0xe340305f
 site  challenge_menu      0x0004d670 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x0004d854 0xe2433001 0xe3530006
 value challenge_menu_list_at   280

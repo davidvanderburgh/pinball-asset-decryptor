@@ -724,5 +724,6 @@ value challenge_mode_6  14
 text  challenge_name_6  The Unforgiven
 value challenge_name_msg_6  3655
 site  challenge_balls     0x004481f0 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x001b31ec 0xe30f3f80 0xe34036fe
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x003e4fd8 0xe3002012 0xe3402700

@@ -175,7 +175,7 @@ def find(elf):
         return [], notes or ["no challenge list and no start menu of the known shape"]
     if generic:
         menu = generic["lines"]
-    return flag_lines(e) + lines + balls_lines(e) + menu + end_ball, []
+    return flag_lines(e) + lines + balls_lines(e) + extra_ball_lines(e) + menu + end_ball, []
 
 
 def balls_lines(e):
@@ -208,6 +208,30 @@ def balls_lines(e):
         j = two[0]
         out.append("site  challenge_balls_2   0x%08x 0x%08x 0x%08x" % (base + 4 * j, w[j], w[j + 1]))
     return out
+
+
+def extra_ball_lines(e):
+    """PAD-619: `site challenge_extra_ball` - the framework's take-an-extra-ball test, one shape on every Spike 2 build:
+        movw rX, <count> ; movt rX, <count> ; ldrb rY, [rX] ; adds r0, rY, #0 ; movne r0, #1 ; cmp r0, #0 ;
+        subne rY, rY, #1 ; strbne rY, [rX] ; bx lr
+    The ball's end asks it before the balls-per-game getter: an extra ball earned in a mode's challenge game (Star Wars
+    ELG 1.10) was played as a second ball. The runtime has it say 0 then. Empty when it is not there, or not once."""
+    w, base = e.words, e.text_va
+    hits = []
+    for k in range(len(w) - 9):
+        a, b, c = w[k], w[k + 1], w[k + 2]
+        rx = (a >> 12) & 0xF
+        if (a & 0xFFF00000) != 0xE3000000 or (b & 0xFFF00000) != 0xE3400000 or (b >> 12) & 0xF != rx \
+                or (c & 0xFFFF0FFF) != (0xE5D00000 | rx << 16):
+            continue
+        ry = (c >> 12) & 0xF
+        if w[k + 3:k + 9] == (0xE2900000 | ry << 16, 0x13A00001, 0xE3500000, 0x12400001 | ry << 16 | ry << 12,
+                              0x15C00000 | rx << 16 | ry << 12, 0xE12FFF1E):
+            hits.append(k)
+    if len(hits) != 1:
+        return []
+    k = hits[0]
+    return ["site  challenge_extra_ball 0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
 
 
 def _short(stem):
@@ -1037,8 +1061,11 @@ def menu_wide(e, names, on_flag):
     caption = challenge_caption(e)
     if plain is None or caption is None:
         return None
-    return ["# the start menu (CHOOSE YOUR MODE OF PLAY), TMNT's wide entries: challenges of the modes' own - the plain "
-            "challenge game (kind %d)" % plain,
+    # PAD-619: ours play as STANDARD, not as the plain challenge's kind: TMNT's challenges are locked until a player has
+    # unlocked them ("PLAY AS ALL FOUR TURTLES TO UNLOCK"), and Start on a locked kind clears the challenge flags and
+    # plays Standard - the game's own pick did too, on the rig. The ball's start hands the game to the mode instead.
+    return ["# the start menu (CHOOSE YOUR MODE OF PLAY), TMNT's wide entries: challenges of the modes' own - played as "
+            "Standard (0), the plain challenge game (kind %d) being locked until a player unlocks it" % plain,
             "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
             # hooked a word before the kind's load, where r3 still points into the entry: the Start that follows
             # re-reads the kind from the entry itself, so ours is made the plain kind there (as on Star Wars)
@@ -1052,8 +1079,9 @@ def menu_wide(e, names, on_flag):
             "value challenge_menu_caption_at %d" % (kat + 4),
             "value challenge_menu_caption2_at %d" % (kat + 6),
             "value challenge_menu_name_at   %d" % (kat + 8),
-            "value challenge_menu_kind      %d" % plain,
+            "value challenge_menu_kind      0",
             "value challenge_menu_slot      -1",
+            "value challenge_menu_sets_on   1",
             "value challenge_menu_caption   %d" % caption]
 
 
@@ -1069,15 +1097,25 @@ def menu_live(e, names, on_flag):
     # ... or the buttons through the stack (Mando: str r0, [sp, #x] ; ldr r3, [sp, #x] ; tst r3, #0x80)
     frames += [i for i in range(len(w) - 3) if (w[i] & 0xFFFFF000) == 0xE58D0000
                and w[i + 1] == (0xE59D3000 | (w[i] & 0xFFF)) and w[i + 2] == 0xE3130080]
+    # ... or kept in a register tested later, the cursor in a register too (Mando LE 1.44: mov r8, r0 ; ... ;
+    # ldrb sb, [r3, #-0xc8] ; cmp sb, #0 ; bne - and `tst r8, #0x80` at the loop's foot)
+    frames += [i for i in range(len(w) - 8) if (w[i] & 0xFFFF0FFF) == 0xE1A00000 and ((w[i] >> 12) & 0xF) > 3
+               and any((x & 0xFFF00000) == 0xE5500000 and (x >> 16) & 0xF == 3 for x in w[i + 1:i + 4])
+               and (0xE3100080 | ((w[i] >> 12) & 0xF) << 16) in w[i + 2:i + 1500]]
     hits = []
-    for fr in frames:
-        for k in range(fr + 2, fr + 14):
-            if (w[k] & 0xFFF0F000) == PICK_LDR and (w[k] >> 16) & 0xF == 3 and w[k + 1] == 0xE3530000 \
-                    and (w[k + 2] & 0xFF000000) == 0x1A000000:
+    for fr in sorted(set(frames)):
+        for k in range(fr + 1, fr + 14):
+            rd = (w[k] >> 12) & 0xF
+            if ((w[k] & 0xFFF0F000) == PICK_LDR or (w[k] & 0xFFF00000) == 0xE5500000) and (w[k] >> 16) & 0xF == 3 \
+                    and w[k + 1] == 0xE3500000 | rd << 16 and (w[k + 2] & 0xFF000000) == 0x1A000000:
+                five = lambda xs: any(                                         # cursor * 5: r + r lsl 2, or
+                    (x & 0x0FF00FF0) == 0x00800100 and (x >> 16) & 0xF == x & 0xF for x in xs) or any(
+                    (a & 0xFFFF0FF0) == 0xE1A00100 and (b & 0xFFF00000) == 0xE0800000          # lsl rA, rB, #2 ;
+                    and (b >> 16) & 0xF == (a >> 12) & 0xF and b & 0xF == a & 0xF and not b & 0xFF0  # add rD, rA, rB
+                    for j, a in enumerate(xs) for b in xs[j + 1:])
                 if (w[k - 1] & 0xFFFFFFF0) == 0xE0833200:                       # add r3, r3, rC, lsl #4: 16 bytes
                     es = 16
-                elif (w[k - 1] & 0xFFF0FFFF) == 0xE0803103 and any(              # add r3, rB, r3, lsl #2, after
-                        (x & 0x0FF00FF0) == 0x00800100 and (x >> 16) & 0xF == x & 0xF for x in w[k - 5:k - 1]):
+                elif (w[k - 1] & 0xFFF0FFFF) == 0xE0803103 and five(w[k - 6:k - 1]):   # add r3, rB, r3, lsl #2
                     es = 20                                                    # r3 = cursor * 5: 20 bytes (Mando)
                 else:
                     continue
@@ -1088,7 +1126,10 @@ def menu_live(e, names, on_flag):
     if len(hits) != 1:
         return None
     fr, k, list_at, back, top, es = hits[0]
-    count_at = next((w[i] & 0xFFF for i in range(fr, min(len(w) - 4, fr + 600)) if (w[i] & 0xFFFFF000) == 0xE59D3000
+    # the count, as the right button wraps (ldr r3, [sp, #x] ; sub r3, r3, #1 ; cmp r3, rC): after the frame, or - where the
+    # buttons are read at the loop's foot (Mando LE 1.44) - before it
+    count_at = next((w[i] & 0xFFF for i in list(range(fr, min(len(w) - 4, fr + 600))) + list(range(fr - 1, max(0, fr - 600), -1))
+                     if (w[i] & 0xFFFFF000) == 0xE59D3000
                      and 0xE2433001 in w[i + 1:i + 4] and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[i + 2:i + 5])),
                     None)
     start = next((i for i in range(fr, max(0, fr - 6000), -1) if (w[i] & 0xFFFF4000) == 0xE92D4000), None)

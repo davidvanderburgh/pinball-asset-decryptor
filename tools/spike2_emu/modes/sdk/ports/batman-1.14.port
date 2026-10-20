@@ -442,6 +442,7 @@ text  wizard_name_3      Holy Multiball
 # ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
 value challenge_on_flag   18
 site  challenge_balls     0x002bef44 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x004992f8 0xe30136c8 0xe3403087
 site  challenge_menu      0x00029ca4 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x00029e88 0xe2433001 0xe3530006
 value challenge_menu_list_at   320

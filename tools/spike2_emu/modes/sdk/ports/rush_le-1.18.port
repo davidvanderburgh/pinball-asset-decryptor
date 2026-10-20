@@ -580,6 +580,7 @@ value challenge_flag_2  26
 text  challenge_name_2  2112
 site  challenge_balls     0x002c15a4 0xe92d4030 0xe1a05000
 site  challenge_balls_2   0x002dce54 0xe92d4038 0xe1a04000
+site  challenge_extra_ball 0x00267424 0xe3053218 0xe3403b66
 site  challenge_menu      0x000d63d4 0xe1a06000 0xe3160080
 site  challenge_menu_pick 0x000d6510 0xe2433001 0xe3530005
 value challenge_menu_list_at   288

@@ -673,6 +673,7 @@ value game_flags_at       4
 data  game_flag_count     0x005121cc
 value challenge_on_flag   18
 site  challenge_balls     0x0031dd0c 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00161368 0xe30230c4 0xe3403065
 site  challenge_menu      0x000a8f68 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x000aa294 0xe513213c 0xe513314c
 value challenge_menu_pick_back 332
@@ -684,8 +685,9 @@ value challenge_menu_kind_at   4
 value challenge_menu_caption_at 8
 value challenge_menu_caption2_at 10
 value challenge_menu_name_at   12
-value challenge_menu_kind      11
+value challenge_menu_kind      0
 value challenge_menu_slot      -1
+value challenge_menu_sets_on   1
 value challenge_menu_caption   1921
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x0032ad6c 0xe3052d46 0xe340206a

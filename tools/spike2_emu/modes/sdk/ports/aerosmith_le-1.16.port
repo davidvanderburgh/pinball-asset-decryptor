@@ -431,6 +431,7 @@ text  wizard_film_1      every song played
 # ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
 value challenge_on_flag   18
 site  challenge_balls     0x0013c9e0 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00338278 0xe30f3844 0xe3403064
 site  challenge_menu      0x00058574 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x00058788 0xe2433001 0xe3530006
 value challenge_menu_list_at   568

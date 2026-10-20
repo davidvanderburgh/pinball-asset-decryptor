@@ -333,6 +333,16 @@ def test_mando_live_menu_has_20_byte_entries(key):
     assert "es != 20" in src
 
 
+def test_mando_le_1_44_menu_keeps_its_buttons_and_cursor_in_registers():
+    """Its buttons are read at the loop's foot (mov r8, r0 ; tst r8, #0x80 later), the cursor is r6 (lsl r5, r6, #2 ;
+    add r3, r5, r6), the pick reads a byte (ldrb sb, [r3, #-0xc8]) and the count is read before the frame."""
+    test_the_ports_carry_what_the_finder_reads_off_the_game("mando_le-1.44")
+    v = _port("mando_le-1.44")["value"]
+    assert int(v["challenge_on_flag"]) == 16 and int(v["challenge_menu_entry"]) == 20
+    assert int(v["challenge_menu_pick_back"]) == 200 and int(v["challenge_menu_list_at"]) == 584
+    assert int(v["challenge_menu_count_at"]) == 56 and int(v["challenge_menu_sets_on"]) == 1
+
+
 def test_the_end_of_ball_call_is_told_from_its_lookalikes():
     def elf(words):
         return type("E", (), {"words": tuple(words), "text_va": 0x10000})()

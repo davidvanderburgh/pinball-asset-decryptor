@@ -879,6 +879,7 @@ value game_flags_at       4
 data  game_flag_count     0x004f0930
 value challenge_on_flag   18
 site  challenge_balls     0x002d2d34 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00176a90 0xe3093f34 0xe34033bd
 site  challenge_menu      0x000cd874 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x000cd894 0xe51330b0 0xe3530000
 value challenge_menu_pick_back 176

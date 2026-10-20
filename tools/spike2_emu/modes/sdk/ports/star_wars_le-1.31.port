@@ -623,6 +623,7 @@ text  wizard_shot      Left ramp
 # ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
 value challenge_on_flag   18
 site  challenge_balls     0x0033af1c 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x002a7a88 0xe30d398c 0xe340306b
 site  challenge_menu      0x000615e4 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x000617b8 0xe1a07000 0xe51330f0
 value challenge_menu_pick_back 240

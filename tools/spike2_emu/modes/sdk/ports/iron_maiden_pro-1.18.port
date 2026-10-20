@@ -506,6 +506,7 @@ text  wizard_film_2   all four Eddie cards
 # ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
 value challenge_on_flag   18
 site  challenge_balls     0x001efa0c 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x001deed0 0xe3013b8c 0xe3403063
 site  challenge_menu      0x000a41b8 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x000a4384 0xe2433001 0xe3530006
 value challenge_menu_list_at   240

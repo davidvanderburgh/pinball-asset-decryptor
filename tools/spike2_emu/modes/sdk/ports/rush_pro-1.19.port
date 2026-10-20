@@ -699,6 +699,7 @@ text  challenge_name_1  Cygnus Book 2
 value challenge_flag_2  31
 text  challenge_name_2  2112
 site  challenge_balls     0x0031c194 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x0023ff98 0xe3073894 0xe3403b65
 site  challenge_menu      0x000d6d24 0xe1a07000 0xe3170080
 site  challenge_menu_pick 0x000d6e88 0xe2433001 0xe3530006
 value challenge_menu_list_at   288

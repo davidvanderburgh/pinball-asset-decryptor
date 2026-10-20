@@ -470,3 +470,26 @@ site block_rule_10         0x001a1f68 0xe92d41f0 0xe1a06002  # cskill_shot::v[31
 text block_rule_name_10    Skill Shot
 site block_rule_11         0x001b3a30 0xe92d43f0 0xe1a04000  # cthe_child_rule::v[31]
 text block_rule_name_11    The Child
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x006ba5cc
+value game_flags_at       4
+data  game_flag_count     0x005607dc
+value challenge_on_flag   16
+site  challenge_balls     0x001e26f4 0xe92d4030 0xe1a05000
+site  challenge_balls_2   0x0020b154 0xe92d4038 0xe1a04000
+site  challenge_extra_ball 0x002d27f0 0xe30a3600 0xe340306b
+# the start menu (CHOOSE YOUR MODE OF PLAY), applied live as an entry is shown: challenges of the modes' own - no kind of the game's makes a challenge game, so ours play as Standard (0) and the runtime hands the ball to the mode
+site  challenge_menu      0x00103900 0xe1a08000 0xe0823103
+site  challenge_menu_pick 0x00103908 0xe55390c8 0xe3590000
+value challenge_menu_pick_back 200
+value challenge_menu_list_at   584
+value challenge_menu_count_at  56
+value challenge_menu_cap       10
+value challenge_menu_entry     20
+value challenge_menu_kind      0
+value challenge_menu_slot      -1
+value challenge_menu_sets_on   1
+value challenge_menu_caption   1901
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x00356e20 0xe308285a 0xe3402076

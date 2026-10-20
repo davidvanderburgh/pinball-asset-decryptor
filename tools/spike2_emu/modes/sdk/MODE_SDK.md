@@ -3944,6 +3944,10 @@ after - the skill shot's flag 156 and the left-flipper word 3904 at the serve, t
 plunger (node 8 coil 4) 2.0 s after the mode began, `launched for the player`, and the top control gate (node 9 coil
 6) pulsed and held for 20 s 100 ms after the launch; the mode's screen stayed on the glass. Before (main): none of
 it - no skill shot flags, the gate never moved, and the ball was still in the shooter lane 70 s later.
+The same blocks with a 4 s start clip (`clip full` in When the mode starts): the clip at +0.52 s, the launch at
++4544 ms, as it ended. `launch 6`: launched at +6013 ms. `launch player`: `the player launches it (its mode says so)`
+and the ball still in the lane 40 s on. Bond Pro 1.06 (left flipper button 63 held): `0x0018c560 runs as at a
+standard ball's start`, flag 156, the launch at +2010 ms and the top control gate (node 9 coil 6) 100 ms later.
 
 
 ## Holding the end of a ball (PAD-622)

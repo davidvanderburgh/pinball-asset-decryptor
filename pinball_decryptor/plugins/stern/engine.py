@@ -2467,10 +2467,15 @@ def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
             pass
     try:
         from .spike2 import sfx_names as _sfxn
-        name_map = _sfxn.build_name_map(emu, params, log)
+        # the module's own entry swallows errors into {}: called underneath it so
+        # a failure is told apart from a card the names really don't fit
+        name_map = _sfxn._build_name_map(emu, params, log)
     except Exception as e:
-        log("Sound-effect auto-naming unavailable (%s)." % e, "info")
-        name_map = {}
+        # PAD-633: not kept. The empty map used to be cached per card, so one
+        # failed try left every later extract of that card unnamed, silently.
+        log("Sound-effect auto-naming unavailable (%s); sounds keep their idx "
+            "names this time." % e, "info")
+        return {}
     try:
         json.dump({str(k): v for k, v in name_map.items()}, open(cache, "w"))
     except Exception:
@@ -2478,6 +2483,9 @@ def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
     if name_map and log:
         log("Matched %d sound effect(s) to their Sound Test menu name(s)."
             % len(name_map), "success")
+    elif log:
+        log("No sound could be named from the game's Sound Test menu on this "
+            "card, so the sounds keep their idx names.", "info")
     return name_map
 
 

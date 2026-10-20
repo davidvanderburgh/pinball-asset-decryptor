@@ -2304,7 +2304,10 @@ def profile_from_port(path):
                      "drain.")
     proven =not any(UNPROVEN_MARK in line for line in port["header"])
     switch_note = ""
-    seen = SWITCH_EDGE_PROVEN if "switch_edge" in port["site"] else SWITCH_SHOTS_PROVEN
+    # PAD-645: the drain hands the switch lines on only where no switch_hit site does (the runtime's
+    # switches_arm); The Beatles 1.29 maps it for the flipper buttons' sounds in attract alone
+    by_edge = "switch_edge" in port["site"] and not any(s.startswith("switch_hit") for s in port["site"])
+    seen = SWITCH_EDGE_PROVEN if by_edge else SWITCH_SHOTS_PROVEN
     if switch_shots and "%s-%s" % (game, version) not in seen:
         switch_note = ("%s's shots from switches (%s) have not been seen reaching a mode in the "
                        "emulator yet." % (label, ", ".join(switch_shots)))

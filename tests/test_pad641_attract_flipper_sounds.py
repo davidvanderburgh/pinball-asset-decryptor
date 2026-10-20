@@ -75,7 +75,21 @@ def test_every_bond_build_can_have_them(name):
     assert SMo.attract_refusal(MP.profile(name)) == ""
 
 
-def test_a_build_whose_port_does_not_map_the_switch_drain_says_why():
+def _no_drain(monkeypatch):
+    """PAD-645: every shipped port maps the switch drain now: The Beatles' read without it"""
+    real = MP.read_port
+
+    def read(path):
+        port = real(path)
+        if os.path.basename(path).startswith("beatles-"):
+            port["site"].pop("switch_drain", None)
+        return port
+
+    monkeypatch.setattr(MP, "read_port", read)
+
+
+def test_a_build_whose_port_does_not_map_the_switch_drain_says_why(monkeypatch):
+    _no_drain(monkeypatch)
     prof = MP.profile("beatles_1_29")
     assert SMo.attract_refusal(prof) == SMo.NO_ATTRACT % (
         prof.label, "the app has not found where its game program reads the switches or looks its sounds up")
@@ -207,6 +221,7 @@ def test_a_game_that_cannot_have_them_leaves_them_out_and_keeps_the_rest(tmp_pat
     from pinball_decryptor.core import staged_changes as SC
     from pinball_decryptor.plugins.stern import mode_write as MW
     monkeypatch.setattr(MW, "host_refusal", lambda: "")
+    _no_drain(monkeypatch)
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: MP.profile("beatles_1_29"))
     SC.save(str(tmp_path), {"sound_modes": {"attract": ["a.wav"]}})
     logs = []

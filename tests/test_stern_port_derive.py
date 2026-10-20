@@ -164,7 +164,9 @@ def _draft(ref, placed, how=None, shots=("0x1 Left ramp",)):
                 missing=[], seconds=0.1)
 
 
-def test_the_merge_keeps_what_the_references_agree_on():
+def test_the_merge_keeps_what_the_references_agree_on(monkeypatch):
+    from pinball_decryptor.plugins.stern import portswitch
+    monkeypatch.setattr(portswitch, "drain", lambda elf, *a: None)   # PAD-645: a stand-in program has no drain
     refs = [_ref("a-1.0", "godzilla_pro", "1.15"), _ref("b-1.0", "godzilla_le", "1.16"), _ref("c-1.0", "jaws_le", "1.02")]
     core = {("site", "tick"): 0x100, ("site", "shot_dispatch"): 0x200, ("site", "ball_end"): 0x300,
             ("site", "score_add"): 0x400, ("data", "cur_player"): 0x9000, ("data", "scores"): 0x9100}

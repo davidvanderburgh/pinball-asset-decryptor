@@ -479,7 +479,9 @@ def test_switch_shots_not_yet_proven_say_so(monkeypatch):
 
 
 def test_a_port_without_a_switch_hit_site_offers_no_switch_shots(tmp_path):
-    text = "".join(l for l in BEATLES.read_text(encoding="utf-8").splitlines(True) if not l.startswith("site switch_hit"))
+    # PAD-645: nor the switch drain, which The Beatles 1.29 maps for the flipper buttons' sounds in attract
+    text = "".join(l for l in BEATLES.read_text(encoding="utf-8").splitlines(True)
+                   if not l.startswith(("site switch_hit", "site switch_edge")))
     (tmp_path / "beatles-1.29.port").write_text(text, encoding="utf-8")
     p = MP.profile_from_port(str(tmp_path / "beatles-1.29.port"))
     assert len(p.shots) == 27 and p.switch_shots == () and p.switch_shots_note == ""

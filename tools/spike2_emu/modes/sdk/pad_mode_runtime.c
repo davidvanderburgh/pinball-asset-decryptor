@@ -1166,10 +1166,13 @@ int pm_callout_own_sound(unsigned carrier, const unsigned char key[8])
 static int worker_hooked, worker_log;
 static volatile int blist_live;
 static void blist_play(unsigned request);
+static void att_worker(unsigned request);
+static volatile int att_live;               /* PAD-641 (defined with the lookup's hooks below) */
 
 static void on_sound_worker(unsigned *r)
 {
     if (worker_log) say("sound %u %u", r[0], r[2]);
+    if (att_live) att_worker(r[0]);           /* PAD-645: the game's own sound at an attract press */
     if (blist_live) blist_play(r[0]);
 }
 
@@ -9751,6 +9754,7 @@ static int edge_is_hit(unsigned level, unsigned flags, unsigned polarity, int ha
 
 static long edge_log_left;                   /* value switch_edge_log N: log the first N edges (proving a port) */
 static int edge_hooked;                      /* switch_edge is hooked (on_switch_edge), once: shots and PAD-641 */
+static int edge_shots;                       /* the drain's edges are the port's switch shots (switches_arm) */
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask);
 
 static void on_switch_edge(unsigned *r)
@@ -9777,7 +9781,7 @@ static void on_switch_edge(unsigned *r)
     if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
         say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level & 1u,
             flags, pol, mask, playing, hit && playing ? " - a hit" : "");
-    if (!hit || !playing) return;
+    if (!hit || !playing || !edge_shots) return;   /* PAD-645: hooked for the attract sounds alone */
     lit_hold_check(id);                      /* PAD-503: before the game's own handler for it */
     __sync_fetch_and_add(&switch_fired[id], 1u);
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
@@ -9823,9 +9827,13 @@ static void switches_arm(void)
     if (!port.n_switch) return;                  /* a switch_hit site with no switch lines: nothing to hand on */
     switch_at = at >= 0 && at <= 3 ? (unsigned)at : 0;
     for (id = 0; id < N_SWITCH_IDS; id++) switch_delivered[id] = switch_fired[id];
-    if (e) {                                     /* the drain's edges: every switch; the switch_hit sites stay unhooked */
+    for (i = 0; i < port.n_site; i++) sites += is_switch_hit(port.site[i].name);
+    /* PAD-645: a port with switch_hit sites keeps them for its shots; its switch_edge is there for the flipper
+     * buttons' sounds in attract (The Beatles 1.29) */
+    if (e && !sites) {                           /* the drain's edges: every switch */
         if (e->ok && edge_arm(&why) && (edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
             can |= PM_CAN_SWITCH_SHOTS;
+            edge_shots = 1;
             say("switch shots: %d switch line(s) hand their shots to the modes; the switch drain's edges (switch_edge "
                 "0x%08x, from the drain 0x%08x..0x%08x%s)", port.n_switch, e->addr, edge.drain, edge.drain_end,
                 edge.mode_mask ? ", the game's mode mask applied" : ", no mode mask");
@@ -9836,7 +9844,6 @@ static void switches_arm(void)
     }
     for (i = 0; i < port.n_site; i++) {
         if (!is_switch_hit(port.site[i].name)) continue;
-        sites++;
         if (port.site[i].ok && hook(port.site[i].addr, on_switch_hit)) hooked++;
     }
     if (hooked) {
@@ -10447,9 +10454,17 @@ static void bsid_line(const char *ms, const char *slot, const char *ids, const c
  * the game's mode mask holds the attract bit (value mode_mask_attract, 0x10 measured on Godzilla and
  * Bond) and no game is played, plays the carrier with the next file's key swapped in where the game
  * looks its record up (att_lookup) - once the last one has had its length (+ATT_GAP): a press while
- * one still plays is not another sound. The files go round in turn. */
+ * one still plays is not another sound. The files go round in turn.
+ * PAD-645: most games play a sound of their own at a flipper button in attract (Deadpool LE 1.14: its
+ * request 179 at every release). With
+ *   aquiet  <a silent record's key>                             the build's own short silence
+ * a request the game's sound worker takes within ATT_QUIET_MS of either edge of a flipper button in
+ * attract (any but the carrier) has its record lookups for the next ATT_QUIET_LOOK ms take the silence
+ * (att_worker, att_lookup): the project's file is the one heard. */
 #define ATT_FILES       16
 #define ATT_GAP         250                 /* ms after a file's own length before another press plays */
+#define ATT_QUIET_MS    500                 /* after a flipper button's edge in attract: the game's own sound */
+#define ATT_QUIET_LOOK  60                  /* after its worker call: its record's lookups */
 static struct {
     unsigned request, n, next, sw[2], attract_bit, plays;
     unsigned char key[8];
@@ -10458,6 +10473,10 @@ static struct {
     volatile int cur;                       /* the file the carrier plays now (-1: none) */
     volatile unsigned long swap_until, until;
     volatile int looked;
+    int has_quiet;                          /* PAD-645: an aquiet line */
+    unsigned char quiet[8];
+    volatile unsigned long edge_at, quiet_until;
+    volatile unsigned quiet_req, quiets;
 } att = { .cur = -1 };
 static int att_bad;
 
@@ -10491,11 +10510,36 @@ static void att_file(const char *ks, const char *keys, const char *mss)
     if (k > att.n) att.n = k;
 }
 
+static void att_quiet_line(const char *ks)
+{
+    if (key_hex(ks, att.quiet)) att.has_quiet = 1;
+    else att_bad++;
+}
+
+/* PAD-645, the sound worker's entry (r0 = the request): the game's own sound at a flipper button in
+ * attract has its record lookups take the silence for a moment */
+static void att_worker(unsigned request)
+{
+    unsigned long now;
+    if (!att.has_quiet || request == att.request || !att.edge_at) return;
+    now = pm_ms();
+    if ((long)(now - att.edge_at) > ATT_QUIET_MS || pm_in_game()) return;
+    att.quiet_req = request;
+    att.quiet_until = now + ATT_QUIET_LOOK;
+}
+
 /* the record lookup (any thread): the carrier's own record takes the file it plays now. 1 = swapped */
 static int att_lookup(unsigned *r)
 {
     const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
     int c = att.cur;
+    if (att.quiet_until && (long)(att.quiet_until - pm_ms()) > 0 && !key_is(k, att.key)) {
+        r[1] = (unsigned)(unsigned long)att.quiet;   /* PAD-645: the game's own sound at the press */
+        if (att.quiets++ < 40)
+            say("attract flipper sounds: the game's own request %u at a flipper button plays the silence",
+                att.quiet_req);
+        return 1;
+    }
     if (c < 0 || (long)(att.swap_until - pm_ms()) <= 0 || !key_is(k, att.key)) return 0;
     r[1] = (unsigned)(unsigned long)att.host[c];
     if (!att.looked) {                      /* once per play: the proof it was the one played */
@@ -10512,10 +10556,11 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     unsigned long now;
     int k;
     if (id != att.sw[0] && id != att.sw[1]) return;
-    closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
-    if ((level & 1u) != closed) return;                 /* the release */
     if (!(mask & att.attract_bit) || pm_in_game()) return;   /* attract only: not a game, a tilt, a menu */
     now = pm_ms();
+    att.edge_at = now;                                  /* PAD-645: the game's own sound comes at either edge */
+    closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
+    if ((level & 1u) != closed) return;                 /* the release */
     if (att.plays && (long)(att.until - now) > 0) return;    /* the last one still plays */
     k = (int)(att.next % att.n);
     att.next = (unsigned)(k + 1) % att.n;
@@ -10560,10 +10605,25 @@ static void att_arm(void)
         say("attract flipper sounds: off - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
         return;
     }
+    /* PAD-645: the game's own sound at a press plays the silence - through the sound worker */
+    if (att.has_quiet && !(fn("sound_worker")
+                           && (worker_hooked || (worker_hooked = hook(fn("sound_worker"), on_sound_worker))))) {
+        att.has_quiet = 0;
+        say("attract flipper sounds: the game's own sound at a press plays as well - the port has no sound_worker "
+            "that can be hooked");
+    }
     att_live = 1;
+    /* PAD-645: a card with no modes never reaches the gate's sound log: /dump/soundlog.on here too, so a
+     * proof run says what the game itself plays at a press in attract */
+    if (fn("sound_worker") && pm_trigger("soundlog.on")
+        && (worker_hooked || (worker_hooked = hook(fn("sound_worker"), on_sound_worker)))) {
+        worker_log = 1;
+        say("sound log: every request the sound worker takes (soundlog.on)");
+    }
     say("attract flipper sounds: %u file(s) on request %u, flipper buttons %u and %u, attract bit 0x%x; "
-        "switch_edge 0x%08x and sound_lookup 0x%08x are hooked", att.n, att.request, att.sw[0], att.sw[1],
-        att.attract_bit, e->addr, fn("sound_lookup"));
+        "switch_edge 0x%08x and sound_lookup 0x%08x are hooked%s", att.n, att.request, att.sw[0], att.sw[1],
+        att.attract_bit, e->addr, fn("sound_lookup"), att.has_quiet ? "; the game's own sound at a press plays "
+        "a silence (sound_worker)" : "");
 }
 
 static void sndm_line(char *s)
@@ -10614,6 +10674,10 @@ static void sndm_line(char *s)
     }
     if (n >= 4 && str_eq(f[0], "attract")) {
         att_line(f[1], f[2], f[3]);
+        return;
+    }
+    if (n >= 2 && str_eq(f[0], "aquiet")) {    /* PAD-645 */
+        att_quiet_line(f[1]);
         return;
     }
     if (n >= 4 && str_eq(f[0], "afile")) {

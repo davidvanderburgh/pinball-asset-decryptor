@@ -224,18 +224,20 @@ HELP_CONTENT = {
          "sound bank, and in extra sound banks beside it once that is full, as a music "
          "mode's files do."),
         ("Attract flipper sounds",
-         "Stern Spike 2. Most games play a sound or a callout when a flipper button is "
-         "pressed in attract mode, with no game being played; James Bond 007 plays none. "
+         "Stern Spike 2, every game and version. Most games play a sound or a callout when "
+         "a flipper button is pressed in attract mode, with no game being played; James "
+         "Bond 007 plays none. "
          "**Attract flipper sounds**, beside **Find originals…**, gives the flipper "
          "buttons sounds of your own there.\n\n"
          "- **Add a sound…** (up to 16). Each press of either flipper button plays the "
          "next one, and after the last it starts again.\n"
          "- **Play sound 2 (…)** previews one; **Take off sound 2 (…)** drops it.\n"
          "- A press while one is still playing does not start another.\n"
-         "- They ride a sound the game has but never plays, so each plays for at most "
-         "that sound's length (on James Bond 007 LE, almost 15 seconds); a longer file "
-         "is cut to it, and the log says so.\n"
-         "- On a game that has a sound of its own there, that one plays too.\n"
+         "- They ride one of the game's own sounds, so each plays for at most that "
+         "sound's length (about 2 seconds on Star Wars, almost 15 on James Bond 007 LE, "
+         "45 on Jaws); a longer file is cut to it, and the log says so.\n"
+         "- The game's own sound at the press does not play over yours.\n"
+         "- Not on TMNT 1.58 (Pro or LE) or Venom LE 1.06 yet; the menu says why.\n"
          "- Needs an image build, not a direct SD write."),
         ("Replace from folder",
          "**Replace from folder…**, beside the project folder, picks a whole folder "

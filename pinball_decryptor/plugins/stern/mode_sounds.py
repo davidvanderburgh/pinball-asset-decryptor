@@ -680,6 +680,50 @@ def request_records(sids_by_req, sites, params, key_mask):
     return out
 
 
+def own_calls(game_elf_bytes, image_head, sites, params, key_mask, limit=21):
+    """PAD-645: CALL carriers read off a build's own play tables, for a build no carrier was measured
+    on (an older or a locally derived build): the requests that play one sid, whose sid names one
+    record no other sid names and no other request plays, mono, longest record first. This is the
+    item 163 static test less the constant-call-site check (the ELF's call sites are not read here),
+    so the game may play one now and then: fit for the flipper buttons' sounds in attract, which
+    swap a carrier's record only while their own file plays. ``()`` when the tables cannot be read."""
+    from .info import container_counts
+    from .spike2 import sound_requests as SR
+    counts = container_counts(image_head)
+    fragments = counts[0] if isinstance(counts, tuple) else counts.get("fragments")
+    count, _table = SR.locate_sound_requests(game_elf_bytes, fragments)
+    if not count:
+        return ()
+    try:
+        by_req = request_sids(game_elf_bytes, fragments, range(1, int(count)))
+    except ModeSoundError:
+        return ()
+    fk = {p["findkey"]: p for p in params if p.get("findkey")}
+    recs_of = {}
+    for s in sites:
+        p = fk.get(_play_key(s.payload, s.sid, key_mask))
+        if p is not None:
+            recs_of.setdefault(s.sid, set()).add(p["idx"])
+    sids_of_rec, reqs_of_sid = {}, {}
+    for sid, recs in recs_of.items():
+        for r in recs:
+            sids_of_rec.setdefault(r, set()).add(sid)
+    for req, sids in by_req.items():
+        for sid in set(sids):
+            reqs_of_sid.setdefault(sid, set()).add(req)
+    by_idx = {p["idx"]: p for p in params}
+    pool = []
+    for req, sids in by_req.items():
+        if len(sids) != 1 or len(recs_of.get(sids[0], ())) != 1 or len(reqs_of_sid.get(sids[0], ())) != 1:
+            continue
+        rec = next(iter(recs_of[sids[0]]))
+        p = by_idx.get(rec) or {}
+        if len(sids_of_rec.get(rec, ())) != 1 or int(p.get("chan", 0) or 0) != 1:
+            continue
+        pool.append((-int(p.get("length", 0) or 0), req))
+    return tuple(req for _n, req in sorted(pool)[:limit])
+
+
 def sid_records(sids, sites, params, key_mask):
     """``{sid: record idx}`` for sids that each name exactly one record (a music bed's sid)."""
     fk = {p["findkey"]: p["idx"] for p in params if p.get("findkey")}

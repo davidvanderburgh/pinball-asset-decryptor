@@ -706,3 +706,5 @@ value challenge_mode_2  13
 text  challenge_name_2  Challenge Mode High
 value challenge_name_msg_2  2797
 site  challenge_balls     0x0025b9fc 0xe92d4030 0xe1a05000
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x00210adc 0xe30c2f92 0xe3402075

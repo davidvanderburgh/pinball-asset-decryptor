@@ -318,6 +318,12 @@ def end_ball_lines(e):
                 q += 1
         if q == len(END_BALL_WORDS) and any(x & 0xFFFFF000 == 0xE92D4000 for x in body[:4]):
             at.append(k)
+    if len(at) > 1:
+        # PAD-619: more than one of that opening (Rush 1.19, Iron Maiden 1.18, TMNT, Venom, Mando, Foo Fighters): the
+        # end of the ball takes its argument in r4 (mov r4, r0) and turns the flippers off (mov r1, #0x1000 ; mov r0,
+        # #0 ; bl), as Bond's and Rush 1.18's do
+        at = [k for k in at if 0xE1A04000 in w[k + 2:k + 8]
+              and any(w[j] == 0xE3A01A01 and w[j + 1] == 0xE3A00000 for j in range(k, min(k + 40, len(w) - 1)))]
     if len(at) != 1:
         return []
     k = at[0]

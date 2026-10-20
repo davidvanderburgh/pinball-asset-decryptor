@@ -331,3 +331,14 @@ def test_mando_live_menu_has_20_byte_entries(key):
     assert int(v["challenge_menu_entry"]) == 20 and int(v["challenge_menu_sets_on"]) == 1
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
     assert "es != 20" in src
+
+
+def test_the_end_of_ball_call_is_told_from_its_lookalikes():
+    def elf(words):
+        return type("E", (), {"words": tuple(words), "text_va": 0x10000})()
+    real = [0xE30C2846, 0xE3402B67, 0xE92D4038, 0xE1A05001, 0xE1D230B0, 0xE1A04000, 0xE3833C02, 0xE3833002,
+            0xE1C230B0, 0xEB000000, 0xE3A01A01, 0xE3A00000, 0xEB000000, 0, 0]            # Rush LE 1.19 0x16224c
+    other = [0xE30C2846, 0xE3402B67, 0xE92D4008, 0xE1D230B0, 0xE3833C02, 0xE3833002, 0xE1C230B0, 0xEB000000,
+             0, 0, 0, 0, 0, 0, 0]                                                       # its 0xfe5f8 (no arg, no flippers)
+    lines = PC.end_ball_lines(elf(other + real))
+    assert lines[-1].split()[2] == "0x%08x" % (0x10000 + 4 * len(other))

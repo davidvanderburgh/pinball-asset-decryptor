@@ -252,7 +252,8 @@ def test_quit_stops_only_a_run_this_app_started(rig, monkeypatch, tmp_path):
     import subprocess
     ran = []
     from pinball_decryptor.webui import emulate_dp_core as core
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a))
+    # only the stop counts: the tab's own status.sh poll may run meanwhile on a busy machine
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a) if "stop.sh" in " ".join(a[0]) else None)
     monkeypatch.setattr(core, "rig_cmd_root",
                         lambda *a, **k: ["bash"] + list(a))
     monkeypatch.setattr(

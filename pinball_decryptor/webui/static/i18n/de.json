@@ -12418,5 +12418,9 @@
 "**Add a sound…** (up to {}). Each press of either flipper button plays the next one, and after the last it starts again.": "**Sound hinzufügen…** (bis zu {}). Jeder Druck auf eine der beiden Flippertasten spielt den nächsten, und nach dem letzten beginnt es von vorn.",
 "A press while one is still playing does not start another.": "Ein Druck, während noch einer spielt, startet keinen weiteren.",
 "They ride a sound the game has but never plays, so each plays for at most that sound's length (on James Bond {} LE, almost {} seconds); a longer file is cut to it, and the log says so.": "Sie laufen auf einem Sound, den das Spiel hat, aber nie abspielt, daher spielt jeder höchstens so lange wie dieser Sound (bei James Bond {} LE fast {} Sekunden); eine längere Datei wird darauf gekürzt, und das Protokoll sagt es.",
-"On a game that has a sound of its own there, that one plays too.": "Bei einem Spiel, das dort einen eigenen Sound hat, spielt dieser ebenfalls."
+"On a game that has a sound of its own there, that one plays too.": "Bei einem Spiel, das dort einen eigenen Sound hat, spielt dieser ebenfalls.",
+"Loudness of sound {} ({})…": "Lautstärke von Sound {} ({})…",
+"Sound {}'s loudness:": "Lautstärke von Sound {}:",
+"Loudness of sound {}": "Lautstärke von Sound {}",
+"**Loudness of sound {} (…)…** gives one file a loudness of its own, from -{} to +{} dB ({} keeps it matched). While **Play sound {}** has it in the Replacement player, the loudness box there is that file's too. Sound {}'s is the sound's own loudness box.": "**Lautstärke von Sound {} (…)…** gibt einer Datei eine eigene Lautstärke, von -{} bis +{} dB ({} lässt sie angeglichen). Solange **Sound {} abspielen** sie im Ersatz-Player hat, gilt das Lautstärkefeld dort auch für diese Datei. Für Sound {} gilt das eigene Lautstärkefeld des Sounds."
 }

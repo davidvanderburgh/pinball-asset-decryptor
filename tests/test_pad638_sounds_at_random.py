@@ -262,3 +262,124 @@ def test_the_audio_tab_switches_a_slot_s_files_to_random_and_back(tmp_path, monk
         w.call("audio.menu_action", "turn_order:1", rel)
         assert w.call("audio.menu_action", "turn_off:2", rel) is True       # its last file
         assert "random" not in (_sidecar(proj).get("sound_modes") or {})
+
+
+# ---- round 2: each file in turn has a loudness of its own -----------------------------------------
+def test_each_file_in_turn_keeps_its_own_loudness():
+    m = SMo.clean({"turns": {TANK: ["b.wav", "c.wav"]},
+                   "turn_levels": {TANK: {"2": 4, "3": 0, "4": 9, "x": 2}, BOC: {"2": 3}}})
+    assert m.turn_levels == {TANK: {2: 4}}           # file 4 does not exist, 0 is no offset
+    assert m.level(TANK, SMo.turn_mode(2)) == 4 and m.level(TANK, SMo.turn_mode(3)) == 0
+    assert SMo.to_json(m)["turn_levels"] == {TANK: {"2": 4}}
+    assert SMo.clean(SMo.to_json(m)).turn_levels == m.turn_levels
+    # a record without levels of its own (music modes from before) still gives turns theirs
+    assert SMo.clean({"turns": {TANK: ["b.wav"]}, "turn_levels": {TANK: {"2": -6}}}).level(
+        TANK, SMo.turn_mode(2)) == -6
+
+
+def test_the_build_gives_each_file_in_turn_its_own_loudness(tmp_path, monkeypatch):
+    from tests.test_pad565_sounds_in_turn import _p, _wav
+    from pinball_decryptor.plugins.stern.spike2.emulator import BLOCK
+    made = {s: _wav(tmp_path / ("conv_" + s), 0.5) for s in ("b.wav", "c.wav")}
+    monkeypatch.setattr(SMo, "convert", lambda project, rel, mode, src, log=None: made[src])
+    params = [_p(2, 44100 + BLOCK), _p(10, 44100 + BLOCK), _p(11, 44100 + BLOCK)]
+    m = SMo.clean({"turns": {TANK: ["b.wav", "c.wav"]}, "turn_levels": {TANK: {"3": -5}}})
+    _e, _g, used = E._sound_modes_grow(str(tmp_path), params, {}, {}, m, lambda *a, **k: None)
+    assert [u["db"] for u in used] == [0, -5]
+    rec = SMo.read_card_record(SMo.cfg_text(0, 0, [], True, record=SMo.card_record(
+        m, [dict(u, lines=1) for u in used])))
+    assert [t["db"] for t in rec["turns"]] == [0, -5]
+
+
+def test_the_routes_carry_each_file_in_turn_s_loudness(tmp_path):
+    from pinball_decryptor.core import staged_changes as SC
+    data = {"sound_modes": {"names": [], "slots": {}, "turns": {TANK: ["b.wav", "c.wav"]},
+                            "turn_levels": {TANK: {"3": -5}}}}
+    rec = SC.sound_modes_of(data)
+    assert rec["levels"] == {TANK: {"t3": -5}}
+    other = "audio/idx0007 - SE TANK.wav"
+    tgt = {}
+    assert SC.merge_sound_modes(tgt, {"names": [], "slots": {other: rec["slots"][TANK]},
+                                      "levels": {other: rec["levels"][TANK]}}) == 1
+    assert tgt["sound_modes"]["turn_levels"] == {other: {"3": -5}}
+    assert tgt["sound_modes"]["levels"] == {}
+    assert SMo.clean(tgt["sound_modes"]).level(other, SMo.turn_mode(3)) == -5
+    # a file whose number shifted (a gap in the record) keeps its own level
+    SC.merge_sound_modes(tgt, {"names": [], "slots": {other: {"t2": "x.wav", "t5": "y.wav"}},
+                               "levels": {other: {"t5": 7}}})
+    assert tgt["sound_modes"]["turns"][other] == ["x.wav", "y.wav"]
+    assert tgt["sound_modes"]["turn_levels"] == {other: {"3": 7}}
+
+
+def test_the_music_modes_file_and_the_card_carry_each_file_s_loudness(tmp_path):
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.plugins.stern import media_share as MS
+    from tests.test_webui_audio import _wav as wav
+    src = str(tmp_path / "src")
+    wav(os.path.join(src, *TANK.split("/")), seconds=0.3)
+    mine = str(tmp_path / "mine" / "Tank B.wav")
+    wav(mine, seconds=0.4, amp=700)
+    SC.save(src, {"sound_modes": {"names": [], "slots": {}, "turns": {TANK: [mine]},
+                                  "turn_levels": {TANK: {"2": 6}}}})
+    path = str(tmp_path / "modes.zip")
+    MS.save_music_modes(src, path)
+    dst = str(tmp_path / "dst")
+    wav(os.path.join(dst, *TANK.split("/")), seconds=0.3)
+    got = MS.load_music_modes(dst, path)
+    assert MS.put_music(dst, got["record"]) == 1
+    assert SMo.load(dst).turn_levels == {TANK: {2: 6}}
+    # an extract of a card built with it
+    proj = str(tmp_path / "proj")
+    wav(os.path.join(proj, *TANK.split("/")), seconds=0.3)
+    wav(os.path.join(proj, "audio", "idx0040 - SE X.wav"), seconds=0.5, amp=900)
+    m = SMo.clean({"turns": {TANK: [r"C:\mine\Tank B.wav"]}, "turn_levels": {TANK: {"2": 6}}})
+    used = [{"rel": TANK, "slot": 2, "mode": SMo.turn_mode(2), "host": 40, "db": 6, "lines": 1}]
+    cfg = SMo.cfg_text(0, 0, [], True, record=SMo.card_record(m, used))
+    assert MS.readback("card.raw", proj, padmode={"sounds.cfg": cfg.encode()})["music"] == 1
+    assert SMo.load(proj).turn_levels == {TANK: {2: 6}}
+
+
+def test_the_audio_tab_sets_each_file_s_loudness(tmp_path, monkeypatch):
+    from tests.test_webui_audio import _open, _project, _sidecar, _wav as wav
+    from tests.webui_harness import web_app
+    from pinball_decryptor.webui import compat
+    rel = "audio/idx0001 - Jackpot.wav"
+    monkeypatch.setattr(SMo, "offer", lambda project, rels, probe=True: ("not here", {}))
+    monkeypatch.setattr(SMo, "offer_turns", lambda project, rels, probe=True: (
+        "", {r: "" for r in rels}))
+    proj = _project(tmp_path)
+    b, c = str(tmp_path / "mine" / "Jackpot B.wav"), str(tmp_path / "mine" / "Jackpot C.wav")
+    wav(b)
+    wav(c)
+
+    def labels(w):
+        items = w.call("audio.menu", rel, [rel])
+        e = next(i for i in items if str(i.get("label", "")).startswith("Play ") and i.get("submenu"))
+        return [s["label"] for s in e["submenu"] if not s.get("sep")]
+
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        for f in (b, c):
+            w.answers.append(f)
+            assert w.call("audio.menu_action", "turn_add", rel) is True
+        assert "Loudness of sound 2 (0 dB)…" in labels(w)
+        monkeypatch.setattr(compat.simpledialog, "askstring", lambda *a, **k: "-4")
+        assert w.call("audio.menu_action", "turn_level:3", rel) is True
+        assert _sidecar(proj)["sound_modes"]["turn_levels"] == {rel: {"3": -4}}
+        assert "Loudness of sound 3 (-4 dB)…" in labels(w)
+        r = next(r for r in w.state("audio")["rows"] if r["k"] == rel)
+        assert "3. Jackpot C.wav at -4 dB" in r["tn_tip"]
+        # in the Replacement player, the loudness box is that file's own
+        import time
+        w.call("audio.select", [rel])
+        time.sleep(0.6)                                           # the row loads 250 ms on
+        w.drain()
+        assert w.call("audio.menu_action", "turn_play:2", rel) is True
+        st = w.state("audio")
+        assert st["level_label"] == "Sound 2's loudness:" and st["level"] == "0"
+        assert w.call("audio.set_level", rel, "3") is not False
+        assert _sidecar(proj)["sound_modes"]["turn_levels"] == {rel: {"2": 3, "3": -4}}
+        # taking off sound 2 moves sound 3 (and its loudness) up to 2
+        assert w.call("audio.menu_action", "turn_off:2", rel) is True
+        assert _sidecar(proj)["sound_modes"]["turn_levels"] == {rel: {"2": -4}}
+        assert w.state("audio")["level_label"] == ""

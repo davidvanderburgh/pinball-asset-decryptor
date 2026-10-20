@@ -1484,9 +1484,12 @@ class EmulateTab(TabService):
                       % (pct, total // (1024 * 1024)))
 
     def _reattach_data_disk(self):
-        if not runtime.wsl_distro() or not rigdata.exists():
+        if not runtime.wsl_distro():
             return
         d = runtime.wsl_distro()
+        self._reattach_card_store(d)
+        if not rigdata.exists():
+            return
         try:
             if rigdata.attached(d):
                 return
@@ -1497,10 +1500,24 @@ class EmulateTab(TabService):
             self._log("[emulate] could not re-attach the work disk (%s). The "
                       "run will stop rather than write into memory." % exc)
 
+    def _reattach_card_store(self, d):
+        # the shared card cache (PAD-651): without it a run copies its card
+        # off D: again, which is slow but not wrong - so a failure is a line
+        # in the log, never a refusal
+        try:
+            if rigdata.cards_exists() and not rigdata.cards_attached(d):
+                self._log("[emulate] the Spike 2 card store came unattached "
+                          "(a WSL restart does that); attaching it again.")
+                rigdata.attach_cards(d)
+        except Exception as exc:                         # noqa: BLE001
+            self._log("[emulate] could not attach the card store (%s); cards "
+                      "are copied into the runtime's own cache instead." % exc)
+
     def _ensure_data_disk(self):
         d = runtime.wsl_distro()
         if not d:
             return
+        self._reattach_card_store(d)
         try:
             if rigdata.ensure(d, log=lambda m: self._log("[emulate] %s" % m)):
                 free = rigdata.free_bytes(d)

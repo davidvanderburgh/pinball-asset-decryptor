@@ -10534,7 +10534,7 @@ static void att_unsteal(unsigned long now, int now_too)
 {
     /* the game's own request at a press gets its steal flag back once the press is over */
     if (att.nosteal_req && (now_too || (long)(now - att.nosteal_at) > ATT_NOSTEAL_MS)) {
-        pm_sound_priority(att.nosteal_req, -1, att.nosteal_old & 0xff);
+        pm_sound_priority(att.nosteal_req, (int)(att.nosteal_old >> 8), (int)(att.nosteal_old & 0xff));
         att.nosteal_req = 0;
     }
 }
@@ -10548,12 +10548,14 @@ static void att_worker(unsigned request)
     if ((long)(now - att.edge_at) > ATT_QUIET_MS || pm_in_game()) return;
     att.quiet_req = request;
     att.quiet_until = now + ATT_QUIET_LOOK;
-    /* PAD-645: and it takes no channel from ours - the worker copies the flags into the channel after
-     * this (Jurassic Park 1.05's 235 two ms after ours looked up, Mandalorian Pro 1.45's 879 at the
-     * release, both played the silence over our file) */
+    /* PAD-645: and it takes no channel from ours - the worker copies priority and flags into the channel
+     * after this (Jurassic Park 1.05's 235 two ms after ours looked up, Mandalorian Pro 1.45's 879 at the
+     * release, The Beatles 1.29's 403 with its steal flag already off: each played the silence over our
+     * file). Our carrier's own priority and no steal flag: it cannot take a channel ours holds. */
     if (att.nosteal_req != request) {
+        int ours = pm_sound_priority(att.request, -1, -1);
         att_unsteal(now, 1);
-        if ((old = pm_sound_priority(request, -1, 0)) >= 0) {
+        if ((old = pm_sound_priority(request, ours >= 0 ? ours >> 8 : -1, 0)) >= 0) {
             att.nosteal_req = request;
             att.nosteal_old = old;
         }
@@ -10594,9 +10596,10 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     att.edge_at = now;                                  /* PAD-645: the game's own sound comes at either edge */
     closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
     if ((level & 1u) != closed) {                       /* the release */
-        if (att.cur >= 0 && !att.looked && att.quiet_req && (long)(att.until - now) > 0) {
+        if (att.cur >= 0 && att.quiet_req && (long)(att.until - now) > 0
+            && (!att.looked || !pm_sound_active(att.request))) {
             /* PAD-645: the game's own request at the press (The Beatles 1.29's 403, 1 ms after ours) took the
-             * channel before ours looked its record up: stop it and play ours again */
+             * channel before ours looked its record up, or cut it: stop it and play ours again */
             if (pm_sound_active(att.quiet_req)) pm_sound_stop(att.quiet_req);
             att.swap_until = now + att.ms[att.cur] + 1000;
             att.until = now + att.ms[att.cur] + ATT_GAP;

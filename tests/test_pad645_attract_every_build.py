@@ -387,7 +387,7 @@ def test_the_games_own_sound_at_a_press_never_keeps_ours_from_playing():
     edge = edge[:edge.index("\n}\n")]
     release = edge[edge.index("/* the release */"):edge.index("if (att.plays && (long)(att.until - now) > 0)")]
     # at the release: ours never looked up while the game's own took the channel - stop it, play ours again
-    assert "!att.looked && att.quiet_req" in release
+    assert "(!att.looked || !pm_sound_active(att.request))" in release
     assert release.index("pm_sound_stop(att.quiet_req)") < release.index("pm_sound(att.request)")
     # at the next press: the game's own from the last one still holds its channel - stopped first
     press = edge[edge.index("if (att.plays && (long)(att.until - now) > 0)"):]
@@ -402,10 +402,10 @@ def test_the_games_own_sound_at_a_press_takes_no_channel_from_ours():
     worker = c[c.index("static void att_worker(unsigned request)\n{"):]
     worker = worker[:worker.index("\n}\n")]
     # the worker copies the request's flags into its channel after this hook: the steal flag goes first
-    assert "pm_sound_priority(request, -1, 0)" in worker
-    assert worker.index("att.quiet_req = request;") < worker.index("pm_sound_priority(request, -1, 0)")
+    assert "pm_sound_priority(request, ours >= 0 ? ours >> 8 : -1, 0)" in worker
+    assert worker.index("att.quiet_req = request;") < worker.index("pm_sound_priority(request, ours")
     # and comes back once the press is over (any later request the worker takes), or for the next one
     assert worker.index("att_unsteal(now, 0);") < worker.index("if (!att.has_quiet")
     unsteal = c[c.index("static void att_unsteal(unsigned long now, int now_too)\n{"):]
     unsteal = unsteal[:unsteal.index("\n}\n")]
-    assert "ATT_NOSTEAL_MS" in unsteal and "pm_sound_priority(att.nosteal_req, -1, att.nosteal_old & 0xff);" in unsteal
+    assert "ATT_NOSTEAL_MS" in unsteal and "pm_sound_priority(att.nosteal_req, (int)(att.nosteal_old >> 8), (int)(att.nosteal_old & 0xff));" in unsteal

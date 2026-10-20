@@ -254,9 +254,9 @@ def save_music_modes(project, path):
         if not mem:
             continue
         slots.setdefault(rel, {})[_carried_key(m)] = mem
-        db = SMo.clean_level((own.get(rel) or {}).get(str(m)))
+        db = SMo.clean_level((own.get(rel) or {}).get(_carried_key(m)))
         if db:
-            levels.setdefault(rel, {})[str(m)] = int(db)
+            levels.setdefault(rel, {})[_carried_key(m)] = int(db)
         sigs[rel] = _sig(project, rel)
     if not slots and not attract:
         raise ShareError("None of this project's music mode files is on this PC any more, so "
@@ -589,6 +589,8 @@ def music_from_card(project, cfg_text):
                 os.path.splitext(os.path.basename(slot))[0], f["turn"])
             copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
         slots.setdefault(slot, {})[_carried_key(SMo.turn_mode(f["turn"]))] = copied[host]
+        if f["db"]:                                   # PAD-638: its own loudness
+            levels.setdefault(slot, {})[_carried_key(SMo.turn_mode(f["turn"]))] = int(f["db"])
     # PAD-641: the flipper buttons' sounds in attract, in their order
     attract = []
     for f in rec.get("attract") or ():
@@ -636,6 +638,11 @@ def _built_project_modes(card):
     if modes.levels is not None:
         rec["levels"] = {rel: {str(m): db for m, db in v.items() if str(m) in files.get(rel, {})}
                          for rel, v in modes.levels.items()}
+    for rel, v in modes.turn_levels.items():          # PAD-638: files in turn's own loudness
+        for k, db in v.items():
+            key = _carried_key(SMo.turn_mode(k))
+            if db and key in files.get(rel, {}):
+                rec.setdefault("levels", {}).setdefault(rel, {})[key] = int(db)
     return rec
 
 

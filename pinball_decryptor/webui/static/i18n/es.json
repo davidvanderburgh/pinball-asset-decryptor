@@ -12418,5 +12418,9 @@
 "**Add a sound…** (up to {}). Each press of either flipper button plays the next one, and after the last it starts again.": "**Añadir un sonido…** (hasta {}). Cada pulsación de cualquiera de los dos botones de flipper reproduce el siguiente, y tras el último vuelve a empezar.",
 "A press while one is still playing does not start another.": "Una pulsación mientras uno todavía suena no inicia otro.",
 "They ride a sound the game has but never plays, so each plays for at most that sound's length (on James Bond {} LE, almost {} seconds); a longer file is cut to it, and the log says so.": "Van sobre un sonido que el juego tiene pero nunca reproduce, así que cada uno suena como mucho lo que dura ese sonido (en James Bond {} LE, casi {} segundos); un archivo más largo se recorta a esa duración, y el registro lo indica.",
-"On a game that has a sound of its own there, that one plays too.": "En un juego que tiene su propio sonido ahí, ese también suena."
+"On a game that has a sound of its own there, that one plays too.": "En un juego que tiene su propio sonido ahí, ese también suena.",
+"Loudness of sound {} ({})…": "Volumen del sonido {} ({})…",
+"Sound {}'s loudness:": "Volumen del sonido {}:",
+"Loudness of sound {}": "Volumen del sonido {}",
+"**Loudness of sound {} (…)…** gives one file a loudness of its own, from -{} to +{} dB ({} keeps it matched). While **Play sound {}** has it in the Replacement player, the loudness box there is that file's too. Sound {}'s is the sound's own loudness box.": "**Volumen del sonido {} (…)…** da a un archivo un volumen propio, de -{} a +{} dB ({} lo deja igualado). Mientras **Reproducir sonido {}** lo tiene en el reproductor de reemplazo, la casilla de volumen de allí también es la de ese archivo. El del sonido {} es la casilla de volumen del propio sonido."
 }

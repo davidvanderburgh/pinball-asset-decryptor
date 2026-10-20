@@ -4,7 +4,7 @@
 
 The project's record says the tank-fire sound's three files play at random (``sound_modes``
 ``random``). Before (main) the app knows nothing of it: the menu offers files in turn only. After,
-"Play at random (3 sounds)" with One after another / At random, At random ticked.
+"Play at random (3 sounds)" with One after another / At random, At random ticked; round 2 adds each file's own loudness (sound 3 at -4 dB).
 
 The tank-fire sound (idx 2) has a replacement and, in the sidecar's ``sound_modes`` ``turns``, two
 more files the game plays in turn with it. Writes <before_|after_>audio_tab.png (the Audio tab on
@@ -76,7 +76,8 @@ def _project(scratch):
         json.dump({"audio": {"audio/" + TANK: own[TANK_FILES[0][0]]},
                    "sound_modes": {"turns": {"audio/" + TANK: [own[TANK_FILES[1][0]],
                                                                own[TANK_FILES[2][0]]]},
-                                   "random": ["audio/" + TANK]}},
+                                   "random": ["audio/" + TANK],
+                                   "turn_levels": {"audio/" + TANK: {"3": -4}}}},
                   f, indent=2)
     return dst
 

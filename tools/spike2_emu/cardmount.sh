@@ -210,10 +210,32 @@ cache_make_room() {   # <img> <own-copy-path>
 # thread and the run log both read LINES (dd's own \r progress never surfaces
 # through either). The copier is never killed here: on a stall or a failure
 # the boot falls back to the 9p hybrid and the copy keeps going for next time.
+# THE COPY IS ON THE BOARD (PAD-649). David: "indicate on rig pills when card copies are ongoing and the
+# percentage of them". While a card is copied into the cache the board (pad_board_dir, beside the rigs' locks)
+# carries copy-<label>.json - {"label","card","who","slot","distro","state","done_mb","total_mb","pct","updated"}
+# - rewritten every 2 s by cache_wait below and removed at its end; cardstage.sh asks for a "queued" one
+# (--board-copy queued) while it waits for the machine's one copy lock. The triage dashboard and the Emulate tab
+# tie it to the rig whose lock says it waits for that card (rigbatch names the label there) and show "copying
+# Dungeons And Dragons LE 1.10 19%" on the pill. A record nobody has touched for 90 s is stale and ignored.
+copy_board_file() { echo "$(pad_board_dir)/copy-$1.json"; }
+copy_board_write() {   # <label> <img> <state> <done-bytes> <total-bytes>
+    local f d pct=0
+    f=$(copy_board_file "$1"); d=$(dirname "$f")
+    mkdir -p "$d" 2>/dev/null || return 0
+    [ "$5" -gt 0 ] 2>/dev/null && pct=$(( $4 * 100 / $5 ))
+    printf '{"label":"%s","card":"%s","who":"%s","slot":%s,"distro":"%s","state":"%s","done_mb":%s,"total_mb":%s,"pct":%s,"updated":%s}\n' \
+        "$1" "$(basename "$2")" "$(pad_label 2>/dev/null | tr -d '"\\' | cut -c1-40)" "${PAD_SLOT:-0}" \
+        "${WSL_DISTRO_NAME:-$(uname -n)}" "$3" $(( $4 / 1048576 )) $(( $5 / 1048576 )) "$pct" "$(date +%s)" \
+        > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f" 2>/dev/null
+    return 0
+}
+copy_board_clear() { rm -f "$(copy_board_file "$1")" "$(copy_board_file "$1").tmp" 2>/dev/null; return 0; }
+
 # Returns 0 iff the cache is valid when the copier is done.
 cache_wait() {   # <img> <copy> <stamp> <pidf>
     local img="$1" copy="$2" stamp="$3" pidf="$4"
-    local total tmb done mb pct last=-1 still=0
+    local total tmb done mb pct last=-1 still=0 label
+    label=$(basename "$copy" .raw)
     total=$(stat -c %s "$img" 2>/dev/null) || return 1
     [ "$total" -gt 0 ] || return 1
     tmb=$(( total / 1048576 ))
@@ -227,10 +249,12 @@ cache_wait() {   # <img> <copy> <stamp> <pidf>
         done=$(stat -c %s "$copy.partial" 2>/dev/null || echo 0)
         mb=$(( done / 1048576 )); pct=$(( done * 100 / total ))
         echo "[card] copying $(basename "$img"): $mb / $tmb MB ($pct%)" >&2
+        copy_board_write "$label" "$img" copying "$done" "$total"
         if [ "$done" = "$last" ]; then
             still=$(( still + 1 ))
             if [ "$still" -ge 120 ]; then   # 240 s without a byte moving
                 echo "[card] copy stalled - booting from the original instead (copy continues)" >&2
+                copy_board_clear "$label"
                 return 1
             fi
         else
@@ -239,6 +263,7 @@ cache_wait() {   # <img> <copy> <stamp> <pidf>
         last=$done
         sleep 2
     done
+    copy_board_clear "$label"
     cache_valid "$img" "$copy" "$stamp"
 }
 
@@ -646,6 +671,20 @@ fi
 # path a boot would use: the copy, or the original when it could not be made.
 if [ "$MODE" = "--cache-now" ]; then
     PAD_CARD_CACHE=1 cache_pick "$IMG" "$LABEL" sync
+    exit 0
+fi
+# --board-copy queued|clear: the board's copy record for this card (PAD-649; the comment at copy_board_write).
+# "queued" says a copy is wanted and waits its turn for the machine's one copy lock (cardstage.sh); "clear"
+# removes the record. A card already in the cache gets no record either way.
+if [ "$MODE" = "--board-copy" ]; then
+    case "${3:-}" in
+        queued)
+            if ! cache_valid "$IMG" "$CACHE/$LABEL.raw" "$CACHE/$LABEL.src"; then
+                copy_board_write "$LABEL" "$IMG" queued 0 "$(stat -c %s "$IMG" 2>/dev/null || echo 0)"
+            fi ;;
+        clear) copy_board_clear "$LABEL" ;;
+        *) die "usage: cardmount.sh <card.raw> --board-copy queued|clear" ;;
+    esac
     exit 0
 fi
 if [ "$MODE" = "--precache" ]; then

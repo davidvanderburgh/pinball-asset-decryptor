@@ -874,3 +874,21 @@ def test_rigjob_keeps_the_games_time_and_leaves_the_rig_clean():
     assert 'python3 "$RIG/plunge.py" game' in rj               # a game is on when the ball was launched
     sc = open(os.path.join(RIG, "startcheck.sh"), encoding="utf-8").read()
     assert '. "$(dirname "$0")/rigjob.sh"' in sc and "job_start_game || job_fail" in sc
+
+
+def test_a_card_copy_is_on_the_board_while_it_runs():
+    """PAD-649: the copier's wait loop writes copy-<label>.json beside the rigs' locks every 2 s and removes it at
+    the end (stall included); cardstage.sh writes a "queued" one before it takes the copy lock and clears it after;
+    rigbatch names the card's label in the waiting rig's lock note and sweeps its own records at the end."""
+    cm = open(os.path.join(RIG, "cardmount.sh"), encoding="utf-8").read()
+    w = cm[cm.index("cache_wait() {"):cm.index("cache_pick() {")]
+    assert 'copy_board_write "$label" "$img" copying "$done" "$total"' in w
+    assert w.count('copy_board_clear "$label"') == 2
+    assert 'if [ "$MODE" = "--board-copy" ]; then' in cm and 'copy_board_write "$LABEL" "$IMG" queued 0' in cm
+    cs = open(os.path.join(RIG, "cardstage.sh"), encoding="utf-8").read()
+    blk = cs[cs.index('if [ "$STAGE" = cache ]; then'):cs.index("# THIS batch's own folder")]
+    assert blk.index('--board-copy queued') < blk.index("got=$( copy_lock") < blk.index('--board-copy clear')
+    rb = open(os.path.join(RIG, "rigbatch.sh"), encoding="utf-8").read()
+    assert 'note "$slot" "rigbatch $key (waiting for its card: $lbl)"' in rb
+    assert 'PAD_LABEL="$WHO" setsid bash "$RIG/cardstage.sh" "$OUT" cache' in rb
+    assert '"$(pad_board_dir)"/copy-*.json' in rb

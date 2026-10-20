@@ -9807,11 +9807,20 @@ static void motor_note(const unsigned char *p, int n)
  * PAD_STEPPER_SPS steps a second (default 5000: floor 0 to floor 3 in 1.5 s).
  * The far switch closes at PAD_STEPPER_TRAVEL steps from home (default 7500).
  *
- * WHICH SWITCH IS HOME IS NOT KNOWN. Here it is BUILDING UP (the config's byte
- * 8), because home is beside floor 0, where the building rests between games
- * and the floors are the damage it takes; nothing in the rig can tell, and the
- * game reads only the status, never these switches, to move it. PAD_STEPPER_HOME=down swaps them. The building
- * starts between the switches, position unknown, as on a machine at power on.
+ * WHICH SWITCH IS HOME: BUILDING UP (the config's byte 8), because home is
+ * beside floor 0, where the building rests between games and the floors are
+ * the damage it takes. PAD-393 could only guess; PAD-656 (D&D LE's dragon, the
+ * same board with two axes, its switches named HOME) settled the rule: cmd
+ * 34's direction byte picks the end (stepper_ends). PAD_STEPPER_HOME=down
+ * swaps them. The building starts between the switches, position unknown, as
+ * on a machine at power on.
+ *
+ * D&D LE 1.10's dragon (PAD-656): node 10 motor 0 = left-right (byte 7 LR
+ * HOME, byte 8 LR AWAY), motor 1 = up-down (byte 7 UD HOME, no byte 8), both
+ * configured and homed (34 <m> 01) at boot, then moved by small positive
+ * steps (attract: up-down 0 <-> 69, left-right 35 <-> 50). With motor 1
+ * refused (one input) and motor 0 homed onto LR AWAY, the game showed
+ * "OPERATOR ALERT! Dragon Jam - DEVICE MALFUNCTION" after a Start.
  *
  * PAD_STEPPER=0 restores the zero reply and stops the model. */
 #define NB_STEPPERS 6
@@ -9819,9 +9828,10 @@ static void motor_note(const unsigned char *p, int n)
 struct nb_stepper {
     unsigned char cfg;          /* cmd 32 seen for this motor              */
     signed char sw[2];          /* input bit: [0] home end, [1] far end    */
+    signed char in[2];          /* the config's byte 7 / byte 8 inputs     */
     unsigned char homed;
     signed char going;          /* -1 idle, 0 homing, 1 a move             */
-    long pos;                   /* steps from home (<= 0)                   */
+    long pos;                   /* steps from home, either side (PAD-656)   */
     long from, to;              /* the move under way                       */
     unsigned long start, due;   /* pad_ms() it began / ends                 */
     unsigned long moves, homes; /* counts, for the log                      */
@@ -9878,7 +9888,8 @@ static void stepper_switches(unsigned nid, struct nb_stepper *s)
     int moving = s->going >= 0 && pad_ms() < s->due, e;
     unsigned char made[2];
     made[0] = pos == 0 && !(moving && s->from == 0);
-    made[1] = pos <= -stepper_travel() && !(moving && s->from <= -stepper_travel());
+    made[1] = (pos < 0 ? -pos : pos) >= stepper_travel() &&
+              !(moving && (s->from < 0 ? -s->from : s->from) >= stepper_travel());
     for (e = 0; e < 2; e++) {
         motor_switch(nid, s->sw[e], made[e]);
         if (made[e] != s->made[e]) {
@@ -9934,6 +9945,26 @@ static void stepper_go(unsigned nid, unsigned k, int going, long to)
     motor_say(b);
 }
 
+/* Which configured input is home (PAD-656). cmd 34's last byte is the way
+ * home: 1 runs it to byte 7's input, 0 to byte 8's. D&D LE homes both dragon
+ * axes with 1, and its byte 7 inputs are the ones named HOME (LR HOME, UD
+ * HOME; byte 8 = LR AWAY, and none on the up-down axis); godzilla_le homes the
+ * building with 0, so its home is byte 8, BUILDING UP - PAD-393's pick. The
+ * one-input steppers agree: Rush LE and John Wick home with 1 and name byte 7,
+ * James Bond 60th LE's four with 0 and name byte 8. A direction with no input
+ * there homes to the one there is. PAD_STEPPER_HOME=down turns the rule
+ * round. Returns 1 when home moved to the other end. */
+static int stepper_ends(struct nb_stepper *s, unsigned dir)
+{
+    const char *h = getenv("PAD_STEPPER_HOME");
+    int e = dir ? 0 : 1, was = s->sw[0];
+    if (h && (h[0] == 'd' || h[0] == 'D')) e = !e;
+    if (s->in[e] < 0) e = !e;
+    s->sw[0] = s->in[e];
+    s->sw[1] = s->in[!e];
+    return was != s->sw[0];
+}
+
 /* On the write: 32 configures, 34 homes, 31 moves. */
 static void stepper_note(const unsigned char *p, int n)
 {
@@ -9947,21 +9978,21 @@ static void stepper_note(const unsigned char *p, int n)
     s = &nb_steppers[nid][k];
     if (p[2] == 0x32) {
         char b[160];
-        const char *h = getenv("PAD_STEPPER_HOME");
-        int down = h && (h[0] == 'd' || h[0] == 'D');
-        /* only the 23-byte stepper frame, both ends named as inputs */
-        if (n < 23 || p[1] != 0x14 || !(p[7] & 0x40) || !(p[8] & 0x40)) return;
+        /* only the 23-byte stepper frame, an end named as an input (PAD-656:
+         * D&D LE's up-down axis has one, byte 7 = UD HOME, byte 8 = 00) */
+        if (n < 23 || p[1] != 0x14 || !((p[7] | p[8]) & 0x40)) return;
         if (s->cfg) return;
         s->cfg = 1;
-        s->sw[0] = (signed char)((down ? p[7] : p[8]) & 0x3f);
-        s->sw[1] = (signed char)((down ? p[8] : p[7]) & 0x3f);
+        s->in[0] = (p[7] & 0x40) ? (signed char)(p[7] & 0x3f) : -1;
+        s->in[1] = (p[8] & 0x40) ? (signed char)(p[8] & 0x3f) : -1;
+        stepper_ends(s, 0);             /* until a 34 says which way home is */
         s->going = -1;
         s->homed = 0;
         s->pos = -stepper_travel() / 2;     /* between the switches */
         nb_stepper_cfg[nid] = 1;
-        snprintf(b, sizeof b, "[stepper] node %u motor %u: home on input %d, "
-                 "far end on input %d at %ld steps, %ld steps/s%s\n", nid, k,
-                 s->sw[0], s->sw[1], -stepper_travel(), stepper_sps(),
+        snprintf(b, sizeof b, "[stepper] node %u motor %u: inputs %d (byte 7) "
+                 "and %d (byte 8), far end %ld steps from home, %ld steps/s%s\n",
+                 nid, k, s->in[0], s->in[1], stepper_travel(), stepper_sps(),
                  stepper_on() ? "" : " - PAD_STEPPER=0, not answered");
         motor_say(b);
         if (stepper_on()) stepper_switches(nid, s);
@@ -9970,6 +10001,19 @@ static void stepper_note(const unsigned char *p, int n)
     if (!s->cfg || !stepper_on()) return;
     stepper_tick(nid);
     if (p[2] == 0x34) {
+        if (n >= 6 && stepper_ends(s, p[4])) {
+            /* home is the other end from the one assumed: where it is now
+             * is not known any more */
+            char b[128];
+            s->going = -1;
+            s->homed = 0;
+            s->pos = -stepper_travel() / 2;
+            stepper_switches(nid, s);
+            snprintf(b, sizeof b, "[stepper] %lu ms node %u motor %u: home "
+                     "toward direction %u = input %d, far end input %d\n",
+                     pad_ms(), nid, k, p[4], s->sw[0], s->sw[1]);
+            motor_say(b);
+        }
         if (s->going == 0) return;          /* already on its way home */
         stepper_go(nid, k, 0, 0);
         return;
@@ -9978,8 +10022,12 @@ static void stepper_note(const unsigned char *p, int n)
         long steps = (short)(p[4] | (p[5] << 8)), to;
         if (!steps) return;
         to = stepper_pos(s) + steps;
-        if (to > 0) to = 0;                 /* the home end stops it */
-        if (to < -stepper_travel() - 2000) to = -stepper_travel() - 2000;
+        /* no stop at home: which side of it the positions lie is the
+         * title's (godzilla's floors are negative, the dragon's and Bond
+         * 60th's moves positive), and the game asks only for places it can
+         * reach (PAD-656) */
+        if ((to < 0 ? -to : to) > stepper_travel() + 2000)
+            to = to < 0 ? -(stepper_travel() + 2000) : stepper_travel() + 2000;
         stepper_go(nid, k, 1, to);
     }
 }

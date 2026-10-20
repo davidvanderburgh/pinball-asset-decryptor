@@ -243,6 +243,15 @@ def read_led():
     return d if coilmap.has_magic(d) else None
 
 
+def list_stamp(game):
+    """The switch list's mtime, or None - what tells the feeder the list was replaced."""
+    path = gameinfo.table("switch_list.txt", game)
+    try:
+        return os.path.getmtime(path) if path else None
+    except OSError:
+        return None
+
+
 class Feeder:
     """Resolution, decisions and the writes - kept apart on purpose.
 
@@ -255,6 +264,7 @@ class Feeder:
     def __init__(self, game=None, dry=False):
         self.dry = dry
         self.game = gameinfo.active(game)
+        self.list_stamp = list_stamp(self.game)
         rows = trough.load_list(gameinfo.table("switch_list.txt", self.game)
                                 or "")
         positions, how = trough.find(rows)
@@ -721,6 +731,7 @@ def main():
         % (HZ, FLIGHT_S * 1000, MIN_GAP_S * 1000, ", DRY RUN" if dry else ""))
 
     period, gone_since, ever = 1.0 / max(1.0, HZ), None, False
+    looked = time.monotonic()
     # PAD-484: THE GAME'S CLOCK, not the wall's. Every time this models - the
     # lane flight, the retry gap, the way home, the room's minute - is a time
     # on the machine, so with the game running k times the wall's they all
@@ -752,6 +763,17 @@ def main():
             ever = True
             say("padled block is up - watching")
         gone_since = None
+        # PAD-619: A LIST READ OUT OF THE BINARY IS REPLACED BY THE RUN'S OWN DUMP a minute in (mktables), and on a
+        # build whose static numbering is not the game's (Aerosmith 1.16: 93 of 93 ids moved) the feeder had latched
+        # the binary's trough ids at boot - "the trough is empty", no ball ever served on the title's first run
+        if time.monotonic() - looked > 2.0:
+            looked = time.monotonic()
+            if list_stamp(f.game) != f.list_stamp:
+                fed, f = f.fed, Feeder(dry=dry)
+                f.fed = fed
+                say("switch list replaced - resolved again:")
+                for line in f.describe():
+                    say(line)
         if f.poll(m, d, gclock.now()) and once:
             break
         time.sleep(period / min(4.0, max(1.0, padsw.speed(m))))

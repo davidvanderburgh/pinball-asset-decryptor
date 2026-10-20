@@ -619,3 +619,19 @@ value wizard_arg_1       1
 value wizard_flag_1      81    # FG_MAIN_MULTIBALL_ACTIVE
 text  wizard_name_1      Beatlemania Multiball
 text  wizard_film_1      level 3 in all five modes
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x00159bc0 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00198fb8 0xe3053578 0xe340305b
+site  challenge_menu      0x00024078 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00024258 0xe2433001 0xe3530003
+value challenge_menu_list_at   216
+value challenge_menu_count_at  40
+value challenge_menu_cap       5
+value challenge_menu_entry     16
+value challenge_menu_kind      3
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x001ff2e0 0xe30425de 0xe340205b

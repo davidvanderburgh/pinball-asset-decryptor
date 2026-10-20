@@ -8400,6 +8400,26 @@ extern int close(int);
 static unsigned char sw_rest_set[8];
 static unsigned sw_rest_n;
 
+/* PAD-619: the id the RUNNING game's own table gives a wire, or `fallback`
+ * when the table is not readable or has no such wire. A list read out of the
+ * binary may number the switches another way than the game does (Aerosmith
+ * 1.16: 93 of 93 ids moved, Star Wars LE 1.30: 70 of 103) until mktables
+ * replaces it with this run's own dump - and the at-rest set is read before
+ * that, so it goes by wire, which both numberings agree on. */
+static unsigned sw_live_by_wire(unsigned node, unsigned bit, unsigned fallback)
+{
+    unsigned st, n, id;
+    if (!SW_STRUCT || !SW_COUNT) return fallback;
+    st = tread(SW_STRUCT);
+    n  = tread(SW_COUNT);
+    if (!sw_ok(st) || n > 4096) return fallback;
+    for (id = 1; id < n && id < 256; id++) {
+        const unsigned char *e = (const unsigned char *)(unsigned long)(st + id * 32);
+        if (e[20] == node && *(const unsigned short *)(e + 18) == bit) return id;
+    }
+    return fallback;
+}
+
 static void sw_rest_resolve(void)
 {
     static char buf[16384];
@@ -8449,7 +8469,7 @@ static void sw_rest_resolve(void)
             if (!seen[f]) break;
         }
         if (seen[1] && seen[2] && num[1] == 0 && num[2] == 23) {
-            sw_rest_set[0] = (unsigned char)id;   /* the door, per title */
+            sw_rest_set[0] = (unsigned char)sw_live_by_wire(0, 23, id);   /* the door, per title */
             continue;
         }
         for (; q < e - 8; q++) {
@@ -8463,7 +8483,8 @@ static void sw_rest_resolve(void)
                 (q[8] == '\n' || q[8] == '\r' || q[8] == 0 || q[8] == ' ')) {
                 t = (unsigned)(q[7] - '0');
                 if (sw_rest_n < sizeof sw_rest_set && t) {
-                    sw_rest_set[sw_rest_n++] = (unsigned char)id;
+                    unsigned live = seen[1] && seen[2] ? sw_live_by_wire(num[1], num[2], id) : id;
+                    sw_rest_set[sw_rest_n++] = (unsigned char)(live < sizeof sw_active ? live : id);
                     got++;
                 }
                 break;

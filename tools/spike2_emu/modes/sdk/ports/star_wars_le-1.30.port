@@ -733,3 +733,24 @@ text block_name_34      Lightsaber Duel Ready
 site block_start_35     0x0009ac94 0xe5902000 0xe92d4038
 data block_obj_35       0x005fb8f4
 text block_name_35      Jedi Wizard Mball Ready
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x0061f578
+value game_flags_at       4
+data  game_flag_count     0x004baf24
+value challenge_on_flag   17
+site  challenge_balls     0x0018357c 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x001e86e0 0xe3043be8 0xe3403062
+site  challenge_menu      0x00060c8c 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00060e50 0xe1a07000 0xe51330e0
+value challenge_menu_pick_back 224
+value challenge_menu_list_at   400
+value challenge_menu_count_at  40
+value challenge_menu_cap       3
+value challenge_menu_entry     16
+value challenge_menu_kind      0
+value challenge_menu_slot      -1
+value challenge_menu_sets_on   1
+value challenge_menu_caption   1911
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x002d5cc8 0xe30f27da 0xe3402061

@@ -920,3 +920,25 @@ text shake_long             0:1024:0
 data  wizard_obj_1    0x0073a4e8   # ctoxin_teamup, a multiball
 text  wizard_name_1   Toxin Team-Up
 text  wizard_film_1   Mayhem or Carnage Multiball, or a Doppelganger
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x007b60f8
+value game_flags_at       4
+data  game_flag_count     0x005a3348
+value challenge_on_flag   18
+data  game_play_modes     0x006fc5c8   # the adapter's current game-play mode
+value game_play_mode_at   4
+value challenge_mode_plain  0   # Standard (what the adapter's reset stores)
+value challenge_mode_0  11
+text  challenge_name_0  Challenge Mode Low
+value challenge_name_msg_0  2795
+value challenge_mode_1  12
+text  challenge_name_1  Challenge Mode Medium
+value challenge_name_msg_1  2793
+value challenge_mode_2  13
+text  challenge_name_2  Challenge Mode High
+value challenge_name_msg_2  2797
+site  challenge_balls     0x00398970 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x0020a680 0xe3013b20 0xe3403074
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x0028c990 0xe3012452 0xe3402074

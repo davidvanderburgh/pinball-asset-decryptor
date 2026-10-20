@@ -413,3 +413,19 @@ site  wizard_earned_1    0x00123e80 0xe92d4038 0xe3a04000   # earned: every song
 value wizard_flag_1      57    # FG_MEDLEY_MULTIBALL_ACTIVE
 text  wizard_name_1      Medley Tour Multiball
 text  wizard_film_1      every song played
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x003a39a4 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00272710 0xe30e3e90 0xe3403067
+site  challenge_menu      0x00058534 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00058748 0xe2433001 0xe3530006
+value challenge_menu_list_at   568
+value challenge_menu_count_at  28
+value challenge_menu_cap       8
+value challenge_menu_entry     12
+value challenge_menu_kind      3
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x003393b4 0xe30826b2 0xe3402068

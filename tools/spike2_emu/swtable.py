@@ -57,8 +57,22 @@ def by_name(rows):
             for sid, _num, node, bit, name in rows if name and name != "?"}
 
 
-def text(game, rows, elf=None, static_asked=False):
+#: Where a list's ids came from (PAD-619). A list read out of the binary is
+#: PROVISIONAL: the static reader numbers some builds' switches in another
+#: order than the running game's own table (star_wars_le 1.30: LEFT FLIPPER
+#: BUTTON 55 from the binary, 59 in the game), and every tool pokes by id.
+SOURCE_TAG = "# source: "
+SOURCE_DUMP = "the shim's dump"
+SOURCE_BINARY = "the binary"
+SOURCE_BINARY_NO_DUMP = "the binary (a run's dump never came)"
+
+
+def text(game, rows, elf=None, static_asked=False, source=SOURCE_DUMP):
     """switch_list.txt, as a string.
+
+    ★ `# source:` SAYS WHOSE IDS THESE ARE (PAD-619). mktables replaces a list
+    read out of the binary with the run's own dump when one arrives - see
+    SOURCE_TAG above and mktables.build().
 
     ★ THE `# static-names:` LINE IS A MEMO, NOT A PROVENANCE (2026-09-08).
     swnames' third source - the title's own STATIC switch table - is the one
@@ -83,9 +97,10 @@ def text(game, rows, elf=None, static_asked=False):
     """
     nodes = sorted({r[2] for r in rows})
     binary = devicexy.binary_id(elf) or "(unknown)"
-    lines = ["# %s switch list, from the shim's reading of the game's own table."
-             % game,
+    lines = ["# %s switch list, from %s." % (game, "the shim's reading of the game's own table"
+                                            if source == SOURCE_DUMP else "the game's binary"),
              "# binary: %s" % binary,
+             "%s%s" % (SOURCE_TAG, source),
              # PAD-367: which reader made it - see devicexy.READER_REV
              "%s%d" % (devicexy.READER_TAG, devicexy.READER_REV)]
     if static_asked:

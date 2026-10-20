@@ -166,75 +166,76 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
-| Aerosmith 1.16 | ✓ | no | ✓ | shots | scoop, shaker, light shows, mini-wizards |
-| Aerosmith LE 1.15 | ✓ | no | ✓ | all |  |
-| Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all |  |
-| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| Batman 66 1.13 | ✓ | ✓ | ✓ | all |  |
-| Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Deadpool LE 1.14 | ✓ | ✓ | ✓ | all |  |
-| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
+| Aerosmith 1.16 | ✓ | no | ✓ | shots | scoop, shaker, light shows, mini-wizards, challenges |
+| Aerosmith LE 1.15 | ✓ | no | ✓ | all | challenges |
+| Aerosmith LE 1.16 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all | challenges |
+| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
+| Batman 66 1.13 | ✓ | ✓ | ✓ | all | challenges |
+| Batman 66 1.14 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Deadpool LE 1.14 | ✓ | ✓ | ✓ | all | challenges |
+| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards |
-| Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot |
-| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, battle slot |
-| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards, battle slot |
-| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all |  |
-| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Iron Maiden LE 1.16 | ✓ | ✓ | ✓ | all |  |
-| Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
+| Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
+| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot, challenges |
+| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, battle slot, challenges |
+| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards, battle slot, challenges |
+| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all | challenges |
+| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Iron Maiden LE 1.16 | ✓ | ✓ | ✓ | all | challenges |
+| Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
 | James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, light shows |
-| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| John Wick LE 1.01 | ✓ | no | ✓ | all |  |
-| John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop, shaker, light shows, mini-wizards |
-| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards |
-| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms, light shows, mini-wizards |
-| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
+| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
+| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
+| John Wick LE 1.01 | ✓ | no | ✓ | all | challenges |
+| John Wick LE 1.02 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| John Wick Pro 1.02 | ✓ | no | ✓ | shots | scoop, shaker, light shows, mini-wizards, challenges |
+| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | mechanisms, light shows, mini-wizards, challenges |
+| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all |  |
-| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Rush LE 1.18 | ✓ | ✓ | ✓ | all |  |
-| Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards |
-| Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows |
-| Star Wars LE 1.30 | ✓ | ✓ | ✓ | all |  |
-| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
+| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all | challenges |
+| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Rush LE 1.18 | ✓ | ✓ | ✓ | all | challenges |
+| Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows, challenges |
+| Star Wars LE 1.30 | ✓ | ✓ | ✓ | all | challenges |
+| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
 | Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all | challenges |
 | Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
-| Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all |  |
-| Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| TMNT Pro 1.58 | no | no | ✓ | no | never waits, no events |
-| TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards |
-| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards, waits for multiballs only |
-| The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all |  |
-| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards |
-| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
-| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows |
+| Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all | challenges |
+| Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
+| TMNT Pro 1.58 | no | no | ✓ | no | challenges, never waits |
+| TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges |
+| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards, challenges, waits for multiballs only |
+| The Beatles 1.30 | no | ✓ | no | no | light shows, never waits |
+| The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all | challenges |
+| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, challenges |
+| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, challenges |
 | Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards |
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards |
-| Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
-| Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards |
+| Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
+| Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **When time is up:** the voice of The Beatles, Deadpool, Elvira, John Wick, Jurassic Park Pin, Led Zeppelin, Star Wars (LE, Pro and ELG), TMNT and Uncanny X-Men has no line saying the time is up, so the game's own call cannot end a mode there; a sound of your own can. The Beatles and Deadpool play every piece of their music themselves, so a mode cannot have music of its own there.

@@ -535,3 +535,19 @@ value wizard_arg_2       0x00592300   # its mode object
 data  wizard_built_2     0x005923a8   # that object's construction guard
 data  wizard_running_2   0x0059235c   # the object's +0x5c: its start sets it
 text  wizard_name_2      Restore Power
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x0022cdfc 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x002cfb40 0xe30534f4 0xe340305a
+site  challenge_menu      0x00043334 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00043518 0xe2433001 0xe3530005
+value challenge_menu_list_at   252
+value challenge_menu_count_at  40
+value challenge_menu_cap       7
+value challenge_menu_entry     12
+value challenge_menu_kind      2
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x002f5e24 0xe30523ba 0xe340205c

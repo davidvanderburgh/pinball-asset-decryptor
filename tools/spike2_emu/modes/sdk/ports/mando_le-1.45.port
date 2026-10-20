@@ -510,3 +510,21 @@ text  wizard_film_1   the three Razor Crest multiballs
 data  wizard_obj_2    0x006e60c0   # cyou_have_what_i_want, a multiball
 text  wizard_name_2   You Have What I Want
 text  wizard_film_2   all three encounters
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x00377d60 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x001e6874 0xe30a3a7c 0xe340306e
+site  challenge_menu      0x00104268 0xe58d0004 0xe59d3004
+site  challenge_menu_pick 0x00104290 0xe51330d8 0xe3530000
+value challenge_menu_pick_back 216
+value challenge_menu_list_at   640
+value challenge_menu_count_at  64
+value challenge_menu_cap       10
+value challenge_menu_entry     20
+value challenge_menu_kind      0
+value challenge_menu_slot      -1
+value challenge_menu_sets_on   1
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x0030de98 0xe30a267a 0xe3402071

@@ -827,6 +827,10 @@ value challenge_menu_count_at  92
 value challenge_menu_cap       9
 value challenge_menu_kind      3
 value challenge_menu_caption   1921
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+site  challenge_balls     0x0026847c 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00301a80 0xe3073158 0xe3403082
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x003f79bc 0xe305211e 0xe3402082
 # PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each challenge's champion category

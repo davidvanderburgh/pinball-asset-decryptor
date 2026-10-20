@@ -566,3 +566,29 @@ text block_name_35      2112 Wizard
 site lamp_free_owner      0x002c4be8 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0xd0
 value proc_exit_slots      4
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x0b617cb4
+value game_flags_at       4
+data  game_flag_count     0x004d62f8
+value challenge_on_flag   16
+value challenge_flag_0  24
+text  challenge_name_0  Cygnus Book 1
+value challenge_flag_1  25
+text  challenge_name_1  Cygnus Book 2
+value challenge_flag_2  26
+text  challenge_name_2  2112
+site  challenge_balls     0x002c15a4 0xe92d4030 0xe1a05000
+site  challenge_balls_2   0x002dce54 0xe92d4038 0xe1a04000
+site  challenge_extra_ball 0x00267424 0xe3053218 0xe3403b66
+site  challenge_menu      0x000d63d4 0xe1a06000 0xe3160080
+site  challenge_menu_pick 0x000d6510 0xe2433001 0xe3530005
+value challenge_menu_list_at   288
+value challenge_menu_count_at  24
+value challenge_menu_cap       7
+value challenge_menu_entry     16
+value challenge_menu_kind      4
+value challenge_menu_slot      0
+value challenge_menu_caption   1901
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x001b8e80 0xe30a2322 0xe3402b61

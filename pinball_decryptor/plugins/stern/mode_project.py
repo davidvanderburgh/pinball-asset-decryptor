@@ -90,6 +90,7 @@ class TitleProfile:
     roster: tuple = ()               # PAD-589: the battle selection's slots a mode may take (their names, slot order);
     #                                  () where the title has no roster a mode can take
     challenge_menu: int = 0          # PAD-615 round 2: how many challenges of the modes' own the game's start menu has
+    challenge_by_default: bool = False   # PAD-619: the service menu's Default Game Mode can pick its challenges
     #                                  room for (0 = none: the build's menu is not the runtime's to change)
     challenges: tuple = ()           # PAD-615: the game's Challenge list a mode may take a place in (the challenges'
     #                                  names, in the game's menu order); () where the title names none a mode can take
@@ -868,9 +869,10 @@ def _roster(game, port):
 
 #: PAD-615: a mode that takes the place of one of the game's challenges in a Player Challenge game (the mode file's
 #: ``challenge`` line; MODE_SDK.md "A mode in the game's Challenge list"). What pad_mode_runtime.c's challenge list
-#: needs - (sites, data, values): at least the first challenge's own start (the port's `site challenge_go_<n>`, from
-#: portchallenge.py), the game flags it reads and the flag of a challenge game.
-CHALLENGE_NEEDS = (("challenge_go_0",), ("game_flags",), ("challenge_on_flag",))
+#: needs - (sites, data, values): the game flags it reads and the flag of a challenge game; and per challenge either
+#: its own start (`site challenge_go_<n>`, PAD-615) or, PAD-619, its flag alone (`value challenge_flag_<n>`, taken as
+#: the ball starts: the port's `event ball_start`). portchallenge.py writes them.
+CHALLENGE_NEEDS = ((), ("game_flags",), ("challenge_on_flag",))
 #: The builds where a mode holding a challenge was seen in the emulator: the game made a Player Challenge game with that
 #: pick by its own Default Game Mode setting (AD_DEFAULT_GAME_MODE), the mode started at the first ball's start instead
 #: of the game's challenge, and a control run (the same setting, no mode) started the game's own.
@@ -880,18 +882,78 @@ CHALLENGE_PROVEN = frozenset({
     "stranger_things-1.13",            # PAD-615 2026-10-19: Default Game Mode 2 (Demogorgon), challenge 0 claimed: DEMO TEST START 7 ms after the pick, the game's Demogorgon Challenge (flag 104) never set; control: it started
     "stranger_things_le-1.12",         # PAD-615 2026-10-19: the same (its Demogorgon Challenge flag 99): mode started, the game's not; control: the game's started
     "stranger_things_le-1.13",         # PAD-615 2026-10-19: the same (flag 104): mode started, the game's not; control: the game's started
+    "godzilla_le-1.16",                # PAD-619 2026-10-19 rig 3: the game-play mode set to King of the Monsters (4) in attract, challenge 0 claimed by its flag: flag 40 cleared at the ball's start, START (challenge pick), the game's end-of-ball call when the mode ended, GAME OVER after the one ball
+    "godzilla_pro-1.15",               # PAD-619 2026-10-19 rig 1: the same on the stock Pro 1.15 card
+    "godzilla_pro-1.16",               # PAD-619 2026-10-19 rig 2: the same on the stock Pro 1.16 card; control (no mode): flags 18 and 40 set, the game's own King of the Monsters
+    "jaws_le-1.02",                    # PAD-619 2026-10-19 rig 1: the same as Jaws Pro below on the stock LE card - 8 -> 1 at the ball's start, START (challenge pick), one ball, GAME OVER
+    "venom_le-1.07",                   # PAD-619 2026-10-19 rig 2: the game-play mode set to Challenge Mode Low (11) in attract, challenge 0 claimed: 11 -> 0 (Standard) at the ball's start, START (challenge pick), one ball, GAME OVER
+    "venom_pro-1.07",                  # PAD-619 2026-10-19 rig 2: the same on the stock Pro card; control (rig 4, no mode): index kept at 11, flag 18, the game's own challenge
+    "jaws_pro-1.02",                   # PAD-619 2026-10-19 rig 3, the stock card, hidden, muted: the game-play mode set to 4th of July (8) in attract as the start menu's pick sets it, challenge 0 claimed: at the ball's start the index went 8 -> 1 (Standard), TAKEN BY PAD START (challenge pick), no 4th of July screen, one ball (the getter said 1), GAME OVER. Control (no mode): index kept at 8, flag 18 set, the game's own 4th OF JULY challenge on screen
+    "john_wick_le-1.01",               # PAD-619 2026-10-19 rig batch_r15: the game-play mode set to Tick Tock Mr. Wick (5) in attract, challenge 0 claimed: 5 -> 1 at the ball's start, START (challenge pick), one ball, GAME OVER
+    "john_wick_le-1.02",               # PAD-619 2026-10-19 rig batch_r15: the same with Red Circle Reckoning (4) on the stock LE 1.02 card
+    "john_wick_pro-1.02",              # PAD-619 2026-10-19 rig 3: the game-play mode set to Red Circle Reckoning (4, wck_cm_dance_club) in attract, challenge 0 claimed: 4 -> 1 at the ball's start, TAKEN BY PAD START (challenge pick), one ball, GAME OVER. Control: index kept at 4, flag 18, the game's own DANCE CLUB challenge (60 s) on screen
+    "metallica_spike-1.03",            # PAD-619 2026-10-19 rig batch_r15: the Lux Aeterna Combo Challenge (7; the challenge game's flag is 17 on 1.03), challenge 0 claimed: 7 -> 1 at the ball's start, START (challenge pick), one ball, GAME OVER
+    "metallica_spike-1.04",            # PAD-619 2026-10-19 rig 3: the game-play mode set to the Lux Aeterna Combo Challenge (8) in attract, challenge 0 claimed: 8 -> 1 at the ball's start, TAKEN BY PAD START (challenge pick), one ball, GAME OVER. Control: index kept at 8, flag 18, the game's own COMBO CHALLENGE on screen
+    "rush_pro-1.19",                   # PAD-619 2026-10-19 rig 1, the stock card, hidden, muted: Default Game Mode 2 (Cygnus Book 1), challenge 0 claimed by its flag: RUSH TEST START (challenge pick) as the ball started, flag 29 cleared, the game's Cygnus intro (flag 37) never set, GAME OVER after the one ball. Control: flags 29 and 37 set, the game's own Cygnus played
 })
 
 
-#: PAD-615 round 2: the builds whose start menu (CHOOSE YOUR MODE OF PLAY) was seen in the emulator showing a taken
-#: challenge under its mode's name and challenges of the modes' own after the game's, one picked starting its mode as
-#: a one-ball challenge game.
-CHALLENGE_MENU_PROVEN = frozenset({
-    "james_bond_le-1.06",              # PAD-615 2026-10-19 rig 2, the stock card, hidden, muted: both flipper buttons in attract; YOLT WIZARD (`challenge new`) the 8th entry, DAF WIZARD (`challenge 1`) in Ahoy's place; YOLT picked: START (challenge pick) at the ball's start, the game's Ahoy not started, GAME OVER after the ball. Three of our own: 9 entries, the third "no room"; the last (DAF) picked and started. Control (no modes): 7 entries, Ahoy picked, the game's own Ahoy
-    "james_bond_pro-1.06",             # PAD-615 2026-10-19 rig 2: the same on the stock Pro card (flipper buttons 62/63): YOLT WIZARD the 8th entry, picked, START at the ball's start, GAME OVER after the ball
-})
-#: the entries the game's own menu takes on those builds: Standard, Competition and the five challenges (Tournament and
-#: DJ Mixer when switched on would take two more)
+#: PAD-615 round 2 / PAD-619: the builds whose start menu (CHOOSE YOUR MODE OF PLAY) was seen in the emulator showing
+#: challenges of the modes' own after the game's (and a taken challenge under its mode's name), one picked starting
+#: its mode as a one-ball challenge game - and how many entries the game's own menu took there (the room left for
+#: ours is the port's challenge_menu_cap less those).
+CHALLENGE_MENU_PROVEN = {
+    "james_bond_le-1.06": 7,           # PAD-615 2026-10-19 rig 2, the stock card, hidden, muted: both flipper buttons in attract; YOLT WIZARD (`challenge new`) the 8th entry, DAF WIZARD (`challenge 1`) in Ahoy's place; YOLT picked: START (challenge pick) at the ball's start, the game's Ahoy not started, GAME OVER after the ball. Three of our own: 9 entries, the third "no room"; the last (DAF) picked and started. Control (no modes): 7 entries, Ahoy picked, the game's own Ahoy
+    "james_bond_pro-1.06": 7,          # PAD-615 2026-10-19 rig 2: the same on the stock Pro card (flipper buttons 62/63): YOLT WIZARD the 8th entry, picked, START at the ball's start, GAME OVER after the ball
+    "aerosmith_le-1.16": 2, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "batman-1.14": 2,       # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "deadpool_le-1.14": 2,  # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "deadpool_le-1.16": 2,  # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "deadpool_pro-1.16": 2, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "guardians-1.15": 2,    # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "guardians_le-1.15": 2, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "iron_maiden_le-1.18": 2, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "iron_maiden_pro-1.18": 2, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "mando_le-1.44": 9,               # PAD-619 2026-10-20 rig batch_r26: the live-applied menu read through registers (buttons at the loop's foot, the cursor in r6, a byte pick), PAD CHALLENGE after the game's 9, picked as Standard: START (challenge pick), the end-of-ball call, the balls getter said 1, GAME OVER on the glass after the one ball
+    "mando_le-1.45": 9,               # PAD-619 2026-10-19 rig batch_r10: the live-applied menu (20-byte entries), PAD CHALLENGE after the game's 9, picked as Standard: START (challenge pick), one ball, GAME OVER
+    "mando_pro-1.45": 9,              # PAD-619 2026-10-19 rig batch_r10: the same on the stock Pro card
+    "munsters_le-1.28": 5,  # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 5, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "munsters_pro-1.28": 5, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 5, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "avengers_infinity_le-1.10": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "avengers_infinity_pro-1.10": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "beatles-1.29": 4,      # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 4, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "led_zeppelin_le-1.22": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "led_zeppelin_pro-1.22": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "rush_le-1.18": 6,                # PAD-619 2026-10-19 rig batch_r19 (retry; the r9 run had not opened the menu): PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call when it ended, one ball, GAME OVER
+    "rush_le-1.19": 6,                # PAD-619 2026-10-19 rig batch_r11: PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call (the lookalike-proof site) when it ended, one ball, GAME OVER
+    "rush_pro-1.19": 6,     # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "aerosmith-1.16": 2,              # PAD-619 2026-10-20 rig batch_r27 (once the rig's switch list was the game's own numbering: 93 of 93 ids had moved): PAD CHALLENGE after the game's 2, picked: START (challenge pick), the end-of-ball call, one ball, GAME OVER
+    "aerosmith_le-1.15": 2,           # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - kept past the game's own start - one ball, GAME OVER
+    "avengers_infinity_le-1.09": 3,   # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 3, picked: START past the game's ball-start mode, the end-of-ball call, the game left after the one ball (in_game last 1 -> 0, no second ball; no game_over event in its port)
+    "elvira3-1.13": 2,                # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2 (the count in r5), picked: START (challenge pick), the end-of-ball call when it ended, the game left after the one ball (in_game last 1 -> 0, no second ball; no game_over event in its port)
+    "foo_fighters_le-1.04": 3,        # PAD-619 2026-10-19 rig batch_r10: the live-applied menu, PAD CHALLENGE after the game's 3, picked as Standard: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "foo_fighters_pro-1.04": 3,       # PAD-619 2026-10-19 rig batch_r10: the same on the stock Pro card
+    "guardians_le-1.14": 2,           # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2, picked: START (challenge pick), one ball, GAME OVER
+    "batman-1.13": 2,                 # PAD-619 2026-10-19 rig batch_r8: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - the pick kept past the game's own start, which this build dispatches after the ball's - one ball, GAME OVER
+    "iron_maiden_le-1.16": 2,         # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - the pick kept past the game's own start - the end-of-ball call, the game over after the one ball (in_game 1 -> 0, attract on screen; no game_over event in its port)
+    "jurassic_park_le-1.16": 8,       # PAD-619 2026-10-19 rig batch_r18 (NVRAM wiped, the service splash passed with Select and Back): the live-applied menu, PAD CHALLENGE after the game's 8, picked as Standard: START (challenge pick), one ball, GAME OVER
+    "jurassic_park_pro-1.16": 8,      # PAD-619 2026-10-19 rig batch_r12: the live-applied menu (20-byte entries), PAD CHALLENGE after the game's 8, picked as Standard: START (challenge pick), one ball, GAME OVER
+    "jurassic_park_the_pin-1.05": 2,  # PAD-619 2026-10-19 rig batch_r8 (its buttons are L/R FLIPPER BUTTON): PAD CHALLENGE after the game's 2, picked: START (challenge pick), one ball, GAME OVER
+    "sword_of_rage_le-1.18": 4,       # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 4, picked: START (challenge pick), one ball, GAME OVER
+    "star_wars_le-1.30": 2,           # PAD-619 2026-10-20 rig batch_r23 (once the rig's switch list was the game's own numbering, mktables 70 of 103 ids moved): the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), one ball, HIGH SCORE initials (in_game last 1 -> 0, no second ball)
+    "star_wars_elg-1.10": 2,          # PAD-619 2026-10-20 rig batch_r27: PAD CHALLENGE after the game's 2, picked: START (challenge pick), an extra ball earned in it refused (challenge_extra_ball), the balls getter said 1, GAME OVER after the one ball
+    "stranger_things-1.13": 6,        # PAD-619 2026-10-19 rig sweep: PAD CHALLENGE after the game's 6, picked: START (challenge pick) at the ball's start (its handler hands it over), one ball, GAME OVER
+    "stranger_things_le-1.12": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.12 card
+    "stranger_things_le-1.13": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.13 card
+    "sword_of_rage_le-1.19": 4,       # PAD-619 2026-10-19 rig batch_all: PAD CHALLENGE after the game's 4, picked: START (challenge pick), one ball, GAME OVER
+    "sword_of_rage_pro-1.19": 4,      # PAD-619 2026-10-19 rig batch_all: the same on the stock Pro card
+    "star_wars_le-1.31": 2,           # PAD-619 2026-10-20 rig batch_r30 (the Action Button pressed at the ball start's path choice): the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), the balls getter said 1, ball_end, an extra ball refused, game_over
+    "star_wars_pro-1.31": 2,          # PAD-619 2026-10-19 rig 2: the compare-chain menu (no challenge kind of the game's): PAD CHALLENGE appended after Standard and Competition, picked as Standard: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "turtles_le-1.59": 12,            # PAD-619 2026-10-20 rig batch_r53 (fresh NVRAM and NVRAM chip image, the van stocked; its game began on the 5th try of coins / Guided Setup / Start, as PAD-420's did on the 3rd): the wide-entry menu, PAD CHALLENGE after the game's 12, played as Standard: START (challenge pick), the end-of-ball call, the balls getter said 1, an extra ball refused, game_over
+    "turtles_pro-1.58": 12,           # PAD-619 2026-10-20 rig batch_r40, on the event ids the rig saw fire (batch_r38: 1.59's less 4): the wide-entry menu, PAD CHALLENGE after the game's 12, played as Standard: START (challenge pick), the end-of-ball call, the balls getter said 1, an extra ball refused, attract after the one ball
+    "turtles_pro-1.59": 12,           # PAD-619 2026-10-20 rig batch_r36 (fresh NVRAM; plunged once the game had served, after its turtle select): the wide-entry menu, PAD CHALLENGE after the game's 12, played as Standard (TMNT's challenges are locked until unlocked): START (challenge pick), the end-of-ball call, the balls getter said 1, an extra ball refused, attract after the one ball. Control (batch_r35): a Standard game ended its first ball and served a second
+}
+#: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)
 CHALLENGE_MENU_GAMES_OWN = 7
 CHALLENGE_NEW = 16                   #: ModeSpec.challenge for a challenge of the mode's own (the runtime's first own slot)
 
@@ -904,27 +966,46 @@ def _challenge_menu(key, port):
         cap = int(port["value"].get("challenge_menu_cap", 0) or 0)
     except (TypeError, ValueError):
         return 0
-    return max(0, cap - CHALLENGE_MENU_GAMES_OWN)
+    return max(0, cap - CHALLENGE_MENU_PROVEN[key])
+
+
+def _challenge_ready(port):
+    """PAD-619: the port names what the runtime needs for a challenge list (:data:`CHALLENGE_NEEDS`), and either a
+    challenge (its start, or its flag with the ball's start to take it on) or a start menu of the known shape."""
+    _sites, data, values = CHALLENGE_NEEDS
+    if not port or not (all(port["data"].get(n) for n in data) and all(n in port["value"] for n in values)):
+        return False
+    return bool(_challenges(port)) or {"challenge_menu", "challenge_menu_pick"} <= set(port["site"])
 
 
 def _challenge_cannot(key, label, port=None):
-    """The ``cannot`` entry for taking a challenge's place on build ``key``, or () when it can."""
-    sites, data, values = CHALLENGE_NEEDS
-    if not port or not (all(n in port["site"] for n in sites) and all(port["data"].get(n) for n in data)
-                        and all(n in port["value"] for n in values)):
+    """The ``cannot`` entry for a mode in the game's challenges on build ``key`` (taking one's place, or one of its
+    own on the start menu), or () when it can do either."""
+    if not _challenge_ready(port):
+        if key.startswith("james_bond_60th"):            # PAD-619: its one challenge is the whole game, on a clock
+            return (("challenge", "%s's only challenge is Challenge Mode, a whole game played against the clock: there "
+                                  "is no challenge in it a mode of yours could take the place of, and its start menu "
+                                  "is not one the app can add a challenge to." % label),)
         return (("challenge", "%s's Player Challenge mode has no list of challenges a mode of yours can take a place "
-                              "in." % label),)
-    if key in CHALLENGE_PROVEN:
+                              "in, and no start menu the app can add one to." % label),)
+    if key in CHALLENGE_PROVEN or key in CHALLENGE_MENU_PROVEN:
         return ()
     return (("challenge", "The app has found %s's challenges but has not yet seen a mode of yours start from one in "
                           "the emulator, so it cannot here yet." % label),)
 
 
 def _challenges(port):
-    """The names of the port's challenges, in the game's menu order (``challenge_go_<n>`` from 0, no gap)."""
+    """The names of the port's challenges, in the game's menu order, from 0 with no gap: each one's own start
+    (``challenge_go_<n>``) or, PAD-619, its flag - or its game-play mode's index (``challenge_mode_<n>``, the
+    GamePlayModes builds) - where the port has the ball's start to take it on."""
     out = []
-    while port and "challenge_go_%d" % len(out) in port["site"] and len(out) < 8:
+    ball = any(e[0] == "ball_start" for e in (port or {}).get("event", ()))
+    while port and len(out) < 8:
         n = len(out)
+        by_mode = ball and port["data"].get("game_play_modes")             and str(port["value"].get("challenge_mode_%d" % n, "")).strip() not in ("", "-1")   # the mode's index
+        if not ("challenge_go_%d" % n in port["site"] or by_mode
+                or ball and str(port["value"].get("challenge_flag_%d" % n, "0")).strip() not in ("", "0")):
+            break
         out.append(port["text"].get("challenge_name_%d" % n, "").strip() or "Challenge %d" % (n + 1))
     return tuple(out)
 
@@ -2274,8 +2355,12 @@ def profile_from_port(path):
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589
-        challenges=_challenges(port) if not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
+        challenges=_challenges(port) if key in CHALLENGE_PROVEN and not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
         challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
+        # PAD-619: not where a challenge is the game-play mode's index or a game-mode table's (Jaws, Godzilla, Venom:
+        # their Default Game Mode cannot select one) - only by its handler or its flag (Bond, Stranger Things, Rush)
+        challenge_by_default=bool(port) and not any(k.startswith(("challenge_mode_", "challenge_name_msg_"))
+                                                    for k in port["value"]),
         shakes=_shakes(port),                                                # PAD-414
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418

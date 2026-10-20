@@ -126,7 +126,7 @@ def _mb(name):
         (set() if name in MP.SCOOP_PROVEN else {"scoop"}) | \
         (set() if any(b == name for b, _c in MP.HELD_COILS_PROVEN) else {"coils"}) |         (set() if name in MP.SHIELD_PROVEN else {"shield"}) |         (set() if name in GAME_SHOW_PORTS else {"shows"}) | (set() if name in MP.SHAKER_PROVEN else {"shaker"}) | \
         (set() if name in MP.WIZARDS_PROVEN else {"wizard"}) |         (set() if name in MP.BUILDING_PROVEN else {"building"}) |         (set() if name in MP.ROSTER_PROVEN else {"roster"}) | \
-        (set() if name in MP.CHALLENGE_PROVEN else {"challenge"})   # PAD-225; PAD-381 magnet, scoop, coils; PAD-392; PAD-418; PAD-414; PAD-436; PAD-589; PAD-615
+        (set() if name in MP.CHALLENGE_PROVEN or name in MP.CHALLENGE_MENU_PROVEN else {"challenge"})   # PAD-225; PAD-381 magnet, scoop, coils; PAD-392; PAD-418; PAD-414; PAD-436; PAD-589; PAD-615
 
 
 def _check_runtime_file(p, spec, slug):

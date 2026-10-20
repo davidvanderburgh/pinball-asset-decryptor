@@ -377,3 +377,23 @@ text block_name_2       Upper Playfield Orbit Rule
 site lamp_free_owner      0x001e9514 0xe92d4010 0xe1a04000
 value proc_exit_hooks      0xd0
 value proc_exit_slots      4
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x0060c2d8
+value game_flags_at       4
+data  game_flag_count     0x004ba48c
+value challenge_on_flag   16
+site  challenge_balls     0x001a5080 0xe92d4030 0xe1a05000
+site  challenge_balls_2   0x002e1cfc 0xe92d4038 0xe1a04000
+site  challenge_extra_ball 0x001b07a4 0xe30a3864 0xe3403060
+site  challenge_menu      0x000582a0 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00058498 0xe2433001 0xe3530005
+value challenge_menu_list_at   564
+value challenge_menu_count_at  24
+value challenge_menu_cap       7
+value challenge_menu_entry     12
+value challenge_menu_kind      2
+value challenge_menu_slot      -1
+value challenge_menu_caption   1901
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x001888a0 0xe3062f6e 0xe3402069

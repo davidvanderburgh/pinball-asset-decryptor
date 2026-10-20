@@ -10482,6 +10482,7 @@ static struct {
     volatile unsigned long swap_until, until;
     volatile int looked;
     int has_quiet;                          /* PAD-645: an aquiet line */
+    unsigned freed;                         /* PAD-645: the game's own requests stopped at a press */
     unsigned char quiet[8];
     volatile unsigned long edge_at, quiet_until;
     volatile unsigned quiet_req, quiets;
@@ -10573,6 +10574,14 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     k = (int)(att.next % att.n);
     att.next = (unsigned)(k + 1) % att.n;
     if (pm_sound_active(att.request)) pm_sound_stop(att.request);   /* the silence after a short file */
+    if (att.quiet_req && att.quiet_req != att.request && pm_sound_active(att.quiet_req)) {
+        /* PAD-645: the game's own request at the last press played the silence but still holds its channel
+         * for its own length (The Beatles 1.29's 403, about 8 s): ours would be refused there */
+        pm_sound_stop(att.quiet_req);
+        if (att.freed++ < 20)
+            say("attract flipper sounds: the game's own request %u still held its channel - stopped", att.quiet_req);
+    }
+    att.quiet_req = 0;
     att.looked = 0;
     att.swap_until = now + att.ms[k] + 1000;
     att.until = now + att.ms[k] + ATT_GAP;

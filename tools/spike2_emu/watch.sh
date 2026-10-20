@@ -506,14 +506,28 @@ fi
 # while the run lives; teardown (and killgame.sh) removes it. A record whose
 # mtime stops moving is a run that died without either.
 BOARD_RUN="$(pad_board_dir)/slot-$PAD_SLOT.run"
+# The game's speed as the shim reports it (dump/padspeed, "x4.000 ..."; PAD-484), as a short number: 4, 0.5, 1
+# when nothing was asked. The record carries it (PAD-649) so the rig pills on the triage dashboard and the
+# Emulate tab say "4x" while a sweep runs sped up.
+# Only THIS run's file counts: the previous run's is still there at start (the dump is cleaned further down), and
+# the boot runs at 1x whatever the last run was asked - so a file older than this run reads as nothing.
+pad_board_speed() {
+    local f=$ROOT/dump/padspeed
+    [ -f "$f" ] && [ "$(stat -c %Y "$f" 2>/dev/null || echo 0)" -ge "${BOARD_STARTED:-0}" ] || return 0
+    sed -n 's/^x\([0-9.]*\).*/\1/p' "$f" 2>/dev/null | head -1 | awk '{ printf "%g", $1 + 0 }'
+}
+BOARD_SPEED=""
+BOARD_STARTED=$(date +%s)
 pad_board_run() {
     mkdir -p "$(dirname "$BOARD_RUN")" 2>/dev/null || return 0
+    BOARD_SPEED=$(pad_board_speed); BOARD_SPEED=${BOARD_SPEED:-1}
     # "emu" and "audio" as every emulator's record has them (tools/rigboard.sh,
     # PAD-296); a hidden run is silent whatever PAD_AUDIO says (see below).
-    printf '{"emu":"spike2","slot":%s,"game":"%s","label":"%s","distro":"%s","root":"%s","pid":%s,"started":%s,"hidden":%s,"audio":%s}\n' \
+    printf '{"emu":"spike2","slot":%s,"game":"%s","label":"%s","distro":"%s","root":"%s","pid":%s,"started":%s,"hidden":%s,"audio":%s,"speed":%s}\n' \
         "$PAD_SLOT" "$GAME" "$PAD_LABEL" "${WSL_DISTRO_NAME:-$(uname -n)}" "$ROOT" "$$" \
-        "$(date +%s)" "$([ "$PAD_HIDDEN" = 1 ] && echo true || echo false)" \
-        "$([ "$PAD_HIDDEN" != 1 ] && [ "${PAD_AUDIO:-0}" != 0 ] && echo true || echo false)" > "$BOARD_RUN.tmp" 2>/dev/null \
+        "$BOARD_STARTED" "$([ "$PAD_HIDDEN" = 1 ] && echo true || echo false)" \
+        "$([ "$PAD_HIDDEN" != 1 ] && [ "${PAD_AUDIO:-0}" != 0 ] && echo true || echo false)" \
+        "$BOARD_SPEED" > "$BOARD_RUN.tmp" 2>/dev/null \
         && mv -f "$BOARD_RUN.tmp" "$BOARD_RUN" 2>/dev/null
     return 0
 }
@@ -3131,7 +3145,12 @@ while :; do
     BOARD_BEAT=$((BOARD_BEAT + 1))
     if [ "$BOARD_BEAT" -ge 40 ]; then
         BOARD_BEAT=0
-        [ -f "$BOARD_RUN" ] && touch "$BOARD_RUN" 2>/dev/null || pad_board_run
+        # rewritten when the game's speed changed (padspeed.py took it up), touched otherwise
+        if [ -f "$BOARD_RUN" ] && [ "${BOARD_SPEED:-1}" = "$(s=$(pad_board_speed); echo "${s:-1}")" ]; then
+            touch "$BOARD_RUN" 2>/dev/null
+        else
+            pad_board_run
+        fi
     fi
     if ! [ -n "$(pad_pids -x padglhost)" ]; then
         # NOT "(window closed)" FOR EVERY WAY THE RENDERER CAN GO. This line

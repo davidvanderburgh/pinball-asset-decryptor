@@ -197,10 +197,19 @@ not seen in 60 s and whose first Start was ignored - one run of seven, and it pa
   loops; the sweep's own job script stamps every output line with a `date` and a `bc`), the games ~1.8, the
   renderers ~1.1. A sampler that counts live processes only never saw the first two.
 
+## PAD-649: the speed is the default, and the job keeps the game's time
+
+2026-10-20's two library sweeps (PAD-643, PAD-645) ran at 1x: nobody passed `--speed`, and the jobs' own `sleep`s
+were the wall's anyway. rigbatch now runs every job at **4x by default** (`--speed 1` for real time), and
+`rigjob.sh` is the library a job is written on so that its waits are in game seconds (`job_sleep`,
+`job_wait_log`'s deadline) and end when the run dies; every job is capped (`--job-cap`, 600 s); the rigs join a
+batch as they free; the copier runs two ahead per rig and takes turns across distros. docs/plans/rig_slots.md,
+"PAD-649", has the measurements and the proof.
+
 ## Not done, and what is next
 
-- **More rigs at once.** Since PAD-488 rigbatch fits `nproc*10/20` rigs at its default 15 pictures a second - every
-  free rig of the 4 on this VM. Beyond 4 needs PAD_SLOTS_MAX raised and a run to prove it. ~/.wslconfig gives WSL 10
+- **More rigs at once.** Since PAD-488 rigbatch fits `nproc*10/20` rigs at its default 15 pictures a second;
+  PAD-649 raised PAD_SLOTS_MAX to 5 so the fifth is there to take. ~/.wslconfig gives WSL 10
   of the 9800X3D's 16 logical processors (David's choice, for the desktop's sake).
 - **The harness's own processes** are now the biggest CPU in a sweep's game (PAD-488's last bullet above, ~3.4 of the
   ~5.8 busy cores): one python3 per switch press is ~80 ms of a core each.

@@ -278,7 +278,7 @@ function startMain() {
     // unlabelled run in the ordinary rig - David's own, from main.
     const rig = S.rig || {};
     if (rig.slot || rig.label) {
-      app.dataset.rig = String(Math.min(rig.slot || 0, 4));
+      app.dataset.rig = String(Math.min(rig.slot || 0, 5));   // the rigs with a colour (pf.css --rig-N; 5 since PAD-649)
       const chip = el("span", "pf-rig",
         rig.slot ? ("rig " + rig.slot + (rig.label ? " \u00b7 " + rig.label : "")) : rig.label);
       chip.title = rig.slot

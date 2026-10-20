@@ -60,8 +60,11 @@ function RigStrip({ s }) {
   if (!mine.slot && !busy.some((r) => !r.mine)) return null;
   const chips = rigs.filter((r) => r.mine || held(r)).map((r) => {
     const run = r.run;
+    // the game's clock against the wall's (PAD-649): a sweep's run says "4x"
+    const speed = run && !run.stale && run.speed && Math.abs(run.speed - 1) > 1e-6
+      ? (Math.round(run.speed * 100) / 100) + "x" : "";
     const what = run ? (run.stale ? run.game + " (no heartbeat " + ago(run.up_s) + ")"
-                                  : run.game + " running " + ago(run.up_s))
+                                  : run.game + " running " + ago(run.up_s) + (speed ? " at " + speed : ""))
                      : (r.doing || "held") + (r.state === "active" && r.idle_s != null
                                               ? ", idle " + ago(r.idle_s) : "");
     const who = r.holder || (run && run.label) || "";
@@ -73,6 +76,7 @@ function RigStrip({ s }) {
         style=${"--rig-c:" + r.colour} title=${tipText}>
       <span class="emu-rig-n">${r.slot ? "Rig " + r.slot : "Main rig"}</span>
       ${who ? html`<span class="emu-rig-who">${who}</span>` : null}
+      ${speed ? html`<span class="emu-rig-speed" title=${"The game runs its clock " + speed + " the wall's (PAD_SPEED)"}>${speed}</span>` : null}
       <span class="emu-rig-what">${r.mine && !r.holder && !run ? "this window" : what}</span>
     </span>`;
   });

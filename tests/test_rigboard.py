@@ -214,7 +214,7 @@ def test_a_missing_helper_is_a_no_op(path):
 def test_spike2_record_says_which_emulator_and_whether_it_plays_sound():
     s = _src("spike2_emu", "watch.sh")
     assert '{"emu":"spike2","slot":%s' in s
-    assert '"hidden":%s,"audio":%s}' in s
+    assert '"hidden":%s,"audio":%s,"speed":%s}' in s      # the game's speed too (PAD-649)
 
 
 def test_the_installer_ships_the_helper():

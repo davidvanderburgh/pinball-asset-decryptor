@@ -64,7 +64,7 @@ _pad_run_live() {
     local n
     [ "$(bash "$RIG/alive.sh" --total 2>/dev/null)" != 0 ] && return 0
     [ "${PAD_SLOT:-0}" = 0 ] || return 1
-    for n in $(seq 1 "${PAD_SLOTS_MAX:-4}"); do
+    for n in $(seq 1 "${PAD_SLOTS_MAX:-5}"); do
         mountpoint -q "$PAD_HOME/padslots/$n/root" 2>/dev/null || continue
         [ "$(PAD_SLOT=$n bash "$RIG/alive.sh" --procs 2>/dev/null)" != 0 ] && return 0
     done

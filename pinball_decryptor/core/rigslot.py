@@ -28,14 +28,14 @@ import sys
 import time
 
 #: Rigs a PC offers (padpath.sh's PAD_SLOTS_MAX).
-SLOTS_MAX = 4
+SLOTS_MAX = 5
 #: A run record whose heartbeat is older than this is a run that died hard
 #: (riglock.sh's RUN_FRESH).
 RUN_FRESH_S = 120
 
-#: The five rig colours, the same ones the playfield window's band and chip
+#: The six rig colours, the same ones the playfield window's band and chip
 #: use (pfpage/pf.css --rig-N) and the triage dashboard draws.
-COLOURS = ("#8b9196", "#4fb3d9", "#c08cf0", "#f0845d", "#6fcf8a")
+COLOURS = ("#8b9196", "#4fb3d9", "#c08cf0", "#f0845d", "#6fcf8a", "#e8c04a")
 
 _claimed = []           # [slot] this process took and must give back
 _home = []              # the rigs this app has run on, last one last
@@ -195,9 +195,28 @@ def board(now=None):
                           "label": str(run.get("label") or ""),
                           "up_s": int(now - (run.get("started") or rm)),
                           "stale": (now - rm) > RUN_FRESH_S,
-                          "distro": str(run.get("distro") or "")}
+                          "distro": str(run.get("distro") or ""),
+                          # the game's clock against the wall's (watch.sh, PAD-649): 4 while a
+                          # sweep runs sped up; an older record has none, so 1
+                          "speed": _speed(run.get("speed"))}
         out.append(row)
     return out
+
+
+def _speed(v):
+    try:
+        k = float(v)
+    except (TypeError, ValueError):
+        return 1.0
+    return k if k > 0 else 1.0
+
+
+def speed_text(k):
+    """4.0 -> "4x", 0.5 -> "0.5x", 1 -> "" (real time says nothing)."""
+    k = _speed(k)
+    if abs(k - 1.0) < 1e-6:
+        return ""
+    return ("%g" % k) + "x"
 
 
 def _lock_path(n):

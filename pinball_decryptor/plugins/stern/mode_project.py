@@ -923,6 +923,7 @@ CHALLENGE_MENU_PROVEN = {
     "beatles-1.29": 4,      # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 4, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
     "led_zeppelin_le-1.22": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
     "led_zeppelin_pro-1.22": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "rush_le-1.18": 6,                # PAD-619 2026-10-19 rig batch_r19 (retry; the r9 run had not opened the menu): PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call when it ended, one ball, GAME OVER
     "rush_le-1.19": 6,                # PAD-619 2026-10-19 rig batch_r11: PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call (the lookalike-proof site) when it ended, one ball, GAME OVER
     "rush_pro-1.19": 6,     # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
     "aerosmith_le-1.15": 2,           # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - kept past the game's own start - one ball, GAME OVER

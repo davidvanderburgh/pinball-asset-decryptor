@@ -919,6 +919,8 @@ CHALLENGE_MENU_PROVEN = {
     "led_zeppelin_pro-1.22": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
     "rush_pro-1.19": 6,     # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
     "batman-1.13": 2,                 # PAD-619 2026-10-19 rig batch_r8: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - the pick kept past the game's own start, which this build dispatches after the ball's - one ball, GAME OVER
+    "elvira3-1.13": 2,                # PAD-619 2026-10-19 rig batch_r8: PAD CHALLENGE after the game's 2 (the count kept in r5), picked: START (challenge pick), the game's end-of-ball call when it ended, the game over after the one ball (in_game 1 -> 0, no second ball; its port names no game_over event)
+    "iron_maiden_le-1.16": 2,         # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - the pick kept past the game's own start - the end-of-ball call, the game over after the one ball (in_game 1 -> 0, attract on screen; no game_over event in its port)
     "jurassic_park_the_pin-1.05": 2,  # PAD-619 2026-10-19 rig batch_r8 (its buttons are L/R FLIPPER BUTTON): PAD CHALLENGE after the game's 2, picked: START (challenge pick), one ball, GAME OVER
     "star_wars_pro-1.31": 2,          # PAD-619 2026-10-19 rig 2: the compare-chain menu (no challenge kind of the game's): PAD CHALLENGE appended after Standard and Competition, picked as Standard: START (challenge pick) at the ball's start, one ball, GAME OVER
 }

@@ -185,21 +185,23 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   needs a ball_end first. Rechecked every saved run: Star Wars LE 1.31's proof had never ended the ball (the mission
   select waits for the Action Button) - taken off the list, rerun with the button pressed.
 
-## Status by build (2026-10-20)
+## Status by build (2026-10-20, run 9)
 
-- Start menus proven (CHALLENGE_MENU_PROVEN, 46): Aerosmith 1.16, LE 1.15/1.16, Avengers LE 1.09/1.10, Pro 1.10,
+- Start menus proven (CHALLENGE_MENU_PROVEN, 48): Aerosmith 1.16, LE 1.15/1.16, Avengers LE 1.09/1.10, Pro 1.10,
   Batman 66 1.13/1.14, The Beatles 1.29, Bond LE/Pro 1.06, Deadpool LE 1.14/1.16, Pro 1.16, Elvira 1.13, Foo Fighters
   LE/Pro 1.04, Guardians 1.15, LE 1.14/1.15, Iron Maiden LE 1.16/1.18, Pro 1.18, JP The Pin 1.05, JP LE/Pro 1.16, Led
   Zeppelin LE/Pro 1.22, Mando LE 1.44/1.45, Pro 1.45, Munsters LE/Pro 1.28, Rush LE 1.18/1.19, Pro 1.19, Star Wars ELG
-  1.10, LE 1.30/1.31, Pro 1.31, Stranger Things 1.13, LE 1.12/1.13, Sword of Rage LE 1.18/1.19, Pro 1.19.
+  1.10, LE 1.30/1.31, Pro 1.31, Stranger Things 1.13, LE 1.12/1.13, Sword of Rage LE 1.18/1.19, Pro 1.19, TMNT Pro 1.58/1.59.
 - A mode in a challenge's place proven (CHALLENGE_PROVEN, 18): Bond LE/Pro, Stranger Things x3, Rush Pro 1.19, Jaws
   LE/Pro, John Wick LE 1.01/1.02, Pro 1.02, Metallica 1.03/1.04, Venom LE/Pro, Godzilla LE 1.16 / Pro 1.15 / 1.16.
+- TMNT (run 9): its challenges are locked until unlocked, so ours plays as Standard. The earlier failures were the
+  harness's: it plunged before TMNT had served (its turtle select comes first) - plunging once a ball is in the lane
+  (proof619j.sh `plungew`), a control game ended its ball and served the next, and our pick proved on Pro 1.59
+  (batch_r36) and Pro 1.58 (batch_r40). Pro 1.58's drafted port named no events: its dispatch (0x183e08, bounded
+  0xbf) and five ids - 1.59's less 4 - were read off a stock game on the rig (batch_r38).
 - Not proven, the app says so ("has found its challenges but has not yet seen a mode of yours start from one"): TMNT
-  LE/Pro 1.59, Pro 1.58. Ours plays as Standard now (its challenges are locked until unlocked); on Pro 1.59 the pick
-  started the mode at the ball's start, but the ball never ended - every drain was served back and the challenge's
-  end-of-ball call does nothing in what the game takes for a Standard game; on LE 1.59 Start on our entry ("CHALLENGE /
-  PAD CHALLENGE" on the glass) left the menu up - its lock test (0x194298's value against the entry's last word)
-  refuses it. Pro 1.58's port is thin (no events): nothing to judge a rig run by.
+  LE 1.59 - no game starts on the rig at all, control included (fresh NVRAM, the van stocked, PAD-420's coins-then-
+  Guided-Setup order: Start takes a credit, the trough reads 4/6, attract stays; batch_r41/r42).
 - Star Wars LE 1.31's mission select after the end-of-ball call: playfield switches hit just after it open the
   mission select ("USE THE ACTION BUTTON TO SELECT YOUR MISSION"), whose countdown stops while the ball is ending, and
   the game waits for the player's pick (batch_r27, r31: nothing for 110+ s). With the Action Button pressed it finishes

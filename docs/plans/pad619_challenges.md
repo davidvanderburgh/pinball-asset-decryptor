@@ -157,3 +157,10 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   (bit 0x80) goes straight to 0xa9918, which clears flags 16-20 / 40 / 41 and leaves the menu - the CONTROL (the
   game's own FINAL BATTLE picked the same way) also played a Standard game. How TMNT starts that challenge is not in
   this function (a confirm step, or the choice read elsewhere at the game's start): to find before TMNT can be proven.
+- Proven later in round 6: Aerosmith LE 1.15, Avengers LE 1.09, Guardians LE 1.14, Sword of Rage LE 1.18, Elvira 1.13
+  (40 menus in all). The game's end-of-ball call is now told from its lookalikes (argument in r4, flippers off) and
+  found on all 69 builds (4ff6ef1c) - Rush LE 1.19's challenge game had played on without it; rerun queued (r11).
+- Open: Star Wars ELG 1.10 plays a second ball (the balls-per-game getter is never asked; its game length is decided
+  elsewhere); Rush LE 1.18's menu does not open on the rig with the flipper buttons held (settings as 1.19's);
+  Aerosmith 1.16's rig sat with the coin door open (48V disabled) - rerun queued; TMNT's real pick; JP LE/Pro 1.16 and
+  Mando LE 1.44 menus; Foo Fighters / Mando 1.45 proofs running (r10).

@@ -2211,7 +2211,14 @@ static void ck_idle_tick(void);           /* PAD-530: the game's main-play video
  * the whole multiplier out and came back only after it. A clip the game LOOPS is a background, as its main-play video
  * is: surface_play is hooked too (its second argument is the game's loop flag, LE 0x57b0b4 -> 0x578770), and a loop of
  * the game's plays one pass (its own length, at most CK_LOOP_MS) before the mode's clip takes the surface back. A clip
- * the game plays once (a lock, a start, an award) is waited out as before. */
+ * the game plays once (a lock, a start, an award) is waited out as before.
+ * PAD-639 (luvthatapex on Bond LE): a loop of the game's can also be the backdrop of one of its DISPLAY EFFECTS drawn over
+ * the TV: the spinner's satellite (effect 75, priority 132) loops Diamond_EarthSpin under a see-through picture and its
+ * words for as long as the spinner keeps spinning (15 s in the emulator). The one pass put the mode's clip back after
+ * 3 s, under the satellite. So while a FOREGROUND effect of the game has the screen (the manager's effect now, `data
+ * display_effects`, is one whose table record lacks the background flag 1 - Bond Women's 007 SCORING, effect 226, has
+ * it, as the in-game display 29 does) the game's loop stays; once that effect is over, the mode's clip comes back at
+ * once (the game asks for its main-play video then too). A port without `data display_effects` keeps the one pass. */
 #define CK_END_MS 500                     /* this close to its end, a clip counts as over */
 #define CK_LOOP_MS 3000                   /* a loop of the game's is shown this long at most, then ours comes back */
 static struct {
@@ -2228,6 +2235,7 @@ static struct {
     long long loop_len;                   /* its length, once the surface tells it (0: not yet) */
     char game[64];                        /* the game's clip on the surface now (for the log) */
     unsigned asks;
+    unsigned fx;                          /* PAD-639: the game's foreground display effect over its loop (0: none) */
 } ck;
 static int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;
 /* PAD-530 round 4 (Jim-Beam on v1.184.3): when the mode's clip ran to its end, the bank's surface was left with its last
@@ -2240,6 +2248,7 @@ static int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;
 static char ck_idle[96];                  /* the game's main-play video, the last one it asked for */
 static int ck_last_ours;                  /* the last clip put on the bank's surface was ours */
 static unsigned long ck_idle_due;
+static unsigned disp_foreground_effect(void);   /* PAD-639: the display priority section, below */
 static int sv_hook(void);
 static int have_sites(const char *const *names);
 
@@ -2259,6 +2268,7 @@ static void ck_drop(const char *why)
     if (why) say("clip: \"%s\" is not put back - %s", ck.name, why);
     ck.name[0] = 0;
     ck.on = ck.lost = ck.back = ck.loop = 0;
+    ck.fx = 0;
 }
 
 /* set and play `name` on the bank's surface: 0 when the bank has no such clip */
@@ -2324,6 +2334,7 @@ static void ck_seen(unsigned *r)
         for (i = 0; name[i] && i + 1 < sizeof ck.game; i++) ck.game[i] = name[i];
         ck.game[i] = 0;
         ck.loop = 0;
+        ck.fx = 0;
     }
     if (ck.lost && is_idle) ck.back = 1;  /* the game's clip is over: its main-play video is no clip to wait out */
 }
@@ -2362,6 +2373,17 @@ static void ck_tick(void)
     surf = clip2_surface();
     if (!surf) return;
     if (ck.loop && !ck.back) {            /* a loop of the game's: one pass of it, at most CK_LOOP_MS */
+        unsigned fx = disp_foreground_effect();
+        if (fx) {                         /* PAD-639: the backdrop of a display of the game's over the TV: it stays */
+            if (!ck.fx) say("clip: the game's display effect %u is over its loop \"%.60s\" - \"%s\" waits for its end",
+                            fx, ck.game, ck.name);
+            ck.fx = fx;
+            return;
+        }
+        if (ck.fx) {
+            say("clip: the game's display effect %u is over - \"%s\" comes back", ck.fx, ck.name);
+            ck.back = 1;
+        }
         if (ck.loop_len <= 0) ck.loop_len = ck_ms("surface_duration", surf);
         if (pm_ms() - ck.loop_ms >= (unsigned long)(ck.loop_len > 0 && ck.loop_len < CK_LOOP_MS ? ck.loop_len : CK_LOOP_MS))
             ck.back = 1;
@@ -2377,6 +2399,7 @@ static void ck_tick(void)
     }
     ck.on = 1;
     ck.lost = ck.back = ck.loop = 0;
+    ck.fx = 0;
     ck.zero_ms = pm_ms() - (unsigned long)want;
     clip.on = 1;
     clip.seen = 0;
@@ -2439,6 +2462,7 @@ int pm_clip(const char *name)
             ck.begun = begun;
             ck.on = 1;
             ck.lost = ck.back = ck.loop = 0;
+            ck.fx = 0;
             ck.backs = ck.asks = 0;
             ck.zero_ms = pm_ms();
         }
@@ -3173,6 +3197,21 @@ static unsigned char *disp_manager(void)
 static unsigned disp_host(void) { return (unsigned)pm_port_value("display_host", 0); }
 static unsigned disp_now(unsigned char *m) { return *(unsigned short *)(m + pm_port_value("display_now_at", 0xc)); }
 static unsigned disp_level_now(unsigned char *m) { return *(m + pm_port_value("display_priority_at", 0xe)); }
+
+/* PAD-639: the effect of the game's that has the screen now when it is a FOREGROUND one - its table record (data
+ * award_screen_arg: {records, count}, a record {process, u16 flags, u8 priority}) lacks the background flag 1 - else 0.
+ * Needs only the manager (data display_effects), so a port without the other display lines has it too. */
+static unsigned disp_foreground_effect(void)
+{
+    unsigned char *m = disp_manager();
+    const unsigned *t;
+    unsigned now;
+    if (!m) return 0;
+    now = disp_now(m);
+    t = (const unsigned *)(unsigned long)data("award_screen_arg");
+    if (!now || !t[0] || now >= t[1]) return 0;
+    return *(const unsigned short *)(unsigned long)(t[0] + 8u * now + 4) & 1 ? 0 : now;
+}
 
 static void disp_release(const char *why)
 {

@@ -81,6 +81,8 @@ data typeinfo_resource      0x00614704
 data typeinfo_scene_player  0x00738dfc
 data display_holder         0x0088d7a8
 data award_screen_arg       0x007a7e00
+#   display_effects: PAD-639, read off award_screen 0x3c62d8: its manager getter 0x523340 loads *0x8a0348 (LE 0x89b708)
+data display_effects        0x008a0348
 data sound_channels         0x0086d694
 data sound_queue            0x0086df08
 data sound_requests         0x008058ec

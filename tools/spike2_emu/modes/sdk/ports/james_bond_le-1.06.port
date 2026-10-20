@@ -183,7 +183,9 @@ data sound_request_count    0x00615da8
 # data rule_battle            NOT PLACED: no code that loads it could be lined up
 # data roster_screen_table    NOT PLACED: no code that loads it could be lined up
 # data rule_cities            NOT PLACED: no code that loads it could be lined up
-# data display_effects        NOT PLACED: no code that loads it could be lined up
+#   display_effects: PAD-639, read off award_screen 0x367660: its manager getter 0x3f9eac loads *0x89b708 and checks
+#   +4 against the effect table arg (Godzilla's layout: +0xc the effect now); emulator: the spinner's satellite = 75
+data display_effects         0x0089b708
 # data layered_displays       NOT PLACED: no code that loads it could be lined up
 #   lamp_layers: derived from 2 places, e.g. 0x3a6010+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
 data lamp_layers            0x008243fc

@@ -53,16 +53,16 @@ def main():
             time.sleep(1)
             label = "When a shot is hit" if has else "When it starts"
             # a native <select> list cannot be screenshotted open: lay its list out in place for the shot
-            page.evaluate("""(label) => { const l = [...document.querySelectorAll('span.lbl')].find((e) =>
+            picked = page.evaluate("""(label) => { const l = [...document.querySelectorAll('span.lbl')].find((e) =>
                 e.textContent.trim() === label); const sel = l && l.nextElementSibling.querySelector('select');
-                if (!sel) return; const n = sel.querySelectorAll('option, optgroup').length;
+                if (!sel) return ''; const n = sel.querySelectorAll('option, optgroup').length;
                 sel.size = n; sel.style.height = 'auto'; sel.style.overflow = 'hidden';
                 const w = sel.parentElement; w.style.height = 'auto'; w.style.width = '320px';
-                const c = w.querySelector('.caret'); if (c) c.style.display = 'none'; }""", label)
+                const c = w.querySelector('.caret'); if (c) c.style.display = 'none'; return sel.value; }""", label)
             time.sleep(1.5)
             out = os.path.join(out_dir, "%s_form_lights.png" % prefix)
             page.screenshot(path=out)
-            print("shot", out, flush=True)
+            print("shot", out, "- the box's value:", picked, flush=True)
         S._shoot(url, form, height=1900)
     finally:
         proc.terminate()

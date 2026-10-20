@@ -943,7 +943,7 @@ def main():
         print("no switch table recovered for %r" % title, file=sys.stderr)
         return 1
     import swtable
-    sys.stdout.write(swtable.text(title, r))
+    sys.stdout.write(swtable.text(title, r, source=swtable.SOURCE_BINARY))
     return 0
 
 

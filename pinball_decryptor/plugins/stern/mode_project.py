@@ -938,6 +938,7 @@ CHALLENGE_MENU_PROVEN = {
     "jurassic_park_pro-1.16": 8,      # PAD-619 2026-10-19 rig batch_r12: the live-applied menu (20-byte entries), PAD CHALLENGE after the game's 8, picked as Standard: START (challenge pick), one ball, GAME OVER
     "jurassic_park_the_pin-1.05": 2,  # PAD-619 2026-10-19 rig batch_r8 (its buttons are L/R FLIPPER BUTTON): PAD CHALLENGE after the game's 2, picked: START (challenge pick), one ball, GAME OVER
     "sword_of_rage_le-1.18": 4,       # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 4, picked: START (challenge pick), one ball, GAME OVER
+    "star_wars_le-1.30": 2,           # PAD-619 2026-10-20 rig batch_r23 (once the rig's switch list was the game's own numbering, mktables 70 of 103 ids moved): the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), one ball, HIGH SCORE initials (in_game last 1 -> 0, no second ball)
     "star_wars_le-1.31": 2,           # PAD-619 2026-10-19 rig batch_r15: the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), the game left after the one ball (in_game last 1 -> 0, no second ball)
     "stranger_things-1.13": 6,        # PAD-619 2026-10-19 rig sweep: PAD CHALLENGE after the game's 6, picked: START (challenge pick) at the ball's start (its handler hands it over), one ball, GAME OVER
     "stranger_things_le-1.12": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.12 card

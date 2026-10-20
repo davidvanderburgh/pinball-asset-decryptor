@@ -24,6 +24,7 @@ here.)
 import json
 import marshal
 import os
+import re
 import threading
 import time
 
@@ -303,6 +304,18 @@ SOUND_MODES_KEY = "sound_modes"
 TURN_KEY = "t"
 
 
+#: PAD-638: music mode m's own file k in turn is carried under "m<m>t<k>"
+#: ("m2t3"), its loudness under the same key in ``levels``, and the modes of a
+#: slot whose own files play at random in ``"mode_random": {rel: ["2"]}``
+_MODE_TURN_RE = re.compile(r"^m(\d+)t(\d+)$")
+
+
+def _mode_turn_k(m):
+    """``(mode, k)`` for a carried key "m2t3", else None."""
+    hit = _MODE_TURN_RE.match(str(m))
+    return (int(hit.group(1)), int(hit.group(2))) if hit else None
+
+
 def _turn_k(m):
     """File k in turn for a carried mode key ("t2" -> 2), else None."""
     m = str(m)
@@ -361,7 +374,32 @@ def sound_modes_of(data):
                 key = "%s%s" % (TURN_KEY, k)
                 if key in turns[rel] and db:
                     levels.setdefault(rel, {})[key] = db
+    # PAD-638: a music mode's own files in turn, and their loudness, under "m<m>t<k>"
+    mturns, mrandom = {}, {}
+    mt = raw.get("mode_turns") if isinstance(raw.get("mode_turns"), dict) else {}
+    ml = raw.get("mode_turn_levels") if isinstance(raw.get("mode_turn_levels"), dict) else {}
+    for rel, by in mt.items():
+        if not isinstance(rel, str) or rel not in slots or not isinstance(by, dict):
+            continue
+        for m, files in by.items():
+            if str(m) not in slots[rel] or not isinstance(files, list):
+                continue
+            for k, f in enumerate([f for f in files if isinstance(f, str) and f.strip()], 2):
+                key = "m%st%d" % (m, k)
+                mturns.setdefault(rel, {})[key] = f
+                db = ((ml.get(rel) or {}).get(str(m)) or {}).get(str(k)) \
+                    if isinstance(ml.get(rel), dict) else None
+                if db:
+                    levels.setdefault(rel, {})[key] = db
+        ms = (raw.get("mode_random") or {}).get(rel) \
+            if isinstance(raw.get("mode_random"), dict) else None
+        keep = sorted(str(m) for m in (ms or ()) if any(
+            _mode_turn_k(k)[0] == int(m) for k in mturns.get(rel, {})))
+        if keep:
+            mrandom[rel] = keep
     for rel, files in turns.items():
+        slots.setdefault(rel, {}).update(files)
+    for rel, files in mturns.items():
         slots.setdefault(rel, {}).update(files)
     out = {"names": names, "slots": slots,
            "levels": {rel: v for rel, v in levels.items() if v}}
@@ -369,6 +407,8 @@ def sound_modes_of(data):
                  if isinstance(rel, str) and rel in turns)
     if rnd:
         out["random"] = rnd
+    if mrandom:
+        out["mode_random"] = mrandom
     if attract:
         out["attract"] = attract
     return out
@@ -387,6 +427,7 @@ def merge_sound_modes(data, rec):
         "names": [], "slots": {}, "levels": {}}
     slots = {rel: dict(v) for rel, v in here["slots"].items()}
     random = set(here.get("random") or ())
+    mrandom = {rel: set(ms) for rel, ms in (here.get("mode_random") or {}).items()}
     # PAD-565: a slot the record gives files in turn takes the record's, in its order (PAD-638:
     # and its order, at random or not)
     for rel, by_mode in (rec.get("slots") or {}).items():
@@ -397,6 +438,19 @@ def merge_sound_modes(data, rec):
                 random.add(rel)
             else:
                 random.discard(rel)
+        # PAD-638: a mode the record gives files in turn of its own takes the record's
+        given = {_mode_turn_k(m)[0] for m in (by_mode if isinstance(by_mode, dict) else ())
+                 if _mode_turn_k(m)}
+        if given:
+            if rel in slots:
+                slots[rel] = {m: f for m, f in slots[rel].items()
+                              if not (_mode_turn_k(m) and _mode_turn_k(m)[0] in given)}
+            ms = mrandom.setdefault(rel, set())
+            for g in given:
+                if str(g) in ((rec.get("mode_random") or {}).get(rel) or ()):
+                    ms.add(str(g))
+                else:
+                    ms.discard(str(g))
     levels = {rel: dict(v) for rel, v in here["levels"].items()}
     n = 0
     for rel, by_mode in (rec.get("slots") or {}).items():
@@ -436,7 +490,21 @@ def merge_sound_modes(data, rec):
             tl = {i: db for i, db in tl.items() if db}
             if tl:
                 turn_levels[rel] = tl
-    slots = {rel: {m: f for m, f in v.items() if _turn_k(m) is None}
+    # PAD-638: a music mode's own files in turn, for a mode the slot still has a file for
+    mode_turns, mode_levels = {}, {}
+    for rel, by_mode in slots.items():
+        got = sorted((_mode_turn_k(m), f) for m, f in by_mode.items() if _mode_turn_k(m))
+        for (m, k), f in got:
+            if str(m) in by_mode:
+                mode_turns.setdefault(rel, {}).setdefault(str(m), []).append((k, f))
+        for m, kf in (mode_turns.get(rel) or {}).items():
+            for i, (k, _f) in enumerate(kf, 2):
+                db = (levels.get(rel) or {}).get("m%st%d" % (m, k))
+                if db:
+                    mode_levels.setdefault(rel, {}).setdefault(m, {})[str(i)] = db
+    mode_turns = {rel: {m: [f for _k, f in kf] for m, kf in by.items()}
+                  for rel, by in mode_turns.items()}
+    slots = {rel: {m: f for m, f in v.items() if _turn_k(m) is None and not _mode_turn_k(m)}
              for rel, v in slots.items()}
     levels = {rel: {m: db for m, db in v.items() if m in slots.get(rel, {})}
               for rel, v in levels.items()}
@@ -448,6 +516,15 @@ def merge_sound_modes(data, rec):
             out["random"] = sorted(random & set(turns))
         if turn_levels:
             out["turn_levels"] = turn_levels
+    if mode_turns:
+        out["mode_turns"] = mode_turns
+        mr = {rel: sorted(m for m in ms if m in mode_turns.get(rel, {}))
+              for rel, ms in mrandom.items()}
+        mr = {rel: ms for rel, ms in mr.items() if ms}
+        if mr:
+            out["mode_random"] = mr
+        if mode_levels:
+            out["mode_turn_levels"] = mode_levels
     if attract:
         out["attract"] = attract
     data[SOUND_MODES_KEY] = out

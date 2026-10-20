@@ -11201,8 +11201,9 @@ def _install_modes(output_path, modes, landed, planned, log):
                 "operator menu's MUSIC MODE says their mode: %s."
                 % (len(_mm), ", ".join(_mm)), "success")
         if _turns:
-            log("Sounds in turn: %d file(s) on the card, each played when its sound's turn comes "
-                "round: %s." % (len(_turns), ", ".join(_turns)), "success")
+            log("Sounds in turn: %d file(s) on the card, each played in its sound's turn (or "
+                "picked at random, where its sound plays them at random): %s."
+                % (len(_turns), ", ".join(_turns)), "success")
     if modes.get("picture"):
         log("Picture settings: %s in the operator menu change the whole screen as soon as "
             "the operator accepts a value." % ", ".join(modes["picture"]), "success")

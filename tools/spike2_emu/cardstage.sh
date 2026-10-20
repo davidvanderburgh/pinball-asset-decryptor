@@ -51,7 +51,18 @@ RIG=$(cd "$(dirname "$0")" && pwd)
 # fs.protected_regular=2 on Ubuntu, so a root batch could not open a lock the desktop user's batch had made (nor the
 # user a root one, 0644) - "Permission denied", then "flock: 9: Bad file descriptor", and the two copied at once
 # anyway. flock needs no write access.
-COPY_LOCK=/tmp/pad-cardstage-copy.lock
+# ON /mnt/wsl, SHARED BY EVERY DISTRO (PAD-649): /tmp is each distro's own, and 2026-10-20's two library sweeps
+# ran in two distros (PAD-643 in PAD-Runtime, PAD-645 in Ubuntu) - each held its own lock and both copied off the
+# one spinning disk at once, 72-108 s a card against the 24 s a copy takes alone. WSL mounts one tmpfs at /mnt/wsl
+# in every distro (one kernel, one superblock), so a flock there is one lock for the machine. /tmp where there is
+# no /mnt/wsl (plain Linux, the tests); PAD_COPY_LOCK names another.
+if [ -n "${PAD_COPY_LOCK:-}" ]; then
+    COPY_LOCK=$PAD_COPY_LOCK
+elif [ -d /mnt/wsl ] && [ -w /mnt/wsl ]; then
+    COPY_LOCK=/mnt/wsl/pad-cardstage-copy.lock
+else
+    COPY_LOCK=/tmp/pad-cardstage-copy.lock
+fi
 copy_lock() {
     [ -e "$COPY_LOCK" ] || ( umask 0; : > "$COPY_LOCK" ) 2>/dev/null
     exec 9< "$COPY_LOCK"
@@ -110,6 +121,9 @@ fi
 OUT=${1:?usage: cardstage.sh <batch-out-dir> <stage-dir>|cache <ahead> <keep-gb>}
 STAGE=${2:?}
 AHEAD=${3:-2}
+# how far ahead to run: <ahead>, or what <batch-out-dir>/ahead says now - rigbatch writes two per rig there and
+# raises it as rigs join (PAD-649)
+ahead() { local a; a=$(cat "$OUT/ahead" 2>/dev/null | tr -dc 0-9); echo "${a:-$AHEAD}"; }
 KEEP=$(( ${4:-100} * GB ))
 S=$OUT/stage
 if [ "$STAGE" = cache ]; then
@@ -127,7 +141,7 @@ if [ "$STAGE" = cache ]; then
         [ -e "$OUT/stop" ] && exit 0
         card=$(sed -n "$((i + 1))p" "$OUT/queue" | cut -d'|' -f2 | tr -d '\r' \
                | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        while [ "$(pending_c)" -ge "$AHEAD" ]; do
+        while [ "$(pending_c)" -ge "$(ahead)" ]; do
             [ -e "$OUT/stop" ] && exit 0
             sleep 2
         done
@@ -203,7 +217,7 @@ for i in $(seq 0 $((TOTAL - 1))); do
     [ -e "$OUT/stop" ] && exit 0
     card=$(sed -n "$((i + 1))p" "$OUT/queue" | cut -d'|' -f2 | tr -d '\r' \
            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-    while [ "$(pending)" -ge "$AHEAD" ]; do
+    while [ "$(pending)" -ge "$(ahead)" ]; do
         [ -e "$OUT/stop" ] && exit 0
         sleep 2
     done

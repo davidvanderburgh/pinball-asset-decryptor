@@ -46,14 +46,15 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 /* WHICH RIG, AND WHOSE RUN (rig slots, padpath.sh). Several rigs can be up at
    once, one per session; a band across the top in the rig's own colour and a
    chip naming it make every window say where it came from at a glance. The
-   same five colours as the app's Emulate tab and the triage dashboard. */
-:root { --rig-0: #8b9196; --rig-1: #4fb3d9; --rig-2: #c08cf0; --rig-3: #f0845d; --rig-4: #6fcf8a; }
+   same six colours as the app's Emulate tab and the triage dashboard. */
+:root { --rig-0: #8b9196; --rig-1: #4fb3d9; --rig-2: #c08cf0; --rig-3: #f0845d; --rig-4: #6fcf8a; --rig-5: #e8c04a; }
 #app[data-rig] { border-top: 4px solid var(--rig-c); }
 #app[data-rig="0"] { --rig-c: var(--rig-0); }
 #app[data-rig="1"] { --rig-c: var(--rig-1); }
 #app[data-rig="2"] { --rig-c: var(--rig-2); }
 #app[data-rig="3"] { --rig-c: var(--rig-3); }
 #app[data-rig="4"] { --rig-c: var(--rig-4); }
+#app[data-rig="5"] { --rig-c: var(--rig-5); }
 .pf-rig { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 11px; background: var(--rig-c, var(--rig-0)); color: #111; font: 600 12px var(--cond); letter-spacing: .02em; white-space: nowrap; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------------------------------------------------------------- frame */

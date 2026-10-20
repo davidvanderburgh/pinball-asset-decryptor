@@ -23,7 +23,7 @@ one ring (2026-08-06).
 
 ### A rig slot is a complete rig, layered over the ordinary one
 
-`PAD_SLOT=N` (1..`PAD_SLOTS_MAX`, default 4) selects slot N; unset or 0 is the
+`PAD_SLOT=N` (1..`PAD_SLOTS_MAX`, default 5 since PAD-649, 4 before) selects slot N; unset or 0 is the
 ordinary rig, exactly as before. All of it is derived in `padpath.sh`
 ("RIG SLOTS"):
 
@@ -165,9 +165,9 @@ worktree pointer; `ticket/PAD-n` shows as `PAD-n`, main shows nothing).
 - **Playfield window** (`playfield.py`): the same prefix on its title (which
   also makes `raise_existing()` per slot: before, two sessions on one title got
   one window, the first session's), plus a **coloured band across the top and
-  a chip in the status bar** (`pfpage/pf.css` `--rig-N`, `pf.js`). Five
-  colours: rig 0 grey, 1 cyan, 2 violet, 3 coral, 4 green; the app and the
-  triage dashboard use the same ones.
+  a chip in the status bar** (`pfpage/pf.css` `--rig-N`, `pf.js`). Six
+  colours: rig 0 grey, 1 cyan, 2 violet, 3 coral, 4 green, 5 amber (PAD-649);
+  the app and the triage dashboard use the same ones.
 - David's own runs from main in rig 0 have no label, and their titles are
   exactly as before.
 
@@ -405,6 +405,61 @@ refusal in pad_slot_use, the pytest guard) and by `list` on the real board,
 which read the three app-window locks as LAPSED and PAD-225's sweep as
 running. Owed: an app-driven Start/Stop on a claimed rig in PAD-Runtime
 (the app windows open at the time run the old code until reopened).
+
+**2026-10-20 - PAD-649: sweeps run faster.** David: "we need to be able to run
+sweeping tickets (like 645 and 643) faster. they shouldn't be taking hours upon
+hours to go through all of the games. i remember we had a 4x playback in
+emulator rigs before". Measured on the board and the two sweeps' batch logs
+that afternoon: both ran at 1x (nobody passed `--speed`); PAD-645's passing
+builds took 110-150 s, ~66 s of it the job's own wall-clock sleeps, and its
+FAILING builds 605-1023 s each (a loop waiting 600 s for a runtime line);
+its one-rig batches staged one card ahead, so each rig sat idle 70-110 s
+through every copy; each ticket wrote a chunk-and-poll driver of its own
+because rigbatch took its rigs once at start and never picked up a rig the
+other ticket freed; and the two tickets' card copies ran AT ONCE off the
+spinning D: (the copy lock was in `/tmp`, which is per distro: PAD-643 in
+PAD-Runtime, PAD-645 in Ubuntu), 72-108 s a card against the 24 s a copy
+takes alone. PAD_SLOTS_MAX was 4, so rigbatch's own fit of 5 rigs was never
+reached.
+
+- **rigbatch runs every job at 4x by default** (PAD-484's game speed;
+  `--speed 1` or a line's `PAD_SPEED=1` opts out). The rig's helpers already
+  keep the game's time; a job's own `sleep` does not, which is what rigjob.sh
+  is for.
+- **rigjob.sh**, the library a sweep job is written on: `job_begin`,
+  `job_boot`, `job_wait_attract` (Guided Setup left on a first boot),
+  `job_press`, `job_sleep` (game seconds), `job_wait_log` (a deadline in game
+  seconds), `job_start_game` (a game is on when the ball was launched),
+  `job_shot`, `job_pass` / `job_fail`. Every wait ends the moment the run
+  dies; a job that ends any other way still stops the rig and prints a
+  VERDICT fail. `startcheck.sh` (boot, then a game started) is the example
+  and rigbatch's second stock job.
+- **Every job is capped**: `--job-cap S` (600; a line's `PAD_JOB_CAP=S`
+  wins; 0 = none). The job is a session of its own (setsid), stopped whole;
+  the rig's run with it.
+- **The rigs join as they free**: `-n` is a ceiling. The batch starts on the
+  rigs free now (waits for the first, saying so once a minute; `--no-wait`
+  gives up), looks every `PAD_RIGBATCH_GROW_S` (20 s) for another while
+  builds are queued, and a worker gives its rig back the moment the queue is
+  empty. No chunk drivers.
+- **The copier runs two builds ahead per rig** (`<out>/ahead`, raised as rigs
+  join), so a copy overlaps the job on a one-rig batch too.
+- **One card copy at a time across every distro**: the copy lock is
+  `/mnt/wsl/pad-cardstage-copy.lock` - WSL mounts one tmpfs there in every
+  distro (proven: an flock held in Ubuntu refused `flock -n` in PAD-Runtime,
+  same inode) - and `/tmp` where there is no `/mnt/wsl`.
+- **Five rigs** (`PAD_SLOTS_MAX` 5): rigbatch fits `nproc*10/20` = 5 on this
+  VM's 10 cores. Rig 5's colour (amber, `#e8c04a`) is on the playfield page,
+  the app's rig strip (`core/rigslot.py`) and the triage dashboard
+  (pad-triage v0.42.0 `rigboard.py`; the running dashboard shows it after a
+  restart). Mount it once per WSL boot: `wsl -u root -e bash <rig>/slot.sh up 5`.
+- Tests (test_spike2_rig_slots.py, stub rigs, Linux): the batch waits for a
+  rig, takes the second as it frees, gives both back, the copier's lead
+  follows (2 then 4); the cap stops a job with everything it started, for
+  `--job-cap` and a line's own; the defaults and the lock path by text;
+  rigjob's waits by text. `test_a_sweeps_card_copier_is_no_rigs_run_script`
+  fails on main too while other tickets' rigs are up on this machine (it
+  reads the live /proc).
 
 ### The protocol text for the `/next` skill, at merge
 

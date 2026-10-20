@@ -2,6 +2,7 @@
 # rigbatch.sh - run one job over a list of builds, spread across several rigs.
 #
 #   rigbatch.sh [-n RIGS] [--who PAD-n] [--out DIR] [--speed K] [--fps F]
+#               [--job-cap S] [--no-wait]
 #               [--stage DIR | --no-stage] [--stage-keep GB]
 #               <list> [-- <command> [args...]]
 #
@@ -10,7 +11,9 @@
 # run once per line as `<command> [args...] <key> <card>`, with the line's
 # ENV, PAD_SLOT (its rig) and PAD_LABEL (--who) in its environment. Default:
 # bootcheck.sh (does the build boot to attract). A job's last `VERDICT ...`
-# line is its result; with none, exit 0 is pass.
+# line is its result; with none, exit 0 is pass. A job of your own is written
+# on rigjob.sh (boot, wait for attract, press, start a game, verdict - all in
+# the game's time, so --speed makes it shorter); startcheck.sh is the example.
 #
 # WHY. A ticket that changes the emulator or the runtime has to prove it on the
 # whole Spike 2 library - 36 builds at a median 3 minutes is two hours one at a
@@ -22,11 +25,28 @@
 # HOW MANY RIGS. -n, else as many as the CPU feeds at full speed: a rig costs
 # ~2 cores at the sweep's 15 pictures a second (--fps below; PAD-488 measured
 # 1.7 over four rigs' busiest 30 s), so nproc*10/20, and ~2.8 at the machine's
-# 30 (nproc*10/28) - and never more than the free rigs. Over-committing is not merely slower: an emulated game starved of
-# CPU misses its own timings (ball-save windows, drains, a 150 s start) and a
-# healthy build reads as failed. Taking a rig mounts it, which needs root:
-# run this as root (`wsl -u root -e env HOME=/home/<you> bash rigbatch.sh ...`),
-# or mount the rigs first with `slot.sh up N`.
+# 30 (nproc*10/28). Over-committing is not merely slower: an emulated game
+# starved of CPU misses its own timings (ball-save windows, drains, a 150 s
+# start) and a healthy build reads as failed. Taking a rig mounts it, which
+# needs root: run this as root (`wsl -u root -e env HOME=/home/<you> bash
+# rigbatch.sh ...`), or mount the rigs first with `slot.sh up N`.
+#
+# THE RIGS JOIN AS THEY FREE (PAD-649). -n is a ceiling, not a demand: the
+# batch starts on whatever rigs are free right now (waits for the first one,
+# saying so once a minute; --no-wait gives up instead), and while builds are
+# still queued it keeps looking, every PAD_RIGBATCH_GROW_S (20) seconds, for
+# another rig up to -n - so a sweep that starts while another ticket's sweep
+# holds three rigs begins on the fourth and spreads onto the others as that
+# sweep gives them back. A rig is given back the moment its worker finds the
+# queue empty, not at the end of the batch. Before this, two tickets sweeping
+# at once (PAD-643, PAD-645) each wrote a driver of their own that cut the
+# list into chunks and polled the board for a free rig a minute at a time.
+#
+# EVERY JOB IS CAPPED (--job-cap S, default 600; a line's own PAD_JOB_CAP=S
+# wins; 0 = no cap). A job with no VERDICT by then is stopped, its rig's run
+# with it, and the build fails "no verdict in Ss". PAD-645's sweep spent 10-17
+# minutes on each of its failing builds, in a job waiting for a runtime line
+# that was never coming.
 #
 # CARDS ON A WINDOWS DRIVE ARE STAGED ONTO THE WSL DISK (cardstage.sh cache).
 # Several rigs booting several images off one hard disk make it seek between
@@ -45,9 +65,14 @@
 # --speed K (PAD-484): every job's game runs its clock K times the wall's once
 # it is in attract (PAD_SPEED, padspeed.py) - a sweep's time goes on the game's
 # own waiting, not on the CPU. The rig's helpers (ball feeder, plunger, switch
-# presses, gamecheck.sh) keep the game's time by the same K. A job that has to
-# see real-time behaviour (a clip played frame by frame) leaves it out, or
-# says PAD_SPEED=1 on its own line.
+# presses, gamecheck.sh, rigjob.sh) keep the game's time by the same K.
+# DEFAULT 4 (PAD-649): both of 2026-10-20's library sweeps ran at 1x because
+# nobody asked, and PAD-484 measured the 7-build check at 4x in a third of
+# the time with every build passing. A job that has to see real-time
+# behaviour (a clip played frame by frame) says --speed 1, or PAD_SPEED=1 on
+# its own line. A job's OWN waits only get shorter when they are in the
+# game's time (pad_gsleep / rigjob.sh's job_sleep): a plain `sleep 3` is
+# still 3 s of the wall, 12 s of the game.
 #
 # --fps F (PAD-488): every job's game builds at most F pictures a second (60,
 # 30, 20 or 15; PAD_SWAP_VBLANKS=60/F, eglshim.c). DEFAULT 15, half the
@@ -61,6 +86,10 @@
 # its own clock and logic do not change. A job that judges the pictures' own
 # cadence passes --fps 30, or says PAD_SWAP_VBLANKS=2 on its own line.
 #
+# The cards are copied TWO AHEAD PER RIG (PAD-649; it was one per rig, which
+# on a one-rig batch meant the rig sat idle through every copy: 70-110 s a
+# build), and the copier follows the rig count as rigs join.
+#
 # Out: DIR (default $PAD_HOME/rigbatch/<list>-<time>/) holds progress.txt,
 # results.tsv (key, rig, verdict, seconds, the VERDICT line) and one log per
 # build. The rigs show on the board as held by --who, noting each build as it
@@ -69,7 +98,8 @@
 . "$(dirname "$0")/padpath.sh"
 set -u
 
-N="" WHO="" OUT="" STAGE="" NOSTAGE=0 KEEP=100 SPEED="" FPS=15
+N="" WHO="" OUT="" STAGE="" NOSTAGE=0 KEEP=100 SPEED=4 FPS=15 CAP=600 WAIT=1
+GROW_S=${PAD_RIGBATCH_GROW_S:-20}
 while [ $# -gt 0 ]; do
     case "$1" in
         -n) N=$2; shift 2 ;;
@@ -80,6 +110,8 @@ while [ $# -gt 0 ]; do
         --stage-keep) KEEP=$2; shift 2 ;;
         --speed) SPEED=$2; shift 2 ;;
         --fps) FPS=$2; shift 2 ;;
+        --job-cap) CAP=$2; shift 2 ;;
+        --no-wait) WAIT=0; shift ;;
         -h|--help) awk 'NR == 1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
         *) break ;;
     esac
@@ -93,6 +125,11 @@ case $FPS in
     60|30|20|15) VBL=$((60 / FPS)) ;;
     *) echo "rigbatch: --fps is 60, 30, 20 or 15 (a swap is a whole number of 60 Hz refreshes)" >&2; exit 2 ;;
 esac
+case $SPEED in
+    1|1.0|"") SPEED="" ;;                                 # real time: nothing asked of the shim
+    *[!0-9.]*|.) echo "rigbatch: --speed is a number (1 = real time)" >&2; exit 2 ;;
+esac
+case $CAP in ''|*[!0-9]*) echo "rigbatch: --job-cap is whole seconds (0 = none)" >&2; exit 2 ;; esac
 WHO=${WHO:-$(pad_label)}
 WHO=${WHO:-rigbatch}
 OUT=${OUT:-$PAD_HOME/rigbatch/$(basename "$LIST" .list)-$(date +%Y%m%d-%H%M%S)}
@@ -116,23 +153,36 @@ if [ "$N" -gt "$fit" ]; then
     say "WARNING: $N rigs on $cpu cores (~$((per / 10)).$((per % 10)) each at $FPS fps fits $fit) - builds may fail on timing, not on their own"
 fi
 
-# ---- take the rigs ------------------------------------------------------
+# ---- take the rigs: what is free now; the rest join as they free ---------
 SLOTS=()
-for _ in $(seq 1 "$N"); do
+take_rig() {                      # one more rig, if any is free and mounted: prints its number
+    local s
     s=$(bash "$RIG/riglock.sh" take --any "$WHO" "rigbatch $(basename "$LIST")" 2>/dev/null < /dev/null \
         | sed -n 's/^slot=//p')
-    [ -n "$s" ] || break
+    [ -n "$s" ] || return 1
     # (PAD_RIGBATCH_ASSUME_MOUNTED=1: the unit tests, which run on stub rigs)
     if [ "${PAD_RIGBATCH_ASSUME_MOUNTED:-0}" != 1 ] && \
        ! mountpoint -q "$PAD_HOME/padslots/$s/root" 2>/dev/null; then
         say "rig $s is free but not mounted (mounting needs root): wsl -u root -e bash $RIG/slot.sh up $s"
         bash "$RIG/riglock.sh" release "$s" "$WHO" > /dev/null 2>&1 < /dev/null
-        break
+        return 1
     fi
+    echo "$s"
+}
+waited=0
+while [ "${#SLOTS[@]}" -lt "$N" ]; do
+    s=$(take_rig) || break
     SLOTS+=("$s")
 done
-[ "${#SLOTS[@]}" -gt 0 ] || { say "no rig could be taken - riglock.sh list"; exit 1; }
-say "$TOTAL builds on rig(s) ${SLOTS[*]} for $WHO${SPEED:+ at ${SPEED}x}, $FPS fps; job: ${CMD[*]}"
+while [ "${#SLOTS[@]}" = 0 ]; do
+    [ "$WAIT" = 1 ] || { say "no rig could be taken - riglock.sh list"; exit 1; }
+    [ $((waited % 60)) = 0 ] && say "no rig is free; waiting for one (riglock.sh list; --no-wait gives up instead)"
+    sleep "$GROW_S"; waited=$((waited + GROW_S))
+    s=$(take_rig) && SLOTS+=("$s")
+done
+say "$TOTAL builds on rig(s) ${SLOTS[*]} for $WHO at ${SPEED:-1}x, $FPS fps, job cap ${CAP}s; job: ${CMD[*]}" \
+    "$([ "${#SLOTS[@]}" -lt "$N" ] && echo "(up to $N rigs as they free)")"
+echo $(( 2 * ${#SLOTS[@]} )) > "$OUT/ahead"      # the copier runs this many builds ahead (cardstage.sh)
 
 # ---- stage the cards (cardstage.sh) ----------------------------------------
 if [ "$NOSTAGE" = 0 ] && [ -z "$STAGE" ] && [ -d /mnt/c ] \
@@ -142,13 +192,13 @@ fi
 SPID=""
 if [ "$NOSTAGE" = 0 ] && [ "$STAGE" = cache ]; then
     mkdir -p "$OUT/stage"
-    say "caching cards on the WSL disk (cardmount.sh's cache), one copy at a time, ${#SLOTS[@]} ahead"
+    say "caching cards on the WSL disk (cardmount.sh's cache), one copy at a time, $(cat "$OUT/ahead") ahead"
     setsid bash "$RIG/cardstage.sh" "$OUT" cache "${#SLOTS[@]}" \
         >> "$OUT/stage.log" 2>&1 < /dev/null &
     SPID=$!
 elif [ "$NOSTAGE" = 0 ] && [ -n "$STAGE" ]; then
     mkdir -p "$STAGE" "$OUT/stage"
-    say "staging cards to $STAGE, one copy at a time, ${#SLOTS[@]} ahead (kept up to ${KEEP} GB)"
+    say "staging cards to $STAGE, one copy at a time, $(cat "$OUT/ahead") ahead (kept up to ${KEEP} GB)"
     setsid bash "$RIG/cardstage.sh" "$OUT" "$STAGE" "${#SLOTS[@]}" "$KEEP" \
         >> "$OUT/stage.log" 2>&1 < /dev/null &
     SPID=$!
@@ -163,6 +213,7 @@ finish() {
     [ -n "$SPID" ] && { kill -TERM -- "-$SPID" 2>/dev/null; kill -TERM "$SPID" 2>/dev/null; }
     for p in "${WPIDS[@]}"; do kill -TERM -- "-$p" 2>/dev/null; kill -TERM "$p" 2>/dev/null; done
     for s in "${SLOTS[@]}"; do
+        grep -qx "$s" "$OUT/released" 2>/dev/null && continue     # given back already (its worker found the queue empty)
         PAD_SLOT=$s PAD_LABEL="$WHO" bash "$RIG/killgame.sh" > /dev/null 2>&1 < /dev/null
         bash "$RIG/riglock.sh" release "$s" "$WHO" --force > /dev/null 2>&1 < /dev/null
     done
@@ -175,10 +226,18 @@ trap 'say "STOPPED - stopping every rig"; finish; exit 130' INT TERM
 
 # ---- the workers ----------------------------------------------------------
 worker() {
-    local slot=$1 i line key card envs t0 rc v log
+    local slot=$1 i line key card envs t0 rc v log cap capped
     while :; do
         i=$(flock "$OUT/next" bash -c 'i=$(cat "$1"); echo $((i + 1)) > "$1"; echo "$i"' _ "$OUT/next")
-        [ "$i" -lt "$TOTAL" ] || return 0
+        if [ "$i" -ge "$TOTAL" ]; then
+            # the queue is empty: this rig goes back NOW, for whoever is waiting for one (the batch's
+            # last builds may run minutes more on the other rigs)
+            [ -e "$OUT/stop" ] && return 0
+            echo "$slot" >> "$OUT/released"
+            bash "$RIG/riglock.sh" release "$slot" "$WHO" > /dev/null 2>&1 < /dev/null
+            say "rig $slot  given back (the queue is empty)"
+            return 0
+        fi
         line=$(sed -n "$((i + 1))p" "$OUT/queue")
         IFS='|' read -r key card envs <<<"$line"
         key=$(echo "$key" | tr -d '[:space:]')
@@ -211,22 +270,34 @@ worker() {
         # shellcheck disable=SC2086
         # the batch's own settings first, so a line's ENV still wins: PAD_CARD_CACHE=1 when the cards were cached
         # (the job boots the original path and its mount finds the copy), PAD_SPEED for --speed, PAD_SWAP_VBLANKS for --fps
-        env ${STAGE:+$( [ "$STAGE" = cache ] && echo PAD_CARD_CACHE=1 )} ${SPEED:+PAD_SPEED=$SPEED} \
+        # the job is a session of its own (setsid), so the cap can stop it with everything it started - except
+        # the rig's run, which watch.sh puts in a session of its own and killgame.sh stops below
+        setsid env ${STAGE:+$( [ "$STAGE" = cache ] && echo PAD_CARD_CACHE=1 )} ${SPEED:+PAD_SPEED=$SPEED} \
             PAD_SWAP_VBLANKS=$VBL $envs \
             PAD_SLOT="$slot" PAD_LABEL="$WHO" "${CMD[@]}" "$key" "$card" > "$log" 2>&1 < /dev/null &
         jp=$!
+        cap=$(sed -n 's/.*\bPAD_JOB_CAP=\([0-9]*\).*/\1/p' <<<"$envs"); cap=${cap:-$CAP}
         # THE LEASE IS KEPT WHILE THE JOB RUNS (PAD-420): it lapses PAD_LOCK_IDLE after its holder's last touch, and a
         # job that waits minutes (a media proof, a coil hold, a game check) looked free - the next batch took its slot
         # and that batch's first killgame killed this job's game.
-        n=0
+        n=0 capped=""
         while kill -0 "$jp" 2>/dev/null; do
             sleep 2; n=$((n + 1))
             [ $((n % 15)) = 0 ] && bash "$RIG/riglock.sh" use "$slot" "$WHO" > /dev/null 2>&1 < /dev/null
+            if [ "$cap" -gt 0 ] && [ $(( $(date +%s) - t0 )) -ge "$cap" ]; then
+                capped=1
+                kill -TERM -- "-$jp" 2>/dev/null; sleep 3; kill -KILL -- "-$jp" 2>/dev/null
+                break
+            fi
         done
         wait "$jp"
         rc=$?
         [ -n "$STAGE" ] && touch "$OUT/stage/$i.done"
         v=$(grep -a '^VERDICT ' "$log" | tail -1)
+        if [ -n "$capped" ] && [ -z "$v" ]; then
+            v="VERDICT $key fail no verdict in ${cap}s - the job was stopped (--job-cap)"
+            echo "$v" >> "$log"
+        fi
         [ -n "$v" ] || { [ "$rc" = 0 ] && v="VERDICT $key pass" || v="VERDICT $key fail rc=$rc"; }
         # A job that left its rig running would hand the next build a live one.
         [ "$(PAD_SLOT=$slot bash "$RIG/alive.sh" --total 2>/dev/null < /dev/null)" = 0 ] \
@@ -238,13 +309,31 @@ worker() {
     done
 }
 
-T0=$(date +%s)
-for s in "${SLOTS[@]}"; do
-    setsid bash -c "$(declare -f say worker); P='$P' OUT='$OUT' TOTAL=$TOTAL RIG='$RIG' WHO='$WHO' STAGE='$STAGE' SPEED='$SPEED' VBL='$VBL'; \
-        CMD=($(printf '%q ' "${CMD[@]}")); worker $s" < /dev/null &
+start_worker() {                  # <slot>
+    setsid bash -c "$(declare -f say worker); P='$P' OUT='$OUT' TOTAL=$TOTAL RIG='$RIG' WHO='$WHO' STAGE='$STAGE' SPEED='$SPEED' VBL='$VBL' CAP='$CAP'; \
+        CMD=($(printf '%q ' "${CMD[@]}")); worker $1" < /dev/null &
     WPIDS+=("$!")
+}
+T0=$(date +%s)
+for s in "${SLOTS[@]}"; do start_worker "$s"; done
+# While any worker lives: wait, and every GROW_S look for one more rig while more builds are queued
+# than rigs are working them
+tick=0
+while :; do
+    live=0
+    for p in "${WPIDS[@]}"; do kill -0 "$p" 2>/dev/null && live=$((live + 1)); done
+    [ "$live" -gt 0 ] || break
+    sleep 1; tick=$((tick + 1))
+    [ $((tick % GROW_S)) = 0 ] || continue
+    left=$(( TOTAL - $(cat "$OUT/next" 2>/dev/null || echo "$TOTAL") ))
+    [ "${#SLOTS[@]}" -lt "$N" ] && [ "$left" -gt 0 ] || continue
+    s=$(take_rig) || continue
+    SLOTS+=("$s")
+    echo $(( 2 * live + 2 )) > "$OUT/ahead"
+    say "rig $s joins ($left builds still queued)"
+    start_worker "$s"
 done
-for p in "${WPIDS[@]}"; do wait "$p"; done
+for p in "${WPIDS[@]}"; do wait "$p" 2>/dev/null; done
 trap - INT TERM
 finish
 

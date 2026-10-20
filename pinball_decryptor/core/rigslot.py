@@ -28,14 +28,14 @@ import sys
 import time
 
 #: Rigs a PC offers (padpath.sh's PAD_SLOTS_MAX).
-SLOTS_MAX = 4
+SLOTS_MAX = 5
 #: A run record whose heartbeat is older than this is a run that died hard
 #: (riglock.sh's RUN_FRESH).
 RUN_FRESH_S = 120
 
-#: The five rig colours, the same ones the playfield window's band and chip
+#: The six rig colours, the same ones the playfield window's band and chip
 #: use (pfpage/pf.css --rig-N) and the triage dashboard draws.
-COLOURS = ("#8b9196", "#4fb3d9", "#c08cf0", "#f0845d", "#6fcf8a")
+COLOURS = ("#8b9196", "#4fb3d9", "#c08cf0", "#f0845d", "#6fcf8a", "#e8c04a")
 
 _claimed = []           # [slot] this process took and must give back
 _home = []              # the rigs this app has run on, last one last

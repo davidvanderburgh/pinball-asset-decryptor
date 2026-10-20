@@ -16,6 +16,7 @@ import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
 import { BlocksEditor, BlocksCode, BLOCKS_WORDS, ProgramBar, useModeProgram } from "./modes_blocks.js";
 import { PlayfieldView } from "./modes_playfield.js";
+import { LightShowsView } from "./modes_lightshows.js";
 import { RuleCardsView, StoryView, ShotTableView, TimelineView, NodeGraphView } from "./modes_rules.js";
 import { ScriptView, CodeView, CEditor } from "./modes_script.js";
 
@@ -951,6 +952,7 @@ const BLOCKS_PAGES = [["blocks", "Blocks", "The mode's rules as snapped blocks, 
   ["cards", "Rule cards", "Each rule as a card that reads When … Then, with a choice in every blank.", RuleCardsView],
   ["story", "Story", "The mode's life: what starts it, what each rule does while it waits and while it runs, and what ends it.", StoryView],
   ["playfield", "Playfield", "The game's playfield with the mode's lit shots: press a shot to see and change what it does.", PlayfieldView],
+  ["shows", "Light shows", "The mode's own light shows: made step by step from a ready-made one or blank, played on the playfield picture, run by name from any rule.", LightShowsView],   // PAD-646
   ["table", "Shot table", "One row per shot, one column for each time it can count: what every shot does, and which do nothing yet.", ShotTableView],
   ["timeline", "Timeline", "The mode's clock as a track: what happens at its start, at each moment and at its end.", TimelineView],
   ["graph", "Node graph", "Every rule wired to the variables and timers it shares with the others.", NodeGraphView],

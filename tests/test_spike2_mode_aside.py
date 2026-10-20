@@ -247,7 +247,8 @@ def test_game_modes_block_lists_the_modes_and_holds_them_from_start_to_end(harne
 def test_game_modes_give_way_waits_for_the_games_mode_and_ends_when_one_begins(harness_block, tmp_path):
     out = _run(harness_block, tmp_path, RUSH + "game_modes give_way\n", "stock", "1", "shot", "0x08000000",
                "tick", "10", "stock", "0", "shot", "0x08000000", "tick", "10", "stock", "1", "tick", "10")
-    assert "one of the game's modes is running - its trigger count is kept" in out
+    # PAD-619: the line names what of the game's is running (the desk harness's stub: "a stock mode")
+    assert "RUSH not started (trigger shot): a stock mode is running - its trigger count is kept" in out
     assert out.index("STOCK 0") < out.index("RUSH START") < out.index("RUSH END (the game's own mode began)")
     assert "BLOCK 1" not in out
 

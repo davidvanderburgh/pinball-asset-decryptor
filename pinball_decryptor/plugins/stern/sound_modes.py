@@ -186,6 +186,7 @@ class Modes:
     levels: dict = field(default_factory=dict)     # {rel: {mode: dB}}, or None
     turns: dict = field(default_factory=dict)      # PAD-565: {rel: [file 2, file 3, ...]}
     random: set = field(default_factory=set)       # PAD-638: slots whose files in turn play at random
+    turn_levels: dict = field(default_factory=dict)  # PAD-638: {rel: {k: dB}}, file k in turn's own
     attract: list = field(default_factory=list)    # PAD-641: [file 1, file 2, ...]
     #: PAD-641: the carrier's slot the attract files are built on (a build sets it; never saved)
     attract_rel: str = ""
@@ -233,10 +234,10 @@ class Modes:
 
     def level(self, rel, mode):
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
-        sound), or ``None`` for a project saved before mode files had their own. A sound in turn
-        is matched to its slot's sound (0)."""
+        sound), or ``None`` for a project saved before mode files had their own. A file in turn
+        has a loudness of its own too (PAD-638: ``turn_levels``), 0 unless one was set."""
         if is_turn(mode):
-            return 0
+            return int((self.turn_levels.get(rel) or {}).get(turn_of(mode), 0) or 0)
         if self.levels is None:
             return None
         return int((self.levels.get(rel) or {}).get(mode, 0) or 0)
@@ -374,6 +375,20 @@ def clean(raw):
     rnd = raw.get("random")
     if isinstance(rnd, (list, tuple)):
         out.random = {rel for rel in rnd if isinstance(rel, str) and rel in out.turns}
+    tl = raw.get("turn_levels")
+    for rel, v in (tl.items() if isinstance(tl, dict) else ()):
+        if rel not in out.turns or not isinstance(v, dict):
+            continue
+        keep = {}
+        for k, db in v.items():
+            try:
+                k = int(k)
+            except (TypeError, ValueError):
+                continue
+            if 2 <= k <= len(out.turns[rel]) + 1 and clean_level(db):
+                keep[k] = clean_level(db)
+        if keep:
+            out.turn_levels[rel] = keep
     attract = raw.get("attract")
     if isinstance(attract, (list, tuple)):
         out.attract = [f for f in attract if isinstance(f, str) and f.strip()][:ATTRACT_MAX]
@@ -404,6 +419,11 @@ def to_json(modes):
         rnd = sorted(rel for rel in modes.random if modes.turns.get(rel))
         if rnd:
             out["random"] = rnd
+        tl = {rel: {str(k): int(db) for k, db in sorted(v.items()) if db}
+              for rel, v in sorted(modes.turn_levels.items()) if modes.turns.get(rel)}
+        tl = {rel: v for rel, v in tl.items() if v}
+        if tl:
+            out["turn_levels"] = tl
     if modes.attract:
         out["attract"] = list(modes.attract)
     if modes.levels is not None:

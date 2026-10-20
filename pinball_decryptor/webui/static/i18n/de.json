@@ -12419,5 +12419,9 @@
 "A press while one is still playing does not start another.": "Ein Druck, während noch einer spielt, startet keinen weiteren.",
 "They ride one of the game's own sounds, so each plays for at most that sound's length (about {} seconds on Star Wars, almost {} on James Bond {} LE, {} on Jaws); a longer file is cut to it, and the log says so.": "Sie laufen auf einem eigenen Sound des Spiels, daher spielt jeder höchstens so lange wie dieser Sound (etwa {} Sekunden bei Star Wars, fast {} bei James Bond {} LE, {} bei Jaws); eine längere Datei wird darauf gekürzt, und das Protokoll sagt es.",
 "The game's own sound at the press does not play over yours.": "Der eigene Sound des Spiels beim Drücken spielt nicht über deinen.",
-"Not on TMNT {} (Pro or LE) or Venom LE {} yet; the menu says why.": "Noch nicht bei TMNT {} (Pro oder LE) oder Venom LE {}; das Menü sagt, warum."
+"Not on TMNT {} (Pro or LE) or Venom LE {} yet; the menu says why.": "Noch nicht bei TMNT {} (Pro oder LE) oder Venom LE {}; das Menü sagt, warum.",
+"Loudness of sound {} ({})…": "Lautstärke von Sound {} ({})…",
+"Sound {}'s loudness:": "Lautstärke von Sound {}:",
+"Loudness of sound {}": "Lautstärke von Sound {}",
+"**Loudness of sound {} (…)…** gives one file a loudness of its own, from -{} to +{} dB ({} keeps it matched). While **Play sound {}** has it in the Replacement player, the loudness box there is that file's too. Sound {}'s is the sound's own loudness box.": "**Lautstärke von Sound {} (…)…** gibt einer Datei eine eigene Lautstärke, von -{} bis +{} dB ({} lässt sie angeglichen). Solange **Sound {} abspielen** sie im Ersatz-Player hat, gilt das Lautstärkefeld dort auch für diese Datei. Für Sound {} gilt das eigene Lautstärkefeld des Sounds."
 }

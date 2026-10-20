@@ -293,11 +293,13 @@ def same_stem_sibling(path):
 #: PAD-494: a Stern project's music modes (``plugins.stern.sound_modes``):
 #: ``{"names": [...], "slots": {rel: {"2": file}}, "levels": {rel: {"2": dB}}}``
 #: and (PAD-565) its sounds in turn, ``"turns": {rel: [file 2, file 3, ...]}``,
-#: (PAD-638) the slots of them that play at random, ``"random": [rel, ...]``
+#: (PAD-638) the slots of them that play at random, ``"random": [rel, ...]``,
+#: and each such file's own loudness, ``"turn_levels": {rel: {"2": dB}}``
 SOUND_MODES_KEY = "sound_modes"
 #: PAD-565: the mod routes carry a slot's file k in turn as one more of its
 #: files, under this mode key + k ("t2"), so it travels wherever its slot's
 #: music mode files do; :func:`merge_sound_modes` puts it back in ``turns``
+#: (PAD-638: its loudness rides ``levels`` under the same key)
 TURN_KEY = "t"
 
 
@@ -351,6 +353,14 @@ def sound_modes_of(data):
         own = (data or {}).get("audio_levels") or {}
         levels = {rel: {m: own[rel] for m in files}
                   for rel, files in slots.items() if own.get(rel)}
+    # PAD-638: a file in turn's own loudness, under its carried key ("t2")
+    for rel, v in ((raw.get("turn_levels") or {}).items()
+                   if isinstance(raw.get("turn_levels"), dict) else ()):
+        if rel in turns and isinstance(v, dict):
+            for k, db in v.items():
+                key = "%s%s" % (TURN_KEY, k)
+                if key in turns[rel] and db:
+                    levels.setdefault(rel, {})[key] = db
     for rel, files in turns.items():
         slots.setdefault(rel, {}).update(files)
     out = {"names": names, "slots": slots,
@@ -415,19 +425,29 @@ def merge_sound_modes(data, rec):
         n += 1
     if not n and names == here["names"]:
         return 0
-    turns = {}
+    turns, turn_levels = {}, {}
     for rel, by_mode in slots.items():
         got = sorted((_turn_k(m), f) for m, f in by_mode.items() if _turn_k(m) is not None)
         if got:
             turns[rel] = [f for _k, f in got]
+            # PAD-638: each file's own loudness, by where it now stands in the list
+            tl = {str(i): (levels.get(rel) or {}).get("%s%d" % (TURN_KEY, k))
+                  for i, (k, _f) in enumerate(got, 2)}
+            tl = {i: db for i, db in tl.items() if db}
+            if tl:
+                turn_levels[rel] = tl
     slots = {rel: {m: f for m, f in v.items() if _turn_k(m) is None}
              for rel, v in slots.items()}
+    levels = {rel: {m: db for m, db in v.items() if m in slots.get(rel, {})}
+              for rel, v in levels.items()}
     out = {"names": names, "slots": {rel: v for rel, v in slots.items() if v},
            "levels": {rel: v for rel, v in levels.items() if v}}
     if turns:
         out["turns"] = turns
         if random & set(turns):
             out["random"] = sorted(random & set(turns))
+        if turn_levels:
+            out["turn_levels"] = turn_levels
     if attract:
         out["attract"] = attract
     data[SOUND_MODES_KEY] = out

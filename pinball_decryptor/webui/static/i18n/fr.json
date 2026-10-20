@@ -12419,5 +12419,9 @@
 "A press while one is still playing does not start another.": "Un appui pendant qu'un son joue encore n'en lance pas un autre.",
 "They ride one of the game's own sounds, so each plays for at most that sound's length (about {} seconds on Star Wars, almost {} on James Bond {} LE, {} on Jaws); a longer file is cut to it, and the log says so.": "Ils passent sur un son du jeu lui-même, donc chacun dure au plus la longueur de ce son (environ {} secondes sur Star Wars, près de {} sur James Bond {} LE, {} sur Jaws) ; un fichier plus long est coupé à cette longueur, et le journal l'indique.",
 "The game's own sound at the press does not play over yours.": "Le son du jeu lui-même à l'appui ne joue pas par-dessus le vôtre.",
-"Not on TMNT {} (Pro or LE) or Venom LE {} yet; the menu says why.": "Pas encore sur TMNT {} (Pro ou LE) ni sur Venom LE {} ; le menu dit pourquoi."
+"Not on TMNT {} (Pro or LE) or Venom LE {} yet; the menu says why.": "Pas encore sur TMNT {} (Pro ou LE) ni sur Venom LE {} ; le menu dit pourquoi.",
+"Loudness of sound {} ({})…": "Volume du son {} ({})…",
+"Sound {}'s loudness:": "Volume du son {} :",
+"Loudness of sound {}": "Volume du son {}",
+"**Loudness of sound {} (…)…** gives one file a loudness of its own, from -{} to +{} dB ({} keeps it matched). While **Play sound {}** has it in the Replacement player, the loudness box there is that file's too. Sound {}'s is the sound's own loudness box.": "**Volume du son {} (…)…** donne à un fichier un volume propre, de -{} à +{} dB ({} le garde aligné). Tant que **Lire le son {}** l'a dans le lecteur de remplacement, la case de volume y est aussi celle de ce fichier. Celui du son {} est la case de volume du son lui-même."
 }

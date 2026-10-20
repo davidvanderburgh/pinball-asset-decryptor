@@ -392,3 +392,20 @@ def test_the_games_own_sound_at_a_press_never_keeps_ours_from_playing():
     # at the next press: the game's own from the last one still holds its channel - stopped first
     press = edge[edge.index("if (att.plays && (long)(att.until - now) > 0)"):]
     assert press.index("pm_sound_stop(att.quiet_req)") < press.index("pm_sound(att.request)")
+
+
+def test_the_games_own_sound_at_a_press_takes_no_channel_from_ours():
+    """Jurassic Park 1.05's 235 (2 ms after ours looked its record up) and The Mandalorian Pro 1.45's 879
+    (at the release) took our channel and played the silence over our file (emulator, 4x sweep)."""
+    with open(RUNTIME, encoding="utf-8") as f:
+        c = f.read()
+    worker = c[c.index("static void att_worker(unsigned request)\n{"):]
+    worker = worker[:worker.index("\n}\n")]
+    # the worker copies the request's flags into its channel after this hook: the steal flag goes first
+    assert "pm_sound_priority(request, -1, 0)" in worker
+    assert worker.index("att.quiet_req = request;") < worker.index("pm_sound_priority(request, -1, 0)")
+    # and comes back once the press is over (any later request the worker takes), or for the next one
+    assert worker.index("att_unsteal(now, 0);") < worker.index("if (!att.has_quiet")
+    unsteal = c[c.index("static void att_unsteal(unsigned long now, int now_too)\n{"):]
+    unsteal = unsteal[:unsteal.index("\n}\n")]
+    assert "ATT_NOSTEAL_MS" in unsteal and "pm_sound_priority(att.nosteal_req, -1, att.nosteal_old & 0xff);" in unsteal

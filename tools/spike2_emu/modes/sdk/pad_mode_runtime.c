@@ -10471,6 +10471,7 @@ static void bsid_line(const char *ms, const char *slot, const char *ids, const c
  * (att_worker, att_lookup): the project's file is the one heard. */
 #define ATT_FILES       16
 #define ATT_GAP         250                 /* ms after a file's own length before another press plays */
+#define ATT_NOSTEAL_MS  1000                /* PAD-645: the game's own request at a press steals no channel */
 #define ATT_QUIET_MS    500                 /* after a flipper button's edge in attract: the game's own sound */
 #define ATT_QUIET_LOOK  60                  /* after its worker call: its record's lookups */
 static struct {
@@ -10483,6 +10484,8 @@ static struct {
     volatile int looked;
     int has_quiet;                          /* PAD-645: an aquiet line */
     unsigned freed;                         /* PAD-645: the game's own requests stopped at a press */
+    volatile unsigned nosteal_req, nosteal_old;   /* PAD-645: the game's own request, its steal flag off */
+    volatile unsigned long nosteal_at;
     unsigned char quiet[8];
     volatile unsigned long edge_at, quiet_until;
     volatile unsigned quiet_req, quiets;
@@ -10527,14 +10530,35 @@ static void att_quiet_line(const char *ks)
 
 /* PAD-645, the sound worker's entry (r0 = the request): the game's own sound at a flipper button in
  * attract has its record lookups take the silence for a moment */
+static void att_unsteal(unsigned long now, int now_too)
+{
+    /* the game's own request at a press gets its steal flag back once the press is over */
+    if (att.nosteal_req && (now_too || (long)(now - att.nosteal_at) > ATT_NOSTEAL_MS)) {
+        pm_sound_priority(att.nosteal_req, -1, att.nosteal_old & 0xff);
+        att.nosteal_req = 0;
+    }
+}
+
 static void att_worker(unsigned request)
 {
-    unsigned long now;
+    unsigned long now = pm_ms();
+    int old;
+    att_unsteal(now, 0);
     if (!att.has_quiet || request == att.request || !att.edge_at) return;
-    now = pm_ms();
     if ((long)(now - att.edge_at) > ATT_QUIET_MS || pm_in_game()) return;
     att.quiet_req = request;
     att.quiet_until = now + ATT_QUIET_LOOK;
+    /* PAD-645: and it takes no channel from ours - the worker copies the flags into the channel after
+     * this (Jurassic Park 1.05's 235 two ms after ours looked up, Mandalorian Pro 1.45's 879 at the
+     * release, both played the silence over our file) */
+    if (att.nosteal_req != request) {
+        att_unsteal(now, 1);
+        if ((old = pm_sound_priority(request, -1, 0)) >= 0) {
+            att.nosteal_req = request;
+            att.nosteal_old = old;
+        }
+    }
+    att.nosteal_at = now;
 }
 
 /* the record lookup (any thread): the carrier's own record takes the file it plays now. 1 = swapped */

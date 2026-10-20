@@ -78,6 +78,7 @@ struct mode_cfg {
     unsigned roster_callout_1;        /* item 146: `roster_callout <id>` + 1; 0 = not given (the slot is silent) */
     unsigned challenge_1;             /* PAD-615: `challenge <n>` + 1, CHALLENGE_NEW for `challenge new`; 0 = none */
     char challenge_name[40];          /* PAD-615: `challenge_name <words>`: its name on the start menu ("" = `name`) */
+    int challenge_launch;             /* PAD-643: `challenge_launch clip|player|<seconds>`: 0 (clip), -1, ms */
     unsigned display_priority;        /* item 154 display: `priority <n>`, 0 = none (the display as before) */
     /* item 167: `multiball <balls> [ball save s]` - the mode is a multiball of its own; `seconds 0` is then no
      * clock (it ends when one ball is left). `add_ball <mask> [times]`: a shot that adds a ball */
@@ -618,6 +619,14 @@ static int challenge_line(struct slot *M, const char *line)
     const char *a = key_is(line, "challenge");
     uint64_t n;
     unsigned k;
+    if (!a && (a = key_is(line, "challenge_launch")) != 0) {   /* PAD-643: who launches its challenge ball, and when */
+        if (a[0] == 'p') cfg.challenge_launch = PM_LAUNCH_PLAYER;
+        else if (a[0] >= '0' && a[0] <= '9') {
+            n = num(&a);
+            cfg.challenge_launch = n > 60 ? 60000 : (int)n * 1000;
+        } else cfg.challenge_launch = PM_LAUNCH_CLIP;
+        return 1;
+    }
     if (!a && (a = key_is(line, "challenge_name")) != 0) {
         for (k = 0; a[k] && a[k] != '\r' && a[k] != '\n' && k < sizeof cfg.challenge_name - 1; k++) cfg.challenge_name[k] = a[k];
         while (k && cfg.challenge_name[k - 1] == ' ') k--;
@@ -2664,6 +2673,8 @@ static void challenge_sync(struct slot *M)
     want = cfg.valid ? cfg.challenge_1 : 0;
     name = cfg.challenge_name[0] ? cfg.challenge_name : cfg.name;
     for (k = 0; name[k] && name[k] == challenge_shown[M->index][k]; k++) ;
+    if (challenge_held[M->index] && challenge_want[M->index] == want)       /* PAD-643: its launch, as the file says now */
+        pm_challenge_launch(challenge_held[M->index] - 1, cfg.challenge_launch);
     if (challenge_want[M->index] == want && (!want || (!name[k] && !challenge_shown[M->index][k]))) return;
     if (challenge_held[M->index]) {
         pm_challenge_release(challenge_held[M->index] - 1);
@@ -2682,6 +2693,7 @@ static void challenge_sync(struct slot *M)
             return;
         }
         challenge_held[M->index] = (unsigned)at + 1;
+        pm_challenge_launch((unsigned)at, cfg.challenge_launch);              /* PAD-643 */
         pm_log("%s: its own challenge %d (%s) is on the game's start menu", cfg.name, at, pm_challenge_name((unsigned)at));
         return;
     }
@@ -2692,6 +2704,7 @@ static void challenge_sync(struct slot *M)
         }
     if (pm_challenge_claim(want - 1, challenge_pick)) {
         challenge_held[M->index] = want;
+        pm_challenge_launch(want - 1, cfg.challenge_launch);                  /* PAD-643 */
         pm_log("%s claims challenge %u (%s)", cfg.name, want - 1, pm_challenge_name(want - 1));
         if (pm_challenge_title(want - 1, name))
             pm_log("%s: the start menu shows challenge %u as %s", cfg.name, want - 1, name);

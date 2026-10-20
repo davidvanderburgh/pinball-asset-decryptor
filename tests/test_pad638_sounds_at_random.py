@@ -383,3 +383,173 @@ def test_the_audio_tab_sets_each_file_s_loudness(tmp_path, monkeypatch):
         assert w.call("audio.menu_action", "turn_off:2", rel) is True
         assert _sidecar(proj)["sound_modes"]["turn_levels"] == {rel: {"2": -4}}
         assert w.state("audio")["level_label"] == ""
+
+
+# ---- round 3: a music mode's own files in turn (or at random) ------------------------------------
+def test_a_music_mode_file_keeps_files_in_turn_of_its_own():
+    m = SMo.clean({"slots": {BOC: {"2": "o.wav", "3": "h.wav"}},
+                   "mode_turns": {BOC: {"2": ["b.wav", "c.wav"], "4": ["x.wav"]}, TANK: {"2": ["y.wav"]}},
+                   "mode_random": {BOC: ["2", "4"]},
+                   "mode_turn_levels": {BOC: {"2": {"3": -5, "9": 2}}}})
+    assert m.mode_turns == {BOC: {2: ["b.wav", "c.wav"]}}      # only a mode the slot has a file for
+    assert m.mode_random == {BOC: {2}}
+    assert m.mode_turn_levels == {BOC: {2: {3: -5}}}
+    assert m.files()[-2:] == [(BOC, SMo.mode_turn(2, 2), "b.wav"), (BOC, SMo.mode_turn(2, 3), "c.wav")]
+    assert m.level(BOC, SMo.mode_turn(2, 3)) == -5 and m.count == 3
+    mt = SMo.mode_turn(2, 3)
+    assert SMo.is_mode_turn(mt) and SMo.is_turn(mt) and not SMo.is_attract(mt)
+    assert SMo.mode_turn_of(mt) == (2, 3) and SMo.turn_of(mt) == 3
+    assert SMo.what(BOC, mt).endswith("'s mode 2 file 3 in turn")
+    assert SMo.clean(SMo.to_json(m)) == m
+
+
+def test_a_music_mode_s_files_in_turn_are_turned_at_its_file_s_record(tmp_path):
+    params = [{"idx": 2095, "findkey": b"S" * 8}, {"idx": 40, "findkey": b"M" * 8, "grown": True},
+              {"idx": 41, "findkey": b"J" * 8, "grown": True}, {"idx": 42, "findkey": b"K" * 8, "grown": True}]
+    m = SMo.clean({"slots": {BOC: {"2": "o.wav"}}, "mode_turns": {BOC: {"2": ["b.wav", "c.wav"]}},
+                   "mode_random": {BOC: ["2"]}, "levels": {}})
+    used = [{"rel": BOC, "slot": 2095, "mode": SMo.mode_turn(2, 2), "host": 41, "db": 0},
+            {"rel": BOC, "slot": 2095, "mode": SMo.mode_turn(2, 3), "host": 42, "db": 0}]
+    logs = []
+    lines = E._turn_key_lines(params, used, lambda t, lvl="info": logs.append(t),
+                              mode_hosts={(BOC, 2): 40})
+    assert lines == [(2, b"M" * 8, b"J" * 8), (3, b"M" * 8, b"K" * 8)]   # the MODE FILE's key
+    # a mode file in an extra sound bank (no host in image.bin): its files in turn are left out
+    used2 = [dict(u) for u in used]
+    assert E._turn_key_lines(params, used2, lambda t, lvl="info": logs.append(t), mode_hosts={}) == []
+    assert "the slot's file for mode 2 is not in the main sound bank" in logs[-1]
+    rec = SMo.read_card_record(SMo.cfg_text(0, 0, [], True, record=SMo.card_record(
+        m, [dict(u, lines=1) for u in used])))
+    assert [(t["mode"], t["turn"], t["host"]) for t in rec["mode_turns"]] == [(2, 2, 41), (2, 3, 42)]
+    assert rec["mode_random"] == [{"mode": 2, "slot": 2095, "rel": BOC}]
+
+
+def test_the_build_cuts_a_mode_s_files_in_turn_to_its_file_and_gives_that_file_its_own_record(
+        tmp_path, monkeypatch):
+    from tests.test_pad565_sounds_in_turn import _p, _wav
+    from pinball_decryptor.plugins.stern.spike2.emulator import BLOCK
+    made = {s: _wav(tmp_path / ("conv_" + s), secs) for s, secs in
+            (("o.wav", 0.5), ("b.wav", 0.9), ("c.wav", 0.3))}
+    monkeypatch.setattr(SMo, "convert", lambda project, rel, mode, src, log=None: made[src])
+    params = [_p(2095, 44100 + BLOCK)] + [_p(i, 44100 + BLOCK) for i in range(10, 16)]
+    m = SMo.clean({"slots": {BOC: {"2": "o.wav", "3": "o.wav"}},
+                   "mode_turns": {BOC: {"2": ["b.wav", "c.wav"]}}, "levels": {}})
+    logs = []
+    _e, _g, used = E._sound_modes_grow(str(tmp_path), params, {}, {}, m,
+                                       lambda t, lvl="info": logs.append(t))
+    by = {u["mode"]: u for u in used}
+    assert by[2]["host"] != by[3]["host"]          # mode 2's file is its own record: its key turns
+    assert by[SMo.mode_turn(2, 2)]["frames"] == by[2]["frames"] == 22050   # cut to mode 2's file
+    assert by[SMo.mode_turn(2, 3)]["frames"] == int(0.3 * 44100)
+
+
+def test_the_routes_carry_a_music_mode_s_files_in_turn():
+    from pinball_decryptor.core import staged_changes as SC
+    data = {"sound_modes": {"names": [], "slots": {BOC: {"2": "o.wav"}}, "levels": {},
+                            "mode_turns": {BOC: {"2": ["b.wav", "c.wav"]}},
+                            "mode_random": {BOC: ["2"]}, "mode_turn_levels": {BOC: {"2": {"3": -4}}}}}
+    rec = SC.sound_modes_of(data)
+    assert rec["slots"][BOC] == {"2": "o.wav", "m2t2": "b.wav", "m2t3": "c.wav"}
+    assert rec["levels"][BOC] == {"m2t3": -4} and rec["mode_random"] == {BOC: ["2"]}
+    other = "audio/idx2096 - other.wav"
+    tgt = {}
+    assert SC.merge_sound_modes(tgt, {"names": [], "slots": {other: rec["slots"][BOC]},
+                                      "levels": {other: rec["levels"][BOC]},
+                                      "mode_random": {other: ["2"]}}) == 1
+    got = SMo.clean(tgt["sound_modes"])
+    assert got.slots == {other: {2: "o.wav"}} and got.mode_turns == {other: {2: ["b.wav", "c.wav"]}}
+    assert got.mode_random == {other: {2}} and got.mode_turn_levels == {other: {2: {3: -4}}}
+    from pinball_decryptor.core import modpack
+    packed, _f, _g = modpack.pack_sound_modes({"names": [], "slots": {BOC: {"m2t2": __file__}},
+                                               "mode_random": {BOC: ["2"]}})
+    assert packed["mode_random"] == {BOC: ["2"]}
+
+
+def test_a_music_mode_s_files_in_turn_go_to_the_file_and_off_the_card(tmp_path):
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.plugins.stern import media_share as MS
+    from tests.test_webui_audio import _wav as wav
+    src = str(tmp_path / "src")
+    wav(os.path.join(src, *BOC.split("/")), seconds=0.3)
+    o, b = str(tmp_path / "mine" / "Orch.wav"), str(tmp_path / "mine" / "Orch B.wav")
+    wav(o, seconds=0.4, amp=700)
+    wav(b, seconds=0.4, amp=900)
+    SC.save(src, {"sound_modes": {"names": [], "slots": {BOC: {"2": o}}, "levels": {},
+                                  "mode_turns": {BOC: {"2": [b]}}, "mode_random": {BOC: ["2"]},
+                                  "mode_turn_levels": {BOC: {"2": {"2": 5}}}}})
+    path = str(tmp_path / "modes.zip")
+    MS.save_music_modes(src, path)
+    dst = str(tmp_path / "dst")
+    wav(os.path.join(dst, *BOC.split("/")), seconds=0.3)
+    got = MS.load_music_modes(dst, path)
+    assert MS.put_music(dst, got["record"]) == 1
+    m = SMo.load(dst)
+    assert list(m.mode_turns[BOC]) == [2] and m.mode_random == {BOC: {2}}
+    assert m.mode_turn_levels == {BOC: {2: {2: 5}}}
+    # an extract of a card built with it
+    proj = str(tmp_path / "proj")
+    wav(os.path.join(proj, *BOC.split("/")), seconds=0.3)
+    for i, amp in ((40, 900), (41, 1100)):
+        wav(os.path.join(proj, "audio", "idx%04d - SE X.wav" % i), seconds=0.5, amp=amp)
+    mm = SMo.clean({"slots": {BOC: {"2": "C:/m/Orch.wav"}}, "levels": {},
+                    "mode_turns": {BOC: {"2": ["C:/m/Orch B.wav"]}}, "mode_random": {BOC: ["2"]}})
+    used = [{"rel": BOC, "slot": 2095, "mode": 2, "host": 40, "db": 0, "lines": 1},
+            {"rel": BOC, "slot": 2095, "mode": SMo.mode_turn(2, 2), "host": 41, "db": 3, "lines": 1}]
+    cfg = SMo.cfg_text(0, 2, [], False, record=SMo.card_record(mm, used))
+    assert MS.readback("card.raw", proj, padmode={"sounds.cfg": cfg.encode()})["music"] == 1
+    back = SMo.load(proj)
+    assert [os.path.basename(f) for f in back.mode_turns[BOC][2]] == ["Orch B.wav"]
+    assert back.mode_random == {BOC: {2}} and back.mode_turn_levels == {BOC: {2: {2: 3}}}
+
+
+def test_the_audio_tab_gives_a_music_mode_files_in_turn_of_its_own(tmp_path, monkeypatch):
+    from tests.test_webui_audio import _open, _project, _sidecar, _wav as wav
+    from tests.webui_harness import web_app
+    from pinball_decryptor.webui import compat
+    rel = "audio/idx0001 - Jackpot.wav"
+    monkeypatch.setattr(SMo, "offer", lambda project, rels, probe=True: ("", {r: "" for r in rels}))
+    monkeypatch.setattr(SMo, "offer_turns", lambda project, rels, probe=True: (
+        "", {r: "" for r in rels}))
+    proj = _project(tmp_path)
+    o, b, c = (str(tmp_path / "mine" / n) for n in ("Orch.wav", "Orch B.wav", "Orch C.wav"))
+    for f in (o, b, c):
+        wav(f)
+
+    def sub(w):
+        items = w.call("audio.menu", rel, [rel])
+        e = next(i for i in items if str(i.get("label", "")).startswith("Play ") and i.get("submenu"))
+        return e["submenu"]
+
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        assert not any(s.get("header") for s in sub(w))         # no mode file: as before
+        w.answers.append(o)
+        assert w.call("audio.menu_action", "mode_pick:2", rel) is True
+        heads = [s["header"] for s in sub(w) if s.get("header")]
+        assert heads == ["Its own sound", "Mode 2 (Custom A): Orch.wav"]
+        for f in (b, c):
+            w.answers.append(f)
+            assert w.call("audio.menu_action", "mturn_add:2", rel) is True
+        assert w.call("audio.menu_action", "mturn_order:2:1", rel) is True
+        monkeypatch.setattr(compat.simpledialog, "askstring", lambda *a, **k: "-3")
+        assert w.call("audio.menu_action", "mturn_level:2:3", rel) is True
+        sm = _sidecar(proj)["sound_modes"]
+        assert sm["mode_turns"] == {rel: {"2": [os.path.normpath(b), os.path.normpath(c)]}}
+        assert sm["mode_random"] == {rel: ["2"]} and sm["mode_turn_levels"] == {rel: {"2": {"3": -3}}}
+        labels = [s.get("label") for s in sub(w)]
+        assert labels[-6:] == [
+            "Play sound 2 (Orch B.wav)", "Loudness of sound 2 (0 dB)\u2026",
+            "Take off sound 2 (Orch B.wav)", "Play sound 3 (Orch C.wav)",
+            "Loudness of sound 3 (-3 dB)\u2026", "Take off sound 3 (Orch C.wav)"]
+        assert [s["checked"] for s in sub(w) if str(s.get("action", "")).startswith("mturn_order")] \
+            == [False, True]
+        r = next(r for r in w.state("audio")["rows"] if r["k"] == rel)
+        assert r["tn"] == 3 and r["tr"] is True
+        assert ("In mode 2 (Custom A): each time the game plays this sound it plays one of these at "
+                "random") in r["tn_tip"] and "3. Orch C.wav at -3 dB" in r["tn_tip"]
+        # taking off sound 2 moves sound 3 up; taking off mode 2's file takes them all
+        assert w.call("audio.menu_action", "mturn_off:2:2", rel) is True
+        assert _sidecar(proj)["sound_modes"]["mode_turn_levels"] == {rel: {"2": {"2": -3}}}
+        assert w.call("audio.menu_action", "mode_off:2", rel) is True
+        sm = _sidecar(proj).get("sound_modes") or {}
+        assert not sm.get("mode_turns") and not sm.get("mode_random")

@@ -1514,6 +1514,7 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
                            "names": list((sm or {}).get("names") or []),
                            "levels": dict((sm or {}).get("levels") or {}),
                            "random": list((sm or {}).get("random") or []),
+                           "mode_random": dict((sm or {}).get("mode_random") or {}),
                            # PAD-641: the flipper buttons' sounds in attract (no slot: as they are)
                            "attract": list((sm or {}).get("attract") or [])},
         "toggles": {k: saved[k] for k in _TOGGLE_KEYS if k in saved},
@@ -2093,6 +2094,8 @@ def _apply_sound_modes(tgt, plan, record, prior, include_flagged):
         rec["slots"][e["tgt_rel"]] = dict(e["repl"])
         if e["src_rel"] in (sm.get("random") or ()):
             rec["random"].append(e["tgt_rel"])        # PAD-638: its files at random
+        if (sm.get("mode_random") or {}).get(e["src_rel"]):
+            rec.setdefault("mode_random", {})[e["tgt_rel"]] = list(sm["mode_random"][e["src_rel"]])
         if levels.get(e["src_rel"]):
             rec["levels"][e["tgt_rel"]] = dict(levels[e["src_rel"]])
         record[_SOUND_MODES_KEY][e["tgt_rel"]] = dict(e["repl"])

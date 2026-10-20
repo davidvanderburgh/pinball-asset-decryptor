@@ -237,6 +237,19 @@ HATS = {
 }
 #: PAD-615 round 2: the challenge hat's choice that adds the mode to the game's start menu as a challenge of its own
 CHALLENGE_NEW = "A new challenge of its own"
+#: PAD-643: the challenge hat's `launch` - who launches the challenge ball, and when: "clip" (the runtime, once the
+#: mode's start clip is over - the default), "player", or a number of seconds after the mode began (1 to 60)
+CHALLENGE_LAUNCH = ("clip", "player")
+
+
+def challenge_launch_ms(hat):
+    """PAD-643: the runtime's pm_challenge_launch value for a challenge hat: 0 its start clip, -1 the player, ms."""
+    v = str((hat or {}).get("launch") or "clip").strip()
+    if v == "player":
+        return -1
+    if v.isdigit():
+        return max(1, min(60, int(v))) * 1000
+    return 0
 #: a shot / event hat's "when": the mode's state it runs in
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
 RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game"}
@@ -1110,6 +1123,9 @@ def _check_hat(hat, n, ctx):
             ctx["out"].append("%s waits for the challenge %s, which this card's game does not have." % (where, name))
         elif name in ctx["picked"]:
             ctx["out"].append("%s waits for %s too: one script per challenge." % (where, name))
+        elif str(hat.get("launch") or "clip") not in CHALLENGE_LAUNCH and not _int_ok(hat.get("launch"), 1, 60):
+            ctx["out"].append("%s's ball launch must be when its start clip is over, by the player, or 1 to 60 "
+                              "seconds after it starts." % where)                       # PAD-643
         else:
             ctx["picked"].add(name)
 
@@ -1997,6 +2013,7 @@ def to_c(program, slug):
     # the hats' own shots and events
     hat_code = {k: [] for k in HATS}
     challenge_names = []                    # PAD-615: the game's challenges its scripts take the place of
+    challenge_launch = []                   # PAD-643: each one's launch (pm_challenge_launch)
     for kind, items in bodies.items():
         for n, hat, body in items:
             head = "    /* script %d: %s */" % (n, _comment(_hat_words(hat)))
@@ -2029,6 +2046,7 @@ def to_c(program, slug):
                 name = str(hat.get("challenge") or "")
                 if name not in challenge_names:
                     challenge_names.append(name)
+                    challenge_launch.append(challenge_launch_ms(hat))      # PAD-643
                 test = "(picked & %du)" % (1 << challenge_names.index(name))
             else:
                 test = None
@@ -2677,6 +2695,8 @@ def to_c(program, slug):
         L.append(" * starts its script instead of the game's own challenge), claimed as it loads */")
         L.append("static const char *const CHALLENGE_NAMES[%d] = { %s };   /* \"\" = a new one of its own */"
                  % (len(challenge_names), ", ".join(_c_str("" if n == CHALLENGE_NEW else n) for n in challenge_names)))
+        L.append("static const int CHALLENGE_LAUNCH[%d] = { %s };   /* PAD-643: 0 its start clip, -1 the player, ms */"
+                 % (len(challenge_names), ", ".join(str(v) for v in challenge_launch)))
         L.append("static int CHALLENGE_AT[%d];" % len(challenge_names))
         L.append("static volatile unsigned challenge_picked;   /* set on the game's thread, run on the tick */")
         L.append("")
@@ -2713,13 +2733,16 @@ def to_c(program, slug):
         L.append("        if (!CHALLENGE_NAMES[i][0]) {     /* its own, on the game's start menu under its name */")
         L.append("            CHALLENGE_AT[i] = pm_challenge_add(MODE_NAME, on_challenge);")
         L.append("            if (CHALLENGE_AT[i] < 0) pm_log(\"no challenge of its own: this game's start menu is not ours to add to\");")
+        L.append("            else pm_challenge_launch((unsigned)CHALLENGE_AT[i], CHALLENGE_LAUNCH[i]);   /* PAD-643 */")
         L.append("            continue;")
         L.append("        }")
         L.append("        CHALLENGE_AT[i] = pm_challenge_named(CHALLENGE_NAMES[i]);")
         L.append("        if (CHALLENGE_AT[i] < 0 || !pm_challenge_claim((unsigned)CHALLENGE_AT[i], on_challenge))")
         L.append('            pm_log("the challenge %s is not one this game lets a mode take the place of", CHALLENGE_NAMES[i]);')
-        L.append("        else")
+        L.append("        else {")
         L.append("            pm_challenge_title((unsigned)CHALLENGE_AT[i], MODE_NAME);   /* the start menu shows its name */")
+        L.append("            pm_challenge_launch((unsigned)CHALLENGE_AT[i], CHALLENGE_LAUNCH[i]);   /* PAD-643 */")
+        L.append("        }")
         L.append("    }")
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
@@ -3799,5 +3822,9 @@ def _hat_words(hat):
     if kind == "timer_done":
         return "when the timer %s runs out" % (hat.get("timer") or "(no timer)")
     if kind == "challenge":
-        return "when the player picks the challenge %s" % (hat.get("challenge") or "(no challenge)")
+        ms = challenge_launch_ms(hat)                                               # PAD-643
+        return "when the player picks the challenge %s%s" % (
+            hat.get("challenge") or "(no challenge)",
+            ", the player launching its ball" if ms < 0 else ", its ball launched %d s after it starts" % (ms // 1000)
+            if ms else "")
     return HATS.get(kind, "?").lower()

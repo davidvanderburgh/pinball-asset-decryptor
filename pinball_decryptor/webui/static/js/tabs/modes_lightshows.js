@@ -236,6 +236,9 @@ function legacyBlocks(prog) {
   return out;
 }
 const secs = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(ms % 1000 ? 1 : 0) + " s" : ms + " ms");
+// the clock's room: its longest read over the show ("999 ms" or the show's length, then " / " and the length), so
+// the playfield column keeps its width while the time counts (PAD-653: it grew and shrank with every read)
+const clockWidth = (total) => `${Math.max(6, secs(total).length) + 3 + secs(total).length}ch`;
 const lengthOf = (s) => (s.steps || []).reduce((a, x) => a + (Number(x.ms) || 0), 0);
 // a name no other show has, of the letters a name may hold (block_modes.SHOW_NAME_RE)
 const freeName = (shows, base) => {
@@ -491,11 +494,11 @@ export function LightShowsView({ c, pg }) {
         : html`<div class="small muted">Reading the playfield…</div>`}
       ${pf && !pf.art ? html`<div class="small muted pf-why">${pf.why || TIP.noArt}</div>` : null}
       <div class="row ls-transport">
-        <${Button} size="sm" icon=${player.playing ? "pause" : "play"} disabled=${!total} title=${TIP.play}
+        <${Button} size="sm" cls="ls-play" icon=${player.playing ? "pause" : "play"} disabled=${!total} title=${TIP.play}
           onClick=${() => (player.playing ? player.pause() : player.play())}>${player.playing ? "Pause" : "Play"}<//>
         <${Button} size="sm" kind="ghost" icon="stop" disabled=${!total} title=${TIP.stop} onClick=${player.stop}>Stop<//>
         <label class="chk" ...${tip(TIP.loop)}><input type="checkbox" checked=${loop} onChange=${(e) => setLoop(e.target.checked)} /><span>Loop</span></label>
-        <span class="small mono muted ls-clock">${secs(Math.round(player.t))} / ${secs(total)}</span>
+        <span class="small mono muted ls-clock" style=${{ minWidth: clockWidth(total) }}>${secs(Math.round(player.t))} / ${secs(total)}</span>
       </div>
       <input type="range" class="ls-scrub" min="0" max=${total || 1} value=${Math.round(player.t)} disabled=${!total} ...${tip(TIP.scrub)}
         onInput=${(e) => { player.pause(); player.seek(Number(e.target.value)); }} />

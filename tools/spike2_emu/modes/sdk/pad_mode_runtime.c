@@ -8272,6 +8272,7 @@ static void roster_deferred_tick(void);   /* item 146 */
 static void stock_tick(void);             /* item 160 */
 static void magnet_tick(void);            /* PAD-381 */
 static void scoop_tick(void);             /* PAD-381 */
+static void launch_tick(void);            /* PAD-643 */
 
 static void on_tick(unsigned *r)
 {
@@ -8301,6 +8302,7 @@ static void on_tick(unsigned *r)
     building_tick();                          /* PAD-393: a put-back owed */
     shows_tick();                             /* PAD-411: no show of ours past its 20 s */
     wizards_tick();                           /* PAD-436: a mini-wizard's refused start, kept lit */
+    launch_tick();                            /* PAD-643: a mode's challenge ball launched for the player */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
@@ -8708,7 +8710,8 @@ static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start m
 /* round 2: challenges of a mode's own, added to the game's start menu: slot CHALLENGE_OWN + k */
 #define CHALLENGE_OWN 16
 #define N_OWN_CHALLENGE 4
-static struct { int (*fn)(unsigned slot); const struct pm_mode *by; char name[40]; } own_challenge[N_OWN_CHALLENGE];
+static struct { int (*fn)(unsigned slot); const struct pm_mode *by; char name[40]; int launch; } own_challenge[N_OWN_CHALLENGE];
+static int challenge_launch[N_CHALLENGE];   /* PAD-643: pm_challenge_launch - 0 its start clip, -1 the player, ms */
 static volatile int own_pending = -1;    /* the own challenge picked on the start menu, until its ball starts */
 
 /* PAD-630 (luvthatapex, Bond LE): the game's own challenge ENDS THE BALL when it is over. Ahoy Mr. Bond's ending
@@ -8742,6 +8745,8 @@ static int chg_state(void)
     return chg.state;
 }
 
+static void launch_picked(unsigned slot);   /* PAD-643: below */
+static void launch_began(void);
 static void chg_scores_picked(unsigned slot, const char *name, const struct pm_mode *by);   /* PAD-640, below */
 
 /* slot: the game's challenge the game thinks it plays (an own challenge plays as challenge 0's); name: the menu's */
@@ -8773,6 +8778,7 @@ static void chg_began(void)
     if (chg.state == 1 && current == chg.by && pm_player()) {
         chg.game = chg_game_now();
         chg.state = 2;
+        launch_began();              /* PAD-643: its ball launched for the player */
     }
 }
 
@@ -8890,6 +8896,7 @@ void pm_challenge_release(unsigned slot)
         if (own_challenge[k].fn && own_challenge[k].by == current) {
             say("challenge %u (%s): taken out of the game's start menu", slot, own_challenge[k].name);
             own_challenge[k].fn = 0; own_challenge[k].by = 0;
+            own_challenge[k].launch = 0;
             if (own_pending == (int)k) own_pending = -1;
         }
         return;
@@ -8901,6 +8908,7 @@ void pm_challenge_release(unsigned slot)
             pm_message_restore((unsigned)pm_port_value(key, 0));     /* PAD-619: the game's own name again */
         challenge_title[slot][0] = 0;
         challenge_fn[slot] = 0; challenge_by[slot] = 0;
+        challenge_launch[slot] = 0;
         say("challenge %u (%s): released - the game's own again", slot, pm_challenge_name(slot));
     }
 }
@@ -8934,6 +8942,7 @@ static int challenge_veto(unsigned *r, unsigned n)
                 took ? "its mode starts - the game's own challenge does not" : "the mode let it go - the game's own starts");
             if (took) {
                 challenge_ours = 1; challenge_ours_ms = pm_ms();
+                launch_picked(CHALLENGE_OWN + (unsigned)k);
                 chg_picked(own_challenge[k].by, 0, own_challenge[k].name);
                 return 1;
             }
@@ -8950,7 +8959,7 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
-    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n], n, challenge_title[n]); }
+    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n]); }
     return took != 0;
 }
 
@@ -9334,6 +9343,7 @@ static void challenge_ball_start(void)
             took ? "its mode starts as the ball starts" : "the mode let it go");
         if (took) {
             challenge_ours = 1; challenge_ours_ms = pm_ms();
+            launch_picked(CHALLENGE_OWN + (unsigned)k);
             chg_picked(own_challenge[k].by, how >= 0 ? (unsigned)how : ~0u, own_challenge[k].name);   /* ~0: no category */
         }
         return;
@@ -9350,7 +9360,7 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
             took ? "the mode takes it - its pick cleared, the game's own does not start" : "the mode let it go");
-        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n], n, challenge_title[n]); }
+        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n]); }
         return;
     }
 }
@@ -9376,6 +9386,166 @@ static int challenge_extra_veto(unsigned *r, unsigned n)
     if (!challenge_ours) return 0;
     if (!said++) say("challenge game: a mode's - an extra ball earned in it is not played (one ball)");
     return 1;
+}
+
+/* ---- PAD-643 (luvthatapex, Bond LE): a mode's challenge ball, launched for the player and started as every other ball
+ * Two things the game does at a standard ball's start it leaves out of a challenge game a mode of ours took:
+ * 1. Its own challenges play their start and launch the ball; ours left it in the shooter lane while the mode's start
+ *    clip played, waiting for the player. The framework's launch-button handler (`site ball_launch`, Bond LE
+ *    0x3f382c, bus 197: fires the auto plunger when a ball waits in it - FG_MBDEV_AUTO_PLUNGER_BALL_IN_DEVICE /
+ *    _PLAYER_CONTROL, `value ball_launch_flag` / `value ball_launch_wait_flag`) is called for the player: when the
+ *    mode's start clip is over (the default), a set time after the mode began, or never (the player launches).
+ *    pm_challenge_launch(slot, ms) says which, per challenge: 0 its start clip, -1 the player, ms after it began.
+ * 2. The game's own ball-start handlers that do their work only OUTSIDE a challenge game (Bond: the skill shot's,
+ *    bus 34, LE 0x18dd50 - its set-up starts the super skill shot's process, which opens the top control gate to
+ *    the loop while the left flipper button is held at the launch; in a challenge game it skips all of it). Each is
+ *    `site challenge_plain_<k>` (k 0-3); in a mode's challenge game the runtime wraps it with the challenge game's
+ *    flag cleared for the call, so it runs as in a standard game. A handler of up to four register arguments. */
+#define N_PLAIN 4
+#define LAUNCH_CLIP_SETTLE_MS 1500u    /* the start clip begins half a second after the mode: look after that */
+#define LAUNCH_CLIP_MAX_MS 30000u      /* a clip that never ends: launch anyway */
+#define LAUNCH_GIVE_UP_MS 10000u       /* nothing launched this long after it was due: the player launches it */
+static unsigned (*plain_orig[N_PLAIN])(unsigned, unsigned, unsigned, unsigned);
+static struct {
+    int how;                             /* the picked challenge's setting: 0 its start clip, -1 the player, ms */
+    int armed;                           /* its mode began in its challenge game: a launch owed */
+    unsigned long began, due, last;      /* pm_ms() the mode began, the launch was due, the last call */
+    int calls;
+} lch;
+
+int pm_challenge_launch(unsigned slot, int ms)
+{
+    if (ms < -1) ms = -1;
+    if (slot >= CHALLENGE_OWN && slot < CHALLENGE_OWN + N_OWN_CHALLENGE) {
+        unsigned k = slot - CHALLENGE_OWN;
+        if (!own_challenge[k].fn || own_challenge[k].by != current) return 0;
+        own_challenge[k].launch = ms;
+        return 1;
+    }
+    if (slot >= (unsigned)pm_challenge_slots() || !challenge_fn[slot] || challenge_by[slot] != current) return 0;
+    challenge_launch[slot] = ms;
+    return 1;
+}
+
+int pm_ball_launch_known(void)
+{
+    return fn("ball_launch") != 0 && pm_port_value("ball_launch_flag", 0) > 0;
+}
+
+static void launch_picked(unsigned slot)
+{
+    if (slot >= CHALLENGE_OWN && slot < CHALLENGE_OWN + N_OWN_CHALLENGE) lch.how = own_challenge[slot - CHALLENGE_OWN].launch;
+    else lch.how = slot < N_CHALLENGE ? challenge_launch[slot] : 0;
+    lch.armed = 0;
+}
+
+static void launch_began(void)
+{
+    lch.armed = lch.how >= 0;
+    lch.began = pm_ms();
+    lch.due = 0;
+    lch.calls = 0;
+    if (lch.how < 0) say("challenge ball: the player launches it (its mode says so)");
+    else if (!pm_ball_launch_known()) { say("challenge ball: this port names no launch - the player launches it"); lch.armed = 0; }
+}
+
+/* When the launch is due, from the state alone (tests lift it verbatim): how 0 waits for the start clip - from
+ * LAUNCH_CLIP_SETTLE_MS after the mode began until no clip of ours plays, LAUNCH_CLIP_MAX_MS at most; how > 0 that
+ * many ms after it began. 1 = due now. */
+static int launch_due(int how, unsigned long since, int clip_on)
+{
+    if (how < 0) return 0;
+    if (how > 0) return since >= (unsigned long)how;
+    if (since < LAUNCH_CLIP_SETTLE_MS) return 0;
+    return !clip_on || since >= LAUNCH_CLIP_MAX_MS;
+}
+
+static void launch_tick(void)
+{
+    unsigned long now = pm_ms();
+    int in, wait;
+    if (!lch.armed) return;
+    if (chg_state() != 2 || !pm_in_game()) { lch.armed = 0; return; }   /* its mode ended, or the game */
+    if (!lch.due) {
+        if (!launch_due(lch.how, now - lch.began, clip.on)) return;
+        lch.due = now;
+    }
+    in = game_flag((unsigned)pm_port_value("ball_launch_flag", 0));
+    wait = pm_port_value("ball_launch_wait_flag", 0) > 0 ? game_flag((unsigned)pm_port_value("ball_launch_wait_flag", 0)) : 0;
+    if (in != 1 && wait != 1) {                          /* no ball waits in the plunger */
+        if (lch.calls) {
+            say("challenge ball: launched for the player (%s, %lu ms after its mode began)",
+                lch.how ? "its set time" : "its start clip over", lch.last - lch.began);
+            lch.armed = 0;
+        } else if (now - lch.due > LAUNCH_GIVE_UP_MS) {
+            say("challenge ball: no ball waited in the auto plunger (a manual shooter lane, or the game launched it) - left to the player");
+            lch.armed = 0;
+        }
+        return;
+    }
+    if (lch.calls && now - lch.last < 500) return;
+    if (lch.calls && now - lch.due > LAUNCH_GIVE_UP_MS) {   /* the ball may reach the plunger after the flag says so */
+        say("challenge ball: the game did not launch it after %d calls - the player launches it", lch.calls);
+        lch.armed = 0;
+        return;
+    }
+    lch.calls++;
+    lch.last = now;
+    ((int (*)(void))(unsigned long)fn("ball_launch"))();
+}
+
+static void game_flag_set(unsigned id)
+{
+    unsigned char *bits;
+    if (!data("game_flags")) return;
+    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
+    if (bits) bits[id >> 3] |= (unsigned char)(1u << (id & 7));
+}
+
+/* this game is a challenge game a mode of ours took - or is about to be: its pick made on the menu, or held */
+static int chg_ours_now(void)
+{
+    unsigned n;
+    if (game_flag((unsigned)pm_port_value("challenge_on_flag", 0)) != 1) return 0;
+    if (challenge_ours || own_pending >= 0) return 1;
+    for (n = 0; n < (unsigned)challenges_n; n++)
+        if (challenge_fn[n] && challenge_picked(n) == 1) return 1;
+    return 0;
+}
+
+static unsigned plain_call(int k, unsigned a, unsigned b, unsigned c, unsigned d)
+{
+    static unsigned said_game[N_PLAIN];
+    unsigned on = (unsigned)pm_port_value("challenge_on_flag", 0), ret;
+    if (!chg_ours_now()) return plain_orig[k](a, b, c, d);
+    if (said_game[k] != chg_game_now() + 1) {
+        char key[24];
+        said_game[k] = chg_game_now() + 1;
+        pm_snprintf(key, sizeof key, "challenge_plain_%d", k);
+        say("challenge game: a mode's - the game's 0x%08x runs as at a standard ball's start", fn(key));
+    }
+    game_flag_clear(on);
+    ret = plain_orig[k](a, b, c, d);
+    game_flag_set(on);
+    return ret;
+}
+#define PLAIN(k) static unsigned plain_##k(unsigned a, unsigned b, unsigned c, unsigned d) { return plain_call(k, a, b, c, d); }
+PLAIN(0) PLAIN(1) PLAIN(2) PLAIN(3)
+static unsigned (*const plain_wraps[N_PLAIN])(unsigned, unsigned, unsigned, unsigned) = { plain_0, plain_1, plain_2, plain_3 };
+
+static void plain_arm(void)
+{
+    char key[24];
+    int k;
+    for (k = 0; k < N_PLAIN; k++) {
+        pm_snprintf(key, sizeof key, "challenge_plain_%d", k);
+        if (!site(key)) continue;
+        plain_orig[k] = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn(key), (void *)plain_wraps[k]);
+        if (!plain_orig[k])
+            say("challenges: %s at 0x%08x could not be wrapped - it stays left out of a mode's challenge game", key, fn(key));
+    }
+    if (pm_ball_launch_known())
+        say("challenges: a mode's challenge ball is launched for the player at 0x%08x", fn("ball_launch"));
 }
 
 static int event_bus_id(const char *name);
@@ -9422,6 +9592,7 @@ static void challenges_arm(void)
             challenges_n = 0;
             return;
         }
+    if (challenges_n || site("challenge_menu")) plain_arm();   /* PAD-643 */
     if (challenges_n) {
         can |= PM_CAN_CHALLENGE;
         say("challenges: %d of the game's a mode may take the place of (flag %ld for a challenge game)", challenges_n,

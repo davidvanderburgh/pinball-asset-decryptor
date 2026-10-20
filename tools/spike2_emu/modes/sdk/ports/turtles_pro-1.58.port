@@ -237,3 +237,8 @@ event ball_start     0x21
 event ball_end       0x30
 event bonus_start    0x23
 event bonus_end      0x24
+
+# ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
+site  ball_launch         0x00184b24 0xe92d4010 0xe30449d0
+value ball_launch_flag       11
+value ball_launch_wait_flag  12

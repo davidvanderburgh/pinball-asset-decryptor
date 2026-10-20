@@ -741,3 +741,8 @@ value challenge_menu_slot      -1
 value challenge_menu_sets_on   1
 value challenge_menu_caption   1921
 site  challenge_end_ball  0x00483df0 0xe30c24ca 0xe3402073
+
+# ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
+site  ball_launch         0x0047fc60 0xe92d4010 0xe30840d0
+value ball_launch_flag       12
+value ball_launch_wait_flag  13

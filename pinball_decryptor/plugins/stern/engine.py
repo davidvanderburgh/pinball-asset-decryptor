@@ -8167,7 +8167,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         _sm_frags, _sm_sids = _sound_modes_for_banks(
                             gr_path, img_path, params, desc_sites,
                             [u for u in sound_mode_used
-                             if not _SMo_is_attract(u["mode"])],
+                             if not _SMo_is_attract(u["mode"])
+                             and not _SMo_is_mode_turn(u["mode"])],
                             list(mode_own_used or ()) + ([mode_sound_used]
                                                         if mode_sound_used else []),
                             _old_bank_map, log)
@@ -10221,19 +10222,20 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         if why and modes.attract and not modes.turns:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
                 % (len(modes.files()), why.rstrip(".")), "warning")
-            modes.slots, modes.names, why = {}, [], ""
+            modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
         elif why and modes.turns and not _SMo.title_refusal(prof, turns=True):
             # PAD-565: a title the sounds in turn work on and the menu setting not (yet)
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
-                % (len(modes.files()) - sum(map(len, modes.turns.values())), why.rstrip(".")),
+                % (sum(map(len, modes.slots.values())), why.rstrip(".")),
                 "warning")
-            modes.slots, modes.names, why = {}, [], ""
+            modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
         elif not why and modes.turns:
             why = _SMo.title_refusal(prof, turns=True)
             if why and modes.attract:
                 log("Sounds in turn: %d file(s) the game would play in turn are left out of this "
                     "build: %s." % (sum(map(len, modes.turns.values())), why.rstrip(".")), "warning")
                 modes.slots, modes.names, modes.turns, why = {}, [], {}, ""
+                modes.mode_turns = {}
     if why:
         if modes.attract and not modes.count and not modes.turns:
             log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are "
@@ -10247,8 +10249,15 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         return None, None
     if modes.count:
         log("Found %d file(s) for %d music modes (%s)." % (
-            len(modes.files()) - sum(map(len, modes.turns.values())), modes.count,
+            sum(map(len, modes.slots.values())), modes.count,
             ", ".join("%d %s" % (m, modes.name(m)) for m in range(1, modes.count + 1))), "info")
+        _mt = [(rel, m, len(f)) for rel, by in sorted(modes.mode_turns.items())
+               for m, f in sorted(by.items())]
+        if _mt:                                   # PAD-638: a music mode's own files in turn
+            log("Found %d music mode file(s) that play %d more file(s) in turn (%d of them at "
+                "random)." % (len(_mt), sum(n for _r, _m, n in _mt),
+                              sum(1 for r, m, _n in _mt if m in (modes.mode_random.get(r) or ()))),
+                "info")
     if modes.turns:
         log("Found %d sound(s) that play %d more file(s) in turn." % (
             len(modes.turns), sum(map(len, modes.turns.values()))), "info")
@@ -10677,6 +10686,16 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         if song:
             room = max(room + sum(emitted_length(int(byidx[i].get("length", 0) or 0))
                                   for i in parts) for parts in song.values())
+        if _SMo.is_mode_turn(mode):
+            # PAD-638: a music mode's own file in turn plays for as long as that mode's file
+            # (its descriptors declare that file's length)
+            _m = _SMo.mode_turn_of(mode)[0]
+            _own = next((u for u in used if u["rel"] == rel and int(u["mode"]) == _m), None)
+            if _own is None:
+                log("%s: %s is not put on this card: the slot's file for mode %d is not on it."
+                    % (who, what, _m), "warning")
+                continue
+            room = int(_own["frames"])
         level_ref = max([slot] + rest, key=lambda i: (int(byidx[i].get("length", 0) or 0), -i))
         entry = {"rel": rel, "slot": int(slot), "mode": int(mode), "name": modes.name(mode),
                  "level_ref": int(level_ref), "db": db}
@@ -10685,6 +10704,10 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         if bodies:
             entry["bodies"] = {int(s): [int(i) for i in parts] for s, parts in bodies.items()}
         key = (slot, wav, db, None if longer_ok else room)
+        if not _SMo.is_turn(mode) and (modes.mode_turns.get(rel) or {}).get(mode):
+            # PAD-638: a mode file with files in turn of its own: its record is its own (the
+            # runtime turns that record's key), never shared with another mode's
+            key = key + (mode,)
         if key in hosted:
             # the same file at the same loudness in another mode of this slot: its record
             host, want = hosted[key]
@@ -11076,8 +11099,16 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     bsids, tsids = _bank_sid_lines(params, banked, list_ids or {}, log)
     attract = _attract_lines(params, [u for u in used if _SMo.is_attract(u["mode"])],
                              modes, log)
+    # PAD-638: a music mode's own files in turn are turned at that mode file's record (one in
+    # image.bin: a mode file in a sound bank is played by a bank sound id, never its key)
+    mode_hosts = {(u["rel"], int(u["mode"])): int(u["host"]) for u in used
+                  if not _SMo.is_turn(u["mode"])}
+    for u in banked:
+        if _SMo.is_mode_turn(u["mode"]) or not _SMo.is_turn(u["mode"]):
+            mode_hosts.pop((u["rel"], int(u["mode"])), None)
     turns = _turn_key_lines(params, [u for u in used if _SMo.is_turn(u["mode"])
-                                     and not _SMo.is_attract(u["mode"])], log)
+                                     and not _SMo.is_attract(u["mode"])], log,
+                            mode_hosts=mode_hosts)
     used_modes = [u for u in used if not _SMo.is_turn(u["mode"])]
     try:
         sounds = (_sound_mode_descriptors(gr_path, staged, params, sites, used_modes, log)
@@ -11104,8 +11135,15 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     # PAD-638: the slots whose files in turn play at random, by the key their turn lines name
     byidx = {p["idx"]: p for p in params}
     randoms = sorted({bytes(byidx[int(u["slot"])]["findkey"]) for u in used + banked
-                      if _SMo.is_turn(u["mode"]) and u.get("lines") and u["rel"] in modes.random
+                      if _SMo.is_turn(u["mode"]) and not _SMo.is_mode_turn(u["mode"])
+                      and u.get("lines") and u["rel"] in modes.random
                       and (byidx.get(int(u["slot"])) or {}).get("findkey")})
+    for u in used:                            # PAD-638: a music mode's own, by its file's record
+        if _SMo.is_mode_turn(u["mode"]) and u.get("lines"):
+            _m = _SMo.mode_turn_of(u["mode"])[0]
+            hp = byidx.get(mode_hosts.get((u["rel"], _m)))
+            if _m in (modes.mode_random.get(u["rel"]) or ()) and hp and hp.get("findkey"):
+                randoms = sorted(set(randoms) | {bytes(hp["findkey"])})
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
@@ -11240,17 +11278,27 @@ def _attract_lines(params, used, modes, log):
             "files": files}
 
 
-def _turn_key_lines(params, used, log):
+def _turn_key_lines(params, used, log, mode_hosts=None):
     """PAD-565: ``[(k, slot key, file k's key)]`` - for each slot's file k in turn (*used*, its
     pseudo mode), the record key the game looks the slot up by and its file's record's, off the
     grown bank's params (``sounds.cfg`` ``turn`` lines: the runtime swaps the looked-up key in
     turn). An entry whose keys did not come out of the bank is left out and logged; one that
-    landed gets ``lines`` 1 (the card's record names it)."""
+    landed gets ``lines`` 1 (the card's record names it). PAD-638: a music mode's own file in turn
+    is turned at that mode file's record instead (*mode_hosts* ``{(rel, mode): host idx}``, the
+    mode files in image.bin); one whose mode file is not there is left out."""
     from . import sound_modes as _SMo
     byidx = {p["idx"]: p for p in params}
     out = []
     for u in used or ():
         sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
+        if _SMo.is_mode_turn(u["mode"]):
+            _m = _SMo.mode_turn_of(u["mode"])[0]
+            sp = byidx.get((mode_hosts or {}).get((u["rel"], _m)))
+            if sp is None:
+                log("Sounds in turn: %s is left out: the slot's file for mode %d is not in the "
+                    "main sound bank (one in an extra sound bank cannot take turns)."
+                    % (_SMo.what(u["rel"], u["mode"]), _m), "warning")
+                continue
         if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
             log("Sounds in turn: %s is left out: its record did not come out of the grown bank."
                 % _SMo.what(u["rel"], u["mode"]), "warning")
@@ -18793,6 +18841,11 @@ def _game_sounds_for_banks(gr_path, img_path, params, sites, user_grows, edited,
     touched, _w = BB.game_sound_sids({int(i): None for i in edited or ()}, byidx, sites,
                                      mask, slots)
     return ok, why, touched
+
+
+def _SMo_is_mode_turn(mode):
+    from . import sound_modes as _SMo
+    return _SMo.is_mode_turn(mode)
 
 
 def _SMo_is_attract(mode):

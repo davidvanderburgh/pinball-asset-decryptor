@@ -29,15 +29,20 @@ def test_the_stager_and_the_multicard_builder_know_the_store():
     assert '"/mnt/wsl/cards/cardcache" if os.path.isdir("/mnt/wsl/cards/cardcache")' in mk
 
 
-def test_the_store_script_attaches_by_name_and_registers_the_logon_task():
+def test_the_store_script_attaches_by_name_unelevated_and_registers_the_logon_task():
     ps = _text("cardstore.ps1")
-    assert "--vhd --bare" in ps and "--vhd --name $Name" in ps and "$Name = 'cards'" in ps
-    assert "mkfs.ext4 -q -L $Name -m 0 $dev" in ps
-    assert "schtasks /Create /F /TN 'PAD card store' /SC ONLOGON /RL HIGHEST /TR $ps" in ps
-    # the disk steps run elevated; the distro's files are touched unelevated
-    assert "Start-Process powershell.exe -Verb RunAs" in ps
-    assert ps.index("Elevate 'create'") < ps.index('mkfs.ext4') < ps.index("Elevate 'remount'")
+    assert "$Name = 'cards'" in ps and "'--vhd', '--bare'" in ps and "'--vhd', '--name', $Name" in ps
+    # the app's own recipe (core/rigdata.py): diskpart and wsl --mount need no administrator, and the ext4 is
+    # sized for thousands of big files, not millions of small ones
+    assert "RunAs" not in ps and "/RL HIGHEST" not in ps
+    assert "mkfs.ext4 -q -F -L $Name -i 1048576 -J size=64 -m 0 -E lazy_itable_init=1,lazy_journal_init=1 $dev" in ps
+    create = ps[ps.index("    'create' {"):]
+    assert create.index("'--vhd', '--bare'") < create.index("mkfs.ext4") < create.index("AttachByName\n")
+    assert "pinball_decryptor\\data\\pad-cards.vhdx" in ps              # beside the app's work disk
     assert "chmod 1777 $MountPoint $MountPoint/cardcache" in ps
+    # the logon entry is a Startup-folder .cmd: `schtasks /Create /SC ONLOGON` is "Access is denied" unelevated
+    assert "schtasks" not in ps.split("ValidateSet")[1].split("# A Startup-folder")[0]
+    assert "[Environment]::GetFolderPath('Startup')" in ps and "'PAD card store.cmd'" in ps
     assert "\t" not in ps                                          # a path with a tab in it bit once
 
 

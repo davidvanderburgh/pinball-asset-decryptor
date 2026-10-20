@@ -949,6 +949,7 @@ CHALLENGE_MENU_PROVEN = {
     "sword_of_rage_pro-1.19": 4,      # PAD-619 2026-10-19 rig batch_all: the same on the stock Pro card
     "star_wars_le-1.31": 2,           # PAD-619 2026-10-20 rig batch_r30 (the Action Button pressed at the ball start's path choice): the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), the balls getter said 1, ball_end, an extra ball refused, game_over
     "star_wars_pro-1.31": 2,          # PAD-619 2026-10-19 rig 2: the compare-chain menu (no challenge kind of the game's): PAD CHALLENGE appended after Standard and Competition, picked as Standard: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "turtles_pro-1.59": 12,           # PAD-619 2026-10-20 rig batch_r36 (fresh NVRAM; plunged once the game had served, after its turtle select): the wide-entry menu, PAD CHALLENGE after the game's 12, played as Standard (TMNT's challenges are locked until unlocked): START (challenge pick), the end-of-ball call, the balls getter said 1, an extra ball refused, attract after the one ball. Control (batch_r35): a Standard game ended its first ball and served a second
 }
 #: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)
 CHALLENGE_MENU_GAMES_OWN = 7

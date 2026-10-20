@@ -505,7 +505,7 @@ function ModePage({ s, f, off, dis, rs, lim }) {
         ${challengeOn && !dis.challenge ? html`<div class="row wrap" style="padding-left:26px">
           <span class="dim nw" title=${T.challengeLaunch}>its ball launched</span>
           <${Select} value=${f.challenge_launch || "clip"} options=${[{ value: "clip", label: "when its start clip ends" }, { value: "time", label: "a set time after it starts" }, { value: "player", label: "by the player" }]} ns="modes" k="f:challenge_launch" disabled=${off} width=${200} title=${T.challengeLaunch} />
-          ${f.challenge_launch === "time" ? html`<span class="nw"><${Num} k="challenge_launch_s" value=${f.challenge_launch_s} disabled=${off} width=${56} title=${T.challengeLaunch} /> <span class="dim">s</span></span>` : null}
+          ${f.challenge_launch === "time" ? html`<div class="row"><${Num} k="challenge_launch_s" value=${f.challenge_launch_s} disabled=${off} width=${56} title=${T.challengeLaunch} /><span class="dim">s</span></div>` : null}
         </div>` : null}
         ${rs.challenge ? html`<div class="small muted wrap" style="padding-left:26px">${rs.challenge}</div>` : null}`}
         ${[0, 1].map((i) => html`<div class="row wrap">

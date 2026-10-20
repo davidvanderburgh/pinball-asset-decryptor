@@ -881,6 +881,9 @@ CHALLENGE_PROVEN = frozenset({
     "stranger_things-1.13",            # PAD-615 2026-10-19: Default Game Mode 2 (Demogorgon), challenge 0 claimed: DEMO TEST START 7 ms after the pick, the game's Demogorgon Challenge (flag 104) never set; control: it started
     "stranger_things_le-1.12",         # PAD-615 2026-10-19: the same (its Demogorgon Challenge flag 99): mode started, the game's not; control: the game's started
     "stranger_things_le-1.13",         # PAD-615 2026-10-19: the same (flag 104): mode started, the game's not; control: the game's started
+    "godzilla_le-1.16",                # PAD-619 2026-10-19 rig 3: the game-play mode set to King of the Monsters (4) in attract, challenge 0 claimed by its flag: flag 40 cleared at the ball's start, START (challenge pick), the game's end-of-ball call when the mode ended, GAME OVER after the one ball
+    "godzilla_pro-1.15",               # PAD-619 2026-10-19 rig 1: the same on the stock Pro 1.15 card
+    "godzilla_pro-1.16",               # PAD-619 2026-10-19 rig 2: the same on the stock Pro 1.16 card; control (no mode): flags 18 and 40 set, the game's own King of the Monsters
     "jaws_le-1.02",                    # PAD-619 2026-10-19 rig 1: the same as Jaws Pro below on the stock LE card - 8 -> 1 at the ball's start, START (challenge pick), one ball, GAME OVER
     "venom_le-1.07",                   # PAD-619 2026-10-19 rig 2: the game-play mode set to Challenge Mode Low (11) in attract, challenge 0 claimed: 11 -> 0 (Standard) at the ball's start, START (challenge pick), one ball, GAME OVER
     "venom_pro-1.07",                  # PAD-619 2026-10-19 rig 2: the same on the stock Pro card; control (rig 4, no mode): index kept at 11, flag 18, the game's own challenge
@@ -909,6 +912,12 @@ CHALLENGE_MENU_PROVEN = {
     "iron_maiden_pro-1.18": 2, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 2, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
     "munsters_le-1.28": 5,  # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 5, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
     "munsters_pro-1.28": 5, # PAD-619 2026-10-19 rig sweep (job619*.sh), the stock card, hidden, muted: both flipper buttons in attract; PAD CHALLENGE (`challenge new`) appended after the game's 5, picked: START (challenge pick) at the ball's start, one ball, GAME OVER
+    "avengers_infinity_le-1.10": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "avengers_infinity_pro-1.10": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "beatles-1.29": 4,      # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 4, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "led_zeppelin_le-1.22": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "led_zeppelin_pro-1.22": 3, # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 3, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "rush_pro-1.19": 6,     # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
     "star_wars_pro-1.31": 2,          # PAD-619 2026-10-19 rig 2: the compare-chain menu (no challenge kind of the game's): PAD CHALLENGE appended after Standard and Competition, picked as Standard: START (challenge pick) at the ball's start, one ball, GAME OVER
 }
 #: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)

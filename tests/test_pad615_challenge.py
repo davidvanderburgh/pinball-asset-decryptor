@@ -163,7 +163,7 @@ def test_the_named_builds_can_and_the_others_say_why_not():
     assert BARE.why_not("challenge") == ("King Kong Pro 0.97's Player Challenge mode has no list of challenges a "
                                        "mode of yours can take a place in, and no start menu the app can add one to.")
     assert "has not yet seen a mode of yours start from one in the emulator" in UNPROVEN.why_not("challenge")
-    assert not MP.GODZILLA_PRO_1_15.can("challenge")
+    assert MP.GODZILLA_PRO_1_15.can("challenge")                         # PAD-619: King of the Monsters, by its flag
 
 
 def test_every_shipped_build_gets_a_verdict_with_the_game_named():

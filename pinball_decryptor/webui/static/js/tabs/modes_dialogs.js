@@ -1,8 +1,8 @@
 // The Modes tab's dialogs: the game's own modes (the stock timers and awards table), the
-// video cutter ("Cut from a video"), a mode in C's name, and a clip's preview.
+// video cutter ("Cut from a video") and a clip's preview.
 // Python owns the state (modes.stock, modes.film); these only render it and call back.
 
-import { html, useEffect, useRef, useState, Modal, Button, Field, Check, Radio, Select, Table, Note,
+import { html, useEffect, useState, Modal, Button, Field, Check, Radio, Select, Table, Note,
          tip, cx, call, mediaUrl } from "../core/ui.js";
 
 const STOCK_TIP = "The timers, awards and shots of the modes the game shipped with. Pick a row, type a new value (or pick a shot) and press Set. Changes are saved with this project and put on the card by Write, like the Defaults tab. A timer that is an operator setting is the same number the Defaults tab shows (a machine still on the game's default takes the new one when it boots). A number the game works out in code, or one the game never uses in play, can't be changed here; the row says why. To rename a mode, edit its title on the Text tab.";
@@ -134,32 +134,6 @@ export function FilmDialog({ film }) {
     </div>
     <div class=${cx("small wrap", film.error ? "err-ink" : "dim")} role="status" ...${tip(FILM_TIP)}>${film.status}</div>
   <//>`;
-}
-
-// ---------------------------------------------------------------- New code mode
-export function NewCodeDialog({ onClose, blocks }) {
-  const [name, setName] = useState("");
-  const ok = () => { const n = name.trim(); if (!n) return; call(blocks ? "modes.new_blocks_mode" : "modes.new_code_mode", n); onClose(); };
-  return html`<${Modal} title=${blocks ? "New mode from blocks" : "New code mode"} icon=${blocks ? "blocks" : "edit"} onClose=${onClose}
-    footer=${html`<${Button} onClick=${onClose}>Cancel<//><${Button} kind="primary" disabled=${!name.trim()} onClick=${ok}>OK<//>`}>
-    <label class="lbl" for="modes-code-name">What is the mode called?</label>
-    <${Field} id="modes-code-name" value=${name} onChange=${setName} autoFocus onCommit=${(v) => { if (v.trim()) { setName(v); } }} />
-    <div class="small muted">${blocks
-      ? "A mode built from blocks, starting from a small working one on this card's shots to change: what starts it, what scores, what it says and lights. Try it builds it in with the others."
-      : "A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others."}</div>
-    <${EnterKey} onEnter=${ok} />
-  <//>`;
-}
-
-function EnterKey({ onEnter }) {
-  const ref = useRef(onEnter);
-  ref.current = onEnter;
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ref.current(); } };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
-  return null;
 }
 
 // ------------------------------------------------------------------ a clip's preview

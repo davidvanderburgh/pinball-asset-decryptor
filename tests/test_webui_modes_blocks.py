@@ -1,6 +1,6 @@
 """PAD-232: the web Modes tab's third way to make a mode, BLOCKS.
 
-A blocks mode is made from New ▸ Mode from blocks…, listed with a Blocks pill, opened in the
+A blocks mode is made from New mode ▸ Blocks, listed with a Blocks pill, opened in the
 block editor (its program, what is wrong with it, the C it makes and the card's shots, events
 and callouts for the boxes), saved whole by the page, and taken to C with Edit as C. The tab runs
 in-process (tests/webui_harness.py) against a scratch Godzilla Pro 1.15 project.

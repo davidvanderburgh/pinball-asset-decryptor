@@ -96,14 +96,78 @@ button.modes-list-grp:hover { color: var(--ink-2); background: var(--panel-2); }
 
 /* the first mode: three ways in */
 .modes-first .modes-editor-bd { gap: 18px; }
-.modes-first-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.modes-first-opt { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
-.modes-first-opt.rec { border-color: var(--accent); }
 .modes-doc-link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; }
 .modes-doc-link:hover { text-decoration: underline; }
 .modes-doc-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
-.modes-first-opt > .row { gap: 8px; }
-html.bp-1280 .modes-first-grid { grid-template-columns: minmax(0, 1fr); }
+
+/* the new-mode wizard (modes_new.js, PAD-652): a tile per way, then that way's own step */
+.nmw .bd { display: flex; flex-direction: column; gap: 14px; }
+.nmw-blocks { --kc: #8a63e6; }
+.nmw-c { --kc: var(--info); }
+.nmw-form { --kc: var(--ink-3); }
+.nmw-intro { display: flex; flex-direction: column; gap: 4px; }
+.nmw-lead { font-size: 17px; font-weight: 600; color: var(--ink); }
+.nmw-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.nmw-tile { display: flex; flex-direction: column; gap: 12px; text-align: left; padding: 16px; min-width: 0; cursor: pointer;
+  color: var(--ink); font: inherit; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px;
+  border-top: 4px solid var(--kc); transition: border-color .12s, transform .12s, box-shadow .12s, background .12s; }
+.nmw-tile:hover:not(.off), .nmw-tile:focus-visible { border-color: var(--kc); background: color-mix(in srgb, var(--kc) 9%, var(--panel-2));
+  transform: translateY(-2px); box-shadow: var(--shadow); outline: none; }
+.nmw-tile.off { cursor: not-allowed; opacity: .55; }
+.nmw-tile-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nmw-tile-ic { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; flex: none;
+  border-radius: 10px; color: var(--kc); background: color-mix(in srgb, var(--kc) 18%, transparent); }
+.nmw-tile-ic .i { width: 22px; height: 22px; }
+.nmw-tile-title { font-size: 18px; font-weight: 700; }
+.nmw-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--ink-2); background: var(--panel-3); }
+.nmw-badge.ok { color: var(--ok); background: var(--ok-soft); }
+.nmw-badge.info { color: var(--info); background: var(--info-soft); }
+.nmw-pitch { color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.nmw-level { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.nmw-level-lbl { color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+.nmw-level-bar { display: inline-flex; gap: 3px; }
+.nmw-level-bar > span { width: 18px; height: 6px; border-radius: 3px; background: var(--line-2); }
+.nmw-level-bar > span.on { background: var(--kc); }
+.nmw-level-words { color: var(--ink-2); font-weight: 600; }
+.nmw-can { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.nmw-can li { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); }
+.nmw-can li .i { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--ok); }
+.nmw-can li.no { color: var(--ink-3); }
+.nmw-can li.no .i { color: var(--ink-3); }
+.nmw-tile-ft { margin-top: auto; display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; }
+.nmw-work { color: var(--ink-3); flex: 1 1 auto; min-width: 0; }
+.nmw-go { display: inline-flex; align-items: center; gap: 2px; color: var(--kc); font-weight: 600; white-space: nowrap; }
+.nmw-form .nmw-go { color: var(--ink-2); }
+.nmw-go .i { width: 14px; height: 14px; }
+.nmw-tiles.compact .nmw-can li.no { display: none; }
+html.bp-1280 .nmw-tiles.compact { grid-template-columns: minmax(0, 1fr); }
+.nmw-crumb { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); }
+.nmw-step { display: flex; flex-direction: column; gap: 14px; }
+.nmw-name { gap: 6px; }
+.nmw-sub { font-weight: 600; color: var(--ink); }
+.nmw-how { display: flex; flex-direction: column; gap: 8px; }
+.nmw-how-row { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--ink-2); }
+.nmw-num { flex: none; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #fff; background: #8a63e6; }
+.nmw-cols { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; }
+.nmw-col { gap: 10px; min-width: 0; }
+.nmw-agent { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--info) 45%, transparent);
+  background: color-mix(in srgb, var(--info) 8%, transparent); }
+.nmw-agent .row { gap: 8px; color: var(--info); }
+.nmw-brief { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; color: var(--ink); background: var(--bg-2);
+  border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; }
+.nmw-brief:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.nmw-exlist { display: flex; flex-direction: column; gap: 6px; }
+.nmw-exgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.nmw-ex { display: flex; align-items: center; gap: 10px; text-align: left; min-width: 0; padding: 9px 12px; cursor: pointer; font: inherit; font-size: 13px;
+  color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; }
+.nmw-ex > .ellip { flex: 1 1 auto; }
+.nmw-ex:hover:not(:disabled), .nmw-ex:focus-visible { border-color: var(--accent); outline: none; }
+.nmw-ex:disabled { opacity: .5; cursor: not-allowed; }
+.nmw-ex.big { padding: 12px 14px; }
+.nmw-ex.rec { border-color: var(--accent-line); }
+.nmw-ex-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nmw-sdk { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; }
 
 /* one of the game's own modes: a row per number */
 .modes-gm { display: flex; flex-direction: column; gap: 0; }

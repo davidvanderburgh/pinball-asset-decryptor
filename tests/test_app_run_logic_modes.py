@@ -3191,7 +3191,10 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert "about a minute" in bodies["Try it"] and "Cancel" in bodies["Try it"]
     assert "used as it is" in bodies["Try it"] and "Start mode now" in bodies["Try it"]
     code = bodies["Modes written in C"]
-    assert "Blank mode in C" in code and "assets.json" in code and "MODE_SDK.md" in code
+    assert "New mode > C" in code and "assets.json" in code and "MODE_SDK.md" in code
+    assert "copy for an agent" in code                     # PAD-652
+    making = bodies["Making a mode"]
+    assert "recommended" in making and "AI agent" in making and "playground" in making
     assert "Choose your films folder" in code and "Cut film assets" not in code
     stock = bodies["The game's own modes"]
     assert "All to stock" in stock and "Defaults tab" in stock and "Text tab" in stock

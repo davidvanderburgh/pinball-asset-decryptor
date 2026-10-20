@@ -4,7 +4,7 @@
 // page of its numbers, the shots that count as its own and its rewrite in C), a five-page
 // editor, a code mode's Code/Assets panes, every game mode's numbers in one dialog too,
 // the video cutter, a pinned Try it footer, and the progress of reading a card's game
-// build the first time the tab sees it. Everything that makes a mode is under New; the
+// build the first time the tab sees it. Everything that makes a mode is under New mode; the
 // page head carries no buttons, and every tool sits on the page of the mode it changes.
 //
 // Python (tabs/modes.py) owns every decision; this page renders modes.* and edits the
@@ -13,8 +13,9 @@
 import { html, useEffect, useRef, useState, Button, Field, Select, Check, Radio, Chip, Note, Empty,
          InfoBadge, Icon, Progress, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
-import { BlocksEditor, BlocksCode, BLOCKS_WORDS, ProgramBar, useModeProgram } from "./modes_blocks.js";
+import { StockDialog, FilmDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
+import { NewModeWizard, KindTiles } from "./modes_new.js";
+import { BlocksEditor, BlocksCode, ProgramBar, useModeProgram } from "./modes_blocks.js";
 import { PlayfieldView } from "./modes_playfield.js";
 import { LightShowsView } from "./modes_lightshows.js";
 import { RuleCardsView, StoryView, ShotTableView, TimelineView, NodeGraphView } from "./modes_rules.js";
@@ -202,47 +203,8 @@ function ReadingPanel({ r }) {
 }
 
 // ------------------------------------------------------------------ the list
-// New ▾: everything that makes a mode. A blank mode, one from an example, a mode made of
-// blocks (PAD-232), and under
-// Advanced a mode written in C (a blank one from the SDK's template, or one of the C
-// examples) with the Mode SDK's document. With no project, Mode in C's Blank gives Tk's
-// own sentence.
-function exampleItems(s) {
-  return (s.examples || []).filter((x) => !x.code).map((x) => ({ label: x.name, disabled: x.disabled,
-    title: x.name === "KAIJU RUSH" ? "The example that has run on a real machine." : "",
-    onClick: () => call("modes.example", x.name) }));
-}
-
-function codeItems(s, onNewCode) {
-  const code = (s.examples || []).filter((x) => x.code);
-  return [
-    { label: "Blank mode in C…", icon: "edit", title: s.project && s.no_port ? s.no_port : T.codeMode,
-      disabled: !!(s.project && s.no_port),
-      onClick: () => (s.project ? onNewCode() : call("modes.new_code_mode", "")) },
-    ...(code.length ? [{ sep: true }, { header: "Examples in C" },
-      ...code.map((x) => ({ label: x.name, onClick: () => call("modes.code_example", x.name) }))] : []),
-    { sep: true },
-    { label: "Open MODE_SDK.md", icon: "file", title: s.sdk_doc, onClick: () => call("modes.open_sdk_doc") },
-  ];
-}
-
-function newMenuItems(s, onNewCode, onNewBlocks) {
-  const ex = exampleItems(s);
-  return [
-    { label: "Blank mode", icon: "plus", disabled: !s.new_ok, onClick: () => call("modes.new"),
-      title: s.new_ok ? "" : (s.cap_text || s.project_label) },
-    { label: "From an example", icon: "list", disabled: !s.ex_ok || !ex.length, submenu: ex,
-      title: s.ex_ok ? "" : s.ex_tip },
-    { label: "Mode from blocks…", icon: "blocks", disabled: !!(s.project && s.no_port),
-      title: s.project && s.no_port ? s.no_port : BLOCKS_WORDS.newTip,
-      onClick: () => (s.project ? onNewBlocks() : call("modes.new_blocks_mode", "")) },
-    { sep: true },
-    { header: "Advanced" },
-    { label: "Mode in C", icon: "edit", submenu: codeItems(s, onNewCode) },
-    { sep: true },
-    { label: "What a mode can and can't do", icon: "help", title: "Opens the Tips for this tab", onClick: () => call("modes.open_limits_doc") },
-  ];
-}
+// New opens the new-mode wizard (modes_new.js, PAD-652): Blocks, C or the form, then that
+// way's own step. It used to be a drop-down of every way in.
 
 // One row of the list: the person's modes (form, and code with a C pill) and the game's own
 // modes (kind "game", with a count of staged changes).
@@ -268,7 +230,7 @@ function ListRow({ r, i, selIdx, isSel }) {
 // GAME_FOLD_AT of them (a person's choice to open or fold them is kept in this browser).
 const GAME_FOLD_AT = 6;
 
-function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
+function ModeList({ s, onNew, onAllNumbers }) {
   const [fold, setFold] = useStored("pad.modes.game_fold2", "auto");
   const sel = s.sel || {};
   const allGame = s.game_rows || [];
@@ -297,7 +259,7 @@ function ModeList({ s, onNewCode, onNewBlocks, onAllNumbers }) {
   };
   return html`<section class="card modes-list">
     <div class="hd"><span class="h2">Modes</span><span class="sp"></span>
-      <${Button} kind="primary" size="sm" iconRight="down" onClick=${(e) => openMenu(e.currentTarget, newMenuItems(s, onNewCode, onNewBlocks))}>New<//></div>
+      <${Button} kind="primary" size="sm" icon="plus" title="Make a new mode: from blocks, in C, or with the form" onClick=${() => onNew("")}>New mode<//></div>
     <div class="bd modes-list-bd">
       ${rows.length || allGame.length ? html`<div class="list" role="listbox" aria-label="Modes in this project" onKeyDown=${onKey} ref=${listRef}>
         ${allGame.length ? html`<div class="modes-list-grp" role="presentation">Yours</div>` : null}
@@ -1282,10 +1244,9 @@ function CheckNote({ s }) {
 }
 
 // ------------------------------------------------------------------ the first mode
-// A project with no mode of its own yet: the three ways in, the easiest first.
-function FirstMode({ s, onNewCode, onNewBlocks }) {
-  const ex = exampleItems(s);
-  const off = !!s.no_port;
+// A project with no mode of its own yet: the new-mode wizard's three ways, in place. A way
+// opens the wizard at its own step.
+function FirstMode({ s, onNew }) {
   return html`<section class="card modes-editor modes-first">
     <div class="bd modes-editor-bd">
       <div class="stack" style="gap:4px">
@@ -1298,33 +1259,7 @@ function FirstMode({ s, onNewCode, onNewBlocks }) {
       </div>
       ${s.check_wanted && !(s.check || {}).working ? html`<${Note} kind="warn" action=${html`<span class="row nw modes-note-act"><${CheckButton} s=${s} /></span>`}>
         <b>Check this game first.</b> What the app knows of ${s.title_label || "this game"} has never run in the emulator. The check plays one game by itself (about two minutes) and says which shots and events work, before you make a mode.<//>` : null}
-      <div class="modes-first-grid">
-        <div class="modes-first-opt rec">
-          <div class="row wrap"><${Icon} name="list" /><b>From an example</b><${Chip} kind="ok" sm>recommended<//></div>
-          <div class="small muted wrap">A finished mode to play and change.${ex.some((x) => x.label === "KAIJU RUSH") ? " KAIJU RUSH is the one that has run on a real machine." : ""}</div>
-          <div class="row wrap">${ex.length ? ex.map((x) => html`<${Button} key=${x.label} size="sm" kind=${x.label === "KAIJU RUSH" ? "primary" : ""}
-              disabled=${off || x.disabled} title=${x.title} onClick=${x.onClick}>${x.label}<//>`)
-            : html`<span class="small dim">${s.ex_tip || "No example for this game yet."}</span>`}</div>
-        </div>
-        <div class="modes-first-opt">
-          <div class="row"><${Icon} name="plus" /><b>Blank mode</b></div>
-          <div class="small muted wrap">Start empty and fill in the form, page by page.</div>
-          <div class="row"><${Button} size="sm" disabled=${!s.new_ok || off} onClick=${() => call("modes.new")}>Blank mode<//></div>
-        </div>
-        <div class="modes-first-opt">
-          <div class="row wrap"><${Icon} name="blocks" /><b>Build with blocks</b></div>
-          <div class="small muted wrap">${BLOCKS_WORDS.pick}</div>
-          <div class="row"><${Button} size="sm" disabled=${off} title=${s.no_port || BLOCKS_WORDS.newTip} onClick=${onNewBlocks}>Mode from blocks…<//></div>
-        </div>
-        <div class="modes-first-opt">
-          <div class="row wrap"><${Icon} name="edit" /><b>Write one in C</b><${Chip} sm>advanced<//></div>
-          <div class="small muted wrap">For what the form can't do. It starts from the Mode SDK's template.</div>
-          <div class="row wrap">
-            <${Button} size="sm" disabled=${off} title=${s.no_port || T.codeMode} onClick=${onNewCode}>Blank mode in C…<//>
-            <${Button} size="sm" kind="ghost" icon="file" onClick=${() => call("modes.open_sdk_doc")}>MODE_SDK.md<//>
-          </div>
-        </div>
-      </div>
+      <${KindTiles} s=${s} onPick=${onNew} compact />
       ${(s.game_rows || []).length ? html`<div class="small muted wrap">Or change one of the game's own modes: they're listed on the left, under yours, each with its timers, awards and shots.</div>` : null}
     </div>
   </section>`;
@@ -1335,7 +1270,7 @@ export default function ModesTab() {
   const s = useNs("modes");
   if (s.spin) SPIN = s.spin;
   const [stock, setStock] = useState(false);
-  const [newCode, setNewCode] = useState(false);     // "code" | "blocks" | false
+  const [newMode, setNewMode] = useState(null);      // the wizard: { kind: "" | "blocks" | "c" | "form" }
   const [clip, setClip] = useState(null);
   const showClip = (path, title) => setClip({ path, title });
   const withClip = Object.assign({}, s, { _showClip: showClip });
@@ -1347,12 +1282,12 @@ export default function ModesTab() {
     <${CheckNote} s=${s} />
     ${s.insider_note ? html`<div class="modes-note"><${Note} kind="info">${s.insider_note}<//></div>` : null}
     <div class="modes-body">
-      <${ModeList} s=${s} onNewCode=${() => setNewCode("code")} onNewBlocks=${() => setNewCode("blocks")} onAllNumbers=${() => setStock(true)} />
+      <${ModeList} s=${s} onNew=${(k) => setNewMode({ kind: k })} onAllNumbers=${() => setStock(true)} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`
         : s.code && s.code.blocks ? html`<${BlocksPane} s=${withClip} />`
         : s.code ? html`<${CodePane} s=${withClip} />`
         : s.open ? html`<${Editor} s=${s} showClip=${showClip} />`
-        : hasProject && !(s.rows || []).length ? html`<${FirstMode} s=${s} onNewCode=${() => setNewCode("code")} onNewBlocks=${() => setNewCode("blocks")} />`
+        : hasProject && !(s.rows || []).length ? html`<${FirstMode} s=${s} onNew=${(k) => setNewMode({ kind: k })} />`
         : html`<section class="card modes-editor modes-empty">
             <${Empty} icon="modes" title=${hasProject ? "No mode open" : "No project"}>
               ${hasProject ? (s.status || "Pick a mode on the left.") : s.project_label}
@@ -1362,7 +1297,7 @@ export default function ModesTab() {
     <${TryFooter} s=${s} />
     ${stock ? html`<${StockDialog} s=${s} onClose=${() => setStock(false)} />` : null}
     ${s.film ? html`<${FilmDialog} film=${s.film} key=${s.film.seq} />` : null}
-    ${newCode ? html`<${NewCodeDialog} blocks=${newCode === "blocks"} onClose=${() => setNewCode(false)} />` : null}
+    ${newMode ? html`<${NewModeWizard} s=${s} start=${newMode.kind} onClose=${() => setNewMode(null)} />` : null}
     ${clip ? html`<${ClipDialog} path=${clip.path} title=${clip.title} onClose=${() => setClip(null)} />` : null}
   </div>`;
 }

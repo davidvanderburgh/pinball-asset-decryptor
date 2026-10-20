@@ -1075,8 +1075,3 @@ export function BlocksCode({ c, View }) {
     ${View ? html`<${View} text=${b.c || ""} lang="c" />` : html`<pre class="bk-c-src mono">${b.c || ""}</pre>`}
   </div>`;
 }
-
-export const BLOCKS_WORDS = {
-  pick: "Snap blocks together: when a shot is made, score it; if a count gets high enough, start the mode. The app turns them into a mode in C for you.",
-  newTip: "A mode built from blocks: rules like \"when Left ramp is made 3 times, start the mode\", snapped together. For what the form can't say, without writing C.",
-};

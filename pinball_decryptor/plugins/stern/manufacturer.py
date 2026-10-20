@@ -1013,6 +1013,19 @@ class SternManufacturer(Manufacturer):
                 out[rel] = list(uses.get(int(m.group(1)), ()))
         return out
 
+    def sound_variant_counts(self, assets_dir, rels):
+        # PAD-637: Extract's sound_variants.json - the decoded sounds whose
+        # file is several variants of one sound, one after another
+        from .clip_sounds import _IDX_RE, sound_variants
+        got = sound_variants(assets_dir)
+        out = {}
+        for rel in rels:
+            d, _s, name = rel.rpartition("/")
+            m = _IDX_RE.search(name) if d == "audio" and got else None
+            if m and int(m.group(1)) in got:
+                out[rel] = got[int(m.group(1))]
+        return out
+
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games
         # partition, which neither a Whitestar ROM zip nor a Spike 1 card has.

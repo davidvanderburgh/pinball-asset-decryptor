@@ -78,7 +78,20 @@ def _uses_lines(uses):
     if len(uses) > _REQ_TIP_MAX:
         lines.append("and %d more" % (len(uses) - _REQ_TIP_MAX))
     return lines
-_CAT_NAMES = (("music", "Music"), ("sfx", "Sound FX"),
+
+
+def _variants_lines(n, duration):
+    """The Format cell's tip for a file of *n* variants of one sound (PAD-637)."""
+    each = (duration or 0.0) / n
+    return ["This sound comes in %d variants%s; the game plays one of them each "
+            "time, picked by what is happening in the game. The file holds them "
+            "one after another." % (n, ", %.2f s each" % each if each > 0 else ""),
+            "Edit this file and keep its length, and each variant gets its own "
+            "part back. Any other sound becomes every variant, cut to one "
+            "variant's length."]
+
+
+_CAT_NAMES =(("music", "Music"), ("sfx", "Sound FX"),
               ("callouts", "Callouts"), ("other", "Other"))
 _CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
 
@@ -202,6 +215,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._keep = {}             # rel -> bool (JJP)
         self._level = {}            # rel -> int dB (Stern)
         self._uses = None           # rel -> [(request, name)] (PAD-635)
+        self._variants = {}         # rel -> variants its file holds (PAD-637)
         self._keep_whole = []       # ordered rels (Stern Spike 2 grow)
         # PAD-494: a slot's files for the other MUSIC MODES ({rel: {mode: path}}),
         # the modes' names, and the plugin's answer to which slots can have them
@@ -603,10 +617,16 @@ class AudioTab(FindOriginalsMixin, TabService):
                     assets_path, [s.rel_path for s in slots]) if mfr else None)
             except Exception:                           # noqa: BLE001
                 uses = None
+            # PAD-637: which slots' files are several variants of one sound
+            try:
+                variants = (mfr.sound_variant_counts(
+                    assets_path, [s.rel_path for s in slots]) if mfr else None)
+            except Exception:                           # noqa: BLE001
+                variants = None
             if self._scan_id != scan_id:
                 return
             self._post(self._populate_after_scan, slots, scan_id,
-                       assets_path, cats, offer, uses)
+                       assets_path, cats, offer, uses, variants)
 
         self._set_scanning(True)
         threading.Thread(target=_work, daemon=True,
@@ -652,13 +672,14 @@ class AudioTab(FindOriginalsMixin, TabService):
         return True
 
     def _populate_after_scan(self, slots, scan_id, scan_dir, cats=None,
-                             offer=None, uses=None):
+                             offer=None, uses=None, variants=None):
         from ...core import staged_changes
         if self._scan_id != scan_id:
             return
         self._set_scanning(False)
         self._cats = cats or {}
         self._uses = uses if isinstance(uses, dict) else None
+        self._variants = variants if isinstance(variants, dict) else {}
         if self._uses is None and self._sort[0] == "rq":
             self._sort = ("#0", False)
         self.set(req_cap=self._uses is not None, req_tip=_REQ_TIP)
@@ -862,7 +883,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         i = self._row_index.get(rel)
         if i is not None:
             self.patch_item("rows", i, len=slot.duration_str(),
-                            fmt=slot.format_summary())
+                            **self._fmt_cells(slot))
 
     # ------------------------------------------------------------------
     # the on-disk change diff
@@ -1164,10 +1185,13 @@ class AudioTab(FindOriginalsMixin, TabService):
         from ...core import audio_categories as _ac
         cats = self._cats
         by_length = bool(self._music_by_length)
+        variants = self._variants
 
         def _cat_key(s):
             dur = s.duration or _ac.name_duration_seconds(
                 os.path.basename(s.rel_path)) or 0.0
+            # a file of variants plays one of them at a time (PAD-637)
+            dur /= variants.get(s.rel_path, 1)
             return _ac.effective_category(cats.get(s.rel_path, "other"), dur,
                                           by_length)
         return _cat_key
@@ -1175,6 +1199,15 @@ class AudioTab(FindOriginalsMixin, TabService):
     def _level_disp(self, rel):
         db = self._level.get(rel) or 0
         return "%+d dB" % db if db else ""
+
+    def _fmt_cells(self, s):
+        """The Format cell, and its tip when the file is several variants of one
+        sound one after another (PAD-637)."""
+        nv = self._variants.get(s.rel_path)
+        if not nv:
+            return {"fmt": s.format_summary()}
+        return {"fmt": "%s · %d variants" % (s.format_summary(), nv),
+                "fmt_tip": _variants_lines(nv, s.duration)}
 
     def _row(self, s, cat_disp, depth=0):
         rel = s.rel_path
@@ -1206,6 +1239,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         if uses is not None:
             row["rq"] = len(uses)
             row["rq_tip"] = _uses_lines(uses)
+        row.update(self._fmt_cells(s))
         if depth:
             row["d"] = depth
         return row

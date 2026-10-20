@@ -9073,7 +9073,9 @@ static int challenge_balls_veto(unsigned *r, unsigned n)
 {
     static int said;
     (void)r; (void)n;
-    if (!challenge_ours) return 0;
+    /* PAD-619: also from the start menu's pick of one of ours to the game's start - Star Wars ELG reads the setting as
+     * the game starts, before the ball's start hands the game to the mode */
+    if (!challenge_ours && !(own_pending >= 0 && !pm_in_game())) return 0;
     if (!said++) say("challenge game: a mode's - one ball (the balls-per-game getter says 1)");
     return 1;
 }

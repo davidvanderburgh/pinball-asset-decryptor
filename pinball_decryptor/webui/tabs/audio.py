@@ -44,8 +44,8 @@ _TURN_BASE = 100
 _ATTRACT_MAX = 16
 #: PAD-641: what the Attract flipper sounds button says it does
 _ATTRACT_TIP = ("Sounds the machine plays when a flipper button is pressed in attract mode (no game "
-                "being played), one after another, as other Spike 2 games play their callouts. Each "
-                "is played for at most the length of the unused game sound it rides on.")
+                "being played), one after another, in place of the game's own sound there. Each "
+                "is played for at most the length of the game sound it rides on.")
 
 from .. import compat
 from ..find_originals import FindOriginalsMixin

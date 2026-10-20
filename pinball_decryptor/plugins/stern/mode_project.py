@@ -947,6 +947,7 @@ CHALLENGE_MENU_PROVEN = {
     "stranger_things_le-1.13": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.13 card
     "sword_of_rage_le-1.19": 4,       # PAD-619 2026-10-19 rig batch_all: PAD CHALLENGE after the game's 4, picked: START (challenge pick), one ball, GAME OVER
     "sword_of_rage_pro-1.19": 4,      # PAD-619 2026-10-19 rig batch_all: the same on the stock Pro card
+    "star_wars_le-1.31": 2,           # PAD-619 2026-10-20 rig batch_r30 (the Action Button pressed at the ball start's path choice): the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), the balls getter said 1, ball_end, an extra ball refused, game_over
     "star_wars_pro-1.31": 2,          # PAD-619 2026-10-19 rig 2: the compare-chain menu (no challenge kind of the game's): PAD CHALLENGE appended after Standard and Competition, picked as Standard: START (challenge pick) at the ball's start, one ball, GAME OVER
 }
 #: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)

@@ -185,20 +185,21 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   needs a ball_end first. Rechecked every saved run: Star Wars LE 1.31's proof had never ended the ball (the mission
   select waits for the Action Button) - taken off the list, rerun with the button pressed.
 
-## Status by build (2026-10-19, night)
+## Status by build (2026-10-20)
 
-- Start menus proven (CHALLENGE_MENU_PROVEN, 42): Aerosmith LE 1.15/1.16, Avengers LE 1.09/1.10, Pro 1.10, Batman 66
-  1.13/1.14, The Beatles 1.29, Bond LE/Pro 1.06, Deadpool LE 1.14/1.16, Pro 1.16, Elvira 1.13, Foo Fighters LE/Pro
-  1.04, Guardians 1.15, LE 1.14/1.15, Iron Maiden LE 1.16/1.18, Pro 1.18, JP The Pin 1.05, JP LE/Pro 1.16, Led
-  Zeppelin LE/Pro 1.22, Mando LE/Pro 1.45, Munsters LE/Pro 1.28, Rush LE 1.18/1.19, Pro 1.19, Star Wars LE/Pro 1.31,
-  Stranger Things 1.13, LE 1.12/1.13, Sword of Rage LE 1.18/1.19, Pro 1.19.
+- Start menus proven (CHALLENGE_MENU_PROVEN, 46): Aerosmith 1.16, LE 1.15/1.16, Avengers LE 1.09/1.10, Pro 1.10,
+  Batman 66 1.13/1.14, The Beatles 1.29, Bond LE/Pro 1.06, Deadpool LE 1.14/1.16, Pro 1.16, Elvira 1.13, Foo Fighters
+  LE/Pro 1.04, Guardians 1.15, LE 1.14/1.15, Iron Maiden LE 1.16/1.18, Pro 1.18, JP The Pin 1.05, JP LE/Pro 1.16, Led
+  Zeppelin LE/Pro 1.22, Mando LE 1.44/1.45, Pro 1.45, Munsters LE/Pro 1.28, Rush LE 1.18/1.19, Pro 1.19, Star Wars ELG
+  1.10, LE 1.30/1.31, Pro 1.31, Stranger Things 1.13, LE 1.12/1.13, Sword of Rage LE 1.18/1.19, Pro 1.19.
 - A mode in a challenge's place proven (CHALLENGE_PROVEN, 18): Bond LE/Pro, Stranger Things x3, Rush Pro 1.19, Jaws
   LE/Pro, John Wick LE 1.01/1.02, Pro 1.02, Metallica 1.03/1.04, Venom LE/Pro, Godzilla LE 1.16 / Pro 1.15 / 1.16.
-- Not proven, the app says so: Aerosmith 1.16 (the rig's switch table for it is a rewritten copy - coins and flippers
-  miss; a rig fix, not the feature), Star Wars
-  ELG 1.10 (a mode's challenge game plays on to ball 2 - the getter is never asked), TMNT x3 (even the game's own
-  FINAL BATTLE pick plays Standard on the rig), Mando LE 1.44 (its menu resets the cursor every frame: Standard
-  only), Star Wars LE 1.30 (on the rig neither the
-  menu opens with the flipper buttons held nor a plunged ball leaves the trough - its switch table, as Aerosmith 1.16's;
-  three runs, one alone).
+- Not proven, the app says so ("has found its challenges but has not yet seen a mode of yours start from one"): TMNT
+  LE/Pro 1.59, Pro 1.58. Ours plays as Standard now (its challenges are locked until unlocked); on Pro 1.59 the pick
+  started the mode at the ball's start, but the ball never ended - every drain was served back and the challenge's
+  end-of-ball call does nothing in what the game takes for a Standard game; on LE 1.59 Start on our entry ("CHALLENGE /
+  PAD CHALLENGE" on the glass) left the menu up - its lock test (0x194298's value against the entry's last word)
+  refuses it. Pro 1.58's port is thin (no events): nothing to judge a rig run by.
+- Seen on the rig, not this ticket's: Star Wars LE 1.31 froze in its mission select (countdown stuck at 9) when the
+  scoop was hit after the challenge's end-of-ball call; the proof runs play only until the mode has run out.
 - No challenge, said so: King Kong 0.97, X-Men 0.98, D&D x3, Bond 60th (a timed whole game).

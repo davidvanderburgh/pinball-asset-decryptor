@@ -145,3 +145,15 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   by calls (fn 0x5cf38: `0x5cef0(list, kind, ?, flag, caption msg, text msg)` per entry: Standard 0x77a/0x77b, flag
   0x10 Tournament 0x77c/0x77d, ...) - a challenge of a mode's own there means calling 0x5cef0 after the builder and
   finding its pick.
+
+## Round 6 (2026-10-19, late)
+
+- Proven: Batman 66 1.13, JP The Pin 1.05, Iron Maiden LE 1.16 start menus (the older builds' pick kept past the
+  game's start; JP The Pin's buttons are L/R FLIPPER BUTTON). Foo Fighters LE/Pro 1.04 and Mando LE/Pro 1.45: in code
+  (menu_live: live-applied menus, ours as Standard), rig proof to run. Bond 60th: cannot sentence (timed whole game).
+- A port without a game_over event (IM LE 1.16, Elvira, Avengers LE 1.09) is judged by in_game's LAST transition
+  going to 0 and no further ball start (C:/tmp/PAD-619/reverdict.sh) - the end-of-ball call flickers in_game.
+- TMNT 1.59: our entry is appended (13 entries) and picked (made FINAL BATTLE's kind 11, flag 18 set live), but Start
+  (bit 0x80) goes straight to 0xa9918, which clears flags 16-20 / 40 / 41 and leaves the menu - the CONTROL (the
+  game's own FINAL BATTLE picked the same way) also played a Standard game. How TMNT starts that challenge is not in
+  this function (a confirm step, or the choice read elsewhere at the game's start): to find before TMNT can be proven.

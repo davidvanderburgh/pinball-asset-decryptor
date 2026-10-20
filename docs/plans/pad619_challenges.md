@@ -178,5 +178,7 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   miss; a rig fix, not the feature), Star Wars
   ELG 1.10 (a mode's challenge game plays on to ball 2 - the getter is never asked), TMNT x3 (even the game's own
   FINAL BATTLE pick plays Standard on the rig), Mando LE 1.44 (its menu resets the cursor every frame: Standard
-  only), Star Wars LE 1.30 (the menu does not open on the rig).
+  only), Star Wars LE 1.30 (on the rig neither the
+  menu opens with the flipper buttons held nor a plunged ball leaves the trough - its switch table, as Aerosmith 1.16's;
+  three runs, one alone).
 - No challenge, said so: King Kong 0.97, X-Men 0.98, D&D x3, Bond 60th (a timed whole game).

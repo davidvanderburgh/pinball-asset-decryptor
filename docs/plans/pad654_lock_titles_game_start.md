@@ -60,6 +60,7 @@ answers (cmd 51/53/54 board motors, cmd 41 + short 40 coil motors; docs/plans/no
 At Start the game configures two axes with a 23-byte cmd 32 (`32 01 c8 e1 00 42 ...` and `32 00 00
 e1 00 41 40 ...`), then cmd 34 / 36, and from then on polls cmd 38 and 39 about 1000 times a second
 (62360 of each in 60 game-seconds): a stepper driver waiting for a status nobody gives.
+Done in PAD-656: it is PAD-393's stepper with two axes (`docs/plans/pad656_dragon_stepper.md`).
 
 ## TMNT LE 1.59: the van stocks the glider
 

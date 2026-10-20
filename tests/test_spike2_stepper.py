@@ -44,6 +44,14 @@ DOWN_7500 = "8a133100b4e214050000b80b0000b80b00000000fd00"   # -7500 (floor 0 ->
 UP_2500 = "8a133100c40914050000b80b0000b80b00000000c600"     # +2500 (floor 3 -> 2)
 STATUS = "8a02383c07"
 
+#: dungeons_and_dragons_le 1.10, node 10, as sent (PAD-656): the dragon's two axes, configured and homed
+#: once at boot. Left-right: byte 7 = 0x41 LR HOME, byte 8 = 0x40 LR AWAY; up-down: byte 7 = 0x42 UD HOME and
+#: no byte 8. Both homed with direction 1 (godzilla's building with 0).
+DND_UD_CONFIG = "8a143201c8e1004200a080500000000005007d00005200"
+DND_UD_HOME = "8a043401013c00"
+DND_LR_CONFIG = "8a14320000e1004140a080500000000005007d0000dc00"
+DND_LR_HOME = "8a043400013d00"
+
 HARNESS = r"""
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,9 +77,11 @@ int main(int argc, char **argv)
             char *e;
             now_ms = strtoul(s + 1, &e, 10);
             stepper_tick((unsigned)strtoul(e + 1, 0, 10));
-        } else if (s[0] == 's') {           /* s<node> - a status poll, motor 0 */
+        } else if (s[0] == 's') {           /* s<node>[:<motor>] - a status poll */
             unsigned char p[5] = {0, 0, 0, 0, 0};
-            int r = stepper_status((unsigned)strtoul(s + 1, 0, 10), 0, p);
+            char *e;
+            unsigned nid = (unsigned)strtoul(s + 1, &e, 10);
+            int r = stepper_status(nid, *e == ':' ? (unsigned)strtoul(e + 1, 0, 10) : 0, p);
             printf("S %%lu %%d %%d %%02x\n", now_ms, r, (short)(p[0] | (p[1] << 8)), p[4]);
         } else {                            /* f<hex> - a frame on the wire   */
             unsigned char f[64];
@@ -116,7 +126,7 @@ def sbin(tmp_path_factory):
     assert state, "the stepper state declarations moved - update this test"
     body = "\n".join([state.group(0)] + [_extract(src, n, "hwshim.c") for n in (
         "stepper_on", "stepper_env", "stepper_sps", "stepper_travel", "stepper_pos", "stepper_switches",
-        "stepper_tick", "stepper_go", "stepper_note", "stepper_status")])
+        "stepper_tick", "stepper_go", "stepper_ends", "stepper_note", "stepper_status")])
     d = tmp_path_factory.mktemp("stepper")
     (d / "stepper.c").write_text(HARNESS % body, encoding="utf-8")
     exe = d / ("stepper.exe" if os.name == "nt" else "stepper")
@@ -182,6 +192,46 @@ def test_switched_off(sbin):
 def test_home_down_swaps_the_switches(sbin):
     edges, _ = _run(sbin, ["t0:10", CONFIG, HOME, "t750:10"], PAD_STEPPER_HOME="down")
     assert (750, 10, 1, 1) in edges
+
+
+def test_dnd_dragon_axes_home_on_their_home_switches(sbin):
+    """PAD-656: the one-switch up-down axis is a stepper too, and direction 1 homes each axis to byte 7's input,
+    the one the game names HOME. Before, the up-down axis went unanswered (zero status for ever) and left-right
+    homed onto LR AWAY: 'Dragon Jam - DEVICE MALFUNCTION'."""
+    edges, st = _run(sbin, ["t0:10", DND_UD_CONFIG, DND_UD_HOME, DND_LR_CONFIG, DND_LR_HOME, "s10:1", "s10:0",
+                            "t1000:10", "s10:1", "s10:0"])
+    assert st == [(0, 1, 3750, "02"), (0, 1, 3750, "02"), (1000, 1, 0, "04"), (1000, 1, 0, "04")]
+    made = {(nid, bit) for _ms, nid, bit, level in edges if level}
+    assert made == {(10, 2), (10, 1)}           # UD HOME and LR HOME; never LR AWAY (input 0)
+
+
+#: and the attract swing that follows (PAD_NB_TRACE=1, 2026-10-20): left-right +50, then up-down +69 and back
+DND_LR_50 = "8a133100320090000000d0070000d00700000000c200"
+DND_UD_UP = "8a133101450090010000d0070000d00700000000ad00"
+DND_UD_DOWN = "8a133101bbff90000000d0070000d007000000003900"
+
+
+def test_dnd_moves_are_positive_from_home(sbin):
+    """Homed with direction 1, the positions lie ABOVE home: +69 lifts the head off UD HOME and -69 brings it back
+    on. (Godzilla's below-home clamp held every dragon move at 0.)"""
+    edges, st = _run(sbin, ["t0:10", DND_UD_CONFIG, DND_UD_HOME, DND_LR_CONFIG, DND_LR_HOME, "t1000:10",
+                            DND_LR_50, DND_UD_UP, "t1100:10", "s10:0", "s10:1",
+                            DND_UD_DOWN, "t1200:10", "s10:1"])
+    assert st == [(1100, 1, 50, "04"), (1100, 1, 69, "04"), (1200, 1, 0, "04")]
+    ud, level = [], None
+    for ms, _nid, bit, lv in edges:             # the UD HOME input's changes
+        if bit == 2 and lv != level:
+            ud.append((ms, lv))
+            level = lv
+    assert ud == [(0, 0), (1000, 1), (1000, 0), (1200, 1)]   # between; homed; lifted; back on
+    assert (1000, 10, 1, 0) in edges            # LR leaves LR HOME
+
+
+def test_direction_zero_homes_to_byte_8(sbin):
+    """The same frames homed the other way: left-right to LR AWAY's input, up-down to the only input it has."""
+    edges, _ = _run(sbin, ["t0:10", DND_UD_CONFIG, DND_UD_HOME[:8] + "00" + DND_UD_HOME[10:],
+                           DND_LR_CONFIG, DND_LR_HOME[:8] + "00" + DND_LR_HOME[10:], "t1000:10"])
+    assert {(nid, bit) for _ms, nid, bit, level in edges if level} == {(10, 2), (10, 0)}
 
 
 # ---- the runtime's building section -------------------------------------------------------------

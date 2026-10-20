@@ -916,3 +916,9 @@ value challenge_scores_cat_2  12
 value challenge_scores_cat_3  13
 # CHALLENGE CHAMPION
 value challenge_scores_cat_4  14
+
+# ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
+site  ball_launch         0x003f382c 0xe92d4010 0xe30b44d4
+value ball_launch_flag       12
+value ball_launch_wait_flag  13
+site  challenge_plain_0   0x0018dd50 0xe92d4038 0xe1a05000

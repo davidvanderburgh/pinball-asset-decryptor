@@ -866,7 +866,8 @@ _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block
                         r"data game_play_modes|value game_play_mode_at|value challenge_mode_\w+|"
                         r"site challenge_balls(?:_2)?|site challenge_extra_ball|"   # portchallenge.py (PAD-619: + the balls-per-game getters, the extra-ball test)
                         r"site challenge_end_ball|"   # PAD-630
-                        r"site challenge_score(?:s|_entry)|value challenge_scores_cat_\d+)\b")   # PAD-640
+                        r"site challenge_score(?:s|_entry)|value challenge_scores_cat_\d+|"   # PAD-640
+                        r"site ball_launch|value ball_launch_(?:wait_)?flag|site challenge_plain_\d+)\b")   # PAD-643
 
 
 def generated(key, rest):

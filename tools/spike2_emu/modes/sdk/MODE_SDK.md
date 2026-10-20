@@ -3858,7 +3858,10 @@ the game's own (flags 29, 37). The start menu on every build of the generation: 
 * **Start menus of other shapes** - Elvira's count lives in r5 for the whole loop (`value challenge_menu_count_reg`:
   the frame is hooked with every register saved); Star Wars LE/Pro picks with a compare chain and has no challenge
   kind at all; Foo Fighters, Mando 1.45 and Jurassic Park LE/Pro apply the shown entry live and Start only leaves
-  the menu (20-byte entries on Mando and JP); TMNT's entries are 24 bytes with the kind at +4. Where the menu has
+  the menu (20-byte entries on Mando and JP; Mando LE 1.44 keeps its buttons and cursor in registers, reads the
+  buttons at the loop's foot and its pick as a byte); TMNT's entries are 24 bytes with the kind at +4, and its
+  challenges are locked until a player unlocks them (Start on a locked one plays Standard), so ours play as
+  Standard there too. Where the menu has
   no challenge kind, ours play as Standard (`value challenge_menu_kind 0`, `value challenge_menu_sets_on 1`): the
   pick is hooked where r3 points into the entry (`value challenge_menu_pick_back`), ours is made Standard's kind in
   the entry itself and known after by the name it points to, and the ball's start hands the game to the mode -
@@ -3869,7 +3872,12 @@ the game's own (flags 29, 37). The start menu on every build of the generation: 
 
 The older builds (Batman 66 1.13, Iron Maiden LE 1.16, ...) dispatch the ball's start before the game's: a pick taken
 in the last 2 s survives the game's start, and also has `site challenge_balls_2` (a per-player sum of the setting)
-answer 1. A port without a `game_over` event is proven by in_game last going to 0 with no second ball.
+answer 1. A port without a `game_over` event is proven by a `ball_end` and then in_game last going to 0 with no second
+ball - the end-of-ball call flickers in_game to 0 without ending anything, so in_game alone is not proof.
+
+The ball's end asks the extra-ball test (`site challenge_extra_ball`, one shape on every build: the count byte, non-zero
+takes one and the ball is played again) before the balls-per-game getter. An extra ball earned in a mode's challenge
+game is not played: the runtime has the test say none while one runs (Star Wars ELG 1.10 played one as a second ball).
 
 **The challenge's end ends the ball (PAD-630).** The game's own challenge, once it is over, ends the ball: Ahoy Mr.
 Bond's ending (LE `0x1cda4`), in a challenge game, clears its running flag and calls the framework's "end this ball

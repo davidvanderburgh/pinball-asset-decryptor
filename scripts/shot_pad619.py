@@ -11,6 +11,8 @@ Writes into <out_dir>:
 - <prefix>_deadpool_starts.png  the same on Deadpool Pro 1.16: on the branch, A new challenge of its own
 - <prefix>_jaws_starts.png      the same on Jaws Pro 1.02: on the branch, a challenge game of 4th of July (the game-play
                                 mode's index)
+- <prefix>_mando_starts.png     the same on Mando LE 1.44: on the branch, A new challenge of its own (its start menu
+                                read through registers); before it, no challenge at all
 """
 
 import json
@@ -26,7 +28,8 @@ import webui_shot  # noqa: E402
 
 CARDS = {"rush": ("rush_pro-1_19_0.Release.16G.sdcard.raw", "Rush Pro 1.19 Extract", "rush_pro_1_19"),
          "deadpool": ("deadpool_pro-1_16_0.Release.8G.sdcard.raw", "Deadpool Pro 1.16 Extract", "deadpool_pro_1_16"),
-         "jaws": ("jaws_pro-1_02_0.Release.16G.sdcard.raw", "Jaws Pro 1.02 Extract", "jaws_pro_1_02")}
+         "jaws": ("jaws_pro-1_02_0.Release.16G.sdcard.raw", "Jaws Pro 1.02 Extract", "jaws_pro_1_02"),
+         "mando": ("mando_le-1_44_0.Release.8G.sdcard.raw", "Mando LE 1.44 Extract", "mando_le_1_44")}
 
 
 def _scroll_to(page, text, block="start"):
@@ -62,12 +65,21 @@ def main():
             def form(page):
                 webui_shot.api(url, "modes.select", slug, "form")
                 time.sleep(3)
+                try:                                             # the log pane squeezes the form: out of the way
+                    page.get_by_text("Hide log").click(timeout=3000)
+                    time.sleep(1)
+                except Exception:
+                    pass
                 _scroll_to(page, "Starts on")
-                _scroll_to(page, "and also", "end")
+                # the choice itself, below the fold of the form's own scrolling panel: the deepest element holding it
+                page.evaluate("""(t) => { const all = [...document.querySelectorAll('*')].filter((e) =>
+                    e.textContent.includes(t)); const h = all[all.length - 1]; if (h) h.scrollIntoView({ block: 'center' }); }""",
+                              "a challenge game of")
+                time.sleep(1)
                 out = os.path.join(out_dir, "%s_%s_starts.png" % (prefix, name))
                 page.screenshot(path=out)
                 print("shot", out, flush=True)
-            S._shoot(url, form, height=1100)
+            S._shoot(url, form, height=1500)
         finally:
             proc.terminate()
 

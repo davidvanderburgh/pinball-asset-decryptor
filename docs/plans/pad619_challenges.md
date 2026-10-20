@@ -165,6 +165,26 @@ Every Spike 2 build carries the framework's Player Challenge game: `FG_PLAYER_CH
   Aerosmith 1.16's rig sat with the coin door open (48V disabled) - rerun queued; TMNT's real pick; JP LE/Pro 1.16 and
   Mando LE 1.44 menus; Foo Fighters / Mando 1.45 proofs running (r10).
 
+## Round 7 (2026-10-20)
+
+- The rig's switch list: pass one (no run) reads a title's list out of the binary, and pass two kept it "(cached)"
+  without looking at the dump the same run printed. On Star Wars LE 1.30 (70 of 103 ids) and Aerosmith 1.16 (93 of
+  93) the binary's numbering is not the game's own table's, so Start, both flipper buttons and the trough feeder
+  poked other switches - "the menu does not open", "no ball leaves the trough". mktables now records a list's source
+  and replaces a binary one with the dump; the feeder re-resolves when it is replaced; the shim's at-rest door and
+  trough go by wire (bd661a08, e5ac0eda). Star Wars LE 1.30's menu proven with it.
+- Mando LE 1.44: not "the cursor resets every frame" - the loop returns past that `mov r6, #0`. Its menu keeps the
+  buttons and the cursor in registers and picks with a byte; menu_live reads it. Proven: GAME OVER after the one ball.
+- Star Wars ELG 1.10's second ball was an EXTRA BALL earned 17 s into the challenge game (its count at 0x600114 went
+  0 -> 1): the ball's end takes it before asking the balls getter. `site challenge_extra_ball` (all 61 challenge
+  ports) says none while a mode's challenge game runs.
+- TMNT: its challenges are locked until a player unlocks them ("PLAY AS ALL FOUR TURTLES TO UNLOCK"); Start on a
+  locked one plays Standard, which is why the game's own FINAL BATTLE pick (the control) did too. Ours now play as
+  Standard (kind 0, sets_on) and the ball's start hands the game to the mode.
+- reverdict.sh's in_game rule was fooled by the end-of-ball call's flicker (Aerosmith 1.16 sat on BALL 1); it now
+  needs a ball_end first. Rechecked every saved run: Star Wars LE 1.31's proof had never ended the ball (the mission
+  select waits for the Action Button) - taken off the list, rerun with the button pressed.
+
 ## Status by build (2026-10-19, night)
 
 - Start menus proven (CHALLENGE_MENU_PROVEN, 42): Aerosmith LE 1.15/1.16, Avengers LE 1.09/1.10, Pro 1.10, Batman 66

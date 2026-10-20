@@ -1721,7 +1721,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "roster_found": bool(getattr(p, "roster", ())) or "has found" in p.why_not("roster"),
                 # PAD-615: the game's challenges a mode may take the place of, and whether it names any at all
                 "challenges": list(getattr(p, "challenges", ()) or ()),
-                "challenge_found": bool(getattr(p, "challenges", ())) or "has found" in p.why_not("challenge"),
+                # PAD-619: a build whose start menu takes only challenges of the modes' own (Deadpool, Mando, Star Wars,
+                # ...) names none of the game's - and hid the row that picks one of its own
+                "challenge_found": (bool(getattr(p, "challenges", ())) or bool(getattr(p, "challenge_menu", 0))
+                                    or "has found" in p.why_not("challenge")),
                 # ... and, round 2, whether a mode may be a challenge of its own on the game's start menu (how many fit)
                 "challenge_new": self.CHALLENGE_NEW if getattr(p, "challenge_menu", 0) else "",
                 "challenge_room": int(getattr(p, "challenge_menu", 0) or 0),

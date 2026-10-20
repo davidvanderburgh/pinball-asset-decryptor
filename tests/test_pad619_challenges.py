@@ -360,3 +360,22 @@ def test_the_tab_says_default_game_mode_only_where_it_can_pick_the_challenge():
     assert not P["jaws_pro_1_02"].challenge_by_default and not P["godzilla_pro_1_16"].challenge_by_default
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
     assert '${prof.challenge_by_default ? " To start every game this way' in js
+
+
+def test_the_tab_shows_the_challenge_row_where_only_challenges_of_a_modes_own_fit(tmp_path):
+    """Deadpool Pro 1.16 names none of the game's challenges, but its start menu takes one of a mode's own: the row
+    that picks it was hidden (challenge_found counted the game's named challenges only)."""
+    from tests.test_webui_modes import _card_project, _project
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import preview
+    old = preview.enabled
+    preview.enabled = lambda feature: feature == "modes"
+    try:
+        proj = _card_project(tmp_path / "dp", "deadpool_pro-1_16_0.Release.8G.sdcard.raw")
+        with web_app(tmp_path, mfr="stern") as w:
+            _project(w, proj)
+            w.call("modes.new")
+            prof = w.state("modes")["profile"]
+            assert prof["challenges"] == [] and prof["challenge_new"] and prof["challenge_found"]
+    finally:
+        preview.enabled = old

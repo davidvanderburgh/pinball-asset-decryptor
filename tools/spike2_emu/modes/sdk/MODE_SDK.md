@@ -3923,7 +3923,7 @@ site  challenge_plain_0   0x0018dd50 0xe92d4038 0xe1a05000    # Bond's skill sho
 
 The launch handler fires the auto plunger when a ball waits in it and does nothing otherwise; it has one shape on
 every Spike 2 build with challenges (61 of them, one hit each). When the mode that took the pick begins, the runtime
-calls it for the player, from the tick, every 500 ms while one of the two flags says a ball waits (6 calls at most):
+calls it for the player, from the tick, every 500 ms while one of the two flags says a ball waits (for 10 s at most: the player-control flag can come before the ball reaches the plunger):
 by default once the mode's start clip is over (from 1.5 s after it began, while no clip of ours plays; 30 s at
 most; at once with no start clip), else a set time after the mode began, or never. `pm_challenge_launch(slot, ms)`
 says which for a challenge the calling mode holds or added: `PM_LAUNCH_CLIP` (0), `PM_LAUNCH_PLAYER` (-1), or ms. A

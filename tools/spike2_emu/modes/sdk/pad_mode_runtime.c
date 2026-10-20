@@ -9118,7 +9118,7 @@ static int challenge_extra_veto(unsigned *r, unsigned n)
 #define N_PLAIN 4
 #define LAUNCH_CLIP_SETTLE_MS 1500u    /* the start clip begins half a second after the mode: look after that */
 #define LAUNCH_CLIP_MAX_MS 30000u      /* a clip that never ends: launch anyway */
-#define LAUNCH_GIVE_UP_MS 10000u       /* no ball waiting this long after it was due: the player launched it */
+#define LAUNCH_GIVE_UP_MS 10000u       /* nothing launched this long after it was due: the player launches it */
 static unsigned (*plain_orig[N_PLAIN])(unsigned, unsigned, unsigned, unsigned);
 static struct {
     int how;                             /* the picked challenge's setting: 0 its start clip, -1 the player, ms */
@@ -9198,7 +9198,7 @@ static void launch_tick(void)
         return;
     }
     if (lch.calls && now - lch.last < 500) return;
-    if (lch.calls >= 6) {
+    if (lch.calls && now - lch.due > LAUNCH_GIVE_UP_MS) {   /* the ball may reach the plunger after the flag says so */
         say("challenge ball: the game did not launch it after %d calls - the player launches it", lch.calls);
         lch.armed = 0;
         return;

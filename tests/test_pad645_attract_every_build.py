@@ -375,3 +375,20 @@ def test_the_runtime_has_the_games_own_sound_at_a_press_play_the_silence():
     arm = c[c.index("static void att_arm(void)"):]
     arm = arm[:arm.index("\n}\n")]
     assert "att.has_quiet = 0;" in arm and 'hook(fn("sound_worker"), on_sound_worker)' in arm
+
+
+def test_the_games_own_sound_at_a_press_never_keeps_ours_from_playing():
+    """The Beatles 1.29 (emulator): its request 403 comes 1 ms after ours and takes the channel before ours
+    looks its record up, then holds it for about 8 s - the next two presses' sounds were refused."""
+    with open(RUNTIME, encoding="utf-8") as f:
+        c = f.read()
+    edge = c[c.index("static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, "
+                     "unsigned mask)\n{"):]
+    edge = edge[:edge.index("\n}\n")]
+    release = edge[edge.index("/* the release */"):edge.index("if (att.plays && (long)(att.until - now) > 0)")]
+    # at the release: ours never looked up while the game's own took the channel - stop it, play ours again
+    assert "!att.looked && att.quiet_req" in release
+    assert release.index("pm_sound_stop(att.quiet_req)") < release.index("pm_sound(att.request)")
+    # at the next press: the game's own from the last one still holds its channel - stopped first
+    press = edge[edge.index("if (att.plays && (long)(att.until - now) > 0)"):]
+    assert press.index("pm_sound_stop(att.quiet_req)") < press.index("pm_sound(att.request)")

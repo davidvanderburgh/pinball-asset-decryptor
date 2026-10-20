@@ -10569,7 +10569,21 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     now = pm_ms();
     att.edge_at = now;                                  /* PAD-645: the game's own sound comes at either edge */
     closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
-    if ((level & 1u) != closed) return;                 /* the release */
+    if ((level & 1u) != closed) {                       /* the release */
+        if (att.cur >= 0 && !att.looked && att.quiet_req && (long)(att.until - now) > 0) {
+            /* PAD-645: the game's own request at the press (The Beatles 1.29's 403, 1 ms after ours) took the
+             * channel before ours looked its record up: stop it and play ours again */
+            if (pm_sound_active(att.quiet_req)) pm_sound_stop(att.quiet_req);
+            att.swap_until = now + att.ms[att.cur] + 1000;
+            att.until = now + att.ms[att.cur] + ATT_GAP;
+            pm_sound(att.request);
+            if (att.freed++ < 20)
+                say("attract flipper sounds: the game's own request %u took the channel first - file %d again at the "
+                    "release", att.quiet_req, att.cur + 1);
+            att.quiet_req = 0;
+        }
+        return;
+    }
     if (att.plays && (long)(att.until - now) > 0) return;    /* the last one still plays */
     k = (int)(att.next % att.n);
     att.next = (unsigned)(k + 1) % att.n;

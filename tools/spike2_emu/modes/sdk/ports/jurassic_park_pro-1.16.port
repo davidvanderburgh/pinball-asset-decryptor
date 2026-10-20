@@ -568,3 +568,19 @@ text  wizard_film_2   all four T-Rex events, then T-REX
 data  wizard_obj_3    0x007294c8   # its object in the mode table (the block lines'), built at run time
 text  wizard_name_3   Secure Control Room
 text  wizard_film_3   all three Control Room modes
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x0022c244 0xe92d4030 0xe1a05000
+site  challenge_menu      0x000e382c 0xe1a06000 0xe3160080
+site  challenge_menu_pick 0x000e385c 0xe51330c4 0xe3530000
+value challenge_menu_pick_back 196
+value challenge_menu_list_at   508
+value challenge_menu_count_at  60
+value challenge_menu_cap       9
+value challenge_menu_entry     20
+value challenge_menu_kind      0
+value challenge_menu_slot      -1
+value challenge_menu_sets_on   1
+value challenge_menu_caption   1921
+site  challenge_end_ball  0x002116b0 0xe3082492 0xe3402078

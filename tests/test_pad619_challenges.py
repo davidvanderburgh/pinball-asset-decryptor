@@ -324,7 +324,7 @@ def test_bond_60th_says_its_challenge_is_a_timed_whole_game():
     assert not p.can("challenge") and "a whole game played against the clock" in p.why_not("challenge")
 
 
-@pytest.mark.parametrize("key", ("mando_le-1.45", "mando_pro-1.45"))
+@pytest.mark.parametrize("key", ("mando_le-1.45", "mando_pro-1.45", "jurassic_park_le-1.16", "jurassic_park_pro-1.16"))
 def test_mando_live_menu_has_20_byte_entries(key):
     test_the_ports_carry_what_the_finder_reads_off_the_game(key)
     v = _port(key)["value"]

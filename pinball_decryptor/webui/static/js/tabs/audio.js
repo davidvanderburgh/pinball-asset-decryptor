@@ -411,7 +411,7 @@ By default every replacement is gained to the same loudness as the sound it repl
 // -------------------------------------------------------------------- tab
 // Default column widths (px) until the user drags one; the dragged ones are
 // the Tk tree's own (settings.json column_widths.audio, shared with Tk).
-const FIXED = { play: 30, len: 96, fmt: 184, type: 92, loop: 58, keep: 58, lvl: 76 };
+const FIXED = { play: 30, len: 96, fmt: 184, type: 92, rq: 88, loop: 58, keep: 58, lvl: 76 };
 const ROW_H = 32;
 const MIN_W = { "#0": 80, rep: 110 };    // the Tk columns' minwidth
 // A control inside a row: its second click of a double-click does nothing
@@ -631,8 +631,14 @@ export default function AudioTab() {
     { key: "#0", label: "Original Track", sort: "#0", width: name0, titleOf: (r) => r.g ? r.label : r.k,
       render: (r) => html`<${NameCell} r=${r} prefix=${s.prefix} />` },
     { key: "len", label: "Length", sort: "len", width: FIXED.len + "px", num: true, render: (r) => r.len },
-    { key: "fmt", label: "Format", sort: "fmt", width: FIXED.fmt + "px", titleOf: (r) => r.fmt, render: (r) => html`<span class="dim">${r.fmt || ""}</span>` },
+    // PAD-637: a file of several variants of one sound says so, and how Write takes it
+    { key: "fmt", label: "Format", sort: "fmt", width: FIXED.fmt + "px", titleOf: (r) => r.fmt_tip ? undefined : r.fmt,
+      render: (r) => html`<span class="dim" ...${r.fmt_tip ? tip({ head: "Variants", lines: r.fmt_tip }) : {}}>${r.fmt || ""}</span>` },
     { key: "type", label: "Type", sort: "type", width: FIXED.type + "px", render: (r) => r.type || "" },
+    // PAD-635: how many of the game code's sound requests play the sound
+    ...(s.req_cap ? [{ key: "rq", label: "Requests", sort: "rq", title: s.req_tip, width: FIXED.rq + "px", num: true,
+      render: (r) => r.rq == null ? "" : html`<span class=${cx(!r.rq && "warn-ink")} aria-label=${r.rq ? `Played by ${r.rq} sound requests` : "No sound request plays it"}
+        ...${tip({ head: "Sound requests", lines: r.rq_tip })}>${r.rq || "None"}</span>` }] : []),
     ...(col === "loop" || col === "keep" ? [{ key: col, label: html`<span class="aud-hc">${flagName}</span>`, sort: col,
       title: col === "loop" ? T.loop : T.keep, width: FIXED[col] + "px", cls: "aud-flagc",
       titleOf: () => (col === "loop" ? T.loop : T.keep),

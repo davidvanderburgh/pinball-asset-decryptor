@@ -100,9 +100,9 @@ _REV_TAG = ".r%d" % _DERIVE_REV
 _CACHE_KINDS = (
     (_REV_TAG + ".pkl",             re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.pkl$")),
     (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
-    (_REV_TAG + ".sfxnames4.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
-    (_REV_TAG + ".sites1.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
-    (_REV_TAG + ".requests1.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
+    (_REV_TAG + ".sfxnames5.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
+    (_REV_TAG + ".sites2.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
+    (_REV_TAG + ".requests3.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
 )
 
 
@@ -2382,11 +2382,12 @@ def _wav_basename(p, duration_names):
     The prefix is the TRUE decoded play length (header length minus the
     200-sample cursor lead-in, see emitted_length) — the raw header length
     read ~4.5 ms long, so a replacement trimmed to the advertised time got
-    its tail cut at encode (a tester's Replace-tab mismatch)."""
+    its tail cut at encode (a tester's Replace-tab mismatch).  A multi-band
+    record's file holds all its variants, so its prefix is all of them."""
     if not duration_names:
         return "idx%04d.wav" % p["idx"]
-    from .spike2.emulator import emitted_length
-    ms = int(round(emitted_length(p.get("length", 0)) * 1000.0 / 44100.0))
+    from .spike2.emulator import emitted_total
+    ms = int(round(emitted_total(p) * 1000.0 / 44100.0))
     m, rem = divmod(ms, 60000)
     s, ms = divmod(rem, 1000)
     return "%02dm%02ds%03d - idx%04d.wav" % (m, s, ms, p["idx"])
@@ -2430,13 +2431,15 @@ def _sfx_names_cache_path(fp):
     the pre-v0.63.1 maps, ``3`` retires everything built before the menu's
     ``{group_ptr, node_id}`` / sound-id-list indirection was read correctly,
     and ``4`` retires the maps built while the menu table was located by the
-    literal "SE FX " (which found it on two titles out of fourteen).
+    literal "SE FX " (which found it on two titles out of fourteen), and ``5``
+    the maps that read a descriptor's first marker as ``0b 00 00 00`` only
+    (PAD-636).
 
     Also carries the derive revision, because a name map is validated against
     the audio the params point at -- params from a superseded derive can only
     have produced a superseded map."""
     return os.path.join(_params_cache_dir(),
-                        fp[:32] + _REV_TAG + ".sfxnames4.json")
+                        fp[:32] + _REV_TAG + ".sfxnames5.json")
 
 
 def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
@@ -2479,19 +2482,22 @@ def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
 
 
 def _requests_cache_path(fp):
-    """Sibling of the params cache holding ``{request: [idx, ...]}``
+    """Sibling of the params cache holding ``{request: [[idx, ...], [also, ...]]}``
     (:func:`_write_sound_requests`). Carries the derive revision for the same
-    reason the SFX-name map does: the idx it names are the params' records."""
+    reason the SFX-name map does: the idx it names are the params' records.
+    Version 2 added the later parts (PAD-635), version 3 reads each descriptor
+    only as far as the next one starts (PAD-636); an older file is pruned."""
     return os.path.join(_params_cache_dir(),
-                        fp[:32] + _REV_TAG + ".requests1.json")
+                        fp[:32] + _REV_TAG + ".requests3.json")
 
 
 def _write_sound_requests(emu, game_real_path, image_path, params, output_dir,
                           log):
     """Write ``sound_requests.tsv`` at the assets root: every sound REQUEST the
-    game code can ask for, the ``idx`` records its sound ids resolve to, and
-    its Sound Test name (:mod:`.clip_sounds`). The Video tab reads it to name
-    the sound files a clip's code plays.
+    game code can ask for, the ``idx`` records its sound ids resolve to, the
+    records it plays as later parts, and its Sound Test name
+    (:mod:`.clip_sounds`). The Video tab reads it to name the sound files a
+    clip's code plays, the Audio tab to show which requests play each sound.
 
     Resolved through the firmware's own ``get_asset_descriptor`` while *emu*
     is still booted (the Sound Test names' chain); cached per card next to the
@@ -2513,21 +2519,27 @@ def _write_sound_requests(emu, game_real_path, image_path, params, output_dir,
             return 0
         cache = _requests_cache_path(_fingerprint(game_real_path, image_path))
         idx_of = None
+        also = {}
         if os.path.exists(cache):
             try:
                 with open(cache, encoding="utf-8") as f:
-                    idx_of = {int(k): v for k, v in json.load(f).items()}
+                    got = json.load(f)
+                idx_of = {int(k): v[0] for k, v in got.items() if v[0]}
+                also = {int(k): v[1] for k, v in got.items() if v[1]}
             except Exception:
-                idx_of = None
+                idx_of, also = None, {}
         if idx_of is None:
-            idx_of = _cs.resolve_requests(emu, params, lists, fw)
+            idx_of = _cs.resolve_requests(emu, params, lists, fw, also=also,
+                                            ceiling=fragments)
             try:
                 with open(cache, "w", encoding="utf-8") as f:
-                    json.dump({str(k): v for k, v in idx_of.items()}, f)
+                    json.dump({str(k): [idx_of.get(k, []), also.get(k, [])]
+                               for k in set(idx_of) | set(also)}, f)
             except Exception:
                 pass
         _cs.write_requests(os.path.join(output_dir, _cs.REQUESTS_TSV), lists,
-                           idx_of, _cs.menu_names(fw, lists))
+                           idx_of, _cs.menu_names(fw, lists),
+                           also=also if idx_of else None)
         if log:
             log("Mapped %d of the game's %d sound requests to their sounds (%s)."
                 % (len(idx_of), count, _cs.REQUESTS_TSV), "info")
@@ -2793,6 +2805,17 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         # Which sounds each request plays, for the Video tab's "sounds this
         # clip's code plays" (clip_sounds); the resolver needs this emu.
         _write_sound_requests(emu, gr_path, img_path, params, output_dir, log)
+        # The sounds whose file is several variants one after another (PAD-637),
+        # for the Audio tab's Format and Type columns.
+        try:
+            from . import clip_sounds as _cs
+            n_var = _cs.write_variants(output_dir, params)
+            if n_var:
+                log("%d sound(s) on this card are several variants of one sound (the "
+                    "game picks one each time it plays); each extracts as its "
+                    "variants one after another." % n_var, "info")
+        except Exception as e:
+            log("The sound variants list couldn't be written (%s)." % e, "info")
         emu.close()
         emu = None   # decode runs in worker processes (or a fresh emu on fallback)
 
@@ -4391,13 +4414,18 @@ def _classify_audio_edits(byidx, audio_edits, assets_dir):
     file, and has to run before the encode cache is consulted: a clip that was
     fitted on the last build has a cached body for the STOCK slot, and
     replaying that into a grown build would write the trimmed version."""
-    from .spike2.emulator import emitted_length
+    from .spike2.emulator import bands_of, emitted_length
     fits, grows = {}, {}
     for idx, wav in audio_edits.items():
         p = byidx.get(idx)
         want = _wav_frames_44k(_asset_path(assets_dir, wav)) if p else None
         room = emitted_length(p.get("length", 0)) if p else 0
-        if want is None or want <= room:
+        if p is not None and bands_of(p) > 1:
+            # a multi-band record keeps its length: the file is either its
+            # variants one after another or one sound for them all, and a
+            # longer one is trimmed to a variant (see _band_pieces)
+            fits[idx] = wav
+        elif want is None or want <= room:
             fits[idx] = wav
         else:
             grows[idx] = (room, want)
@@ -8028,6 +8056,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         grows = _grows_named_by_a_descriptor(
                             grows, {p["idx"]: p for p in params}, desc_sites,
                             log)
+                        grows = _grows_reencodable(
+                            gr_path, img_path, grows,
+                            {p["idx"]: p for p in params}, log)
                         _stage_done(log, "reading the game's play tables", t0)
                     # the user's longer sounds; the modes' own are FORCED
                     # grows added below, which the bank's budget can't trim
@@ -14278,14 +14309,20 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
     bit-exact over the first ``nblk`` blocks.
 
     The analytic re-encode recovers a per-sample keystream by driving the codec;
-    that recovery is exact for the codecs validated so far but does not yet model
-    every variant (e.g. multi-band sounds, where the companding fires several
-    times per output sample and the captured keystream interleaves).  This
-    self-test catches such sounds so Write can skip them rather than patch a body
-    that would decode to noise -- protecting both the newly-located titles and
-    any multi-band sound in an already-supported title.  Any failure to drive the
+    that recovery is exact for the codecs validated so far but a codec layout it
+    does not model would recover garbage.  This self-test catches such sounds so
+    Write can skip them rather than patch a body that would decode to noise --
+    protecting the newly-located titles and any layout not seen yet (multi-band
+    records failed it until PAD-637 read them).  Any failure to drive the
     recovery (e.g. no companding site located) is treated as 'not valid' so the
-    sound is skipped, never written blind."""
+    sound is skipped, never written blind.
+
+    A multi-band record is valid when every variant is (PAD-637)."""
+    from .spike2.emulator import band_params, bands_of
+    nb = 1 if "band" in p else bands_of(p)
+    if nb > 1:
+        return all(_recovery_valid(emu, gr, sr, band_params(p, k), np, nblk)
+                   for k in range(1, nb + 1))
     secs = (nblk * 200 + 200) / 44100.0
     try:
         out0 = emu.decode(p, max_secs=secs)
@@ -14359,14 +14396,14 @@ def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None,
     (:func:`_write_machine_render`).
 
     Raises :class:`_EncodeVerifyError` on mismatch."""
-    from .spike2.emulator import emitted_length, BLOCK
+    from .spike2.emulator import emitted_total, BLOCK
     # Verification needs a booted emulator and a real slot; without either
     # there is nothing to check against (only unit tests exercising the
     # target-fitting half of the encoders get here).  Both always exist on the
     # Write path.
     if emu is None or "body_off" not in p:
         return
-    n = emitted_length(p["length"])
+    n = emitted_total(p)
     if n <= 0:
         return
     stereo = p["chan"] == 2
@@ -14421,9 +14458,10 @@ def _audit_audio_patches(params, patches, log):
     another patch by at most the deliberate shared-boundary word(s).  Log-only
     — an anomaly warns loudly but never blocks a build (the verify pass is
     the hard gate).  Returns the number of anomalies."""
+    from .spike2.emulator import frame_bytes
     own = {}
     for p in params:
-        s = 4 if p.get("chan") == 2 else 2
+        s = frame_bytes(p)
         for d in (0, 1, 2):                 # delta 0 / -1 / -2 window starts
             own.setdefault(p["body_off"] - s * d, []).append((p, s, d))
     issues = shared = 0
@@ -14475,10 +14513,10 @@ def _slot_end_map(params):
     are packed back-to-back, so the sound ending at another's ``body_off`` is
     the layout predecessor whose tail word(s) a delta<0 encode window
     overlaps (see :func:`_resolve_shared_boundary`)."""
+    from .spike2.emulator import frame_bytes
     out = {}
     for q in params:
-        bps = 4 if q.get("chan") == 2 else 2
-        out[q["body_off"] + bps * q["length"]] = q
+        out[q["body_off"] + frame_bytes(q) * q["length"]] = q
     return out
 
 
@@ -14569,6 +14607,11 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
         def stock_word(abs_off):
             return struct.unpack("<H", bytes(emu.mm[abs_off:abs_off + 2]))[0]
 
+        from .spike2.emulator import band_params, bands_of
+        pred_lane = bands_of(pred)
+        if pred_lane > 1:
+            # a multi-band predecessor's last word is its last variant's
+            pred = band_params(pred, pred_lane)
         pred_ext = _extended_params(pred)
         if pred_ext is None:
             return body
@@ -14592,6 +14635,11 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
             reproduces while reporting near-zero error (EHOH spinner
             idx5102/idx5103: stock R 7 shipped as 3357)."""
             w = (abs_off - pred["body_off"]) // 2
+            if pred_lane > 1:
+                w -= pred_lane - 1
+                if w % pred_lane:
+                    return None
+                w //= pred_lane
             if pred["chan"] == 2:
                 f, sub = w // 2, w % 2
                 i = f - d_p
@@ -14728,6 +14776,9 @@ def _apply_stock_head(emu, p, start, body, tgt, rec, np, log=None):
     try:
         if p.get("chan") == 2:
             return skip("stereo slot; mono only for now")
+        from .spike2.emulator import bands_of
+        if bands_of(p) > 1:
+            return skip("a record of variants; plain sounds only")
         if start != p["body_off"]:
             return skip("shifted delta<0 window, head word is shared")
         head = np.abs(np.asarray(tgt[:BLOCK], np.int64))
@@ -14799,6 +14850,27 @@ def _lowpass_loop(samples, cutoff_hz, np, pad=4096):
 _LEVEL_REF_UNSET = object()
 
 
+#: How far (a fraction of its length) a replacement for a multi-band record may
+#: be off the length Extract wrote it at and still be read as that file edited:
+#: its variants one after another, cut back into them in proportion.
+_BAND_FILE_SLACK = 0.02
+
+
+def _band_pieces(s, n, nb, np):
+    """The audio each of a multi-band record's *nb* variants (each *n* samples
+    long) is given from a replacement *s*.  Extract writes the variants one
+    after another, so a file within :data:`_BAND_FILE_SLACK` of ``nb * n`` is
+    that file edited and is cut back into its *nb* parts; any other sound is the
+    sound the record now plays, whichever variant the game picks, so every
+    variant gets all of it."""
+    s = np.asarray(s, np.int64)
+    whole = nb * n
+    if nb > 1 and abs(len(s) - whole) <= whole * _BAND_FILE_SLACK:
+        cut = [int(round(k * len(s) / float(nb))) for k in range(nb + 1)]
+        return [s[cut[k]:cut[k + 1]] for k in range(nb)]
+    return [s] * nb
+
+
 def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
                  loop=False, orig=_LEVEL_REF_UNSET, blocks=None):
     # Returns encode_sound's ``(start_off, body)`` — the write offset can sit
@@ -14811,7 +14883,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
     # end runs straight into its start - no edge fades, a circular low-pass.
     # *orig* is the loudness reference to match (default: the slot's own stock
     # render); a mode's music bed passes the game's own music.
-    from .spike2.emulator import emitted_length
+    from .spike2.emulator import bands_of, emitted_length
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
     if loop:
@@ -14824,7 +14896,10 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
                    _stock_render(emu, p, np, stereo=False)
                    if orig is _LEVEL_REF_UNSET else orig,
                    _MONO_RANGE, np, headroom, gain_db=gain_db)
-    tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
+    s = np.clip(s, -_MONO_RANGE, _MONO_RANGE)
+    # a multi-band record: one fitted target per variant, back to back
+    tgt = np.concatenate([_fit(v, n, np, fade_ms=fade_ms)
+                          for v in _band_pieces(s, n, bands_of(p), np)])
     seed = _encode_seed_for(p, int(np.abs(tgt).max()))
     tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, seed)
     # *blocks*: a chain encode's block workers (PAD-599, spike2.parallel);
@@ -14843,7 +14918,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
 def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
                    gain_db=None, loop=False, orig=_LEVEL_REF_UNSET,
                    blocks=None):
-    from .spike2.emulator import emitted_length
+    from .spike2.emulator import bands_of, emitted_length
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
     if loop:
@@ -14856,10 +14931,11 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
     a = _fit_level(a, _stock_render(emu, p, np, stereo=True)
                    if orig is _LEVEL_REF_UNSET else orig,
                    _STEREO_RANGE, np, headroom, gain_db=gain_db)
-    L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), n, np,
-             fade_ms=fade_ms)
-    R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
-             fade_ms=fade_ms)
+    a = np.clip(a, -_STEREO_RANGE, _STEREO_RANGE)
+    # a multi-band record: one fitted target per variant, back to back
+    pieces = _band_pieces(a, n, bands_of(p), np)
+    L = np.concatenate([_fit(v[:, 0], n, np, fade_ms=fade_ms) for v in pieces])
+    R = np.concatenate([_fit(v[:, 1], n, np, fade_ms=fade_ms) for v in pieces])
     _seed = _encode_seed_for(
         p, max(int(np.abs(L).max()), int(np.abs(R).max())))
     L = _apply_slot_seed(L, np, _STEREO_RANGE, _seed)
@@ -15339,7 +15415,8 @@ def _chain_encoded(cache, where, emu, row, wav_path, encode, gain_db=None,
         return encode()
     key = None
     try:
-        width = 4 if chan == 2 else 2
+        from .spike2.emulator import frame_bytes
+        width = max(4 if chan == 2 else 2, frame_bytes(row))
         lo = max(0, int(row["body_off"]) - 4 * width)
         window = emu.mm[lo:int(row["body_off"])
                         + width * (int(row["length"]) + 4)]
@@ -17003,9 +17080,10 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
     if not patches:
         return []
     # {start_off: param} for every plausible window start (delta 0 / -1 / -2).
+    from .spike2.emulator import frame_bytes
     owners = {}
     for p in params:
-        s = 4 if p.get("chan") == 2 else 2
+        s = frame_bytes(p)
         for d in (0, 1, 2):
             owners.setdefault(p["body_off"] - s * d, p)
 
@@ -17063,12 +17141,12 @@ def _final_check_one(emu, off, p, body, scrap_check, np):
     blip-free cave keeps all of ours; an appended body starts as a scaffold)."""
     import math
 
-    from .spike2.emulator import BLOCK, emitted_length
+    from .spike2.emulator import BLOCK, bands_of, emitted_length, emitted_total
 
     def dbfs(v):
         return -120.0 if v <= 0 else 20.0 * math.log10(v / 32768.0)
 
-    n = emitted_length(p["length"])
+    n = emitted_total(p)
     step = 4 if p.get("chan") == 2 else 2
     stock = bytes(emu.mm.base[off:off + len(body)]
                   if hasattr(emu.mm, "base")
@@ -17098,7 +17176,12 @@ def _final_check_one(emu, off, p, body, scrap_check, np):
     # those map ~1:1 to output samples (delta near 0), so index by
     # word position clipped into range.
     rev_pk = 0
-    if len(reverted):
+    if len(reverted) and bands_of(p) > 1:
+        # a multi-band word -> its variant's sample, in the joined decode
+        st = int(p["stride"]); w = reverted
+        ri = (w // st) + emitted_length(p["length"]) * ((w % st) // (step // 2))
+        ri = ri[ri < len(s)]
+    elif len(reverted):
         ri = reverted[reverted < step * n] // step
         ri = ri[ri < len(s)]
         if len(ri):
@@ -17759,8 +17842,13 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
 # its old 0.32 s would be cut, or worse, at 0.32 s.  It is moved by the
 # difference between the new and the stock length, which keeps whatever base
 # a multi-part entry had.
+#
+# The op11 marker is ``0b 00 xx 00``: the byte after the zero is the record's
+# band layout, not part of the key (PAD-636: Led Zeppelin LE/Pro 1.22 play
+# their ten multi-band records, stride 12 / 24, behind ``0b 00 01 00`` /
+# ``0b 00 04 00``; no other title on hand uses it).
 _DESC_KEY2_MASK = 0xE0001FFF
-_DESC_OP11 = b"\x0b\x00\x00\x00"
+_DESC_OP11 = re.compile(rb"\x0b\x00.\x00", re.S)
 _DESC_DUR_OFF = 3
 _DESC_DUR_RATE = 4000
 
@@ -17879,15 +17967,18 @@ def _desc_key_mask(params, sites, log=None):
 
 def _op11_payloads(desc):
     """``[(offset, payload8)]`` for every op11 marker in a descriptor, from
-    the first position a primary asset can sit at (see sfx_names)."""
+    the first position a primary asset can sit at (see sfx_names), whatever
+    the marker's parameter byte.  The search goes on after the payload: its
+    eight bytes are a key, never an op."""
     out = []
     p = 9
     while True:
-        p = desc.find(_DESC_OP11, p)
-        if p < 0 or p + 12 > len(desc):
+        m = _DESC_OP11.search(desc, p)
+        if m is None or m.start() + 12 > len(desc):
             return out
+        p = m.start()
         out.append((p + 4, desc[p + 4:p + 12]))
-        p += 4
+        p += 12
 
 
 def _card_sites_key(disk_f, gr_path, img_path):
@@ -17913,7 +18004,7 @@ def _card_sites_key(disk_f, gr_path, img_path):
 
 
 def _sites_cache_path(key):
-    return os.path.join(_params_cache_dir(), key[:32] + _REV_TAG + ".sites1.pkl")
+    return os.path.join(_params_cache_dir(), key[:32] + _REV_TAG + ".sites2.pkl")
 
 
 def _card_descriptor_sites(gr_path, img_path, log=None, card_key=None):
@@ -17949,10 +18040,16 @@ def _card_descriptor_sites(gr_path, img_path, log=None, card_key=None):
 def _descriptor_sites(gr_path, img_path, log=None):
     """Every op11 payload the card's play tables carry, as a list of
     :class:`_DescSite`.  Empty when the resolver can't be located, which a
-    caller treats as "no descriptor names anything"."""
+    caller treats as "no descriptor names anything".
+
+    Only a descriptor's OWN payloads are its sites: the resolver's window
+    runs on into the next descriptor, whose payloads are that one's
+    (PAD-636: on Led Zeppelin Pro 1.22 sid 475's window carries sid 476's
+    record, so growing it moved sid 475's declared duration too: 4.72 s to
+    9.72 s for an 8 s replacement)."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
-    out = []
+    out, found = [], []
     emu = Spike2Emu(gr_path, img_path)
     try:
         emu.boot()
@@ -17964,16 +18061,17 @@ def _descriptor_sites(gr_path, img_path, log=None):
             return out
         for sid in range(SN.sid_ceiling(img_path) + 1):
             r = SN.resolve_descriptor(emu, resolver, buf, sid)
-            if r is None:
-                continue
-            dec0, ks, desc = r
-            d0 = _DESC_DUR_OFF
-            dur = struct.unpack_from("<I", desc, d0)[0]
-            for p, payload in _op11_payloads(desc):
-                out.append(_DescSite(sid, dec0 + p, ks[p:p + 8], payload,
-                                     dec0 + d0, ks[d0:d0 + 4], dur))
+            if r is not None:
+                found.append((sid,) + tuple(r))
     finally:
         emu.close()
+    extents = _descriptor_extents([f[1] for f in found], SN.DESC_WINDOW)
+    d0 = _DESC_DUR_OFF
+    for sid, dec0, ks, desc in found:
+        dur = struct.unpack_from("<I", desc, d0)[0]
+        for p, payload in _own_payloads(desc, extents[dec0]):
+            out.append(_DescSite(sid, dec0 + p, ks[p:p + 8], payload,
+                                 dec0 + d0, ks[d0:d0 + 4], dur))
     return out
 
 
@@ -18005,6 +18103,54 @@ def _grows_named_by_a_descriptor(grows, byidx, sites, log):
                 "trimmed to fit." % idx, "info")
         else:
             kept[idx] = spec
+    return kept
+
+
+def _grows_reencodable(gr_path, img_path, grows, byidx, log):
+    """*grows* less every sound whose codec this app cannot re-encode bit-exact
+    (:func:`_recovery_valid` on its stock record), each dropped with a reason in
+    the log: the encode would skip it, and a skipped grow leaves the play table
+    re-pointed at an appended record nobody encoded.  A multi-band record
+    (PAD-637: Led Zeppelin LE/Pro 1.22's ten, behind ``0b 00 01 00`` /
+    ``0b 00 04 00``; Foo Fighters 1.04's one) is never lengthened: it is
+    re-encoded at its own length instead."""
+    if not grows:
+        return grows
+    import numpy as np
+    from .spike2.codec import GenRecover, StereoRecover
+    from .spike2.emulator import Spike2Emu, bands_of
+    kept = {}
+    for idx in list(grows):
+        p = byidx.get(idx)
+        if p is not None and bands_of(p) > 1:
+            # its appended copy would need every variant's lane laid out anew
+            log("idx %d: this sound plays one of %d variants, which can't be "
+                "lengthened; the replacement is trimmed to fit."
+                % (idx, bands_of(p)), "info")
+            grows = {k: v for k, v in grows.items() if k != idx}
+    if not grows:
+        return grows
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        gr = sr = None
+        for idx, spec in grows.items():
+            p = byidx.get(idx)
+            ok = False
+            if p is not None:
+                if p.get("chan") == 2:
+                    sr = sr or StereoRecover(emu)
+                else:
+                    gr = gr or GenRecover(emu)
+                ok = _recovery_valid(emu, gr, sr, p, np)
+            if ok:
+                kept[idx] = spec
+            else:
+                log("idx %d: this app can't re-encode this sound's codec, so it "
+                    "can't be lengthened; the replacement is trimmed to fit."
+                    % idx, "info")
+    finally:
+        emu.close()
     return kept
 
 
@@ -18060,6 +18206,13 @@ def _mode_sound_grow(gr_path, img_path, params, sites, audio_edits, grows,
             % (name, "its sound record is unknown" if want is not None else
                "its end sound %s is not a WAV this app can read"
                % os.path.basename(mode_sound["wav"])), "warning")
+        return audio_edits, grows, None
+    from .spike2.emulator import bands_of
+    if any(bands_of(rows[i]) > 1 for i in idxs):
+        # a record of variants is never lengthened (_grows_reencodable)
+        log("Modes: %s ends with the game's own time-up call on this card: its "
+            "time-up sound plays one of several variants, which can't be "
+            "lengthened." % name, "warning")
         return audio_edits, grows, None
     audio_edits = dict(audio_edits)
     grows = dict(grows)
@@ -18473,7 +18626,7 @@ def _game_sounds_for_banks(gr_path, img_path, params, sites, user_grows, edited,
         if u and u.get("sid"):
             exclude.add(int(u["sid"]))
     exclude.update(int(x) for x in exclude_sids or ())
-    mask = _desc_key_mask(params, sites) if _mode_family_on() else _DESC_KEY2_MASK
+    mask = _desc_key_mask(params, sites)
     byidx = {p["idx"]: p for p in params}
     ok, why = BB.game_sound_sids(user_grows, byidx, sites, mask, slots, exclude=exclude)
     touched, _w = BB.game_sound_sids({int(i): None for i in edited or ()}, byidx, sites,
@@ -19122,7 +19275,7 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=(),
     ``mask`` is the build's key mask; ``None`` measures it from *params* and
     *sites* (:func:`_desc_key_mask`).  *family* (default: the preview switch,
     :func:`_mode_family_on`) False keeps what a build without the mode editor
-    family does: the one key mask it knew and the declared duration rounded
+    family does: the declared duration rounded
     UP from the header length.
 
     *bank_beds* ``{bed sid: (stock key, stock length, new length)}`` are the
@@ -19136,7 +19289,7 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=(),
     if family is None:
         family = _mode_family_on()
     if mask is None:
-        mask = _desc_key_mask(params, sites) if family else _DESC_KEY2_MASK
+        mask = _desc_key_mask(params, sites)
     writes, expect = {}, {}
     keep = {int(i) for i in keep or ()}
     for sid, (skey, stock_len, new_len) in sorted((bank_beds or {}).items()):
@@ -19295,11 +19448,13 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, ke
     (:func:`_plan_descriptor_repoint`). Returns the ``{off: bytes}`` written."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
-    # the key mask measured per build, and durations that end where the audio
-    # does, are the mode editor family's: the preview switch off keeps the
-    # one mask and the rounding a build without it uses (_mode_family_on)
+    # durations that end where the audio does are the mode editor family's: the
+    # preview switch off keeps the rounding a build without it uses
+    # (_mode_family_on).  The key mask is measured per build either way: Led
+    # Zeppelin's names 11 of Led Zeppelin Pro 1.22's 549 records, so with the
+    # switch off every longer replacement there failed the Write (PAD-636)
     family = _mode_family_on()
-    mask = _desc_key_mask(params, sites, log) if family else _DESC_KEY2_MASK
+    mask = _desc_key_mask(params, sites, log)
     writes, expect = _plan_descriptor_repoint(params, sites, mask, family=family, keep=keep,
                                               bank_beds=bank_beds)
     t_writes, t_want = ({}, {})

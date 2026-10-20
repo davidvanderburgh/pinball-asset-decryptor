@@ -52,7 +52,46 @@ _NO_PROJECT_NOTE = "(no project yet — extract into one on the Extract tab)"
 _TYPE_KEYS = {"Music": "music", "Sound FX": "sfx", "Callouts": "callouts",
               "Other": "other"}
 _CAT_DISP = {"music": "Music", "sfx": "Sound FX", "callouts": "Callouts"}
-_CAT_NAMES = (("music", "Music"), ("sfx", "Sound FX"),
+
+#: PAD-635: the Requests column's heading tip, and how many requests a cell's
+#: tip names before it says how many more there are
+_REQ_TIP = ("How many of the game code's sound requests play this sound. The "
+            "game's code asks for a sound by its request number, and each "
+            "request plays one or more sounds. None = no request plays it: "
+            "the game program never asks for it, so it is most likely a "
+            "leftover the game does not use. Click the heading to sort by it.")
+_REQ_TIP_MAX = 12
+
+
+def _uses_lines(uses):
+    """The Requests cell's tip: the requests that play a sound, by number and
+    Sound Test name."""
+    if not uses:
+        return ["No sound request in the game's code plays this sound: the "
+                "game program never asks for it, so it is most likely a "
+                "leftover the game does not use."]
+    lines = ["Played by %d of the game code's sound requests:" % len(uses)
+             if len(uses) > 1 else
+             "Played by one of the game code's sound requests:"]
+    lines += ["#%d%s" % (r, "  " + n if n else "")
+              for r, n in uses[:_REQ_TIP_MAX]]
+    if len(uses) > _REQ_TIP_MAX:
+        lines.append("and %d more" % (len(uses) - _REQ_TIP_MAX))
+    return lines
+
+
+def _variants_lines(n, duration):
+    """The Format cell's tip for a file of *n* variants of one sound (PAD-637)."""
+    each = (duration or 0.0) / n
+    return ["This sound comes in %d variants%s; the game plays one of them each "
+            "time, picked by what is happening in the game. The file holds them "
+            "one after another." % (n, ", %.2f s each" % each if each > 0 else ""),
+            "Edit this file and keep its length, and each variant gets its own "
+            "part back. Any other sound becomes every variant, cut to one "
+            "variant's length."]
+
+
+_CAT_NAMES =(("music", "Music"), ("sfx", "Sound FX"),
               ("callouts", "Callouts"), ("other", "Other"))
 _CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
 
@@ -67,7 +106,8 @@ _FOLDER_MATCH_EXTS = (".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac",
 _SORT_CFG = (("#0", "Original Track", False), ("len", "Length", True),
              ("fmt", "Format", False), ("type", "Type", False),
              ("rep", "Replacement", False), ("loop", "Loop", True),
-             ("keep", "Full", True), ("lvl", "Level", True))
+             ("keep", "Full", True), ("lvl", "Level", True),
+             ("rq", "Requests", True))
 _SORT_DEFAULT_DESC = {c: d for c, _h, d in _SORT_CFG}
 
 # Keep in step with App._AUDIO_ADV_DEFAULTS (and the Tk dialog).
@@ -174,6 +214,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._loop = {}             # rel -> bool (BOF)
         self._keep = {}             # rel -> bool (JJP)
         self._level = {}            # rel -> int dB (Stern)
+        self._uses = None           # rel -> [(request, name)] (PAD-635)
+        self._variants = {}         # rel -> variants its file holds (PAD-637)
         self._keep_whole = []       # ordered rels (Stern Spike 2 grow)
         # PAD-494: a slot's files for the other MUSIC MODES ({rel: {mode: path}}),
         # the modes' names, and the plugin's answer to which slots can have them
@@ -310,6 +352,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._loop = {}
         self._keep = {}
         self._level = {}
+        self._uses = None
         self._rep_mode = None
         self._scan_dir = ""
         self._dup_groups = None
@@ -568,10 +611,22 @@ class AudioTab(FindOriginalsMixin, TabService):
                     assets_path, [s.rel_path for s in slots]) if mfr else None)
             except Exception:                           # noqa: BLE001
                 offer = None
+            # PAD-635: which of the game's sound requests play each slot
+            try:
+                uses = (mfr.sound_request_uses(
+                    assets_path, [s.rel_path for s in slots]) if mfr else None)
+            except Exception:                           # noqa: BLE001
+                uses = None
+            # PAD-637: which slots' files are several variants of one sound
+            try:
+                variants = (mfr.sound_variant_counts(
+                    assets_path, [s.rel_path for s in slots]) if mfr else None)
+            except Exception:                           # noqa: BLE001
+                variants = None
             if self._scan_id != scan_id:
                 return
             self._post(self._populate_after_scan, slots, scan_id,
-                       assets_path, cats, offer)
+                       assets_path, cats, offer, uses, variants)
 
         self._set_scanning(True)
         threading.Thread(target=_work, daemon=True,
@@ -617,12 +672,17 @@ class AudioTab(FindOriginalsMixin, TabService):
         return True
 
     def _populate_after_scan(self, slots, scan_id, scan_dir, cats=None,
-                             offer=None):
+                             offer=None, uses=None, variants=None):
         from ...core import staged_changes
         if self._scan_id != scan_id:
             return
         self._set_scanning(False)
         self._cats = cats or {}
+        self._uses = uses if isinstance(uses, dict) else None
+        self._variants = variants if isinstance(variants, dict) else {}
+        if self._uses is None and self._sort[0] == "rq":
+            self._sort = ("#0", False)
+        self.set(req_cap=self._uses is not None, req_tip=_REQ_TIP)
         self._sm_offer = offer if isinstance(offer, dict) else None
         if scan_dir != self._scan_dir:
             self.audio_type_var.set("All types")
@@ -823,7 +883,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         i = self._row_index.get(rel)
         if i is not None:
             self.patch_item("rows", i, len=slot.duration_str(),
-                            fmt=slot.format_summary())
+                            **self._fmt_cells(slot))
 
     # ------------------------------------------------------------------
     # the on-disk change diff
@@ -1125,10 +1185,13 @@ class AudioTab(FindOriginalsMixin, TabService):
         from ...core import audio_categories as _ac
         cats = self._cats
         by_length = bool(self._music_by_length)
+        variants = self._variants
 
         def _cat_key(s):
             dur = s.duration or _ac.name_duration_seconds(
                 os.path.basename(s.rel_path)) or 0.0
+            # a file of variants plays one of them at a time (PAD-637)
+            dur /= variants.get(s.rel_path, 1)
             return _ac.effective_category(cats.get(s.rel_path, "other"), dur,
                                           by_length)
         return _cat_key
@@ -1136,6 +1199,15 @@ class AudioTab(FindOriginalsMixin, TabService):
     def _level_disp(self, rel):
         db = self._level.get(rel) or 0
         return "%+d dB" % db if db else ""
+
+    def _fmt_cells(self, s):
+        """The Format cell, and its tip when the file is several variants of one
+        sound one after another (PAD-637)."""
+        nv = self._variants.get(s.rel_path)
+        if not nv:
+            return {"fmt": s.format_summary()}
+        return {"fmt": "%s · %d variants" % (s.format_summary(), nv),
+                "fmt_tip": _variants_lines(nv, s.duration)}
 
     def _row(self, s, cat_disp, depth=0):
         rel = s.rel_path
@@ -1163,6 +1235,11 @@ class AudioTab(FindOriginalsMixin, TabService):
         if tn:
             row["tn"] = len(tn) + 1
             row["tn_tip"] = self._turns_words(rel)
+        uses = self._uses.get(rel) if self._uses else None
+        if uses is not None:
+            row["rq"] = len(uses)
+            row["rq_tip"] = _uses_lines(uses)
+        row.update(self._fmt_cells(s))
         if depth:
             row["d"] = depth
         return row
@@ -1208,6 +1285,9 @@ class AudioTab(FindOriginalsMixin, TabService):
                 return (1 if self._keep.get(s.rel_path) else 0,)
             if col == "lvl":
                 return (self._level.get(s.rel_path, 0),)
+            if col == "rq":
+                uses = self._uses.get(s.rel_path) if self._uses else None
+                return (-1 if uses is None else len(uses), s.rel_path.lower())
             if col == "type":
                 return (_cat_disp(s), s.rel_path.lower())
             return (s.rel_path.lower(),)
@@ -3285,12 +3365,15 @@ class AudioTab(FindOriginalsMixin, TabService):
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.writer(f)
+                uses = self._uses
                 w.writerow(["Original Track", "Length", "Format", "Type",
                             "Replacement", "Changed On Disk", "Loop",
-                            "Full Length", "Level dB"])
+                            "Full Length", "Level dB"]
+                           + (["Game Sound Requests"] if uses is not None
+                              else []))
                 for s in sorted(self._slots, key=lambda q: q.rel_path):
                     rel = s.rel_path
-                    w.writerow([
+                    row = [
                         rel, s.duration_str(), s.format_summary(),
                         _CAT_DISP.get(_cat_key(s), "Other"),
                         self._assign.get(rel, ""),
@@ -3298,7 +3381,12 @@ class AudioTab(FindOriginalsMixin, TabService):
                         "yes" if self._loop.get(rel) else "",
                         "yes" if self._keep.get(rel) else "",
                         self._level.get(rel, "") or "",
-                    ])
+                    ]
+                    if uses is not None:
+                        u = uses.get(rel)
+                        row.append("" if u is None else " ".join(
+                            "#%d" % r for r, _n in u) or "none")
+                    w.writerow(row)
         except OSError as e:
             compat.messagebox.showerror("Export CSV",
                                         "Couldn't write the CSV:\n%s" % e)

@@ -44,6 +44,10 @@ def test_all_current_paths_land_in_one_directory():
     STEM + ".r1.pkl",
     STEM + ".r1.consumed.npy",
     STEM + ".r1.requests1.json",
+    STEM + _REV_TAG + ".requests1.json",     # PAD-635: no later parts
+    STEM + _REV_TAG + ".sfxnames4.json",     # PAD-636: first marker 0b 00 00 00 only
+    STEM + _REV_TAG + ".sites1.pkl",         # PAD-636: next descriptor's payloads
+    STEM + _REV_TAG + ".requests2.json",     # PAD-636: next descriptor's parts
 ])
 def test_superseded_files_are_stale(name):
     assert _is_stale_cache_file(name) is True
@@ -52,8 +56,9 @@ def test_superseded_files_are_stale(name):
 @pytest.mark.parametrize("name", [
     STEM + _REV_TAG + ".pkl",
     STEM + _REV_TAG + ".consumed.npy",
-    STEM + _REV_TAG + ".sfxnames4.json",
-    STEM + _REV_TAG + ".requests1.json",
+    STEM + _REV_TAG + ".sfxnames5.json",
+    STEM + _REV_TAG + ".requests3.json",
+    STEM + _REV_TAG + ".sites2.pkl",
 ])
 def test_current_files_are_not_stale(name):
     """The live cache must survive its own prune."""

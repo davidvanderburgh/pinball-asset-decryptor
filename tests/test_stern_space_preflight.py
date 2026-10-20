@@ -851,6 +851,8 @@ def audio(rig, monkeypatch):
     monkeypatch.setattr(engine, "_descriptor_sites", lambda *a, **k: [])
     monkeypatch.setattr(engine, "_grows_named_by_a_descriptor",
                         lambda grows, *a, **k: grows)
+    monkeypatch.setattr(engine, "_grows_reencodable",
+                        lambda gr, img, grows, *a, **k: grows)
     return params
 
 

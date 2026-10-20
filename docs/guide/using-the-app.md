@@ -326,7 +326,10 @@ It does nothing else, and the machine still reports its scores to
 Insider Connected.
 **Played in (Stern Spike 2 titles whose modes the app can tell apart:
 Godzilla, Uncanny X-Men, Venom, Mandalorian, Star Wars, TMNT, D&D, Jaws,
-King Kong and most other titles whose program is C++).** The *Played in* column names the battles,
+King Kong and the other titles whose program is C++, Deadpool, and the
+titles whose rules are plain C: Aerosmith, Batman 66, Beatles, Elvira 3,
+Guardians, James Bond, Jurassic Park the Pinball, Metallica, Star Wars
+ELG and Stranger Things).** The *Played in* column names the battles,
 multiballs and other modes of the game that play each clip, read from
 the card's game program, and the list beside *All / Changed /
 Unchanged* shows one mode's clips only. *Other parts of the game*
@@ -343,9 +346,13 @@ a direct SD write); clear the replacement and the row follows the
 first again. When the column is missing, one line beside the list says
 why: the project's card image is not on this PC (put it back, or extract
 again), it could not be read, or the game's program does not tell its
-modes apart (Aerosmith, Batman 66, Beatles, Elvira 3 and the other
-titles whose rules are plain C, and Deadpool). In that last case the
-sounds with a clip below still show.
+modes apart. In that last case the sounds with a clip below still show. On a title
+whose rules are plain C, a mode is one the game keeps an audit or a
+running flag for, named as the Modes tab names it (*Love in an Elevator
+Multiball*, *Sweet Emotion*), and a clip is a mode's when the part of
+the program that shows it is that mode's own; a clip shown by code
+several modes share (a mystery award, a select screen) is one of the
+*Other parts of the game*.
 **Sounds with a clip (Stern Spike 2).** A clip and its sound are
 separate files on a Spike 2 card, named differently, and nothing in
 the file names links them. The game's program does, and under the

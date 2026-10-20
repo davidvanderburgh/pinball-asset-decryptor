@@ -63,9 +63,10 @@ def test_the_runtime_swaps_the_looked_up_key_in_turn():
     assert 'str_eq(f[0], "turn")' in c and "sndt_line(f[1], f[2], f[3])" in c
     assert "#define SNDT_MAX        16" in c and SMo.TURN_MAX == 16
     assert "if (sndt_live && r[1]) sndt_lookup(r);" in c
-    assert c.count('hook(fn("sound_lookup"), on_sound_lookup)') == 2
+    assert c.count('hook(fn("sound_lookup"), on_sound_lookup)') == 3
     assert '!lookup_hooked && !hook(fn("sound_lookup"), on_sound_lookup)' in c        # the turns'
     assert '!lookup_hooked && hook(fn("sound_lookup"), on_sound_lookup)' in c         # the modes'
+    assert '!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))' in c   # PAD-641'
 
 
 def test_the_build_writes_each_file_s_record_key_beside_its_slot_s():

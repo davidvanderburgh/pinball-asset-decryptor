@@ -420,6 +420,24 @@ const MIN_W = { "#0": 80, rep: 110 };    // the Tk columns' minwidth
 const once = (fn) => (e) => { e.stopPropagation(); if (e.detail > 1) return; fn(e); };
 const noDbl = (e) => e.stopPropagation();
 
+// PAD-641: the sounds the flipper buttons play in attract mode, in turn: one button whose menu
+// adds a file, plays one or takes one off (or says why this game cannot have them)
+function AttractButton({ a, running }) {
+  const n = (a.files || []).length;
+  const items = a.why
+    ? [{ label: "Why not on this game?", icon: "info", onClick: () => call("audio.attract_action", "why") }]
+    : [{ label: "Add a sound…", icon: "plus", disabled: running || n >= a.max,
+         title: n >= a.max ? `At most ${a.max} sounds` : "Choose a sound file the flipper buttons play in attract mode",
+         onClick: () => call("audio.attract_action", "add") }];
+  if (n) items.push({ sep: true });
+  (a.files || []).forEach((f, i) => {
+    if (!a.why) items.push({ label: `Play sound ${i + 1} (${f})`, icon: "play", onClick: () => call("audio.attract_action", `play:${i + 1}`) });
+    items.push({ label: `Take off sound ${i + 1} (${f})`, icon: "x", disabled: running, onClick: () => call("audio.attract_action", `off:${i + 1}`) });
+  });
+  return html`<span ...${tip({ head: "Attract flipper sounds", lines: a.tip || [] })}><${Button} kind="ghost" icon="audio"
+    onClick=${(e) => openMenu(e.currentTarget, items, { align: "right" })}>${n ? `Attract flipper sounds (${n})` : "Attract flipper sounds"}<//></span>`;
+}
+
 export default function AudioTab() {
   const s = useNs("audio");
   const shell = useNs("shell");
@@ -674,6 +692,7 @@ export default function AudioTab() {
       <${Button} onClick=${() => call("audio.scan")} icon=${s.scanning ? "x" : "refresh"}>${s.scanning ? "Cancel scan" : "Scan"}<//>
       <${Button} icon="folder" disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
       <${Button} icon="search" disabled=${s.running} title=${T.originals} onClick=${() => call("audio.originals_open")}>Find originals…<//>
+      ${s.attract ? html`<${AttractButton} a=${s.attract} running=${s.running} />` : null}
       ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
       <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
         title=${"More: Export CSV, Clear replacements…, Save / load settings" + (s.modes_share ? ", Save / load music modes" : "") + (s.adv_full ? ", Profile vs stock" : "")}

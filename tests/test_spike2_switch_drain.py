@@ -108,6 +108,7 @@ int main(int argc, char **argv)
     edge.desc_via = gen_a ? -1 : 8;
     edge.flags_at = gen_a ? 0x1e : 0x1a;
     edge.polarity_at = gen_a ? 0x20 : 0x1c;
+    edge_shots = 1;                                  /* switches_arm's: the drain's edges are shots (PAD-645) */
     for (i = 1; i < 16; i++) {
         unsigned flags = i == 5 ? 0x400 : i == 6 ? 0x800 : i == 7 ? 0xc00 : i == 9 ? 0x1400 : 0;
         unsigned pol = i == 7 ? 4 : 0;

@@ -23,11 +23,11 @@ other start of ball". MODE_SDK.md "A mode in the game's Challenge list" has the 
   plunger (node 8 coil 4) 2.0 s after the mode began, the top control gate (node 9 coil 6) pulsed + held 20 s 100 ms
   after the launch. Before - none of it, the ball still in the lane 70 s on.
 
-## Left
-
 Also proven (run 1): Bond LE `launch player` (run_player.sh: no launch), `launch 6` (run_t6.sh: +6013 ms), a 4 s
 start clip (run_clip.sh: launched at +4544 ms, as it ended); Bond Pro 1.06 (run_pro.sh, proof_pro.sh, rig_pro/:
 skill shot wrapped, launch +2010 ms, gate 100 ms later with the left flipper button 63 held).
+
+## Left
 
 1. Every other build with challenges (59): a rigbatch sweep from PAD-619's kit (C:/tmp/PAD-619 job619.sh +
    proof619d.sh, stage_menu mode files, RIGSRC -> this worktree) WITHOUT the `plunge` step after Start, verdict

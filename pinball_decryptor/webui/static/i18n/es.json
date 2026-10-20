@@ -12422,5 +12422,12 @@
 "Loudness of sound {} ({})…": "Volumen del sonido {} ({})…",
 "Sound {}'s loudness:": "Volumen del sonido {}:",
 "Loudness of sound {}": "Volumen del sonido {}",
-"**Loudness of sound {} (…)…** gives one file a loudness of its own, from -{} to +{} dB ({} keeps it matched). While **Play sound {}** has it in the Replacement player, the loudness box there is that file's too. Sound {}'s is the sound's own loudness box.": "**Volumen del sonido {} (…)…** da a un archivo un volumen propio, de -{} a +{} dB ({} lo deja igualado). Mientras **Reproducir sonido {}** lo tiene en el reproductor de reemplazo, la casilla de volumen de allí también es la de ese archivo. El del sonido {} es la casilla de volumen del propio sonido."
+"**Loudness of sound {} (…)…** gives one file a loudness of its own, from -{} to +{} dB ({} keeps it matched). While **Play sound {}** has it in the Replacement player, the loudness box there is that file's too. Sound {}'s is the sound's own loudness box.": "**Volumen del sonido {} (…)…** da a un archivo un volumen propio, de -{} a +{} dB ({} lo deja igualado). Mientras **Reproducir sonido {}** lo tiene en el reproductor de reemplazo, la casilla de volumen de allí también es la de ese archivo. El del sonido {} es la casilla de volumen del propio sonido.",
+"Its own sound": "Su propio sonido",
+"Add a sound for {}…": "Añadir un sonido para {}…",
+"Play {} sound {} ({})": "Reproducir {} sonido {} ({})",
+"Loudness of {} sound {} ({})…": "Volumen de {} sonido {} ({})…",
+"Take off {} sound {} ({})": "Quitar {} sonido {} ({})",
+"Mode {} sound {}'s loudness:": "Volumen del modo {} sonido {}:",
+"In a music mode a sound has a file of its own for, that file plays every time, unless that mode's file has sounds in turn of its own: on a sound with music mode files, the menu has a part for each mode (**Add a sound for mode {} (…)…**), with its own One after another / At random and loudness. Its own sound's part plays in every mode the sound has no file for. A mode's sounds play as long as its file.": "En un modo musical para el que un sonido tiene un archivo propio, ese archivo suena siempre, salvo que el archivo de ese modo tenga sus propios sonidos por turnos: en un sonido con archivos de modos musicales, el menú tiene una parte para cada modo (**Añadir un sonido para modo {} (…)…**), con su propio Uno tras otro / Al azar y su volumen. La parte de su propio sonido suena en cada modo para el que el sonido no tiene archivo. Los sonidos de un modo duran lo que su archivo."
 }

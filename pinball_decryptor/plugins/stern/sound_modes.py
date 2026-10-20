@@ -55,6 +55,15 @@ file plays for as long as its slot's sound, so each one is cut to that length. N
 While a music mode gives the slot a file of its own, that file plays every time (its descriptor
 names that file's record, not the slot's).
 
+IN A MUSIC MODE (PAD-638, round 3: "can a set of random variants be assigned to an audio mode
+slot?"): a slot's file for music mode m can have files in turn (or at random) of its own
+(``mode_turns``: ``{rel: {m: [file 2, ...]}}``, ``mode_random``: ``{rel: [m, ...]}``,
+``mode_turn_levels``: ``{rel: {m: {k: dB}}}``). Mode m's descriptors name the mode file's own new
+record, so the game looks THAT record's key up while the setting says m: its ``turn`` / ``random``
+lines name that key, and the runtime swaps it as it does a slot's (no runtime change). Each is cut
+to its mode file's length (the descriptor declares it). They stay in image.bin: a mode file in a
+sound bank is reached by a bank sound id, not its key, so its own files in turn are left out.
+
 AT RANDOM (PAD-638): an owner asked for "random audio variants ... like a jukebox". A slot with
 files in turn can play them AT RANDOM instead (``random``: ``[rel, ...]``, slots with files in
 turn only): each play picks any of its files but the one it played last. The same files, records
@@ -123,6 +132,9 @@ PROVEN = frozenset({"godzilla_le-1.16", "godzilla_pro-1.16"})
 #: SNDT_MAX), and the pseudo mode file k of them is built under (:func:`turn_mode`)
 TURN_MAX = 16
 TURN_BASE = 100
+#: PAD-638: music mode m's file k in turn is built under pseudo mode MODE_TURN_BASE + m * 20 + k
+#: (:func:`mode_turn`; above :data:`TURN_BASE`, so the build treats it as a file in turn)
+MODE_TURN_BASE = 1000
 #: PAD-565: ``<game>-<version>`` of the builds where the sounds in turn were SEEN working: the
 #: LATEST build of every Stern Spike 2 game in the image library (David: "just the latest
 #: versions"), each swept in the emulator (an override set built by Write's own code, the slot's
@@ -183,6 +195,11 @@ class Modes:
     turns: dict = field(default_factory=dict)      # PAD-565: {rel: [file 2, file 3, ...]}
     random: set = field(default_factory=set)       # PAD-638: slots whose files in turn play at random
     turn_levels: dict = field(default_factory=dict)  # PAD-638: {rel: {k: dB}}, file k in turn's own
+    #: PAD-638: a music mode's own files in turn: {rel: {m: [file 2, ...]}}, the slots' modes of
+    #: them that play at random {rel: {m, ...}}, and their loudness {rel: {m: {k: dB}}}
+    mode_turns: dict = field(default_factory=dict)
+    mode_random: dict = field(default_factory=dict)
+    mode_turn_levels: dict = field(default_factory=dict)
     attract: list = field(default_factory=list)    # PAD-641: [file 1, file 2, ...]
     #: PAD-641: the carrier's slot the attract files are built on (a build sets it; never saved)
     attract_rel: str = ""
@@ -204,6 +221,8 @@ class Modes:
     def name(self, mode):
         if is_attract(mode):
             return "in attract"
+        if is_mode_turn(mode):
+            return "%s, in turn" % self.name(mode_turn_of(mode)[0])
         if is_turn(mode):
             return "in turn"
         n = self.names[mode - 1] if 0 < mode <= len(self.names) else ""
@@ -220,6 +239,9 @@ class Modes:
         return ([(rel, m, f) for rel in sorted(self.slots) for m, f in sorted(self.slots[rel].items())]
                 + [(rel, turn_mode(k), f) for rel in sorted(self.turns)
                    for k, f in enumerate(self.turns[rel], 2)]
+                + [(rel, mode_turn(m, k), f) for rel in sorted(self.mode_turns)
+                   for m in sorted(self.mode_turns[rel])
+                   for k, f in enumerate(self.mode_turns[rel][m], 2)]
                 + ([(self.attract_rel, attract_mode(k), f) for k, f in enumerate(self.attract, 1)]
                    if self.attract_rel else []))
 
@@ -227,6 +249,9 @@ class Modes:
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
         sound), or ``None`` for a project saved before mode files had their own. A file in turn
         has a loudness of its own too (PAD-638: ``turn_levels``), 0 unless one was set."""
+        if is_mode_turn(mode):
+            m, k = mode_turn_of(mode)
+            return int(((self.mode_turn_levels.get(rel) or {}).get(m) or {}).get(k, 0) or 0)
         if is_turn(mode):
             return int((self.turn_levels.get(rel) or {}).get(turn_of(mode), 0) or 0)
         if self.levels is None:
@@ -241,7 +266,22 @@ def attract_mode(k):
 
 
 def is_attract(mode):
-    return int(mode) > ATTRACT_BASE
+    return ATTRACT_BASE < int(mode) < MODE_TURN_BASE
+
+
+def mode_turn(m, k):
+    """PAD-638: the pseudo mode music mode *m*'s file *k* in turn (2..:data:`TURN_MAX`) is built
+    under."""
+    return MODE_TURN_BASE + int(m) * 20 + int(k)
+
+
+def is_mode_turn(mode):
+    return int(mode) > MODE_TURN_BASE
+
+
+def mode_turn_of(mode):
+    """``(m, k)``: music mode m's file k in turn, from its pseudo mode."""
+    return divmod(int(mode) - MODE_TURN_BASE, 20)
 
 
 def attract_of(mode):
@@ -261,7 +301,9 @@ def is_turn(mode):
 
 
 def turn_of(mode):
-    """File k of a slot's sounds in turn, from its pseudo mode."""
+    """File k of a slot's sounds in turn, from its pseudo mode (PAD-638: of a music mode's too)."""
+    if is_mode_turn(mode):
+        return mode_turn_of(mode)[1]
     return int(mode) - TURN_BASE
 
 
@@ -277,6 +319,9 @@ def what(rel, mode, name=""):
     base = os.path.basename(str(rel).replace("\\", "/"))
     if is_attract(mode):
         return "flipper sound %d" % attract_of(mode)
+    if is_mode_turn(mode):
+        m, k = mode_turn_of(mode)
+        return "%s's mode %d file %d in turn" % (base, m, k)
     if is_turn(mode):
         return "%s's file %d in turn" % (base, turn_of(mode))
     return "%s's file for mode %d (%s)" % (base, mode, name or default_name(mode))
@@ -287,6 +332,8 @@ def tag(rel, mode):
     base = os.path.basename(str(rel).replace("\\", "/"))
     if is_attract(mode):
         return "flipper sound %d in attract" % attract_of(mode)
+    if is_mode_turn(mode):
+        return "%s (mode %d, file %d in turn)" % ((base,) + mode_turn_of(mode))
     if is_turn(mode):
         return "%s (file %d in turn)" % (base, turn_of(mode))
     return "%s (mode %d)" % (base, int(mode))
@@ -296,6 +343,8 @@ def when(mode):
     """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
     if is_attract(mode):
         return "at a flipper button press in attract (sound %d)" % attract_of(mode)
+    if is_mode_turn(mode):
+        return "while MUSIC MODE is %d, at its turn (file %d)" % mode_turn_of(mode)
     if is_turn(mode):
         return "at its turn (file %d)" % turn_of(mode)
     return "while MUSIC MODE is %d" % int(mode)
@@ -374,6 +423,52 @@ def clean(raw):
                 keep[k] = clean_level(db)
         if keep:
             out.turn_levels[rel] = keep
+    # PAD-638: a music mode's own files in turn, only for a mode the slot has a file for
+    mt = raw.get("mode_turns")
+    for rel, by in (mt.items() if isinstance(mt, dict) else ()):
+        if rel not in out.slots or not isinstance(by, dict):
+            continue
+        for m, files in by.items():
+            try:
+                m = int(m)
+            except (TypeError, ValueError):
+                continue
+            keep = [f for f in (files if isinstance(files, (list, tuple)) else ())
+                    if isinstance(f, str) and f.strip()][:TURN_MAX - 1]
+            if m in out.slots[rel] and keep:
+                out.mode_turns.setdefault(rel, {})[m] = keep
+    mr = raw.get("mode_random")
+    for rel, ms in (mr.items() if isinstance(mr, dict) else ()):
+        keep = set()
+        for m in (ms if isinstance(ms, (list, tuple)) else ()):
+            try:
+                m = int(m)
+            except (TypeError, ValueError):
+                continue
+            if m in (out.mode_turns.get(rel) or {}):
+                keep.add(m)
+        if keep:
+            out.mode_random[rel] = keep
+    ml = raw.get("mode_turn_levels")
+    for rel, by in (ml.items() if isinstance(ml, dict) else ()):
+        for m, v in (by.items() if isinstance(by, dict) else ()):
+            try:
+                m = int(m)
+            except (TypeError, ValueError):
+                continue
+            files = (out.mode_turns.get(rel) or {}).get(m)
+            if not files or not isinstance(v, dict):
+                continue
+            keep = {}
+            for k, db in v.items():
+                try:
+                    k = int(k)
+                except (TypeError, ValueError):
+                    continue
+                if 2 <= k <= len(files) + 1 and clean_level(db):
+                    keep[k] = clean_level(db)
+            if keep:
+                out.mode_turn_levels.setdefault(rel, {})[m] = keep
     attract = raw.get("attract")
     if isinstance(attract, (list, tuple)):
         out.attract = [f for f in attract if isinstance(f, str) and f.strip()][:ATTRACT_MAX]
@@ -409,6 +504,23 @@ def to_json(modes):
         tl = {rel: v for rel, v in tl.items() if v}
         if tl:
             out["turn_levels"] = tl
+    mt = {rel: {str(m): list(f) for m, f in sorted(by.items()) if f and m in (modes.slots.get(rel) or {})}
+          for rel, by in sorted(modes.mode_turns.items())}
+    mt = {rel: by for rel, by in mt.items() if by}
+    if mt:
+        out["mode_turns"] = mt
+        mr = {rel: sorted(str(m) for m in ms if str(m) in mt.get(rel, {}))
+              for rel, ms in sorted(modes.mode_random.items())}
+        mr = {rel: ms for rel, ms in mr.items() if ms}
+        if mr:
+            out["mode_random"] = mr
+        ml = {rel: {str(m): {str(k): int(db) for k, db in sorted(v.items()) if db}
+                    for m, v in sorted(by.items()) if str(m) in mt.get(rel, {})}
+              for rel, by in sorted(modes.mode_turn_levels.items())}
+        ml = {rel: {m: v for m, v in by.items() if v} for rel, by in ml.items()}
+        ml = {rel: by for rel, by in ml.items() if by}
+        if ml:
+            out["mode_turn_levels"] = ml
     if modes.attract:
         out["attract"] = list(modes.attract)
     if modes.levels is not None:
@@ -697,6 +809,10 @@ REC_MODE, REC_FILE = "#mode", "#file"
 REC_TURN = "#turn"
 #: PAD-638: a slot whose files in turn play at random: ``#random <slot idx> <slot rel>``
 REC_RANDOM = "#random"
+#: PAD-638: music mode m's own file k in turn: ``#mturn <m> <k> <slot idx> <record idx> <dB or ->
+#: <slot rel> <the file's own name>``; and ``#mrandom <m> <slot idx> <slot rel>`` when they play at
+#: random
+REC_MTURN, REC_MRANDOM = "#mturn", "#mrandom"
 #: PAD-641: a flipper button sound in attract: ``#attract <k> <slot idx> <record idx> - <slot rel>
 #: <the file's own name>`` (the slot is the carrier's)
 REC_ATTRACT = "#attract"
@@ -743,6 +859,15 @@ def card_record(modes, used):
                                   _rec_word(u["rel"]),
                                   _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
             continue
+        if is_mode_turn(m):
+            mm, k = mode_turn_of(m)
+            files = (modes.mode_turns.get(u["rel"]) or {}).get(mm) or []
+            src = files[k - 2] if 0 <= k - 2 < len(files) else ""
+            db = u.get("db")
+            out.append("\t".join([REC_MTURN, str(mm), str(k), str(int(u["slot"])), _rec_host(u),
+                                  "-" if db is None else str(int(db)), _rec_word(u["rel"]),
+                                  _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
+            continue
         if is_turn(m):
             files = modes.turns.get(u["rel"]) or []
             src = files[turn_of(m) - 2] if 0 <= turn_of(m) - 2 < len(files) else ""
@@ -753,9 +878,15 @@ def card_record(modes, used):
                                str(turn_of(m) if is_turn(m) else m), str(int(u["slot"])), _rec_host(u),
                               "-" if db is None else str(int(db)), _rec_word(u["rel"]),
                               _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
-    landed = {u["rel"]: int(u["slot"]) for u in used if u.get("lines") and is_turn(u["mode"])}
+    landed = {u["rel"]: int(u["slot"]) for u in used if u.get("lines") and is_turn(u["mode"])
+              and not is_mode_turn(u["mode"])}
     out += ["%s\t%d\t%s" % (REC_RANDOM, landed[rel], _rec_word(rel))
             for rel in sorted(modes.random) if rel in landed]
+    mlanded = {(u["rel"], mode_turn_of(u["mode"])[0]): int(u["slot"]) for u in used
+               if u.get("lines") and is_mode_turn(u["mode"])}
+    out += ["%s\t%d\t%d\t%s" % (REC_MRANDOM, m, mlanded[(rel, m)], _rec_word(rel))
+            for rel in sorted(modes.mode_random) for m in sorted(modes.mode_random[rel])
+            if (rel, m) in mlanded]
     return out
 
 
@@ -768,6 +899,7 @@ def read_card_record(text):
     when it has no record (a card written before PAD-553). PAD-608: an entry whose file is in a
     sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""
     names, files, turns, rnd, attract, seen = {}, [], [], [], [], False
+    mturns, mrnd = [], []
     for line in str(text or "").splitlines():
         f = line.split("\t")
         try:
@@ -796,6 +928,17 @@ def read_card_record(text):
                                       **({"bank": bank} if bank is not None else {})))
             elif f[0] == REC_RANDOM and len(f) >= 3:
                 rnd.append({"slot": int(f[1]), "rel": f[2]})
+            elif f[0] == REC_MTURN and len(f) >= 7:
+                seen = True
+                m, k = int(f[1]), int(f[2])
+                if 2 <= m <= MAX_MODES and 2 <= k <= TURN_MAX:
+                    host, bank = _read_host(f[4])
+                    mturns.append(dict({"mode": m, "turn": k, "slot": int(f[3]), "host": host,
+                                        "db": None if f[5] == "-" else (clean_level(f[5]) or 0),
+                                        "rel": f[6], "name": f[7] if len(f) > 7 else ""},
+                                       **({"bank": bank} if bank is not None else {})))
+            elif f[0] == REC_MRANDOM and len(f) >= 4:
+                mrnd.append({"mode": int(f[1]), "slot": int(f[2]), "rel": f[3]})
             elif f[0] == REC_ATTRACT and len(f) >= 6:
                 seen = True
                 k = int(f[1])
@@ -816,6 +959,10 @@ def read_card_record(text):
             out["random"] = rnd
     if attract:
         out["attract"] = sorted(attract, key=lambda a: a["k"])
+    if mturns:
+        out["mode_turns"] = mturns
+        if mrnd:
+            out["mode_random"] = mrnd
     return out
 
 

@@ -12422,5 +12422,12 @@
 "Loudness of sound {} ({})…": "Volume du son {} ({})…",
 "Sound {}'s loudness:": "Volume du son {} :",
 "Loudness of sound {}": "Volume du son {}",
-"**Loudness of sound {} (…)…** gives one file a loudness of its own, from -{} to +{} dB ({} keeps it matched). While **Play sound {}** has it in the Replacement player, the loudness box there is that file's too. Sound {}'s is the sound's own loudness box.": "**Volume du son {} (…)…** donne à un fichier un volume propre, de -{} à +{} dB ({} le garde aligné). Tant que **Lire le son {}** l'a dans le lecteur de remplacement, la case de volume y est aussi celle de ce fichier. Celui du son {} est la case de volume du son lui-même."
+"**Loudness of sound {} (…)…** gives one file a loudness of its own, from -{} to +{} dB ({} keeps it matched). While **Play sound {}** has it in the Replacement player, the loudness box there is that file's too. Sound {}'s is the sound's own loudness box.": "**Volume du son {} (…)…** donne à un fichier un volume propre, de -{} à +{} dB ({} le garde aligné). Tant que **Lire le son {}** l'a dans le lecteur de remplacement, la case de volume y est aussi celle de ce fichier. Celui du son {} est la case de volume du son lui-même.",
+"Its own sound": "Son propre son",
+"Add a sound for {}…": "Ajouter un son pour {}…",
+"Play {} sound {} ({})": "Lire {} son {} ({})",
+"Loudness of {} sound {} ({})…": "Volume de {} son {} ({})…",
+"Take off {} sound {} ({})": "Retirer {} son {} ({})",
+"Mode {} sound {}'s loudness:": "Volume du mode {} son {} :",
+"In a music mode a sound has a file of its own for, that file plays every time, unless that mode's file has sounds in turn of its own: on a sound with music mode files, the menu has a part for each mode (**Add a sound for mode {} (…)…**), with its own One after another / At random and loudness. Its own sound's part plays in every mode the sound has no file for. A mode's sounds play as long as its file.": "Dans un mode musical pour lequel un son a son propre fichier, ce fichier joue à chaque fois, sauf si le fichier de ce mode a ses propres sons à tour de rôle : sur un son avec des fichiers de modes musicaux, le menu a une partie pour chaque mode (**Ajouter un son pour mode {} (…)…**), avec ses propres L'un après l'autre / Au hasard et son volume. La partie de son propre son joue dans chaque mode pour lequel le son n'a pas de fichier. Les sons d'un mode durent autant que son fichier."
 }

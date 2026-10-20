@@ -3011,7 +3011,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @rpc
     def new_blocks_mode(self, name):
-        """New ▸ Blocks: a mode made of blocks, from a starter program on the card's shots."""
+        """New mode ▸ Blocks: a mode made of blocks, from a starter program on the card's shots."""
         if not self.project():
             self._tryit_note(MP.NO_PROJECT_HELP)
             return None

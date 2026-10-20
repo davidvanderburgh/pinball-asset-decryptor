@@ -3027,9 +3027,14 @@ PREVIEW_HELP = {
             ]),
             ("Which games", _modes_which_games),
             ("Making a mode", [
-                "**New**, over the list, makes a blank mode or one from an example "
-                "(KAIJU RUSH is the one that has run on a real machine). A project "
-                "with no mode yet offers the same on the page. Then:\n\n"
+                "**New mode**, over the list, asks how you want to build it, with a "
+                "tile for each way that says what it asks of you and what it can do:\n\n"
+                "- **Blocks** (recommended): rules snapped together, no code.\n"
+                "- **C** (best with an AI agent): the Mode SDK, for anything a mode can do.\n"
+                "- **Form** (a playground): boxes to fill in, nothing more.\n\n"
+                "A project with no mode yet shows the same tiles on the page. The Form "
+                "makes a blank mode or one from an example (KAIJU RUSH is the one that "
+                "has run on a real machine). For a form mode, then:\n\n"
                 "1. **Name it.**\n"
                 "2. **Starts on:** the shot that starts it and how many times (up to "
                 "999); the two *or* lists add up to two more shots whose hits count "
@@ -3078,7 +3083,7 @@ PREVIEW_HELP = {
                 "- A refusal is shown beside Try it and on the Emulate tab, with the reason.",
             ]),
             ("Several modes",
-             "- A card holds as many modes as you make. The count is under New, with "
+             "- A card holds as many modes as you make. The count is under the tab's name, with "
              "modes made of blocks and modes written in C counted apart.\n"
              "- **One runs at a time.** A mode whose shots come up while another is "
              "running does not start then, but its next starting shot after that one "
@@ -3086,7 +3091,7 @@ PREVIEW_HELP = {
              "- A card carries one end sound of a mode's own: the first mode that has "
              "one. The Sound section says whose."),
             ("Modes made of blocks", [
-                "**New > Mode from blocks…** makes a small working mode on this card's "
+                "**New mode > Blocks** makes a small working mode on this card's "
                 "shots, built from blocks instead of the form or C.",
                 {"cards": [
                     {"icon": "flag", "tone": "info", "title": "When",
@@ -3131,9 +3136,11 @@ PREVIEW_HELP = {
             ]),
             ("Modes written in C", [
                 "For what the form can't do.\n\n"
-                "- **New > Mode in C > Blank mode in C…** copies the Mode SDK's "
-                "template into this project's modes folder and opens it. **Open "
-                "MODE_SDK.md** opens the SDK's guide.\n"
+                "- **New mode > C**, named, copies the Mode SDK's template into this "
+                "project's modes folder and opens it. **Make it and copy for an agent** "
+                "does the same, then copies what to tell an AI agent: the mode's file, "
+                "the SDK's guide to read first, and what you said the mode should do. "
+                "**Open MODE_SDK.md** opens the SDK's guide.\n"
                 "- The folder's name is the mode's trigger name (its test triggers are "
                 "*folder*.start and .stop), so keep it to letters, digits and _.\n"
                 "- An **assets.json** beside the code names a clip, a picture, music "
@@ -3145,7 +3152,7 @@ PREVIEW_HELP = {
                 "numbered: **Save** (or Ctrl+S) writes it. **Open … in my editor** opens it "
                 "in your computer's editor instead; **Read again** picks up a change made "
                 "there.",
-                {"note": "On a Godzilla title, New > Mode in C adds six examples written "
+                {"note": "On a Godzilla title, New mode > C offers examples written "
                          "in C, among them the MELTDOWN multiball, lit by ten Magna "
                          "captive-ball hits. Each plays its clips full screen behind a HUD "
                          "of its own. Their clips, music and calls are cut from your own "

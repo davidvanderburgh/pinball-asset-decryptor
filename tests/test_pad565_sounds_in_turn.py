@@ -252,7 +252,8 @@ def test_the_audio_tab_adds_plays_and_takes_off_files_in_turn(tmp_path, monkeypa
         e = entry(w)
         assert e["label"] == "Play in turn (3 sounds)"
         assert [s["label"] for s in e["submenu"] if not s.get("sep")] == [
-            "Add a sound to play in turn…", "Play sound 2 (Jackpot B.wav)", "Take off sound 2 (Jackpot B.wav)",
+            "Add a sound to play in turn…", "One after another", "At random",   # PAD-638
+            "Play sound 2 (Jackpot B.wav)", "Take off sound 2 (Jackpot B.wav)",
             "Play sound 3 (Jackpot C.wav)", "Take off sound 3 (Jackpot C.wav)"]
         assert w.call("audio.menu_action", "turn_play:3", rel) is True
         assert w.state("audio")["panes"]["rep"]["name"] == "Sound 3 in turn: Jackpot C.wav"

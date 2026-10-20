@@ -1512,7 +1512,8 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
         _SOUND_MODES_KEY: {"matched": m_matched, "remapped": m_remapped,
                            "flagged": m_flagged, "dropped": m_dropped,
                            "names": list((sm or {}).get("names") or []),
-                           "levels": dict((sm or {}).get("levels") or {})},
+                           "levels": dict((sm or {}).get("levels") or {}),
+                           "random": list((sm or {}).get("random") or [])},
         "toggles": {k: saved[k] for k in _TOGGLE_KEYS if k in saved},
         "defaults": {k: dict(saved[k]) for k in _MERGE_KEYS
                      if isinstance(saved.get(k), dict) and saved[k]},
@@ -2082,9 +2083,12 @@ def _apply_sound_modes(tgt, plan, record, prior, include_flagged):
     if include_flagged:
         entries += [dict(e, tgt_rel=e["src_rel"]) for e in sm.get("flagged") or ()]
     levels = sm.get("levels") or {}
-    rec = {"names": list(sm.get("names") or []), "slots": {}, "levels": {}}
+    rec = {"names": list(sm.get("names") or []), "slots": {}, "levels": {},
+           "random": []}
     for e in entries:
         rec["slots"][e["tgt_rel"]] = dict(e["repl"])
+        if e["src_rel"] in (sm.get("random") or ()):
+            rec["random"].append(e["tgt_rel"])        # PAD-638: its files at random
         if levels.get(e["src_rel"]):
             rec["levels"][e["tgt_rel"]] = dict(levels[e["src_rel"]])
         record[_SOUND_MODES_KEY][e["tgt_rel"]] = dict(e["repl"])

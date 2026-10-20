@@ -55,6 +55,12 @@ file plays for as long as its slot's sound, so each one is cut to that length. N
 While a music mode gives the slot a file of its own, that file plays every time (its descriptor
 names that file's record, not the slot's).
 
+AT RANDOM (PAD-638): an owner asked for "random audio variants ... like a jukebox". A slot with
+files in turn can play them AT RANDOM instead (``random``: ``[rel, ...]``, slots with files in
+turn only): each play picks any of its files but the one it played last. The same files, records
+and lines; ``sounds.cfg`` adds a ``random`` line naming the slot's record key (pad_mode_runtime.c
+"AT RANDOM").
+
 IN A SOUND BANK (PAD-608): a file ``image.bin`` has no room for goes into a sound bank of the app's
 own (``image-scNN.bin``, PAD-595), as the modes' own sounds and the longer replacements do. The game
 plays a bank's sound only under a sound id of the bank's own (it streams from the file of the id's
@@ -151,6 +157,7 @@ class Modes:
     slots: dict = field(default_factory=dict)      # {rel: {mode: file}}
     levels: dict = field(default_factory=dict)     # {rel: {mode: dB}}, or None
     turns: dict = field(default_factory=dict)      # PAD-565: {rel: [file 2, file 3, ...]}
+    random: set = field(default_factory=set)       # PAD-638: slots whose files in turn play at random
 
     @property
     def any(self):
@@ -289,6 +296,9 @@ def clean(raw):
             keep = [f for f in files if isinstance(f, str) and f.strip()][:TURN_MAX - 1]
             if keep:
                 out.turns[rel] = keep
+    rnd = raw.get("random")
+    if isinstance(rnd, (list, tuple)):
+        out.random = {rel for rel in rnd if isinstance(rel, str) and rel in out.turns}
     levels = raw.get("levels")
     if not isinstance(levels, dict):
         out.levels = None
@@ -313,6 +323,9 @@ def to_json(modes):
                      for rel, files in sorted(modes.slots.items()) if files}}
     if modes.turns:
         out["turns"] = {rel: list(files) for rel, files in sorted(modes.turns.items()) if files}
+        rnd = sorted(rel for rel in modes.random if modes.turns.get(rel))
+        if rnd:
+            out["random"] = rnd
     if modes.levels is not None:
         out["levels"] = {rel: {str(m): int(db) for m, db in sorted(v.items()) if db}
                          for rel, v in sorted(modes.levels.items()) if any(v.values())}
@@ -486,14 +499,15 @@ def cut(wav, frames):
 
 
 # ---- the runtime's table ------------------------------------------------------------------------
-def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=()):
+def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(), randoms=()):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
     the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
     *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
     turn (PAD-565: ``turn`` lines, the record keys the runtime swaps at the game's lookup).
     PAD-608: *bsids* ``[(mode, sound id, bank sound id)]`` and *tsids* ``[(k, slot key, sound id,
     bank sound id)]``, the files in a sound bank (``bsid`` / ``tsid`` lines: the runtime points the
-    game's requests at the bank's id).
+    game's requests at the bank's id). PAD-638: *randoms* the slot keys whose files play at random
+    (``random`` lines).
     PAD-553: *record* (:func:`card_record`) goes in as comment lines the runtime skips, so an
     extract of the card brings the modes back (:func:`read_card_record`)."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
@@ -509,6 +523,8 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=())
         lines.append("bsid\t%d\t%d\t%d" % (int(mode), int(sid), int(bank)))
     for k, slot, sid, bank in tsids:
         lines.append("tsid\t%d\t%s\t%d\t%d" % (int(k), bytes(slot).hex(), int(sid), int(bank)))
+    for slot in randoms:
+        lines.append("random\t%s" % bytes(slot).hex())
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -521,6 +537,8 @@ REC_MODE, REC_FILE = "#mode", "#file"
 #: PAD-565: a slot's file in turn: ``#turn <k> <slot idx> <record idx> <dB or -> <slot rel>
 #: <the file's own name>``
 REC_TURN = "#turn"
+#: PAD-638: a slot whose files in turn play at random: ``#random <slot idx> <slot rel>``
+REC_RANDOM = "#random"
 #: PAD-608: a file in a sound bank names its record as ``<bank category>:<record idx>`` (an app
 #: before PAD-608 skips such a line: its record field is not a number)
 _BANK_HOST = re.compile(r"^(\d{1,2}):(\d+)$")
@@ -567,16 +585,20 @@ def card_record(modes, used):
                                str(turn_of(m) if is_turn(m) else m), str(int(u["slot"])), _rec_host(u),
                               "-" if db is None else str(int(db)), _rec_word(u["rel"]),
                               _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
+    landed = {u["rel"]: int(u["slot"]) for u in used if u.get("lines") and is_turn(u["mode"])}
+    out += ["%s\t%d\t%s" % (REC_RANDOM, landed[rel], _rec_word(rel))
+            for rel in sorted(modes.random) if rel in landed]
     return out
 
 
 def read_card_record(text):
     """``{"names": [...], "files": [{"mode", "slot", "host", "db", "rel", "name"}]}`` (and
     ``"turns"`` ``[{"turn", "slot", "host", "db", "rel", "name"}]`` when the card plays sounds in
-    turn, PAD-565) from a card's ``sounds.cfg`` (*text*), or ``None``
+    turn, PAD-565; ``"random"`` ``[{"slot", "rel"}]`` the slots of them that play at random,
+    PAD-638) from a card's ``sounds.cfg`` (*text*), or ``None``
     when it has no record (a card written before PAD-553). PAD-608: an entry whose file is in a
     sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""
-    names, files, turns, seen = {}, [], [], False
+    names, files, turns, rnd, seen = {}, [], [], [], False
     for line in str(text or "").splitlines():
         f = line.split("\t")
         try:
@@ -603,6 +625,8 @@ def read_card_record(text):
                                        "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
                                        "rel": f[5], "name": f[6] if len(f) > 6 else ""},
                                       **({"bank": bank} if bank is not None else {})))
+            elif f[0] == REC_RANDOM and len(f) >= 3:
+                rnd.append({"slot": int(f[1]), "rel": f[2]})
         except ValueError:
             continue
     if not seen:
@@ -611,6 +635,8 @@ def read_card_record(text):
     out = {"names": [names.get(m, "") for m in range(1, top + 1)], "files": files}
     if turns:
         out["turns"] = turns
+        if rnd:
+            out["random"] = rnd
     return out
 
 

@@ -183,7 +183,9 @@ data sound_request_count    0x00615da8
 # data rule_battle            NOT PLACED: no code that loads it could be lined up
 # data roster_screen_table    NOT PLACED: no code that loads it could be lined up
 # data rule_cities            NOT PLACED: no code that loads it could be lined up
-# data display_effects        NOT PLACED: no code that loads it could be lined up
+#   display_effects: PAD-639, read off award_screen 0x367660: its manager getter 0x3f9eac loads *0x89b708 and checks
+#   +4 against the effect table arg (Godzilla's layout: +0xc the effect now); emulator: the spinner's satellite = 75
+data display_effects         0x0089b708
 # data layered_displays       NOT PLACED: no code that loads it could be lined up
 #   lamp_layers: derived from 2 places, e.g. 0x3a6010+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
 data lamp_layers            0x008243fc
@@ -901,3 +903,16 @@ site  challenge_balls     0x0026847c 0xe92d4030 0xe1a05000
 site  challenge_extra_ball 0x00301a80 0xe3073158 0xe3403082
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x003f79bc 0xe305211e 0xe3402082
+# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each challenge's champion category
+site  challenge_scores       0x004e87dc 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x004e7d10 0xe1a03000 0xe3050750
+# DR. NO CHALLENGE CHAMPION
+value challenge_scores_cat_0  10
+# AHOY MR. BOND CHALLENGE CHAMPION
+value challenge_scores_cat_1  11
+# GOLDFINGER'S JACKPOT CHALLENGE CHAMPION
+value challenge_scores_cat_2  12
+# DISCO VOLANTE CHALLENGE CHAMPION
+value challenge_scores_cat_3  13
+# CHALLENGE CHAMPION
+value challenge_scores_cat_4  14

@@ -37,6 +37,8 @@ static const char *idle_text = "MainPlayLoop";
 static const char *pm_port_text(const char *n) { return !strcmp(n, "backdrop_idle") ? idle_text : 0; }
 static long pm_port_value(const char *n, long fallback) { return !strcmp(n, "surface_playing") ? 2 : fallback; }
 static unsigned data(const char *n) { return 0; }
+static unsigned fx_now;                            /* PAD-639: the game's foreground display effect now */
+static unsigned disp_foreground_effect(void) { return fx_now; }
 static void *clip_layer_video(void) { return 0; }
 static void clip2_show(int on) {}
 static char strs[8][96];
@@ -345,3 +347,126 @@ def test_the_idle_watch_runs_from_the_tick_and_a_backdrop_counts_as_ours():
     assert "ck_last_ours = 1;" in _lift(src, "static void bd2_play(void *surf)")
     seen = _lift(src, "static void ck_seen(unsigned *r)")
     assert seen.index("ck_last_ours = 0;") < seen.index("if (!ck.name[0]) return;")   # recorded with no clip of ours too
+
+
+SPIN_MAIN = r"""
+static void tick(unsigned long ms)
+{
+    now_ms += ms;
+    if (clip.on && state != 2) clip.on = 0;
+    ck_tick();
+    if (state == 2 && !looping && position(&surf_obj) >= length_of(video)) state = 0;
+}
+static void game_loop(const char *name)
+{
+    unsigned str = std_string(name);
+    set_video(&surf_obj, &str);
+    play(&surf_obj, 1, -1);
+}
+static void ticks(int n, unsigned long ms) { while (n--) tick(ms); }
+int main(void)
+{
+    ck_can = 1;
+    current = running = &mode_a; begun++;
+    pm_clip("PadMode_long_Clip"); tick(16); tick(4000);
+    printf("-- the spinner: effect 75 over the game's loop for 15 s\n");
+    game_loop("Diamond_EarthSpin"); fx_now = 75;
+    ticks(150, 100);
+    printf("waits %d\n", ck.lost);
+    fx_now = 0; tick(16);                          /* its end: ours at once, where it would be */
+    printf("on %d\n", clip.on);
+    printf("-- a loop with no effect over it: one pass, as before\n");
+    tick(2000);
+    game_loop("BondWomen_007_Loop"); ticks(20, 100);
+    printf("waits %d\n", ck.lost);
+    ticks(11, 100);
+    printf("on %d\n", clip.on);
+    printf("done\n");
+    return 0;
+}
+"""
+
+
+def test_a_loop_under_a_display_effect_of_the_games_stays_until_it_ends(tmp_path):
+    # PAD-639 (luvthatapex, Bond LE): the spinner's satellite is a see-through picture over the game's Diamond_EarthSpin
+    # loop for as long as the spinner spins; the one pass put the mode's clip back under the satellite after 3 s
+    src = RUNTIME.read_text(encoding="utf-8")
+    parts = [_ck_struct(src)] + [_lift(src, s) for s in (
+        "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
+        "static void ck_drop(const char *why)", "static int clip2_start(void *surf, const char *name)",
+        "static void ck_seen(unsigned *r)", "static void ck_play_seen(unsigned *r)", "static void ck_tick(void)\n{",
+        "int pm_clip(const char *name)")]
+    out = _host_run(tmp_path, PRELUDE + "\n".join(parts) + SPIN_MAIN, flags=("-no-pie", "-fno-pie")).splitlines()
+    if not out:
+        pytest.skip("this host links above 4 GB even with -no-pie")
+    seeks = [int(x.split()[1]) for x in out if x.startswith("SEEK ")]
+    out = [x if not x.startswith("SEEK ") else "SEEK" for x in out]
+    assert out == [
+        "PLAY PadMode_long_Clip",
+        "-- the spinner: effect 75 over the game's loop for 15 s",
+        "PLAY Diamond_EarthSpin (looped)", "waits 1",           # 15 s, not 3: the satellite keeps its backdrop
+        "PLAY PadMode_long_Clip", "SEEK", "on 1",
+        "-- a loop with no effect over it: one pass, as before",
+        "PLAY BondWomen_007_Loop (looped)", "waits 1",
+        "PLAY PadMode_long_Clip", "SEEK", "on 1", "done"]
+    assert 19000 <= seeks[0] <= 19200                           # 4 s in + 15 s under the game's: where it would be
+
+
+FX_HEAD = r"""
+#include <stdio.h>
+#include <string.h>
+static unsigned recs[2 * 4] = { 0, 0,  0, 0x10001,  0, 0x840002,  0, 0x10001 };   /* {process, flags | prio << 16} */
+static unsigned arg[2];
+static unsigned char mgr[0x20];
+static unsigned char *mgr_p;
+static int no_manager;
+static unsigned data(const char *n)
+{
+    if (!strcmp(n, "award_screen_arg")) return (unsigned)(unsigned long)arg;
+    if (!strcmp(n, "display_effects")) return no_manager ? 0 : (unsigned)(unsigned long)&mgr_p;
+    return 0;
+}
+static long pm_port_value(const char *n, long fallback) { return fallback; }
+"""
+
+FX_MAIN = r"""
+int main(void)
+{
+    unsigned now;
+    arg[0] = (unsigned)(unsigned long)recs; arg[1] = 4;
+    mgr_p = mgr; *(unsigned *)(mgr + 4) = (unsigned)(unsigned long)arg;
+    for (now = 0; now < 5; now++) {
+        *(unsigned short *)(mgr + 0xc) = (unsigned short)now;
+        printf("%u:%u ", now, disp_foreground_effect());
+    }
+    *(unsigned *)(mgr + 4) = 0;                    /* another table's manager: none of ours */
+    printf("other:%u ", disp_foreground_effect());
+    no_manager = 1;
+    printf("none:%u\n", disp_foreground_effect());
+    return 0;
+}
+"""
+
+
+def test_only_a_foreground_effect_of_the_games_counts(tmp_path):
+    # the effect now, from the manager of the effect table; a background effect (flag 1: Bond's in-game display 29,
+    # Bond Women's 007 SCORING 226) is no display over the TV, nor an effect id past the table
+    src = RUNTIME.read_text(encoding="utf-8")
+    parts = [_lift(src, s) for s in (
+        "static unsigned char *disp_manager(void)", "static unsigned disp_now(unsigned char *m)",
+        "static unsigned disp_foreground_effect(void)\n{")]
+    out = _host_run(tmp_path, FX_HEAD + "\n".join(parts) + FX_MAIN, flags=("-no-pie", "-fno-pie")).strip()
+    if not out:
+        pytest.skip("this host links above 4 GB even with -no-pie")
+    assert out == "0:0 1:0 2:2 3:0 4:0 other:0 none:0"
+
+
+@pytest.mark.parametrize("port, manager", [
+    ("james_bond_le-1.06.port", "0x0089b708"),
+    ("james_bond_pro-1.06.port", "0x008a0348"),
+])
+def test_both_bond_builds_name_the_display_effect_manager(port, manager):
+    # read off each build's award_screen: its manager getter loads this pointer (emulator: the spinner = effect 75)
+    text = (PORTS / port).read_text(encoding="utf-8")
+    assert re.search(r"^data display_effects\s+%s$" % manager, text, re.M)
+    assert "disp_foreground_effect()" in _lift(RUNTIME.read_text(encoding="utf-8"), "static void ck_tick(void)\n{")

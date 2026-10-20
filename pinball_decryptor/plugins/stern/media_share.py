@@ -259,6 +259,9 @@ def save_music_modes(project, path):
                          "there is nothing to save.")
     head = {"kind": MUSIC_KIND, "version": 1, "from": _about(project), "names": list(modes.names),
             "slots": slots, "levels": levels, "sigs": sigs}
+    rnd = sorted(rel for rel in modes.random if rel in slots)
+    if rnd:
+        head["random"] = rnd                            # PAD-638: files in turn at random
     _write_zip(path, head, [(mem, f) for f, mem in
                             ((f, _member(members, f)) for f in {f for _r, _m, f in modes.files()})
                             if mem])
@@ -365,6 +368,8 @@ def load_music_modes(project, path):
         same = _same_title(project, head)
         names = set(z.namelist())
         slots, levels, found, left, cache = {}, {}, [], [], {}
+        rnd_in = head.get("random") if isinstance(head.get("random"), list) else []
+        rnd = []
         folder = os.path.join(project, MUSIC_DIR)
         for rel in sorted(slots_in):
             by_mode = slots_in[rel]
@@ -393,11 +398,15 @@ def load_music_modes(project, path):
                              % os.path.basename(to)))
                 continue
             slots[to] = keep
+            if rel in rnd_in:
+                rnd.append(to)
             if how:
                 found.append((rel, to, how))
     names_in = head.get("names") if isinstance(head.get("names"), list) else []
     record = {"names": [str(n) if isinstance(n, str) else "" for n in names_in][:SMo.MAX_MODES],
               "slots": slots, "levels": levels}
+    if rnd:
+        record["random"] = sorted(rnd)
     return {"record": record, "loaded": len(slots), "files": len(cache), "found": found,
             "left": left, "about": head.get("from") or {}}
 
@@ -564,7 +573,12 @@ def music_from_card(project, cfg_text):
                 os.path.splitext(os.path.basename(slot))[0], f["turn"])
             copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
         slots.setdefault(slot, {})[_carried_key(SMo.turn_mode(f["turn"]))] = copied[host]
-    return {"names": rec["names"], "slots": slots, "levels": levels}, left
+    out = {"names": rec["names"], "slots": slots, "levels": levels}
+    # PAD-638: the slots whose files in turn play at random
+    rnd = sorted({idx[f["slot"]] for f in rec.get("random") or () if idx.get(f["slot"]) in slots})
+    if rnd:
+        out["random"] = rnd
+    return out, left
 
 
 def _built_project_modes(card):
@@ -585,6 +599,8 @@ def _built_project_modes(card):
     if not files:
         return None
     rec = {"names": list(modes.names), "slots": files}
+    if modes.random & set(files):
+        rec["random"] = sorted(modes.random & set(files))
     if modes.levels is not None:
         rec["levels"] = {rel: {str(m): db for m, db in v.items() if str(m) in files.get(rel, {})}
                          for rel, v in modes.levels.items()}

@@ -260,6 +260,11 @@ static const struct pm_mode *const list[] = { &mode };
 static void on_ball_end(unsigned *r) { printf("BALL_END\n"); }
 static volatile unsigned event_fired[N_BUS_IDS];
 static void lit_hold_check(unsigned id) {}           /* PAD-503's, not under test here */
+static int challenge_game_id = -1, challenge_ball_id = -1;   /* PAD-619's, not under test here */
+static volatile int challenge_ours;
+static unsigned long challenge_ours_ms;
+unsigned long pm_ms(void) { return 0; }
+static void challenge_ball_start(void) {}
 @SWITCHES@
 @DISPATCH@
 int main(void)

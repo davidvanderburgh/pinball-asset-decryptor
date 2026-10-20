@@ -453,11 +453,27 @@ reached.
   the app's rig strip (`core/rigslot.py`) and the triage dashboard
   (pad-triage v0.42.0 `rigboard.py`; the running dashboard shows it after a
   restart). Mount it once per WSL boot: `wsl -u root -e bash <rig>/slot.sh up 5`.
+- **Proof on the emulator, rig 5, four cached builds through `rigbatch.sh -n 2
+  --who PAD-649 ... -- startcheck.sh` with nothing else passed** (so at 4x,
+  15 fps, job cap 600 s; the other four rigs held by PAD-643 and PAD-645's
+  sweeps the whole time, so it ran on one): **4/4 pass in 7m27s**. Godzilla
+  Pro 1.16 162 s (the title's FIRST boot in a fresh rig: tables built, Guided
+  Setup left by the library at 126 s, attract 129 s, a game on at 152 s),
+  Jaws LE 1.02 **47 s** (attract 33 s, a game on at 37 s), John Wick Pro
+  1.02 99 s, Jurassic Park Pro 1.16 129 s (Guided Setup again, left at 97 s);
+  `dump/padspeed` read `x4.000`, padspeed.log "the game took it up"; every
+  job left 0 processes and the rig was given back the moment the queue was
+  empty; the pictures are real games (Jaws: Skill Shot, player 1 in play).
+  Against PAD-645's job at 1x: 110-150 s a passing build, 605-1023 s a
+  failing one. The batch first started on four UNCACHED builds, and its
+  copy crawled at 0.4 MB/s beside the other two tickets' copies off D: (each
+  on the old per-distro lock) - the collision the shared lock is for.
 - Tests (test_spike2_rig_slots.py, stub rigs, Linux): the batch waits for a
   rig, takes the second as it frees, gives both back, the copier's lead
   follows (2 then 4); the cap stops a job with everything it started, for
   `--job-cap` and a line's own; the defaults and the lock path by text;
-  rigjob's waits by text. `test_a_sweeps_card_copier_is_no_rigs_run_script`
+  rigjob's waits by text. test_rigslot.py and pad-triage's test_rigboard.py
+  take the rig count from SLOTS_MAX. `test_a_sweeps_card_copier_is_no_rigs_run_script`
   fails on main too while other tickets' rigs are up on this machine (it
   reads the live /proc).
 

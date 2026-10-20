@@ -39,7 +39,7 @@ def test_an_ordinary_install_changes_nothing(board):
     assert rigslot.rig_env() == []
     assert rigslot.title_tag() == ""
     rows = rigslot.board()
-    assert [r["slot"] for r in rows] == [0, 1, 2, 3, 4]
+    assert [r["slot"] for r in rows] == list(range(rigslot.SLOTS_MAX + 1))
     assert not any(r["holder"] or r["run"] for r in rows)
     assert rows[0]["mine"] and not rows[1]["mine"]
 
@@ -128,7 +128,7 @@ def test_a_lapsed_hold_is_taken_only_when_no_rig_is_free(board, monkeypatch):
     _put(board, "slot-1.lock", {"slot": 1, "who": "PAD-3"}, age=old)     # lapsed
     assert rigslot.claim_for_run() == 2                           # free first
     rigslot.release_claimed()
-    for n in (2, 3, 4):
+    for n in range(2, rigslot.SLOTS_MAX + 1):
         _put(board, "slot-%d.lock" % n, {"slot": n, "who": "x%d" % n})  # active
     assert rigslot.claim_for_run() == 1                           # then the lapsed one
     assert _lock(board, 1)["who"] == "PAD-7"

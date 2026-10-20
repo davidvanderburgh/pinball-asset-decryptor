@@ -130,8 +130,8 @@ job_guided_setup() {
 #: job_wait_attract [wall seconds, default 300]: until status.sh says attract (the game's own light show,
 #: gamestate.sh). On the WALL, not the game's clock: the boot is the CPU-bound part and runs at 1x (PAD-484; the
 #: speed is asked for from attract). 1 the moment the run dies, or at the deadline - JOB_WHY says which. A title's
-#: first boot in a fresh rig opens Guided Setup, which nothing leaves by itself: from 45 s in, once a minute, the
-#: menu is looked for and left.
+#: first boot in a fresh rig opens Guided Setup, which nothing leaves by itself: from 45 s in, every 20 s (a look
+#: that finds no menu costs ~3 s), the menu is looked for and left.
 job_wait_attract() {
     local deadline=${1:-300} t0 st el next=45
     t0=$(date +%s)
@@ -153,7 +153,7 @@ job_wait_attract() {
             job_say "$JOB_WHY"; return 1
         fi
         if [ "$el" -ge "$next" ] && [ -s "$LIST" ]; then
-            next=$((el + 60))
+            next=$((el + 20))
             job_guided_setup 0 && job_say "first boot: left Guided Setup by Save & Exit"
         fi
         sleep 3

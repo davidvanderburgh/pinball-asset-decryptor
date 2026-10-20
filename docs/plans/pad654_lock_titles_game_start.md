@@ -54,7 +54,12 @@ hold's `balls` (4) are queued behind the trough (`PAD_BALL_EXTRA` still override
 Not done, and not needed for a game: the dragon toy's motors. The game drives the dragon left /
 right and up / down (DRAGON LR AWAY / LR HOME / UD HOME, node 10, with LR / UD RESET DETECTED
 inputs) and nothing answers it, so a game shows "OPERATOR ALERT! Dragon Jam - DEVICE
-MALFUNCTION". The game plays on. A follow-up.
+MALFUNCTION". The game plays on. A follow-up, because it is a board nobody has modelled yet:
+`PAD_NB_TRACE=1` on node 10 (C:/tmp/PAD-654/dragon.sh) shows none of the motor protocols the rig
+answers (cmd 51/53/54 board motors, cmd 41 + short 40 coil motors; docs/plans/node_board_motor.md).
+At Start the game configures two axes with a 23-byte cmd 32 (`32 01 c8 e1 00 42 ...` and `32 00 00
+e1 00 41 40 ...`), then cmd 34 / 36, and from then on polls cmd 38 and 39 about 1000 times a second
+(62360 of each in 60 game-seconds): a stepper driver waiting for a status nobody gives.
 
 ## TMNT LE 1.59: the van stocks the glider
 
@@ -87,7 +92,12 @@ All in the emulator, hidden and muted, newest builds, `rigbatch.sh` at 4x:
   TMNT once on try 2; D&D LE on try 2 by design - the first Start loads the dragon).
 - with the stock mode runtime loaded so `mode.log` says the game's own `in_game 0 -> 1`
   (C:/tmp/PAD-654/gprobe.sh): 6/6 over two rounds.
-- the whole library (53 newest builds) through `startcheck.sh`: see the ticket's report.
+- the whole library (53 newest builds) through `startcheck.sh` on the branch head, 2026-10-20: 51/53 in
+  one pass (Munsters LE, D&D LE's Pro, TMNT LE, Godzilla LE and King Kong LE among them); the two
+  others (D&D LE, Iron Maiden Pro) ended during boot, before attract and before anything this changes,
+  and passed 6/6 when run again (three each).
+- King Kong LE 0.97's occasional `[segv]` while starting a game happens on main too (A/B, same job:
+  main 4 of 6, branch 4 of 5; only the segv failed either side). Not this ticket's.
 
 Harness (C:/tmp/PAD-654): `iolog.py` (every named coil fire and switch edge), `gprobe.sh`
 (in_game verdict), `sel.sh` (screens between Start and ball 1).

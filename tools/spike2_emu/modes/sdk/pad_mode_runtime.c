@@ -1236,9 +1236,12 @@ static int key_is(const unsigned char *a, const unsigned char *b)
 static void sndt_lookup(unsigned *r);
 static volatile int sndt_live;              /* PAD-565: the lookup hook takes the sounds in turn */
 static int lookup_hooked;                   /* sound_lookup is hooked (on_sound_lookup), once */
+static int att_lookup(unsigned *r);         /* PAD-641: the flipper buttons' sounds in attract */
+static volatile int att_live;
 
 static void on_sound_lookup(unsigned *r)
 {
+    if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (sndt_live && r[1]) sndt_lookup(r);   /* PAD-565: a sound's files in turn */
     if (swaps_live && r[1]) {
         const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
@@ -9462,6 +9465,8 @@ static int edge_is_hit(unsigned level, unsigned flags, unsigned polarity, int ha
 }
 
 static long edge_log_left;                   /* value switch_edge_log N: log the first N edges (proving a port) */
+static int edge_hooked;                      /* switch_edge is hooked (on_switch_edge), once: shots and PAD-641 */
+static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask);
 
 static void on_switch_edge(unsigned *r)
 {
@@ -9482,6 +9487,7 @@ static void on_switch_edge(unsigned *r)
     pol = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.polarity_at);
     mask = edge.mode_mask ? *(const unsigned short *)(unsigned long)edge.mode_mask : 0u;
     hit = edge_is_hit(level, flags, pol, edge.mode_mask != 0, mask);
+    if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
     playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
     if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
         say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level & 1u,
@@ -9533,7 +9539,7 @@ static void switches_arm(void)
     switch_at = at >= 0 && at <= 3 ? (unsigned)at : 0;
     for (id = 0; id < N_SWITCH_IDS; id++) switch_delivered[id] = switch_fired[id];
     if (e) {                                     /* the drain's edges: every switch; the switch_hit sites stay unhooked */
-        if (e->ok && edge_arm(&why) && hook(e->addr, on_switch_edge)) {
+        if (e->ok && edge_arm(&why) && (edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
             can |= PM_CAN_SWITCH_SHOTS;
             say("switch shots: %d switch line(s) hand their shots to the modes; the switch drain's edges (switch_edge "
                 "0x%08x, from the drain 0x%08x..0x%08x%s)", port.n_switch, e->addr, edge.drain, edge.drain_end,
@@ -10125,6 +10131,138 @@ static void bsid_line(const char *ms, const char *slot, const char *ids, const c
     e->said = 0;
 }
 
+/* ---- attract flipper sounds (PAD-641) ------------------------------------------------------------
+ * An owner of a James Bond 007 noticed every other Spike 2 game plays a sound or a callout when a
+ * flipper button is pressed in attract mode, and Bond plays none (the emulator: Godzilla LE 1.16 plays
+ * its request 64 at a press, about once in 17 s; Bond LE 1.06 played no request in 8 presses), and
+ * asked for a few. The build gives the project's files a CARRIER, a request the game never plays (the
+ * modes' own calls' road), each file a record of its own no descriptor names, and sounds.cfg says:
+ *   attract <request> <its record's key> <left id>,<right id>   the carrier, the flipper buttons
+ *   afile   <k> <file k's record key> <ms>                      file k (1..), its own length
+ * The framework's switch drain (site switch_edge, as the shots from switches) hands every edge to
+ * att_edge: a press of either button (the edge to its active level, as edge_is_hit reads it), while
+ * the game's mode mask holds the attract bit (value mode_mask_attract, 0x10 measured on Godzilla and
+ * Bond) and no game is played, plays the carrier with the next file's key swapped in where the game
+ * looks its record up (att_lookup) - once the last one has had its length (+ATT_GAP): a press while
+ * one still plays is not another sound. The files go round in turn. */
+#define ATT_FILES       16
+#define ATT_GAP         250                 /* ms after a file's own length before another press plays */
+static struct {
+    unsigned request, n, next, sw[2], attract_bit, plays;
+    unsigned char key[8];
+    unsigned char host[ATT_FILES][8];
+    unsigned ms[ATT_FILES];
+    volatile int cur;                       /* the file the carrier plays now (-1: none) */
+    volatile unsigned long swap_until, until;
+    volatile int looked;
+} att = { .cur = -1 };
+static int att_bad;
+
+static void att_line(const char *rs, const char *ks, const char *ids)
+{
+    const char *p = rs;
+    unsigned r, k = 0;
+    int ok;
+    r = (unsigned)number(&p, &ok);
+    if (!ok || !r || !key_hex(ks, att.key)) { att_bad++; return; }
+    att.request = r;
+    for (p = ids; *p && k < 2; ) {
+        unsigned id = (unsigned)number(&p, &ok);
+        if (!ok) break;
+        att.sw[k++] = id;
+        while (*p == ',' || *p == ' ') p++;
+    }
+    if (k != 2) { att.request = 0; att_bad++; }
+}
+
+static void att_file(const char *ks, const char *keys, const char *mss)
+{
+    const char *p = ks;
+    unsigned k, ms;
+    int ok, ok2;
+    k = (unsigned)number(&p, &ok);
+    p = mss;
+    ms = (unsigned)number(&p, &ok2);
+    if (!ok || !ok2 || k < 1 || k > ATT_FILES || !ms || !key_hex(keys, att.host[k - 1])) { att_bad++; return; }
+    att.ms[k - 1] = ms;
+    if (k > att.n) att.n = k;
+}
+
+/* the record lookup (any thread): the carrier's own record takes the file it plays now. 1 = swapped */
+static int att_lookup(unsigned *r)
+{
+    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    int c = att.cur;
+    if (c < 0 || (long)(att.swap_until - pm_ms()) <= 0 || !key_is(k, att.key)) return 0;
+    r[1] = (unsigned)(unsigned long)att.host[c];
+    if (!att.looked) {                      /* once per play: the proof it was the one played */
+        att.looked = 1;
+        say("attract flipper sounds: request %u looked up its record, took file %d's", att.request, c + 1);
+    }
+    return 1;
+}
+
+/* every edge of the switch drain (the game's thread): a flipper button pressed in attract */
+static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask)
+{
+    unsigned closed;
+    unsigned long now;
+    int k;
+    if (id != att.sw[0] && id != att.sw[1]) return;
+    closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
+    if ((level & 1u) != closed) return;                 /* the release */
+    if (!(mask & att.attract_bit) || pm_in_game()) return;   /* attract only: not a game, a tilt, a menu */
+    now = pm_ms();
+    if (att.plays && (long)(att.until - now) > 0) return;    /* the last one still plays */
+    k = (int)(att.next % att.n);
+    att.next = (unsigned)(k + 1) % att.n;
+    if (pm_sound_active(att.request)) pm_sound_stop(att.request);   /* the silence after a short file */
+    att.looked = 0;
+    att.swap_until = now + att.ms[k] + 1000;
+    att.until = now + att.ms[k] + ATT_GAP;
+    att.cur = k;
+    att.plays++;
+    pm_sound(att.request);
+    say("attract flipper sounds: switch %u pressed in attract - file %d of %u (%u ms) on request %u", id, k + 1,
+        att.n, att.ms[k], att.request);
+}
+
+/* from sndm_arm: the switch drain's hook (shared with the shots from switches) and the record lookup's
+ * (shared with the sounds in turn and the modes' own sounds) */
+static int edge_arm(const char **why);
+static void att_arm(void)
+{
+    struct site *e = site("switch_edge");
+    const char *why = 0;
+    unsigned k;
+    if (att_bad) say("attract flipper sounds: %d line(s) of sounds.cfg not read", att_bad);
+    if (!att.request || !att.n) return;
+    for (k = 0; k < att.n; k++)
+        if (!att.ms[k]) { say("attract flipper sounds: off - file %u has no line", k + 1); return; }
+    if (!fn("sound_play") || !fn("sound_lookup")) {
+        say("attract flipper sounds: off - the port has no sound_play or sound_lookup for this build");
+        return;
+    }
+    if (!e || !e->ok || !edge_arm(&why) || !edge.mode_mask) {
+        say("attract flipper sounds: off - %s", !e ? "the port has no switch_edge" : !e->ok
+            ? "switch_edge does not match this build" : why ? why : "the port has no mode_mask");
+        return;
+    }
+    att.attract_bit = (unsigned)pm_port_value("mode_mask_attract", 0x10);
+    if (!edge_hooked && !(edge_hooked = hook(e->addr, on_switch_edge))) {
+        say("attract flipper sounds: off - switch_edge 0x%08x cannot be hooked", e->addr);
+        return;
+    }
+    if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+        say("attract flipper sounds: off - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        return;
+    }
+    att_live = 1;
+    say("attract flipper sounds: %u file(s) on request %u, flipper buttons %u and %u, attract bit 0x%x; "
+        "switch_edge 0x%08x and sound_lookup 0x%08x are hooked", att.n, att.request, att.sw[0], att.sw[1],
+        att.attract_bit, e->addr, fn("sound_lookup"));
+}
+
 static void sndm_line(char *s)
 {
     const char *p;
@@ -10165,6 +10303,14 @@ static void sndm_line(char *s)
     }
     if (n >= 5 && str_eq(f[0], "tsid")) {
         bsid_line(f[1], f[2], f[3], f[4]);
+        return;
+    }
+    if (n >= 4 && str_eq(f[0], "attract")) {
+        att_line(f[1], f[2], f[3]);
+        return;
+    }
+    if (n >= 4 && str_eq(f[0], "afile")) {
+        att_file(f[1], f[2], f[3]);
         return;
     }
     if (n < 4 || !str_eq(f[0], "sound")) return;
@@ -10436,8 +10582,9 @@ static void sndm_arm(void)
     }
     sndt_arm();                               /* PAD-565: the files in turn need no resolver */
     blist_arm();                              /* PAD-608: nor do the files in a sound bank */
+    att_arm();                                /* PAD-641: nor the flipper buttons' sounds in attract */
     if (!n_sndm) {
-        if (n_sndt || n_bsid) return;
+        if (n_sndt || n_bsid || att.n) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }

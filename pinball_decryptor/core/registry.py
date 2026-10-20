@@ -996,7 +996,11 @@ class Manufacturer(ABC):
         (``""`` when they can), per slot why that one cannot (``""`` when it
         can), and how many modes a project may have. ``None`` (the default)
         when the plugin has no such thing, and the tab offers nothing. Called
-        off the UI thread: it may open the project's card image."""
+        off the UI thread: it may open the project's card image.  PAD-565 adds
+        ``"turns_why"`` / ``"turn_slots"`` (files in turn) and PAD-641
+        ``"attract_why"``: why the flipper buttons cannot play sounds in
+        attract mode on this project's game (``""`` when they can; no key: the
+        tab offers no such button)."""
         return None
 
     def sound_request_uses(self, assets_dir, rels):

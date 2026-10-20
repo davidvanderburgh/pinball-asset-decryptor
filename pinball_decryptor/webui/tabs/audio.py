@@ -37,6 +37,12 @@ _MODES_MAX = 8
 _MODES_SHOWN = 4
 #: PAD-565: the most files one sound plays in turn, its own one included (sound_modes.TURN_MAX)
 _TURNS_MAX = 16
+#: PAD-641: the most sounds the flipper buttons play in attract (sound_modes.ATTRACT_MAX)
+_ATTRACT_MAX = 16
+#: PAD-641: what the Attract flipper sounds button says it does
+_ATTRACT_TIP = ("Sounds the machine plays when a flipper button is pressed in attract mode (no game "
+                "being played), one after another, as other Spike 2 games play their callouts. Each "
+                "is played for at most the length of the unused game sound it rides on.")
 
 from .. import compat
 from ..find_originals import FindOriginalsMixin
@@ -231,6 +237,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         # PAD-565: a slot's files the game plays IN TURN with its own ({rel: [path, ...]}, file 2
         # first), kept in the same record as the music modes
         self._turns = {}
+        # PAD-641: the sounds the flipper buttons play in attract ([path, ...]), the same record
+        self._attract = []
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -277,7 +285,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                  running=False, profile_busy=False, adv_marker=False,
                  prefix="", sort={"key": "#0", "desc": False},
                  panes=dict(self._panes), dup_scanning=False,
-                 widths=self._saved_widths(), pex=False, modes_share=False)
+                 widths=self._saved_widths(), pex=False, modes_share=False, attract=None)
 
     # ------------------------------------------------------------------
     # small helpers
@@ -767,7 +775,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._dup_groups = None
         self.set(prefix=self._common_prefix(),
                  modes_share=(self._sm_offer is not None or bool(self._modes)
-                              or bool(self._turns)))
+                              or bool(self._turns) or bool(self._attract)))
         if self.audio_group_dups_var.get():
             self._ensure_dup_groups(quiet=True)
         self._refresh_list()
@@ -1385,7 +1393,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._sel = sel
         self.set(rows=rows, empty=hint, sel=list(self._sel),
                  sort={"key": col, "desc": desc},
-                 dup_scanning=self._dup_scanning)
+                 dup_scanning=self._dup_scanning, attract=self._attract_state())
         self._publish_status()
         self._update_clear_all()
         self._level_sync()
@@ -2646,6 +2654,9 @@ class AudioTab(FindOriginalsMixin, TabService):
             keep = [f for f in files if isinstance(f, str) and f.strip()][:_TURNS_MAX - 1]
             if keep:
                 self._turns[rel] = keep
+        attract = raw.get("attract")
+        self._attract = ([f for f in attract if isinstance(f, str) and f.strip()][:_ATTRACT_MAX]
+                         if isinstance(attract, (list, tuple)) else [])
 
     def _modes_json(self):
         names = list(self._mode_names)
@@ -2654,7 +2665,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         slots = {rel: {str(m): f for m, f in sorted(v.items())}
                  for rel, v in sorted(self._modes.items()) if v}
         turns = {rel: list(v) for rel, v in sorted(self._turns.items()) if v}
-        if not slots and not names and not turns:
+        if not slots and not names and not turns and not self._attract:
             return None
         levels = {}
         for rel, v in sorted(self._mode_levels.items()):
@@ -2665,6 +2676,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         out = {"names": names, "slots": slots, "levels": levels}
         if turns:
             out["turns"] = turns
+        if self._attract:
+            out["attract"] = list(self._attract)
         return out
 
     def _mode_level(self, rel, m):
@@ -2952,6 +2965,78 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._modes_changed(rel)
             return True
         return False
+
+    # ------------------------------------------------------------------
+    # PAD-641: the sounds the flipper buttons play in attract
+    # ------------------------------------------------------------------
+    def _attract_why(self):
+        return str((self._sm_offer or {}).get("attract_why") or "")
+
+    def _attract_state(self):
+        """The page's Attract flipper sounds button: ``{"files": [name, ...], "why", "max",
+        "tip"}``, or None where the plugin offers no such thing and the project has none."""
+        if "attract_why" not in (self._sm_offer or {}) and not self._attract:
+            return None
+        names = [os.path.basename(f) for f in self._attract]
+        tip = [_ATTRACT_TIP]
+        if names:
+            tip.append("In turn: " + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
+        if self._attract_why():
+            tip.append(self._attract_why())
+        return {"files": names, "why": self._attract_why(), "max": _ATTRACT_MAX, "tip": tip}
+
+    @rpc
+    def attract_action(self, action):
+        """The Attract flipper sounds menu: ``add`` (choose a file), ``play:k`` (file k in the
+        Replacement pane), ``off:k`` (take file k off), ``why`` (why this game cannot)."""
+        kind, _c, arg = str(action or "").partition(":")
+        try:
+            k = int(arg) if arg else 0
+        except ValueError:
+            return False
+        why = self._attract_why()
+        if kind == "why":
+            if why:
+                compat.messagebox.showinfo("Attract flipper sounds", why)
+            return bool(why)
+        if kind == "add":
+            if why or len(self._attract) >= _ATTRACT_MAX or not self._scan_dir:
+                return False
+            self._cancel_select_job()
+            self.stop_all_preview_playback()
+            path = self._ask_path(
+                "open", "audio_replacement",
+                "Choose a sound the flipper buttons play in attract mode",
+                filetypes=_AUDIO_FILETYPES)
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+            if not path:
+                return False
+            self._attract.append(os.path.normpath(path))
+            self.log("Replace Audio: the flipper buttons play %s in attract mode (sound %d of %d)."
+                     % (os.path.basename(path), len(self._attract), len(self._attract)), "info")
+            self._attract_changed()
+            return True
+        if not 1 <= k <= len(self._attract):
+            return False
+        f = self._attract[k - 1]
+        if kind == "play":
+            self._pane_load("rep", f, autoplay=True,
+                            label="Attract flipper sound %d: %s" % (k, os.path.basename(f)))
+            return True
+        if kind == "off":
+            del self._attract[k - 1]
+            self.log("Replace Audio: the flipper buttons no longer play %s in attract mode."
+                     % os.path.basename(f), "info")
+            self._attract_changed()
+            return True
+        return False
+
+    def _attract_changed(self):
+        self._save_staged_changes()
+        self.set(modes_share=(self._sm_offer is not None or bool(self._modes)
+                              or bool(self._turns) or bool(self._attract)))
+        self._refresh_list()
 
     def _add_mode(self):
         """One more music mode (up to the game's most), named as it is added."""

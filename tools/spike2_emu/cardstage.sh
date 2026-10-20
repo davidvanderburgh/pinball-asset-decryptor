@@ -158,7 +158,7 @@ if [ "$STAGE" = cache ]; then
                PAD_CACHE_KEEP_FREE_GB=${PAD_CACHE_KEEP_FREE_GB:-30} \
                    bash "$RIG/cardmount.sh" "$card" --cache-now 2>> "$OUT/stage.cache.log" | tail -1 )
         case "$got" in
-            "$PAD_HOME"/cardcache/*)
+            "$PAD_HOME"/cardcache/*|/mnt/wsl/cards/cardcache/*|"${PAD_CARD_CACHE_DIR:-/nonexistent}"/*)
                 echo "$(date +%T) cached $(basename "$card")  in $(( $(date +%s) - t0 ))s" ;;
             *)
                 echo "$(date +%T) NOT cached $(basename "$card") (disk full?) - it boots from where it lies" ;;

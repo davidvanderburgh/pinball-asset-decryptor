@@ -36,7 +36,18 @@ SELF=$(cd "$(dirname "$0")" && pwd)
 . "$SELF/padpath.sh"
 PREFIX=$PAD_HOME/local
 CARDS=$PAD_CARDS          # per rig slot (padpath.sh): a slot unmounts only its own
-CACHE=$PAD_HOME/cardcache
+# THE SHARED CARD STORE (PAD-651): when /mnt/wsl/cards is mounted (cardstore.ps1: one ext4 disk file on the NVMe,
+# attached to the WSL VM by name, so EVERY distro sees it), the cache lives there - one cache for the sessions'
+# Ubuntu, the app's runtime and the app's data disk, sized for the newest build of every title. Without it (a
+# machine without the store, a reboot before the logon task ran) the cache is $PAD_HOME/cardcache as it always was.
+# PAD_CARD_CACHE_DIR names another.
+if [ -n "${PAD_CARD_CACHE_DIR:-}" ]; then
+    CACHE=$PAD_CARD_CACHE_DIR
+elif [ -d /mnt/wsl/cards/cardcache ] && mountpoint -q /mnt/wsl/cards 2>/dev/null; then
+    CACHE=/mnt/wsl/cards/cardcache
+else
+    CACHE=$PAD_HOME/cardcache
+fi
 FUSE2FS="$PREFIX/usr/bin/fuse2fs"
 # Both library directories, because the packages unpacked into $PREFIX put
 # their libraries in /lib up to 24.04 and in /usr/lib from 26.04 (PAD-437).
@@ -558,6 +569,9 @@ title_dir() {
 # ITEM 77: cache-manager queries. No image argument and no mount - these are
 # what the Emulate tab's Card cache dialog shells. Tab-separated so a label
 # or source path may carry spaces (the source is LAST for the same reason).
+if [ "${1:-}" = "--cache-dir" ]; then     # where the cache is (the shared store when mounted; PAD-651)
+    echo "$CACHE"; exit 0
+fi
 if [ "${1:-}" = "--cache-list" ]; then
     # entry <TAB> label <TAB> real_kb <TAB> apparent_kb <TAB> boot_epoch <TAB> source
     for f in "$CACHE"/*.raw; do

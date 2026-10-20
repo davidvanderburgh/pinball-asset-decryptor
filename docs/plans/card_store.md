@@ -1,0 +1,76 @@
+# The shared card store: the Spike 2 library lives in WSL once (PAD-651)
+
+David, 2026-10-20: *"is it just going to be faster long term to have all the spike2 images on the c drive instead
+of the D drive? this constant copying them back and forth is inefficient in many ways. especially because we
+aren't cleaning up after ourselves. or, can we have wsl use our d drive instead?"* Then: *"we only ever need the
+newest builds of spike 2 images anyways. we only keep around old versions for posterity."*
+
+## Why the copies existed, and why neither of his two ideas ends them
+
+- A card on ANY Windows drive, C: included, is read through 9p under fuse2fs and is latency-bound: Godzilla Pro
+  1.16 reached attract in 79-130 s from C: and in 23 s from a copy on the WSL ext4 disk (PAD-484,
+  docs/plans/game_speed.md). So raw images on C: keep the copies; they only make them faster.
+- Several rigs reading several images off the spinning D: (ST4000DM005) seek until a read stalls past the game's
+  own watchdog: 5 of 12 builds died that way before staging existed (rig_slots.md). Attaching D: to WSL (`wsl
+  --mount` of a physical disk) takes the disk away from Windows while it is attached and keeps the seeking.
+- So every sweep copied its cards into cardmount.sh's cache first - and there were THREE caches, one per place
+  the rig runs (Ubuntu's `~/cardcache`, 123 GB in a 256 GB distro disk; the app's runtime `/home/pad/cardcache`;
+  the app's data disk `/mnt/wsl/paddata/spike2/cardcache`), each too small for the library and each evicting
+  least-recently-booted with 30 GB kept free. A 78-build sweep re-copied most of the library every pass, and two
+  tickets in two distros copied the same card twice, off one spinning disk, at 6 MB/s (measured 2026-10-20 with
+  PAD-643 and PAD-645 both sweeping).
+
+## The library is the newest build of every title
+
+Measured (newest image per title, used blocks from the cache's copy or cardcopy.py's plan): 57 newest images =
+320 GB of used blocks (607 GB as raw images); 53 stock titles = 293 GB, the other 27 GB the four Godzilla Heisei
+custom builds. Rush LE/Pro and Metallica are the biggest at ~11.7 GB each; Jurassic Park the Pin, Bond 60th and
+Beatles the smallest at 1.3-2.0 GB.
+
+David, the same afternoon: *"move any image that has a later version of it to the older versions folder. we
+should never use these images in this folder (they are for archival purposes only)."* Done: 33 images, 321 GB,
+moved within D: to `D:\Pinball\images\Stern\spike2\older versions` (`moved.log` beside them names each). The
+spike2 folder is now exactly the library: 56 images (60 `.raw` files with the Heisei customs), one per title.
+Nothing reads `older versions`: not a sweep list, not the cache, not the app's picker.
+
+## What was built
+
+1. **`cardstore.ps1`** (Windows side). `create` makes an expandable VHDX on the NVMe (`C:\wsl\cards.vhdx`, 400 GB
+   maximum, grows as used; diskpart, since Windows Home has no Hyper-V module), attaches it bare with
+   `wsl --mount --vhd --bare`, has Ubuntu format it ext4 (label `cards`, no reserved blocks), detaches it and
+   attaches it again with `--name cards` - which puts it at **/mnt/wsl/cards in every distro at once** (Ubuntu
+   and PAD-Runtime, the app's runtime). The disk steps need administrator rights and run in an elevated child
+   (`Start-Process -Verb RunAs`, silent on David's PC); everything that touches a distro's files runs unelevated.
+   A mount does not survive a reboot, so `create` registers a logon task, **"PAD card store"**, that runs
+   `cardstore.ps1 mount` with highest privileges; the task names the main checkout's copy of the script
+   (`Documents\development\pinball-asset-decryptor\tools\spike2_emu\cardstore.ps1`), which outlives any ticket's
+   worktree - so it works from the first reboot after this ticket merges; before that, `cardstore.ps1 mount` by
+   hand. `status` shows the file's size on disk, the mount in each distro and the cache's use.
+2. **cardmount.sh keeps its cache in the store when it is there**: `/mnt/wsl/cards/cardcache` when that is a
+   mount, else `$PAD_HOME/cardcache` as before (a machine without the store, a reboot before the logon task
+   ran); `PAD_CARD_CACHE_DIR` names another; `cardmount.sh --cache-dir` says which. cardstage.sh's "did the copy
+   land in the cache" check and mkmulticard.py's copier check know the store too. The copier, the stamps, the
+   `.boot` sidecars and the eviction are unchanged - there is just one of each now, for every distro.
+3. **`precache.sh`** copies every `.raw` in the library folder (never its `older versions` subfolder) into the
+   cache, one at a time under the machine-wide copy lock the sweeps use, skipping what is cached and valid, and
+   reports each card to the dashboard (`PAD_PROGRESS=PAD-n`).
+4. **`cachemigrate.sh`** moves the VALID entries of an old per-distro cache into the store (sparse-preserving,
+   NVMe to NVMe, the old entry removed once the new one matches), drops entries whose image is gone or changed
+   (the older versions), and leaves a card a run has mounted alone - so the 123 GB Ubuntu had already copied
+   were not read off D: again.
+
+## Measured
+
+- `cardstore.ps1 create`: the file made, formatted and attached by name in about a minute; 393 GB usable;
+  `mountpoint /mnt/wsl/cards` true in Ubuntu and in PAD-Runtime.
+- PAD-Runtime's cache: 2 valid entries (8 GB) moved into the store in 18 s.
+- (filled in as the pre-cache completes)
+
+## What it leaves
+
+- The old caches: Ubuntu's `~/cardcache` and PAD-Runtime's two are emptied by the migration; the Ubuntu distro
+  disk file shrinks the next time it is compacted (`/prune`).
+- Cards on E: or elsewhere, or an older version a ticket must boot on purpose: copied on first use as before and
+  evicted first, since the pre-cached newest builds are booted more recently.
+- A new image arriving in the spike2 folder: `precache.sh` again (seconds for everything already there), or the
+  first run copies it.

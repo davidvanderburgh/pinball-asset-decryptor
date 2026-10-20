@@ -317,3 +317,8 @@ def test_foo_fighters_live_menu_takes_ours_as_standard_through_the_entry(key):
     v = _port(key)["value"]
     assert int(v["challenge_menu_kind"]) == 0 and int(v["challenge_menu_sets_on"]) == 1
     assert int(v["challenge_menu_pick_back"]) == 176 and int(v["challenge_menu_list_at"]) == 576
+
+
+def test_bond_60th_says_its_challenge_is_a_timed_whole_game():
+    p = MP.profile_from_port(str(PORTS / "james_bond_60th_le-1.11.port"))
+    assert not p.can("challenge") and "a whole game played against the clock" in p.why_not("challenge")

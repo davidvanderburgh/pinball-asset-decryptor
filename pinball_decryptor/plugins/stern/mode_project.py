@@ -951,6 +951,10 @@ def _challenge_cannot(key, label, port=None):
     """The ``cannot`` entry for a mode in the game's challenges on build ``key`` (taking one's place, or one of its
     own on the start menu), or () when it can do either."""
     if not _challenge_ready(port):
+        if key.startswith("james_bond_60th"):            # PAD-619: its one challenge is the whole game, on a clock
+            return (("challenge", "%s's only challenge is Challenge Mode, a whole game played against the clock: there "
+                                  "is no challenge in it a mode of yours could take the place of, and its start menu "
+                                  "is not one the app can add a challenge to." % label),)
         return (("challenge", "%s's Player Challenge mode has no list of challenges a mode of yours can take a place "
                               "in, and no start menu the app can add one to." % label),)
     if key in CHALLENGE_PROVEN or key in CHALLENGE_MENU_PROVEN:

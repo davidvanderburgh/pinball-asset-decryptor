@@ -56,18 +56,20 @@ capture). Results: see the ticket's report.
   matches neither signature; its derived port has no drain, so it is refused.
 - The Beatles 1.30: no card in the library (a hand-made copy of 1.29's port sat in the old cache).
 
-## Sweep status (paused 2026-10-20 for David's disk clean-up)
+## Sweep result (final runtime)
 
-Only the NEWEST build of each title is swept (David, 2026-10-20: older Spike 2 versions move to
-`D:\Pinball\images\Stern\spike2\older versions`, archival only, never used). 53 titles.
+Only the newest build of each title (David, 2026-10-20: the older versions are archival only), 53 titles,
+on the final runtime (`C:/tmp/PAD-645`: `run645d.sh` on rigjob.sh, one rigbatch at 4x; `tones.py` /
+`tonecheck.py` find the three tones in each capture's attract part).
 
-Final runtime (6a78d38c), passed: Aerosmith 1.16, Aerosmith LE 1.16, Avengers LE 1.10, Avengers Pro 1.10,
-Batman 66 1.14, The Beatles 1.29, Deadpool LE 1.16, Deadpool Pro 1.16, D&D Pro 1.10, Foo Fighters Pro 1.04,
-Godzilla LE 1.16, James Bond Pro 1.06. D&D LE 1.10: attract passes, no game starts on the rig (known).
-
-Left (40, newest builds): elvira3-1.13, foo_fighters_le-1.04, godzilla_pro-1.16, guardians-1.15, guardians_le-1.15, iron_maiden_le-1.18, iron_maiden_pro-1.18, james_bond_60th_le-1.11, james_bond_le-1.06, jaws_le-1.02, jaws_pro-1.02, john_wick_le-1.02, john_wick_pro-1.02, jurassic_park_le-1.16, jurassic_park_pro-1.16, jurassic_park_the_pin-1.05, king_kong_le-0.97, king_kong_pro-0.97, led_zeppelin_le-1.22, led_zeppelin_pro-1.22, mando_le-1.45, mando_pro-1.45, metallica_spike-1.04, munsters_le-1.28, munsters_pro-1.28, rush_le-1.19, rush_pro-1.19, star_wars_elg-1.10, star_wars_le-1.31, star_wars_pro-1.31, stranger_things-1.13, stranger_things_le-1.13, sword_of_rage_le-1.19, sword_of_rage_pro-1.19, turtles_le-1.59, turtles_pro-1.59, uncanny_xmen_le-0.98, uncanny_xmen_pro-0.98, venom_le-1.07, venom_pro-1.07.
-
-Resume: `C:/tmp/PAD-645` - list `left_newest.txt`, job `run645c.sh` (pad_gsleep, ~150 s cap on a dead boot),
-driver `sweepdrv_c.sh` (`--speed 4`), sets in `b/<key>`, ports and runtime from the branch; `tonecheck.py`
-checks the tones in each capture. Earlier sweeps (older runtimes) passed on every one of these but the rig
-limits: TMNT LE 1.59 starts no game on the rig (known), Elvira 1.11 (an older build) sat on Tech Alerts.
+- 50 pass: six presses in attract play files 1 2 3 1 2 3 in press order, each looked up, the tones in
+  that order in the capture; three presses in a game play nothing.
+- 3 attract only: Munsters LE 1.28 (the rig's trough reads 0/6, no ball to start a game with), D&D LE
+  1.10 (its attract eject loop) and TMNT LE 1.59 (needs fresh NVRAM and retries) start no game on the
+  rig. Their attract presses pass, tones in order; the in-game test is the mode mask, 0x0000 in a game on
+  every build that started one (Munsters Pro 1.28 and TMNT Pro 1.59 among them).
+- The 4x sweep found two more ways the game's own sound at a press beat ours (Jurassic Park 1.05's 235
+  and The Mandalorian Pro 1.45's 879 took our channel after ours started): that request now gets our
+  carrier's priority and no steal flag for the press, and a cut file replays at the release.
+- Some LE builds start no game at 4x but do at 1x (King Kong LE 0.97, Led Zeppelin LE 1.22, Mandalorian
+  LE 1.45): rig timing, not the feature.

@@ -2382,11 +2382,12 @@ def _wav_basename(p, duration_names):
     The prefix is the TRUE decoded play length (header length minus the
     200-sample cursor lead-in, see emitted_length) — the raw header length
     read ~4.5 ms long, so a replacement trimmed to the advertised time got
-    its tail cut at encode (a tester's Replace-tab mismatch)."""
+    its tail cut at encode (a tester's Replace-tab mismatch).  A multi-band
+    record's file holds all its variants, so its prefix is all of them."""
     if not duration_names:
         return "idx%04d.wav" % p["idx"]
-    from .spike2.emulator import emitted_length
-    ms = int(round(emitted_length(p.get("length", 0)) * 1000.0 / 44100.0))
+    from .spike2.emulator import emitted_total
+    ms = int(round(emitted_total(p) * 1000.0 / 44100.0))
     m, rem = divmod(ms, 60000)
     s, ms = divmod(rem, 1000)
     return "%02dm%02ds%03d - idx%04d.wav" % (m, s, ms, p["idx"])
@@ -2804,6 +2805,17 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         # Which sounds each request plays, for the Video tab's "sounds this
         # clip's code plays" (clip_sounds); the resolver needs this emu.
         _write_sound_requests(emu, gr_path, img_path, params, output_dir, log)
+        # The sounds whose file is several variants one after another (PAD-637),
+        # for the Audio tab's Format and Type columns.
+        try:
+            from . import clip_sounds as _cs
+            n_var = _cs.write_variants(output_dir, params)
+            if n_var:
+                log("%d sound(s) on this card are several variants of one sound (the "
+                    "game picks one each time it plays); each extracts as its "
+                    "variants one after another." % n_var, "info")
+        except Exception as e:
+            log("The sound variants list couldn't be written (%s)." % e, "info")
         emu.close()
         emu = None   # decode runs in worker processes (or a fresh emu on fallback)
 
@@ -4402,13 +4414,18 @@ def _classify_audio_edits(byidx, audio_edits, assets_dir):
     file, and has to run before the encode cache is consulted: a clip that was
     fitted on the last build has a cached body for the STOCK slot, and
     replaying that into a grown build would write the trimmed version."""
-    from .spike2.emulator import emitted_length
+    from .spike2.emulator import bands_of, emitted_length
     fits, grows = {}, {}
     for idx, wav in audio_edits.items():
         p = byidx.get(idx)
         want = _wav_frames_44k(_asset_path(assets_dir, wav)) if p else None
         room = emitted_length(p.get("length", 0)) if p else 0
-        if want is None or want <= room:
+        if p is not None and bands_of(p) > 1:
+            # a multi-band record keeps its length: the file is either its
+            # variants one after another or one sound for them all, and a
+            # longer one is trimmed to a variant (see _band_pieces)
+            fits[idx] = wav
+        elif want is None or want <= room:
             fits[idx] = wav
         else:
             grows[idx] = (room, want)
@@ -14292,14 +14309,20 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
     bit-exact over the first ``nblk`` blocks.
 
     The analytic re-encode recovers a per-sample keystream by driving the codec;
-    that recovery is exact for the codecs validated so far but does not yet model
-    every variant (e.g. multi-band sounds, where the companding fires several
-    times per output sample and the captured keystream interleaves).  This
-    self-test catches such sounds so Write can skip them rather than patch a body
-    that would decode to noise -- protecting both the newly-located titles and
-    any multi-band sound in an already-supported title.  Any failure to drive the
+    that recovery is exact for the codecs validated so far but a codec layout it
+    does not model would recover garbage.  This self-test catches such sounds so
+    Write can skip them rather than patch a body that would decode to noise --
+    protecting the newly-located titles and any layout not seen yet (multi-band
+    records failed it until PAD-637 read them).  Any failure to drive the
     recovery (e.g. no companding site located) is treated as 'not valid' so the
-    sound is skipped, never written blind."""
+    sound is skipped, never written blind.
+
+    A multi-band record is valid when every variant is (PAD-637)."""
+    from .spike2.emulator import band_params, bands_of
+    nb = 1 if "band" in p else bands_of(p)
+    if nb > 1:
+        return all(_recovery_valid(emu, gr, sr, band_params(p, k), np, nblk)
+                   for k in range(1, nb + 1))
     secs = (nblk * 200 + 200) / 44100.0
     try:
         out0 = emu.decode(p, max_secs=secs)
@@ -14373,14 +14396,14 @@ def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None,
     (:func:`_write_machine_render`).
 
     Raises :class:`_EncodeVerifyError` on mismatch."""
-    from .spike2.emulator import emitted_length, BLOCK
+    from .spike2.emulator import emitted_total, BLOCK
     # Verification needs a booted emulator and a real slot; without either
     # there is nothing to check against (only unit tests exercising the
     # target-fitting half of the encoders get here).  Both always exist on the
     # Write path.
     if emu is None or "body_off" not in p:
         return
-    n = emitted_length(p["length"])
+    n = emitted_total(p)
     if n <= 0:
         return
     stereo = p["chan"] == 2
@@ -14435,9 +14458,10 @@ def _audit_audio_patches(params, patches, log):
     another patch by at most the deliberate shared-boundary word(s).  Log-only
     — an anomaly warns loudly but never blocks a build (the verify pass is
     the hard gate).  Returns the number of anomalies."""
+    from .spike2.emulator import frame_bytes
     own = {}
     for p in params:
-        s = 4 if p.get("chan") == 2 else 2
+        s = frame_bytes(p)
         for d in (0, 1, 2):                 # delta 0 / -1 / -2 window starts
             own.setdefault(p["body_off"] - s * d, []).append((p, s, d))
     issues = shared = 0
@@ -14489,10 +14513,10 @@ def _slot_end_map(params):
     are packed back-to-back, so the sound ending at another's ``body_off`` is
     the layout predecessor whose tail word(s) a delta<0 encode window
     overlaps (see :func:`_resolve_shared_boundary`)."""
+    from .spike2.emulator import frame_bytes
     out = {}
     for q in params:
-        bps = 4 if q.get("chan") == 2 else 2
-        out[q["body_off"] + bps * q["length"]] = q
+        out[q["body_off"] + frame_bytes(q) * q["length"]] = q
     return out
 
 
@@ -14583,6 +14607,11 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
         def stock_word(abs_off):
             return struct.unpack("<H", bytes(emu.mm[abs_off:abs_off + 2]))[0]
 
+        from .spike2.emulator import band_params, bands_of
+        pred_lane = bands_of(pred)
+        if pred_lane > 1:
+            # a multi-band predecessor's last word is its last variant's
+            pred = band_params(pred, pred_lane)
         pred_ext = _extended_params(pred)
         if pred_ext is None:
             return body
@@ -14606,6 +14635,11 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
             reproduces while reporting near-zero error (EHOH spinner
             idx5102/idx5103: stock R 7 shipped as 3357)."""
             w = (abs_off - pred["body_off"]) // 2
+            if pred_lane > 1:
+                w -= pred_lane - 1
+                if w % pred_lane:
+                    return None
+                w //= pred_lane
             if pred["chan"] == 2:
                 f, sub = w // 2, w % 2
                 i = f - d_p
@@ -14742,6 +14776,9 @@ def _apply_stock_head(emu, p, start, body, tgt, rec, np, log=None):
     try:
         if p.get("chan") == 2:
             return skip("stereo slot; mono only for now")
+        from .spike2.emulator import bands_of
+        if bands_of(p) > 1:
+            return skip("a record of variants; plain sounds only")
         if start != p["body_off"]:
             return skip("shifted delta<0 window, head word is shared")
         head = np.abs(np.asarray(tgt[:BLOCK], np.int64))
@@ -14813,6 +14850,27 @@ def _lowpass_loop(samples, cutoff_hz, np, pad=4096):
 _LEVEL_REF_UNSET = object()
 
 
+#: How far (a fraction of its length) a replacement for a multi-band record may
+#: be off the length Extract wrote it at and still be read as that file edited:
+#: its variants one after another, cut back into them in proportion.
+_BAND_FILE_SLACK = 0.02
+
+
+def _band_pieces(s, n, nb, np):
+    """The audio each of a multi-band record's *nb* variants (each *n* samples
+    long) is given from a replacement *s*.  Extract writes the variants one
+    after another, so a file within :data:`_BAND_FILE_SLACK` of ``nb * n`` is
+    that file edited and is cut back into its *nb* parts; any other sound is the
+    sound the record now plays, whichever variant the game picks, so every
+    variant gets all of it."""
+    s = np.asarray(s, np.int64)
+    whole = nb * n
+    if nb > 1 and abs(len(s) - whole) <= whole * _BAND_FILE_SLACK:
+        cut = [int(round(k * len(s) / float(nb))) for k in range(nb + 1)]
+        return [s[cut[k]:cut[k + 1]] for k in range(nb)]
+    return [s] * nb
+
+
 def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
                  loop=False, orig=_LEVEL_REF_UNSET, blocks=None):
     # Returns encode_sound's ``(start_off, body)`` — the write offset can sit
@@ -14825,7 +14883,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
     # end runs straight into its start - no edge fades, a circular low-pass.
     # *orig* is the loudness reference to match (default: the slot's own stock
     # render); a mode's music bed passes the game's own music.
-    from .spike2.emulator import emitted_length
+    from .spike2.emulator import bands_of, emitted_length
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
     if loop:
@@ -14838,7 +14896,10 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
                    _stock_render(emu, p, np, stereo=False)
                    if orig is _LEVEL_REF_UNSET else orig,
                    _MONO_RANGE, np, headroom, gain_db=gain_db)
-    tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
+    s = np.clip(s, -_MONO_RANGE, _MONO_RANGE)
+    # a multi-band record: one fitted target per variant, back to back
+    tgt = np.concatenate([_fit(v, n, np, fade_ms=fade_ms)
+                          for v in _band_pieces(s, n, bands_of(p), np)])
     seed = _encode_seed_for(p, int(np.abs(tgt).max()))
     tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, seed)
     # *blocks*: a chain encode's block workers (PAD-599, spike2.parallel);
@@ -14857,7 +14918,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None,
 def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
                    gain_db=None, loop=False, orig=_LEVEL_REF_UNSET,
                    blocks=None):
-    from .spike2.emulator import emitted_length
+    from .spike2.emulator import bands_of, emitted_length
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
     if loop:
@@ -14870,10 +14931,11 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
     a = _fit_level(a, _stock_render(emu, p, np, stereo=True)
                    if orig is _LEVEL_REF_UNSET else orig,
                    _STEREO_RANGE, np, headroom, gain_db=gain_db)
-    L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), n, np,
-             fade_ms=fade_ms)
-    R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
-             fade_ms=fade_ms)
+    a = np.clip(a, -_STEREO_RANGE, _STEREO_RANGE)
+    # a multi-band record: one fitted target per variant, back to back
+    pieces = _band_pieces(a, n, bands_of(p), np)
+    L = np.concatenate([_fit(v[:, 0], n, np, fade_ms=fade_ms) for v in pieces])
+    R = np.concatenate([_fit(v[:, 1], n, np, fade_ms=fade_ms) for v in pieces])
     _seed = _encode_seed_for(
         p, max(int(np.abs(L).max()), int(np.abs(R).max())))
     L = _apply_slot_seed(L, np, _STEREO_RANGE, _seed)
@@ -15353,7 +15415,8 @@ def _chain_encoded(cache, where, emu, row, wav_path, encode, gain_db=None,
         return encode()
     key = None
     try:
-        width = 4 if chan == 2 else 2
+        from .spike2.emulator import frame_bytes
+        width = max(4 if chan == 2 else 2, frame_bytes(row))
         lo = max(0, int(row["body_off"]) - 4 * width)
         window = emu.mm[lo:int(row["body_off"])
                         + width * (int(row["length"]) + 4)]
@@ -17017,9 +17080,10 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
     if not patches:
         return []
     # {start_off: param} for every plausible window start (delta 0 / -1 / -2).
+    from .spike2.emulator import frame_bytes
     owners = {}
     for p in params:
-        s = 4 if p.get("chan") == 2 else 2
+        s = frame_bytes(p)
         for d in (0, 1, 2):
             owners.setdefault(p["body_off"] - s * d, p)
 
@@ -17077,12 +17141,12 @@ def _final_check_one(emu, off, p, body, scrap_check, np):
     blip-free cave keeps all of ours; an appended body starts as a scaffold)."""
     import math
 
-    from .spike2.emulator import BLOCK, emitted_length
+    from .spike2.emulator import BLOCK, bands_of, emitted_length, emitted_total
 
     def dbfs(v):
         return -120.0 if v <= 0 else 20.0 * math.log10(v / 32768.0)
 
-    n = emitted_length(p["length"])
+    n = emitted_total(p)
     step = 4 if p.get("chan") == 2 else 2
     stock = bytes(emu.mm.base[off:off + len(body)]
                   if hasattr(emu.mm, "base")
@@ -17112,7 +17176,12 @@ def _final_check_one(emu, off, p, body, scrap_check, np):
     # those map ~1:1 to output samples (delta near 0), so index by
     # word position clipped into range.
     rev_pk = 0
-    if len(reverted):
+    if len(reverted) and bands_of(p) > 1:
+        # a multi-band word -> its variant's sample, in the joined decode
+        st = int(p["stride"]); w = reverted
+        ri = (w // st) + emitted_length(p["length"]) * ((w % st) // (step // 2))
+        ri = ri[ri < len(s)]
+    elif len(reverted):
         ri = reverted[reverted < step * n] // step
         ri = ri[ri < len(s)]
         if len(ri):
@@ -18041,15 +18110,26 @@ def _grows_reencodable(gr_path, img_path, grows, byidx, log):
     """*grows* less every sound whose codec this app cannot re-encode bit-exact
     (:func:`_recovery_valid` on its stock record), each dropped with a reason in
     the log: the encode would skip it, and a skipped grow leaves the play table
-    re-pointed at an appended record nobody encoded (PAD-636: Led Zeppelin Pro
-    1.22's ten multi-band sounds, the ones behind ``0b 00 01 00`` /
-    ``0b 00 04 00``).  Trimmed, it is skipped and left unchanged, as before."""
+    re-pointed at an appended record nobody encoded.  A multi-band record
+    (PAD-637: Led Zeppelin LE/Pro 1.22's ten, behind ``0b 00 01 00`` /
+    ``0b 00 04 00``; Foo Fighters 1.04's one) is never lengthened: it is
+    re-encoded at its own length instead."""
     if not grows:
         return grows
     import numpy as np
     from .spike2.codec import GenRecover, StereoRecover
-    from .spike2.emulator import Spike2Emu
+    from .spike2.emulator import Spike2Emu, bands_of
     kept = {}
+    for idx in list(grows):
+        p = byidx.get(idx)
+        if p is not None and bands_of(p) > 1:
+            # its appended copy would need every variant's lane laid out anew
+            log("idx %d: this sound plays one of %d variants, which can't be "
+                "lengthened; the replacement is trimmed to fit."
+                % (idx, bands_of(p)), "info")
+            grows = {k: v for k, v in grows.items() if k != idx}
+    if not grows:
+        return grows
     emu = Spike2Emu(gr_path, img_path)
     try:
         emu.boot()
@@ -18126,6 +18206,13 @@ def _mode_sound_grow(gr_path, img_path, params, sites, audio_edits, grows,
             % (name, "its sound record is unknown" if want is not None else
                "its end sound %s is not a WAV this app can read"
                % os.path.basename(mode_sound["wav"])), "warning")
+        return audio_edits, grows, None
+    from .spike2.emulator import bands_of
+    if any(bands_of(rows[i]) > 1 for i in idxs):
+        # a record of variants is never lengthened (_grows_reencodable)
+        log("Modes: %s ends with the game's own time-up call on this card: its "
+            "time-up sound plays one of several variants, which can't be "
+            "lengthened." % name, "warning")
         return audio_edits, grows, None
     audio_edits = dict(audio_edits)
     grows = dict(grows)

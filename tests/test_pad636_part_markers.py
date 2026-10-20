@@ -129,9 +129,10 @@ def test_request_parts_stop_where_the_next_descriptor_starts(lz_resolver):
 
 
 def test_a_sound_whose_codec_cannot_re_encode_is_not_lengthened(monkeypatch):
-    """Led Zeppelin Pro 1.22's ten sounds behind 0b 00 01 00 / 0b 00 04 00 are its ten multi-band
-    records (stride 12 / 24), which fail the re-encode self-test: grown, the play table would be
-    re-pointed at an appended record the encode then skipped. They trim, and say why."""
+    """A sound that fails the re-encode self-test is not grown: the play table would be re-pointed
+    at an appended record the encode then skipped. It trims, and says why. Led Zeppelin Pro 1.22's
+    ten sounds behind 0b 00 01 00 / 0b 00 04 00 are its multi-band records (stride 12 / 24), which
+    re-encode since PAD-637 but are never lengthened (idx 390 here)."""
     from pinball_decryptor.plugins.stern.spike2 import codec as CODEC
 
     class _Emu:

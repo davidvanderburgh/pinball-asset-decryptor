@@ -964,6 +964,38 @@ def read_requests(project):
     return out
 
 
+#: Extract's list of the decoded sounds that are several VARIANTS of one sound (PAD-637:
+#: multi-band records), ``{"<idx>": variant count}``; absent when the card has none.
+VARIANTS_JSON = "sound_variants.json"
+
+
+def write_variants(project, params):
+    """Write (or, with none on the card, remove) :data:`VARIANTS_JSON` for *params*."""
+    import json
+    from .spike2.emulator import bands_of
+    got = {str(p["idx"]): bands_of(p) for p in params if bands_of(p) > 1}
+    path = os.path.join(project, VARIANTS_JSON)
+    if not got:
+        if os.path.exists(path):
+            os.remove(path)
+        return 0
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(got, f, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+    return len(got)
+
+
+def sound_variants(project):
+    """``{idx: variant count}`` from :data:`VARIANTS_JSON` (``{}`` when there is none)."""
+    import json
+    try:
+        with open(os.path.join(project, VARIANTS_JSON), encoding="utf-8") as f:
+            return {int(k): int(v) for k, v in json.load(f).items() if int(v) > 1}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
 def sound_uses(project):
     """``{idx: [(request, Sound Test name), ...]}`` of every request that plays each decoded
     sound, as the first sound of a sound id or a later part of one; a sound no request plays

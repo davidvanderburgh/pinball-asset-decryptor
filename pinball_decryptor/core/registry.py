@@ -1007,6 +1007,13 @@ class Manufacturer(ABC):
         tab shows no Requests column. Called off the UI thread."""
         return None
 
+    def sound_variant_counts(self, assets_dir, rels):
+        """``{rel: n}`` for each Replace-Audio slot whose file is *n* variants of
+        one sound one after another, the game playing one of them each time
+        (PAD-637: Spike 2 multi-band records); ``{}`` (the default) for none.
+        Called off the UI thread."""
+        return {}
+
     def video_pins_byte_size(self, assets_dir=None) -> bool:
         """Whether this plugin's Write may hold a replacement clip to the
         original's exact byte length.

@@ -160,6 +160,60 @@ def emitted_length(length):
     return max(0, int(length) - BLOCK)
 
 
+# MULTI-BAND RECORDS (PAD-637).  A record whose codec obj says N bands (+0x1c)
+# and a frame of stride = N * chan words (+0x1a) holds N variants of one sound,
+# interleaved frame by frame: frame i is variant 1's sample i (one word mono,
+# the u0/u1 pair stereo), variant 2's sample i, ... variant N's.  The game plays one variant per voice -- the band
+# number at voice+0x20, 1-based, chosen from a table of game-state tests when
+# the voice starts (0x1d5f50 on Led Zeppelin Pro 1.22) and switched live through
+# voice+0x21, which the codec crossfades into.  Mono band k reads word
+# ``k - 1 + N * i`` with keystream index ``seed + k - 1 + N * cursor``: an
+# ordinary mono sound is the N = 1 case at band 0, which is why it reads one word
+# below its body (delta = -1).  The voice setup gives these records codec
+# functions of their own (locate.find_band_codecs).  Led Zeppelin LE/Pro 1.22
+# carry ten mono ones (N = 12 or 24: a sound stepped through twelve pitches, the
+# 24 ones in left / right pairs), Foo Fighters LE/Pro 1.04 one stereo song in two
+# mixes (N = 2); no other build derived on this machine has any.  Read as one
+# plain sound they came out as stationary noise.  Extract writes a record as its
+# variants one after another, in band order; Write encodes each variant into its
+# own lane.
+
+def bands_of(p):
+    """How many variants record *p* interleaves (1 for a plain sound): its
+    frame is ``stride`` words, ``chan`` words per variant."""
+    chan = int(p.get("chan", 1))
+    if chan not in (1, 2):
+        return 1
+    st = int(p.get("stride", chan) or chan)
+    if st <= chan or st % chan:
+        return 1
+    n = st // chan
+    raw = p.get("_rawobj")
+    if raw and len(raw) > 0x1c and raw[0x1c] != n:
+        return 1                 # bands not stride / chan: a layout not seen
+    return n
+
+
+def band_params(p, band):
+    """*p* narrowed to its variant *band* (1-based): a mono sound of the same
+    length whose decode / keystream recovery drives the codec with that band."""
+    return dict(p, band=int(band))
+
+
+def frame_bytes(p):
+    """Bytes one sample frame of record *p* takes in the bank: 2 mono, 4
+    stereo, ``2 * stride`` for a multi-band record (all its variants)."""
+    if bands_of(p) > 1:
+        return 2 * int(p["stride"])
+    return 4 if int(p.get("chan", 1)) == 2 else 2
+
+
+def emitted_total(p):
+    """Samples a record decodes to: every variant's emitted run, back to back."""
+    return emitted_length(p.get("length", 0)) * (
+        1 if "band" in p else bands_of(p))
+
+
 def _md_record_count(eng, dst):
     """Record count at the master-directory malloc-return PC (where the
     MASTERDIR_MALLOC hook sits, ``dst`` = the returned buffer in r0).
@@ -632,6 +686,9 @@ class Spike2Emu:
         # Optional: None here just means that module locates them itself from
         # the ELF, and a build where they can't be found still decodes audio.
         self.MASTERDIR_CRYPTO = None
+        # Multi-band records' render functions (locate.find_band_codecs);
+        # None: they decode through the slot the scale resolves to.
+        self.BAND_RENDER = None
         if addrs:
             for k in ("BOOT_LO", "BOOT_HI", "VF2_VA", "REG_BASE", "PROV",
                       "DISPATCH", "QMUL_TABLE", "CAT0_REGISTER", "RBTREE_HDR",
@@ -641,6 +698,7 @@ class Spike2Emu:
             self.MASTERDIR_COUNT = addrs.get("MASTERDIR_COUNT")
             self.COUNTREG = addrs.get("COUNTREG")
             self.MASTERDIR_CRYPTO = addrs.get("MASTERDIR_CRYPTO")
+            self.BAND_RENDER = addrs.get("BAND_RENDER")
             self.OBJREG = addrs["OBJREG"]
             # generic derive skips the template lookup (find-skip) instead of
             # stubbing the chain helpers, and takes the length from the raw obj.
@@ -1715,10 +1773,11 @@ class Spike2Emu:
         obj[0x1d] = p["scale"]
         return bytes(obj)
 
-    def _voice(self, chan):
+    def _voice(self, chan, band=0):
         v = bytearray(0x40)
         struct.pack_into("<I", v, 0x00, self.OBJ_VA)   # obj pointer
         struct.pack_into("<I", v, 0x30, VOL[chan])     # volume
+        v[0x20] = band & 0xff                          # multi-band variant
         return bytes(v)
 
     def codec_fns(self, scale, chan):
@@ -1739,10 +1798,27 @@ class Spike2Emu:
         validated build keeps the dispatch render/decode fn (bit-exact path).
         ``codec_fns`` alone is wrong here: it predates the slot-parity fix and
         returns the noise slot on flipped builds."""
+        if p.get("band"):
+            fn = self._band_entry(p)
+            if fn is not None:
+                return fn
         if self._generic:
             return self._resolve_entry(p)
         render_fn, decode_fn = self.codec_fns(p["scale"], p["chan"])
         return render_fn if p["chan"] == 2 else decode_fn
+
+    def _band_entry(self, p):
+        """The render function the game's voice setup picks for a multi-band
+        record's scale and channel count (``BAND_RENDER``), or None."""
+        if self.BAND_RENDER is None:
+            return None
+        addr = (self.DISPATCH + self.BAND_RENDER + 0x40 * int(p["scale"])
+                + (4 if int(p["chan"]) == 1 else 0))
+        try:
+            fn = _u32(bytes(self.mu.mem_read(addr, 4)))
+        except UcError:
+            return None
+        return fn if fn and self._backing_off(fn) is not None else None
 
     def decode(self, p, max_secs=None, cancel=None, progress=None):
         """Decode one sound to ``(L, R, stereo)`` int64 arrays (mono consumers
@@ -1750,8 +1826,18 @@ class Spike2Emu:
 
         ``progress`` (if given) is called ``(cur, nmax)`` once per decoded block
         (samples-so-far / total) so a caller can surface live per-sound progress
-        for the long music tracks; it's cheap, so the caller throttles."""
-        if self._generic:
+        for the long music tracks; it's cheap, so the caller throttles.
+
+        A multi-band record decodes to its variants one after another (see
+        :func:`bands_of`); ``max_secs`` caps the whole run."""
+        nb = 1 if "band" in p else bands_of(p)
+        if nb > 1:
+            return self._decode_bands(p, nb, max_secs, cancel, progress)
+        if p.get("band"):
+            entry = self.recover_entry(p)
+            if entry is None:
+                return None
+        elif self._generic:
             entry = self._resolve_entry(p)
             if entry is None:
                 return None
@@ -1760,6 +1846,42 @@ class Spike2Emu:
             entry = render_fn if p["chan"] == 2 else decode_fn
         return self._decode_with_entry(p, entry, max_secs=max_secs, cancel=cancel,
                                        progress=progress)
+
+    def _decode_bands(self, p, nb, max_secs, cancel, progress):
+        """A multi-band record's variants decoded in band order and joined:
+        each is cut to its emitted run, so variant k starts at sample
+        ``(k - 1) * emitted_length(length)`` of the result."""
+        import numpy as np
+        n = emitted_length(p["length"])
+        total = n * nb
+        want = total if max_secs is None else min(total, int(44100 * max_secs))
+        stereo = int(p["chan"]) == 2
+        Ls, Rs = [], []
+        got = 0
+        for k in range(1, nb + 1):
+            if got >= want:
+                break
+            secs = min(n, want - got) / 44100.0 + (BLOCK + 1) / 44100.0
+            prog = None
+            if progress is not None:
+                def prog(cur, _nmax, _base=got):
+                    progress(_base + min(cur, n), total)
+            res = self.decode(band_params(p, k), max_secs=secs, cancel=cancel,
+                              progress=prog)
+            if res is None:
+                return None
+            take = min(n, want - got)
+            for out, ch in ((Ls, res[0]), (Rs, res[1])):
+                a = np.asarray(ch, np.int64)[:take]
+                if len(a) < take:
+                    a = np.concatenate([a, np.zeros(take - len(a), np.int64)])
+                out.append(a)
+            got += take
+        if not Ls:
+            return None
+        L = np.concatenate(Ls)
+        R = np.concatenate(Rs) if stereo else L.copy()
+        return L, R, stereo
 
     @staticmethod
     def _specflat(x):
@@ -1938,6 +2060,9 @@ class Spike2Emu:
         key = (p["scale"], p["chan"])
         if key in self._slot_cache:
             return self._slot_cache[key]
+        if "band" not in p and bands_of(p) > 1:
+            # scored whole, the interleave reads as noise on every slot
+            p = band_params(p, 1)
         cands = self._slot_candidates(p)
         where = {fnv: place for fnv, place in cands}
         order = [fnv for fnv, _place in cands]
@@ -2018,8 +2143,13 @@ class Spike2Emu:
         mu = self.mu
         chan = p["chan"]; stereo = (chan == 2); length = p["length"]
         Rmul, Roff = (4, 800) if stereo else (2, 400)
+        band = int(p.get("band", 0))
+        if band:
+            # one variant of a multi-band record: its frames are stride words
+            st = int(p["stride"])
+            Rmul, Roff = 2 * st, 400 * st
         OBJ = self._build_obj(p)
-        VOICE = self._voice(chan)
+        VOICE = self._voice(chan, band)
         vol = VOL[chan]
         bo = p["body_off"]; bodysz = Rmul * length
         span = _algn(min(bodysz + 0x4000, 0x10000000))

@@ -631,7 +631,9 @@ export default function AudioTab() {
     { key: "#0", label: "Original Track", sort: "#0", width: name0, titleOf: (r) => r.g ? r.label : r.k,
       render: (r) => html`<${NameCell} r=${r} prefix=${s.prefix} />` },
     { key: "len", label: "Length", sort: "len", width: FIXED.len + "px", num: true, render: (r) => r.len },
-    { key: "fmt", label: "Format", sort: "fmt", width: FIXED.fmt + "px", titleOf: (r) => r.fmt, render: (r) => html`<span class="dim">${r.fmt || ""}</span>` },
+    // PAD-637: a file of several variants of one sound says so, and how Write takes it
+    { key: "fmt", label: "Format", sort: "fmt", width: FIXED.fmt + "px", titleOf: (r) => r.fmt_tip ? undefined : r.fmt,
+      render: (r) => html`<span class="dim" ...${r.fmt_tip ? tip({ head: "Variants", lines: r.fmt_tip }) : {}}>${r.fmt || ""}</span>` },
     { key: "type", label: "Type", sort: "type", width: FIXED.type + "px", render: (r) => r.type || "" },
     // PAD-635: how many of the game code's sound requests play the sound
     ...(s.req_cap ? [{ key: "rq", label: "Requests", sort: "rq", title: s.req_tip, width: FIXED.rq + "px", num: true,

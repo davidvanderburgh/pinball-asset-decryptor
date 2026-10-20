@@ -699,6 +699,61 @@ def masterdir_crypto(raw=None, game_real_path=None, md_start=None):
         return None
 
 
+def find_band_codecs(fw, dispatch):
+    """Where the codec dispatch keeps a MULTI-BAND record's render functions
+    (PAD-637), as ``{"BAND_RENDER": off}``: the stereo function of scale ``S``
+    is the pointer at ``dispatch + off + 0x40 * S``, the mono one 4 bytes on.
+    ``None`` when the selector isn't found.
+
+    The voice setup picks a sound's codec from its obj: chan (+0x1b), bands
+    (+0x1c) and scale (+0x1d)::
+
+        ldrb r2, [obj, #0x1b] ; ldrb r1, [obj, #0x1c] ; sub r2, r2, #1
+        ldrb r3, [obj, #0x1d] ; clz r2, r2 ; cmp r1, #1 ; ...
+        bls  <one band>       ; cmp <voice+0x2c>, #0 ; beq <...>
+        cmp r2, #0 ; movw/movt base ; add r3, base, r3, lsl #6
+        ldrne r2, [r3, #-mono] ; ldreq r2, [r3, #-stereo] ; ...
+
+    Read from the code, not assumed from the table: the table's 0x40-aligned
+    base (:func:`_find_dispatch`) sits at a different place in each build's
+    rows, so the slot a plain sound resolves to says nothing about the
+    multi-band one (Led Zeppelin Pro 1.22's plain codec IS its multi-band
+    one, Foo Fighters 1.04's is not)."""
+    t = fw.secs[".text"]
+    raw, toff, tva, tsz = fw.raw, t["off"], t["addr"], t["size"]
+    for o in range(toff, toff + tsz - 4, 4):
+        w = _u32(raw, o)
+        if (w & 0x0FFF0FF0) != 0x016F0F10 or (w >> 28) != 0xE:     # clz
+            continue
+        va = tva + (o - toff)
+        ins = list(_disasm(fw, va - 0x18, va + 0x40))
+        ops = [(x.mnemonic, x.op_str) for x in ins]
+        head = " | ".join("%s %s" % m for m in ops[:7])
+        if "#0x1b]" not in head or "#0x1c]" not in head or "#0x1d]" not in head:
+            continue
+        base = {}
+        reg_base = None
+        for i, x in enumerate(ins):
+            w2 = fw.w_text(x.address)
+            mm = _decode_movw_movt(w2)
+            if mm and mm[0] == "movw":
+                base[mm[1]] = mm[2]
+            elif mm and mm[0] == "movt" and mm[1] in base:
+                base[mm[1]] |= mm[2] << 16
+                reg_base = base[mm[1]]
+            elif reg_base is not None and x.mnemonic in ("ldrne", "ldreq")                     and "#-" in x.op_str:
+                nxt = ins[i + 1] if i + 1 < len(ins) else None
+                if nxt is None or nxt.mnemonic not in ("ldrne", "ldreq"):
+                    break
+                offs = {}
+                for y in (x, nxt):
+                    offs[y.mnemonic] = int(y.op_str.split("#-")[1].rstrip("]"), 16)
+                if set(offs) != {"ldrne", "ldreq"}                         or offs["ldreq"] - offs["ldrne"] != 4:
+                    break
+                return {"BAND_RENDER": reg_base - offs["ldreq"] - dispatch}
+    return None
+
+
 # --------------------------------------------------------------------------
 # top-level
 # --------------------------------------------------------------------------
@@ -750,6 +805,12 @@ def locate_all(game_real_path=None, raw=None):
         # decodes audio exactly as before; only growing the sound bank is
         # refused, with a named reason (see :mod:`.masterdir`).
         res["MASTERDIR_CRYPTO"] = find_masterdir_crypto(fw, md, ipc["_end"])
+        # Optional: a build this misses decodes every plain sound as before;
+        # its multi-band records decode through the resolved slot instead.
+        try:
+            res.update(find_band_codecs(fw, disp) or {})
+        except Exception:
+            pass
     except Exception:
         return None
     if any(res.get(k) is None for k in _REQUIRED) or objreg is None:

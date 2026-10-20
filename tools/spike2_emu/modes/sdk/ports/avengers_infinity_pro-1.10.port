@@ -436,13 +436,13 @@ text block_rule_name_22    Tower
 
 # ---- PAD-420: placed by port_tool.py from avengers_infinity_le-1.09.port (the same title), unverified ----
 text example_start_shot     Right bullseye target
-value switch_drain_size     0x1c8
-value switch_flags_at       0x1e
-value switch_level_at       0x1
-value switch_level_before   0x1
-value switch_level_via      0x0
-value switch_polarity_at    0x20
-value switch_record_size    0x2c
+#   switch_*: this build's own drain (generation B), read off its code (PAD-645: were another generation's)
+value switch_drain_size     384
+value switch_record_size    32
+value switch_level_at       24
+value switch_desc_via       8
+value switch_flags_at       26
+value switch_polarity_at    28
 
 # PAD-420: callouts from this build's own voice lines (the requests transcribed: voices.py / pick.py); the ids the older build's port had moved
 callout countdown         569   # One! / Two!

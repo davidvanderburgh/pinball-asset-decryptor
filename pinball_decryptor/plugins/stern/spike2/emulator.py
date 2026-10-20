@@ -571,6 +571,20 @@ class _ExtraHooks(dict):
             self.watch(addr)
 
 
+def plt_branches(plt_entry, generic, handlers):
+    """The PLT thunk entries :meth:`Spike2Emu._plt_branch` sends through their GOT
+    slots: every one on a generic build; on the validated build all but those its
+    own :attr:`Spike2Emu.PLT` handlers emulate whole. PAD-645: branching through
+    the GOT after such a handler ran the import a second time (operator new on
+    its own pointer), and TMNT Pro 1.58's derive stopped at 7 of its 2053
+    sounds (since 6c5c0c15)."""
+    out = dict(plt_entry)
+    if not generic:
+        for a in handlers:
+            out.pop(a, None)
+    return out
+
+
 class Spike2Emu:
     # memory layout (no region overlaps; see module docstring)
     STK = 0x20000000; STKSZ = 0x00400000
@@ -599,7 +613,7 @@ class Spike2Emu:
         # every LDREX/STREX, so the global hook can emulate them inline, and
         # the ELF PLT thunk entries -> their GOT slots (see _static_analysis)
         self._atomic_pcs = set(st.atomic_pcs)
-        self._plt_entry = dict(st.plt_entry)
+        self._plt_entry = plt_branches(st.plt_entry, st.generic, self.PLT)
         for vaddr, off, filesz, memsz in segs:
             b = vaddr & ~0xfff
             e = _algn(vaddr + memsz)

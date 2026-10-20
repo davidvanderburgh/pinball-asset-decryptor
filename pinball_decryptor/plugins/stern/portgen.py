@@ -37,7 +37,8 @@ import numpy as np
 #: 3: four one-place rodata tables (Godzilla's Ebirah stage awards and lamp table, the tank path and
 #: spot list) are carried like layered_displays
 #: 4: the Insider Connected score gate (agent_header + agent_begin), which every port must carry
-REVISION = 4
+#: 5: the switch drain on every port that has one, shots or not: the flipper buttons' sounds in attract (PAD-645)
+REVISION = 5
 RECIPE_FORMAT = 1
 
 CORE_SITES = ("tick", "shot_dispatch", "ball_end", "score_add")

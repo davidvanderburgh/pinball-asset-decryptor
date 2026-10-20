@@ -238,6 +238,25 @@ event ball_end       0x30
 event bonus_start    0x23
 event bonus_end      0x24
 
+# ---- PAD-645: the framework's switch drain, for the flipper buttons' sounds in attract (portswitch.py; no `switch` lines: the shots keep their own route) ----
+#   switch_edge: the framework's per-switch call in its switch drain (generation A: r0 = the switch id, called for every edge the game acts on, before the level is stored) - press the switches to prove it
+site switch_edge      0x00252c80 0xe92d4010 0xe1a04000
+#   switch_drain: the drain itself, never hooked: an edge counts only when switch_edge is called from it
+site switch_drain     0x002533d8 0xe92d4ff0 0xe30892f0
+data switch_records         0x005bfa70
+data switch_count           0x006c4aec
+value switch_drain_size     456
+value switch_record_size    44
+value switch_level_at       1
+value switch_level_via      0
+value switch_level_before   1
+value switch_flags_at       30
+value switch_polarity_at    32
+#   sound_play: located (strict) from TMNT Pro 1.59 and LE 1.59 (loose from The Beatles 1.29), the same place
+site sound_play       0x002ae830 0xe92d4010 0xe303e3f8
+#   the drain's edges are not this port's shots (they keep their own route): only the flipper buttons' sounds in attract use it
+value switch_edge_shots     0
+
 # ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
 site  ball_launch         0x00184b24 0xe92d4010 0xe30449d0
 value ball_launch_flag       11

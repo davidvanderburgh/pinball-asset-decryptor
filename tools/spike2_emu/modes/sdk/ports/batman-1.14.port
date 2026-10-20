@@ -72,11 +72,13 @@ value event_next            0x84
 value event_flags           0x2
 value event_show_flag       0x20
 value event_show_id         0x96
-value switch_drain_size     0x180
-value switch_record_size    0x20
-value switch_level_at       0x18
-value switch_flags_at       0x1a
-value switch_polarity_at    0x1c
+#   switch_*: this build's own drain (generation B), read off its code (PAD-645: were another generation's)
+value switch_drain_size     384
+value switch_record_size    32
+value switch_level_at       24
+value switch_desc_via       8
+value switch_flags_at       26
+value switch_polarity_at    28
 value countdown_step -1
 value sound_channel_count       8
 value sound_channel_size        196
@@ -276,8 +278,6 @@ lamp 120          0              CRANE FLASH  # lamp 156, I/O group 7 index 6, a
 lamp 121          0              TURNTABLE REACTOR FLASH  # lamp 157, I/O group 8 index 11, at 113,132
 
 # ---- PAD-420: placed by port_tool.py from batman-1.13.port (the same title), unverified ----
-value switch_level_before   0x1
-value switch_level_via      0x0
 
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.

@@ -2304,7 +2304,11 @@ def profile_from_port(path):
                      "drain.")
     proven =not any(UNPROVEN_MARK in line for line in port["header"])
     switch_note = ""
-    seen = SWITCH_EDGE_PROVEN if "switch_edge" in port["site"] else SWITCH_SHOTS_PROVEN
+    # PAD-645: the drain hands the switch lines on unless the port says it is there for the flipper
+    # buttons' sounds in attract alone (`value switch_edge_shots 0`, the runtime's switches_arm)
+    by_edge = ("switch_edge" in port["site"] and (port["value"].get("switch_edge_shots", 1) != 0
+                                                  or not any(s.startswith("switch_hit") for s in port["site"])))
+    seen = SWITCH_EDGE_PROVEN if by_edge else SWITCH_SHOTS_PROVEN
     if switch_shots and "%s-%s" % (game, version) not in seen:
         switch_note = ("%s's shots from switches (%s) have not been seen reaching a mode in the "
                        "emulator yet." % (label, ", ".join(switch_shots)))

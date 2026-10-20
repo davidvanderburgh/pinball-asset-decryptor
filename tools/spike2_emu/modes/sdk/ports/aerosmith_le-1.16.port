@@ -71,11 +71,13 @@ value event_next            0x84
 value event_flags           0x2
 value event_show_flag       0x20
 value event_show_id         0x96
-value switch_drain_size     0x180
-value switch_record_size    0x20
-value switch_level_at       0x18
-value switch_flags_at       0x1a
-value switch_polarity_at    0x1c
+#   switch_*: this build's own drain (generation B), read off its code (PAD-645: were another generation's)
+value switch_drain_size     384
+value switch_record_size    32
+value switch_level_at       24
+value switch_desc_via       8
+value switch_flags_at       26
+value switch_polarity_at    28
 value sound_channel_count       8
 value sound_channel_size        196
 value sound_channel_request     184
@@ -168,8 +170,6 @@ event tilt           0xc6
 event game_over      0x47
 
 # ---- PAD-420: placed by port_tool.py from aerosmith_le-1.15.port (the same title), unverified ----
-value switch_level_before   0x1
-value switch_level_via      0x0
 
 # ---- PAD-420: lamps COPIED from aerosmith_le-1.15.port (the same model's machine) ----
 lamp 9            0x100          LEFT OUTLANE  # node/channel 8/3; tie: Left outlane

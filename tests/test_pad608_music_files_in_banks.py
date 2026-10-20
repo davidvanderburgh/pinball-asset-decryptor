@@ -267,7 +267,10 @@ def test_the_runtime_points_the_request_at_the_bank_s_id_at_the_play_worker():
     assert "bsid_line(f[1], 0, f[2], f[3]);" in c and "bsid_line(f[1], f[2], f[3], f[4]);" in c
     # one hook on the worker for the sound log and the banks
     assert "if (blist_live) blist_play(r[0]);" in c
-    assert c.count('hook(fn("sound_worker"), on_sound_worker)') == 2
+    # every place that hooks it goes through the one worker_hooked (PAD-645 adds the attract silence's and the
+    # sound log's on a card of attract sounds alone)
+    sites = c.count('hook(fn("sound_worker"), on_sound_worker)')
+    assert sites >= 2 and c.count('(worker_hooked = hook(fn("sound_worker"), on_sound_worker))') == sites
     assert "(worker_hooked = hook(fn(\"sound_worker\"), on_sound_worker))" in c
     # armed before the music modes' resolver wrap, which a bank-only card does not need
     arm = c[c.index("static void sndm_arm(void)"):]

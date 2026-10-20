@@ -119,6 +119,10 @@ SHOWN_MODES = 4
 #: turn: cut to its carrier's length, matched to the carrier's loudness)
 ATTRACT_MAX = 16
 ATTRACT_BASE = 200
+#: PAD-645: the pseudo file the build adds after them, a short silence: the game's own sound at the
+#: press plays it instead (``aquiet`` in sounds.cfg), so only the project's file is heard
+ATTRACT_QUIET = ATTRACT_MAX + 1
+ATTRACT_QUIET_SECONDS = 0.1
 #: the runtime's table, beside mode.so on p2 (pad_mode_runtime.c SNDM_FILES)
 CFG_NAME = "sounds.cfg"
 #: ``PAD_STERN_SOUND_MODES=0`` leaves every mode file out of a build
@@ -205,6 +209,9 @@ class Modes:
     attract_rel: str = ""
     #: PAD-641: the build's carrier for them: ``{"request", "slot", "switches"}`` (never saved)
     attract_plan: dict = field(default_factory=dict)
+    #: PAD-645: the silence the build adds for the game's own sound at a press (a build sets it;
+    #: never saved)
+    attract_quiet: str = ""
 
     @property
     def any(self):
@@ -243,7 +250,9 @@ class Modes:
                    for m in sorted(self.mode_turns[rel])
                    for k, f in enumerate(self.mode_turns[rel][m], 2)]
                 + ([(self.attract_rel, attract_mode(k), f) for k, f in enumerate(self.attract, 1)]
-                   if self.attract_rel else []))
+                   if self.attract_rel else [])
+                + ([(self.attract_rel, attract_mode(ATTRACT_QUIET), self.attract_quiet)]
+                   if self.attract_rel and self.attract_quiet and self.attract else []))
 
     def level(self, rel, mode):
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
@@ -318,6 +327,8 @@ def what(rel, mode, name=""):
     """A file built under *mode* for slot *rel*, as the log names it."""
     base = os.path.basename(str(rel).replace("\\", "/"))
     if is_attract(mode):
+        if attract_of(mode) == ATTRACT_QUIET:
+            return "the silence the game's own sound at a press plays"
         return "flipper sound %d" % attract_of(mode)
     if is_mode_turn(mode):
         m, k = mode_turn_of(mode)
@@ -331,6 +342,8 @@ def tag(rel, mode):
     """The build record's words for a file built under *mode* for slot *rel*."""
     base = os.path.basename(str(rel).replace("\\", "/"))
     if is_attract(mode):
+        if attract_of(mode) == ATTRACT_QUIET:
+            return "the silence for the game's own sound at a flipper button press in attract"
         return "flipper sound %d in attract" % attract_of(mode)
     if is_mode_turn(mode):
         return "%s (mode %d, file %d in turn)" % ((base,) + mode_turn_of(mode))
@@ -342,6 +355,8 @@ def tag(rel, mode):
 def when(mode):
     """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
     if is_attract(mode):
+        if attract_of(mode) == ATTRACT_QUIET:
+            return "in place of the game's own sound at a flipper button press in attract"
         return "at a flipper button press in attract (sound %d)" % attract_of(mode)
     if is_mode_turn(mode):
         return "while MUSIC MODE is %d, at its turn (file %d)" % mode_turn_of(mode)
@@ -564,6 +579,10 @@ def turns_any():
 #: PAD-641: what the runtime needs of a build's port for the flipper buttons' sounds in attract: the
 #: framework's switch drain (the presses), the game's record lookup (the swap) and its sound play
 ATTRACT_SITES = ("switch_edge", "switch_drain", "sound_lookup", "sound_play")
+#: PAD-645: the builds whose sound bank the app reads without each record's play key (TMNT Pro 1.58:
+#: the codec's validated path, 2053 records, none with a key; TMNT LE 1.58's bank does not derive),
+#: so no request can be told the record it plays and nothing can carry the flipper buttons' sounds
+ATTRACT_NO_KEYS = frozenset({"turtles_pro-1.58", "turtles_le-1.58"})
 ATTRACT_VALUES = ("switch_drain_size", "switch_record_size", "switch_level_at", "switch_flags_at",
                   "switch_polarity_at")
 ATTRACT_DATA = ("switch_records", "mode_mask")
@@ -571,12 +590,16 @@ ATTRACT_DATA = ("switch_records", "mode_mask")
 
 def attract_refusal(prof):
     """PAD-641: why ``prof``'s build cannot play the flipper buttons' sounds in attract, or ``""``:
-    it needs a port with the switch drain, the record lookup and the sound play, and a carrier (a
-    request the game never plays, :func:`.mode_sounds.carriers`)."""
+    it needs a port with the switch drain, the record lookup and the sound play. Its carrier is a
+    request the game never plays (:func:`.mode_sounds.carriers`) or, on a build none was measured
+    on (PAD-645: an older or a locally derived build), a call read off its own play tables when
+    it is built (:func:`.mode_sounds.own_calls`)."""
     if prof is None:
         return NO_TITLE_ATTRACT
+    if title_key(prof) in ATTRACT_NO_KEYS:
+        return NO_ATTRACT % (prof.label, "the app cannot tell which of its sound records each of its "
+                             "sounds plays")
     from . import mode_project as MP
-    from . import mode_sounds as MS
     try:
         port = MP.read_port(MP.port_path(prof))
     except OSError:
@@ -586,10 +609,6 @@ def attract_refusal(prof):
             x not in port.get("value", {}) for x in ATTRACT_VALUES):
         return NO_ATTRACT % (prof.label, "the app has not found where its game program reads the "
                              "switches or looks its sounds up")
-    c = MS.carriers(prof.game_dir, prof.version)
-    if c is None or not c.calls:
-        return NO_ATTRACT % (prof.label, "no sound of the game's that it never plays is known to "
-                             "carry them")
     return ""
 
 
@@ -774,7 +793,9 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     extract of the card brings the modes back (:func:`read_card_record`).
     PAD-641: *attract* ``{"request", "key", "switches": [id, ...], "files": [(key, ms), ...]}``, the
     flipper buttons' sounds in attract: an ``attract`` line (the carrier, its own record's key, the
-    buttons' switch ids) and an ``afile`` line per file (its record's key, its length in ms)."""
+    buttons' switch ids) and an ``afile`` line per file (its record's key, its length in ms);
+    PAD-645: and with ``"quiet"`` (a silent record's key) an ``aquiet`` line: the game's own sound
+    at a press plays it instead."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
@@ -795,6 +816,8 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
                                                ",".join(str(int(i)) for i in attract["switches"])))
         for k, (key, ms) in enumerate(attract["files"], 1):
             lines.append("afile\t%d\t%s\t%d" % (k, bytes(key).hex(), int(ms)))
+        if attract.get("quiet"):
+            lines.append("aquiet\t%s" % bytes(attract["quiet"]).hex())
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -854,6 +877,8 @@ def card_record(modes, used):
         m = int(u["mode"])
         if is_attract(m):
             k = attract_of(m)
+            if k == ATTRACT_QUIET:                  # the build's own silence: nothing to bring back
+                continue
             src = modes.attract[k - 1] if 0 < k <= len(modes.attract) else ""
             out.append("\t".join([REC_ATTRACT, str(k), str(int(u["slot"])), _rec_host(u), "-",
                                   _rec_word(u["rel"]),

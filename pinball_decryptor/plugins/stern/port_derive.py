@@ -801,18 +801,37 @@ def framework_core(tgt, lines, placed, provenance):
     if ("site", "shot_dispatch") not in placed:
         src = portswitch.switch_source(tgt)
         out["notes"] += src["notes"]
-        if src["mapped"] and portgen.is_hooked_ok(tgt, int(src["sites"][1].split()[2], 0)):
+        if not src["mapped"]:
+            src = None
+    else:
+        # PAD-645: the shots come from the dispatch; the drain is there for the flipper buttons'
+        # sounds in attract (no `switch` lines)
+        src = portswitch.drain_source(tgt)
+    if src is not None:
+        own = {name: int(next(l for l in src["sites"] if l.startswith("site %s " % name)).split()[2], 0)
+               for name in ("switch_edge", "switch_drain")}
+        if any(placed.get(("site", n)) not in (None, va) for n, va in own.items()):
+            # the references placed another function there: this build's own drain is the one
+            _drop_placed(lines, placed, provenance, "site", tuple(own))
+            lines["site"] = [l for l in lines["site"] if not re.match(r"^# site (switch_edge|switch_drain) ", l)]
+        if ("site", "switch_edge") not in placed:
             lines["site"] += src["sites"]
-            for name, va in src["data"].items():
-                if ("data", name) not in placed:
-                    _drop_not_placed(lines, "data", name)
-                    lines["data"].append(_entry_line("data", name, va, tgt))
-                    placed[("data", name)] = va
-            for name in ("switch_edge", "switch_drain"):
-                va = int(next(l for l in src["sites"] if l.startswith("site %s " % name)).split()[2], 0)
+            for name, va in own.items():
                 placed[("site", name)] = va
                 provenance["site %s" % name] = dict(value=_fmt(va), how=src["how"], refs=[])
-            out["values"] += src["values"]
+        for name, va in src["data"].items():
+            if ("data", name) not in placed:
+                _drop_not_placed(lines, "data", name)
+                lines["data"].append(_entry_line("data", name, va, tgt))
+                placed[("data", name)] = va
+        # PAD-645: the drain's values are this build's own, read off its code, also where the
+        # references placed its sites (they carry no switch_* values a merge copies)
+        out["values"] += src["values"]
+        if not src.get("mapped"):
+            # the drain is not this port's shots (the dispatch is): only the attract sounds use it (the runtime's
+            # switches_arm leaves the switch_hit sites the shots)
+            out["values"].append(("switch_edge_shots", 0))
+        if src.get("mapped"):
             out["mapped"] = src["mapped"]
             out["switch_lines"] = portswitch.switch_lines(src["mapped"])
             out["example"] = portswitch.example_start_shot(src["mapped"])

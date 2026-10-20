@@ -901,13 +901,19 @@ def sound_modes_plan(project, game_elf, prof, cfg):
     from . import sound_modes as SMo
     if prof is None:
         raise ModeWriteError(SMo.NO_TITLE)
-    # PAD-565: a card of sounds in turn only has no MUSIC MODE setting line
+    # PAD-565: a card of sounds in turn only has no MUSIC MODE setting line; PAD-645: one of the
+    # flipper buttons' sounds in attract alone has neither, and its own gate (the engine left out
+    # whatever else the title cannot play)
     try:
         with open(cfg, encoding="utf-8") as f:
-            turns = not any(line.startswith("setting\t") for line in f)
+            kinds = {line.split("\t", 1)[0] for line in f}
     except OSError:
-        turns = False
-    why = SMo.title_refusal(prof, turns=turns)
+        kinds = {"setting"}
+    turns = "setting" not in kinds
+    if turns and not kinds & {"turn", "tsid"} and "attract" in kinds:
+        why = SMo.attract_refusal(prof)
+    else:
+        why = SMo.title_refusal(prof, turns=turns)
     if why:
         raise ModeWriteError(why)
     try:

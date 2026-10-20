@@ -11204,8 +11204,6 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
         modes.attract, modes.attract_rel, modes.attract_plan = [], "", {}
 
     c = _MSo.carriers(prof.game_dir, prof.version) if prof is not None else None
-    if c is None or not c.calls:
-        return _out("no sound of the game's that it never plays is known to carry them")
     try:
         mask = _desc_key_mask(params, sites)
         with open(_lp(gr_path), "rb") as f:
@@ -11214,6 +11212,19 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
             head = f.read(1 << 16)
     except (RuntimeError, OSError) as e:
         return _out("the game's play tables cannot be read (%s)" % e)
+    if params and not any(p.get("findkey") or p.get("key0") is not None for p in params):
+        # PAD-645: TMNT Pro 1.58's sound bank is read by the one path that never learns each
+        # record's play key, so nothing can say which record a request plays
+        return _out("the app cannot tell which of this game's sound records each of its sounds "
+                    "plays, so no sound of its own can carry them")
+    calls, whose = (tuple(c.calls) if c is not None else ()), "which the game never plays"
+    if not calls:
+        # PAD-645: a build no carrier was measured on (an older or a derived one): calls read off
+        # its own play tables
+        calls = _MSo.own_calls(elf, head, sites, params, mask)
+        whose = "a call of the game's own that no other sound of it plays, read off its play tables"
+    if not calls:
+        return _out("no sound of the game's that it never plays is known to carry them")
     switches = _SMo.flipper_buttons(elf)
     if len(switches) != 2:
         return _out("the game program does not name its left and right flipper buttons")
@@ -11230,7 +11241,7 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
                                              + list(modes.turns)) if i is not None}
     busy |= {int(u["idx"]) for u in (mode_own_used or ()) if u and u.get("idx") is not None}
     why = "none of them could be placed"
-    for request in c.calls:
+    for request in calls:
         try:
             slot = _MW.request_record(elf, head, params, sites, int(request), mask)
         except (_MW.ModeWriteError, ValueError, IndexError, struct.error) as e:
@@ -11244,11 +11255,30 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
             continue
         modes.attract_rel = files[slot]
         modes.attract_plan = {"request": int(request), "slot": int(slot), "switches": switches}
-        log("Attract flipper sounds: %d file(s) ride request %d (sound idx %d, which the game never "
-            "plays); the flipper buttons are switches %d and %d." % (
-                n, request, slot, switches[0], switches[1]), "info")
+        # PAD-645: a short silence beside them, for the game's own sound at a press to play
+        modes.attract_quiet = _attract_quiet_wav(log)
+        log("Attract flipper sounds: %d file(s) ride request %d (sound idx %d, %s); the flipper "
+            "buttons are switches %d and %d." % (n, request, slot, whose, switches[0], switches[1]), "info")
         return None
     return _out(why)
+
+
+def _attract_quiet_wav(log):
+    """PAD-645: a short mono silence (:data:`.sound_modes.ATTRACT_QUIET_SECONDS`) the build adds as
+    a record of its own: the runtime has the game's own sound at an attract press play it, so only
+    the project's file is heard. ``""`` (the game's sound plays too) when it cannot be written."""
+    from . import sound_modes as _SMo
+    path = os.path.join(tempfile.gettempdir(), "pad_attract_quiet.wav")
+    try:
+        with wave.open(path, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(44100)
+            w.writeframes(b"\0\0" * int(44100 * _SMo.ATTRACT_QUIET_SECONDS))
+    except OSError as e:
+        log("Attract flipper sounds: the game's own sound at a press plays as well (%s)." % e, "warning")
+        return ""
+    return path
 
 
 def _attract_lines(params, used, modes, log):
@@ -11262,7 +11292,7 @@ def _attract_lines(params, used, modes, log):
     if not used or not plan:
         return None
     byidx = {p["idx"]: p for p in params}
-    key, files = None, []
+    key, files, quiet = None, [], None
     for u in sorted(used, key=lambda u: int(u["mode"])):
         sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
         if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
@@ -11270,12 +11300,18 @@ def _attract_lines(params, used, modes, log):
                 "bank." % _SMo.what(u["rel"], u["mode"]), "warning")
             continue
         key = bytes(sp["findkey"])
+        if _SMo.attract_of(u["mode"]) == _SMo.ATTRACT_QUIET:
+            quiet = bytes(hp["findkey"])            # PAD-645: not one of the files in turn
+            continue
         files.append((bytes(hp["findkey"]), int(-(-int(u["frames"]) * 1000 // 44100))))
         u["lines"] = 1
     if not files:
         return None
-    return {"request": int(plan["request"]), "key": key, "switches": list(plan["switches"]),
-            "files": files}
+    out = {"request": int(plan["request"]), "key": key, "switches": list(plan["switches"]),
+           "files": files}
+    if quiet:
+        out["quiet"] = quiet
+    return out
 
 
 def _turn_key_lines(params, used, log, mode_hosts=None):

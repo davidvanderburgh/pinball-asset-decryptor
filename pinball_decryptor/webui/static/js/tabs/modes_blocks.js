@@ -92,7 +92,7 @@ const TIP = {
   name: "The name its blocks call it by: lower-case letters, digits and _.",
   rate: "How fast it blinks, pulses or chases: one beat every this many ms (20 to 5000). Any value: a number, a variable, a sum. Empty = its usual pace.",
   hurry: "Blinks slowly with most of the time left, faster as the clock runs down, and flickers in the last three seconds.",
-  show: "A light show over the playfield's inserts (the ones the game's port places), a few seconds long: the shots' own lights come back when it is over. A new show takes the place of one still running.",
+  show: "A light show over the playfield's inserts (the ones the game's port places), a few seconds long: the shots' own lights come back when it is over. A new show takes the place of one still running. The mode's own shows are made under Light shows, step by step with a preview; the ready-made ones run as they are.",
   ownShow: "Its own steps, one after another: each a pattern over the inserts for some ms, in two colors, from a place on the playfield.",
   stepRate: "The pattern's pace, ms (a strobe's flash, a beam's turn, a chase's step). 0 = its usual.",
   lightShot: "Lights a shot's inserts, or one of the game's own lights by name (an insert, a GI string or a flasher, under The game's lights), in this color and pattern, over what the game shows there; off holds it dark. It stays so until a Hand back block or the end of the mode gives it back: to another of your modes that had it lit before, else to the game. To light the mode itself, so that a shot starts it, use Light the mode at.",
@@ -392,16 +392,23 @@ function StmtBody({ b, path, ed }) {
         value=${b.rate} path=${[...path, "rate"]} ed=${ed} /><span class="bk-w">ms</span>` : null}`;
     case "show": {
       const shows = (ed.ch.light || {}).shows || [];
+      const mine = (ed.prog.shows || []).map((s) => s.name).filter(Boolean);        // PAD-646: the mode's own, by name
+      const MINE = "mine:";
       const pick = (v) => ed.edit((d) => {
         const t = at(d, path);
+        if (v.startsWith(MINE)) { t.show = "mine"; t.name = v.slice(MINE.length); delete t.steps; return; }
+        delete t.name;
         if (v === "own") {
           const from = shows.find((x) => x.key === t.show) || shows[0];
           if (!(t.steps || []).length) t.steps = clone((from || {}).steps || []);
         } else delete t.steps;
         t.show = v;
       });
-      return html`<span class="bk-w" ...${tip(TIP.show)}>Run the light show</span><${Pick} value=${b.show}
-        options=${[...shows.map((x) => [x.key, x.label]), ["own", "its own steps…"]]} onChange=${pick} />`;
+      const cur = b.show === "mine" ? MINE + (b.name || "") : b.show;
+      const opts = [...mine.map((n) => ({ value: MINE + n, label: n, group: "The mode's own (Light shows)" })),
+        ...shows.map((x) => ({ value: x.key, label: x.label, group: "Ready-made" })), { value: "own", label: "its own steps…", group: "Ready-made" }];
+      if (b.show === "mine" && !mine.includes(b.name || "")) opts.unshift({ value: cur, label: b.name ? `${b.name} (not one of the mode's shows)` : "(one of the mode's shows: make it under Light shows)" });
+      return html`<span class="bk-w" ...${tip(TIP.show)}>Run the light show</span><${Pick} value=${cur} options=${opts} onChange=${pick} />`;
     }
     case "lights_off": return html`<span class="bk-w" ...${tip(TIP.handBack)}>Hand back the lights of</span><${LightPick} b=${b} path=${path} ed=${ed} every />`;
     case "add_time": return html`<span class="bk-w" ...${tip(TIP.addTime)}>Add</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
@@ -499,7 +506,7 @@ function Stmt({ b, path, ed }) {
 }
 
 // A Light show block's own steps: one line each, in the order they run.
-const SHOW_STEPS = 10;
+const SHOW_STEPS = 32;          // block_modes.SHOW_STEPS (PAD-646: was 10)
 function ShowSteps({ steps, path, ed }) {
   const light = ed.ch.light || {};
   const move = (i, dir) => ed.edit((d) => { const l = at(d, path); const [x] = l.splice(i, 1); l.splice(i + dir, 0, x); });

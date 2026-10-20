@@ -112,7 +112,8 @@ SAY = {
     "light_shot": lambda b: "Light %s %s %s" % (b.get("shot") or b.get("insert"), colour(b.get("color")),
                                                   PATTERN_WORDS.get(b.get("pattern"), "")),
     "lights_off": lambda b: "Hand back %s" % ("every light" if b.get("shot") == "*" else "the %s lights" % (b.get("shot") or b.get("insert"))),
-    "show": lambda b: "Light show: %s" % (BM.SHOWS.get(b.get("show"), ("its own steps",))[0]),
+    "show": lambda b: "Light show: %s" % (("the mode's %s" % (b.get("name") or "?")) if b.get("show") == "mine"
+                                          else BM.SHOWS.get(b.get("show"), ("its own steps",))[0]),
     "game_show": lambda b: "The game's show %s" % (b.get("name") or "?"),
     "log": lambda b: "Log “%s”" % (b.get("text") or ""),
     "clip": lambda b: "Play clip %s (%s)" % (b.get("clip"), BM.CLIP_WHERE.get(b.get("where"), "")),

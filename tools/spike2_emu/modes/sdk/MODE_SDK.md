@@ -2163,6 +2163,35 @@ the block are greyed with the reason (`mode_project._shows_cannot`); a name the 
 Lights page; Port to... the Pro leaves both out (kept with the Premium/LE's shots for the way back:
 `MODEL_FIELDS`), and a mode taken to another game drops a show that game does not name.
 
+**A show the game starts by a call, and a show on each hit (PAD-642).** A James Bond 007 LE owner: "Every time a lit
+insert is hit in a mode in James Bond LE there is a lightshow that quickly alternates inserts and GI in a 1.5-2 second
+show. Would like to see this lightshow as an option in custom modes so those could be consistent." That flash has no
+body of its own to play. Every mode of the game's answers its lit shot with its show 464 (LE 1.06; body 0x139448),
+which calls 0x19e534(colour); that starts two shows through the game's own show starter (`site show_start`, numbers
+into its table 0x7c46b8): 450, the GI (body 0x19d51c), and 448, the inserts (body 0x1bea60 - the Wide slow fade
+above, which a fresh process plays 25 times over: 11.7 s), each told the colour (+0xc0, an index into the game's
+palette 0x62f6d4) and 3 repeats (+0xc8). The game's own table of them (0x61f3a4) uses colours 1-10, 2 s each (1.5 s
+for purple). Pro 1.06 is the same code: 0x19cd44, shows 448 and 446. So a port may name a show by that call:
+
+```
+site show_stop_number     0x002fce04 ...   # the game's "stop every show with this number"
+site show_13              0x0019e534 ...   # the call (not a process body)
+value show_call_13        2                # ... made with this argument (here the colour: red)
+text show_numbers_13      450 448          # the game's shows it starts, stopped by show_stop_number
+text show_name_13         Lit shot flash red
+```
+
+`pm_game_show` makes the call instead of starting a process, with every limit above (only the running mode, in a
+game, one at a time, not while the ball ends); `pm_game_show_playing` is 1 for its `show_secs`; `pm_game_show_stop`
+(or a new show) stops the game's shows by those numbers. The shows it starts are the game's own processes, flagged as
+shows, so the game's exit frees their lights. Bond LE and Pro 1.06 name ten: Lit shot flash white, red, green, blue,
+cyan, magenta, purple, yellow, orange and dark orange (the game's colours 1-10). The 60th Anniversary LE's program (another
+framework) has no such call - nothing starts two shows with a colour and a repeat count - so it names none.
+
+A form mode plays one on each hit of a shot that scores too (`show_hit <name>`, Lights > The game's light shows > When
+a shot is hit), in place of the shot's white flash (PAD-415), as the game's own modes answer a lit shot; a blocks mode
+puts "Play the game's light show" in a "When a shot is hit" script.
+
 ## The game's own mini-wizards (PAD-436)
 
 James Bond LE 1.06 has four mini-wizards, each with its insert on the Right ramp: Chaos at Crab Key (Dr. No, insert

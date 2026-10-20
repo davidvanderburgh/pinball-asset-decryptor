@@ -3168,6 +3168,9 @@ class ModeSpec:
     # game_shows); "" = none. The end's is skipped when the ball is ending (the game stops every show of its own then)
     show_start: str = ""
     show_end: str = ""
+    # PAD-642: and on each hit of a shot that scores (James Bond's lit-shot flash, as the game's own modes answer a lit
+    # shot); it takes the place of the shot's white flash
+    show_hit: str = ""
     # PAD-436: the game's own mini-wizard instead of a mode of its own, by the port's name for it (the profile's
     # game_wizards); "" = none. When it would start, the player is handed the game's mode - lit for the game's start
     # shot ("light") or started at once ("start") - and nothing of this mode's own runs (its clock, shots, screen,
@@ -3359,7 +3362,7 @@ def _switch_off_what_it_cannot(spec, p):
     if not p.can("shaker"):
         spec.shakes = []
     if not p.can("shows"):
-        spec.show_start = spec.show_end = ""
+        spec.show_start = spec.show_end = spec.show_hit = ""
     if not p.can("wizard"):
         spec.game_wizard = ""
     return spec
@@ -3480,7 +3483,8 @@ def retarget(spec, p):
 #: lights - is the same mode on every model.
 MODEL_FIELDS = ("start_shot", "start_or", "start_also", "start_sequence", "scoring_shots", "shot_award", "end_shot",
                 "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds",
-                "shield", "building_floor", "building_shot", "shakes", "show_start", "show_end", "game_wizard")
+                "shield", "building_floor", "building_shot", "shakes", "show_start", "show_end", "show_hit",
+                "game_wizard")
 #: what each model word is called in the words
 MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "Premium"}
 
@@ -3647,8 +3651,8 @@ def port_words(old, new, p):
         gone.append("the building")
     if old.shakes and not new.shakes:
         gone.append("the shaker")
-    shows = [s for s in (old.show_start, old.show_end)
-             if isinstance(s, str) and s and s not in (new.show_start, new.show_end)]
+    shows = [s for s in dict.fromkeys((old.show_start, old.show_end, old.show_hit))
+             if isinstance(s, str) and s and s not in (new.show_start, new.show_end, new.show_hit)]
     if gone:
         words.append("%s does not hold %s, so %s left out there" % (
             now, " or ".join(gone), "it is" if len(gone) == 1 else "they are"))
@@ -3727,7 +3731,7 @@ def _retarget_advanced(out, old_key, p, names, dropped):
     if old_key != p.key:
         # PAD-418: a light show is the game's own, asked for by name: one the other game does not name is dropped
         have = {name for name, _k, _s in getattr(p, "game_shows", ())}
-        for f in ("show_start", "show_end"):
+        for f in ("show_start", "show_end", "show_hit"):
             if isinstance(getattr(out, f), str) and getattr(out, f) not in have:
                 setattr(out, f, "")
         # PAD-436: so is a mini-wizard
@@ -4727,16 +4731,16 @@ def validate_shows(spec, p):
     """Every reason the light-show part cannot be built; nothing when the mode plays none."""
     out = []
     have = {name for name, _k, _s in getattr(p, "game_shows", ())}
-    for f, when in (("show_start", "start"), ("show_end", "end")):
+    for f, when in (("show_start", "at its start"), ("show_end", "at its end"), ("show_hit", "on its shots")):
         v = getattr(spec, f)
         if v in ("", None):
             continue
         if not isinstance(v, str):
-            out.append("The light show at its %s is a show's name." % when)
+            out.append("The light show %s is a show's name." % when)
         elif not p.can("shows"):
             out.append("A light show of the game's is not on %s (Lights says why)." % p.label)
         elif v not in have:
-            out.append("%s has no light show called %r to play at the mode's %s." % (p.label, v, when))
+            out.append("%s has no light show called %r to play %s." % (p.label, v, when.replace("its", "the mode's")))
     return out
 
 
@@ -4745,7 +4749,8 @@ def show_lines(spec, p):
     if not p.can("shows"):
         return []
     have = {name for name, _k, _s in p.game_shows}
-    return ["%-14s %s" % (f, getattr(spec, f)) for f in ("show_start", "show_end") if getattr(spec, f) in have]
+    return ["%-14s %s" % (f, getattr(spec, f)) for f in ("show_start", "show_end", "show_hit")
+            if getattr(spec, f) in have]
 
 
 # ---- PAD-436: the game's own mini-wizard instead of a mode of its own -----------------------

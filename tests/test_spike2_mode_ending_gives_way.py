@@ -126,6 +126,7 @@ def test_the_runtime_stops_another_modes_full_screen_clip_when_a_mode_begins(tmp
     src = RUNTIME.read_text(encoding="utf-8")
     code = r"""
 #include <stdio.h>
+#include <stdarg.h>
 struct pm_mode { const char *name; };
 static const struct pm_mode *current, *running;
 static char running_as[40];
@@ -134,11 +135,13 @@ static struct { int on, seen; unsigned long started, last; } clip;
 static const struct pm_mode *clip_owner;
 static const char *mode_name(const struct pm_mode *m, const char *none) { return m && m->name ? m->name : none; }
 static void say(const char *fmt, const char *a) { printf(fmt, a); putchar('\n'); }
-static void pm_log(const char *fmt, const char *a) { say(fmt, a); }
+static void pm_log(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vprintf(fmt, ap); va_end(ap); putchar('\n'); }
 static void disp_linger_other_began(void) {}
 static int refused_said(const struct pm_mode *m) { return 0; }      /* PAD-399's, not under test here */
 static void refused_forget(void) {}
 static unsigned long lit_hold_until;                               /* PAD-503's, not under test here */
+static int chg_refuses(void) { return 0; }                         /* PAD-630's, not under test here */
+static void chg_began(void) {}
 void pm_clip_stop(void) { printf("STOP\n"); clip.on = 0; }
 """ + _lift(src, "static void clip_other_began(void)\n{") + "\n" + _lift(src, "int pm_begin(void)\n{") + "\n" + \
         _lift(src, "unsigned pm_begun(void)") + r"""

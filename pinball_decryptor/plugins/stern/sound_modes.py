@@ -55,6 +55,12 @@ file plays for as long as its slot's sound, so each one is cut to that length. N
 While a music mode gives the slot a file of its own, that file plays every time (its descriptor
 names that file's record, not the slot's).
 
+AT RANDOM (PAD-638): an owner asked for "random audio variants ... like a jukebox". A slot with
+files in turn can play them AT RANDOM instead (``random``: ``[rel, ...]``, slots with files in
+turn only): each play picks any of its files but the one it played last. The same files, records
+and lines; ``sounds.cfg`` adds a ``random`` line naming the slot's record key (pad_mode_runtime.c
+"AT RANDOM").
+
 IN A SOUND BANK (PAD-608): a file ``image.bin`` has no room for goes into a sound bank of the app's
 own (``image-scNN.bin``, PAD-595), as the modes' own sounds and the longer replacements do. The game
 plays a bank's sound only under a sound id of the bank's own (it streams from the file of the id's
@@ -64,6 +70,20 @@ for a mode's file, ``tsid`` for a file in turn): the runtime points the game's s
 the bank's ids when the setting (or the turn) wants that file (pad_mode_runtime.c "IN A SOUND
 BANK"). The card's record names such a file's record as ``<bank>:<record>``, and an extract of the
 card decodes that bank to bring it back.
+
+ATTRACT FLIPPER SOUNDS (PAD-641): an owner noticed every other Spike 2 game plays a sound or a
+callout when a flipper button is pressed in attract mode, and James Bond plays none (measured in the
+emulator: Godzilla LE 1.16 plays its request 64, Bond LE 1.06 nothing in 8 presses), and asked to add
+a few. The project lists its own files (``attract``: ``[file 1, file 2, ...]``, at most
+:data:`ATTRACT_MAX`); a press of either flipper button in attract plays the next of them, in turn.
+The game has no sound for that, so the files ride a CARRIER, a request the game never plays (the
+modes' own calls' road, :mod:`.mode_sounds`): each is a record of its own, made as a file in turn
+is (a grown copy of a host record, cut to the carrier's length) under a pseudo mode
+(:func:`attract_mode`) on the carrier's slot, and ``sounds.cfg`` names the carrier, its record's
+key, the flipper buttons' switch ids and each file's record key and length (``attract`` /
+``afile`` lines). The runtime (pad_mode_runtime.c "attract flipper sounds") hooks the framework's
+switch drain and plays the carrier with the next file's key swapped in at the game's record lookup,
+only while the game's mode mask says attract, and not while the last one still plays.
 """
 from __future__ import annotations
 
@@ -72,6 +92,7 @@ import json
 import os
 import re
 import shutil
+import struct
 from dataclasses import dataclass, field
 
 #: the project sidecar's key: ``{"names": [name, ...], "slots": {rel: {"2": file, "3": file}},
@@ -84,6 +105,11 @@ LEVEL_MAX = 12
 MAX_MODES = 8
 #: how many the Audio tab offers before the user adds more
 SHOWN_MODES = 4
+#: PAD-641: the most files the flipper buttons play in attract, and the pseudo mode file k of them
+#: is built under (:func:`attract_mode`; above :data:`TURN_BASE`, so the build treats it as a file in
+#: turn: cut to its carrier's length, matched to the carrier's loudness)
+ATTRACT_MAX = 16
+ATTRACT_BASE = 200
 #: the runtime's table, beside mode.so on p2 (pad_mode_runtime.c SNDM_FILES)
 CFG_NAME = "sounds.cfg"
 #: ``PAD_STERN_SOUND_MODES=0`` leaves every mode file out of a build
@@ -130,6 +156,10 @@ NOT_PROVEN_TURNS = ("Sounds in turn are not offered on %s. They work on the late
                     "Stern Spike 2 game: update the machine's code to use them.")
 NOT_SOUND = "Only a sound the game keeps in its sound bank (an idx file) can have a file for another mode."
 NOT_SOUND_TURN = "Only a sound the game keeps in its sound bank (an idx file) can play files in turn."
+#: PAD-641: why the flipper buttons cannot play sounds in attract on a build
+NO_TITLE_ATTRACT = ("The app cannot tell which game this project is for, so it cannot give its flipper "
+                    "buttons sounds in attract mode.")
+NO_ATTRACT = ("Sounds for the flipper buttons in attract mode are not offered on %s: %s.")
 
 _IDX_RE = re.compile(r"(?:^|/)idx(\d+)")
 
@@ -151,11 +181,19 @@ class Modes:
     slots: dict = field(default_factory=dict)      # {rel: {mode: file}}
     levels: dict = field(default_factory=dict)     # {rel: {mode: dB}}, or None
     turns: dict = field(default_factory=dict)      # PAD-565: {rel: [file 2, file 3, ...]}
+    random: set = field(default_factory=set)       # PAD-638: slots whose files in turn play at random
+    turn_levels: dict = field(default_factory=dict)  # PAD-638: {rel: {k: dB}}, file k in turn's own
+    attract: list = field(default_factory=list)    # PAD-641: [file 1, file 2, ...]
+    #: PAD-641: the carrier's slot the attract files are built on (a build sets it; never saved)
+    attract_rel: str = ""
+    #: PAD-641: the build's carrier for them: ``{"request", "slot", "switches"}`` (never saved)
+    attract_plan: dict = field(default_factory=dict)
 
     @property
     def any(self):
-        """Whether a build has anything of these to carry: a music mode or a sound in turn."""
-        return bool(self.count or self.turns)
+        """Whether a build has anything of these to carry: a music mode, a sound in turn or a
+        sound for the flipper buttons in attract."""
+        return bool(self.count or self.turns or self.attract)
 
     @property
     def count(self):
@@ -164,6 +202,8 @@ class Modes:
         return top if top >= 2 else 0
 
     def name(self, mode):
+        if is_attract(mode):
+            return "in attract"
         if is_turn(mode):
             return "in turn"
         n = self.names[mode - 1] if 0 < mode <= len(self.names) else ""
@@ -175,20 +215,38 @@ class Modes:
 
     def files(self):
         """``[(rel, mode, file)]``, in slot then mode order, then the sounds in turn (each under
-        its pseudo mode, :func:`turn_mode`)."""
+        its pseudo mode, :func:`turn_mode`), then the flipper buttons' sounds in attract on the
+        carrier's slot once a build has named it (:attr:`attract_rel`, :func:`attract_mode`)."""
         return ([(rel, m, f) for rel in sorted(self.slots) for m, f in sorted(self.slots[rel].items())]
                 + [(rel, turn_mode(k), f) for rel in sorted(self.turns)
-                   for k, f in enumerate(self.turns[rel], 2)])
+                   for k, f in enumerate(self.turns[rel], 2)]
+                + ([(self.attract_rel, attract_mode(k), f) for k, f in enumerate(self.attract, 1)]
+                   if self.attract_rel else []))
 
     def level(self, rel, mode):
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
-        sound), or ``None`` for a project saved before mode files had their own. A sound in turn
-        is matched to its slot's sound (0)."""
+        sound), or ``None`` for a project saved before mode files had their own. A file in turn
+        has a loudness of its own too (PAD-638: ``turn_levels``), 0 unless one was set."""
         if is_turn(mode):
-            return 0
+            return int((self.turn_levels.get(rel) or {}).get(turn_of(mode), 0) or 0)
         if self.levels is None:
             return None
         return int((self.levels.get(rel) or {}).get(mode, 0) or 0)
+
+
+def attract_mode(k):
+    """PAD-641: the pseudo mode the flipper buttons' file *k* in attract (1..:data:`ATTRACT_MAX`)
+    is built under."""
+    return ATTRACT_BASE + int(k)
+
+
+def is_attract(mode):
+    return int(mode) > ATTRACT_BASE
+
+
+def attract_of(mode):
+    """File k of the flipper buttons' sounds in attract, from its pseudo mode."""
+    return int(mode) - ATTRACT_BASE
 
 
 def turn_mode(k):
@@ -197,6 +255,8 @@ def turn_mode(k):
 
 
 def is_turn(mode):
+    """Whether a file is built as a file in turn is: a slot's file in turn, or (PAD-641) a sound of
+    the flipper buttons in attract (:func:`is_attract`)."""
     return int(mode) > TURN_BASE
 
 
@@ -207,12 +267,16 @@ def turn_of(mode):
 
 def who(mode):
     """The log lines' heading for a file built under *mode*."""
+    if is_attract(mode):
+        return "Attract flipper sounds"
     return "Sounds in turn" if is_turn(mode) else "Music modes"
 
 
 def what(rel, mode, name=""):
     """A file built under *mode* for slot *rel*, as the log names it."""
     base = os.path.basename(str(rel).replace("\\", "/"))
+    if is_attract(mode):
+        return "flipper sound %d" % attract_of(mode)
     if is_turn(mode):
         return "%s's file %d in turn" % (base, turn_of(mode))
     return "%s's file for mode %d (%s)" % (base, mode, name or default_name(mode))
@@ -221,6 +285,8 @@ def what(rel, mode, name=""):
 def tag(rel, mode):
     """The build record's words for a file built under *mode* for slot *rel*."""
     base = os.path.basename(str(rel).replace("\\", "/"))
+    if is_attract(mode):
+        return "flipper sound %d in attract" % attract_of(mode)
     if is_turn(mode):
         return "%s (file %d in turn)" % (base, turn_of(mode))
     return "%s (mode %d)" % (base, int(mode))
@@ -228,6 +294,8 @@ def tag(rel, mode):
 
 def when(mode):
     """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
+    if is_attract(mode):
+        return "at a flipper button press in attract (sound %d)" % attract_of(mode)
     if is_turn(mode):
         return "at its turn (file %d)" % turn_of(mode)
     return "while MUSIC MODE is %d" % int(mode)
@@ -289,6 +357,26 @@ def clean(raw):
             keep = [f for f in files if isinstance(f, str) and f.strip()][:TURN_MAX - 1]
             if keep:
                 out.turns[rel] = keep
+    rnd = raw.get("random")
+    if isinstance(rnd, (list, tuple)):
+        out.random = {rel for rel in rnd if isinstance(rel, str) and rel in out.turns}
+    tl = raw.get("turn_levels")
+    for rel, v in (tl.items() if isinstance(tl, dict) else ()):
+        if rel not in out.turns or not isinstance(v, dict):
+            continue
+        keep = {}
+        for k, db in v.items():
+            try:
+                k = int(k)
+            except (TypeError, ValueError):
+                continue
+            if 2 <= k <= len(out.turns[rel]) + 1 and clean_level(db):
+                keep[k] = clean_level(db)
+        if keep:
+            out.turn_levels[rel] = keep
+    attract = raw.get("attract")
+    if isinstance(attract, (list, tuple)):
+        out.attract = [f for f in attract if isinstance(f, str) and f.strip()][:ATTRACT_MAX]
     levels = raw.get("levels")
     if not isinstance(levels, dict):
         out.levels = None
@@ -306,13 +394,23 @@ def to_json(modes):
     names = [n for n in modes.names]
     while names and not str(names[-1] or "").strip():
         names.pop()
-    if not modes.slots and not names and not modes.turns:
+    if not modes.slots and not names and not modes.turns and not modes.attract:
         return None
     out = {"names": names,
            "slots": {rel: {str(m): f for m, f in sorted(files.items())}
                      for rel, files in sorted(modes.slots.items()) if files}}
     if modes.turns:
         out["turns"] = {rel: list(files) for rel, files in sorted(modes.turns.items()) if files}
+        rnd = sorted(rel for rel in modes.random if modes.turns.get(rel))
+        if rnd:
+            out["random"] = rnd
+        tl = {rel: {str(k): int(db) for k, db in sorted(v.items()) if db}
+              for rel, v in sorted(modes.turn_levels.items()) if modes.turns.get(rel)}
+        tl = {rel: v for rel, v in tl.items() if v}
+        if tl:
+            out["turn_levels"] = tl
+    if modes.attract:
+        out["attract"] = list(modes.attract)
     if modes.levels is not None:
         out["levels"] = {rel: {str(m): int(db) for m, db in sorted(v.items()) if db}
                          for rel, v in sorted(modes.levels.items()) if any(v.values())}
@@ -349,6 +447,70 @@ TURNS_ANY_ENV = "PAD_STERN_TURNS_ANY"
 
 def turns_any():
     return os.environ.get(TURNS_ANY_ENV) == "1"
+
+
+#: PAD-641: what the runtime needs of a build's port for the flipper buttons' sounds in attract: the
+#: framework's switch drain (the presses), the game's record lookup (the swap) and its sound play
+ATTRACT_SITES = ("switch_edge", "switch_drain", "sound_lookup", "sound_play")
+ATTRACT_VALUES = ("switch_drain_size", "switch_record_size", "switch_level_at", "switch_flags_at",
+                  "switch_polarity_at")
+ATTRACT_DATA = ("switch_records", "mode_mask")
+
+
+def attract_refusal(prof):
+    """PAD-641: why ``prof``'s build cannot play the flipper buttons' sounds in attract, or ``""``:
+    it needs a port with the switch drain, the record lookup and the sound play, and a carrier (a
+    request the game never plays, :func:`.mode_sounds.carriers`)."""
+    if prof is None:
+        return NO_TITLE_ATTRACT
+    from . import mode_project as MP
+    from . import mode_sounds as MS
+    try:
+        port = MP.read_port(MP.port_path(prof))
+    except OSError:
+        return NO_ATTRACT % (prof.label, "the app has no map of its game program")
+    if any(x not in port["site"] for x in ATTRACT_SITES) or any(
+            x not in port.get("data", {}) for x in ATTRACT_DATA) or any(
+            x not in port.get("value", {}) for x in ATTRACT_VALUES):
+        return NO_ATTRACT % (prof.label, "the app has not found where its game program reads the "
+                             "switches or looks its sounds up")
+    c = MS.carriers(prof.game_dir, prof.version)
+    if c is None or not c.calls:
+        return NO_ATTRACT % (prof.label, "no sound of the game's that it never plays is known to "
+                             "carry them")
+    return ""
+
+
+def offer_attract(project, probe=True):
+    """PAD-641: why the project's game cannot give its flipper buttons sounds in attract (``""``
+    when it can)."""
+    if not enabled():
+        return "%s=0 leaves the flipper buttons' sounds in attract out of this app." % GATE_ENV
+    return attract_refusal(project_title(project, probe=probe))
+
+
+_FLIPPER_BUTTON = re.compile(r"^(LEFT|L|RIGHT|R) FLIPPER BUTTON$")
+
+
+def flipper_buttons(game_elf):
+    """PAD-641: the switch ids of the left and right flipper buttons in the game program
+    *game_elf* (bytes), by the game's own switch names ("LEFT FLIPPER BUTTON", "R FLIPPER
+    BUTTON"; never an upper flipper's), ``[]`` when its switch table cannot be read. Every Spike 2
+    build in the image library names them so (69 of 69, 2026-10-20)."""
+    from . import portgen as G
+    from . import portswitch as PS
+    try:
+        sws = PS.switches(G.Elf(bytes(game_elf)))
+    except (G.PortgenError, ValueError, struct.error, IndexError):
+        return []
+    out = []
+    for side in ("L", "R"):
+        for sw in sws:
+            m = _FLIPPER_BUTTON.match(" ".join(str(sw["name"]).upper().split()))
+            if m and m.group(1)[0] == side:
+                out.append(int(sw["id"]))
+                break
+    return out
 
 
 def title_refusal(prof, turns=False):
@@ -461,8 +623,8 @@ def convert(project, rel, mode, src, log=None):
                              % (os.path.basename(src), why))
     os.replace(tmp, out)
     if log:
-        log("Music modes: %s for mode %d of %s made into the slot's format%s." % (
-            os.path.basename(src), mode, os.path.basename(rel), " (%s)" % why if why else ""), "info")
+        log("%s: %s (%s) made into the slot's format%s." % (
+            who(mode), os.path.basename(src), what(rel, mode), " (%s)" % why if why else ""), "info")
     return out
 
 
@@ -486,16 +648,21 @@ def cut(wav, frames):
 
 
 # ---- the runtime's table ------------------------------------------------------------------------
-def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=()):
+def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(), randoms=(),
+             attract=None):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
     the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
     *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
     turn (PAD-565: ``turn`` lines, the record keys the runtime swaps at the game's lookup).
     PAD-608: *bsids* ``[(mode, sound id, bank sound id)]`` and *tsids* ``[(k, slot key, sound id,
     bank sound id)]``, the files in a sound bank (``bsid`` / ``tsid`` lines: the runtime points the
-    game's requests at the bank's id).
+    game's requests at the bank's id). PAD-638: *randoms* the slot keys whose files play at random
+    (``random`` lines).
     PAD-553: *record* (:func:`card_record`) goes in as comment lines the runtime skips, so an
-    extract of the card brings the modes back (:func:`read_card_record`)."""
+    extract of the card brings the modes back (:func:`read_card_record`).
+    PAD-641: *attract* ``{"request", "key", "switches": [id, ...], "files": [(key, ms), ...]}``, the
+    flipper buttons' sounds in attract: an ``attract`` line (the carrier, its own record's key, the
+    buttons' switch ids) and an ``afile`` line per file (its record's key, its length in ms)."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
@@ -509,6 +676,13 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=())
         lines.append("bsid\t%d\t%d\t%d" % (int(mode), int(sid), int(bank)))
     for k, slot, sid, bank in tsids:
         lines.append("tsid\t%d\t%s\t%d\t%d" % (int(k), bytes(slot).hex(), int(sid), int(bank)))
+    for slot in randoms:
+        lines.append("random\t%s" % bytes(slot).hex())
+    if attract and attract.get("files"):
+        lines.append("attract\t%d\t%s\t%s" % (int(attract["request"]), bytes(attract["key"]).hex(),
+                                               ",".join(str(int(i)) for i in attract["switches"])))
+        for k, (key, ms) in enumerate(attract["files"], 1):
+            lines.append("afile\t%d\t%s\t%d" % (k, bytes(key).hex(), int(ms)))
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -521,6 +695,11 @@ REC_MODE, REC_FILE = "#mode", "#file"
 #: PAD-565: a slot's file in turn: ``#turn <k> <slot idx> <record idx> <dB or -> <slot rel>
 #: <the file's own name>``
 REC_TURN = "#turn"
+#: PAD-638: a slot whose files in turn play at random: ``#random <slot idx> <slot rel>``
+REC_RANDOM = "#random"
+#: PAD-641: a flipper button sound in attract: ``#attract <k> <slot idx> <record idx> - <slot rel>
+#: <the file's own name>`` (the slot is the carrier's)
+REC_ATTRACT = "#attract"
 #: PAD-608: a file in a sound bank names its record as ``<bank category>:<record idx>`` (an app
 #: before PAD-608 skips such a line: its record field is not a number)
 _BANK_HOST = re.compile(r"^(\d{1,2}):(\d+)$")
@@ -557,6 +736,13 @@ def card_record(modes, used):
         if not u.get("lines"):
             continue
         m = int(u["mode"])
+        if is_attract(m):
+            k = attract_of(m)
+            src = modes.attract[k - 1] if 0 < k <= len(modes.attract) else ""
+            out.append("\t".join([REC_ATTRACT, str(k), str(int(u["slot"])), _rec_host(u), "-",
+                                  _rec_word(u["rel"]),
+                                  _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
+            continue
         if is_turn(m):
             files = modes.turns.get(u["rel"]) or []
             src = files[turn_of(m) - 2] if 0 <= turn_of(m) - 2 < len(files) else ""
@@ -567,16 +753,21 @@ def card_record(modes, used):
                                str(turn_of(m) if is_turn(m) else m), str(int(u["slot"])), _rec_host(u),
                               "-" if db is None else str(int(db)), _rec_word(u["rel"]),
                               _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
+    landed = {u["rel"]: int(u["slot"]) for u in used if u.get("lines") and is_turn(u["mode"])}
+    out += ["%s\t%d\t%s" % (REC_RANDOM, landed[rel], _rec_word(rel))
+            for rel in sorted(modes.random) if rel in landed]
     return out
 
 
 def read_card_record(text):
     """``{"names": [...], "files": [{"mode", "slot", "host", "db", "rel", "name"}]}`` (and
     ``"turns"`` ``[{"turn", "slot", "host", "db", "rel", "name"}]`` when the card plays sounds in
-    turn, PAD-565) from a card's ``sounds.cfg`` (*text*), or ``None``
+    turn, PAD-565; ``"random"`` ``[{"slot", "rel"}]`` the slots of them that play at random,
+    PAD-638; ``"attract"`` ``[{"k", "slot", "host", "rel", "name"}]`` when its flipper buttons
+    play sounds in attract, PAD-641) from a card's ``sounds.cfg`` (*text*), or ``None``
     when it has no record (a card written before PAD-553). PAD-608: an entry whose file is in a
     sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""
-    names, files, turns, seen = {}, [], [], False
+    names, files, turns, rnd, attract, seen = {}, [], [], [], [], False
     for line in str(text or "").splitlines():
         f = line.split("\t")
         try:
@@ -603,6 +794,16 @@ def read_card_record(text):
                                        "db": None if f[4] == "-" else (clean_level(f[4]) or 0),
                                        "rel": f[5], "name": f[6] if len(f) > 6 else ""},
                                       **({"bank": bank} if bank is not None else {})))
+            elif f[0] == REC_RANDOM and len(f) >= 3:
+                rnd.append({"slot": int(f[1]), "rel": f[2]})
+            elif f[0] == REC_ATTRACT and len(f) >= 6:
+                seen = True
+                k = int(f[1])
+                if 1 <= k <= ATTRACT_MAX:
+                    host, bank = _read_host(f[3])
+                    attract.append(dict({"k": k, "slot": int(f[2]), "host": host, "rel": f[5],
+                                         "name": f[6] if len(f) > 6 else ""},
+                                        **({"bank": bank} if bank is not None else {})))
         except ValueError:
             continue
     if not seen:
@@ -611,6 +812,10 @@ def read_card_record(text):
     out = {"names": [names.get(m, "") for m in range(1, top + 1)], "files": files}
     if turns:
         out["turns"] = turns
+        if rnd:
+            out["random"] = rnd
+    if attract:
+        out["attract"] = sorted(attract, key=lambda a: a["k"])
     return out
 
 
@@ -618,7 +823,8 @@ def card_bank_records(rec):
     """``{bank category: {record idx, ...}}``: the records of the app's sound banks a card's record
     (:func:`read_card_record`) names (PAD-608: files in a sound bank), for an extract to decode."""
     out = {}
-    for f in list((rec or {}).get("files") or ()) + list((rec or {}).get("turns") or ()):
+    for f in (list((rec or {}).get("files") or ()) + list((rec or {}).get("turns") or ())
+              + list((rec or {}).get("attract") or ())):
         if f.get("bank") is not None:
             out.setdefault(int(f["bank"]), set()).add(int(f["host"]))
     return out

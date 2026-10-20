@@ -2163,6 +2163,35 @@ the block are greyed with the reason (`mode_project._shows_cannot`); a name the 
 Lights page; Port to... the Pro leaves both out (kept with the Premium/LE's shots for the way back:
 `MODEL_FIELDS`), and a mode taken to another game drops a show that game does not name.
 
+**A show the game starts by a call, and a show on each hit (PAD-642).** A James Bond 007 LE owner: "Every time a lit
+insert is hit in a mode in James Bond LE there is a lightshow that quickly alternates inserts and GI in a 1.5-2 second
+show. Would like to see this lightshow as an option in custom modes so those could be consistent." That flash has no
+body of its own to play. Every mode of the game's answers its lit shot with its show 464 (LE 1.06; body 0x139448),
+which calls 0x19e534(colour); that starts two shows through the game's own show starter (`site show_start`, numbers
+into its table 0x7c46b8): 450, the GI (body 0x19d51c), and 448, the inserts (body 0x1bea60 - the Wide slow fade
+above, which a fresh process plays 25 times over: 11.7 s), each told the colour (+0xc0, an index into the game's
+palette 0x62f6d4) and 3 repeats (+0xc8). The game's own table of them (0x61f3a4) uses colours 1-10, 2 s each (1.5 s
+for purple). Pro 1.06 is the same code: 0x19cd44, shows 448 and 446. So a port may name a show by that call:
+
+```
+site show_stop_number     0x002fce04 ...   # the game's "stop every show with this number"
+site show_13              0x0019e534 ...   # the call (not a process body)
+value show_call_13        2                # ... made with this argument (here the colour: red)
+text show_numbers_13      450 448          # the game's shows it starts, stopped by show_stop_number
+text show_name_13         Lit shot flash red
+```
+
+`pm_game_show` makes the call instead of starting a process, with every limit above (only the running mode, in a
+game, one at a time, not while the ball ends); `pm_game_show_playing` is 1 for its `show_secs`; `pm_game_show_stop`
+(or a new show) stops the game's shows by those numbers. The shows it starts are the game's own processes, flagged as
+shows, so the game's exit frees their lights. Bond LE and Pro 1.06 name ten: Lit shot flash white, red, green, blue,
+cyan, magenta, purple, yellow, orange and dark orange (the game's colours 1-10). The 60th Anniversary LE's program (another
+framework) has no such call - nothing starts two shows with a colour and a repeat count - so it names none.
+
+A form mode plays one on each hit of a shot that scores too (`show_hit <name>`, Lights > The game's light shows > When
+a shot is hit), in place of the shot's white flash (PAD-415), as the game's own modes answer a lit shot; a blocks mode
+puts "Play the game's light show" in a "When a shot is hit" script.
+
 ## The game's own mini-wizards (PAD-436)
 
 James Bond LE 1.06 has four mini-wizards, each with its insert on the Right ramp: Chaos at Crab Key (Dr. No, insert
@@ -2704,7 +2733,12 @@ plays, it notes how far in the mode's clip was. Once the game asks for its main-
 the surface is idle, it plays the mode's clip again and seeks it on. It hooks `surface_play`
 too, whose second argument is the game's loop flag: a clip the game LOOPS is a background
 (Bond Women's `BondWomen_007_Loop` runs for as long as its multiplier does), so it plays one
-pass, its own length and at most 3 s, and then the mode's clip takes the surface back. A clip
+pass, its own length and at most 3 s, and then the mode's clip takes the surface back. But a
+loop that is the backdrop of one of the game's display effects (Bond's spinner satellite, effect
+75, a see-through picture over `Diamond_EarthSpin`) stays for as long as that effect has the
+screen, and the mode's clip comes back when it ends: with `data display_effects` (the effect
+manager pointer) the runtime reads the effect now, and one whose table record lacks the
+background flag 1 is over the TV (PAD-639). A clip
 the game plays once (a lock, a start, an award) is waited out. It does not come back if
 the mode ended, another mode of ours began, or its time ran out under the game's clip. James
 Bond LE and Pro 1.06 name them (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the
@@ -3949,6 +3983,42 @@ The same blocks with a 4 s start clip (`clip full` in When the mode starts): the
 and the ball still in the lane 40 s on. Bond Pro 1.06 (left flipper button 63 held): `0x0018c560 runs as at a
 standard ball's start`, flag 156, the launch at +2010 ms and the top control gate (node 9 coil 6) 100 ms later.
 
+
+**Its own high score (PAD-640).** The game keeps a champion per challenge (`CHAOS CHALLENGE`, `AHOY CHALLENGE`,
+...; the service menu's `CACK CHALLENGE CHAMPION` and the rest), and a challenge game's score that beats it goes in
+there, the initials entered under the challenge's name. A challenge of a mode's own plays, to the game, as Chaos at
+Crab Key's, so its score went in as the `CHAOS CHALLENGE` champion; a mode in a challenge's place filed its scores
+under that challenge. Now a challenge game a mode took keeps the MODE'S high score: the initials entry, when the
+game's score beats it, is under the mode's name (the menu's, in capitals), and the game's own champion is not
+touched. The game keeps its champions in one framework (Bond LE/Pro 1.06 and Stranger Things alike): categories
+`1..` (`HIGHEST SCORES`, `COMBO CHAMPION`, ..., one `<x> CHALLENGE CHAMPION` per challenge, in the menu's order), 36
+bytes each in one table (`{per-player bytes, score getter, reset, compare, qualify, fn, char **titles, u16 *entries,
+flags}`, Bond LE `0x7c3980`, the count at `0x5f7f08`), each a list of score entries (`{u32 record, char *initials,
+char *name, fn, fn, char *title, char **titles, u16 kind, u16 default-score adjustment, ...}`); a record is 96 bytes:
+the initials at +32, the score u64 at +72, `~(the byte sum of the first 88)` u16 at +88. At the game's end one
+function (LE `0x4e87dc`, between the game's other game-over calls at `0x1e29cc`) compares each category's score with
+its records - in a challenge game the game lets only the pick's challenge through - and runs the initials entry under
+the entry's title for each one beaten. `portchallenge.py` writes:
+
+```
+site  challenge_scores       0x004e87dc 0xe92d4ff0 0xe24dd0bc    # the end-of-game high scores (wrapped, hook_wrap)
+site  challenge_score_entry  0x004e7d10 0xe1a03000 0xe3050750    # (category, n) -> the score entry (called)
+value challenge_scores_cat_0  10                                 # DR. NO CHALLENGE CHAMPION ... _4 14 (Stranger Things 9..12)
+```
+
+While that function runs for a challenge game whose pick a mode took, the runtime points the challenge's entry at a
+record of the mode's own and its title at the mode's name, and puts all three back when it returns. The modes'
+records live in `/dump/pad_challenge_scores` (one line each: the record's 96 bytes in hex, a space, the name), a
+mode's first one the entry's default initials and a score of 0 (so the mode's first scoring game is its champion).
+Two modes under one name share one. The game's attract-mode high score pages show the game's own champions only. A
+port without the lines files the score under the game's challenge, as before, and logs nothing new.
+
+Proven (emulator, 2026-10-20, Bond LE 1.06 stock card, hidden, muted; a blocks mode `challenge new` picked on the
+start menu, two challenge games in a row): the first, 14,708,650 points, came to `PLAYER 1 - Enter Initials` under
+`BON APPETIT` (the mode's record was its first: 0, MXV) and kept `14708650, AAA` in `/dump/pad_challenge_scores`; the
+second read it back and the same score left it standing. The game's own `CHAOS CHALLENGE` record (`0x812ed8`: 25,000,000,
+MXV) read the same before, between and after both games. The control on the released runtime: the game's own
+`CHAOS CHALLENGE` initials entry, as reported.
 
 ## Holding the end of a ball (PAD-622)
 

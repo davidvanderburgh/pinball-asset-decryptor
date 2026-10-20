@@ -16,6 +16,7 @@ import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, NewCodeDialog, ClipDialog, PlayButton } from "./modes_dialogs.js";
 import { BlocksEditor, BlocksCode, BLOCKS_WORDS, ProgramBar, useModeProgram } from "./modes_blocks.js";
 import { PlayfieldView } from "./modes_playfield.js";
+import { LightShowsView } from "./modes_lightshows.js";
 import { RuleCardsView, StoryView, ShotTableView, TimelineView, NodeGraphView } from "./modes_rules.js";
 import { ScriptView, CodeView, CEditor } from "./modes_script.js";
 
@@ -60,7 +61,7 @@ const T = {
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
   wizard: "Make this mode the game's own mini-wizard: when it starts (on its shot, an event such as a film done, or shots in order), the player gets the game's mode itself, with its own shots, lights, screens, sounds and award. Lit (where the game lights that one for a start shot), it waits for the game's own start shot, as when the game lights one; started, it begins at once, or the moment none of the game's own modes is in its way, and if the ball ends first it is lit for the start shot where the game has one. On James Bond 007 it is the only one lit until it starts, so the game's own choosing cannot swap it for another, and the game no longer lights it by itself (its own way: a henchman, villain, Q Branch or gadget in all six films), so only this mode hands it out. On the other games the game's own rules still light and start it too. A mini-wizard the player has already played this game plays again.",
-  gameShows: "One of the game's own playfield light shows as the mode starts, and another as it ends: flashy ones suit a start, subdued ones an end. Each plays for its own few seconds, one at a time (a new one takes the place of one still playing). The one at the end is skipped when the mode ends because the ball drained: the game stops its own shows then.",
+  gameShows: "One of the game's own playfield light shows as the mode starts, another as it ends, and one on each hit of a shot that scores: flashy ones suit a start, subdued ones an end, accents a hit (one on a hit plays in place of the shot's white flash). Each plays for its own few seconds, one at a time (a new one takes the place of one still playing). The one at the end is skipped when the mode ends because the ball drained: the game stops its own shows then.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this color and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
   priority: "Kept for modes made before it changed: it no longer holds the game's displays back. A mode never makes the game's screens wait (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off), so the game's awards, starts and jackpots always come through, and the mode's screen is back when they end. 0 = none.",
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
@@ -822,6 +823,8 @@ function LightsPage({ s, f, off, dis, rs }) {
           ns="modes" k="f:show_start" disabled=${sOff} width=${240} sm />
         <span class="lbl">When it ends</span><${Select} value=${f.show_end} options=${showOptions(shows, f.show_end)}
           ns="modes" k="f:show_end" disabled=${sOff} width=${240} sm />
+        <span class="lbl">When a shot is hit</span><${Select} value=${f.show_hit} options=${showOptions(shows, f.show_hit)}
+          ns="modes" k="f:show_hit" disabled=${sOff} width=${240} sm />
       </div>
       ${dis.shows ? null : html`<div class="small muted wrap">${T.gameShows}</div>`}
     <//>
@@ -955,6 +958,7 @@ const BLOCKS_PAGES = [["blocks", "Blocks", "The mode's rules as snapped blocks, 
   ["cards", "Rule cards", "Each rule as a card that reads When … Then, with a choice in every blank.", RuleCardsView],
   ["story", "Story", "The mode's life: what starts it, what each rule does while it waits and while it runs, and what ends it.", StoryView],
   ["playfield", "Playfield", "The game's playfield with the mode's lit shots: press a shot to see and change what it does.", PlayfieldView],
+  ["shows", "Light shows", "The mode's own light shows: made step by step from a ready-made one or blank, played on the playfield picture, run by name from any rule.", LightShowsView],   // PAD-646
   ["table", "Shot table", "One row per shot, one column for each time it can count: what every shot does, and which do nothing yet.", ShotTableView],
   ["timeline", "Timeline", "The mode's clock as a track: what happens at its start, at each moment and at its end.", TimelineView],
   ["graph", "Node graph", "Every rule wired to the variables and timers it shares with the others.", NodeGraphView],

@@ -240,6 +240,9 @@ def pack_sound_modes(rec):
               for rel, v in (rec.get("levels") or {}).items()}
     out = {"names": list(rec.get("names") or []), "slots": slots,
            "levels": {rel: v for rel, v in levels.items() if v}}
+    rnd = [rel for rel in rec.get("random") or () if rel in slots]
+    if rnd:
+        out["random"] = rnd                 # PAD-638: slots whose files in turn play at random
     if not slots and not any(out["names"]):
         return None, [], gone
     return out, files, gone
@@ -1105,5 +1108,9 @@ def _unpack_sound_modes(zip_path, assets_folder, rec, log_cb=None):
                "\"%s\" folder." % (len(written), MUSIC_MODE_FILES_DIR), "info")
     levels = {rel: {str(m): db for m, db in v.items() if str(m) in slots.get(rel, {})}
               for rel, v in (rec.get("levels") or {}).items()}
-    return {"names": list(rec.get("names") or []), "slots": slots,
-            "levels": {rel: v for rel, v in levels.items() if v}}
+    out = {"names": list(rec.get("names") or []), "slots": slots,
+           "levels": {rel: v for rel, v in levels.items() if v}}
+    rnd = [rel for rel in rec.get("random") or () if isinstance(rel, str) and rel in slots]
+    if rnd:
+        out["random"] = rnd                 # PAD-638
+    return out

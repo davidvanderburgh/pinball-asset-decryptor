@@ -63,9 +63,10 @@ def test_the_runtime_swaps_the_looked_up_key_in_turn():
     assert 'str_eq(f[0], "turn")' in c and "sndt_line(f[1], f[2], f[3])" in c
     assert "#define SNDT_MAX        16" in c and SMo.TURN_MAX == 16
     assert "if (sndt_live && r[1]) sndt_lookup(r);" in c
-    assert c.count('hook(fn("sound_lookup"), on_sound_lookup)') == 2
+    assert c.count('hook(fn("sound_lookup"), on_sound_lookup)') == 3
     assert '!lookup_hooked && !hook(fn("sound_lookup"), on_sound_lookup)' in c        # the turns'
     assert '!lookup_hooked && hook(fn("sound_lookup"), on_sound_lookup)' in c         # the modes'
+    assert '!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))' in c   # PAD-641'
 
 
 def test_the_build_writes_each_file_s_record_key_beside_its_slot_s():
@@ -252,8 +253,11 @@ def test_the_audio_tab_adds_plays_and_takes_off_files_in_turn(tmp_path, monkeypa
         e = entry(w)
         assert e["label"] == "Play in turn (3 sounds)"
         assert [s["label"] for s in e["submenu"] if not s.get("sep")] == [
-            "Add a sound to play in turn…", "Play sound 2 (Jackpot B.wav)", "Take off sound 2 (Jackpot B.wav)",
-            "Play sound 3 (Jackpot C.wav)", "Take off sound 3 (Jackpot C.wav)"]
+            "Add a sound to play in turn…", "One after another", "At random",   # PAD-638
+            "Play sound 2 (Jackpot B.wav)", "Loudness of sound 2 (0 dB)…",   # PAD-638
+            "Take off sound 2 (Jackpot B.wav)",
+            "Play sound 3 (Jackpot C.wav)", "Loudness of sound 3 (0 dB)…",
+            "Take off sound 3 (Jackpot C.wav)"]
         assert w.call("audio.menu_action", "turn_play:3", rel) is True
         assert w.state("audio")["panes"]["rep"]["name"] == "Sound 3 in turn: Jackpot C.wav"
         assert w.call("audio.menu_action", "turn_off:2", rel) is True

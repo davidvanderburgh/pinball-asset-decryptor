@@ -4564,7 +4564,10 @@ def card_in_use(card):
     except OSError:
         pass
     home = os.environ.get("PAD_HOME") or os.path.expanduser("~")
-    cache = os.path.join(home, "cardcache")
+    # the same choice cardmount.sh makes (PAD-651): the shared store when it is mounted
+    cache = os.environ.get("PAD_CARD_CACHE_DIR") or (
+        "/mnt/wsl/cards/cardcache" if os.path.isdir("/mnt/wsl/cards/cardcache")
+        else os.path.join(home, "cardcache"))
     if os.path.isdir(cache):
         for name in os.listdir(cache):
             if not name.endswith(".pid"):

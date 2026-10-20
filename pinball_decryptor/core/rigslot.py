@@ -28,14 +28,14 @@ import sys
 import time
 
 #: Rigs a PC offers (padpath.sh's PAD_SLOTS_MAX).
-SLOTS_MAX = 4
+SLOTS_MAX = 5
 #: A run record whose heartbeat is older than this is a run that died hard
 #: (riglock.sh's RUN_FRESH).
 RUN_FRESH_S = 120
 
-#: The five rig colours, the same ones the playfield window's band and chip
+#: The six rig colours, the same ones the playfield window's band and chip
 #: use (pfpage/pf.css --rig-N) and the triage dashboard draws.
-COLOURS = ("#8b9196", "#4fb3d9", "#c08cf0", "#f0845d", "#6fcf8a")
+COLOURS = ("#8b9196", "#4fb3d9", "#c08cf0", "#f0845d", "#6fcf8a", "#e8c04a")
 
 _claimed = []           # [slot] this process took and must give back
 _home = []              # the rigs this app has run on, last one last
@@ -177,12 +177,13 @@ def board(now=None):
         if state(n, now) == "lapsed":
             _seize(n)
     out = []
+    cps = copies(now)
     for n in range(0, SLOTS_MAX + 1):
         lock, lm = _read(os.path.join(d, "slot-%d.lock" % n))
         run, rm = _read(os.path.join(d, "slot-%d.run" % n))
         row = {"slot": n, "colour": COLOURS[n], "holder": "", "doing": "",
                "held_s": None, "distro": "", "run": None, "mine": n == slot(),
-               "state": state(n, now), "idle_s": None}
+               "state": state(n, now), "idle_s": None, "copy": None}
         if row["state"] in ("active", "lapsed"):
             row["idle_s"] = int(now - max(lm, rm))
         if lock:
@@ -195,9 +196,100 @@ def board(now=None):
                           "label": str(run.get("label") or ""),
                           "up_s": int(now - (run.get("started") or rm)),
                           "stale": (now - rm) > RUN_FRESH_S,
-                          "distro": str(run.get("distro") or "")}
+                          "distro": str(run.get("distro") or ""),
+                          # the game's clock against the wall's (watch.sh, PAD-649): 4 while a
+                          # sweep runs sped up; an older record has none, so 1
+                          "speed": _speed(run.get("speed"))}
+        row["copy"] = copy_for(row, cps)        # the card copy this rig waits on (PAD-649)
         out.append(row)
     return out
+
+
+#: A copy record nobody has touched for this long is a copier that died.
+COPY_FRESH_S = 90
+
+
+def card_title(card):
+    """``dungeons_and_dragons_le-1_10_0_spike2.Release.16G.sdcard.raw`` ->
+    ``Dungeons And Dragons LE 1.10``: the card's name as a person reads it."""
+    name = os.path.basename(str(card or ""))
+    name = name.split(".Release")[0]
+    if name.endswith(".raw"):
+        name = name[:-4]
+    key, _, ver = name.partition("-")
+    words = [w for w in key.replace("_", " ").split() if w]
+    eds = {"le": "LE", "pro": "Pro", "prem": "Premium", "premium": "Premium", "se": "SE"}
+    title = " ".join(eds.get(w.lower(), w.capitalize()) for w in words)
+    parts = [p for p in ver.split("_") if p.isdigit()]
+    if len(parts) >= 2:
+        title += " " + parts[0] + "." + parts[1]
+    return title
+
+
+def copies(now=None):
+    """The card copies on the board (cardmount.sh copy_board_write, PAD-649):
+    [{"label","card","title","who","state","pct","done_mb","total_mb"}],
+    fresh ones only."""
+    now = now or time.time()
+    d = board_dir()
+    out = []
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return out
+    for n in names:
+        if not (n.startswith("copy-") and n.endswith(".json")):
+            continue
+        rec, m = _read(os.path.join(d, n))
+        if not rec or (now - m) > COPY_FRESH_S:
+            continue
+        try:
+            pct = max(0, min(100, int(rec.get("pct") or 0)))
+        except (TypeError, ValueError):
+            pct = 0
+        out.append({"label": str(rec.get("label") or n[5:-5]),
+                    "card": str(rec.get("card") or ""),
+                    "title": card_title(rec.get("card") or rec.get("label")),
+                    "who": str(rec.get("who") or ""),
+                    "state": "queued" if rec.get("state") == "queued" else "copying",
+                    "pct": pct, "done_mb": int(rec.get("done_mb") or 0),
+                    "total_mb": int(rec.get("total_mb") or 0)})
+    return out
+
+
+def copy_for(row, copies_):
+    """The copy a rig waits on: its lock says "waiting for its card: <label>"
+    (rigbatch.sh); failing a record for that label, the same holder's copy
+    that is running, else its first queued one."""
+    doing = row.get("doing") or ""
+    if "waiting for its card" not in doing:
+        return None
+    label = doing.split("waiting for its card:", 1)[1].strip(" )") \
+        if "waiting for its card:" in doing else ""
+    mine = [c for c in copies_ if c["who"] and c["who"] == row.get("holder")]
+    for c in mine:
+        if label and c["label"] == label:
+            return c
+    for c in mine:
+        if c["state"] == "copying":
+            return c
+    return mine[0] if mine else None
+
+
+def _speed(v):
+    try:
+        k = float(v)
+    except (TypeError, ValueError):
+        return 1.0
+    return k if k > 0 else 1.0
+
+
+def speed_text(k):
+    """4.0 -> "4x", 0.5 -> "0.5x", 1 -> "" (real time says nothing)."""
+    k = _speed(k)
+    if abs(k - 1.0) < 1e-6:
+        return ""
+    return ("%g" % k) + "x"
 
 
 def _lock_path(n):

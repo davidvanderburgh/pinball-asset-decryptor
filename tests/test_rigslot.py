@@ -39,7 +39,7 @@ def test_an_ordinary_install_changes_nothing(board):
     assert rigslot.rig_env() == []
     assert rigslot.title_tag() == ""
     rows = rigslot.board()
-    assert [r["slot"] for r in rows] == [0, 1, 2, 3, 4]
+    assert [r["slot"] for r in rows] == list(range(rigslot.SLOTS_MAX + 1))
     assert not any(r["holder"] or r["run"] for r in rows)
     assert rows[0]["mine"] and not rows[1]["mine"]
 
@@ -128,7 +128,7 @@ def test_a_lapsed_hold_is_taken_only_when_no_rig_is_free(board, monkeypatch):
     _put(board, "slot-1.lock", {"slot": 1, "who": "PAD-3"}, age=old)     # lapsed
     assert rigslot.claim_for_run() == 2                           # free first
     rigslot.release_claimed()
-    for n in (2, 3, 4):
+    for n in range(2, rigslot.SLOTS_MAX + 1):
         _put(board, "slot-%d.lock" % n, {"slot": n, "who": "x%d" % n})  # active
     assert rigslot.claim_for_run() == 1                           # then the lapsed one
     assert _lock(board, 1)["who"] == "PAD-7"
@@ -183,3 +183,49 @@ def test_every_rig_command_carries_the_rig(board, monkeypatch):
     monkeypatch.setenv("PAD_LABEL", "item/48")
     env = emulate_core._rig_env()
     assert "PAD_SLOT=3" in env and "PAD_LABEL=item/48" in env
+
+
+def test_a_run_says_its_speed(board):
+    """PAD-649: watch.sh writes the game's speed into the run record once padspeed.py's ask is taken up, and
+    the Emulate tab's rig strip says "4x"; an older record has none and reads as real time."""
+    now = int(time.time())
+    _put(board, "slot-1.run", {"slot": 1, "game": "godzilla_pro", "started": now, "speed": 4})
+    _put(board, "slot-2.run", {"slot": 2, "game": "jaws_le", "started": now, "speed": "0.5"})
+    _put(board, "slot-3.run", {"slot": 3, "game": "turtles_pro", "started": now})
+    rows = {r["slot"]: r for r in rigslot.board(now=now)}
+    assert rows[1]["run"]["speed"] == 4.0 and rows[2]["run"]["speed"] == 0.5
+    assert rows[3]["run"]["speed"] == 1.0
+    assert rigslot.speed_text(4) == "4x" and rigslot.speed_text(0.5) == "0.5x"
+    assert rigslot.speed_text(1) == "" and rigslot.speed_text(None) == "" and rigslot.speed_text("x") == ""
+
+
+def test_the_board_says_which_card_copy_a_rig_waits_on(board):
+    """PAD-649: cardmount.sh puts a card copy on the board (copy-<label>.json, every 2 s), cardstage.sh a
+    "queued" one while it waits for the copy lock, and rigbatch's lock note names the card; the row carries the
+    copy its rig waits on, by label first, else the holder's running copy, else its first queued one. A record
+    nobody touched for 90 s is a dead copier and is ignored."""
+    now = int(time.time())
+    _put(board, "slot-1.lock", {"slot": 1, "who": "PAD-9",
+                                "what": "rigbatch dnd_le-1.10 (waiting for its card: dnd_le-1_10_0_spike2)",
+                                "taken": now})
+    _put(board, "slot-2.lock", {"slot": 2, "who": "PAD-9",
+                                "what": "rigbatch jaws_le-1.02 (waiting for its card: jaws_le-1_02_0)", "taken": now})
+    _put(board, "slot-3.lock", {"slot": 3, "who": "PAD-7", "what": "rigbatch x (waiting for its card)", "taken": now})
+    _put(board, "slot-4.lock", {"slot": 4, "who": "PAD-9", "what": "rigbatch godzilla_pro-1.16", "taken": now})
+    _put(board, "copy-dnd_le-1_10_0_spike2.json",
+         {"label": "dnd_le-1_10_0_spike2", "card": "dnd_le-1_10_0_spike2.Release.16G.sdcard.raw", "who": "PAD-9",
+          "state": "copying", "done_mb": 2852, "total_mb": 14777, "pct": 19})
+    _put(board, "copy-jaws_le-1_02_0.json",
+         {"label": "jaws_le-1_02_0", "card": "jaws_le-1_02_0.Release.16G.sdcard.raw", "who": "PAD-9",
+          "state": "queued", "done_mb": 0, "total_mb": 15000, "pct": 0})
+    _put(board, "copy-old.json", {"label": "old", "card": "old-1_0_0.raw", "who": "PAD-7", "state": "copying",
+                                  "pct": 50}, age=400)
+    rows = {r["slot"]: r for r in rigslot.board(now=now)}
+    assert rows[1]["copy"]["state"] == "copying" and rows[1]["copy"]["pct"] == 19
+    assert rows[1]["copy"]["title"] == "Dnd LE 1.10" and rows[1]["copy"]["total_mb"] == 14777
+    assert rows[2]["copy"]["state"] == "queued" and rows[2]["copy"]["title"] == "Jaws LE 1.02"
+    assert rows[3]["copy"] is None                      # its only record is a dead copier's
+    assert rows[4]["copy"] is None                      # not waiting for a card
+    assert rigslot.card_title("dungeons_and_dragons_le-1_10_0_spike2.Release.16G.sdcard.raw") \
+        == "Dungeons And Dragons LE 1.10"
+    assert rigslot.card_title("godzilla_pro-1_16_0_spike2") == "Godzilla Pro 1.16"

@@ -31,7 +31,7 @@ CALLOUT_SOUND = ("callout", "own-sound")
 PORTS = {
     "godzilla_pro-1.15": (18, 64, True, set(), EVERY_CAPABILITY),   # item 160: + the three spinners; PAD-228: + 3 buttons
     "godzilla_le-1.16": (24, 64, True, set(), EVERY_CAPABILITY),    # PAD-228: + 3 buttons
-    "turtles_pro-1.58": (17, 32, True, ALL, NO_FRAMEWORK_DISPLAY),
+    "turtles_pro-1.58": (17, 32, True, ALL - {"events"}, NO_FRAMEWORK_DISPLAY),   # f618285f: its event ids
     "turtles_pro-1.59": (17, 32, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
     "deadpool_pro-1.16": (25, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
     "deadpool_le-1.14": (28, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
@@ -210,7 +210,7 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
     assert not p.can("stack") and "tells that one of its own modes is running" in p.why_not("stack")
     assert [part for part in MP.PARTS if not p.can(part)] == ["stack", "multiball", "ball_save"] + \
-        ([] if "godzilla_le-1.16" in MP.MAGNET_PROVEN else ["magnet"]) + ["wizard", "challenge"]   # no count: no multiball, no ball save; PAD-436: no mini-wizards; PAD-615: no challenge list
+        ([] if "godzilla_le-1.16" in MP.MAGNET_PROVEN else ["magnet"]) + ["wizard"]   # no count: no multiball, no ball save; PAD-436: no mini-wizards; PAD-619: its challenges need no mode query
     # with the count alone it is the balls route, greyed until seen (item 164's STACK_BALLS_PROVEN)
     only = "\n".join(line for line in text.splitlines() if "stock_" not in line)
     (tmp_path / "godzilla_le-1.16.port").write_text(only, encoding="utf-8")
@@ -632,9 +632,12 @@ def test_events_come_from_the_port_as_the_runtime_arms_them(tmp_path):
     assert list(le.events) == [line.split()[1] for line in text.splitlines() if line.startswith("event ")]
     assert le.can("events") and MP.GODZILLA_PRO_1_15.can("events")
     assert set(MP.profile_from_port(_port("godzilla_pro-1.15")).events) == set(MP.GODZILLA_PRO_1_15.events)
-    for key in ("turtles_pro_1_58",):
-        p = MP.profile(key)
-        assert p.events == () and "events yet" in p.why_not("events")
+    # f618285f: TMNT Pro 1.58 was the last title with no events; it arms the bus ones now
+    assert MP.profile("turtles_pro_1_58").events == ("game_start", "ball_start", "ball_end", "bonus_start", "bonus_end")
+    no_events = "\n".join(line for line in text.splitlines() if not line.startswith("event "))
+    (tmp_path / "godzilla_le-1.16.port").write_text(no_events, encoding="utf-8")
+    p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
+    assert p.events == () and "events yet" in p.why_not("events")
     no_bus = "\n".join(line for line in text.splitlines() if not line.startswith("site hook_dispatch"))
     (tmp_path / "godzilla_le-1.16.port").write_text(no_bus, encoding="utf-8")
     assert MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port")).events == (

@@ -471,3 +471,35 @@ def test_build_name_map_never_raises_on_bad_emu(tmp_path):
     assert sfx_names.build_name_map(_Bad(), []) == {}
     assert sfx_names.build_name_map(_Bad(), [{"idx": 0}]) == {}
     assert sfx_names.build_name_map(_Bad(), [{"idx": 0, "key0": 123}]) == {}
+
+
+# ---- PAD-633: a failed naming try is not kept for the card --------------------
+
+def _naming_run(tmp_path, monkeypatch, build):
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    monkeypatch.delenv("PINBALL_SFX_NAMES", raising=False)
+    monkeypatch.setattr(engine, "_params_cache_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(engine, "_fingerprint", lambda g, i: "f" * 40)
+    monkeypatch.setattr(sfx_names, "_build_name_map", build)
+    lines = []
+    got = engine._load_or_build_sfx_names(
+        None, "gr", "img", [], lambda m, lvl="info": lines.append(m))
+    return got, lines
+
+
+def test_an_error_is_not_cached_so_the_next_extract_tries_again(tmp_path, monkeypatch):
+    def boom(emu, params, log=None):
+        raise RuntimeError("emulator hiccup")
+    got, lines = _naming_run(tmp_path, monkeypatch, boom)
+    assert got == {} and any("emulator hiccup" in m for m in lines)
+    assert not os.listdir(str(tmp_path))
+    got, _ = _naming_run(tmp_path, monkeypatch, lambda e, p, log=None: {7: "SE FX A"})
+    assert got == {7: "SE FX A"}
+
+
+def test_a_result_is_cached_and_no_names_is_said(tmp_path, monkeypatch):
+    got, lines = _naming_run(tmp_path, monkeypatch, lambda e, p, log=None: {})
+    assert got == {} and any("keep their idx names" in m for m in lines)
+    assert len(os.listdir(str(tmp_path))) == 1      # a real "none fit" is kept
+    got, _ = _naming_run(tmp_path, monkeypatch, lambda e, p, log=None: {7: "SE FX A"})
+    assert got == {}                                 # served from the cache

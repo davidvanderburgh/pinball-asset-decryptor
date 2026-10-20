@@ -491,3 +491,60 @@ html.light .ce-fn { color: #1d4ed8; } html.light .ce-ar { color: #a16207; } html
 .ce-ro .ce-hl { position: static; flex: 1 1 auto; }
 .ce-cmode { gap: 8px; min-height: 0; }
 .ce-cmode .ce { height: 520px; flex: none; }
+
+/* ---- PAD-646: the Light shows view - the mode's own shows, the playfield playing one, its steps as a timeline ---- */
+.ls-view { display: flex; height: 100%; min-height: 0; }
+.ls-list { flex: 0 0 230px; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-right: 1px solid var(--line); overflow: auto; }
+.ls-list-hd { align-items: center; gap: 8px; margin-bottom: 4px; }
+.ls-row { display: flex; flex-direction: column; gap: 4px; text-align: left; border: 1px solid var(--line-2); background: transparent; color: var(--ink);
+  border-radius: 8px; padding: 7px 9px; cursor: pointer; font: 13px var(--sans); }
+.ls-row:hover { border-color: var(--ink-3); }
+.ls-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.ls-row-strip { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; }
+.ls-row-strip > span { flex: 1 1 0; }
+.ls-row-name { font-weight: 600; }
+.ls-none, .ls-legacy { padding: 6px 2px; }
+.ls-legacy { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ls-field { flex: 0 0 auto; height: 100%; padding: 12px; display: flex; flex-direction: column; gap: 8px; align-items: center; border-right: 1px solid var(--line); }
+.ls-svg { flex: 1 1 auto; min-height: 0; height: 100%; width: auto; max-width: 100%; display: block; background: #05070a; border-radius: 14px; }
+.ls-svg .pf-art { filter: none; opacity: .32; transition: opacity .15s; }
+.ls-svg.ls-gi-dark .pf-art { opacity: .1; }
+.ls-svg.ls-gi-flash .pf-art { opacity: .6; }
+html.light .ls-svg .pf-art { filter: none; }
+.ls-svg.picking { cursor: crosshair; outline: 2px solid var(--accent); }
+.ls-ins { fill: #1a1e26; stroke: rgba(225,232,242,.35); stroke-width: 1; color: transparent; }
+.ls-ins.lit { stroke: rgba(0,0,0,.4); filter: drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor); }
+.ls-centre circle { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.ls-centre line { stroke: var(--accent); stroke-width: 1.5; }
+.ls-transport { gap: 8px; align-items: center; width: 100%; max-width: 360px; }
+/* Play and Pause take the same room, and the clock its longest read: the column must not move as the show plays (PAD-653) */
+.ls-play { min-width: 6.4em; justify-content: center; }
+.ls-clock { margin-left: auto; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ls-scrub { width: 100%; max-width: 360px; }
+.ls-side { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+.ls-name { gap: 8px; align-items: center; flex-wrap: wrap; }
+.ls-name .ls-inl { flex-wrap: nowrap; }
+.ls-tl-hd { gap: 10px; align-items: baseline; }
+.ls-track { position: relative; display: flex; gap: 2px; height: 44px; padding: 0; }
+.ls-bar { position: relative; flex: 1 1 0; min-width: 28px; height: 44px; align-self: stretch; border: 2px solid transparent; border-radius: 7px; cursor: pointer; padding: 0; overflow: hidden;
+  color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; font: 600 11px var(--sans); box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+.ls-bar:hover { border-color: var(--ink-3); }
+.ls-bar.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), inset 0 0 0 1px rgba(0,0,0,.35); }
+.ls-bar-n { position: absolute; left: 5px; top: 3px; }
+.ls-bar-t { position: absolute; right: 5px; bottom: 3px; font-weight: 500; }
+.ls-bar-blend { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, rgba(0,0,0,.35) 0 3px, transparent 3px 7px); pointer-events: none; }
+.ls-head { position: absolute; top: -4px; bottom: -4px; width: 2px; background: #fff; box-shadow: 0 0 4px #000; pointer-events: none; }
+.ls-step { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.ls-step-hd { align-items: center; gap: 4px; }
+.ls-step .bk-x { background: var(--panel); color: var(--ink); border: 1px solid var(--line-2); }
+.ls-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.ls-inl { gap: 6px; align-items: center; flex-wrap: wrap; }
+.ls-color { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ls-swatches { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.ls-swatch { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(0,0,0,.4); padding: 0; cursor: pointer; }
+.ls-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ls-runs { display: flex; flex-direction: column; gap: 6px; }
+.ls-runlist { margin: 0; padding-left: 20px; font-size: 13px; }
+html.bp-1100 .ls-list { flex-basis: 200px; }
+html.bp-860 .ls-view { flex-direction: column; }
+html.bp-860 .ls-list, html.bp-860 .ls-field { border-right: 0; border-bottom: 1px solid var(--line); height: auto; }

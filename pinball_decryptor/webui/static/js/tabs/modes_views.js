@@ -173,6 +173,7 @@ export function stmtWords(b, ch = {}) {
     case "lights_off": return `Hand back the lights of ${lightName(b)}`;
     case "show": {
       if (b.show === "own") return `Run its own light show (${(b.steps || []).length} steps)`;
+      if (b.show === "mine") return `Run the mode's light show ${quote(b.name || "?")}`;     // PAD-646
       const s = ((ch.light || {}).shows || []).find((x) => x.key === b.show);
       return `Run the light show ${quote(s ? s.label : b.show)}`;
     }

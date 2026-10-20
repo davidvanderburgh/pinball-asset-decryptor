@@ -37,6 +37,15 @@ _MODES_MAX = 8
 _MODES_SHOWN = 4
 #: PAD-565: the most files one sound plays in turn, its own one included (sound_modes.TURN_MAX)
 _TURNS_MAX = 16
+#: PAD-638: the Replacement pane holds file k in turn as pseudo mode _TURN_BASE + k
+#: (sound_modes.TURN_BASE), so the loudness box is that file's own
+_TURN_BASE = 100
+#: PAD-641: the most sounds the flipper buttons play in attract (sound_modes.ATTRACT_MAX)
+_ATTRACT_MAX = 16
+#: PAD-641: what the Attract flipper sounds button says it does
+_ATTRACT_TIP = ("Sounds the machine plays when a flipper button is pressed in attract mode (no game "
+                "being played), one after another, as other Spike 2 games play their callouts. Each "
+                "is played for at most the length of the unused game sound it rides on.")
 
 from .. import compat
 from ..find_originals import FindOriginalsMixin
@@ -231,6 +240,12 @@ class AudioTab(FindOriginalsMixin, TabService):
         # PAD-565: a slot's files the game plays IN TURN with its own ({rel: [path, ...]}, file 2
         # first), kept in the same record as the music modes
         self._turns = {}
+        # PAD-638: the slots of them whose files play AT RANDOM, not one after another
+        self._random = set()
+        # PAD-638: each file in turn's own loudness ({rel: {k: dB}}, k = 2..)
+        self._turn_levels = {}
+        # PAD-641: the sounds the flipper buttons play in attract ([path, ...]), the same record
+        self._attract = []
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -277,7 +292,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                  running=False, profile_busy=False, adv_marker=False,
                  prefix="", sort={"key": "#0", "desc": False},
                  panes=dict(self._panes), dup_scanning=False,
-                 widths=self._saved_widths(), pex=False, modes_share=False)
+                 widths=self._saved_widths(), pex=False, modes_share=False, attract=None)
 
     # ------------------------------------------------------------------
     # small helpers
@@ -721,6 +736,9 @@ class AudioTab(FindOriginalsMixin, TabService):
                                  if rel in self._modes}
             self._turns = {rel: v for rel, v in self._turns.items()
                            if rel in self._by_rel}
+            self._random &= set(self._turns)
+            self._turn_levels = {rel: v for rel, v in self._turn_levels.items()
+                                 if rel in self._turns}
         self._loop = {
             s.rel_path: (bool(saved_loops[s.rel_path])
                          if s.rel_path in saved_loops
@@ -767,7 +785,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._dup_groups = None
         self.set(prefix=self._common_prefix(),
                  modes_share=(self._sm_offer is not None or bool(self._modes)
-                              or bool(self._turns)))
+                              or bool(self._turns) or bool(self._attract)))
         if self.audio_group_dups_var.get():
             self._ensure_dup_groups(quiet=True)
         self._refresh_list()
@@ -1235,6 +1253,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         if tn:
             row["tn"] = len(tn) + 1
             row["tn_tip"] = self._turns_words(rel)
+            if rel in self._random:
+                row["tr"] = True
         uses = self._uses.get(rel) if self._uses else None
         if uses is not None:
             row["rq"] = len(uses)
@@ -1385,7 +1405,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._sel = sel
         self.set(rows=rows, empty=hint, sel=list(self._sel),
                  sort={"key": col, "desc": desc},
-                 dup_scanning=self._dup_scanning)
+                 dup_scanning=self._dup_scanning, attract=self._attract_state())
         self._publish_status()
         self._update_clear_all()
         self._level_sync()
@@ -1986,7 +2006,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         if rel is not None or reset:
             self.set(level=str(self._rep_gain(rel) if rel else 0))
         self.set(level_enabled=bool(self._slots),
-                 level_label=("Mode %d's loudness:" % m) if m else "",
+                 level_label=(("Sound %d's loudness:" % (m - _TURN_BASE)) if m and m > _TURN_BASE
+                              else ("Mode %d's loudness:" % m) if m else ""),
                  level_all=not m)
 
     @rpc
@@ -2646,6 +2667,27 @@ class AudioTab(FindOriginalsMixin, TabService):
             keep = [f for f in files if isinstance(f, str) and f.strip()][:_TURNS_MAX - 1]
             if keep:
                 self._turns[rel] = keep
+        rnd = raw.get("random")
+        self._random = {rel for rel in (rnd if isinstance(rnd, list) else ())
+                        if isinstance(rel, str) and rel in self._turns}
+        self._turn_levels = {}
+        tl = raw.get("turn_levels")
+        for rel, v in (tl.items() if isinstance(tl, dict) else ()):
+            if rel not in self._turns or not isinstance(v, dict):
+                continue
+            keep = {}
+            for k, db in v.items():
+                try:
+                    k, db = int(k), int(round(float(db)))
+                except (TypeError, ValueError):
+                    continue
+                if 2 <= k <= len(self._turns[rel]) + 1 and db:
+                    keep[k] = max(min(db, 12), -12)
+            if keep:
+                self._turn_levels[rel] = keep
+        attract = raw.get("attract")
+        self._attract = ([f for f in attract if isinstance(f, str) and f.strip()][:_ATTRACT_MAX]
+                         if isinstance(attract, (list, tuple)) else [])
 
     def _modes_json(self):
         names = list(self._mode_names)
@@ -2654,7 +2696,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         slots = {rel: {str(m): f for m, f in sorted(v.items())}
                  for rel, v in sorted(self._modes.items()) if v}
         turns = {rel: list(v) for rel, v in sorted(self._turns.items()) if v}
-        if not slots and not names and not turns:
+        if not slots and not names and not turns and not self._attract:
             return None
         levels = {}
         for rel, v in sorted(self._mode_levels.items()):
@@ -2665,29 +2707,53 @@ class AudioTab(FindOriginalsMixin, TabService):
         out = {"names": names, "slots": slots, "levels": levels}
         if turns:
             out["turns"] = turns
+            rnd = sorted(rel for rel in self._random if rel in turns)
+            if rnd:
+                out["random"] = rnd
+            tl = {rel: {str(k): int(db) for k, db in sorted(v.items()) if db}
+                  for rel, v in sorted(self._turn_levels.items()) if rel in turns}
+            tl = {rel: v for rel, v in tl.items() if v}
+            if tl:
+                out["turn_levels"] = tl
+        if self._attract:
+            out["attract"] = list(self._attract)
         return out
 
     def _mode_level(self, rel, m):
-        """Mode *m*'s file's own loudness offset for slot *rel*, in dB."""
+        """Mode *m*'s file's own loudness offset for slot *rel*, in dB (PAD-638: *m* past
+        :data:`_TURN_BASE` is file m - _TURN_BASE in turn)."""
+        if m > _TURN_BASE:
+            return int((self._turn_levels.get(rel) or {}).get(m - _TURN_BASE, 0) or 0)
         return int((self._mode_levels.get(rel) or {}).get(m, 0) or 0)
 
     def _set_mode_level(self, rel, m, db, typed=None):
         """Mode *m*'s file's loudness for slot *rel*: its own, never the
-        slot's (the slot's offset is its own replacement's)."""
-        if m not in (self._modes.get(rel) or {}):
-            return False
-        lv = self._mode_levels.setdefault(rel, {})
-        if db:
-            lv[m] = db
+        slot's (the slot's offset is its own replacement's). PAD-638: or file k in turn's,
+        *m* = :data:`_TURN_BASE` + k."""
+        turn = m > _TURN_BASE
+        if turn:
+            if not 2 <= m - _TURN_BASE <= len(self._turns.get(rel) or []) + 1:
+                return False
+            store, key = self._turn_levels, m - _TURN_BASE
         else:
-            lv.pop(m, None)
+            if m not in (self._modes.get(rel) or {}):
+                return False
+            store, key = self._mode_levels, m
+        lv = store.setdefault(rel, {})
+        if db:
+            lv[key] = db
+        else:
+            lv.pop(key, None)
             if not lv:
-                self._mode_levels.pop(rel, None)
+                store.pop(rel, None)
         if rel == self._selected_rel() and self._pane_mode(rel) == m:
             self.set(level=(str(typed).strip() if typed is not None else "") or str(db))
         i = self._row_index.get(rel)
         if i is not None:
-            self.patch_item("rows", i, md_tip=self._modes_words(rel))
+            if turn:
+                self.patch_item("rows", i, tn_tip=self._turns_words(rel))
+            else:
+                self.patch_item("rows", i, md_tip=self._modes_words(rel))
         if self._pane_mode(rel) == m:
             self._level_preview_soon(rel)
         self._save_staged_changes()
@@ -2874,7 +2940,13 @@ class AudioTab(FindOriginalsMixin, TabService):
             return ""
         own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
                else "the game's own sound")
-        names = [own] + [os.path.basename(f) for f in tn]
+        names = [own] + [os.path.basename(f) + (
+            " at %s" % self._db_words(self._mode_level(rel, _TURN_BASE + k))
+            if self._mode_level(rel, _TURN_BASE + k) else "") for k, f in enumerate(tn, 2)]
+        if rel in self._random:
+            return ("Each time the game plays this sound it plays one of these at random, never "
+                    "the same one twice in a row: "
+                    + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
         return ("Each time the game plays this sound it plays the next of these, then starts "
                 "again: " + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
 
@@ -2893,14 +2965,25 @@ class AudioTab(FindOriginalsMixin, TabService):
             sub.append({"label": "Add a sound to play in turn…", "action": "turn_add",
                         "icon": "plus"})
         if tn:
-            sub.append({"sep": True})
+            # PAD-638: one after another, or at random (a jukebox)
+            rnd = rel in self._random
+            sub += [{"sep": True},
+                    {"label": "One after another", "action": "turn_order:0",
+                     "checked": not rnd, "radio": True},
+                    {"label": "At random", "action": "turn_order:1",
+                     "checked": rnd, "radio": True},
+                    {"sep": True}]
             for k, f in enumerate(tn, 2):
                 if not why:
                     sub.append({"label": "Play sound %d (%s)" % (k, os.path.basename(f)),
                                 "action": "turn_play:%d" % k, "icon": "play"})
+                    sub.append({"label": "Loudness of sound %d (%s)…" % (
+                        k, self._db_words(self._mode_level(rel, _TURN_BASE + k))),
+                                "action": "turn_level:%d" % k, "icon": "wave"})
                 sub.append({"label": "Take off sound %d (%s)" % (k, os.path.basename(f)),
                             "action": "turn_off:%d" % k, "icon": "x"})
-        return {"label": "Play in turn" + (" (%d sounds)" % (len(tn) + 1) if tn else ""),
+        return {"label": ("Play at random" if tn and rel in self._random else "Play in turn")
+                + (" (%d sounds)" % (len(tn) + 1) if tn else ""),
                 "icon": "shuffle", "submenu": sub}
 
     def _turn_action(self, action, rel):
@@ -2934,6 +3017,17 @@ class AudioTab(FindOriginalsMixin, TabService):
                         len(self._turns[rel]) + 1), "info")
             self._modes_changed(rel)
             return True
+        if kind == "turn_order":
+            if not tn or bool(k) == (rel in self._random):
+                return False
+            if k:
+                self._random.add(rel)
+            else:
+                self._random.discard(rel)
+            self.log("Replace Audio: %s plays its %d sounds %s." % (
+                rel, len(tn) + 1, "at random" if k else "one after another"), "info")
+            self._modes_changed(rel)
+            return True
         if not 2 <= k <= len(tn) + 1:
             return False
         f = tn[k - 2]
@@ -2941,17 +3035,118 @@ class AudioTab(FindOriginalsMixin, TabService):
             if rel != self._current_rel:
                 self._load_track(rel)
             self._pane_load("rep", f, autoplay=True,
+                            gain_db=self._mode_level(rel, _TURN_BASE + k),
                             label="Sound %d in turn: %s" % (k, os.path.basename(f)))
+            # PAD-638: the loudness box is this file's own while it is in the pane
+            self._rep_mode = (rel, _TURN_BASE + k)
+            self._level_sync()
             return True
+        if kind == "turn_level":
+            text = compat.simpledialog.askstring(
+                "Loudness of sound %d" % k,
+                "How loud sound %d (%s) plays, in dB from -12 to +12. 0 matches the sound it "
+                "stands in for. It is this file's own: the loudness set on %s itself is that "
+                "sound's, not this one's." % (k, os.path.basename(f), os.path.basename(rel)),
+                initialvalue=str(self._mode_level(rel, _TURN_BASE + k)))
+            if text is None:
+                return False
+            db = self._level_value(text)
+            if db is None:
+                return False
+            self.log("Replace Audio: %s's sound %d (%s) plays at %s." % (
+                rel, k, os.path.basename(f), self._db_words(db)), "info")
+            return self._set_mode_level(rel, _TURN_BASE + k, db)
         if kind == "turn_off":
             del tn[k - 2]
+            # PAD-638: the files after it move up one, their loudness with them
+            lv = self._turn_levels.get(rel) or {}
+            moved = {(j - 1 if j > k else j): db for j, db in lv.items() if j != k}
+            if moved:
+                self._turn_levels[rel] = moved
+            else:
+                self._turn_levels.pop(rel, None)
+            if self._pane_mode(rel) and self._pane_mode(rel) > _TURN_BASE:
+                self._load_rep_pane(rel)
             if not tn:
                 self._turns.pop(rel, None)
+                self._random.discard(rel)
             self.log("Replace Audio: %s no longer plays %s in turn."
                      % (rel, os.path.basename(f)), "info")
             self._modes_changed(rel)
             return True
         return False
+
+    # ------------------------------------------------------------------
+    # PAD-641: the sounds the flipper buttons play in attract
+    # ------------------------------------------------------------------
+    def _attract_why(self):
+        return str((self._sm_offer or {}).get("attract_why") or "")
+
+    def _attract_state(self):
+        """The page's Attract flipper sounds button: ``{"files": [name, ...], "why", "max",
+        "tip"}``, or None where the plugin offers no such thing and the project has none."""
+        if "attract_why" not in (self._sm_offer or {}) and not self._attract:
+            return None
+        names = [os.path.basename(f) for f in self._attract]
+        tip = [_ATTRACT_TIP]
+        if names:
+            tip.append("In turn: " + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
+        if self._attract_why():
+            tip.append(self._attract_why())
+        return {"files": names, "why": self._attract_why(), "max": _ATTRACT_MAX, "tip": tip}
+
+    @rpc
+    def attract_action(self, action):
+        """The Attract flipper sounds menu: ``add`` (choose a file), ``play:k`` (file k in the
+        Replacement pane), ``off:k`` (take file k off), ``why`` (why this game cannot)."""
+        kind, _c, arg = str(action or "").partition(":")
+        try:
+            k = int(arg) if arg else 0
+        except ValueError:
+            return False
+        why = self._attract_why()
+        if kind == "why":
+            if why:
+                compat.messagebox.showinfo("Attract flipper sounds", why)
+            return bool(why)
+        if kind == "add":
+            if why or len(self._attract) >= _ATTRACT_MAX or not self._scan_dir:
+                return False
+            self._cancel_select_job()
+            self.stop_all_preview_playback()
+            path = self._ask_path(
+                "open", "audio_replacement",
+                "Choose a sound the flipper buttons play in attract mode",
+                filetypes=_AUDIO_FILETYPES)
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+            if not path:
+                return False
+            self._attract.append(os.path.normpath(path))
+            self.log("Replace Audio: the flipper buttons play %s in attract mode (sound %d of %d)."
+                     % (os.path.basename(path), len(self._attract), len(self._attract)), "info")
+            self._attract_changed()
+            return True
+        if not 1 <= k <= len(self._attract):
+            return False
+        f = self._attract[k - 1]
+        if kind == "play":
+            self._pane_load("rep", f, autoplay=True,
+                            label="Attract flipper sound %d: %s" % (k, os.path.basename(f)))
+            return True
+        if kind == "off":
+            del self._attract[k - 1]
+            self.log("Replace Audio: the flipper buttons no longer play %s in attract mode."
+                     % os.path.basename(f), "info")
+            self._attract_changed()
+            return True
+        return False
+
+    def _attract_changed(self):
+        self._save_staged_changes()
+        self.set(modes_share=(self._sm_offer is not None or bool(self._modes)
+                              or bool(self._turns) or bool(self._attract)))
+        self._refresh_list()
 
     def _add_mode(self):
         """One more music mode (up to the game's most), named as it is added."""
@@ -3001,7 +3196,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         loads. Returns its path, or None."""
         from ...plugins.stern import media_share as MS
         project = self._assets()
-        if not project or not (self._modes or self._turns):
+        if not project or not (self._modes or self._turns or self._attract):
             compat.messagebox.showinfo(
                 "Save the music modes",
                 "This project has no music modes to save: no sound has a file for another mode "
@@ -3054,7 +3249,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             compat.messagebox.showinfo("Load music modes", str(e))
             return None
         rec = got["record"]
-        if not rec["slots"]:
+        if not rec["slots"] and not rec.get("attract"):
             compat.messagebox.showinfo(
                 "Load music modes", "Nothing in %s could be loaded here:\n\n%s" % (
                     os.path.basename(path), "\n".join("%s: %s" % (os.path.basename(r), w)
@@ -3076,8 +3271,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         self.log("Replace Audio: loaded the music modes of %s: %d sound(s), their files in the "
                  "\"%s\" folder." % (os.path.basename(path), n, MS.MUSIC_DIR), "success")
         lines = ["%d sound(s) have their files for the other music modes (%s)." % (
-            n, ", ".join("%d %s" % (m, self._mode_name(m))
-                         for m in range(1, self._modes_max() + 1)))]
+            len(rec["slots"]), ", ".join("%d %s" % (m, self._mode_name(m))
+                                         for m in range(1, self._modes_max() + 1)))]
+        if rec.get("attract"):
+            lines.append("The flipper buttons play %d sound(s) in attract mode." % len(rec["attract"]))
         made = (got["about"] or {}).get("label")
         if made:
             lines.append("The file was saved from a project of %s." % made)

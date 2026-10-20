@@ -437,6 +437,17 @@ value challenge_menu_slot      0
 value challenge_menu_caption   1901
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x0042841c 0xe3032456 0xe3402082
+# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each challenge's champion category
+site  challenge_scores       0x003f63a8 0xe92d4ff0 0xe24dd0c4
+site  challenge_score_entry  0x003f58dc 0xe1a03000 0xe30a038c
+# DEMOGORGON CHALLENGE CHAMPION
+value challenge_scores_cat_0  9
+# SEND IT BACK CHALLENGE CHAMPION
+value challenge_scores_cat_1  10
+# LIGHT THE FIRE CHALLENGE CHAMPION
+value challenge_scores_cat_2  11
+# CHALLENGE CHAMPION
+value challenge_scores_cat_3  12
 
 # ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
 site  ball_launch         0x00424408 0xe92d4010 0xe3024e94

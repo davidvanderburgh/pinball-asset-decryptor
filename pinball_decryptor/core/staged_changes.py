@@ -292,11 +292,14 @@ def same_stem_sibling(path):
 
 #: PAD-494: a Stern project's music modes (``plugins.stern.sound_modes``):
 #: ``{"names": [...], "slots": {rel: {"2": file}}, "levels": {rel: {"2": dB}}}``
-#: and (PAD-565) its sounds in turn, ``"turns": {rel: [file 2, file 3, ...]}``
+#: and (PAD-565) its sounds in turn, ``"turns": {rel: [file 2, file 3, ...]}``,
+#: (PAD-638) the slots of them that play at random, ``"random": [rel, ...]``,
+#: and each such file's own loudness, ``"turn_levels": {rel: {"2": dB}}``
 SOUND_MODES_KEY = "sound_modes"
 #: PAD-565: the mod routes carry a slot's file k in turn as one more of its
 #: files, under this mode key + k ("t2"), so it travels wherever its slot's
 #: music mode files do; :func:`merge_sound_modes` puts it back in ``turns``
+#: (PAD-638: its loudness rides ``levels`` under the same key)
 TURN_KEY = "t"
 
 
@@ -310,7 +313,8 @@ def _turn_k(m):
 
 def sound_modes_of(data):
     """The music modes record in sidecar *data* as the mod routes carry it:
-    ``{"names", "slots", "levels"}`` with every slot's files, or ``None`` when
+    ``{"names", "slots", "levels"}`` with every slot's files (and PAD-638
+    ``"random"``, the slots whose files in turn play at random), or ``None`` when
     there are none.  A record saved before mode files had a loudness of their
     own (no ``"levels"``) gave each one its slot's ``audio_levels`` offset, so
     those come out as the files' own levels: carried anywhere, they build the
@@ -335,7 +339,10 @@ def sound_modes_of(data):
                 [f for f in files if isinstance(f, str) and f.strip()], 2)}
             if keep:
                 turns[rel] = keep
-    if not slots and not any(names) and not turns:
+    # PAD-641: the flipper buttons' sounds in attract belong to no slot: they go as they are
+    attract = [f for f in (raw.get("attract") or []) if isinstance(f, str) and f.strip()] \
+        if isinstance(raw.get("attract"), list) else []
+    if not slots and not any(names) and not turns and not attract:
         return None
     levels = raw.get("levels")
     if isinstance(levels, dict):
@@ -346,10 +353,25 @@ def sound_modes_of(data):
         own = (data or {}).get("audio_levels") or {}
         levels = {rel: {m: own[rel] for m in files}
                   for rel, files in slots.items() if own.get(rel)}
+    # PAD-638: a file in turn's own loudness, under its carried key ("t2")
+    for rel, v in ((raw.get("turn_levels") or {}).items()
+                   if isinstance(raw.get("turn_levels"), dict) else ()):
+        if rel in turns and isinstance(v, dict):
+            for k, db in v.items():
+                key = "%s%s" % (TURN_KEY, k)
+                if key in turns[rel] and db:
+                    levels.setdefault(rel, {})[key] = db
     for rel, files in turns.items():
         slots.setdefault(rel, {}).update(files)
-    return {"names": names, "slots": slots,
-            "levels": {rel: v for rel, v in levels.items() if v}}
+    out = {"names": names, "slots": slots,
+           "levels": {rel: v for rel, v in levels.items() if v}}
+    rnd = sorted(rel for rel in (raw.get("random") or ())
+                 if isinstance(rel, str) and rel in turns)
+    if rnd:
+        out["random"] = rnd
+    if attract:
+        out["attract"] = attract
+    return out
 
 
 def merge_sound_modes(data, rec):
@@ -364,11 +386,17 @@ def merge_sound_modes(data, rec):
     here = sound_modes_of(data) or {
         "names": [], "slots": {}, "levels": {}}
     slots = {rel: dict(v) for rel, v in here["slots"].items()}
-    # PAD-565: a slot the record gives files in turn takes the record's, in its order
+    random = set(here.get("random") or ())
+    # PAD-565: a slot the record gives files in turn takes the record's, in its order (PAD-638:
+    # and its order, at random or not)
     for rel, by_mode in (rec.get("slots") or {}).items():
-        if isinstance(by_mode, dict) and rel in slots and any(
-                _turn_k(m) is not None for m in by_mode):
-            slots[rel] = {m: f for m, f in slots[rel].items() if _turn_k(m) is None}
+        if isinstance(by_mode, dict) and any(_turn_k(m) is not None for m in by_mode):
+            if rel in slots:
+                slots[rel] = {m: f for m, f in slots[rel].items() if _turn_k(m) is None}
+            if rel in (rec.get("random") or ()):
+                random.add(rel)
+            else:
+                random.discard(rel)
     levels = {rel: dict(v) for rel, v in here["levels"].items()}
     n = 0
     for rel, by_mode in (rec.get("slots") or {}).items():
@@ -390,18 +418,37 @@ def merge_sound_modes(data, rec):
             names.append(name)
         elif not str(names[i] or "").strip():
             names[i] = name
+    # PAD-641: the record's flipper sounds in attract, when it has any, in place of these
+    attract = list(here.get("attract") or [])
+    if rec.get("attract"):
+        attract = [f for f in rec["attract"] if isinstance(f, str) and f.strip()]
+        n += 1
     if not n and names == here["names"]:
         return 0
-    turns = {}
+    turns, turn_levels = {}, {}
     for rel, by_mode in slots.items():
         got = sorted((_turn_k(m), f) for m, f in by_mode.items() if _turn_k(m) is not None)
         if got:
             turns[rel] = [f for _k, f in got]
+            # PAD-638: each file's own loudness, by where it now stands in the list
+            tl = {str(i): (levels.get(rel) or {}).get("%s%d" % (TURN_KEY, k))
+                  for i, (k, _f) in enumerate(got, 2)}
+            tl = {i: db for i, db in tl.items() if db}
+            if tl:
+                turn_levels[rel] = tl
     slots = {rel: {m: f for m, f in v.items() if _turn_k(m) is None}
              for rel, v in slots.items()}
+    levels = {rel: {m: db for m, db in v.items() if m in slots.get(rel, {})}
+              for rel, v in levels.items()}
     out = {"names": names, "slots": {rel: v for rel, v in slots.items() if v},
            "levels": {rel: v for rel, v in levels.items() if v}}
     if turns:
         out["turns"] = turns
+        if random & set(turns):
+            out["random"] = sorted(random & set(turns))
+        if turn_levels:
+            out["turn_levels"] = turn_levels
+    if attract:
+        out["attract"] = attract
     data[SOUND_MODES_KEY] = out
     return n

@@ -119,7 +119,9 @@ fi
 PAD_PATHS_SLOT=$PAD_SLOT
 export PAD_PATHS_SLOT
 #: The slot count a machine offers. Each running guest is ~1.5 cores.
-: "${PAD_SLOTS_MAX:=4}"
+# 5 since PAD-649: rigbatch fits nproc*10/20 rigs at its 15 pictures a second - five on this VM's 10 cores -
+# and the sixth colour is on every rig surface (pfpage/pf.css, core/rigslot.py, pad-triage rigboard.py).
+: "${PAD_SLOTS_MAX:=5}"
 export PAD_SLOTS_MAX
 #: The one rootfs every slot is layered over - slot 0's own.
 PAD_BASE_ROOT=$PAD_HOME/spike2root

@@ -40,6 +40,7 @@ EVERY_BLOCK = [
     {"op": "callout", "role": "ten_seconds"}, {"op": "words", "text": "JACKPOT", "value": None},
     {"op": "light_shot", "shot": "Left ramp", "color": "#ffd000", "pattern": "blink", "rate": num(200)},
     {"op": "lights_off", "shot": "*"}, {"op": "show", "show": "burst"}, {"op": "game_show", "name": "flashy"},
+    {"op": "show", "show": "mine", "name": "Kaiju roar"},                                           # PAD-646
     {"op": "log", "text": ""}, {"op": "clip", "clip": "sever", "where": "full"},
     {"op": "sound", "sound": "roar", "fallback": None},
     {"op": "hud_text", "which": "line", "text": "SHOOT THE LIT SHOT", "value": None},

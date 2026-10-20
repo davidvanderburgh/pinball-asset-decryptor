@@ -216,3 +216,44 @@ def test_ensure_attaches_when_the_mount_was_dropped(monkeypatch, tmp_path):
     assert rigdata.ensure("PAD-Runtime", runner=runner) == rigdata.MOUNT
     assert any(a[:2] == ["wsl.exe", "--mount"] for a in calls), \
         "a dropped mount must be re-attached"
+
+
+# ---- the shared card store (PAD-651) -----------------------------------------
+
+def test_the_card_store_is_a_second_named_disk_never_made_here(monkeypatch, tmp_path):
+    monkeypatch.setenv("PAD_CARDS_DISK", str(tmp_path / "pad-cards.vhdx"))
+    assert rigdata.CARDS_MOUNT == "/mnt/wsl/cards"          # the path cardmount.sh looks at, in every distro
+    assert not rigdata.cards_exists()
+    calls = []
+
+    def runner(args, timeout=None, distro=None):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=b"no", stderr=b"")
+    assert rigdata.ensure_cards("PAD-Runtime", runner=runner) is None     # no file: nothing attached, no error
+    assert calls == []
+
+
+def test_the_card_store_is_attached_when_it_exists_and_is_not_mounted(monkeypatch, tmp_path):
+    f = tmp_path / "pad-cards.vhdx"
+    f.write_bytes(b"x")
+    monkeypatch.setenv("PAD_CARDS_DISK", str(f))
+    monkeypatch.setattr(rigdata.sys, "platform", "win32")
+    calls = []
+    state = {"mounted": False}
+
+    def runner(args, timeout=None, distro=None):
+        calls.append(args)
+        if args[0] == "bash":
+            return subprocess.CompletedProcess(args, 0, stdout=b"mounted" if state["mounted"] else b"no", stderr=b"")
+        if args[:2] == ["wsl.exe", "--mount"]:
+            state["mounted"] = True
+            return subprocess.CompletedProcess(args, 0, stdout=b"ok", stderr=b"")
+        raise AssertionError(args)
+    said = []
+    assert rigdata.ensure_cards("PAD-Runtime", log=said.append, runner=runner) == "/mnt/wsl/cards"
+    assert ["wsl.exe", "--mount", "--vhd", str(f), "--name", "cards"] in calls
+    assert said and "card store" in said[0]
+    # already mounted: nothing more is run
+    n = len(calls)
+    assert rigdata.ensure_cards("PAD-Runtime", runner=runner) == "/mnt/wsl/cards"
+    assert calls[n:] == [["bash", "-c", rigdata._CARDS_IS_MOUNTED]]

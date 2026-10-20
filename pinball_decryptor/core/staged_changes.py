@@ -292,7 +292,8 @@ def same_stem_sibling(path):
 
 #: PAD-494: a Stern project's music modes (``plugins.stern.sound_modes``):
 #: ``{"names": [...], "slots": {rel: {"2": file}}, "levels": {rel: {"2": dB}}}``
-#: and (PAD-565) its sounds in turn, ``"turns": {rel: [file 2, file 3, ...]}``
+#: and (PAD-565) its sounds in turn, ``"turns": {rel: [file 2, file 3, ...]}``,
+#: (PAD-638) the slots of them that play at random, ``"random": [rel, ...]``
 SOUND_MODES_KEY = "sound_modes"
 #: PAD-565: the mod routes carry a slot's file k in turn as one more of its
 #: files, under this mode key + k ("t2"), so it travels wherever its slot's
@@ -310,7 +311,8 @@ def _turn_k(m):
 
 def sound_modes_of(data):
     """The music modes record in sidecar *data* as the mod routes carry it:
-    ``{"names", "slots", "levels"}`` with every slot's files, or ``None`` when
+    ``{"names", "slots", "levels"}`` with every slot's files (and PAD-638
+    ``"random"``, the slots whose files in turn play at random), or ``None`` when
     there are none.  A record saved before mode files had a loudness of their
     own (no ``"levels"``) gave each one its slot's ``audio_levels`` offset, so
     those come out as the files' own levels: carried anywhere, they build the
@@ -353,6 +355,10 @@ def sound_modes_of(data):
         slots.setdefault(rel, {}).update(files)
     out = {"names": names, "slots": slots,
            "levels": {rel: v for rel, v in levels.items() if v}}
+    rnd = sorted(rel for rel in (raw.get("random") or ())
+                 if isinstance(rel, str) and rel in turns)
+    if rnd:
+        out["random"] = rnd
     if attract:
         out["attract"] = attract
     return out
@@ -370,11 +376,17 @@ def merge_sound_modes(data, rec):
     here = sound_modes_of(data) or {
         "names": [], "slots": {}, "levels": {}}
     slots = {rel: dict(v) for rel, v in here["slots"].items()}
-    # PAD-565: a slot the record gives files in turn takes the record's, in its order
+    random = set(here.get("random") or ())
+    # PAD-565: a slot the record gives files in turn takes the record's, in its order (PAD-638:
+    # and its order, at random or not)
     for rel, by_mode in (rec.get("slots") or {}).items():
-        if isinstance(by_mode, dict) and rel in slots and any(
-                _turn_k(m) is not None for m in by_mode):
-            slots[rel] = {m: f for m, f in slots[rel].items() if _turn_k(m) is None}
+        if isinstance(by_mode, dict) and any(_turn_k(m) is not None for m in by_mode):
+            if rel in slots:
+                slots[rel] = {m: f for m, f in slots[rel].items() if _turn_k(m) is None}
+            if rel in (rec.get("random") or ()):
+                random.add(rel)
+            else:
+                random.discard(rel)
     levels = {rel: dict(v) for rel, v in here["levels"].items()}
     n = 0
     for rel, by_mode in (rec.get("slots") or {}).items():
@@ -414,6 +426,8 @@ def merge_sound_modes(data, rec):
            "levels": {rel: v for rel, v in levels.items() if v}}
     if turns:
         out["turns"] = turns
+        if random & set(turns):
+            out["random"] = sorted(random & set(turns))
     if attract:
         out["attract"] = attract
     data[SOUND_MODES_KEY] = out

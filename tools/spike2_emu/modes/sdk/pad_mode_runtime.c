@@ -17,6 +17,7 @@ extern long  read(int, void *, __SIZE_TYPE__);
 extern long  write(int, const void *, __SIZE_TYPE__);
 extern int   close(int);
 extern int   unlink(const char *);
+extern int   rename(const char *, const char *);
 extern int   vsnprintf(char *, __SIZE_TYPE__, const char *, va_list);
 extern int   clock_gettime(int, void *);
 extern int   mprotect(void *, __SIZE_TYPE__, int);
@@ -2214,7 +2215,14 @@ static void ck_idle_tick(void);           /* PAD-530: the game's main-play video
  * the whole multiplier out and came back only after it. A clip the game LOOPS is a background, as its main-play video
  * is: surface_play is hooked too (its second argument is the game's loop flag, LE 0x57b0b4 -> 0x578770), and a loop of
  * the game's plays one pass (its own length, at most CK_LOOP_MS) before the mode's clip takes the surface back. A clip
- * the game plays once (a lock, a start, an award) is waited out as before. */
+ * the game plays once (a lock, a start, an award) is waited out as before.
+ * PAD-639 (luvthatapex on Bond LE): a loop of the game's can also be the backdrop of one of its DISPLAY EFFECTS drawn over
+ * the TV: the spinner's satellite (effect 75, priority 132) loops Diamond_EarthSpin under a see-through picture and its
+ * words for as long as the spinner keeps spinning (15 s in the emulator). The one pass put the mode's clip back after
+ * 3 s, under the satellite. So while a FOREGROUND effect of the game has the screen (the manager's effect now, `data
+ * display_effects`, is one whose table record lacks the background flag 1 - Bond Women's 007 SCORING, effect 226, has
+ * it, as the in-game display 29 does) the game's loop stays; once that effect is over, the mode's clip comes back at
+ * once (the game asks for its main-play video then too). A port without `data display_effects` keeps the one pass. */
 #define CK_END_MS 500                     /* this close to its end, a clip counts as over */
 #define CK_LOOP_MS 3000                   /* a loop of the game's is shown this long at most, then ours comes back */
 static struct {
@@ -2231,6 +2239,7 @@ static struct {
     long long loop_len;                   /* its length, once the surface tells it (0: not yet) */
     char game[64];                        /* the game's clip on the surface now (for the log) */
     unsigned asks;
+    unsigned fx;                          /* PAD-639: the game's foreground display effect over its loop (0: none) */
 } ck;
 static int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;
 /* PAD-530 round 4 (Jim-Beam on v1.184.3): when the mode's clip ran to its end, the bank's surface was left with its last
@@ -2243,6 +2252,7 @@ static int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;
 static char ck_idle[96];                  /* the game's main-play video, the last one it asked for */
 static int ck_last_ours;                  /* the last clip put on the bank's surface was ours */
 static unsigned long ck_idle_due;
+static unsigned disp_foreground_effect(void);   /* PAD-639: the display priority section, below */
 static int sv_hook(void);
 static int have_sites(const char *const *names);
 
@@ -2262,6 +2272,7 @@ static void ck_drop(const char *why)
     if (why) say("clip: \"%s\" is not put back - %s", ck.name, why);
     ck.name[0] = 0;
     ck.on = ck.lost = ck.back = ck.loop = 0;
+    ck.fx = 0;
 }
 
 /* set and play `name` on the bank's surface: 0 when the bank has no such clip */
@@ -2327,6 +2338,7 @@ static void ck_seen(unsigned *r)
         for (i = 0; name[i] && i + 1 < sizeof ck.game; i++) ck.game[i] = name[i];
         ck.game[i] = 0;
         ck.loop = 0;
+        ck.fx = 0;
     }
     if (ck.lost && is_idle) ck.back = 1;  /* the game's clip is over: its main-play video is no clip to wait out */
 }
@@ -2365,6 +2377,17 @@ static void ck_tick(void)
     surf = clip2_surface();
     if (!surf) return;
     if (ck.loop && !ck.back) {            /* a loop of the game's: one pass of it, at most CK_LOOP_MS */
+        unsigned fx = disp_foreground_effect();
+        if (fx) {                         /* PAD-639: the backdrop of a display of the game's over the TV: it stays */
+            if (!ck.fx) say("clip: the game's display effect %u is over its loop \"%.60s\" - \"%s\" waits for its end",
+                            fx, ck.game, ck.name);
+            ck.fx = fx;
+            return;
+        }
+        if (ck.fx) {
+            say("clip: the game's display effect %u is over - \"%s\" comes back", ck.fx, ck.name);
+            ck.back = 1;
+        }
         if (ck.loop_len <= 0) ck.loop_len = ck_ms("surface_duration", surf);
         if (pm_ms() - ck.loop_ms >= (unsigned long)(ck.loop_len > 0 && ck.loop_len < CK_LOOP_MS ? ck.loop_len : CK_LOOP_MS))
             ck.back = 1;
@@ -2380,6 +2403,7 @@ static void ck_tick(void)
     }
     ck.on = 1;
     ck.lost = ck.back = ck.loop = 0;
+    ck.fx = 0;
     ck.zero_ms = pm_ms() - (unsigned long)want;
     clip.on = 1;
     clip.seen = 0;
@@ -2442,6 +2466,7 @@ int pm_clip(const char *name)
             ck.begun = begun;
             ck.on = 1;
             ck.lost = ck.back = ck.loop = 0;
+            ck.fx = 0;
             ck.backs = ck.asks = 0;
             ck.zero_ms = pm_ms();
         }
@@ -3176,6 +3201,21 @@ static unsigned char *disp_manager(void)
 static unsigned disp_host(void) { return (unsigned)pm_port_value("display_host", 0); }
 static unsigned disp_now(unsigned char *m) { return *(unsigned short *)(m + pm_port_value("display_now_at", 0xc)); }
 static unsigned disp_level_now(unsigned char *m) { return *(m + pm_port_value("display_priority_at", 0xe)); }
+
+/* PAD-639: the effect of the game's that has the screen now when it is a FOREGROUND one - its table record (data
+ * award_screen_arg: {records, count}, a record {process, u16 flags, u8 priority}) lacks the background flag 1 - else 0.
+ * Needs only the manager (data display_effects), so a port without the other display lines has it too. */
+static unsigned disp_foreground_effect(void)
+{
+    unsigned char *m = disp_manager();
+    const unsigned *t;
+    unsigned now;
+    if (!m) return 0;
+    now = disp_now(m);
+    t = (const unsigned *)(unsigned long)data("award_screen_arg");
+    if (!now || !t[0] || now >= t[1]) return 0;
+    return *(const unsigned short *)(unsigned long)(t[0] + 8u * now + 4) & 1 ? 0 : now;
+}
 
 static void disp_release(const char *why)
 {
@@ -5693,11 +5733,17 @@ static void building_tick(void)
  * event_cancel`: every process with that id). Some shows run until stopped (process 315's body, Premium/LE 1.16's
  * Insert chase), so the runtime stops one after the port's `value show_secs_<n>` (a moment more than that), and
  * never later than SHOW_MAX_MS. And none starts while the ball ends: the game stops every process of its own then
- * (the second machine test: two modes that ended on a drain started their ending's show, and it was gone at once). */
+ * (the second machine test: two modes that ended on a drain started their ending's show, and it was gone at once).
+ * PAD-642: some of the game's shows have no body of their own to run: the game starts them with a call that takes an
+ * argument (James Bond 007 LE/Pro 1.06's lit-shot flash, 0x19e534: its GI and insert shows by the game's own show
+ * starter, in a colour, three times over - every mode's lit shot plays it). A port names such a show's call as its
+ * `site show_<n>` with `value show_call_<n>` (the argument it is called with), and `text show_numbers_<n>` (the
+ * game's own show numbers it starts) with `site show_stop_number` (the game's "stop every show with this number")
+ * stop it. Those shows are the game's own processes, flagged as shows, so the game's exit frees their lights. */
 #define SHOWS_MAX 64
 #define SHOW_MAX_MS 20000ul
 static int shows_n;
-static struct { int n; unsigned long started, limit; } show_now;
+static struct { int n, call; unsigned long started, limit; } show_now;
 static unsigned long ball_end_at;                    /* when the last ball ended (on_ball_end), 0 = not yet */
 
 int pm_game_shows(void)
@@ -5707,7 +5753,9 @@ int pm_game_shows(void)
 
 int pm_game_show_playing(void)
 {
-    return (can & PM_CAN_GAME_SHOWS) && proc_alive((unsigned)pm_port_value("show_proc", 0));
+    if (!(can & PM_CAN_GAME_SHOWS)) return 0;
+    if (show_now.n && show_now.call) return 1;          /* PAD-642: a called show plays until its length is up */
+    return proc_alive((unsigned)pm_port_value("show_proc", 0));
 }
 
 /* by the port's name (`text show_name_<n>`, any case): a mode written without knowing its game asks for "Strobe
@@ -5728,9 +5776,31 @@ int pm_game_show_named(const char *name)
     return 0;
 }
 
+/* PAD-642: a called show is stopped by the game's show numbers it started (`text show_numbers_<n>`) */
+static void show_call_stop(int n)
+{
+    char key[24];
+    const char *t;
+    unsigned stop = fn("show_stop_number"), v;
+    pm_snprintf(key, sizeof key, "show_numbers_%d", n);
+    t = pm_port_text(key);
+    while (stop && t && *t) {
+        while (*t == ' ' || *t == '	') t++;
+        for (v = 0; *t >= '0' && *t <= '9'; t++) v = v * 10 + (unsigned)(*t - '0');
+        if (v) ((unsigned (*)(unsigned))(unsigned long)stop)(v);
+        if (*t && *t != ' ' && *t != '	') break;
+    }
+}
+
 static void show_kill(const char *why)
 {
     unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    if (show_now.n && show_now.call) {
+        show_call_stop(show_now.n);
+        say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
+        show_now.n = 0;
+        return;
+    }
     if (!proc_alive(id)) return;
     ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("event_cancel"))(id, 0xffffu);
     say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
@@ -5746,7 +5816,7 @@ void pm_game_show_stop(void)
 static void shows_tick(void)
 {
     if (!show_now.n) return;
-    if (!proc_alive((unsigned)pm_port_value("show_proc", 0))) {
+    if (!show_now.call && !proc_alive((unsigned)pm_port_value("show_proc", 0))) {
         show_now.n = 0;
         return;
     }
@@ -5787,6 +5857,7 @@ int pm_game_show(int n)
     char key[24];
     const char *name;
     unsigned id = (unsigned)pm_port_value("show_proc", 0), rec;
+    long arg;
     if (!(can & PM_CAN_GAME_SHOWS)) return 0;
     pm_snprintf(key, sizeof key, "show_%d", n);
     if (n < 1 || n >= SHOWS_MAX || !site(key)) {
@@ -5806,7 +5877,23 @@ int pm_game_show(int n)
         say("show %d: not played - the ball is ending, and the game stops every show of its own with it", n);
         return 0;
     }
-    if (proc_alive(id)) show_kill("another show begins");
+    if (show_now.n || proc_alive(id)) show_kill("another show begins");
+    pm_snprintf(key, sizeof key, "show_call_%d", n);
+    arg = pm_port_value(key, -1);
+    pm_snprintf(key, sizeof key, "show_%d", n);
+    if (arg >= 0) {                                     /* PAD-642: the game's own call starts this one */
+        unsigned at = fn(key);
+        ((void (*)(unsigned))(unsigned long)at)((unsigned)arg);
+        show_now.n = n;
+        show_now.call = 1;
+        show_now.started = pm_ms();
+        pm_snprintf(key, sizeof key, "show_secs_%d", n);       /* stopped at its length to the tick, as the game's */
+        show_now.limit = pm_port_value(key, 0) > 0 ? (unsigned long)pm_port_value(key, 0) * 1000ul : SHOW_MAX_MS;
+        if (show_now.limit > SHOW_MAX_MS) show_now.limit = SHOW_MAX_MS;   /* own caller stops it (0x139448: 2 s) */
+        say("show %d (%s): the game's own light show, started by its own call (0x%08x, %ld)", n,
+            name ? name : "unnamed", at, arg);
+        return 1;
+    }
     rec = ((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
         id, (void (*)(void))(unsigned long)fn(key), 0);
     if (!rec) {
@@ -5819,6 +5906,7 @@ int pm_game_show(int n)
         return 0;
     }
     show_now.n = n;
+    show_now.call = 0;
     show_now.started = pm_ms();
     pm_snprintf(key, sizeof key, "show_secs_%d", n);
     show_now.limit = pm_port_value(key, 0) > 0 ? (unsigned long)pm_port_value(key, 0) * 1000ul + 500ul : SHOW_MAX_MS;
@@ -8654,12 +8742,16 @@ static int chg_state(void)
     return chg.state;
 }
 
-static void chg_picked(const struct pm_mode *by)
+static void chg_scores_picked(unsigned slot, const char *name, const struct pm_mode *by);   /* PAD-640, below */
+
+/* slot: the game's challenge the game thinks it plays (an own challenge plays as challenge 0's); name: the menu's */
+static void chg_picked(const struct pm_mode *by, unsigned slot, const char *name)
 {
     chg.by = by;
     chg.game = chg_game_now();
     chg.state = 1;
     chg.ms = pm_ms();
+    chg_scores_picked(slot, name, by);
 }
 
 /* What the end of a mode does to a challenge game, from the state alone (tests lift it verbatim): 1 = end the ball
@@ -8842,7 +8934,7 @@ static int challenge_veto(unsigned *r, unsigned n)
                 took ? "its mode starts - the game's own challenge does not" : "the mode let it go - the game's own starts");
             if (took) {
                 challenge_ours = 1; challenge_ours_ms = pm_ms();
-                chg_picked(own_challenge[k].by);
+                chg_picked(own_challenge[k].by, 0, own_challenge[k].name);
                 return 1;
             }
         }
@@ -8858,8 +8950,196 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
-    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n]); }
+    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n], n, challenge_title[n]); }
     return took != 0;
+}
+
+/* ---- PAD-640: a mode's challenge game keeps the MODE'S high score ---------------------------------------------
+ * luvthatapex (Bond LE): a challenge of a mode's own plays, to the game, as Chaos at Crab Key's challenge game (the
+ * menu pick becomes challenge 0's kind), so a score that beat it went in as the CHAOS CHALLENGE champion; a mode in
+ * a challenge's place filed its scores under that challenge the same way. The game keeps its champions in one
+ * framework (Bond LE/Pro 1.06 and Stranger Things alike): categories 1.. (HIGHEST SCORES, COMBO CHAMPION, ..., one
+ * "<x> CHALLENGE CHAMPION" per challenge, in the menu's order), each a list of score entries {u32 record, char
+ * *initials, char *name, fn, fn, char *title, char **titles, ...}; a record is 96 bytes: the initials at +32, the
+ * score u64 at +72, ~(the byte sum of the first 88) u16 at +88. At the game's end one function (LE 0x4e87dc)
+ * compares every category's score with its records and runs the initials entry, under the entry's title, for each
+ * one beaten (in a challenge game the game lets only the pick's challenge category through). The port names
+ * (portchallenge.py):
+ *   site  challenge_scores         that function (wrapped: hook_wrap)
+ *   site  challenge_score_entry    the game's (category, n) -> entry lookup (called)
+ *   value challenge_scores_cat_<n> challenge n's category
+ * While the end-of-game function runs for a challenge game whose pick a mode took, the challenge's entry points at a
+ * record of the MODE'S own and its title is the mode's name; the game's own record is not touched (not read, not
+ * written, never in the game's store). The modes' records are kept in CHG_SCORES, one line each: the record's 96
+ * bytes in hex, a space, the name (the menu's capitals). A mode's first record is the entry's default initials and
+ * a score of 0, so its first scoring game is its champion. */
+#define CHG_REC_SIZE 96
+#define CHG_SCORES_MAX 4096
+static const char CHG_SCORES[] = "/dump/pad_challenge_scores";
+static struct { int slot; unsigned game; char name[40]; } chg_hs = { -1, 0, "" };
+static unsigned char chg_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
+static const char *chg_rec_titles[8];
+static unsigned (*chg_scores_game)(unsigned, unsigned, unsigned, unsigned);
+
+/* the record's check, as the game makes it: ~(the byte sum of its first 88 bytes) (tests lift it verbatim) */
+static unsigned short chg_rec_check(const unsigned char *rec)
+{
+    unsigned k, sum = 0;
+    for (k = 0; k < 88; k++) sum += rec[k];
+    return (unsigned short)~sum;
+}
+
+/* a record of no one's: the initials given, a score of 0 (tests lift it verbatim) */
+static void chg_rec_fresh(unsigned char *rec, const char *initials)
+{
+    unsigned k;
+    unsigned short c;
+    for (k = 0; k < CHG_REC_SIZE; k++) rec[k] = 0;
+    for (k = 0; initials && initials[k] && k < 20; k++) rec[32 + k] = (unsigned char)initials[k];
+    c = chg_rec_check(rec);
+    rec[88] = (unsigned char)c;
+    rec[89] = (unsigned char)(c >> 8);
+}
+
+/* 1 when line [i, e) of b is name's: the record's hex, a space, the name (tests lift it verbatim) */
+static int chg_rec_line_is(const char *b, long i, long e, const char *name)
+{
+    long j;
+    const char *t = b + i + 2 * CHG_REC_SIZE + 1;
+    if (e - i <= 2 * CHG_REC_SIZE + 1 || b[i + 2 * CHG_REC_SIZE] != ' ') return 0;
+    for (j = 0; name[j] && t + j < b + e && t[j] == name[j]; j++) ;
+    return !name[j] && t + j == b + e;
+}
+
+/* name's record from the file's text (n bytes): 1 when its line was there whole, with a good check (tests lift it) */
+static int chg_rec_find(const char *b, long n, const char *name, unsigned char *rec)
+{
+    long i = 0, k;
+    while (i < n) {
+        long e = i;
+        while (e < n && b[e] != '\n') e++;
+        if (chg_rec_line_is(b, i, e, name)) {
+            unsigned char got[CHG_REC_SIZE];
+            for (k = 0; k < CHG_REC_SIZE; k++) {
+                int hi = hexval(b[i + 2 * k]), lo = hexval(b[i + 2 * k + 1]);
+                if (hi < 0 || lo < 0) break;
+                got[k] = (unsigned char)(hi * 16 + lo);
+            }
+            if (k == CHG_REC_SIZE && (unsigned)(got[88] | got[89] << 8) == chg_rec_check(got)) {
+                for (k = 0; k < CHG_REC_SIZE; k++) rec[k] = got[k];
+                return 1;
+            }
+        }
+        i = e + 1;
+    }
+    return 0;
+}
+
+/* the file's text with name's line replaced by rec (or rec's added): the new length in out, -1 when it does not
+ * fit (tests lift it verbatim) */
+static long chg_rec_put(const char *b, long n, const char *name, const unsigned char *rec, char *out, long cap)
+{
+    static const char hex[] = "0123456789abcdef";
+    long i = 0, o = 0, k, j;
+    while (i < n) {
+        long e = i;
+        while (e < n && b[e] != '\n') e++;
+        if (e > i && !chg_rec_line_is(b, i, e, name)) {
+            if (o + (e - i) + 1 > cap) return -1;
+            for (k = i; k < e; k++) out[o++] = b[k];
+            out[o++] = '\n';
+        }
+        i = e + 1;
+    }
+    for (j = 0; name[j]; j++) ;
+    if (o + 2 * CHG_REC_SIZE + 1 + j + 1 > cap) return -1;
+    for (k = 0; k < CHG_REC_SIZE; k++) { out[o++] = hex[rec[k] >> 4]; out[o++] = hex[rec[k] & 15]; }
+    out[o++] = ' ';
+    for (k = 0; k < j; k++) out[o++] = name[k];
+    out[o++] = '\n';
+    return o;
+}
+
+static void chg_scores_picked(unsigned slot, const char *name, const struct pm_mode *by)
+{
+    char key[32];
+    chg_hs.slot = -1;
+    if (!chg_scores_game) return;
+    pm_snprintf(key, sizeof key, "challenge_scores_cat_%u", slot);
+    if (pm_port_value(key, 0) <= 0) return;
+    challenge_words(chg_hs.name, name && *name ? name : by && by->name ? by->name : "");
+    if (!chg_hs.name[0]) return;
+    chg_hs.slot = (int)slot;
+    chg_hs.game = chg_game_now();
+}
+
+/* the end-of-game high scores, wrapped: in a mode's challenge game its challenge's entry is the mode's for the call */
+static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    static char b[CHG_SCORES_MAX], out[CHG_SCORES_MAX + 2 * CHG_REC_SIZE + 48];
+    char key[32];
+    unsigned *ent = 0, was[3], ret, k;
+    unsigned char before[CHG_REC_SIZE];
+    long n, m;
+    int slot = chg_hs.slot, changed = 0;
+    chg_hs.slot = -1;                                            /* one game's, once */
+    if (slot >= 0 && chg_hs.game == chg_game_now()) {
+        pm_snprintf(key, sizeof key, "challenge_scores_cat_%d", slot);
+        ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))(
+            (unsigned)pm_port_value(key, 0), 0);
+        if (ent && !maps_has((unsigned long)ent, 28, MAP_R)) ent = 0;
+        if (!ent) say("challenge scores: no entry for challenge %d - the game files this one under its own", slot);
+    }
+    if (!ent) return chg_scores_game(r0, r1, r2, r3);
+    n = pm_read_file(CHG_SCORES, b, sizeof b);
+    if (n < 0) n = 0;
+    if (!chg_rec_find(b, n, chg_hs.name, chg_rec))
+        chg_rec_fresh(chg_rec, maps_has(ent[1], 4, MAP_R) ? (const char *)(unsigned long)ent[1] : "");
+    for (k = 0; k < CHG_REC_SIZE; k++) before[k] = chg_rec[k];
+    for (k = 0; k + 1 < sizeof chg_rec_titles / sizeof chg_rec_titles[0]; k++) chg_rec_titles[k] = chg_hs.name;
+    chg_rec_titles[k] = 0;
+    was[0] = ent[0]; was[1] = ent[5]; was[2] = ent[6];
+    ent[0] = (unsigned)(unsigned long)chg_rec;
+    ent[5] = (unsigned)(unsigned long)chg_hs.name;
+    ent[6] = (unsigned)(unsigned long)chg_rec_titles;
+    say("challenge scores: %s's own high score (%llu, %s) in challenge %d's place for the game's end",
+        chg_hs.name, (unsigned long long)*(uint64_t *)(chg_rec + 72), (const char *)chg_rec + 32, slot);
+    ret = chg_scores_game(r0, r1, r2, r3);
+    ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];
+    for (k = 0; k < CHG_REC_SIZE; k++) changed |= chg_rec[k] != before[k];
+    if (!changed) {
+        say("challenge scores: %s's high score stands", chg_hs.name);
+        return ret;
+    }
+    say("challenge scores: %s's new high score %llu, %s", chg_hs.name,
+        (unsigned long long)*(uint64_t *)(chg_rec + 72), (const char *)chg_rec + 32);
+    m = chg_rec_put(b, n, chg_hs.name, chg_rec, out, (long)sizeof out);
+    if (m > 0) {
+        static const char tmp[] = "/dump/pad_challenge_scores.new";
+        int fd, ok;
+        unlink(tmp);
+        fd = open(tmp, O_WRONLY | O_CREAT, 0644);
+        ok = fd >= 0 && write(fd, out, (unsigned long)m) == m;
+        if (fd >= 0) ok = close(fd) == 0 && ok;
+        if (!(ok && rename(tmp, CHG_SCORES) == 0))
+            say("challenge scores: %s cannot be written - %s's new high score is not kept",
+                CHG_SCORES, chg_hs.name);
+    } else {
+        say("challenge scores: %s is full - %s's new high score is not kept", CHG_SCORES, chg_hs.name);
+    }
+    return ret;
+}
+
+static void chg_scores_arm(void)
+{
+    if (!site("challenge_scores") || !site("challenge_score_entry")) return;
+    if (!fn("challenge_scores") || !fn("challenge_score_entry")
+        || !(chg_scores_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn("challenge_scores"),
+                                                                                              (void *)chg_scores_wrap))) {
+        say("challenge scores: the game's end-of-game high scores could not be wrapped - a mode's challenge game files its score under the game's challenge");
+        return;
+    }
+    say("challenge scores: a mode's challenge game keeps its own high score (%s)", CHG_SCORES);
 }
 
 /* ---- round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract; Bond LE/Pro 1.06)
@@ -9052,7 +9332,10 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
             took ? "its mode starts as the ball starts" : "the mode let it go");
-        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(own_challenge[k].by); }
+        if (took) {
+            challenge_ours = 1; challenge_ours_ms = pm_ms();
+            chg_picked(own_challenge[k].by, how >= 0 ? (unsigned)how : ~0u, own_challenge[k].name);   /* ~0: no category */
+        }
         return;
     }
     for (n = 0; n < (unsigned)challenges_n; n++) {
@@ -9067,7 +9350,7 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
             took ? "the mode takes it - its pick cleared, the game's own does not start" : "the mode let it go");
-        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n]); }
+        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n], n, challenge_title[n]); }
         return;
     }
 }
@@ -9143,6 +9426,8 @@ static void challenges_arm(void)
         can |= PM_CAN_CHALLENGE;
         say("challenges: %d of the game's a mode may take the place of (flag %ld for a challenge game)", challenges_n,
             pm_port_value("challenge_on_flag", 0));
+
+        chg_scores_arm();                                /* PAD-640 */
     }
     if (site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
         && pm_port_value("challenge_menu_list_at", 0) > 0
@@ -9978,6 +10263,7 @@ static void clipv_arm(void)
  *                                                            sound bank's id
  *     tsid <TAB> <k> <TAB> <slot key> <TAB> <id> <TAB> <bank id>   PAD-608: file k in turn of the slot
  *                                                            keyed <slot key> plays as a bank's id
+ *     random <TAB> <slot key>              PAD-638: the slot's files play AT RANDOM, not in turn
  *
  * The setting is read at every resolve (one word), so a change in the menu is heard from the next
  * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg.
@@ -10006,7 +10292,13 @@ static void clipv_arm(void)
  * request is pointed at a copy of its own list naming the bank ids the setting (or the turn) wants,
  * and at its own list again when it wants none - as pm_sound_sid points a mode's carrier. A slot with
  * a file in turn in a bank takes its turns from the worker too: a play of a request naming the slot
- * moves the turn on (SNDT_GAP apart), and the record lookup only swaps in the turn's image.bin file. */
+ * moves the turn on (SNDT_GAP apart), and the record lookup only swaps in the turn's image.bin file.
+ *
+ * AT RANDOM (PAD-638): an owner asked for "random audio variants ... like a jukebox" (each of
+ * Godzilla's multiball songs one of several). A slot with a `random` line takes the same files, but
+ * each play picks any of them but the one it played last (the clip variants' clipv_pick): its own
+ * one is no longer first. As with the random clips, one never plays twice running (so two files take
+ * turns, in a random first order). */
 #define SNDM_FILE_MAX   (512 * 1024)
 #define SNDM_SOUNDS     3072
 #define SNDM_DESC       96                  /* a descriptor's bytes as the resolver's caller reads them */
@@ -10032,6 +10324,7 @@ struct sndt {                               /* a sound that plays files in turn 
     unsigned char host[SNDT_MAX][8];        /* file k's record key at host[k - 1], k = 2..n */
     unsigned char n, pick;                  /* n files, its own one included; pick 0 = its own */
     unsigned char by_worker;                /* PAD-608: a file is in a bank: the worker moves the turn on */
+    unsigned char random;                   /* PAD-638: any file but the last, not the next one */
     unsigned plays;
     unsigned long last;                     /* pm_ms() of its last lookup (of its last play: by_worker) */
 };
@@ -10098,6 +10391,16 @@ static void sndt_line(const char *ks, const char *slot, const char *host)
     t = &sndt[j];
     for (i = 0; i < 8; i++) t->host[k - 1][i] = h[i];
     if (k > t->n) t->n = (unsigned char)k;
+}
+
+/* PAD-638: a `random` line: the slot whose record key is `slot` plays its files at random */
+static void sndt_random_line(const char *slot)
+{
+    unsigned char key[8];
+    int j;
+    if (!key_hex(slot, key)) { sndm_bad++; return; }
+    if ((j = sndt_slot(key)) < 0) { sndm_dropped++; return; }
+    sndt[j].random = 1;
 }
 
 /* PAD-608: a `bsid` line (mode m's bank id for a game id: `slot` 0) or a `tsid` line (file k in turn
@@ -10297,6 +10600,10 @@ static void sndm_line(char *s)
         sndt_line(f[1], f[2], f[3]);
         return;
     }
+    if (n >= 2 && str_eq(f[0], "random")) {
+        sndt_random_line(f[1]);
+        return;
+    }
     if (n >= 4 && str_eq(f[0], "bsid")) {
         bsid_line(f[1], 0, f[2], f[3]);
         return;
@@ -10381,6 +10688,17 @@ static unsigned sndm_resolve(unsigned id, unsigned *out)
     return (unsigned)(unsigned long)e->desc;
 }
 
+/* PAD-565 / PAD-638: the file a new play of sndt `t` takes - the next in turn (its own one first), or
+ * at random any but the last one played (sndt_rand stirs the clip variants' generator) */
+static unsigned char sndt_next(struct sndt *t)
+{
+    unsigned k;
+    if (!t->random) return t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+    if (!t->plays) return (unsigned char)(clipv_rand() % t->n);
+    k = clipv_rand() % (t->n - 1u);
+    return (unsigned char)(k >= t->pick ? k + 1 : k);
+}
+
 /* PAD-565: the record the game looks up for a sound with files in turn - the next one, or the same
  * when it looks it up again within SNDT_GAP ms (a slot whose files skip a number plays its own there) */
 static void sndt_lookup(unsigned *r)
@@ -10399,12 +10717,13 @@ static void sndt_lookup(unsigned *r)
     }
     now = pm_ms();
     if (!t->plays || now - t->last > SNDT_GAP) {
-        t->pick = t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+        t->pick = sndt_next(t);
         t->plays++;
         if (sndt_says < 40 || !(t->plays % 50)) {
             sndt_says++;
-            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x looked up (%u time(s)) - file %u of %u plays",
-                k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7], t->plays, t->pick + 1, t->n);
+            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x looked up (%u time(s)) - file %u of %u plays%s",
+                k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7], t->plays, t->pick + 1, t->n,
+                t->random ? " (at random)" : "");
         }
     }
     t->last = now;
@@ -10418,13 +10737,13 @@ static void sndt_play(struct sndt *t)
 {
     unsigned long now = pm_ms();
     if (!t->plays || now - t->last > SNDT_GAP) {
-        t->pick = t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+        t->pick = sndt_next(t);
         t->plays++;
         if (sndt_says < 40 || !(t->plays % 50)) {
             sndt_says++;
-            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x played (%u time(s)) - file %u of %u plays",
+            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x played (%u time(s)) - file %u of %u plays%s",
                 t->key[0], t->key[1], t->key[2], t->key[3], t->key[4], t->key[5], t->key[6], t->key[7],
-                t->plays, t->pick + 1, t->n);
+                t->plays, t->pick + 1, t->n, t->random ? " (at random)" : "");
         }
     }
     t->last = now;
@@ -10564,8 +10883,12 @@ static void sndt_arm(void)
     }
     lookup_hooked = 1;
     sndt_live = 1;
-    say("sounds in turn: %u sound(s) play their files in turn; sound_lookup 0x%08x is hooked", n_sndt,
-        fn("sound_lookup"));
+    {
+        unsigned j, r = 0;
+        for (j = 0; j < n_sndt; j++) r += sndt[j].random;
+        say("sounds in turn: %u sound(s) play their files in turn (%u of them at random); sound_lookup "
+            "0x%08x is hooked", n_sndt, r, fn("sound_lookup"));
+    }
 }
 
 /* from the constructor, after the port gate: read sounds.cfg and wrap the game's resolver */

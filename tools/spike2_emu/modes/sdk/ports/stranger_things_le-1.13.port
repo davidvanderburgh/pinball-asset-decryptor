@@ -468,3 +468,14 @@ value challenge_menu_slot      0
 value challenge_menu_caption   1921
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x00436db8 0xe30e260e 0xe3402084
+# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each challenge's champion category
+site  challenge_scores       0x002daa6c 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x002d9fa0 0xe1a03000 0xe30c059c
+# DEMOGORGON CHALLENGE CHAMPION
+value challenge_scores_cat_0  9
+# SEND IT BACK CHALLENGE CHAMPION
+value challenge_scores_cat_1  10
+# LIGHT THE FIRE CHALLENGE CHAMPION
+value challenge_scores_cat_2  11
+# CHALLENGE CHAMPION
+value challenge_scores_cat_3  12

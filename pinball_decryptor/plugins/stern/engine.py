@@ -10244,6 +10244,9 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     if modes.turns:
         log("Found %d sound(s) that play %d more file(s) in turn." % (
             len(modes.turns), sum(map(len, modes.turns.values()))), "info")
+        if modes.random:
+            log("%d of them pick one of their files at random each time." % len(modes.random),
+                "info")
     if modes.attract:
         log("Found %d sound(s) for the flipper buttons in attract mode." % len(modes.attract), "info")
     return modes, prof
@@ -11090,11 +11093,16 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
             "own." % ("Sounds in turn" if modes.turns or not modes.attract
                       else "Attract flipper sounds"), "warning")
         return ""
+    # PAD-638: the slots whose files in turn play at random, by the key their turn lines name
+    byidx = {p["idx"]: p for p in params}
+    randoms = sorted({bytes(byidx[int(u["slot"])]["findkey"]) for u in used + banked
+                      if _SMo.is_turn(u["mode"]) and u.get("lines") and u["rel"] in modes.random
+                      and (byidx.get(int(u["slot"])) or {}).get("findkey")})
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
         f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
-                              turns=turns, bsids=bsids, tsids=tsids, attract=attract,
+                              turns=turns, bsids=bsids, tsids=tsids, randoms=randoms, attract=attract,
                               record=_SMo.card_record(modes, used + banked)))
     return path
 
@@ -11334,8 +11342,9 @@ def _install_modes(output_path, modes, landed, planned, log):
                 "operator menu's MUSIC MODE says their mode: %s."
                 % (len(_mm), ", ".join(_mm)), "success")
         if _turns:
-            log("Sounds in turn: %d file(s) on the card, each played when its sound's turn comes "
-                "round: %s." % (len(_turns), ", ".join(_turns)), "success")
+            log("Sounds in turn: %d file(s) on the card, each played in its sound's turn (or "
+                "picked at random, where its sound plays them at random): %s."
+                % (len(_turns), ", ".join(_turns)), "success")
         if _attract:
             log("Attract flipper sounds: %d file(s) on the card, played in turn when a flipper "
                 "button is pressed in attract mode." % len(_attract), "success")

@@ -93,6 +93,7 @@ struct mode_cfg {
     uint64_t building_bits;           /* ... moved on each hit of these shots; 0 = once, as it starts */
     char show_start[40], show_end[40];   /* PAD-418 `show_start <name>` / `show_end <name>`: the game's own light
                                        * show (the port's `text show_name_<n>`) at its start / its end; "" = none */
+    char show_hit[40];                /* PAD-642 `show_hit <name>`: ... and on each hit of a shot that scores */
     char wizard[40];                  /* PAD-436 `game_wizard light|start <name>`: when it starts, the game's own
                                        * mini-wizard (the port's `text wizard_name_<n>`) instead; "" = none */
     int wizard_start;                 /* ... started at once (1), or lit for the game's start shot (0) */
@@ -1995,6 +1996,7 @@ static void cfg_line(struct slot *M, const char *line)
     TEXT("clip_end", clip_end)
     TEXT("show_start", show_start)          /* PAD-418 */
     TEXT("show_end", show_end)              /* PAD-418 */
+    TEXT("show_hit", show_hit)              /* PAD-642 */
     if ((a = key_is(line, "game_wizard")) != 0) {   /* PAD-436 */
         const char *b;
         if ((b = key_is(a, "start")) != 0) cfg.wizard_start = 1;
@@ -2126,6 +2128,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.show_start[0] || cfg.show_end[0])   /* PAD-418 */
         pm_log("\"%s\": the game's light show \"%s\" at its start, \"%s\" at its end%s", cfg.name, cfg.show_start,
                cfg.show_end, pm_can(PM_CAN_GAME_SHOWS) ? "" : " - this game's port names no light shows: none plays");
+    if (cfg.show_hit[0])                     /* PAD-642 */
+        pm_log("\"%s\": the game's light show \"%s\" on each shot that scores%s", cfg.name, cfg.show_hit,
+               pm_can(PM_CAN_GAME_SHOWS) ? "" : " - this game's port names no light shows: none plays");
     params_loaded(M);
     more_loaded(M);                          /* PAD-227 */
 }
@@ -2257,11 +2262,14 @@ static void multiball_served(struct slot *M)
 /* PAD-418: the game's own light show by the port's name (MODE_SDK.md "The game's own light shows"): at the start,
  * and in the first 2 s of the end (pm_end keeps that open). Never as the ball ends - the game stops every show of
  * its own then; the runtime refuses those too, and logs every refusal. */
-static void game_show(struct slot *M, const char *name, const char *when)
+static int game_show(struct slot *M, const char *name, const char *when)
 {
-    if (!name[0]) return;
+    int on;
+    if (!name[0]) return 0;
+    on = pm_game_show_named(name);
     pm_log("%s: the game's light show \"%s\" at %s - %s", cfg.name, name, when,
-           pm_game_show_named(name) ? "playing" : "not played (the runtime's line says why)");
+           on ? "playing" : "not played (the runtime's line says why)");
+    return on;
 }
 
 /* PAD-436: a mode that is the game's own mini-wizard. When it would start, the player is handed the game's mode
@@ -2774,8 +2782,10 @@ static void on_shot(uint64_t mask)
         own_sounds_shot(M, run.hits);
         /* PAD-415: the hit answers at once - while one of ours runs the game's rules see no shots, so none of the
          * game's own sounds or insert flashes play for it: the shot's inserts strobe white, and the game's own hit
-         * sounds climb a step a hit */
-        pm_lamp_flash(mask & scoring_bits(M), PM_RGB(255, 255, 255), 480);
+         * sounds climb a step a hit. PAD-642: or the game's own light show the mode picked for a hit (James Bond's
+         * lit-shot flash, as the game's own modes answer a lit shot), over the whole playfield instead */
+        if (!game_show(M, cfg.show_hit, "a shot"))
+            pm_lamp_flash(mask & scoring_bits(M), PM_RGB(255, 255, 255), 480);
         if (pm_hit_sounds()) pm_hit_sound((int)((run.hits - 1) % (unsigned)pm_hit_sounds()) + 1);
     }
     if (run.active && (M = run.slot) != 0 && p == run.player && (mask & penalty_bits(M)) && end_pending != M) {

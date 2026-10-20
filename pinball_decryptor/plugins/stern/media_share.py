@@ -263,6 +263,9 @@ def save_music_modes(project, path):
                          "there is nothing to save.")
     head = {"kind": MUSIC_KIND, "version": 1, "from": _about(project), "names": list(modes.names),
             "slots": slots, "levels": levels, "sigs": sigs}
+    rnd = sorted(rel for rel in modes.random if rel in slots)
+    if rnd:
+        head["random"] = rnd                            # PAD-638: files in turn at random
     if attract:
         head["attract"] = attract
     every = {f for _r, _m, f in modes.files()} | set(modes.attract)
@@ -373,6 +376,8 @@ def load_music_modes(project, path):
         same = _same_title(project, head)
         names = set(z.namelist())
         slots, levels, found, left, cache = {}, {}, [], [], {}
+        rnd_in = head.get("random") if isinstance(head.get("random"), list) else []
+        rnd = []
         folder = os.path.join(project, MUSIC_DIR)
         for rel in sorted(slots_in):
             by_mode = slots_in[rel]
@@ -401,6 +406,8 @@ def load_music_modes(project, path):
                              % os.path.basename(to)))
                 continue
             slots[to] = keep
+            if rel in rnd_in:
+                rnd.append(to)
             if how:
                 found.append((rel, to, how))
         # PAD-641: the flipper buttons' sounds in attract, which belong to no sound of the card
@@ -410,6 +417,8 @@ def load_music_modes(project, path):
     names_in = head.get("names") if isinstance(head.get("names"), list) else []
     record = {"names": [str(n) if isinstance(n, str) else "" for n in names_in][:SMo.MAX_MODES],
               "slots": slots, "levels": levels}
+    if rnd:
+        record["random"] = sorted(rnd)
     if attract:
         record["attract"] = attract
     return {"record": record, "loaded": len(slots), "files": len(cache), "found": found,
@@ -592,6 +601,10 @@ def music_from_card(project, cfg_text):
             copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
         attract.append(copied[host])
     out = {"names": rec["names"], "slots": slots, "levels": levels}
+    # PAD-638: the slots whose files in turn play at random
+    rnd = sorted({idx[f["slot"]] for f in rec.get("random") or () if idx.get(f["slot"]) in slots})
+    if rnd:
+        out["random"] = rnd
     if attract:
         out["attract"] = attract
     return out, left
@@ -615,6 +628,8 @@ def _built_project_modes(card):
     if not files and not any(os.path.isfile(f) for f in modes.attract):
         return None
     rec = {"names": list(modes.names), "slots": files}
+    if modes.random & set(files):
+        rec["random"] = sorted(modes.random & set(files))
     attract = [f for f in modes.attract if os.path.isfile(f)]      # PAD-641
     if attract:
         rec["attract"] = attract

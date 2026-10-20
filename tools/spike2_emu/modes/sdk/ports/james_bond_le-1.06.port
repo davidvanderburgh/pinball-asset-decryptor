@@ -183,7 +183,9 @@ data sound_request_count    0x00615da8
 # data rule_battle            NOT PLACED: no code that loads it could be lined up
 # data roster_screen_table    NOT PLACED: no code that loads it could be lined up
 # data rule_cities            NOT PLACED: no code that loads it could be lined up
-# data display_effects        NOT PLACED: no code that loads it could be lined up
+#   display_effects: PAD-639, read off award_screen 0x367660: its manager getter 0x3f9eac loads *0x89b708 and checks
+#   +4 against the effect table arg (Godzilla's layout: +0xc the effect now); emulator: the spinner's satellite = 75
+data display_effects         0x0089b708
 # data layered_displays       NOT PLACED: no code that loads it could be lined up
 #   lamp_layers: derived from 2 places, e.g. 0x3a6010+0x8 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29]
 data lamp_layers            0x008243fc
@@ -781,6 +783,74 @@ text show_name_12         Wide red strobe
 text show_kind_12         accent
 value show_secs_12        2
 
+# ---- PAD-642: the game's own lit-shot flash (pad_mode_runtime.c "PAD-642"): every mode's lit shot plays it as it is
+# made - the GI and the inserts flash in turn in the mode's colour, three times, ~2 s. It has no body of its own: the
+# game's show 464 (table 0x61f3a4: colours 1-10, 2 s; the 1.5 s one is purple) calls 0x19e534(colour), which starts
+# shows 450 (the GI, body 0x19d51c) and 448 (the inserts, body 0x1bea60, show 7 here)
+# through the game's show starter, each told the colour and 3 repeats. So each show here is that call, with a colour of the
+# game's palette (0x163fe8's: RGB in the comment); the runtime stops one with the game's "stop every show with this number" for the two. Seen in the emulator (PAD-642).
+site show_stop_number     0x002fce04 0xe92d4070 0xe3066df8
+site show_13             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 1 (85,85,85)
+value show_call_13       1
+text show_numbers_13     450 448
+text show_name_13        Lit shot flash white
+text show_kind_13        accent
+value show_secs_13       2
+site show_14             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 2 (255,0,0)
+value show_call_14       2
+text show_numbers_14     450 448
+text show_name_14        Lit shot flash red
+text show_kind_14        accent
+value show_secs_14       2
+site show_15             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 3 (0,255,0)
+value show_call_15       3
+text show_numbers_15     450 448
+text show_name_15        Lit shot flash green
+text show_kind_15        accent
+value show_secs_15       2
+site show_16             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 4 (0,0,255)
+value show_call_16       4
+text show_numbers_16     450 448
+text show_name_16        Lit shot flash blue
+text show_kind_16        accent
+value show_secs_16       2
+site show_17             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 5 (0,255,255)
+value show_call_17       5
+text show_numbers_17     450 448
+text show_name_17        Lit shot flash cyan
+text show_kind_17        accent
+value show_secs_17       2
+site show_18             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 6 (255,0,255)
+value show_call_18       6
+text show_numbers_18     450 448
+text show_name_18        Lit shot flash magenta
+text show_kind_18        accent
+value show_secs_18       2
+site show_19             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 7 (148,0,211)
+value show_call_19       7
+text show_numbers_19     450 448
+text show_name_19        Lit shot flash purple
+text show_kind_19        accent
+value show_secs_19       2
+site show_20             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 8 (255,255,0)
+value show_call_20       8
+text show_numbers_20     450 448
+text show_name_20        Lit shot flash yellow
+text show_kind_20        accent
+value show_secs_20       2
+site show_21             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 9 (255,127,0)
+value show_call_21       9
+text show_numbers_21     450 448
+text show_name_21        Lit shot flash orange
+text show_kind_21        accent
+value show_secs_21       2
+site show_22             0x0019e534 0xe92d4010 0xe1a04000   # the game's lit-shot flash, colour 10 (127,15,0)
+value show_call_22       10
+text show_numbers_22     450 448
+text show_name_22        Lit shot flash dark orange
+text show_kind_22        accent
+value show_secs_22       2
+
 # ---- PAD-474: the shaker motor, read by shaker_lines.py from the game's own shake routine ----------
 # shake(kind 1..5 (200/384/1024/896/2816 ms), min level: one power, 32/255; a mode's shake is sent as its own are): adjustment 301 (AD_SHAKER_MOTOR), drive 7; 260 constant calls
 site shake              0x00187fc8 0xe92d4030 0xe1a05000
@@ -833,3 +903,16 @@ site  challenge_balls     0x0026847c 0xe92d4030 0xe1a05000
 site  challenge_extra_ball 0x00301a80 0xe3073158 0xe3403082
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x003f79bc 0xe305211e 0xe3402082
+# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each challenge's champion category
+site  challenge_scores       0x004e87dc 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x004e7d10 0xe1a03000 0xe3050750
+# DR. NO CHALLENGE CHAMPION
+value challenge_scores_cat_0  10
+# AHOY MR. BOND CHALLENGE CHAMPION
+value challenge_scores_cat_1  11
+# GOLDFINGER'S JACKPOT CHALLENGE CHAMPION
+value challenge_scores_cat_2  12
+# DISCO VOLANTE CHALLENGE CHAMPION
+value challenge_scores_cat_3  13
+# CHALLENGE CHAMPION
+value challenge_scores_cat_4  14

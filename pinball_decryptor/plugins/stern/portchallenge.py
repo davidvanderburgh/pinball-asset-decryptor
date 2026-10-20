@@ -984,6 +984,8 @@ def menu_wide(e, names, on_flag):
         return None
     k, j = sites[0]
     back = w[k] & 0xFFF
+    if (w[k - 1] & 0x0F0F0000) == 0x050F0000 or (w[k - 1] & 0x0F000000) in (0x0A000000, 0x0B000000)             or (w[k - 1] >> 16) & 0xF == 15:
+        return None                                                 # a pc-relative word cannot move
     pre = w[k - 6:k]
     tops = [rot_imm(x & 0xFFF) for x in pre if (x & 0xFFFF0000) == 0xE28D0000]
     wide = any((x & 0x0FF00FF0) == 0x00800180 and x >> 28 == 0xE for x in pre)   # (cursor * 3) lsl #3: 24 bytes
@@ -1028,7 +1030,10 @@ def menu_wide(e, names, on_flag):
     return ["# the start menu (CHOOSE YOUR MODE OF PLAY), TMNT's wide entries: challenges of the modes' own - the plain "
             "challenge game (kind %d)" % plain,
             "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
-            "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * j, w[j], w[j + 1]),
+            # hooked a word before the kind's load, where r3 still points into the entry: the Start that follows
+            # re-reads the kind from the entry itself, so ours is made the plain kind there (as on Star Wars)
+            "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * (k - 1), w[k - 1], w[k]),
+            "value challenge_menu_pick_back %d" % back,
             "value challenge_menu_list_at   %d" % list_at,
             "value challenge_menu_count_at  %d" % count_at,
             "value challenge_menu_cap       %d" % cap,

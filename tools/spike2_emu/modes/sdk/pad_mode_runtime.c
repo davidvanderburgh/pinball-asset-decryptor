@@ -8632,6 +8632,7 @@ static struct {
     const struct pm_mode *by;            /* the mode that took this challenge game's pick */
     unsigned game;                       /* the game_start count it belongs to */
     int state;                           /* 0 none, 1 picked, 2 its mode runs, 3 over: the ball ends */
+    unsigned long ms;                    /* PAD-619: when it was picked */
 } chg;
 
 static unsigned chg_game_now(void)
@@ -8643,6 +8644,9 @@ static unsigned chg_game_now(void)
 /* the challenge state of THIS game (a new game, or none, forgets it) */
 static int chg_state(void)
 {
+    /* PAD-619: a pick from this very ball's start belongs to the game that starts after it (Iron Maiden LE 1.16,
+     * Batman 66 1.13 dispatch the ball's start before the game's) */
+    if (chg.state == 1 && chg.game != chg_game_now() && pm_player() && pm_ms() - chg.ms < 2000) chg.game = chg_game_now();
     if (chg.state && (chg.game != chg_game_now() || !pm_player())) chg.state = 0, chg.by = 0;
     return chg.state;
 }
@@ -8652,6 +8656,7 @@ static void chg_picked(const struct pm_mode *by)
     chg.by = by;
     chg.game = chg_game_now();
     chg.state = 1;
+    chg.ms = pm_ms();
 }
 
 /* What the end of a mode does to a challenge game, from the state alone (tests lift it verbatim): 1 = end the ball

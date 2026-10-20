@@ -208,7 +208,8 @@ value challenge_on_flag   16
 site  challenge_balls     0x003e15e4 0xe92d4030 0xe1a05000
 site  challenge_balls_2   0x001e29f4 0xe92d4038 0xe1a04000
 site  challenge_menu      0x000a8db4 0xe1a07000 0xe3170080
-site  challenge_menu_pick 0x000a9f40 0xe2433001 0xe353000b
+site  challenge_menu_pick 0x000a9f30 0xe5132124 0xe5133134
+value challenge_menu_pick_back 308
 value challenge_menu_list_at   688
 value challenge_menu_count_at  56
 value challenge_menu_cap       13

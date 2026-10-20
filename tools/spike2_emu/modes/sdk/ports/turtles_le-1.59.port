@@ -674,7 +674,8 @@ data  game_flag_count     0x005121cc
 value challenge_on_flag   18
 site  challenge_balls     0x0031dd0c 0xe92d4030 0xe1a05000
 site  challenge_menu      0x000a8f68 0xe1a07000 0xe3170080
-site  challenge_menu_pick 0x000aa2a4 0xe2433001 0xe353000c
+site  challenge_menu_pick 0x000aa294 0xe513213c 0xe513314c
+value challenge_menu_pick_back 332
 value challenge_menu_list_at   736
 value challenge_menu_count_at  60
 value challenge_menu_cap       14

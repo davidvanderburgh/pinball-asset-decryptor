@@ -468,6 +468,21 @@ reached.
   failing one. The batch first started on four UNCACHED builds, and its
   copy crawled at 0.4 MB/s beside the other two tickets' copies off D: (each
   on the old per-distro lock) - the collision the shared lock is for.
+- **The rig pills say 4x** (David, the same afternoon: "I want visual
+  indication on the rig pills that it's running at 4x as well"). watch.sh
+  writes the game's speed into the run record (`"speed":4`, from
+  `dump/padspeed` once the shim has taken the ask up; only this run's file
+  counts, so the boot says 1 whatever the last run was asked) and rewrites the
+  record at the next heartbeat when it changes. The triage dashboard's pill
+  carries a badge in the rig's colour (`rig 1 - Jaws LE [4x]`, pad-triage
+  v0.43.0 `rigboard.speed_text`) and its Emulator rigs panel says "running
+  7m at 4x"; the Emulate tab's rig strip (`core/rigslot.py` `run.speed`,
+  emulate.js `.emu-rig-speed`) the same. Real time and an older record say
+  nothing. Proven on rig 5 (Jaws LE at 4x): the record read `"speed":1` at
+  8 s (Tech Alerts) and `"speed":4` from 30 s on (attract; padspeed.log "the
+  game is up after 14 s: asking x4.000 ... took it up"); the dashboard pills
+  rendered from the real reader and page code against a sample board, before
+  and after, sent to David.
 - Tests (test_spike2_rig_slots.py, stub rigs, Linux): the batch waits for a
   rig, takes the second as it frees, gives both back, the copier's lead
   follows (2 then 4); the cap stops a job with everything it started, for

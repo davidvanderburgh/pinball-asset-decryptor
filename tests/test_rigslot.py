@@ -183,3 +183,17 @@ def test_every_rig_command_carries_the_rig(board, monkeypatch):
     monkeypatch.setenv("PAD_LABEL", "item/48")
     env = emulate_core._rig_env()
     assert "PAD_SLOT=3" in env and "PAD_LABEL=item/48" in env
+
+
+def test_a_run_says_its_speed(board):
+    """PAD-649: watch.sh writes the game's speed into the run record once padspeed.py's ask is taken up, and
+    the Emulate tab's rig strip says "4x"; an older record has none and reads as real time."""
+    now = int(time.time())
+    _put(board, "slot-1.run", {"slot": 1, "game": "godzilla_pro", "started": now, "speed": 4})
+    _put(board, "slot-2.run", {"slot": 2, "game": "jaws_le", "started": now, "speed": "0.5"})
+    _put(board, "slot-3.run", {"slot": 3, "game": "turtles_pro", "started": now})
+    rows = {r["slot"]: r for r in rigslot.board(now=now)}
+    assert rows[1]["run"]["speed"] == 4.0 and rows[2]["run"]["speed"] == 0.5
+    assert rows[3]["run"]["speed"] == 1.0
+    assert rigslot.speed_text(4) == "4x" and rigslot.speed_text(0.5) == "0.5x"
+    assert rigslot.speed_text(1) == "" and rigslot.speed_text(None) == "" and rigslot.speed_text("x") == ""

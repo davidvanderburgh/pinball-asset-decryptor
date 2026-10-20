@@ -195,9 +195,28 @@ def board(now=None):
                           "label": str(run.get("label") or ""),
                           "up_s": int(now - (run.get("started") or rm)),
                           "stale": (now - rm) > RUN_FRESH_S,
-                          "distro": str(run.get("distro") or "")}
+                          "distro": str(run.get("distro") or ""),
+                          # the game's clock against the wall's (watch.sh, PAD-649): 4 while a
+                          # sweep runs sped up; an older record has none, so 1
+                          "speed": _speed(run.get("speed"))}
         out.append(row)
     return out
+
+
+def _speed(v):
+    try:
+        k = float(v)
+    except (TypeError, ValueError):
+        return 1.0
+    return k if k > 0 else 1.0
+
+
+def speed_text(k):
+    """4.0 -> "4x", 0.5 -> "0.5x", 1 -> "" (real time says nothing)."""
+    k = _speed(k)
+    if abs(k - 1.0) < 1e-6:
+        return ""
+    return ("%g" % k) + "x"
 
 
 def _lock_path(n):

@@ -155,8 +155,10 @@ static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump
 /* The port is read in PORT_CHUNK pieces, a line at a time, up to PORT_MAX bytes. It was ONE read
  * into a buffer of the port's cap (16 KB, then 32 KB when the lamp lines took Godzilla's past 16 KB);
  * with the display lines too Godzilla Premium 1.16's is 23.6 KB. A port longer than PORT_MAX, or a
- * line a full table cannot take, is said in the boot log, never dropped silently. */
-#define PORT_MAX   131072
+ * line a full table cannot take, is said in the boot log, never dropped silently. PAD-645: ports derived
+ * on the user's machine for older builds run to 167 KB (King Kong LE 0.96), their switch drain at the end:
+ * 128 KB lost it. The port is read a chunk at a time, never held whole, so the cap is only a bound. */
+#define PORT_MAX   1048576
 #define PORT_CHUNK 4096
 #define N_SITES    256      /* PAD-363: a title's mode starts (Venom names 50) */
 #define N_DATA     224
@@ -9759,10 +9761,10 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
 
 static void on_switch_edge(unsigned *r)
 {
-    static volatile int said;
+    static volatile int said, bad;
     unsigned id = r[0], lr = r[5], base, rec, st, level, desc, flags, pol, mask;
     int hit, playing;
-    if (lr <= edge.drain || lr > edge.drain_end) return;           /* not from the drain: not an edge */
+    if (bad || lr <= edge.drain || lr > edge.drain_end) return;    /* not from the drain: not an edge */
     if (!id || id >= N_SWITCH_IDS || (edge.count && id >= *(const unsigned *)(unsigned long)edge.count)) return;
     base = *(const unsigned *)(unsigned long)edge.records;
     if (!base) return;
@@ -9770,6 +9772,12 @@ static void on_switch_edge(unsigned *r)
     st = edge.level_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.level_via) : rec;
     desc = edge.desc_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.desc_via) : rec;
     if (!st || !desc) return;
+    if (st < 0x10000u || desc < 0x10000u) {  /* PAD-645: no pointer there: another generation's switch_* values */
+        if (__sync_bool_compare_and_swap(&bad, 0, 1))
+            say("switch edges off: switch %u's record holds 0x%x where switch_%s_via points - the port's switch_* "
+                "values are not this build's", id, st < 0x10000u ? st : desc, st < 0x10000u ? "level" : "desc");
+        return;
+    }
     level = *(const unsigned char *)(unsigned long)(st + (unsigned)edge.level_at);
     if (edge.level_before) level ^= 1u;
     flags = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.flags_at);

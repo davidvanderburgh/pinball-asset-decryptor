@@ -87,6 +87,49 @@ def test_only_a_drain_added_for_the_attract_sounds_leaves_the_switch_hit_sites_t
         assert bool(p.switch_shots_note) == (name not in seen)
 
 
+#: folders of game programs (PAD_PORT_ELFS, else PAD_GAME_ELFS): <port name>.elf or <port name>.0.elf
+ELF_DIRS = [d for v in ("PAD_PORT_ELFS", "PAD_GAME_ELFS") for d in (os.environ.get(v) or "").split(os.pathsep) if d]
+
+
+@pytest.mark.parametrize("name", SHIPPED)
+def test_every_shipped_ports_switch_values_are_its_own_programs(name):
+    """Avengers LE/Pro 1.10 carried 1.09's generation-A record layout on a generation-B program:
+    the first switch edge read a level through a number (9) and the game crashed in the runtime."""
+    from pinball_decryptor.plugins.stern import portgen as G
+    from pinball_decryptor.plugins.stern import portswitch as PS
+    path = next((os.path.join(d, name + x) for d in ELF_DIRS for x in (".elf", ".0.elf")
+                 if os.path.isfile(os.path.join(d, name + x))), None)
+    if path is None:
+        pytest.skip("game program not present: %s" % name)
+    with open(path, "rb") as f:
+        src = PS.drain_source(G.Elf(f.read()))
+    port = MP.read_port(os.path.join(PORTS, name + ".port"))
+    have = {n: v for n, v in port["value"].items()
+            if n.startswith("switch_") and n not in ("switch_edge_shots", "switch_edge_log", "switch_hit_at")}
+    assert have == dict(src["values"])
+    for line in src["sites"]:
+        if line.startswith("site "):
+            assert port["site"][line.split()[1]][0] == int(line.split()[2], 0)
+
+
+def test_a_record_with_no_pointer_where_the_values_say_turns_the_edges_off_not_the_game():
+    with open(RUNTIME, encoding="utf-8") as f:
+        c = f.read()
+    edge = c[c.index("static void on_switch_edge(unsigned *r)"):]
+    edge = edge[:edge.index("\n}\n")]
+    assert "if (st < 0x10000u || desc < 0x10000u) {" in edge and "if (bad ||" in edge
+    assert edge.index("st < 0x10000u") < edge.index("level = *(const unsigned char *)")
+
+
+def test_the_runtime_reads_a_derived_port_to_its_end():
+    """Godzilla LE 1.13's derived port is 155 KB (King Kong LE 0.96's 167 KB), its switch drain the last
+    lines: a 128 KB cap had its attract sounds say "the port lacks a switch_* value"."""
+    import re
+    with open(RUNTIME, encoding="utf-8") as f:
+        cap = int(re.search(r"#define PORT_MAX\s+(\d+)", f.read()).group(1))
+    assert cap >= 1 << 20
+
+
 def test_the_drain_hooked_for_the_attract_sounds_is_no_second_shot_source():
     with open(RUNTIME, encoding="utf-8") as f:
         c = f.read()

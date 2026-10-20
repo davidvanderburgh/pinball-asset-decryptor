@@ -73,7 +73,7 @@ _STR_FIELDS = (
     "game_modes",                                                                     # PAD-363
     "shake_what_start", "shake_what_shot", "shake_what_end",                          # PAD-414
     "shake_s_start", "shake_s_shot", "shake_s_end", "shake_shot",
-    "show_start", "show_end",                                                         # PAD-418
+    "show_start", "show_end", "show_hit",                                             # PAD-418; PAD-642
     "game_wizard", "wizard_how",                                                      # PAD-436
     "building_floor", "building_shot", "roster_slot",                                 # PAD-589
     "challenge")                                                                      # PAD-615
@@ -109,7 +109,7 @@ _DEFAULTS = {
     "start_or_0": "(no other shot)", "start_or_1": "(no other shot)",              # PAD-518
     "seq_reset_any": False,                                                        # PAD-314
     "game_modes": "block",                                                         # PAD-363; PAD-398
-    "show_start": "(none)", "show_end": "(none)",                                  # PAD-418
+    "show_start": "(none)", "show_end": "(none)", "show_hit": "(none)",            # PAD-418; PAD-642
     "game_wizard": "(none)", "wizard_how": "light",                                # PAD-436
     **{"seq_shot_%d" % i: "(no more shots)" for i in range(8)},
 }
@@ -1389,7 +1389,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.f["priority"] = str(spec.priority)
         # PAD-418: the game's own light shows, by name; a name this title does not have is kept as typed, so
         # validate_shows names it
-        for k in ("show_start", "show_end"):
+        for k in ("show_start", "show_end", "show_hit"):                                # PAD-642: and a hit's
             v = getattr(spec, k, "")
             self.f[k] = v if isinstance(v, str) and v else self.SHOW_NONE
 
@@ -1400,7 +1400,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         spec.light_shots_pattern = keys.get(shown, shown)
         text = str(self.f["priority"]).strip()
         spec.priority = int(text) if text.isdigit() else (text or 0)
-        for k in ("show_start", "show_end"):                                            # PAD-418
+        for k in ("show_start", "show_end", "show_hit"):                                # PAD-418; PAD-642
             v = str(self.f[k]).strip()
             setattr(spec, k, "" if v in ("", self.SHOW_NONE) else v)
 

@@ -5690,11 +5690,17 @@ static void building_tick(void)
  * event_cancel`: every process with that id). Some shows run until stopped (process 315's body, Premium/LE 1.16's
  * Insert chase), so the runtime stops one after the port's `value show_secs_<n>` (a moment more than that), and
  * never later than SHOW_MAX_MS. And none starts while the ball ends: the game stops every process of its own then
- * (the second machine test: two modes that ended on a drain started their ending's show, and it was gone at once). */
+ * (the second machine test: two modes that ended on a drain started their ending's show, and it was gone at once).
+ * PAD-642: some of the game's shows have no body of their own to run: the game starts them with a call that takes an
+ * argument (James Bond 007 LE/Pro 1.06's lit-shot flash, 0x19e534: its GI and insert shows by the game's own show
+ * starter, in a colour, three times over - every mode's lit shot plays it). A port names such a show's call as its
+ * `site show_<n>` with `value show_call_<n>` (the argument it is called with), and `text show_numbers_<n>` (the
+ * game's own show numbers it starts) with `site show_stop_number` (the game's "stop every show with this number")
+ * stop it. Those shows are the game's own processes, flagged as shows, so the game's exit frees their lights. */
 #define SHOWS_MAX 64
 #define SHOW_MAX_MS 20000ul
 static int shows_n;
-static struct { int n; unsigned long started, limit; } show_now;
+static struct { int n, call; unsigned long started, limit; } show_now;
 static unsigned long ball_end_at;                    /* when the last ball ended (on_ball_end), 0 = not yet */
 
 int pm_game_shows(void)
@@ -5704,7 +5710,9 @@ int pm_game_shows(void)
 
 int pm_game_show_playing(void)
 {
-    return (can & PM_CAN_GAME_SHOWS) && proc_alive((unsigned)pm_port_value("show_proc", 0));
+    if (!(can & PM_CAN_GAME_SHOWS)) return 0;
+    if (show_now.n && show_now.call) return 1;          /* PAD-642: a called show plays until its length is up */
+    return proc_alive((unsigned)pm_port_value("show_proc", 0));
 }
 
 /* by the port's name (`text show_name_<n>`, any case): a mode written without knowing its game asks for "Strobe
@@ -5725,9 +5733,31 @@ int pm_game_show_named(const char *name)
     return 0;
 }
 
+/* PAD-642: a called show is stopped by the game's show numbers it started (`text show_numbers_<n>`) */
+static void show_call_stop(int n)
+{
+    char key[24];
+    const char *t;
+    unsigned stop = fn("show_stop_number"), v;
+    pm_snprintf(key, sizeof key, "show_numbers_%d", n);
+    t = pm_port_text(key);
+    while (stop && t && *t) {
+        while (*t == ' ' || *t == '	') t++;
+        for (v = 0; *t >= '0' && *t <= '9'; t++) v = v * 10 + (unsigned)(*t - '0');
+        if (v) ((unsigned (*)(unsigned))(unsigned long)stop)(v);
+        if (*t && *t != ' ' && *t != '	') break;
+    }
+}
+
 static void show_kill(const char *why)
 {
     unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    if (show_now.n && show_now.call) {
+        show_call_stop(show_now.n);
+        say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
+        show_now.n = 0;
+        return;
+    }
     if (!proc_alive(id)) return;
     ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("event_cancel"))(id, 0xffffu);
     say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
@@ -5743,7 +5773,7 @@ void pm_game_show_stop(void)
 static void shows_tick(void)
 {
     if (!show_now.n) return;
-    if (!proc_alive((unsigned)pm_port_value("show_proc", 0))) {
+    if (!show_now.call && !proc_alive((unsigned)pm_port_value("show_proc", 0))) {
         show_now.n = 0;
         return;
     }
@@ -5784,6 +5814,7 @@ int pm_game_show(int n)
     char key[24];
     const char *name;
     unsigned id = (unsigned)pm_port_value("show_proc", 0), rec;
+    long arg;
     if (!(can & PM_CAN_GAME_SHOWS)) return 0;
     pm_snprintf(key, sizeof key, "show_%d", n);
     if (n < 1 || n >= SHOWS_MAX || !site(key)) {
@@ -5803,7 +5834,23 @@ int pm_game_show(int n)
         say("show %d: not played - the ball is ending, and the game stops every show of its own with it", n);
         return 0;
     }
-    if (proc_alive(id)) show_kill("another show begins");
+    if (show_now.n || proc_alive(id)) show_kill("another show begins");
+    pm_snprintf(key, sizeof key, "show_call_%d", n);
+    arg = pm_port_value(key, -1);
+    pm_snprintf(key, sizeof key, "show_%d", n);
+    if (arg >= 0) {                                     /* PAD-642: the game's own call starts this one */
+        unsigned at = fn(key);
+        ((void (*)(unsigned))(unsigned long)at)((unsigned)arg);
+        show_now.n = n;
+        show_now.call = 1;
+        show_now.started = pm_ms();
+        pm_snprintf(key, sizeof key, "show_secs_%d", n);       /* stopped at its length to the tick, as the game's */
+        show_now.limit = pm_port_value(key, 0) > 0 ? (unsigned long)pm_port_value(key, 0) * 1000ul : SHOW_MAX_MS;
+        if (show_now.limit > SHOW_MAX_MS) show_now.limit = SHOW_MAX_MS;   /* own caller stops it (0x139448: 2 s) */
+        say("show %d (%s): the game's own light show, started by its own call (0x%08x, %ld)", n,
+            name ? name : "unnamed", at, arg);
+        return 1;
+    }
     rec = ((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
         id, (void (*)(void))(unsigned long)fn(key), 0);
     if (!rec) {
@@ -5816,6 +5863,7 @@ int pm_game_show(int n)
         return 0;
     }
     show_now.n = n;
+    show_now.call = 0;
     show_now.started = pm_ms();
     pm_snprintf(key, sizeof key, "show_secs_%d", n);
     show_now.limit = pm_port_value(key, 0) > 0 ? (unsigned long)pm_port_value(key, 0) * 1000ul + 500ul : SHOW_MAX_MS;

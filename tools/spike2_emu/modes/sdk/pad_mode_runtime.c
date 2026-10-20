@@ -162,7 +162,7 @@ static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump
 #define PORT_CHUNK 4096
 #define N_SITES    256      /* PAD-363: a title's mode starts (Venom names 50) */
 #define N_DATA     224
-#define N_VALUES   192      /* PAD-381: Godzilla Premium/LE names 129 (held coils, scoop and PAD-379's shield) */
+#define N_VALUES   512      /* PAD-381: Godzilla Premium/LE names 129; PAD-645: ports derived for older builds 229-267 */
 #define N_SHOTS    64
 #define N_ROLES    32
 #define N_TEXTS    192      /* PAD-363: each mode a mode may hold off is named */

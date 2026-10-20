@@ -128,6 +128,9 @@ def test_the_runtime_reads_a_derived_port_to_its_end():
     with open(RUNTIME, encoding="utf-8") as f:
         cap = int(re.search(r"#define PORT_MAX\s+(\d+)", f.read()).group(1))
     assert cap >= 1 << 20
+    # and every value line of one: they name 229 (Bond 60th LE 1.10) to 267 (Godzilla LE 1.13), the drain's last
+    values = int(re.search(r"#define N_VALUES\s+(\d+)", open(RUNTIME, encoding="utf-8").read()).group(1))
+    assert values >= 512
 
 
 def test_the_drain_hooked_for_the_attract_sounds_is_no_second_shot_source():

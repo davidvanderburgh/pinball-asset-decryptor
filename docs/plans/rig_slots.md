@@ -483,6 +483,26 @@ reached.
   game is up after 14 s: asking x4.000 ... took it up"); the dashboard pills
   rendered from the real reader and page code against a sample board, before
   and after, sent to David.
+- **The rig pills say which card is copying, and how far** (David, later the
+  same afternoon: "we should indicate on rig pills when card copies are
+  ongoing and the percentage of them" - every rig of the two sweeps read
+  "waiting for its card" for minutes with nothing saying what for). The
+  copier (cardmount.sh `cache_wait`) writes `copy-<label>.json` beside the
+  rigs' locks every 2 s (`card`, `who`, `state`, `done_mb`, `total_mb`,
+  `pct`) and removes it at the end; cardstage.sh writes a `queued` one while
+  it waits for the machine's copy lock (`cardmount.sh <card> --board-copy
+  queued|clear`); rigbatch's lock note names the card's label (`waiting for
+  its card: iron_maiden_le-1_18_0`) and its stager carries the batch's label,
+  so the dashboards tie the record to the rig - by label, else the holder's
+  running copy, else its first queued one; a record untouched for 90 s is a
+  dead copier. The triage dashboard's pill reads `rig 5 - copying Iron Maiden
+  LE 1.18 [60%]` and its panel "copying Iron Maiden LE 1.18 60% (4.4 of 7.3
+  GB)" (pad-triage v0.44.0 `rigboard.copies` / `copy_for` / `card_title`);
+  the Emulate tab's strip the same (`core/rigslot.py`, emulate.js
+  `.emu-rig-copy`). Proven live: a two-card startcheck batch on rig 5 whose
+  cards were not cached - the board read `"state":"copying","pct":7` a minute
+  in and the pills rendered from the live board at 60%, sent to David; the
+  other four rigs (PAD-643/645, old code) stayed plain, as they must.
 - Tests (test_spike2_rig_slots.py, stub rigs, Linux): the batch waits for a
   rig, takes the second as it frees, gives both back, the copier's lead
   follows (2 then 4); the cap stops a job with everything it started, for

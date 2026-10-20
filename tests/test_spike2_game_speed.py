@@ -504,11 +504,11 @@ export PAD_RIGBATCH_ASSUME_MOUNTED=1
 bash "$t/rig/rigbatch.sh" -n 1 --who PAD-9 --out "$t/out" --no-stage --fps 15 "$t/l.list" \
     -- bash "$t/job.sh" > "$t/stdout" 2>&1
 echo "rc=$?"
-grep -o "for PAD-9, 15 fps" "$t/out/progress.txt"
+grep -o "for PAD-9 at 4x, 15 fps" "$t/out/progress.txt"
 bash "$t/rig/rigbatch.sh" -n 1 --who PAD-9 --out "$t/out2" --no-stage "$t/l.list" -- bash "$t/job.sh" > /dev/null 2>&1
 bash "$t/rig/rigbatch.sh" -n 1 --who PAD-9 --out "$t/out4" --no-stage --fps 30 "$t/l.list" \
     -- bash "$t/job.sh" > /dev/null 2>&1
-grep -o "for PAD-9, 30 fps" "$t/out4/progress.txt"
+grep -o "for PAD-9 at 4x, 30 fps" "$t/out4/progress.txt"
 bash "$t/rig/rigbatch.sh" -n 1 --who PAD-9 --out "$t/out3" --no-stage --fps 25 "$t/l.list" \
     -- bash "$t/job.sh" > /dev/null 2>"$t/err"
 echo "rc25=$? $(cat "$t/err")"
@@ -526,7 +526,7 @@ def test_a_batch_caps_every_jobs_frame_rate_with_fps():
                          timeout=120)
     lines = out.stdout.split("\n")
     assert "rc=0" in lines, out.stdout + out.stderr
-    assert "for PAD-9, 15 fps" in lines and "for PAD-9, 30 fps" in lines
+    assert "for PAD-9 at 4x, 15 fps" in lines and "for PAD-9 at 4x, 30 fps" in lines
     assert lines.count("a vblanks=4") == 2 and lines.count("a vblanks=2") == 1    # --fps 15, no --fps, --fps 30
     assert lines.count("b vblanks=2") == 3 and "a vblanks=unset" not in lines
     rc25 = [ln for ln in lines if ln.startswith("rc25=")][0]

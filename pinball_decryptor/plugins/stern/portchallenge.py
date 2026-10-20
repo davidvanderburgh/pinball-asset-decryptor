@@ -175,7 +175,10 @@ def find(elf):
         return [], notes or ["no challenge list and no start menu of the known shape"]
     if generic:
         menu = generic["lines"]
-    return flag_lines(e) + lines + balls_lines(e) + extra_ball_lines(e) + menu + end_ball, []
+    # PAD-643: a mode's challenge ball launched for the player, and the game's own ball-start work that skips a
+    # challenge game run in a mode's
+    return (flag_lines(e) + lines + balls_lines(e) + extra_ball_lines(e) + menu + end_ball + launch_lines(e, names)
+            + plain_lines(e, names, on_flag)), []
 
 
 def balls_lines(e):
@@ -353,6 +356,76 @@ def end_ball_lines(e):
     k = at[0]
     return ["# the game's own challenges end the ball when they are over: so does a mode that took the pick",
             "site  challenge_end_ball  0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
+
+
+def launch_lines(e, names):
+    """PAD-643: `site ball_launch` - the framework's launch-button handler, one shape on every Spike 2 build:
+        push {r4, lr} ; movw/movt r4, <auto plunger device> ; sub sp, sp, #8 ; ldrh r0, [r4, #<id>] ; ...
+        mov r0, #<FG_MBDEV_AUTO_PLUNGER_PLAYER_CONTROL> ; bl <flag get> ; ...
+        mov r0, #<FG_MBDEV_AUTO_PLUNGER_BALL_IN_DEVICE> ; bl <flag get> ; ... mov r2, #8 ; bl <fire>
+    (fires the auto plunger when a ball waits in it, else does nothing), with those two flags: the runtime calls it
+    for the player as a mode's challenge ball starts. Empty when it is not there, or not once."""
+    try:
+        wait, ball = names.index("FG_MBDEV_AUTO_PLUNGER_PLAYER_CONTROL"), names.index("FG_MBDEV_AUTO_PLUNGER_BALL_IN_DEVICE")
+    except ValueError:
+        return []
+    w, base = e.words, e.text_va
+    hits = []
+    for k in range(len(w) - 40):
+        if w[k] != 0xE92D4010 or (w[k + 4] & 0xFFFFF0F0) != 0xE1D400B0:
+            continue
+        win = w[k + 1:k + 40]
+        for j, x in enumerate(win):              # up to the next function's push
+            if (x & 0xFFFF0000) == 0xE92D0000:
+                win = win[:j]
+                break
+        at_wait = [j for j, x in enumerate(win) if x in mov_r0(wait)]
+        at_ball = [j for j, x in enumerate(win) if x in mov_r0(ball)]
+        at_fire = [j for j, x in enumerate(win) if x == 0xE3A02008]
+        if at_wait and at_ball and at_fire and at_wait[0] < at_ball[0] < at_fire[0]:
+            hits.append(k)
+    if len(hits) != 1:
+        return []
+    k = hits[0]
+    return ["# a mode's challenge ball launched for the player: the launch button's handler, while these flags say a "
+            "ball waits in the auto plunger",
+            "site  ball_launch         0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1]),
+            "value ball_launch_flag       %d" % ball,
+            "value ball_launch_wait_flag  %d" % wait]
+
+
+def plain_lines(e, names, on_flag):
+    """PAD-643: `site challenge_plain_<k>` - the game's ball-start handlers that set its skill shot up only OUTSIDE a
+    challenge game (James Bond LE / Pro 1.06, bus 34: the super skill shot whose process opens the top control gate
+    to the loop while the left flipper button is held at the launch):
+        push {.., lr} ; ... (10 words at most) bl <challenge game?> ; cmp r0, #0 ; bne <out> ; ...
+        mov r0, #<a FG_..SKILL_SHOT.. flag> ; bl <flag set|clear>        (within 40 words)
+    where <challenge game?> is `mov r0, #<FG_PLAYER_CHALLENGE_MODE_ACTIVE> ; b <flag get>`. In a mode's challenge
+    game the runtime runs each with the challenge flag cleared for the call. No other build's skill shot asks the
+    challenge flag this way (PAD-643 sweep of 69 builds). At most 4."""
+    fl = flag_functions(e)
+    skill = {i for i, n in enumerate(names) if "SKILL_SHOT" in n}
+    if not fl or not skill:
+        return []
+    w, base = e.words, e.text_va
+    asks = {base + 4 * k for k in range(len(w) - 1)
+            if w[k] in mov_r0(on_flag) and (w[k + 1] & 0xFF000000) == 0xEA000000}
+    sets = {fl["set"], fl["clear"]}
+    out = []
+    for k in range(len(w) - 3):
+        if bl_target(base + 4 * k, w[k]) not in asks or w[k + 1] != 0xE3500000 or (w[k + 2] & 0xFF000000) != 0x1A000000:
+            continue
+        s = next((j for j in range(k - 1, max(k - 11, -1), -1) if (w[j] & 0xFFFF4000) == 0xE92D4000), None)
+        if s is None or any((w[j] & 0xFFFF0000) == 0xE92D0000 for j in range(s + 1, k)):
+            continue
+        if not any(w[j] in mov_r0(f) and bl_target(base + 4 * j + 4, w[j + 1]) in sets
+                   for j in range(k, min(k + 40, len(w) - 1)) for f in skill):
+            continue
+        if len(out) < 4:
+            out.append("site  challenge_plain_%d   0x%08x 0x%08x 0x%08x" % (len(out), base + 4 * s, w[s], w[s + 1]))
+    if not out:
+        return []
+    return ["# the game's skill shot set up at the ball's start only outside a challenge game: in a mode's one too"] + out
 
 
 def rot_imm(w):

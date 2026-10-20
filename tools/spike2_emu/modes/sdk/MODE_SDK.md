@@ -3905,6 +3905,46 @@ sound still played). Before: the ball stayed in play after the end, slings score
 Jackpot and a 2-ball multiball could start. After: the game left play at once (status `0x0202`), nothing scored,
 both refused (`no game`), and the next challenge game started its mode.
 
+**The challenge ball's launch, and its start as every other ball's (PAD-643, luvthatapex, Bond LE).** A challenge
+game's ball waits in the shooter lane as the mode starts. The game's own challenges play their start and launch it;
+a mode's left it for the player, under the mode's start clip. And Bond's skill shot - with it the left flipper button
+held at the launch opening the top control gate to the loop - is set up at the ball's serve only OUTSIDE a challenge
+game (its bus 34 handler, LE `0x18dd50`: `bl <challenge game?> ; cmp r0, #0 ; bne <out>`, then flags 156-159 and the
+super skill shot's process, which keeps `0x81eb90 + 10` at 3904 while the button is held; at the launch the gate's
+decision `0x1aff18` opens the gate, device 9 coil 6, for 20 s). So two things, per build (`portchallenge.launch_lines`
+/ `plain_lines`):
+
+```
+site  ball_launch         0x003f382c 0xe92d4010 0xe30b44d4    # the framework's launch-button handler (bus 197)
+value ball_launch_flag       12                                # FG_MBDEV_AUTO_PLUNGER_BALL_IN_DEVICE
+value ball_launch_wait_flag  13                                # FG_MBDEV_AUTO_PLUNGER_PLAYER_CONTROL
+site  challenge_plain_0   0x0018dd50 0xe92d4038 0xe1a05000    # Bond's skill shot set-up (LE; Pro 0x18c560)
+```
+
+The launch handler fires the auto plunger when a ball waits in it and does nothing otherwise; it has one shape on
+every Spike 2 build with challenges (61 of them, one hit each). When the mode that took the pick begins, the runtime
+calls it for the player, from the tick, every 500 ms while one of the two flags says a ball waits (6 calls at most):
+by default once the mode's start clip is over (from 1.5 s after it began, while no clip of ours plays; 30 s at
+most; at once with no start clip), else a set time after the mode began, or never. `pm_challenge_launch(slot, ms)`
+says which for a challenge the calling mode holds or added: `PM_LAUNCH_CLIP` (0), `PM_LAUNCH_PLAYER` (-1), or ms. A
+mode file: `challenge_launch clip | player | <seconds>` (1-60). The Modes tab: under Starts on > a challenge game of,
+*its ball launched* when its start clip is over / a set time after it starts / by the player. Blocks: the When the
+player picks the challenge hat's second choice. Logged: `challenge ball: launched for the player (its start clip
+over, 2021 ms after its mode began)`, or why not.
+
+Each `challenge_plain_<k>` (0-3) is wrapped (`hook_wrap`): in a challenge game a mode of ours took - or is about to
+take (its pick made on the menu, or a held challenge's flag set) - the runtime clears the challenge game's flag for
+the call and sets it again after, so the handler runs as at a standard ball's start; anything else passes straight
+through. Only Bond LE / Pro 1.06 have one: no other build's skill shot asks the challenge flag that way (PAD-643
+sweep of the 69 programs).
+
+Proven (emulator, 2026-10-20, Bond LE 1.06 stock card, the owner's BON APPETIT blocks as `challenge new`, picked on
+the start menu, the left flipper button held from the mode's start; C:/tmp/PAD-643 run_a1.sh / run_b1.sh, rig/ch643.c):
+after - the skill shot's flag 156 and the left-flipper word 3904 at the serve, the trough eject 0.9 s later, the auto
+plunger (node 8 coil 4) 2.0 s after the mode began, `launched for the player`, and the top control gate (node 9 coil
+6) pulsed and held for 20 s 100 ms after the launch; the mode's screen stayed on the glass. Before (main): none of
+it - no skill shot flags, the gate never moved, and the ball was still in the shooter lane 70 s later.
+
 
 ## Holding the end of a ball (PAD-622)
 

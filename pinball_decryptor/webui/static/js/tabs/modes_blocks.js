@@ -560,6 +560,9 @@ function addMenu(ed, path) {
 
 // ------------------------------------------------------------------ scripts
 // PAD-615: what the challenge hat does
+// PAD-643: who launches the challenge ball, and when (block_modes.CHALLENGE_LAUNCH; a number = seconds after it starts)
+const LAUNCH_OPTS = [["clip", "when its start clip is over"], ["2", "2 s after it starts"], ["4", "4 s after it starts"], ["6", "6 s after it starts"], ["10", "10 s after it starts"], ["player", "by the player"]];
+const LAUNCH_TIP = "The challenge's ball waits in the shooter lane as the mode starts. The game launches it for the player once the mode's start clip is over (or at once, with no start clip), a set time after the mode starts, or not at all: the player launches it. Otherwise the ball starts as any other ball does: on James Bond, the left flipper button held at the launch opens the loop.";
 const CHALLENGE_TIP = "In the game's own Player Challenge mode (a one-ball game picked on the game's start menu, both flipper buttons held in attract, as a game starts, or every game when the service menu's Default Game Mode is set to a challenge), this script runs as the ball starts when this challenge is picked, and the game's own challenge does not start: put Start the mode in it. The game ends when the ball ends. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge. The start menu shows this mode's name in that challenge's place; A new challenge of its own adds it after the game's own entries instead.";
 
 export function HatBody({ h, path, ed }) {
@@ -575,7 +578,7 @@ export function HatBody({ h, path, ed }) {
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
     case "event": return html`<span class="bk-w b">When</span><${Pick} value=${h.event} options=${(ed.ch.events || []).map((x) => [x.name, x.label])} onChange=${(v) => set("event", v)} />${when}`;
     case "timer_done": return html`<span class="bk-w b">When timer</span><${TimerPick} value=${h.timer} ed=${ed} onChange=${(v) => set("timer", v)} /><span class="bk-w b">runs out</span>`;
-    case "challenge": return html`<span class="bk-w b" ...${tip(CHALLENGE_TIP)}>When the player picks the challenge</span><${Pick} value=${h.challenge} options=${(ed.ch.challenges || []).map((x) => [x, x])} onChange=${(v) => set("challenge", v)} />`;
+    case "challenge": return html`<span class="bk-w b" ...${tip(CHALLENGE_TIP)}>When the player picks the challenge</span><${Pick} value=${h.challenge} options=${(ed.ch.challenges || []).map((x) => [x, x])} onChange=${(v) => set("challenge", v)} /><span class="bk-w b" ...${tip(LAUNCH_TIP)}>, its ball launched</span><${Pick} value=${h.launch || "clip"} options=${LAUNCH_OPTS} onChange=${(v) => set("launch", v)} />`;
     default: return html`<span class="bk-w b">${h.kind}</span>`;
   }
 }

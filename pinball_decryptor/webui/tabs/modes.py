@@ -76,7 +76,8 @@ _STR_FIELDS = (
     "show_start", "show_end",                                                         # PAD-418
     "game_wizard", "wizard_how",                                                      # PAD-436
     "building_floor", "building_shot", "roster_slot",                                 # PAD-589
-    "challenge")                                                                      # PAD-615
+    "challenge",                                                                      # PAD-615
+    "challenge_launch", "challenge_launch_s")                                         # PAD-643
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -95,6 +96,7 @@ _DEFAULTS = {
     "building_floor": "(leave it where it is)", "building_shot": "(when it starts)",   # PAD-589
     "roster_slot": "",                                                              # PAD-589
     "challenge": "",                                                                # PAD-615: by its name
+    "challenge_launch": "clip", "challenge_launch_s": "4",                          # PAD-643: clip, time or player
     # PAD-414: the shaker - as it starts, on a shot, as it ends; a shake of the mode's own (strength + seconds) or
     # one of the game's ("game:<name>")
     "shake_on_start": False, "shake_on_shot": False, "shake_on_end": False,
@@ -319,6 +321,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "coil_s": [MP.COIL_MIN_MS / 1000, MP.COIL_LONGEST_MS / 1000, "any"],    # PAD-381: coil_s_0..2 (PAD-621: a
                                                                                 # coil's own longest, checked per coil)
         "also_count": [1, MP.START_COUNT_MAX],                                  # PAD-227; PAD-518
+        "challenge_launch_s": [1, 60],                                          # PAD-643
     }
 
     def __init__(self, window):
@@ -1513,6 +1516,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         n = MP._int_or_none(getattr(spec, "challenge", -1))
         self.f["challenge"] = (self.CHALLENGE_NEW if n == MP.CHALLENGE_NEW
                                else picks[n] if n is not None and 0 <= n < len(picks) else "")
+        launch = MP._int_or_none(getattr(spec, "challenge_launch", 0)) or 0                # PAD-643
+        self.f["challenge_launch"] = "player" if launch < 0 else "time" if launch > 0 else "clip"
+        self.f["challenge_launch_s"] = str(max(1, min(60, launch // 1000))) if launch > 0 else "4"
         self.f["start_event"] = by_name.get(start, start or "")
         kind, name = MP.ends_on_parts(spec)
         self.f["ends_kind"] = kind if kind in ("drain", "clock", "event") else "drain"
@@ -1549,6 +1555,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         name = str(self.f["challenge"]).strip()
         spec.challenge = (MP.CHALLENGE_NEW if spec.starts_on == "challenge" and name == self.CHALLENGE_NEW
                           else picks.index(name) if spec.starts_on == "challenge" and name in picks else -1)
+        how = self.f["challenge_launch"]                                                    # PAD-643
+        secs = MP._int_or_none(self.f["challenge_launch_s"])
+        spec.challenge_launch = (-1 if how == "player" else max(1, min(60, secs or 4)) * 1000 if how == "time"
+                                 else 0) if spec.starts_on == "challenge" else 0
         rows = [str(self.f["seq_shot_%d" % i]).strip() for i in range(self.SEQ_ROWS)]
         spec.start_sequence = [s for s in rows if s and s != self.SEQ_NONE] + list(self._seq_beyond)
         spec.sequence_reset_any = bool(self.f["seq_reset_any"])

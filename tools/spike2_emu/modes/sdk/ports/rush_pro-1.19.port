@@ -711,3 +711,8 @@ value challenge_menu_slot      0
 value challenge_menu_caption   1921
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x003c6198 0xe3042b5a 0xe3402b66
+
+# ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
+site  ball_launch         0x003c1f6c 0xe92d4010 0xe3054944
+value ball_launch_flag       12
+value ball_launch_wait_flag  13

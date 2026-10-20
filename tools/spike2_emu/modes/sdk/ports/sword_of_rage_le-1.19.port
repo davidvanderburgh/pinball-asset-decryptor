@@ -573,3 +573,23 @@ text  wizard_film_1   KNIGHT spelled
 data  wizard_obj_2    0x0062f540   # cmode_bk2k_mball, a multiball
 text  wizard_name_2   The King's Ransom
 text  wizard_film_2   KNIGHT spelled again
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+value challenge_flag_0  67
+text  challenge_name_0  Retro
+value challenge_flag_1  68
+text  challenge_name_1  Ransom
+site  challenge_balls     0x00303578 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x0024e60c 0xe3003b5c 0xe3403066
+site  challenge_menu      0x000432d4 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00043430 0xe2433001 0xe3530004
+value challenge_menu_list_at   176
+value challenge_menu_count_at  40
+value challenge_menu_cap       6
+value challenge_menu_entry     16
+value challenge_menu_kind      4
+value challenge_menu_slot      0
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x003259b0 0xe3072d92 0xe3402065

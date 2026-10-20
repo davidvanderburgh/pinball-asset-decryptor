@@ -438,3 +438,19 @@ text  wizard_name_2      Gas Attack Multiball
 site  wizard_go_3        0x00141f08 0xe92d4ff0 0xe3a00057   # Minor Villain Wizard Mode 3
 value wizard_flag_3      87    # FG_MINOR_VILLAIN_WIZARD_MODE_3_ACTIVE
 text  wizard_name_3      Holy Multiball
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x002bef44 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x004992f8 0xe30136c8 0xe3403087
+site  challenge_menu      0x00029ca4 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x00029e88 0xe2433001 0xe3530006
+value challenge_menu_list_at   320
+value challenge_menu_count_at  32
+value challenge_menu_cap       8
+value challenge_menu_entry     12
+value challenge_menu_kind      3
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x004d6ea4 0xe30d24da 0xe3402086

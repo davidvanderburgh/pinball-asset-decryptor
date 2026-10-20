@@ -631,3 +631,37 @@ site block_start_8      0x000ae5e8 0xe30d1c9c 0xe3a000d2
 text block_name_8       Combo Mode (and Combo Challenge)
 site block_start_9      0x000a87f8 0xe92d43f0 0xe24dd014
 text block_name_9       Coffin Hurry-Up
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x06ff59f8
+value game_flags_at       4
+data  game_flag_count     0x00560c3c
+value challenge_on_flag   17
+data  game_play_modes     0x06fb5628   # the GamePlayModes singleton: the current game-play mode at +8
+value game_play_mode_at   8
+value challenge_mode_plain  1   # Standard: what a mode's challenge game plays
+value challenge_mode_0  7
+text  challenge_name_0  Lux Aeterna Combo
+value challenge_name_msg_0  3659
+value challenge_mode_1  8
+text  challenge_name_1  For Whom the Bell Tolls
+value challenge_name_msg_1  3620
+value challenge_mode_2  9
+text  challenge_name_2  Fade to Black
+value challenge_name_msg_2  3621
+value challenge_mode_3  10
+text  challenge_name_3  Battery
+value challenge_name_msg_3  3622
+value challenge_mode_4  11
+text  challenge_name_4  Enter Sandman
+value challenge_name_msg_4  3623
+value challenge_mode_5  12
+text  challenge_name_5  The End of the Line
+value challenge_name_msg_5  3624
+value challenge_mode_6  13
+text  challenge_name_6  The Unforgiven
+value challenge_name_msg_6  3625
+site  challenge_balls     0x0014c514 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x0032c798 0xe30f3d60 0xe34036fe
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x0036cbd4 0xe3062956 0xe34026ff

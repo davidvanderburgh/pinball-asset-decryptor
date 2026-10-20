@@ -456,5 +456,18 @@ text  challenge_name_2  Light the Fire
 site  challenge_go_3    0x00177508 0xe92d4008 0xeb003ba2
 value challenge_flag_3  147
 text  challenge_name_3  Final Showdown
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+site  challenge_balls     0x002b3058 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x0031657c 0xe30d3430 0xe340307d
+site  challenge_menu      0x0008a28c 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x0008a470 0xe2433001 0xe3530006
+value challenge_menu_list_at   536
+value challenge_menu_count_at  112
+value challenge_menu_cap       8
+value challenge_menu_entry     12
+value challenge_menu_kind      3
+value challenge_menu_slot      0
+value challenge_menu_caption   1921
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x002bd8d4 0xe30321aa 0xe340207e

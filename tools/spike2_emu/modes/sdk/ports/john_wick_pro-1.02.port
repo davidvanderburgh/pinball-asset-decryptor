@@ -617,3 +617,28 @@ text  wizard_film_1   a whole set of jobs, battles or multiballs
 data  wizard_obj_2    0x0068d4b0   # cmode_the_duel, a multiball
 text  wizard_name_2   The Duel
 text  wizard_film_2   the next whole set
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+data  game_play_modes     0x00686048   # the GamePlayModes singleton: the current game-play mode at +8
+value game_play_mode_at   8
+value challenge_mode_plain  1   # Standard: what a mode's challenge game plays
+value challenge_mode_0  4
+text  challenge_name_0  Red Circle Reckoning
+value challenge_name_msg_0  2898
+value challenge_mode_1  5
+text  challenge_name_1  The Staircase
+value challenge_name_msg_1  2900
+value challenge_mode_2  6
+text  challenge_name_2  The Duel
+value challenge_name_msg_2  2902
+value challenge_mode_3  7
+text  challenge_name_3  Special Assignment
+value challenge_name_msg_3  2904
+value challenge_mode_4  9
+text  challenge_name_4  Tick Tock Mr. Wick
+value challenge_name_msg_4  2896
+site  challenge_balls     0x003f5a94 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00155764 0xe30136c8 0xe3403069
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x002a8ccc 0xe307274a 0xe340206d

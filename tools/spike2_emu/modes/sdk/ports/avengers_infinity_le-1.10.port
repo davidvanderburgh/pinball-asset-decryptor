@@ -589,3 +589,22 @@ text  wizard_film_2   the Avengers assembled again
 data  wizard_obj_3    0x00722628   # cmode_battle_royale
 text  wizard_name_3   Black Order Battle Royale
 text  wizard_film_3   the Avengers assembled a third time
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x00753f6c
+value game_flags_at       4
+data  game_flag_count     0x005971a0
+value challenge_on_flag   18
+site  challenge_balls     0x00413a44 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00288c84 0xe30c31c4 0xe3403072
+site  challenge_menu      0x00027548 0xe1a05000 0xe3150080
+site  challenge_menu_pick 0x000275d4 0xe2433001 0xe3530006
+value challenge_menu_list_at   240
+value challenge_menu_count_at  64
+value challenge_menu_cap       8
+value challenge_menu_entry     12
+value challenge_menu_kind      3
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x002cba04 0xe308275a 0xe3402075

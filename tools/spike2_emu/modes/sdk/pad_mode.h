@@ -683,7 +683,7 @@ int pm_lit_claim(uint64_t shots);
 #define PM_CAN_STATUS_BAR   0x4000000u /* pm_status_bar */
 int pm_status_bar(const char *words, unsigned rgb, int percent);
 
-/* ---- the game's Challenge list (PAD-615; title specific: James Bond LE/Pro 1.06, Stranger Things) ------------
+/* ---- the game's Challenge list (PAD-615, PAD-619; title specific: Bond, Stranger Things, Rush, Sword of Rage) -
  * A Player Challenge game: the player picks one of the game's challenges as the game starts and plays it on one
  * ball, the game ending at that ball's end. A mode can CLAIM one of the challenges (slot 0.. in the order of the
  * game's menu; Bond: 0 Chaos at Crab Key, 1 Ahoy Mr. Bond, 2 Goldfinger's Jackpot, 3 Duel on the Disco Volante,
@@ -691,20 +691,20 @@ int pm_status_bar(const char *words, unsigned rgb, int percent);
  * challenge does not start and on_pick(slot) runs instead, on the game's thread, at the moment it would have
  * started. on_pick returns 1 when it took the pick (start your mode: pm_begin from the next tick) and 0 to let the
  * game's own run. The menu cannot grow: a mode takes a challenge's place, under that challenge's name. A claim
- * holds until released, game after game; one mode per challenge. */
+ * holds until released, game after game; one mode per challenge. A challenge game a mode takes is one ball. */
 #define PM_CAN_CHALLENGE    0x8000000u /* pm_challenge_claim */
 int pm_challenge_slots(void);                                        /* 0 when the port names no challenges */
 const char *pm_challenge_name(unsigned slot);                        /* "Ahoy Mr. Bond", or 0 */
 int pm_challenge_named(const char *name);                            /* its slot, any case, or -1 */
 int pm_challenge_claim(unsigned slot, int (*on_pick)(unsigned slot)); /* 1 = claimed */
 void pm_challenge_release(unsigned slot);             /* a challenge claimed, or one added below */
-/* The game's own start menu (Bond LE/Pro 1.06: CHOOSE YOUR MODE OF PLAY, both flipper buttons held in attract)
- * lists the challenges one entry at a time, CHALLENGE over the challenge's name. Where the port names that menu:
+/* The game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons held in attract; PAD-619: every build
+ * of Bond's generation) lists the challenges one entry at a time, CHALLENGE over the name. Where the port names it:
  * pm_challenge_title shows `words` (in capitals) in place of the name of a challenge the calling mode holds, and
  * pm_challenge_add puts a challenge of the mode's own in the menu, after the game's: picked, the game makes a
- * one-ball challenge game of it (to the game, challenge 0's - whose own start does not run) and on_pick(slot) runs
+ * one-ball challenge game of it (challenge 0's, whose own start does not run, or the plain one) and on_pick(slot) runs
  * at the ball's start, as for a claimed one. It returns the new one's slot (16 and
- * up; pm_challenge_name gives its words) or -1. The menu holds 9 entries (Bond: 7 of the game's), so only as many
+ * up; pm_challenge_name gives its words) or -1. The menu has room for a few (Bond: 9, 7 of them the game's): as many
  * as fit are shown; the rest are logged. */
 #define PM_CAN_CHALLENGE_MENU 0x0400u /* pm_challenge_title / pm_challenge_add */
 int pm_challenge_menu(void);                                         /* 1 = the start menu is ours to change */

@@ -199,3 +199,41 @@ text block_name_51      Neutrinos
 site block_start_53     0x00110450 0xe92d4010 0xe1a04000
 data block_obj_53       0x0060ff78
 text block_name_53      Test
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x006c7164
+value game_flags_at       4
+data  game_flag_count     0x004de2b0
+value challenge_on_flag   16
+site  challenge_balls     0x003e15e4 0xe92d4030 0xe1a05000
+site  challenge_balls_2   0x001e29f4 0xe92d4038 0xe1a04000
+site  challenge_extra_ball 0x003b07a4 0xe3043ab8 0xe340306c
+site  challenge_menu      0x000a8db4 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x000a9f30 0xe5132124 0xe5133134
+value challenge_menu_pick_back 308
+value challenge_menu_list_at   688
+value challenge_menu_count_at  56
+value challenge_menu_cap       13
+value challenge_menu_entry     24
+value challenge_menu_kind_at   4
+value challenge_menu_caption_at 8
+value challenge_menu_caption2_at 10
+value challenge_menu_name_at   12
+value challenge_menu_kind      0
+value challenge_menu_slot      -1
+value challenge_menu_sets_on   1
+value challenge_menu_caption   1901
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x00188b38 0xe30625c2 0xe3402061
+
+# ---- events: the framework's event bus (PAD-619), each seen firing in the emulator 2026-10-20 ----
+# The dispatch is 1.59's (cmp r0 ; push {r3,r4,r5,lr} ; bgt ; movw/movt the handler table ; ldr r4, [r3, r0, lsl #2]),
+# bounded at 0xbf where 1.59's is 0xcf, and these five ids are 1.59's less 4: a stock game on the rig (batch_r38, every
+# id 0x20-0x4f named) fired 0x49 and 0x21 once at its start, 0x30 at the ball's end, 0x23 then 0x24 after it, and 0x21
+# again at the next ball's start. 1.59's tilt ids (0xc8 / 0xc6) were not seen and are left out.
+site hook_dispatch    0x00183e08 0xe35000bf 0xe92d4038
+event game_start     0x49
+event ball_start     0x21
+event ball_end       0x30
+event bonus_start    0x23
+event bonus_end      0x24

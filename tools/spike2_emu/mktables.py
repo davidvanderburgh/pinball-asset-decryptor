@@ -218,6 +218,74 @@ def _recorded_reader(dest):
     return None
 
 
+def _recorded_source(dest):
+    """Whose ids `dest` holds (swtable.SOURCE_*), or None for a list written
+    before PAD-619 recorded it."""
+    try:
+        with open(dest) as f:
+            for line in f:
+                if not line.startswith("#"):
+                    return None            # past the header, nothing found
+                if line.startswith(swtable.SOURCE_TAG):
+                    return line[len(swtable.SOURCE_TAG):].strip()
+    except OSError:
+        return None
+    return None
+
+
+def _dump_over_binary(sw_list, game, elf, log_path, wait_s, say):
+    """Replace a cached list read out of the BINARY with this run's own dump.
+    True if it wrote one.
+
+    ★ THE BINARY'S NUMBERING IS NOT ALWAYS THE GAME'S (PAD-619, star_wars_le
+    1.30). Pass one has no run, so a title's first list is read out of the
+    binary (swelf); pass two found it "(cached)" and never looked at the dump
+    the same run printed seconds later - so that list stood for good. On 1.30
+    the static reader numbers the switches by their raw number less 513 and
+    the game indexes its own table in another order: 33 of 103 ids agreed,
+    LEFT FLIPPER BUTTON was 55 on disk and 59 in the game, Start and both
+    flipper buttons poked other switches, the trough feeder watched the wrong
+    six, and no game ever started on the rig. A dump, once seen, is the list;
+    a run with no dump says so in the header (SOURCE_BINARY_NO_DUMP) and later
+    runs stop waiting for one, taking it only if it is already there."""
+    src = _recorded_source(sw_list)
+    if src == swtable.SOURCE_DUMP or not log_path:
+        return False
+    if not switch_dump_complete(log_path):
+        if src == swtable.SOURCE_BINARY_NO_DUMP:
+            return False
+        wait_for_switches(log_path, wait_s,
+                          say=lambda m: say("  switches     %s" % m))
+    asked = _static_names_asked(sw_list, elf)
+    if not switch_dump_complete(log_path):
+        try:
+            _write(sw_list, swtable.text(game, _read_list(sw_list), elf, static_asked=asked,
+                                         source=swtable.SOURCE_BINARY_NO_DUMP))
+        except OSError as exc:
+            say("  switches     FAILED to mark %s: %s" % (sw_list, exc))
+            return False
+        say("  switches     (cached, read out of the binary; no dump from this run to check it by)")
+        return False
+    dump = swtable.read(log_path)
+    if not dump:
+        return False
+    wire = {r[0]: (r[2], r[3]) for r in _read_list(sw_list)}
+    moved = sum(1 for r in dump if wire.get(r[0]) != (r[2], r[3]))
+    filled, _report = swnames.fill(dump, game, elf, use_static=not asked)
+    try:
+        _write(sw_list, swtable.text(game, filled, elf, static_asked=True,
+                                     source=swtable.SOURCE_DUMP))
+    except OSError as exc:
+        say("  switches     FAILED to write %s: %s" % (sw_list, exc))
+        return False
+    if moved:
+        say("  switches     %d of %d ids moved: the list read out of the binary is "
+            "not the running game's numbering - replaced by the shim's dump" % (moved, len(dump)))
+    else:
+        say("  switches     the list read out of the binary matches the shim's dump")
+    return True
+
+
 def _stale_why(dest, source):
     """Why `dest` is not this binary's table by this reader - for the log."""
     was = _recorded_binary(dest)
@@ -488,7 +556,10 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     if wrong_build:
         say("  switches     cached list refused: %s - re-deriving it"
             % _stale_why(sw_list, elf))
-    if os.path.exists(sw_list) and not force and not wrong_build:
+    if (os.path.exists(sw_list) and not force and not wrong_build
+            and _dump_over_binary(sw_list, game, elf, log_path, wait_s, say)):
+        made["switch_list.txt"] = sw_list
+    elif os.path.exists(sw_list) and not force and not wrong_build:
         # ★ REPAIR A CACHED LIST WHOSE NAMES ARE STILL `?`. The dump branch
         # below used to write the shim's rows as-is, and on a title whose
         # message-table address resolves wrong (item 29) that is every name -
@@ -515,7 +586,9 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             if filled != rows or not asked:
                 try:
                     _write(sw_list, swtable.text(game, filled, elf,
-                                                 static_asked=True))
+                                                 static_asked=True,
+                                                 source=_recorded_source(sw_list)
+                                                 or swtable.SOURCE_BINARY))
                     repaired = filled != rows
                     made["switch_list.txt"] = sw_list
                     # "filled", not "from the device table": on a title whose
@@ -557,6 +630,7 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             if elf_rows:
                 live_rows = elf_rows
                 sw_src = "read out of the game's binary, no run needed"
+                sw_from = swtable.SOURCE_BINARY
             else:
                 say("  switches     no switch dump yet - clickable switches "
                     "will appear on the next run of this title")
@@ -564,6 +638,7 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
         else:
             live_rows = swtable.read(log_path)
             sw_src = "from the shim's dump"
+            sw_from = swtable.SOURCE_DUMP
             if not live_rows:
                 say("  switches     the dump is there but held no rows")
                 return made
@@ -596,7 +671,7 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             # table HAS been consulted for this binary and the next start must
             # not pay for it again.
             _write(sw_list, swtable.text(game, live_rows, elf,
-                                         static_asked=True))
+                                         static_asked=True, source=sw_from))
         except OSError as exc:
             say("  switches     FAILED to write %s: %s" % (sw_list, exc))
             say("  switches     (a root-owned tables dir from an old run? a "

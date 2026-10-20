@@ -606,3 +606,21 @@ data  wizard_obj_5    0x00675048   # ctatooine_mini, a multiball
 text  wizard_name_5   Escape from Tatooine
 text  wizard_film_5   every Tatooine mode
 text  wizard_shot      Left ramp
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+site  challenge_balls     0x002750b0 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x003d4130 0xe30a34a0 0xe3403070
+site  challenge_menu      0x0005fa64 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x0005fc38 0xe1a07000 0xe51330f0
+value challenge_menu_pick_back 240
+value challenge_menu_list_at   400
+value challenge_menu_count_at  68
+value challenge_menu_cap       4
+value challenge_menu_entry     16
+value challenge_menu_kind      0
+value challenge_menu_slot      -1
+value challenge_menu_sets_on   1
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x003abbc0 0xe3002c82 0xe3402070

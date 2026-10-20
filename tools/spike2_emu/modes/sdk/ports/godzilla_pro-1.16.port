@@ -769,3 +769,19 @@ text  wizard_film_2   Mechagodzilla Multiball's Super Jackpot
 data  wizard_obj_3    0x007a8af0   # cmode_planet_x_multiball, a multiball
 text  wizard_name_3   Planet X Multiball
 text  wizard_film_3   a battle, Tesla Strike and two attack multiballs
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x007b43f0
+value game_flags_at       4
+data  game_flag_count     0x005f0e00
+value challenge_on_flag   18
+value challenge_flag_0  40
+text  challenge_name_0  King of the Monsters
+value challenge_name_msg_0  3275
+value challenge_flag_1  41
+text  challenge_name_1  King of the Monsters Time Attack
+value challenge_name_msg_1  3276
+site  challenge_balls     0x00408324 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x0042de20 0xe3023290 0xe340307e
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x00373168 0xe30528ea 0xe340207e

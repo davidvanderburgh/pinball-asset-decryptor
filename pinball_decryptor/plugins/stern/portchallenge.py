@@ -126,7 +126,13 @@ def pretty(stem):
 
 
 def find(elf):
-    """(lines, notes): the port lines of `elf` (the game program's bytes or its path), and what was not found."""
+    """(lines, notes): the port lines of `elf` (the game program's bytes or its path), and what was not found.
+
+    PAD-619: two routes to a build's challenges. The named challenges' own ball-start handlers (Bond, Stranger
+    Things: the shape above) when every named challenge has one; otherwise the start menu's (:func:`menu_generic`):
+    each of its kinds that makes a challenge game with a flag of its own is a challenge, taken by its flag alone
+    (`value challenge_flag_<n>`, no site: the runtime clears the flag as the ball starts). A build whose menu has
+    no such kind (only the plain challenge game) still gets the menu lines: challenges of the modes' own."""
     e = Elf(elf)
     names = flag_names(e)
     if not names:
@@ -135,6 +141,151 @@ def find(elf):
         on_flag = names.index("FG_PLAYER_CHALLENGE_MODE_ACTIVE")
     except ValueError:
         return [], ["no FG_PLAYER_CHALLENGE_MODE_ACTIVE flag"]
+    lines, notes = _handler_route(e, names, on_flag)
+    menu = menu_lines(e) if lines else []                       # Bond's own menu code (PAD-615 round 2)
+    # PAD-630's end of the ball when the mode that took the pick ends - PAD-619: on every build that has it, not only
+    # the handler builds: a plain challenge game (Avengers, The Beatles, Led Zeppelin, Godzilla) re-serves every
+    # drain until its challenge ends the ball, so a mode's challenge game never ended without it
+    end_ball = end_ball_lines(e)
+    generic = None if menu else menu_generic(e, names, on_flag)
+    if not lines and generic and generic["named"]:
+        lines = ["value challenge_on_flag   %d" % on_flag]
+        for n, (kind, flag) in enumerate(generic["named"]):
+            stem = re.sub(r"^FG_|_ACTIVE$", "", names[flag])
+            lines += ["# %s: menu kind %d sets flags %d and %d" % (pretty(_short(stem)), kind, on_flag, flag),
+                      "value challenge_flag_%d  %d" % (n, flag),
+                      "text  challenge_name_%d  %s" % (n, pretty(_short(stem)))]
+    elif not lines and generic:
+        lines = ["value challenge_on_flag   %d" % on_flag]
+    if not lines and not generic:
+        lines = table_lines(e, names, on_flag)                  # PAD-619: Godzilla's game-mode table
+    if not lines and not generic:
+        lines = gpm_lines(e, names, on_flag)                    # PAD-619: the GamePlayModes index (Jaws, ...)
+    if not lines and not generic:
+        lines = adapter_lines(e, names, on_flag)                # PAD-619: the adapter's static tables (Venom)
+    if not lines and not generic and not menu:
+        wide = menu_wide(e, names, on_flag)                   # PAD-619: TMNT's wide-entry start menu
+        if wide:
+            lines, menu = ["value challenge_on_flag   %d" % on_flag], wide
+    if not lines and not generic and not menu:
+        live = menu_live(e, names, on_flag)                   # PAD-619: Foo Fighters' live-applied menu
+        if live:
+            lines, menu = ["value challenge_on_flag   %d" % on_flag], live
+    if not lines:
+        return [], notes or ["no challenge list and no start menu of the known shape"]
+    if generic:
+        menu = generic["lines"]
+    return flag_lines(e) + lines + balls_lines(e) + extra_ball_lines(e) + menu + end_ball, []
+
+
+def balls_lines(e):
+    """PAD-619: `site challenge_balls` - the framework's balls-per-game getter, one shape on every Spike 2 build:
+        push {r4, r5, lr} ; mov r5, r0 ; sub sp, sp, #12 ; mov r0, #<AD_BALLS_PER_GAME> ; bl <adjustment> ;
+        mov r4, r0 ; mov r0, r5 ; bl <...> ; cmp r0, #0 ...        (the setting, unless the game's mode says otherwise)
+    The runtime has it say 1 while a mode's challenge game runs. Empty when it is not there, or not once."""
+    from .adjustments import AdjustmentTable
+    try:
+        bpg = AdjustmentTable(e.d).by_name.get("AD_BALLS_PER_GAME")
+    except ValueError:
+        return []
+    if bpg is None:
+        return []
+    w, base = e.words, e.text_va
+    hits = [k for k in range(len(w) - 9) if w[k] == 0xE92D4030 and w[k + 1] == 0xE1A05000 and w[k + 2] == 0xE24DD00C
+            and w[k + 3] in mov_r0(bpg) and bl_target(base + 4 * k + 16, w[k + 4]) is not None
+            and w[k + 5] == 0xE1A04000 and w[k + 6] == 0xE1A00005
+            and bl_target(base + 4 * k + 28, w[k + 7]) is not None and w[k + 8] == 0xE3500000]
+    if len(hits) != 1:
+        return []
+    k = hits[0]
+    out = ["site  challenge_balls     0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
+    # PAD-619: the older builds' per-player sum of the setting and the next (push ; mov r4, r0 ; mov r1, r4 ; mov r0,
+    # #<bpg> ; bl ; mov r1, r4 ; mov r5, r0 ; mov r0, #<bpg + 1> ; bl ; add r0, r0, r5), what they end a game by
+    two = [j for j in range(len(w) - 9) if (w[j] & 0xFFFF0000) == 0xE92D0000 and w[j + 1] == 0xE1A04000
+           and w[j + 2] == 0xE1A01004 and w[j + 3] in mov_r0(bpg) and w[j + 5] == 0xE1A01004 and w[j + 6] == 0xE1A05000
+           and w[j + 7] in mov_r0(bpg + 1) and w[j + 9] == 0xE0800005]
+    if len(two) == 1:
+        j = two[0]
+        out.append("site  challenge_balls_2   0x%08x 0x%08x 0x%08x" % (base + 4 * j, w[j], w[j + 1]))
+    return out
+
+
+def extra_ball_lines(e):
+    """PAD-619: `site challenge_extra_ball` - the framework's take-an-extra-ball test, one shape on every Spike 2 build:
+        movw rX, <count> ; movt rX, <count> ; ldrb rY, [rX] ; adds r0, rY, #0 ; movne r0, #1 ; cmp r0, #0 ;
+        subne rY, rY, #1 ; strbne rY, [rX] ; bx lr
+    The ball's end asks it before the balls-per-game getter: an extra ball earned in a mode's challenge game (Star Wars
+    ELG 1.10) was played as a second ball. The runtime has it say 0 then. Empty when it is not there, or not once."""
+    w, base = e.words, e.text_va
+    hits = []
+    for k in range(len(w) - 9):
+        a, b, c = w[k], w[k + 1], w[k + 2]
+        rx = (a >> 12) & 0xF
+        if (a & 0xFFF00000) != 0xE3000000 or (b & 0xFFF00000) != 0xE3400000 or (b >> 12) & 0xF != rx \
+                or (c & 0xFFFF0FFF) != (0xE5D00000 | rx << 16):
+            continue
+        ry = (c >> 12) & 0xF
+        if w[k + 3:k + 9] == (0xE2900000 | ry << 16, 0x13A00001, 0xE3500000, 0x12400001 | ry << 16 | ry << 12,
+                              0x15C00000 | rx << 16 | ry << 12, 0xE12FFF1E):
+            hits.append(k)
+    if len(hits) != 1:
+        return []
+    k = hits[0]
+    return ["site  challenge_extra_ball 0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
+
+
+def _short(stem):
+    """A menu challenge's name from its flag's stem: CYGNUS_CHALLENGE_BOOK_1 -> CYGNUS_BOOK_1, RETRO_CHALLENGE ->
+    RETRO, 2112_CHALLENGE -> 2112."""
+    return re.sub(r"_+", "_", re.sub(r"(^|_)CHALLENGE(_|$)", "_", stem)).strip("_") or stem
+
+
+def flag_lines(e):
+    """PAD-619: the game's flag bitmap - `data game_flags` (the holder: the bitmap pointer at + game_flags_at) and
+    `data game_flag_count` (its size in bits) - read off the flag functions' one shape on every Spike 2 build:
+        cmp r0,#0 ; beq ; movw/movt r3,<count> ; ldr r3,[r3] ; cmp r0,r3 ; bhs ; movw r2,<holder> ; and r3,r0,#7 ;
+        movt r2,<holder> ; mov ip,#1 ; ldr r1,[r2,#4] ; ldrb r2,[r1,r0,asr #3] ; bic|orr r3,r2,ip,lsl r3 ...
+    Empty when it is not there, or not one holder."""
+    fl = flag_functions(e)
+    if not fl or fl["holder"] is None:
+        return []
+    return ["data  game_flags          0x%08x" % fl["holder"],
+            "value game_flags_at       4",
+            "data  game_flag_count     0x%08x" % fl["count"]]
+
+
+def flag_functions(e):
+    """{set, clear, holder, count} of the game's flag functions (see :func:`flag_lines`), or None."""
+    w, base = e.words, e.text_va
+    found, holders = {}, set()
+    for k in range(12, len(w) - 3):
+        if w[k] != 0xE5921004 or w[k + 1] != 0xE7D121C0:
+            continue
+        regs = {}
+        for j in range(k - 12, k):
+            x = w[j]
+            if x & 0x0FF00000 == 0x03000000:
+                regs[(x >> 12) & 0xF] = ((x >> 16) & 0xF) << 12 | (x & 0xFFF)
+            elif x & 0x0FF00000 == 0x03400000 and ((x >> 12) & 0xF) in regs:
+                r = (x >> 12) & 0xF
+                regs[r] = regs[r] | (((x >> 16) & 0xF) << 12 | (x & 0xFFF)) << 16
+                regs[("v", r)] = regs[r]
+        start = next((j for j in range(k - 1, k - 14, -1) if w[j] == 0xE3500000), None)
+        if start is None or ("v", 2) not in regs or ("v", 3) not in regs:
+            continue
+        kind = {0xE1C2331C: "clear", 0xE182331C: "set"}.get(w[k + 2])
+        if kind:
+            found[kind] = base + 4 * start
+            holders.add((regs[("v", 2)], regs[("v", 3)]))
+    if set(found) != {"set", "clear"} or len(holders) != 1:
+        return None
+    (holder, count), = holders
+    return dict(found, holder=holder, count=count)
+
+
+def _handler_route(e, names, on_flag):
+    """PAD-615's route: each named challenge's own ball-start handler. (lines, notes); lines empty unless every named
+    challenge has exactly one."""
     picks = [(i, CHALLENGE_FLAG.match(n).group(1)) for i, n in enumerate(names) if CHALLENGE_FLAG.match(n)]
     if not picks:
         return [], ["the build names no challenge (no FG_<name>_CHALLENGE flag)"]
@@ -168,7 +319,7 @@ def find(elf):
                   "text  challenge_name_%d  %s" % (n, pretty(stem))]
     if notes:
         return [], notes
-    return lines + end_ball_lines(e) + menu_lines(e), notes
+    return lines, notes
 
 
 #: PAD-630: the framework's "end this ball now" - what the game's own challenge endings call in a challenge game
@@ -191,6 +342,12 @@ def end_ball_lines(e):
                 q += 1
         if q == len(END_BALL_WORDS) and any(x & 0xFFFFF000 == 0xE92D4000 for x in body[:4]):
             at.append(k)
+    if len(at) > 1:
+        # PAD-619: more than one of that opening (Rush 1.19, Iron Maiden 1.18, TMNT, Venom, Mando, Foo Fighters): the
+        # end of the ball takes its argument in r4 (mov r4, r0) and turns the flippers off (mov r1, #0x1000 ; mov r0,
+        # #0 ; bl), as Bond's and Rush 1.18's do
+        at = [k for k in at if 0xE1A04000 in w[k + 2:k + 8]
+              and any(w[j] == 0xE3A01A01 and w[j + 1] == 0xE3A00000 for j in range(k, min(k + 40, len(w) - 1)))]
     if len(at) != 1:
         return []
     k = at[0]
@@ -249,6 +406,756 @@ def menu_lines(e):
             "value challenge_menu_cap       %d" % cap,
             "value challenge_menu_kind      3",
             "value challenge_menu_caption   %d" % ((cw >> 4 & 0xF000) | (cw & 0xFFF))]
+
+
+#: PAD-619: the start menu on the other builds of Bond's generation (Aerosmith, Avengers, Batman 66, The Beatles, Deadpool,
+#: Elvira, Guardians, Iron Maiden, JP The Pin, Led Zeppelin, The Munsters, Rush, Star Wars ELG, Stranger Things, Sword
+#: of Rage, their versions): the same function shape as Bond's - the list on the stack (12- or 16-byte entries {u32
+#: kind, u16 caption message, char *name, ...}), a loop that reads the buttons every frame and, whenever the
+#: selection is shown, jumps on its kind to set the game's mode flags:
+#:   every frame:     mov rX, r0 ; tst rX, #0x80                  (the buttons just read; 0x80 = Start)
+#:   the kind jump:   ldr r3, [r3, #-back] ; sub r3, r3, #1 ; cmp r3, #N ; ldrls pc, [pc, r3, lsl #2]
+PICK_LDR = 0xE5103000          # ldr r3, [r3, #-imm]  (mask 0xFFF0F000)
+
+
+def _pick_sites(e):
+    w = e.words
+    return [k for k in range(len(w) - 4) if (w[k] & 0xFFF0F000) == PICK_LDR and w[k + 1] == 0xE2433001
+            and (w[k + 2] & 0xFFFFFF00) == 0xE3530000 and w[k + 3] == 0x979FF103]
+
+
+def _chain_sites(e):
+    """PAD-619: the compare-chain pick (Star Wars' generation): ldr r3, [r3, #-back] after `add r3, sp, #T ; add
+    r3, r3, rC` (rC = cursor << 4), then cmp r3, #n ; beq - word indexes of the ldr."""
+    w = e.words
+    return [k for k in range(3, len(w) - 2) if (w[k] & 0xFFF0F000) == PICK_LDR and (w[k + 1] & 0xFFFFFF00) == 0xE3530000
+            and (w[k + 2] & 0xFF000000) == 0x0A000000 and (w[k - 3] & 0xFFFFF000) == 0xE28D3000
+            and (w[k - 2] & 0xFFFFFFF0) == 0xE0833000 and (w[k - 1] & 0x0E000010) == 0
+            and (w[k - 1] & 0xF000F) != 0xF000F]
+
+
+def _case_flags(e, va, r0, fl, limit=40):
+    """The flags one case of a kind jump sets (calls of the set function), following its branches until another
+    call (the shared tail's first) or a return. r0: what the code before the jump left in r0."""
+    w, base, out, seen = e.words, e.text_va, [], set()
+    for _ in range(limit):
+        k = (va - base) // 4
+        if va in seen or not 0 <= k < len(w):
+            break
+        seen.add(va)
+        x = w[k]
+        if x & 0x0FFF0000 == 0x03A00000 and x >> 28 == 0xE and (x >> 12) & 0xF == 0:
+            r0 = rot_imm(x & 0xFFF)
+        elif x & 0x0FF00000 == 0x03000000 and x >> 28 == 0xE and (x >> 12) & 0xF == 0:
+            r0 = ((x >> 16) & 0xF) << 12 | (x & 0xFFF)
+        t = bl_target(va, x)
+        if t is not None:
+            if t == fl["set"]:
+                out.append(r0)
+            elif t != fl["clear"]:
+                break
+            r0 = None
+        elif x & 0x0F000000 == 0x0A000000 and x >> 28 == 0xE:
+            off = x & 0xFFFFFF
+            va = va + 8 + 4 * (off - (1 << 24) if off & 0x800000 else off)
+            continue
+        elif (x & 0xFFFF0000) == 0xE8BD0000 or x == 0xE12FFF1E:
+            break
+        va += 4
+    return out
+
+
+def message_table(e):
+    """(va, count) of the game's message table: one pointer per message id to a record of five language strings,
+    found from the record of "CHOOSE YOUR MODE OF PLAY"; (None, 0) when not there."""
+    d, z = e.d, bytes(1)
+
+    def ok(off):
+        r = struct.unpack_from("<I", d, off)[0]
+        ro = e.off(r)
+        if ro is None:
+            return False
+        p = struct.unpack_from("<I", d, ro)[0]
+        po = e.off(p)
+        if po is None:
+            return False
+        end = d.find(z, po, po + 400)
+        return end >= 0 and all(32 <= c < 256 or c in (9, 10) for c in d[po:end])
+
+    i = d.find(z + b"CHOOSE YOUR MODE OF PLAY" + z)
+    if i < 0:
+        return None, 0
+    pk = struct.pack("<I", e.va(i + 1))
+    best = (None, 0)
+    rec = d.find(pk)
+    while rec >= 0:
+        if rec % 4 == 0:
+            pk2 = struct.pack("<I", e.va(rec))
+            a = d.find(pk2)
+            while a >= 0:
+                if a % 4 == 0:
+                    b = a
+                    while ok(b - 4):
+                        b -= 4
+                    n = 0
+                    while ok(b + 4 * n):
+                        n += 1
+                    if n > best[1]:
+                        best = (e.va(b), n)
+                a = d.find(pk2, a + 1)
+        rec = d.find(pk, rec + 1)
+    return best
+
+
+def message_text(e, table, i):
+    return e.cstr(e.word(e.word(table + 4 * i))) or ""
+
+
+def challenge_caption(e):
+    """The message id the start menu shows over a challenge (CHALLENGE; The Beatles: CHALLENGE MODE): the first after
+    CHOOSE YOUR MODE OF PLAY's."""
+    table, n = message_table(e)
+    if not table:
+        return None
+    head = next((i for i in range(n) if message_text(e, table, i) == "CHOOSE YOUR MODE OF PLAY"), None)
+    if head is None:
+        return None
+    return next((i for i in range(head, min(n, head + 40)) if message_text(e, table, i) in ("CHALLENGE", "CHALLENGE MODE")),
+                None)
+
+
+def menu_generic(e, names, on_flag):
+    """PAD-619: the start menu of a build of Bond's generation (see PICK_LDR). None when it is not there, else
+    {lines, named: [(kind, flag)], plain: kind or None}: the port lines, the kinds that make a challenge game with a
+    flag of their own (in kind order: challenge 0, 1, ..) and the kind of the plain one-ball challenge game."""
+    w, base = e.words, e.text_va
+    picks = _pick_sites(e)
+    fl = flag_functions(e)
+    chain = False
+    if not picks:
+        picks, chain = _chain_sites(e), True                    # PAD-619: Star Wars' compare chain
+    if len(picks) != 1 or not fl:
+        return None
+    k = picks[0]
+    back = w[k] & 0xFFF
+    pre = w[k - 8:k]
+    tops = [rot_imm(x & 0xFFF) for x in pre if (x & 0xFFFF0000) == 0xE28D0000]
+    if not tops:
+        return None
+    top = tops[-1]
+    list_at = top - back
+    entry = 16 if any((x & 0xFFFF0FF0) == 0xE1A00200 for x in pre) else 12        # mov rd, rm, lsl #4
+    frames = [j for j in range(max(0, k - 1500), k) if (w[j] & 0xFFFF0FFF) == 0xE1A00000
+              and (w[j + 1] & 0xFFF0FFFF) == 0xE3100080 and ((w[j] >> 12) & 0xF) == ((w[j + 1] >> 16) & 0xF)]
+    if not frames:
+        return None
+    fr = frames[-1]
+    # the count: the cursor's wrap past the last entry - ldr r3, [sp, #count] ; ... sub r3, r3, #1 ; cmp r3, <cursor>
+    count_at = next((w[j] & 0xFFF for j in range(fr, min(len(w) - 4, fr + 600)) if (w[j] & 0xFFFFF000) == 0xE59D3000
+                     and 0xE2433001 in w[j + 1:j + 4] and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[j + 2:j + 5])),
+                    None)
+    start = next((j for j in range(fr, max(0, fr - 3000), -1) if (w[j] & 0xFFFF4000) == 0xE92D4000), None)
+    count_reg = None
+    if count_at is None:
+        # PAD-619, Elvira 1.13: the count kept in a callee-saved register the whole loop - the cursor's wrap reads
+        # `sub r3, rN, #1 ; cmp r3, <cursor>`; the runtime then hooks the frame with every register saved
+        count_reg = next(((w[j] >> 16) & 0xF for j in range(fr, min(len(w) - 2, fr + 200))
+                          if (w[j] & 0xFFF0FFFF) == 0xE2403001 and 4 <= (w[j] >> 16) & 0xF <= 11
+                          and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[j + 1:j + 3])), None)
+    if (count_at is None and count_reg is None) or start is None:
+        return None
+    # the room: up to the first local object above the list the function hands a call (add r0, sp, #x ; bl)
+    above = [rot_imm(w[j] & 0xFFF) for j in range(start, k + 1500) if (w[j] & 0xFFFFF000) == 0xE28D0000
+             and bl_target(base + 4 * j + 4, w[j + 1]) is not None]
+    above = [a for a in above if list_at < a and a != top]
+    if not above:
+        return None
+    cap = (min(above) - list_at) // entry
+    # what each kind sets: r0 as the code before the jump left it
+    r0 = None
+    for j in range(k - 6, k):
+        x = w[j]
+        if x & 0x0FFF0000 == 0x03A00000 and x >> 28 == 0xE and (x >> 12) & 0xF == 0:
+            r0 = rot_imm(x & 0xFFF)
+    caption = challenge_caption(e)
+    if chain:
+        # no kind of this menu makes a challenge game (Star Wars LE/Pro 1.30/1.31: Standard, Tournament, Competition,
+        # DJ Mixer); ours become Standard's (0) at the pick, the runtime hands the ball to the mode. The hook sits a
+        # word early (`mov r7, r0 ; ldr r3, [r3, #-back]`: the cmp/beq after it cannot move) and reads the entry
+        # through r3.
+        if caption is None:
+            return None
+        lines = ["# the start menu (CHOOSE YOUR MODE OF PLAY): challenges of the modes' own - no kind of the game's "
+                 "makes a challenge game, so ours play as Standard (kind 0) and the runtime hands the ball to the mode",
+                 "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
+                 "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * (k - 1), w[k - 1], w[k]),
+                 "value challenge_menu_pick_back %d" % back,
+                 "value challenge_menu_list_at   %d" % list_at,
+                 "value challenge_menu_count_at  %d" % count_at,
+                 "value challenge_menu_cap       %d" % cap,
+                 "value challenge_menu_entry     %d" % entry,
+                 "value challenge_menu_kind      0",
+                 "value challenge_menu_slot      -1",
+                 "value challenge_menu_sets_on   1",
+                 "value challenge_menu_caption   %d" % caption]
+        return {"lines": lines, "named": [], "plain": None}
+    n = (w[k + 2] & 0xFF) + 1
+    named, plain = [], None
+    for i in range(n):
+        flags = _case_flags(e, e.word(base + 4 * (k + 5) + 4 * i), r0, fl)
+        if on_flag not in flags:
+            continue
+        own = [f for f in flags if f != on_flag and not names[f].startswith("FG_PLAYER_")]
+        if not own and len(flags) == 1 and plain is None:
+            plain = i + 1
+        elif len(own) == 1 and len(flags) == 2:
+            named.append((i + 1, own[0]))
+    if caption is None or (plain is None and not named):
+        return None
+    kind = plain if plain is not None else named[0][0]
+    lines = ["# the start menu (CHOOSE YOUR MODE OF PLAY): our names on the challenges modes take, and challenges of "
+             "their own - %s" % ("the plain challenge game (kind %d)" % plain if plain is not None
+                                 else "challenge 0's kind (%d), its own start stopped" % kind),
+             "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
+             "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * k + 4, w[k + 1], w[k + 2]),
+             "value challenge_menu_list_at   %d" % list_at,
+             ("value challenge_menu_count_at  %d" % count_at if count_at is not None
+              else "value challenge_menu_count_reg %d   # the count in r%d (Elvira)" % (count_reg, count_reg)),
+             "value challenge_menu_cap       %d" % cap,
+             "value challenge_menu_entry     %d" % entry,
+             "value challenge_menu_kind      %d" % kind,
+             "value challenge_menu_slot      %d" % (-1 if plain is not None else 0),
+             "value challenge_menu_caption   %d" % caption]
+    return {"lines": lines, "named": named, "plain": plain}
+
+
+#: PAD-619: Godzilla's game-mode table (Godzilla Pro 1.15 / 1.16, LE 1.16): 32-byte entries {u32 kind, u16 flag, u16
+#: flag2, u16 caption message, u16 name message, ...}, filled by one constructor, read by accessors of one shape:
+#:   cmp r1, #<last> ; movwls r3, <table> ; movtls r3, <table> ; addls r3, r3, r1, lsl #5 ; ldrhls r0, [r3, #4]
+#: An entry whose flag is the challenge game's and whose flag2 is set is a challenge, picked by flag2 (KOTM 40, Time
+#: Attack 41): taken by its flag alone as the ball starts, like Rush's.
+def table_lines(e, names, on_flag):
+    """The port lines of a game-mode table's challenges (see above), or []."""
+    w, base = e.words, e.text_va
+    tables = set()
+    for k in range(len(w) - 4):
+        x = w[k]
+        if x & 0xFFFFFF00 == 0xE3510000 and w[k + 1] & 0xFFF0F000 == 0x93003000 and w[k + 2] & 0xFFF0F000 == 0x93403000 \
+                and w[k + 3] == 0x90833281 and w[k + 4] == 0x91D300B4:
+            lo = ((w[k + 1] >> 16) & 0xF) << 12 | (w[k + 1] & 0xFFF)
+            hi = ((w[k + 2] >> 16) & 0xF) << 12 | (w[k + 2] & 0xFFF)
+            tables.add(((hi << 16) | lo, (x & 0xFF) + 1))
+    if len(tables) != 1:
+        return []
+    (tbl, n), = tables
+    entries = _table_entries(e, tbl, n)
+    if not entries:
+        return []
+    table, count = message_table(e)
+    lines, slot = [], 0
+    for i, (flag, flag2, name) in enumerate(entries):
+        if flag != on_flag or not flag2 or flag2 >= len(names) or names[flag2].startswith("FG_PLAYER_") and \
+                not names[flag2].endswith("_CHALLENGE") and not names[flag2].endswith("_CHALLENGE_MODE"):
+            continue
+        words = message_text(e, table, name) if table and name < count else ""
+        stem = re.sub(r"[^A-Z0-9]+", "_", words.upper()).strip("_") or re.sub(r"^FG_(PLAYER_)?", "", names[flag2])
+        lines += ["# entry %d of the game-mode table at 0x%08x: flags %d and %d" % (i, tbl, flag, flag2),
+                  "value challenge_flag_%d  %d" % (slot, flag2),
+                  "text  challenge_name_%d  %s" % (slot, pretty(_short(stem))),
+                  "value challenge_name_msg_%d  %d" % (slot, name)]     # where the start menu shows its name
+        slot += 1
+    return (["value challenge_on_flag   %d" % on_flag] + lines) if slot else []
+
+
+def _table_entries(e, tbl, n):
+    """[(flag, flag2, name message)] of the table's n entries, read off its constructor's stores: the function that
+    stores to tbl + 32 * i + 4 / 6 / 10 from immediates (mov/movw), the table in a register by movw/movt or a literal."""
+    w, base = e.words, e.text_va
+    for k in range(len(w) - 1):
+        x = w[k]
+        # the constructor names the table: movw/movt rX, tbl (or ldr rX, =tbl) followed by strh's through rX
+        reg = None
+        if x & 0x0FF00000 == 0x03000000 and (((x >> 16) & 0xF) << 12 | (x & 0xFFF)) == tbl & 0xFFFF:
+            for j in range(k + 1, min(k + 6, len(w))):
+                y = w[j]
+                if y & 0x0FF00000 == 0x03400000 and (y >> 12) & 0xF == (x >> 12) & 0xF \
+                        and (((y >> 16) & 0xF) << 12 | (y & 0xFFF)) == tbl >> 16:
+                    reg = (x >> 12) & 0xF
+                    break
+        elif x & 0xFFFF0000 == 0xE59F0000:
+            lit = base + 4 * k + 8 + (x & 0xFFF)
+            if e.off(lit) is not None and e.word(lit) == tbl:
+                reg = (x >> 12) & 0xF
+        if reg is None:
+            continue
+        regs, mem = {}, {}
+        for j in range(k, min(k + 600, len(w))):
+            y = w[j]
+            if y >> 28 != 0xE:
+                continue
+            rd = (y >> 12) & 0xF
+            if y & 0x0FFF0000 == 0x03A00000:
+                regs[rd] = rot_imm(y & 0xFFF)
+            elif y & 0x0FF00000 == 0x03000000:
+                regs[rd] = ((y >> 16) & 0xF) << 12 | (y & 0xFFF)
+            elif y & 0x0FFF0000 == 0x03E00000:
+                regs[rd] = ~rot_imm(y & 0xFFF) & 0xFFFFFFFF
+            elif y & 0x0FF000F0 == 0x01C000B0 and (y >> 16) & 0xF == reg:     # strh rd, [reg, #imm]
+                off = ((y >> 4) & 0xF0) | (y & 0xF)
+                if rd in regs:
+                    mem[off] = regs[rd] & 0xFFFF
+            elif (y & 0xFFFF0000) == 0xE8BD0000 or y == 0xE12FFF1E:
+                break
+        entries = [(mem.get(32 * i + 4), mem.get(32 * i + 6, 0), mem.get(32 * i + 10, 0)) for i in range(n)]
+        if sum(1 for f, _f2, _m in entries if f) >= 3:
+            return [(f or 0, f2, m) for f, f2, m in entries]
+    return []
+
+
+#: PAD-619: the GamePlayModes builds whose challenges set FG_PLAYER_CHALLENGE_MODE_ACTIVE alone (Jaws, John Wick,
+#: Metallica, King Kong, X-Men, Jurassic Park LE/Pro): the framework's singleton GamePlayModes (typeinfo
+#: `13GamePlayModes`) holds the current game-play mode's index at +8 (Jaws Pro 1.02: 0x855368, read by 0x5e9f0). The
+#: game's table of them (GamePlayModeAdapter's) is 28-byte entries {u32 index, u16 flag, u16 msg x3, u32 kind, u8 x2,
+#: std::string name at +20}, read by accessors of one shape:
+#:   cmp r1, #<last> ; rsbls r1, r1, r1, lsl #3 ; movwls r3, <tbl> ; movtls r3, <tbl> ; addls r1, r3, r1, lsl #2
+#: and filled by one constructor (read here by a small emulation of its stores). An entry whose flag is the challenge
+#: game's is a challenge, picked by its index; Standard's (the first sys_standard with no flag) is what a mode's
+#: challenge game plays instead.
+GPM_ENTRY = 28
+
+
+def _imm16(x):
+    return ((x >> 16) & 0xF) << 12 | (x & 0xFFF)
+
+
+def _lit(e, va, x):
+    """The word an `ldr rX, [pc, #+/-imm]` at va loads, or None (not one, or off the image)."""
+    if x & 0xFF7F0000 != 0xE51F0000:
+        return None
+    lit = va + 8 + ((x & 0xFFF) if x & 0x00800000 else -(x & 0xFFF))
+    return e.word(lit) if e.off(lit) is not None else None
+
+
+def _refs(d, v):
+    p, out = struct.pack("<I", v), []
+    i = d.find(p)
+    while i >= 0:
+        if i % 4 == 0:
+            out.append(i)
+        i = d.find(p, i + 1)
+    return out
+
+
+def _gpm_singleton(e):
+    """The GamePlayModes singleton's address, or None: its vtable (by the typeinfo name), the constructor that stores
+    that vptr, and the one movw/movt r0 + bl that constructor."""
+    d = e.d
+    i = d.find(b"\x0013GamePlayModes\x00")
+    if i < 0:
+        return None
+    name = e.va(i + 1)
+    vptrs = set()
+    for ti_off in _refs(d, name):
+        ti = e.va(ti_off) - 4
+        for vt_off in _refs(d, ti):
+            vptrs.add(e.va(vt_off) + 4)
+    w, base = e.words, e.text_va
+    ctors, lo = set(), {}
+    for k, x in enumerate(w):
+        hit = False
+        if x & 0x0FF00000 == 0x03000000:
+            lo[(x >> 12) & 0xF] = (k, _imm16(x))
+        elif x & 0x0FF00000 == 0x03400000 and (x >> 12) & 0xF in lo and k - lo[(x >> 12) & 0xF][0] < 8:
+            hit = (_imm16(x) << 16 | lo[(x >> 12) & 0xF][1]) in vptrs
+        elif x & 0xFF7F0000 == 0xE51F0000:
+            hit = _lit(e, base + 4 * k, x) in vptrs
+        if hit:
+            ctors.add(base + 4 * k)                          # the load may be its first instruction (Godzilla)
+            for j in range(k, max(k - 12, 0), -1):           # the function starts after the one before returns
+                if w[j - 1] == 0xE12FFF1E or w[j - 1] & 0xFFFF8000 == 0xE8BD8000:
+                    ctors.add(base + 4 * j)
+                    break
+    singles = set()
+    for k in range(2, len(w)):
+        if w[k] & 0x0F000000 == 0x0B000000 and bl_target(base + 4 * k, w[k]) in ctors:
+            a, b = w[k - 2], w[k - 1]
+            if a & 0xFFF0F000 == 0xE3000000 and b & 0xFFF0F000 == 0xE3400000 and (a >> 12) & 0xF == 0 \
+                    and (b >> 12) & 0xF == 0:
+                singles.add(_imm16(b) << 16 | _imm16(a))
+    return singles.pop() if len(singles) == 1 else None
+
+
+def _gpm_table(e):
+    """(table va, entries) of the GamePlayModeAdapter's table, by its accessors' one shape; (None, 0)."""
+    w, found = e.words, set()
+    for k in range(len(w) - 4):
+        if w[k] & 0xFFFFFF00 == 0xE3510000 and w[k + 1] == 0x90611181 and w[k + 2] & 0xFFF0F000 == 0x93003000 \
+                and w[k + 3] & 0xFFF0F000 == 0x93403000 and w[k + 4] == 0x90831101:
+            found.add((_imm16(w[k + 3]) << 16 | _imm16(w[k + 2]), (w[k] & 0xFF) + 1))
+    return found.pop() if len(found) == 1 else (None, 0)
+
+
+def _gpm_entries(e, tbl, n):
+    """{i: {"index", "flag", "msgs", "name"}} of the table, read off the constructor that loads tbl into a register:
+    its stores (str/strh/strb, immediate, register and post-indexed offsets) emulated from immediates, and its string
+    assignments (bl with r0 = an entry's name field, r1 = a C string)."""
+    w, base = e.words, e.text_va
+    for k in range(len(w) - 1):
+        x = w[k]
+        if x & 0xFF7F0000 == 0xE51F0000:                     # ldr rX, =tbl
+            if _lit(e, base + 4 * k, x) != tbl:
+                continue
+        elif not (x & 0xFFF00000 == 0xE3000000 and _imm16(x) == tbl & 0xFFFF and any(
+                z & 0xFFF00000 == 0xE3400000 and (z >> 12) & 0xF == (x >> 12) & 0xF and _imm16(z) == tbl >> 16
+                for z in w[k + 1:k + 4])):
+            continue
+        regs, mem, names = {}, {}, {}
+        for j in range(k, min(k + 1200, len(w))):
+            z = w[j]
+            if z >> 28 != 0xE:
+                continue
+            r_d, r_n = (z >> 12) & 0xF, (z >> 16) & 0xF
+            if z & 0x0FFF0000 == 0x03A00000:
+                regs[r_d] = rot_imm(z & 0xFFF)
+            elif z & 0x0FFF0000 == 0x03E00000:
+                regs[r_d] = ~rot_imm(z & 0xFFF) & 0xFFFFFFFF
+            elif z & 0x0FF00000 == 0x03000000:
+                regs[r_d] = _imm16(z)
+            elif z & 0x0FF00000 == 0x03400000:
+                regs[r_d] = (regs[r_d] & 0xFFFF) | _imm16(z) << 16 if regs.get(r_d) is not None else None
+            elif z & 0x0FE00000 == 0x02800000:                                                 # add rd, rn, #imm
+                regs[r_d] = (regs[r_n] + rot_imm(z & 0xFFF)) & 0xFFFFFFFF if regs.get(r_n) is not None else None
+            elif z & 0x0FE00000 == 0x02400000:                                                 # sub rd, rn, #imm
+                regs[r_d] = (regs[r_n] - rot_imm(z & 0xFFF)) & 0xFFFFFFFF if regs.get(r_n) is not None else None
+            elif z & 0x0FFF0FF0 == 0x01A00000:                                                 # mov rd, rm
+                regs[r_d] = regs.get(z & 0xF)
+            elif z & 0xFF7F0000 == 0xE51F0000:
+                regs[r_d] = _lit(e, base + 4 * j, z)
+            elif z & 0x0F000000 == 0x0B000000:                                                 # bl
+                a0, a1 = regs.get(0), regs.get(1)
+                if a0 is not None and a1 is not None and tbl <= a0 < tbl + GPM_ENTRY * n:
+                    c = e.cstr(a1)
+                    if c:
+                        names[(a0 - tbl) // GPM_ENTRY] = c
+                for r in (0, 1, 2, 3, 12, 14):
+                    regs.pop(r, None)
+            elif (z & 0xFFFF0000) == 0xE8BD0000 or z == 0xE12FFF1E:
+                break
+            else:
+                addr, size = None, None
+                if z & 0x0E100000 == 0x04000000 and z & 0x01000000 and regs.get(r_n) is not None:   # str/strb imm
+                    off = z & 0xFFF
+                    addr = regs[r_n] + (off if z & 0x00800000 else -off)
+                    size = 1 if z & 0x00400000 else 4
+                elif z & 0x0E1000F0 == 0x000000B0 and regs.get(r_n) is not None:                  # strh
+                    off = ((z >> 4) & 0xF0) | (z & 0xF) if z & 0x00400000 else regs.get(z & 0xF)
+                    if off is not None:
+                        size = 2
+                        if z & 0x01000000:
+                            addr = regs[r_n] + (off if z & 0x00800000 else -off)
+                        else:                                                   # post-indexed: rn, then rn += off
+                            addr = regs[r_n]
+                            regs[r_n] = regs[r_n] + (off if z & 0x00800000 else -off)
+                if addr is not None:
+                    v = regs.get(r_d)
+                    if v is not None:
+                        mem[addr] = v & ((1 << 8 * size) - 1)
+                    else:
+                        mem.pop(addr, None)
+        if sum(1 for v in names.values() if v) < 3:
+            continue
+        out = {}
+        for i in range(n):
+            a = tbl + GPM_ENTRY * i
+            out[i] = {"index": mem.get(a), "flag": mem.get(a + 4),
+                      "msgs": tuple(mem.get(a + o) for o in (6, 8, 10)), "name": names.get(i, "")}
+        return out
+    return {}
+
+
+def gpm_lines(e, names, on_flag, debug=False):
+    """The port lines of a GamePlayModes build's challenges (see above), or []."""
+    single = _gpm_singleton(e)
+    tbl, n = _gpm_table(e)
+    if not single or not tbl:
+        return ["no singleton (%s) or table (%s)" % (single, tbl)] if debug else []
+    entries = _gpm_entries(e, tbl, n)
+    table, count = message_table(e)
+
+    def text(m):
+        return message_text(e, table, m) if table and m is not None and m < count else ""
+    if debug:
+        out = ["singleton 0x%x table 0x%x n %d" % (single, tbl, n)]
+        for i, v in sorted(entries.items()):
+            out.append("%2d idx %s flag %s %s msgs %s" % (i, v["index"], v["flag"], v["name"],
+                                                          [(m, text(m)) for m in v["msgs"]]))
+        return out
+    plain = next((i for i, v in sorted(entries.items()) if v["name"] == "sys_standard" and not v["flag"]), None)
+    if plain is None:
+        return []
+    lines, slot = [], 0
+    for i, v in sorted(entries.items()):
+        if v["flag"] != on_flag or v["index"] != i or v["name"].endswith("_test"):     # Jaws: a video-mode test
+            continue
+        msg = v["msgs"][0]
+        stem = re.sub(r"[^A-Z0-9]+", "_", text(msg).upper()).strip("_") \
+            or re.sub(r"^[a-z]+_(cm_)?", "", v["name"]).upper()
+        lines += ["# entry %d of the game-play-mode table at 0x%08x (%s): flag %d alone - picked by its index"
+                  % (i, tbl, v["name"], on_flag),
+                  "value challenge_mode_%d  %d" % (slot, i),
+                  "text  challenge_name_%d  %s" % (slot, pretty(_short(stem)))]
+        if msg:
+            lines.append("value challenge_name_msg_%d  %d" % (slot, msg))
+        slot += 1
+    if not slot:
+        return []
+    return ["value challenge_on_flag   %d" % on_flag,
+            "data  game_play_modes     0x%08x   # the GamePlayModes singleton: the current game-play mode at +8" % single,
+            "value game_play_mode_at   8",
+            "value challenge_mode_plain  %d   # Standard: what a mode's challenge game plays" % plain] + lines
+
+
+#: PAD-619: Venom's GamePlayModeAdapter keeps no table of objects: the current game-play mode is a plain global (the
+#: adapter's second method: movw/movt r3, <cur>; ldr r0, [r3, #<at>]; bx lr), and each mode's flag and name message
+#: are u16 arrays in the game's read-only data, read by the adapter's methods:
+#:   flag: sub r1, r1, #1 ; cmp r1, #<last> ; lslls r1, r1, #1 ; movwls/movtls r3, <arr> ; ldrhls r0, [r3, r1]
+#:   name: sub r2, r2, #1 ; cmp r2, #<last> ; push ; movwls/movtls r3, <arr> ; addls r3, r3, r2, lsl #1 ; ...
+#:         ldrhls r0, [r3, #<off>]
+#: (modes from 1; 0 is Standard, what the adapter's reset stores). Venom Pro/LE 1.07: Challenge Mode Low / Medium /
+#: High (Defeat Knull) are modes 11-13, flag 18 alone.
+def _adapter_vtable(e):
+    d = e.d
+    i = d.find(b"\x0019GamePlayModeAdapter\x00")
+    if i < 0:
+        return None
+    name = e.va(i + 1)
+    vts = [e.va(o) + 4 for ti in (e.va(o) - 4 for o in _refs(d, name)) for o in _refs(d, ti)]
+    return vts[0] if len(vts) == 1 else None
+
+
+def adapter_lines(e, names, on_flag):
+    """The port lines of a static-table GamePlayModeAdapter's challenges (see above), or []."""
+    vt = _adapter_vtable(e)
+    if not vt:
+        return []
+    fns = []
+    for j in range(16):
+        f = e.word(vt + 4 * j)
+        if not f or e.off(f) is None:
+            break
+        fns.append(f)
+    if len(fns) < 9:
+        return []
+
+    def words(va, n):
+        return [e.word(va + 4 * k) for k in range(n)]
+    a, b, c, r = words(fns[1], 4)
+    if not (a & 0xFFF0F000 == 0xE3003000 and b & 0xFFF0F000 == 0xE3403000 and c & 0xFFFFF000 == 0xE5930000
+            and r == 0xE12FFF1E):
+        return []
+    cur, at = _imm16(b) << 16 | _imm16(a), c & 0xFFF
+    flags = msgs = None
+    for f in fns:
+        w = words(f, 12)
+        if w[0] == 0xE2411001 and w[1] & 0xFFFFFF00 == 0xE3510000 and w[2] == 0x91A01081 \
+                and w[3] & 0xFFF0F000 == 0x93003000 and w[4] & 0xFFF0F000 == 0x93403000 and w[5] == 0x919300B1:
+            flags = (_imm16(w[4]) << 16 | _imm16(w[3]), (w[1] & 0xFF) + 1)
+        if w[0] == 0xE2422001 and w[1] & 0xFFFFFF00 == 0xE3520000 and msgs is None:
+            arr = None
+            for k in range(2, 10):
+                if w[k] & 0xFFF0F000 == 0x93003000 and w[k + 1] & 0xFFF0F000 == 0x93403000:
+                    arr = _imm16(w[k + 1]) << 16 | _imm16(w[k])
+                if arr and w[k] & 0xFFF000F0 == 0x91D000B0:                    # ldrhls r0, [r3, #off]
+                    msgs = arr + (((w[k] >> 4) & 0xF0) | (w[k] & 0xF))
+                    break
+    if not flags:
+        return []
+    arr, n = flags
+    table, count = message_table(e)
+    lines, slot = [], 0
+    for i in range(1, n + 1):
+        flag = struct.unpack_from("<H", e.d, e.off(arr + 2 * (i - 1)))[0]
+        if flag != on_flag:
+            continue
+        msg = struct.unpack_from("<H", e.d, e.off(msgs + 2 * (i - 1)))[0] if msgs else 0
+        words_ = message_text(e, table, msg) if table and msg and msg < count else ""
+        stem = re.sub(r"[^A-Z0-9]+", "_", words_.upper()).strip("_") or "CHALLENGE_%d" % i
+        lines += ["# game-play mode %d (the adapter's flag table at 0x%08x): flag %d alone - picked by its index"
+                  % (i, arr, on_flag),
+                  "value challenge_mode_%d  %d" % (slot, i),
+                  "text  challenge_name_%d  %s" % (slot, pretty(stem))]
+        if msg:
+            lines.append("value challenge_name_msg_%d  %d" % (slot, msg))
+        slot += 1
+    if not slot:
+        return []
+    return ["value challenge_on_flag   %d" % on_flag,
+            "data  game_play_modes     0x%08x   # the adapter's current game-play mode" % cur,
+            "value game_play_mode_at   %d" % at,
+            "value challenge_mode_plain  0   # Standard (what the adapter's reset stores)"] + lines
+
+
+#: PAD-619: TMNT's start menu (TMNT LE/Pro 1.58/1.59): Bond's shape with its fields moved - 24-byte entries
+#: {+0 u8, +4 kind, +8 / +0xa caption message, +0xc char *name, +0x14 u32 ...}, the kind jump a few words after the kind
+#: load (`ldr r3, [r3, #-back] ; cmp r0, r2 ; bhi ; sub r3, r3, #1 ; cmp r3, #N ; ldrls pc, [pc, r3, lsl #2]`), the count
+#: wrapped through another register (`ldr r3, [sp, #count] ; ... sub r6, r3, #1 ; cmp r6, <cursor>`). Its plain
+#: challenge kind is FINAL BATTLE CHALLENGE's (11: flag 18 alone).
+def menu_wide(e, names, on_flag):
+    """The port lines of a wide-entry start menu (see above), or None."""
+    w, base = e.words, e.text_va
+    fl = flag_functions(e)
+    if not fl:
+        return None
+    sites = []
+    for k in range(8, len(w) - 8):
+        if (w[k] & 0xFFF0F000) != PICK_LDR:
+            continue
+        for j in range(k + 2, k + 6):
+            if w[j] == 0xE2433001 and (w[j + 1] & 0xFFFFFF00) == 0xE3530000 and w[j + 2] == 0x979FF103:
+                sites.append((k, j))
+                break
+    if len(sites) != 1:
+        return None
+    k, j = sites[0]
+    back = w[k] & 0xFFF
+    if (w[k - 1] & 0x0F0F0000) == 0x050F0000 or (w[k - 1] & 0x0F000000) in (0x0A000000, 0x0B000000)             or (w[k - 1] >> 16) & 0xF == 15:
+        return None                                                 # a pc-relative word cannot move
+    pre = w[k - 6:k]
+    tops = [rot_imm(x & 0xFFF) for x in pre if (x & 0xFFFF0000) == 0xE28D0000]
+    wide = any((x & 0x0FF00FF0) == 0x00800180 and x >> 28 == 0xE for x in pre)   # (cursor * 3) lsl #3: 24 bytes
+    if not tops or not wide:
+        return None
+    es, kind_addr = 24, tops[-1] - back
+    frames = [i for i in range(max(0, k - 6000), k) if (w[i] & 0xFFFF0FFF) == 0xE1A00000
+              and (w[i + 1] & 0xFFF0FFFF) == 0xE3100080 and ((w[i] >> 12) & 0xF) == ((w[i + 1] >> 16) & 0xF)]
+    if not frames:
+        return None
+    fr = frames[-1]
+    start = next((i for i in range(fr, max(0, fr - 6000), -1) if (w[i] & 0xFFFF4000) == 0xE92D4000), None)
+    if start is None:
+        return None
+    # the entry's start: the builder's own base (add rX, sp, #B) just below the kind - the kind is B's +kat
+    bases = [rot_imm(w[i] & 0xFFF) for i in range(start, fr) if (w[i] & 0xFFFF0000) == 0xE28D0000]
+    bases = [b_ for b_ in bases if kind_addr - es < b_ < kind_addr]
+    if not bases:
+        return None
+    list_at = max(bases)
+    kat = kind_addr - list_at
+    count_at = next((w[i] & 0xFFF for i in range(fr, min(len(w) - 4, fr + 600)) if (w[i] & 0xFFFFF000) == 0xE59D3000
+                     and any((x & 0xFFFF0FFF) == 0xE2430001 for x in w[i + 1:i + 4])
+                     and any((x & 0xFFF0FFF0) == 0xE1500000 for x in w[i + 2:i + 5])), None)
+    if count_at is None:
+        return None
+    above = [rot_imm(w[i] & 0xFFF) for i in range(start, k + 1500) if (w[i] & 0xFFFFF000) == 0xE28D0000
+             and bl_target(base + 4 * i + 4, w[i + 1]) is not None]
+    # the room: up to the first local above the list handed to a call, else the base the function indexes the list
+    # down from (TMNT: sp+0x430, 14 entries of 24)
+    above = [a for a in above if list_at + es <= a and a != tops[-1]] + [tops[-1]]
+    cap = (min(above) - list_at) // es
+    n = (w[j + 1] & 0xFF) + 1
+    plain = None
+    for i in range(n):
+        flags = _case_flags(e, e.word(base + 4 * (j + 4) + 4 * i), None, fl)
+        if on_flag in flags and len(flags) == 1 and plain is None:
+            plain = i + 1
+    caption = challenge_caption(e)
+    if plain is None or caption is None:
+        return None
+    # PAD-619: ours play as STANDARD, not as the plain challenge's kind: TMNT's challenges are locked until a player has
+    # unlocked them ("PLAY AS ALL FOUR TURTLES TO UNLOCK"), and Start on a locked kind clears the challenge flags and
+    # plays Standard - the game's own pick did too, on the rig. The ball's start hands the game to the mode instead.
+    return ["# the start menu (CHOOSE YOUR MODE OF PLAY), TMNT's wide entries: challenges of the modes' own - played as "
+            "Standard (0), the plain challenge game (kind %d) being locked until a player unlocks it" % plain,
+            "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
+            # hooked a word before the kind's load, where r3 still points into the entry: the Start that follows
+            # re-reads the kind from the entry itself, so ours is made the plain kind there (as on Star Wars)
+            "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * (k - 1), w[k - 1], w[k]),
+            "value challenge_menu_pick_back %d" % back,
+            "value challenge_menu_list_at   %d" % list_at,
+            "value challenge_menu_count_at  %d" % count_at,
+            "value challenge_menu_cap       %d" % cap,
+            "value challenge_menu_entry     %d" % es,
+            "value challenge_menu_kind_at   %d" % kat,
+            "value challenge_menu_caption_at %d" % (kat + 4),
+            "value challenge_menu_caption2_at %d" % (kat + 6),
+            "value challenge_menu_name_at   %d" % (kat + 8),
+            "value challenge_menu_kind      0",
+            "value challenge_menu_slot      -1",
+            "value challenge_menu_sets_on   1",
+            "value challenge_menu_caption   %d" % caption]
+
+
+#: PAD-619: Foo Fighters LE/Pro 1.04's start menu applies the hovered entry live, every frame, from the frame's own load
+#: of its kind: `add r3, sp, #T ; ... ; add r3, r3, <cursor>, lsl #4 ; ldr r3, [r3, #-back] ; cmp r3, #0 ; bne` (0 =
+#: Standard; any other kind sets the game's mode there), and Start only leaves the menu. No kind of it makes a challenge
+#: game, so ours play as Standard: the pick is hooked on that load (r3 points into the entry) and ours becomes kind 0.
+def menu_live(e, names, on_flag):
+    """The port lines of a live-applied start menu (see above), or None."""
+    w, base = e.words, e.text_va
+    frames = [i for i in range(len(w) - 2) if (w[i] & 0xFFFF0FFF) == 0xE1A00000 and (w[i + 1] & 0xFFF0FFFF) == 0xE3100080
+              and ((w[i] >> 12) & 0xF) == ((w[i + 1] >> 16) & 0xF)]
+    # ... or the buttons through the stack (Mando: str r0, [sp, #x] ; ldr r3, [sp, #x] ; tst r3, #0x80)
+    frames += [i for i in range(len(w) - 3) if (w[i] & 0xFFFFF000) == 0xE58D0000
+               and w[i + 1] == (0xE59D3000 | (w[i] & 0xFFF)) and w[i + 2] == 0xE3130080]
+    # ... or kept in a register tested later, the cursor in a register too (Mando LE 1.44: mov r8, r0 ; ... ;
+    # ldrb sb, [r3, #-0xc8] ; cmp sb, #0 ; bne - and `tst r8, #0x80` at the loop's foot)
+    frames += [i for i in range(len(w) - 8) if (w[i] & 0xFFFF0FFF) == 0xE1A00000 and ((w[i] >> 12) & 0xF) > 3
+               and any((x & 0xFFF00000) == 0xE5500000 and (x >> 16) & 0xF == 3 for x in w[i + 1:i + 4])
+               and (0xE3100080 | ((w[i] >> 12) & 0xF) << 16) in w[i + 2:i + 1500]]
+    hits = []
+    for fr in sorted(set(frames)):
+        for k in range(fr + 1, fr + 14):
+            rd = (w[k] >> 12) & 0xF
+            if ((w[k] & 0xFFF0F000) == PICK_LDR or (w[k] & 0xFFF00000) == 0xE5500000) and (w[k] >> 16) & 0xF == 3 \
+                    and w[k + 1] == 0xE3500000 | rd << 16 and (w[k + 2] & 0xFF000000) == 0x1A000000:
+                five = lambda xs: any(                                         # cursor * 5: r + r lsl 2, or
+                    (x & 0x0FF00FF0) == 0x00800100 and (x >> 16) & 0xF == x & 0xF for x in xs) or any(
+                    (a & 0xFFFF0FF0) == 0xE1A00100 and (b & 0xFFF00000) == 0xE0800000          # lsl rA, rB, #2 ;
+                    and (b >> 16) & 0xF == (a >> 12) & 0xF and b & 0xF == a & 0xF and not b & 0xFF0  # add rD, rA, rB
+                    for j, a in enumerate(xs) for b in xs[j + 1:])
+                if (w[k - 1] & 0xFFFFFFF0) == 0xE0833200:                       # add r3, r3, rC, lsl #4: 16 bytes
+                    es = 16
+                elif (w[k - 1] & 0xFFF0FFFF) == 0xE0803103 and five(w[k - 6:k - 1]):   # add r3, rB, r3, lsl #2
+                    es = 20                                                    # r3 = cursor * 5: 20 bytes (Mando)
+                else:
+                    continue
+                tops = [rot_imm(x & 0xFFF) for x in w[k - 5:k - 1] if (x & 0xFFFF0000) == 0xE28D0000]
+                if tops:
+                    hits.append((fr, k, tops[-1] - (w[k] & 0xFFF), w[k] & 0xFFF, tops[-1], es))
+                break
+    if len(hits) != 1:
+        return None
+    fr, k, list_at, back, top, es = hits[0]
+    # the count, as the right button wraps (ldr r3, [sp, #x] ; sub r3, r3, #1 ; cmp r3, rC): after the frame, or - where the
+    # buttons are read at the loop's foot (Mando LE 1.44) - before it
+    count_at = next((w[i] & 0xFFF for i in list(range(fr, min(len(w) - 4, fr + 600))) + list(range(fr - 1, max(0, fr - 600), -1))
+                     if (w[i] & 0xFFFFF000) == 0xE59D3000
+                     and 0xE2433001 in w[i + 1:i + 4] and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[i + 2:i + 5])),
+                    None)
+    start = next((i for i in range(fr, max(0, fr - 6000), -1) if (w[i] & 0xFFFF4000) == 0xE92D4000), None)
+    caption = challenge_caption(e)
+    if count_at is None or start is None or caption is None:
+        return None
+    above = [rot_imm(w[i] & 0xFFF) for i in range(start, k + 1500) if (w[i] & 0xFFFFF000) == 0xE28D0000
+             and bl_target(base + 4 * i + 4, w[i + 1]) is not None]
+    above = [a for a in above if list_at + es <= a and a != top] + [top]
+    cap = (min(above) - list_at) // es
+    if cap < 2:
+        return None
+    return ["# the start menu (CHOOSE YOUR MODE OF PLAY), applied live as an entry is shown: challenges of the modes' own "
+            "- no kind of the game's makes a challenge game, so ours play as Standard (0) and the runtime hands the ball "
+            "to the mode",
+            "site  challenge_menu      0x%08x 0x%08x 0x%08x" % (base + 4 * fr, w[fr], w[fr + 1]),
+            "site  challenge_menu_pick 0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1]),
+            "value challenge_menu_pick_back %d" % back,
+            "value challenge_menu_list_at   %d" % list_at,
+            "value challenge_menu_count_at  %d" % count_at,
+            "value challenge_menu_cap       %d" % cap,
+            "value challenge_menu_entry     %d" % es,
+            "value challenge_menu_kind      0",
+            "value challenge_menu_slot      -1",
+            "value challenge_menu_sets_on   1",
+            "value challenge_menu_caption   %d" % caption]
 
 
 def missing_from(lines, port_text):

@@ -689,3 +689,25 @@ text  wizard_film_1   all six multiballs started
 data  wizard_obj_2    0x0b647eb8   # cmode_cygnus_book_2_multiball, a multiball
 text  wizard_name_2   Cygnus X-1 Book 2
 text  wizard_film_2   all six planet modes
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+value challenge_on_flag   18
+value challenge_flag_0  29
+text  challenge_name_0  Cygnus Book 1
+value challenge_flag_1  30
+text  challenge_name_1  Cygnus Book 2
+value challenge_flag_2  31
+text  challenge_name_2  2112
+site  challenge_balls     0x0031c194 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x0023ff98 0xe3073894 0xe3403b65
+site  challenge_menu      0x000d6d24 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x000d6e88 0xe2433001 0xe3530006
+value challenge_menu_list_at   288
+value challenge_menu_count_at  68
+value challenge_menu_cap       8
+value challenge_menu_entry     16
+value challenge_menu_kind      5
+value challenge_menu_slot      0
+value challenge_menu_caption   1921
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x003c6198 0xe3042b5a 0xe3402b66

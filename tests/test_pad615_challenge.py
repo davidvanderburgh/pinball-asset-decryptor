@@ -34,7 +34,8 @@ PORTS = {"james_bond_le-1.06": BOND, "james_bond_pro-1.06": BOND, "stranger_thin
 
 LE = MP.profile_from_port(str(SDK / "ports" / "james_bond_le-1.06.port"))
 STP = MP.profile_from_port(str(SDK / "ports" / "stranger_things-1.13.port"))
-GZ = MP.profile_from_port(str(SDK / "ports" / "godzilla_le-1.16.port"))
+BARE = MP.profile_from_port(str(SDK / "ports" / "king_kong_pro-0.97.port"))   # PAD-619: no challenge in its game modes
+GZP = MP.profile_from_port(str(SDK / "ports" / "godzilla_pro-1.16.port"))    # PAD-619: challenges by flag, no menu of ours
 UNPROVEN = replace(LE, key="james_bond_le_1_06_challengenot", challenges=(),
                    cannot=tuple(LE.cannot) + MP._challenge_cannot(
                        "james_bond_le-9.99", LE.label, MP.read_port(str(SDK / "ports" / "james_bond_le-1.06.port"))))
@@ -42,7 +43,7 @@ UNPROVEN = replace(LE, key="james_bond_le_1_06_challengenot", challenges=(),
 
 @pytest.fixture(autouse=True)
 def _titles(monkeypatch):
-    for p in (LE, STP, GZ, UNPROVEN):
+    for p in (LE, STP, BARE, UNPROVEN):
         monkeypatch.setitem(MP.PROFILES, p.key, p)
 
 
@@ -159,11 +160,11 @@ def test_each_port_names_its_challenges_in_order(key):
 def test_the_named_builds_can_and_the_others_say_why_not():
     assert LE.can("challenge") and LE.challenges == BOND
     assert STP.can("challenge") and STP.challenges == ST
-    assert not GZ.can("challenge") and GZ.challenges == ()
-    assert GZ.why_not("challenge") == ("Godzilla Premium/LE 1.16's Player Challenge mode has no list of challenges a "
-                                       "mode of yours can take a place in.")
+    assert not BARE.can("challenge") and BARE.challenges == ()
+    assert BARE.why_not("challenge") == ("King Kong Pro 0.97's Player Challenge mode has no list of challenges a "
+                                       "mode of yours can take a place in, and no start menu the app can add one to.")
     assert "has not yet seen a mode of yours start from one in the emulator" in UNPROVEN.why_not("challenge")
-    assert not MP.GODZILLA_PRO_1_15.can("challenge")
+    assert MP.GODZILLA_PRO_1_15.can("challenge")                         # PAD-619: King of the Monsters, by its flag
 
 
 def test_every_shipped_build_gets_a_verdict_with_the_game_named():
@@ -172,9 +173,11 @@ def test_every_shipped_build_gets_a_verdict_with_the_game_named():
         if "%s-%s" % (p.game_dir, p.version) in MP.CHALLENGE_PROVEN:
             assert p.can("challenge") and p.challenges, key
             seen.add("%s-%s" % (p.game_dir, p.version))
+        elif "%s-%s" % (p.game_dir, p.version) in MP.CHALLENGE_MENU_PROVEN:    # PAD-619: only its own, on the menu
+            assert p.can("challenge") and p.challenge_menu and not p.challenges, key
         else:
             assert not p.can("challenge") and p.label in p.why_not("challenge"), key
-    assert seen == set(MP.CHALLENGE_PROVEN) == set(PORTS)
+    assert seen == set(MP.CHALLENGE_PROVEN) >= set(PORTS)          # PAD-619: + the flag route's (Rush, ..)
 
 
 # ---- the mode file, from the form ----------------------------------------------------------
@@ -205,8 +208,8 @@ def test_its_refusals():
     pick = ["Pick the game's challenge the mode takes the place of."]
     assert MP.validate(_spec(LE, starts_on="challenge")) == pick
     assert MP.validate(_spec(LE, starts_on="challenge", challenge=5)) == pick
-    assert MP.validate(_spec(GZ, starts_on="challenge", challenge=0)) == [
-        "Starting as one of the game's challenges is not on Godzilla Premium/LE 1.16 yet (Mode says why)."]
+    assert MP.validate(_spec(BARE, starts_on="challenge", challenge=0)) == [
+        "Starting as one of the game's challenges is not on King Kong Pro 0.97 yet (Mode says why)."]
 
 
 def test_it_round_trips_and_a_game_without_a_list_starts_on_its_shot(tmp_path):
@@ -215,8 +218,8 @@ def test_it_round_trips_and_a_game_without_a_list_starts_on_its_shot(tmp_path):
     slug, _ = MP.new_mode(str(project), spec=MP.ModeSpec(name="YOLT", starts_on="challenge", challenge=1))
     back = MP.load(str(project / "modes" / slug / "mode.json"))
     assert (back.starts_on, back.challenge) == ("challenge", 1) and MP.starts_on_challenge(back)
-    spec = _spec(GZ, starts_on="challenge", challenge=0)
-    MP._switch_off_what_it_cannot(spec, GZ)
+    spec = _spec(BARE, starts_on="challenge", challenge=0)
+    MP._switch_off_what_it_cannot(spec, BARE)
     assert (spec.starts_on, spec.challenge) == ("shot", -1)
 
 
@@ -453,7 +456,7 @@ def test_the_tab_offers_the_challenges_on_bond_and_nothing_elsewhere(tmp_path):
             assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")
             w.call("ui.set", "modes", "f:starts_kind", "shot")
             assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("challenge") == -1)
-        proj = _card_project(tmp_path / "gz", "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
+        proj = _card_project(tmp_path / "kk", "king_kong_pro-0_97_0.Release.16G.sdcard.raw")
         with web_app(tmp_path, mfr="stern") as w:
             _project(w, proj)
             w.call("modes.new")
@@ -486,11 +489,12 @@ def test_the_menu_lines_are_the_builds_own_never_a_references():
     assert PC.menu_lines(PC.Elf(_fake_game()[0])) == []          # a program with no such menu: no lines
 
 
-def test_bond_has_room_for_two_of_our_own_and_stranger_things_none():
-    assert LE.challenge_menu == 2 and STP.challenge_menu == 0
+def test_bond_has_room_for_two_of_our_own_and_stranger_things_two():
+    # PAD-619: Stranger Things' menu is read by menu_generic and proven (the game's 6 of 8)
+    assert LE.challenge_menu == 2 and STP.challenge_menu == 2 and GZP.challenge_menu == 0
     pro = MP.profile_from_port(str(SDK / "ports" / "james_bond_pro-1.06.port"))
     assert pro.challenge_menu == 2
-    assert set(MP.CHALLENGE_MENU_PROVEN) == set(BOND_PORTS)
+    assert set(MP.CHALLENGE_MENU_PROVEN) >= set(BOND_PORTS)         # PAD-619: + every build of their generation
 
 
 def test_a_challenge_of_its_own_is_written_as_new_and_refused_where_the_menu_is_not_ours():
@@ -498,10 +502,10 @@ def test_a_challenge_of_its_own_is_written_as_new_and_refused_where_the_menu_is_
     assert MP.validate(spec) == []
     lines = _lines(spec)
     assert "challenge      new" in lines and not [l for l in lines if l.startswith("trigger")]
-    assert MP.validate(_spec(STP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)) == [
-        "A challenge of its own is not on Stranger Things 1.13: its start menu is not one the app can add to."]
-    spec = _spec(STP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)
-    MP._switch_off_what_it_cannot(spec, STP)
+    assert MP.validate(_spec(GZP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)) == [
+        "A challenge of its own is not on Godzilla Pro 1.16: its start menu is not one the app can add to."]
+    spec = _spec(GZP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)
+    MP._switch_off_what_it_cannot(spec, GZP)
     assert (spec.starts_on, spec.challenge) == ("shot", -1)
 
 
@@ -589,7 +593,10 @@ def _menu(tmp_path, own):
     R = _host()
     src = R.RUNTIME.read_text(encoding="utf-8")
     code = MENU_CONTEXT + "#include <stdlib.h>\n#define CHALLENGE_MENU_KIND 0x100u\n" \
-        + "static int challenge_menu_said, challenge_menu_room_said;\n" \
+        + "static int challenge_menu_said, challenge_menu_room_said;\n#define pm_snprintf snprintf\n" \
+        + "".join(line + "\n" for line in src.splitlines() if line.startswith("#define MENU_")) \
+        + R._lift(src, "static int own_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)") + "\n" \
+        + R._lift(src, "static int own_entry(const unsigned *ent)") + "\n" \
         + R._lift(src, "static void challenge_menu_built(unsigned *r)") + "\n" \
         + R._lift(src, "static void challenge_menu_picked(unsigned *r)") + MENU_MAIN
     return R._host_run(tmp_path, code, args=(str(own),)).splitlines()
@@ -630,11 +637,11 @@ def test_the_tab_offers_a_challenge_of_its_own_on_bond(tmp_path):
             assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("challenge") == MP.CHALLENGE_NEW)
             assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")
             assert _wait(w, lambda: w.state("modes")["form"]["challenge"] == "A new challenge of its own")
-        proj = _card_project(tmp_path / "st", "stranger_things-1_13_0.Release.8G.sdcard.raw")
+        proj = _card_project(tmp_path / "gz", "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw")
         with web_app(tmp_path, mfr="stern") as w:
             _project(w, proj)
             w.call("modes.new")
-            assert w.state("modes")["profile"]["challenge_new"] == ""
+            assert w.state("modes")["profile"]["challenge_new"] == ""                 # PAD-619: Godzilla's menu
     finally:
         preview.enabled = old
 

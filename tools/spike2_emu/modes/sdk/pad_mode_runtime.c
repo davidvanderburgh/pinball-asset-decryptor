@@ -524,6 +524,20 @@ static int hook(unsigned addr, hook_fn logger)
     return 1;
 }
 
+/* PAD-619: hook() with every register saved - push {r0-r12, lr} - so the logger reads and WRITES r4-r12 as well
+ * (regs[0..12], lr at regs[13]; the hooked function's sp is regs + 14). Elvira's start menu keeps its entry count in
+ * r5 for the whole loop, and the append changes it. */
+static int hook_full(unsigned addr, hook_fn logger)
+{
+    unsigned *t;
+    if (!hook(addr, logger)) return 0;
+    t = tramp + (tramp_used - 1) * 16;
+    t[0] = 0xe92d5fffu;   /* push {r0-r12, lr} */
+    t[5] = 0xe8bd5fffu;   /* pop {r0-r12, lr} */
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    return 1;
+}
+
 /* ---- a veto hook: the logger decides whether the function runs at all ----------------------
  * The trampoline above, with one more step. The logger gets the same saved registers and
  * returns non-zero to REFUSE: the function is not entered and its caller gets r0 = 1 (what the
@@ -8575,11 +8589,30 @@ static void on_roster_start(unsigned *r)
  * with `data game_flags` (the bitmap both are read from). Every handler is hooked (hook_veto_n, refused with the 1
  * the handler returns). A mode can CLAIM a challenge: in a challenge game with that pick the hook calls the
  * holder's on_pick(n) on the game's thread, at the moment the game would have started its own, and the game's
- * own start does not run (on_pick returning 0 lets it run). Nothing claimed, or not that pick: untouched. */
+ * own start does not run (on_pick returning 0 lets it run). Nothing claimed, or not that pick: untouched.
+ * PAD-619: a challenge with no handler of that shape (Rush, Sword of Rage: the menu's kinds name them) has only its
+ * flag - `value challenge_flag_<n>` without the site. The runtime takes it as the ball starts instead: at the game's
+ * dispatch of the port's `event ball_start` (on the game's thread, before any of the game's own handlers of it run),
+ * a challenge game with that flag set and a mode holding it has the flag cleared - so the game's own challenge sees no
+ * pick and never starts - and the holder's on_pick called.
+ * PAD-619: the GamePlayModes builds (Jaws, John Wick, Metallica, ...) set FG_PLAYER_CHALLENGE_MODE_ACTIVE alone for
+ * every challenge; which one is the framework's current game-play mode, an index into the game's mode table (the
+ * singleton `data game_play_modes`, the index at `value game_play_mode_at`). Their challenges name it - `value
+ * challenge_mode_<n>` (the entry's index) instead of a flag - and the ball's start takes one by setting the index to
+ * Standard's (`value challenge_mode_plain`): the game plays a plain challenge game, the mode's. */
 #define N_CHALLENGE 8
 static int (*challenge_fn[N_CHALLENGE])(unsigned slot);
 static const struct pm_mode *challenge_by[N_CHALLENGE];
-static int challenges_n;                 /* the hooked handlers, 0..N_CHALLENGE; 0 = no challenge list */
+static int challenges_n;                 /* the challenges, 0..N_CHALLENGE; 0 = no challenge list */
+static unsigned char challenge_site[N_CHALLENGE];   /* PAD-619: 1 = its handler is hooked; 0 = by its flag alone */
+static int challenge_ball_id = -1;       /* PAD-619: the bus id of the ball's start, where the flag route takes a pick */
+static int challenge_game_id = -1;       /* PAD-619: the bus id of a game's start: a new game, nobody's challenge yet */
+/* PAD-619: this game is a challenge game a mode of ours took (or one of their own). `site challenge_balls` - the
+ * framework's balls-per-game getter, one shape on every build (portchallenge.balls_lines) - says 1 while it is: a
+ * challenge game is one ball, as Bond's own are, also where the game leaves a challenge game's length to the
+ * challenge (the builds whose challenges come from Stern Insider Connected). */
+static volatile int challenge_ours;
+static unsigned long challenge_ours_ms;   /* PAD-619: when it was taken */
 static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start menu shows for a taken one ("" = its own) */
 /* round 2: challenges of a mode's own, added to the game's start menu: slot CHALLENGE_OWN + k */
 #define CHALLENGE_OWN 16
@@ -8599,6 +8632,7 @@ static struct {
     const struct pm_mode *by;            /* the mode that took this challenge game's pick */
     unsigned game;                       /* the game_start count it belongs to */
     int state;                           /* 0 none, 1 picked, 2 its mode runs, 3 over: the ball ends */
+    unsigned long ms;                    /* PAD-619: when it was picked */
 } chg;
 
 static unsigned chg_game_now(void)
@@ -8610,6 +8644,9 @@ static unsigned chg_game_now(void)
 /* the challenge state of THIS game (a new game, or none, forgets it) */
 static int chg_state(void)
 {
+    /* PAD-619: a pick from this very ball's start belongs to the game that starts after it (Iron Maiden LE 1.16,
+     * Batman 66 1.13 dispatch the ball's start before the game's) */
+    if (chg.state == 1 && chg.game != chg_game_now() && pm_player() && pm_ms() - chg.ms < 2000) chg.game = chg_game_now();
     if (chg.state && (chg.game != chg_game_now() || !pm_player())) chg.state = 0, chg.by = 0;
     return chg.state;
 }
@@ -8619,6 +8656,7 @@ static void chg_picked(const struct pm_mode *by)
     chg.by = by;
     chg.game = chg_game_now();
     chg.state = 1;
+    chg.ms = pm_ms();
 }
 
 /* What the end of a mode does to a challenge game, from the state alone (tests lift it verbatim): 1 = end the ball
@@ -8635,7 +8673,12 @@ static int chg_refuses(void)
 
 static void chg_began(void)
 {
-    if (chg_state() == 1 && current == chg.by) chg.state = 2;
+    /* PAD-619: the pick can come before the game's own game_start (Batman 66 1.13 dispatches the ball's start first),
+     * so the state is stamped with THIS game again when the mode that took it begins */
+    if (chg.state == 1 && current == chg.by && pm_player()) {
+        chg.game = chg_game_now();
+        chg.state = 2;
+    }
 }
 
 static void chg_mode_ended(int ran)
@@ -8710,10 +8753,15 @@ int pm_challenge_menu(void)
 
 int pm_challenge_title(unsigned slot, const char *words)
 {
-    if (!pm_challenge_menu() || slot >= (unsigned)pm_challenge_slots() || challenge_by[slot] != current
-        || !challenge_fn[slot]) return 0;                                /* the holder only */
-    challenge_words(challenge_title[slot], words);
-    return 1;
+    char key[28];
+    long msg;
+    if (slot >= (unsigned)pm_challenge_slots() || challenge_by[slot] != current || !challenge_fn[slot]) return 0;
+    challenge_words(challenge_title[slot], words);                       /* the holder only */
+    if (pm_challenge_menu()) return 1;
+    /* PAD-619: a menu drawn from message ids (Godzilla's game-mode table): the challenge's name message says ours */
+    pm_snprintf(key, sizeof key, "challenge_name_msg_%u", slot);
+    msg = pm_port_value(key, 0);
+    return msg > 0 && pm_message_set((unsigned)msg, challenge_title[slot]);
 }
 
 int pm_challenge_add(const char *words, int (*on_pick)(unsigned slot))
@@ -8752,6 +8800,10 @@ void pm_challenge_release(unsigned slot)
         return;
     }
     if (slot < N_CHALLENGE && challenge_fn[slot] && challenge_by[slot] == current) {
+        char key[28];
+        pm_snprintf(key, sizeof key, "challenge_name_msg_%u", slot);
+        if (challenge_title[slot][0] && !pm_challenge_menu() && pm_port_value(key, 0) > 0)
+            pm_message_restore((unsigned)pm_port_value(key, 0));     /* PAD-619: the game's own name again */
         challenge_title[slot][0] = 0;
         challenge_fn[slot] = 0; challenge_by[slot] = 0;
         say("challenge %u (%s): released - the game's own again", slot, pm_challenge_name(slot));
@@ -8786,6 +8838,7 @@ static int challenge_veto(unsigned *r, unsigned n)
             say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
                 took ? "its mode starts - the game's own challenge does not" : "the mode let it go - the game's own starts");
             if (took) {
+                challenge_ours = 1; challenge_ours_ms = pm_ms();
                 chg_picked(own_challenge[k].by);
                 return 1;
             }
@@ -8802,7 +8855,7 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
-    if (took) chg_picked(challenge_by[n]);
+    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n]); }
     return took != 0;
 }
 
@@ -8816,28 +8869,66 @@ static int challenge_veto(unsigned *r, unsigned n)
  *   site challenge_menu_pick  where the game jumps on the chosen entry's kind (r3): one of ours (kind
  *                             CHALLENGE_MENU_KIND + k) becomes challenge 0's kind, so the game makes a real one-ball
  *                             challenge game of it, and remembers which; at the ball's start challenge 0's handler
- *                             hands it to that mode's on_pick instead (challenge_veto). */
+ *                             hands it to that mode's on_pick instead (challenge_veto).
+ * PAD-619: the other builds of Bond's generation (portchallenge.menu_generic) have the same menu with three
+ * differences the port says: `challenge_menu` is the loop's every-frame point (the buttons just read), so the list is
+ * looked at every frame and ours appended only while they are not there yet; `challenge_menu_entry` 16 where an
+ * entry is 16 bytes (The Beatles, Led Zeppelin, Rush, Sword of Rage: the fourth word copied from the entry it
+ * stands in for); and `challenge_menu_slot`: the challenge ours stand in for (0, its own start stopped: by its
+ * handler or, flag route, by its flag) or -1 - the game's PLAIN challenge game, kind challenge_menu_kind setting only
+ * the challenge game's flag (the builds whose menu offers a challenge only from Stern Insider Connected): nothing of
+ * the game's to stop, the ball's start hands it to the mode (challenge_ball_start). */
 #define CHALLENGE_MENU_KIND 0x100u
 
 static int challenge_menu_said, challenge_menu_room_said;
 
+/* PAD-619: which of the modes' own an entry is: by its kind, or - once a compare-chain menu's pick made it a kind of the
+ * game's (Star Wars: `challenge_menu_pick_back`) - by the name it points to; -1 = the game's */
+/* PAD-619: where an entry keeps its kind, caption message and name - Bond's {kind, caption, name} at 0 / 4 / 8 unless
+ * the port says otherwise (TMNT's 24-byte entries: 4 / 8 / 12) */
+#define MENU_KIND_AT ((unsigned)pm_port_value("challenge_menu_kind_at", 0))
+#define MENU_CAPTION_AT ((unsigned)pm_port_value("challenge_menu_caption_at", 4))
+#define MENU_NAME_AT ((unsigned)pm_port_value("challenge_menu_name_at", 8))
+
+static int own_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
+{
+    unsigned k, kind = *(const unsigned *)(ent + kat), name = *(const unsigned *)(ent + nat);
+    if (kind >= CHALLENGE_MENU_KIND && kind < CHALLENGE_MENU_KIND + N_OWN_CHALLENGE) return (int)(kind - CHALLENGE_MENU_KIND);
+    for (k = 0; k < N_OWN_CHALLENGE; k++)
+        if (own_challenge[k].fn && name == (unsigned)(unsigned long)own_challenge[k].name) return (int)k;
+    return -1;
+}
+
+static int own_entry(const unsigned *ent)
+{
+    return own_entry_at((const unsigned char *)ent, 0, 8);
+}
+
 static void challenge_menu_built(unsigned *r)
 {
-    unsigned char *fsp = (unsigned char *)(r + 6);         /* the menu function's sp: above the six words pushed */
-    unsigned *count = (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    long creg = pm_port_value("challenge_menu_count_reg", -1);  /* PAD-619: Elvira - the count in a register */
+    unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp: above what was pushed */
+    unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
     unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), first = (unsigned)pm_port_value("challenge_menu_kind", 3);
+    unsigned es = (unsigned)pm_port_value("challenge_menu_entry", 12);
     unsigned short caption = (unsigned short)pm_port_value("challenge_menu_caption", 0);
-    unsigned i, k, n0 = *count;
-    if (n0 > cap) return;                                  /* not the list this hook knows: leave it alone */
+    unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
+    unsigned i, k, k2, n0 = *count, mine = 0, tmpl = 0;
+    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
+        return;                                            /* not the list this hook knows: leave it alone */
     for (i = 0; i < n0; i++) {
-        unsigned kind = *(unsigned *)(list + 12 * i);
+        unsigned kind = *(unsigned *)(list + es * i + kat);
+        if (own_entry_at(list + es * i, kat, nat) >= 0) { mine++; continue; }
+        if (kind == first) tmpl = i;                       /* the entry ours stand in for, when the menu shows it */
         if (kind >= first && kind < first + (unsigned)challenges_n) {
-            caption = *(unsigned short *)(list + 12 * i + 4);    /* the game's own caption for a challenge */
+            if (!pm_port_value("challenge_menu_caption", 0))     /* PAD-619: the port's CHALLENGE, else the game's */
+                caption = *(unsigned short *)(list + es * i + cat);  /* own caption for a challenge */
             if (challenge_fn[kind - first] && challenge_title[kind - first][0])
-                *(unsigned *)(list + 12 * i + 8) = (unsigned)(unsigned long)challenge_title[kind - first];   /* the game's u32 */
+                *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)challenge_title[kind - first];   /* the game's u32 */
         }
     }
+    if (mine) return;                                      /* PAD-619: an every-frame site - already appended */
     for (k = 0; k < N_OWN_CHALLENGE; k++) {
         if (!own_challenge[k].fn) continue;
         if (*count >= cap) {
@@ -8846,24 +8937,40 @@ static void challenge_menu_built(unsigned *r)
             continue;
         }
         i = *count;
-        *(unsigned *)(list + 12 * i) = CHALLENGE_MENU_KIND + k;
-        *(unsigned short *)(list + 12 * i + 4) = caption;
-        *(unsigned short *)(list + 12 * i + 6) = 0;
-        *(unsigned *)(list + 12 * i + 8) = (unsigned)(unsigned long)own_challenge[k].name;
+        if (!plain)                                        /* PAD-619: another layout - start from the game's entry */
+            for (k2 = 0; k2 < es; k2++) list[es * i + k2] = list[es * tmpl + k2];
+        else if (es == 16)                                 /* the fourth word: as the entry ours stand in for */
+            *(unsigned *)(list + es * i + 12) = *(unsigned *)(list + es * tmpl + 12);
+        *(unsigned *)(list + es * i + kat) = CHALLENGE_MENU_KIND + k;
+        *(unsigned short *)(list + es * i + cat) = caption;
+        if (plain) *(unsigned short *)(list + es * i + 6) = 0;
+        else if (pm_port_value("challenge_menu_caption2_at", -1) >= 0)     /* TMNT keeps the caption twice */
+            *(unsigned short *)(list + es * i + (unsigned)pm_port_value("challenge_menu_caption2_at", 0)) = caption;
+        *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)own_challenge[k].name;
         *count = i + 1;
     }
-    if (*count != n0 || !challenge_menu_said++)
-        say("challenge menu: %u entries (%u of the modes' own)", *count, *count - n0);
+    if (*count != n0 || !challenge_menu_said++) {
+        char kinds[120];
+        unsigned at = 0;
+        kinds[0] = 0;
+        for (i = 0; i < *count && at < sizeof kinds - 8; i++)     /* PAD-619: the menu's order, for whoever steps it */
+            at += (unsigned)pm_snprintf(kinds + at, sizeof kinds - at, " %u", *(unsigned *)(list + es * i + kat));
+        say("challenge menu: %u entries (%u of the modes' own) - kinds%s", *count, *count - n0, kinds);
+    }
 }
 
 static void challenge_menu_picked(unsigned *r)
 {
-    unsigned kind = r[3];
-    int was = own_pending;          /* the game runs this on every frame of the menu: say only a change */
-    if (kind >= CHALLENGE_MENU_KIND && kind < CHALLENGE_MENU_KIND + N_OWN_CHALLENGE
-        && own_challenge[kind - CHALLENGE_MENU_KIND].fn) {
-        own_pending = (int)(kind - CHALLENGE_MENU_KIND);
-        r[3] = (unsigned)pm_port_value("challenge_menu_kind", 3);   /* the game makes a challenge game of it */
+    long back = pm_port_value("challenge_menu_pick_back", 0);
+    unsigned ptrk[3], *ent = back > 0 ? (unsigned *)(unsigned long)(r[3] - (unsigned)back) : ptrk;
+    unsigned char *e8 = back > 0 ? (unsigned char *)ent - MENU_KIND_AT : 0;   /* the entry's start */
+    int was = own_pending, k;       /* the game runs this on every frame of the menu: say only a change */
+    if (back <= 0) { ptrk[0] = r[3]; ptrk[1] = 0; ptrk[2] = 0; }   /* the kind in r3 (Bond's jump) */
+    k = back > 0 ? own_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : own_entry(ent);
+    if (k >= 0 && own_challenge[k].fn) {
+        own_pending = k;
+        if (back > 0) ent[0] = (unsigned)pm_port_value("challenge_menu_kind", 0);   /* PAD-619: the entry itself */
+        else r[3] = (unsigned)pm_port_value("challenge_menu_kind", 3);   /* the game makes a challenge game of it */
         if (own_pending != was)
             say("challenge menu: %s on the menu - picked, a challenge game whose ball starts its mode",
                 own_challenge[own_pending].name);
@@ -8871,6 +8978,121 @@ static void challenge_menu_picked(unsigned *r)
         own_pending = -1;
     }
 }
+
+static void game_flag_clear(unsigned id);
+
+/* PAD-619: challenge n's pick in this game - 1 / 0, -1 unknown: its flag, or the game-play mode's index */
+static int challenge_picked(unsigned n)
+{
+    char key[24];
+    long want;
+    pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
+    if (pm_port_value(key, 0) > 0) return game_flag((unsigned)pm_port_value(key, 0));
+    pm_snprintf(key, sizeof key, "challenge_mode_%u", n);
+    want = pm_port_value(key, -1);
+    if (want < 0 || !data("game_play_modes")) return -1;
+    return *(const unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8))
+           == (unsigned)want;
+}
+
+/* PAD-619: the game's own challenge n sees no pick: its flag cleared, or the game-play mode made Standard */
+static void challenge_unpick(unsigned n)
+{
+    char key[24];
+    pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
+    if (pm_port_value(key, 0) > 0) {
+        game_flag_clear((unsigned)pm_port_value(key, 0));
+        return;
+    }
+    if (data("game_play_modes") && pm_port_value("challenge_mode_plain", -1) >= 0)
+        *(unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8))
+            = (unsigned)pm_port_value("challenge_mode_plain", 1);
+}
+
+static void game_flag_clear(unsigned id)
+{
+    unsigned char *bits;
+    if (!data("game_flags")) return;
+    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
+    if (bits) bits[id >> 3] &= (unsigned char)~(1u << (id & 7));
+}
+
+/* PAD-619: what the ball's start does, from the flags alone (tests lift it verbatim). on: a challenge game; own: one
+ * of the modes' own was picked on the menu - the challenge it stands in for (n >= 0, stopped by its flag), -1 the plain
+ * one, -2 one whose handler hands it over itself, -3 none of ours picked; held/picked: a mode holds challenge n / its
+ * flag is set (a challenge by its flag alone). 1 = the mode gets it now. */
+static int challenge_ball_takes(int on, int own, int held, int picked)
+{
+    if (on != 1) return 0;
+    if (own != -3) return own != -2;
+    return held && picked == 1;
+}
+
+static void challenge_ball_start(void)
+{
+    const struct pm_mode *was = current;
+    static int said;
+    int on = game_flag((unsigned)pm_port_value("challenge_on_flag", 0)), k = own_pending, took;
+    long slot = pm_port_value("challenge_menu_slot", 0);
+    unsigned n;
+    if (on != 1 && k >= 0 && pm_port_value("challenge_menu_sets_on", 0)) on = 1;   /* PAD-619: a menu of no challenge */
+    if (on != 1) return;
+    if (k >= 0) {
+        int how = slot < 0 ? -1 : slot < challenges_n && challenge_site[slot] ? -2 : (int)slot;
+        if (!challenge_ball_takes(on, how, 0, 0)) return;          /* challenge 0's own handler hands it over */
+        own_pending = -1;
+        if (!own_challenge[k].fn) return;
+        if (how >= 0) challenge_unpick((unsigned)how);              /* the challenge it stood in for: stopped */
+        note_thread("challenge pick", &said);
+        current = own_challenge[k].by;
+        took = own_challenge[k].fn(CHALLENGE_OWN + (unsigned)k);
+        current = was;
+        say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
+            took ? "its mode starts as the ball starts" : "the mode let it go");
+        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(own_challenge[k].by); }
+        return;
+    }
+    for (n = 0; n < (unsigned)challenges_n; n++) {
+        int picked;
+        if (challenge_site[n] || !challenge_fn[n]) continue;
+        picked = challenge_picked(n);
+        if (!challenge_ball_takes(on, -3, 1, picked)) continue;
+        challenge_unpick(n);                                        /* the game's own sees no pick */
+        note_thread("challenge pick", &said);
+        current = challenge_by[n];
+        took = challenge_fn[n](n);
+        current = was;
+        say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
+            took ? "the mode takes it - its pick cleared, the game's own does not start" : "the mode let it go");
+        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n]); }
+        return;
+    }
+}
+
+static int challenge_balls_veto(unsigned *r, unsigned n)
+{
+    static int said;
+    (void)r; (void)n;
+    /* PAD-619: also from the start menu's pick of one of ours to the game's start - Star Wars ELG reads the setting as
+     * the game starts, before the ball's start hands the game to the mode */
+    if (!challenge_ours && !(own_pending >= 0 && !pm_in_game())) return 0;
+    if (!said++) say("challenge game: a mode's - one ball (the balls-per-game getter says 1)");
+    return 1;
+}
+
+/* PAD-619: `site challenge_extra_ball` - the game's take-an-extra-ball test (the count byte: non-zero takes one and the
+ * ball is played again, before the balls-per-game getter is ever asked). A mode's challenge game is one ball: an extra
+ * ball earned in it is not played (Star Wars ELG 1.10 earned one 17 s into the ball and played it as a second) */
+static int challenge_extra_veto(unsigned *r, unsigned n)
+{
+    static int said;
+    (void)r; (void)n;
+    if (!challenge_ours) return 0;
+    if (!said++) say("challenge game: a mode's - an extra ball earned in it is not played (one ball)");
+    return 1;
+}
+
+static int event_bus_id(const char *name);
 
 static void challenges_arm(void)
 {
@@ -8880,20 +9102,52 @@ static void challenges_arm(void)
     if (!data("game_flags") || pm_port_value("challenge_on_flag", 0) <= 0) return;
     for (n = 0; n < N_CHALLENGE; n++) {
         pm_snprintf(key, sizeof key, "challenge_go_%u", n);
-        if (!site(key)) break;
+        if (!site(key)) {
+            pm_snprintf(key, sizeof key, "challenge_flag_%u", n);
+            if (pm_port_value(key, 0) <= 0) {
+                pm_snprintf(key, sizeof key, "challenge_mode_%u", n);   /* PAD-619: or its game-play mode's index */
+                if (pm_port_value(key, -1) < 0 || !data("game_play_modes")) break;
+            }
+            challenge_site[n] = 0;                    /* PAD-619: by its flag (or mode index) alone, as the ball starts */
+            challenges_n = (int)n + 1;
+            continue;
+        }
         if (!fn(key) || !hook_veto_n(fn(key), challenge_veto, n, 1)) {
             say("challenge %u: its handler at 0x%08x could not be hooked - no challenge list", n, fn(key));
+            challenges_n = 0;
             return;   /* the hooks already placed stay unclaimed, so they pass through */
         }
+        challenge_site[n] = 1;
         challenges_n = (int)n + 1;
     }
-    if (!challenges_n) return;
-    can |= PM_CAN_CHALLENGE;
-    say("challenges: %d of the game's a mode may take the place of (flag %ld for a challenge game)", challenges_n,
-        pm_port_value("challenge_on_flag", 0));
+    challenge_ball_id = event_bus_id("ball_start");
+    challenge_game_id = event_bus_id("game_start");
+    if (site("challenge_balls") && (!fn("challenge_balls") || !hook_veto_n(fn("challenge_balls"), challenge_balls_veto, 0, 1)))
+        say("challenges: the balls-per-game getter could not be hooked - a mode's challenge game is as long as the game's");
+    /* PAD-619: the older builds (Batman 1.13, Iron Maiden LE 1.16, Rush LE 1.18, ...) also ask a per-player sum of the
+     * balls-per-game setting and the next one (`site challenge_balls_2`) when they decide the game is over */
+    if (site("challenge_balls_2") && (!fn("challenge_balls_2") || !hook_veto_n(fn("challenge_balls_2"), challenge_balls_veto, 1, 1)))
+        say("challenges: the per-player balls getter could not be hooked - an older build's challenge game may run on");
+    if (site("challenge_extra_ball") && (!fn("challenge_extra_ball") || !hook_veto_n(fn("challenge_extra_ball"), challenge_extra_veto, 0, 0)))
+        say("challenges: the extra-ball test could not be hooked - an extra ball earned in a mode's challenge game is played");
+    for (n = 0; n < (unsigned)challenges_n; n++)
+        if (!challenge_site[n] && challenge_ball_id < 0) {
+            say("challenges: the port has no ball_start event - no challenge list");
+            challenges_n = 0;
+            return;
+        }
+    if (challenges_n) {
+        can |= PM_CAN_CHALLENGE;
+        say("challenges: %d of the game's a mode may take the place of (flag %ld for a challenge game)", challenges_n,
+            pm_port_value("challenge_on_flag", 0));
+    }
     if (site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
-        && pm_port_value("challenge_menu_list_at", 0) > 0 && pm_port_value("challenge_menu_count_at", 0) > 0) {
-        if (fn("challenge_menu") && fn("challenge_menu_pick") && hook(fn("challenge_menu"), challenge_menu_built)
+        && pm_port_value("challenge_menu_list_at", 0) > 0
+        && (pm_port_value("challenge_menu_count_at", 0) > 0 || pm_port_value("challenge_menu_count_reg", -1) >= 4)
+        && (challenges_n || (pm_port_value("challenge_menu_slot", 0) < 0 && challenge_ball_id >= 0))) {
+        if (fn("challenge_menu") && fn("challenge_menu_pick")
+            && (pm_port_value("challenge_menu_count_reg", -1) >= 0 ? hook_full(fn("challenge_menu"), challenge_menu_built)
+                                                                    : hook(fn("challenge_menu"), challenge_menu_built))
             && hook(fn("challenge_menu_pick"), challenge_menu_picked)) {
             can |= PM_CAN_CHALLENGE_MENU;
             say("challenge menu: the start menu at 0x%08x shows our names and up to %ld entries", fn("challenge_menu"),
@@ -8961,6 +9215,15 @@ static void event_line(const char *s)
         n_event_names++;
 }
 
+/* PAD-619: a bus event's id by the port's name, armed or not; -1 when the port has none */
+static int event_bus_id(const char *name)
+{
+    int i;
+    for (i = 0; i < n_event_names; i++)
+        if (!event_names[i].site[0] && str_eq(event_names[i].name, name)) return (int)event_names[i].id;
+    return -1;
+}
+
 int pm_event(const char *name)
 {
     int i;
@@ -8991,6 +9254,11 @@ static void on_event_dispatch(unsigned *r)
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
+    /* PAD-619: a new game forgets the last one's - not a pick from this very ball's start (Batman 66 1.13 dispatches
+     * the ball's start before the game's) */
+    if (challenge_game_id >= 0 && r[0] == (unsigned)challenge_game_id && pm_ms() - challenge_ours_ms > 2000)
+        challenge_ours = 0;
+    if (challenge_ball_id >= 0 && r[0] == (unsigned)challenge_ball_id) challenge_ball_start();   /* PAD-619 */
 }
 
 /* one counter per site event slot: the trampoline hands a logger only the registers, so each slot has its own

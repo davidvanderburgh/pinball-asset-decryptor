@@ -455,3 +455,22 @@ site block_rule_10         0x001281c0 0xe590c000 0xe3071048  # RuleWeapons::v[31
 text block_rule_name_10    Weapons
 site block_rule_11         0x00129120 0xe2022010 0xe3a03000  # RuleWolverineSpinner::v[31]
 text block_rule_name_11    Wolverine Spinner
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x00662bfc
+value game_flags_at       4
+data  game_flag_count     0x004f729c
+value challenge_on_flag   17
+site  challenge_balls     0x002edadc 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00152280 0xe3083108 0xe3403063
+site  challenge_menu      0x000731e4 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x000733b4 0xe2433001 0xe3530005
+value challenge_menu_list_at   236
+value challenge_menu_count_at  24
+value challenge_menu_cap       7
+value challenge_menu_entry     12
+value challenge_menu_kind      2
+value challenge_menu_slot      -1
+value challenge_menu_caption   1911
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x0019639c 0xe30d278a 0xe340206a

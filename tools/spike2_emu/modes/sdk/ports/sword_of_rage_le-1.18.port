@@ -522,3 +522,27 @@ site block_rule_12         0x000ad3d8 0xe92d4ff0 0xe24dd024  # crule_u_turn_comb
 text block_rule_name_12    U Turn Combos
 site block_rule_13         0x000b0608 0xe92d4ff8 0xe1c049d0  # crule_wheel_modes::v[23]
 text block_rule_name_13    Wheel Modes
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x00600034
+value game_flags_at       4
+data  game_flag_count     0x0043fa48
+value challenge_on_flag   16
+value challenge_flag_0  62
+text  challenge_name_0  Retro
+value challenge_flag_1  63
+text  challenge_name_1  Ransom
+site  challenge_balls     0x00239d10 0xe92d4030 0xe1a05000
+site  challenge_balls_2   0x002925e0 0xe92d4038 0xe1a04000
+site  challenge_extra_ball 0x00249964 0xe3053d1c 0xe340306a
+site  challenge_menu      0x00043018 0xe1a05000 0xe3150080
+site  challenge_menu_pick 0x00043160 0xe2433001 0xe3530003
+value challenge_menu_list_at   176
+value challenge_menu_count_at  20
+value challenge_menu_cap       5
+value challenge_menu_entry     16
+value challenge_menu_kind      3
+value challenge_menu_slot      0
+value challenge_menu_caption   1901
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x0011b768 0xe30520a2 0xe340206a

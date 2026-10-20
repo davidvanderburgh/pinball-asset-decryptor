@@ -537,3 +537,23 @@ text block_name_12      Two Minutes to Midnight
 site block_start_14     0x0008b644 0xe92d4030 0xe1a04000
 data block_obj_14       0x0057f3d8
 text block_name_14      Number of the Beast
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+data  game_flags          0x00589884
+value game_flags_at       4
+data  game_flag_count     0x004894a8
+value challenge_on_flag   16
+site  challenge_balls     0x001d2db8 0xe92d4030 0xe1a05000
+site  challenge_balls_2   0x001cacbc 0xe92d4038 0xe1a04000
+site  challenge_extra_ball 0x0027ee0c 0xe30a3f74 0xe340305c
+site  challenge_menu      0x000a5a58 0xe1a07000 0xe3170080
+site  challenge_menu_pick 0x000a5c10 0xe2433001 0xe3530005
+value challenge_menu_list_at   244
+value challenge_menu_count_at  28
+value challenge_menu_cap       7
+value challenge_menu_entry     12
+value challenge_menu_kind      2
+value challenge_menu_slot      -1
+value challenge_menu_caption   1901
+# the game's own challenges end the ball when they are over: so does a mode that took the pick
+site  challenge_end_ball  0x0022ffcc 0xe3012992 0xe3402058

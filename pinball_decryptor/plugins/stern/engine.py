@@ -10222,19 +10222,20 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         if why and modes.attract and not modes.turns:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
                 % (len(modes.files()), why.rstrip(".")), "warning")
-            modes.slots, modes.names, why = {}, [], ""
+            modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
         elif why and modes.turns and not _SMo.title_refusal(prof, turns=True):
             # PAD-565: a title the sounds in turn work on and the menu setting not (yet)
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
-                % (len(modes.files()) - sum(map(len, modes.turns.values())), why.rstrip(".")),
+                % (sum(map(len, modes.slots.values())), why.rstrip(".")),
                 "warning")
-            modes.slots, modes.names, why = {}, [], ""
+            modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
         elif not why and modes.turns:
             why = _SMo.title_refusal(prof, turns=True)
             if why and modes.attract:
                 log("Sounds in turn: %d file(s) the game would play in turn are left out of this "
                     "build: %s." % (sum(map(len, modes.turns.values())), why.rstrip(".")), "warning")
                 modes.slots, modes.names, modes.turns, why = {}, [], {}, ""
+                modes.mode_turns = {}
     if why:
         if modes.attract and not modes.count and not modes.turns:
             log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are "
@@ -10248,8 +10249,15 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         return None, None
     if modes.count:
         log("Found %d file(s) for %d music modes (%s)." % (
-            len(modes.files()) - sum(map(len, modes.turns.values())), modes.count,
+            sum(map(len, modes.slots.values())), modes.count,
             ", ".join("%d %s" % (m, modes.name(m)) for m in range(1, modes.count + 1))), "info")
+        _mt = [(rel, m, len(f)) for rel, by in sorted(modes.mode_turns.items())
+               for m, f in sorted(by.items())]
+        if _mt:                                   # PAD-638: a music mode's own files in turn
+            log("Found %d music mode file(s) that play %d more file(s) in turn (%d of them at "
+                "random)." % (len(_mt), sum(n for _r, _m, n in _mt),
+                              sum(1 for r, m, _n in _mt if m in (modes.mode_random.get(r) or ()))),
+                "info")
     if modes.turns:
         log("Found %d sound(s) that play %d more file(s) in turn." % (
             len(modes.turns), sum(map(len, modes.turns.values()))), "info")

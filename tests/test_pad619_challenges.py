@@ -53,7 +53,7 @@ def test_every_menu_port_names_the_whole_menu():
         low = 3 if int(v.get("challenge_menu_sets_on", 0)) else 5          # Star Wars sized its list for its own
         high = 14 if int(v.get("challenge_menu_entry", 12)) == 24 or int(v.get("challenge_menu_sets_on", 0)) else 9   # TMNT, Foo Fighters
         assert low <= cap <= high and 0 < count_at < 1024 and 0 < list_at < 1024, key
-        assert int(v.get("challenge_menu_entry", 12)) in (12, 16, 24), key
+        assert int(v.get("challenge_menu_entry", 12)) in (12, 16, 20, 24), key
         assert 1890 < int(v["challenge_menu_caption"]) < 1930, key           # CHALLENGE: 1921, 1911, 1901 by era
         assert int(v.get("challenge_menu_slot", 0)) in (-1, 0), key
         if key.startswith("james_bond_"):
@@ -322,3 +322,12 @@ def test_foo_fighters_live_menu_takes_ours_as_standard_through_the_entry(key):
 def test_bond_60th_says_its_challenge_is_a_timed_whole_game():
     p = MP.profile_from_port(str(PORTS / "james_bond_60th_le-1.11.port"))
     assert not p.can("challenge") and "a whole game played against the clock" in p.why_not("challenge")
+
+
+@pytest.mark.parametrize("key", ("mando_le-1.45", "mando_pro-1.45"))
+def test_mando_live_menu_has_20_byte_entries(key):
+    test_the_ports_carry_what_the_finder_reads_off_the_game(key)
+    v = _port(key)["value"]
+    assert int(v["challenge_menu_entry"]) == 20 and int(v["challenge_menu_sets_on"]) == 1
+    src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    assert "es != 20" in src

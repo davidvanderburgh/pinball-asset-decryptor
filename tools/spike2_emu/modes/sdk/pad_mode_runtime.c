@@ -8915,7 +8915,7 @@ static void challenge_menu_built(unsigned *r)
     unsigned short caption = (unsigned short)pm_port_value("challenge_menu_caption", 0);
     unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
     unsigned i, k, k2, n0 = *count, mine = 0, tmpl = 0;
-    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
+    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
         return;                                            /* not the list this hook knows: leave it alone */
     for (i = 0; i < n0; i++) {
         unsigned kind = *(unsigned *)(list + es * i + kat);

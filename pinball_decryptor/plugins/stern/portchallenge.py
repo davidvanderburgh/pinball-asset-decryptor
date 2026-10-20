@@ -1060,19 +1060,28 @@ def menu_live(e, names, on_flag):
     w, base = e.words, e.text_va
     frames = [i for i in range(len(w) - 2) if (w[i] & 0xFFFF0FFF) == 0xE1A00000 and (w[i + 1] & 0xFFF0FFFF) == 0xE3100080
               and ((w[i] >> 12) & 0xF) == ((w[i + 1] >> 16) & 0xF)]
+    # ... or the buttons through the stack (Mando: str r0, [sp, #x] ; ldr r3, [sp, #x] ; tst r3, #0x80)
+    frames += [i for i in range(len(w) - 3) if (w[i] & 0xFFFFF000) == 0xE58D0000
+               and w[i + 1] == (0xE59D3000 | (w[i] & 0xFFF)) and w[i + 2] == 0xE3130080]
     hits = []
     for fr in frames:
         for k in range(fr + 2, fr + 14):
             if (w[k] & 0xFFF0F000) == PICK_LDR and (w[k] >> 16) & 0xF == 3 and w[k + 1] == 0xE3530000 \
-                    and (w[k + 2] & 0xFF000000) == 0x1A000000 and (w[k - 1] & 0xFFFFFFF0) == 0xE0833200 \
-                    and any((x & 0xFFFFF000) == 0xE28D3000 for x in w[k - 4:k - 1]):
-                t = next(rot_imm(x & 0xFFF) for x in w[k - 4:k - 1] if (x & 0xFFFFF000) == 0xE28D3000)
-                hits.append((fr, k, t - (w[k] & 0xFFF), w[k] & 0xFFF, t))
+                    and (w[k + 2] & 0xFF000000) == 0x1A000000:
+                if (w[k - 1] & 0xFFFFFFF0) == 0xE0833200:                       # add r3, r3, rC, lsl #4: 16 bytes
+                    es = 16
+                elif (w[k - 1] & 0xFFF0FFFF) == 0xE0803103 and any(              # add r3, rB, r3, lsl #2, after
+                        (x & 0x0FF00FF0) == 0x00800100 and (x >> 16) & 0xF == x & 0xF for x in w[k - 5:k - 1]):
+                    es = 20                                                    # r3 = cursor * 5: 20 bytes (Mando)
+                else:
+                    continue
+                tops = [rot_imm(x & 0xFFF) for x in w[k - 5:k - 1] if (x & 0xFFFF0000) == 0xE28D0000]
+                if tops:
+                    hits.append((fr, k, tops[-1] - (w[k] & 0xFFF), w[k] & 0xFFF, tops[-1], es))
                 break
     if len(hits) != 1:
         return None
-    fr, k, list_at, back, top = hits[0]
-    es = 16
+    fr, k, list_at, back, top, es = hits[0]
     count_at = next((w[i] & 0xFFF for i in range(fr, min(len(w) - 4, fr + 600)) if (w[i] & 0xFFFFF000) == 0xE59D3000
                      and 0xE2433001 in w[i + 1:i + 4] and any((x & 0xFFFFFFF0) == 0xE1530000 for x in w[i + 2:i + 5])),
                     None)

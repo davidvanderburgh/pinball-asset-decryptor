@@ -1512,7 +1512,9 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
         _SOUND_MODES_KEY: {"matched": m_matched, "remapped": m_remapped,
                            "flagged": m_flagged, "dropped": m_dropped,
                            "names": list((sm or {}).get("names") or []),
-                           "levels": dict((sm or {}).get("levels") or {})},
+                           "levels": dict((sm or {}).get("levels") or {}),
+                           # PAD-641: the flipper buttons' sounds in attract (no slot: as they are)
+                           "attract": list((sm or {}).get("attract") or [])},
         "toggles": {k: saved[k] for k in _TOGGLE_KEYS if k in saved},
         "defaults": {k: dict(saved[k]) for k in _MERGE_KEYS
                      if isinstance(saved.get(k), dict) and saved[k]},
@@ -2083,12 +2085,14 @@ def _apply_sound_modes(tgt, plan, record, prior, include_flagged):
         entries += [dict(e, tgt_rel=e["src_rel"]) for e in sm.get("flagged") or ()]
     levels = sm.get("levels") or {}
     rec = {"names": list(sm.get("names") or []), "slots": {}, "levels": {}}
+    if sm.get("attract"):
+        rec["attract"] = list(sm["attract"])
     for e in entries:
         rec["slots"][e["tgt_rel"]] = dict(e["repl"])
         if levels.get(e["src_rel"]):
             rec["levels"][e["tgt_rel"]] = dict(levels[e["src_rel"]])
         record[_SOUND_MODES_KEY][e["tgt_rel"]] = dict(e["repl"])
-    if rec["slots"] or any(rec["names"]):
+    if rec["slots"] or any(rec["names"]) or rec.get("attract"):
         staged_changes.merge_sound_modes(tgt, rec)
     n = 0
     stale = prior.get(_SOUND_MODES_KEY) or {}

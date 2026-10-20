@@ -242,8 +242,12 @@ def save_music_modes(project, path):
     # a project saved before mode files had a loudness of their own: its files take their
     # sound's, as a mod pack carries them
     own = (staged_changes.sound_modes_of(staged_changes.load(project)) or {}).get("levels") or {}
-    members, _g = _members(f for _r, _m, f in modes.files())
+    members, _g = _members([f for _r, _m, f in modes.files()] + list(modes.attract))
     gone = [(r, m, f) for r, m, f in modes.files() if not _member(members, f)]
+    # PAD-641: the flipper buttons' sounds in attract, in their order
+    attract = [_member(members, f) for f in modes.attract if _member(members, f)]
+    gone += [("", SMo.attract_mode(k), f) for k, f in enumerate(modes.attract, 1)
+             if not _member(members, f)]
     slots, levels, sigs = {}, {}, {}
     for rel, m, f in modes.files():
         mem = _member(members, f)
@@ -254,15 +258,19 @@ def save_music_modes(project, path):
         if db:
             levels.setdefault(rel, {})[str(m)] = int(db)
         sigs[rel] = _sig(project, rel)
-    if not slots:
+    if not slots and not attract:
         raise ShareError("None of this project's music mode files is on this PC any more, so "
                          "there is nothing to save.")
     head = {"kind": MUSIC_KIND, "version": 1, "from": _about(project), "names": list(modes.names),
             "slots": slots, "levels": levels, "sigs": sigs}
-    _write_zip(path, head, [(mem, f) for f, mem in
-                            ((f, _member(members, f)) for f in {f for _r, _m, f in modes.files()})
-                            if mem])
-    return {"slots": len(slots), "files": len(members), "gone": gone}
+    if attract:
+        head["attract"] = attract
+    every = {f for _r, _m, f in modes.files()} | set(modes.attract)
+    _write_zip(path, head, [(mem, f) for f, mem in ((f, _member(members, f)) for f in every) if mem])
+    out = {"slots": len(slots), "files": len(members), "gone": gone}
+    if attract:
+        out["attract"] = len(attract)
+    return out
 
 
 def save_random_clips(project, path):
@@ -395,9 +403,15 @@ def load_music_modes(project, path):
             slots[to] = keep
             if how:
                 found.append((rel, to, how))
+        # PAD-641: the flipper buttons' sounds in attract, which belong to no sound of the card
+        attract = [_unpack(z, m, folder, cache) for m in (head.get("attract") or [])
+                   if isinstance(head.get("attract"), list) and _member_ok(m) and m in names
+                   ][:SMo.ATTRACT_MAX]
     names_in = head.get("names") if isinstance(head.get("names"), list) else []
     record = {"names": [str(n) if isinstance(n, str) else "" for n in names_in][:SMo.MAX_MODES],
               "slots": slots, "levels": levels}
+    if attract:
+        record["attract"] = attract
     return {"record": record, "loaded": len(slots), "files": len(cache), "found": found,
             "left": left, "about": head.get("from") or {}}
 
@@ -469,6 +483,8 @@ def put_music(project, record, keep_own=False):
                                   else not now.turns.get(rel))}
                         for rel, by in record.get("slots", {}).items()}
         rec["slots"] = {rel: by for rel, by in rec["slots"].items() if by}
+        if now.attract:                     # PAD-641: its own flipper sounds in attract stay
+            rec.pop("attract", None)
     data = staged_changes.load(project)
     n = staged_changes.merge_sound_modes(data, rec)
     if n:
@@ -564,7 +580,21 @@ def music_from_card(project, cfg_text):
                 os.path.splitext(os.path.basename(slot))[0], f["turn"])
             copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
         slots.setdefault(slot, {})[_carried_key(SMo.turn_mode(f["turn"]))] = copied[host]
-    return {"names": rec["names"], "slots": slots, "levels": levels}, left
+    # PAD-641: the flipper buttons' sounds in attract, in their order
+    attract = []
+    for f in rec.get("attract") or ():
+        slot, host = idx.get(f["slot"]), _card_host(project, idx, f)
+        if host is None:
+            left.append((f["rel"], SMo.attract_mode(f["k"]), _card_missing(f, slot or f["rel"])))
+            continue
+        if host not in copied:
+            stem = os.path.splitext(_safe_name(f["name"], ""))[0] or "attract flipper sound %d" % f["k"]
+            copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
+        attract.append(copied[host])
+    out = {"names": rec["names"], "slots": slots, "levels": levels}
+    if attract:
+        out["attract"] = attract
+    return out, left
 
 
 def _built_project_modes(card):
@@ -582,9 +612,12 @@ def _built_project_modes(card):
     for rel, mode, f in modes.files():
         if os.path.isfile(f):
             files.setdefault(rel, {})[_carried_key(mode)] = f
-    if not files:
+    if not files and not any(os.path.isfile(f) for f in modes.attract):
         return None
     rec = {"names": list(modes.names), "slots": files}
+    attract = [f for f in modes.attract if os.path.isfile(f)]      # PAD-641
+    if attract:
+        rec["attract"] = attract
     if modes.levels is not None:
         rec["levels"] = {rel: {str(m): db for m, db in v.items() if str(m) in files.get(rel, {})}
                          for rel, v in modes.levels.items()}
@@ -626,8 +659,13 @@ def readback(card, project, log=None, padmode=None):
                 log("%s: %s is not back: %s." % (
                     SMo.who(m), SMo.what(rel, m) if SMo.is_turn(m) else "%s's file for mode %d"
                     % (os.path.basename(rel), m), why), "warning")
+            had_attract = bool(SMo.load(project).attract)
             done["music"] = put_music(project, record, keep_own=True)
-            if done["music"]:
+            if done["music"] and record.get("attract") and not had_attract:
+                log("Attract flipper sounds: this card's flipper buttons play %d sound(s) in attract "
+                    "mode; they are back in the Audio tab%s." % (len(record["attract"]), where),
+                    "success")
+            if done["music"] and record["slots"]:
                 names = SMo.clean(record)
                 log("Music modes: %d sound(s) of this card have files for other music modes (%s); "
                     "they are back in the Audio tab%s." % (

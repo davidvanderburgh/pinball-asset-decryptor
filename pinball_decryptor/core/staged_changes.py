@@ -335,7 +335,10 @@ def sound_modes_of(data):
                 [f for f in files if isinstance(f, str) and f.strip()], 2)}
             if keep:
                 turns[rel] = keep
-    if not slots and not any(names) and not turns:
+    # PAD-641: the flipper buttons' sounds in attract belong to no slot: they go as they are
+    attract = [f for f in (raw.get("attract") or []) if isinstance(f, str) and f.strip()] \
+        if isinstance(raw.get("attract"), list) else []
+    if not slots and not any(names) and not turns and not attract:
         return None
     levels = raw.get("levels")
     if isinstance(levels, dict):
@@ -348,8 +351,11 @@ def sound_modes_of(data):
                   for rel, files in slots.items() if own.get(rel)}
     for rel, files in turns.items():
         slots.setdefault(rel, {}).update(files)
-    return {"names": names, "slots": slots,
-            "levels": {rel: v for rel, v in levels.items() if v}}
+    out = {"names": names, "slots": slots,
+           "levels": {rel: v for rel, v in levels.items() if v}}
+    if attract:
+        out["attract"] = attract
+    return out
 
 
 def merge_sound_modes(data, rec):
@@ -390,6 +396,11 @@ def merge_sound_modes(data, rec):
             names.append(name)
         elif not str(names[i] or "").strip():
             names[i] = name
+    # PAD-641: the record's flipper sounds in attract, when it has any, in place of these
+    attract = list(here.get("attract") or [])
+    if rec.get("attract"):
+        attract = [f for f in rec["attract"] if isinstance(f, str) and f.strip()]
+        n += 1
     if not n and names == here["names"]:
         return 0
     turns = {}
@@ -403,5 +414,7 @@ def merge_sound_modes(data, rec):
            "levels": {rel: v for rel, v in levels.items() if v}}
     if turns:
         out["turns"] = turns
+    if attract:
+        out["attract"] = attract
     data[SOUND_MODES_KEY] = out
     return n

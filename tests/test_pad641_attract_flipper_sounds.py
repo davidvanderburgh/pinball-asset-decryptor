@@ -281,3 +281,76 @@ def test_the_page_draws_the_button_from_the_tabs_state():
         js = f.read()
     assert "s.attract ? html`<${AttractButton}" in js
     assert 'call("audio.attract_action", "add")' in js and "Why not on this game?" in js
+
+
+# ---- carried: mod routes, the music modes file, back out of a card ---------------------------------
+def test_the_mod_routes_carry_them_as_they_are():
+    from pinball_decryptor.core import staged_changes as SC
+    data = {"sound_modes": {"names": [], "slots": {}, "attract": ["a.wav", "b.wav"]}}
+    rec = SC.sound_modes_of(data)
+    assert rec == {"names": [], "slots": {}, "levels": {}, "attract": ["a.wav", "b.wav"]}
+    tgt = {"sound_modes": {"names": [], "slots": {}, "attract": ["mine.wav"],
+                           "turns": {"audio/idx0002.wav": ["t.wav"]}}}
+    assert SC.merge_sound_modes(tgt, rec) == 1
+    assert tgt["sound_modes"]["attract"] == ["a.wav", "b.wav"]               # the record's
+    assert tgt["sound_modes"]["turns"] == {"audio/idx0002.wav": ["t.wav"]}   # the rest kept
+    assert SMo.clean(tgt["sound_modes"]).attract == ["a.wav", "b.wav"]
+    # a record without them leaves the project's own
+    tgt = {"sound_modes": {"names": [], "slots": {}, "attract": ["mine.wav"]}}
+    SC.merge_sound_modes(tgt, {"names": ["", "Two"], "slots": {}})
+    assert tgt["sound_modes"]["attract"] == ["mine.wav"]
+
+
+def test_the_transfer_plan_carries_them(tmp_path):
+    from pinball_decryptor.core import mod_transfer as MT
+    plan = {"sound_modes": {"matched": [], "remapped": [], "names": [], "levels": {}, "attract": ["a.wav"]}}
+    tgt, record = {}, {"sound_modes": {}}
+    MT._apply_sound_modes(tgt, plan, record, {}, False)
+    assert tgt["sound_modes"]["attract"] == ["a.wav"]
+
+
+def test_they_go_to_the_music_modes_file_and_come_back(tmp_path):
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.plugins.stern import media_share as MS
+    from tests.test_webui_audio import _wav as wav
+    src = str(tmp_path / "src")
+    wav(os.path.join(src, "audio", "idx0002.wav"), seconds=0.3)
+    a, b = str(tmp_path / "mine" / "Shaken.wav"), str(tmp_path / "mine" / "Bond.wav")
+    wav(a, seconds=0.4, amp=700)
+    wav(b, seconds=0.5, amp=900)
+    SC.save(src, {"sound_modes": {"names": [], "slots": {}, "attract": [a, b]}})
+    path = str(tmp_path / "modes.zip")
+    assert MS.save_music_modes(src, path) == {"slots": 0, "files": 2, "gone": [], "attract": 2}
+    dst = str(tmp_path / "dst")
+    wav(os.path.join(dst, "audio", "idx0002.wav"), seconds=0.3)
+    got = MS.load_music_modes(dst, path)
+    folder = os.path.join(dst, "Music mode files")
+    assert got["record"]["attract"] == [os.path.join(folder, "Shaken.wav"), os.path.join(folder, "Bond.wav")]
+    assert MS.put_music(dst, got["record"]) == 1
+    assert SMo.load(dst).attract == got["record"]["attract"]
+    # a project with its own keeps them when the record comes in beside them
+    SC.save(dst, {"sound_modes": {"attract": ["C:/my.wav"]}})
+    assert MS.put_music(dst, got["record"], keep_own=True) == 0
+    assert SMo.load(dst).attract == ["C:/my.wav"]
+
+
+def test_an_extract_of_the_card_has_them_back(tmp_path):
+    from pinball_decryptor.plugins.stern import media_share as MS
+    from tests.test_webui_audio import _wav as wav
+    proj = str(tmp_path / "proj")
+    wav(os.path.join(proj, "audio", "idx0046.wav"), seconds=0.3)
+    wav(os.path.join(proj, "audio", "idx0084.wav"), seconds=0.5, amp=900)
+    wav(os.path.join(proj, "audio", "idx0085.wav"), seconds=0.6, amp=500)
+    m = SMo.clean({"attract": [r"C:\mine\Shaken.wav", r"C:\mine\Bond.wav"]})
+    used = [{"rel": CARRIER, "slot": 46, "mode": SMo.attract_mode(k), "host": 83 + k, "db": 0, "lines": 1}
+            for k in (1, 2)]
+    cfg = SMo.cfg_text(0, 0, [], True, attract={"request": 1057, "key": b"C" * 8, "switches": [64, 63],
+                                                "files": [(b"A" * 8, 500), (b"B" * 8, 600)]},
+                       record=SMo.card_record(m, used))
+    said = []
+    assert MS.readback("card.raw", proj, lambda t, lvl="info": said.append(t),
+                       padmode={"sounds.cfg": cfg.encode()})["music"] == 1
+    folder = os.path.join(proj, "Music mode files")
+    assert SMo.load(proj).attract == [os.path.join(folder, "Shaken.wav"), os.path.join(folder, "Bond.wav")]
+    assert any(t.startswith("Attract flipper sounds: this card's flipper buttons play 2 sound(s) in attract "
+                            "mode; they are back in the Audio tab") for t in said)

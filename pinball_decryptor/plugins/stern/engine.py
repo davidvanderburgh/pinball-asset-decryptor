@@ -9010,7 +9010,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         _modes_on = bool(mode_list or code_list)
         # PAD-446: a build of random clips and no mode says so in its own words
         _who = ("Modes" if _modes_on else "Random clips" if variant_slots
-                else "Music modes" if sound_modes_cfg else "Picture settings")
+                else "Music modes" if sound_modes_cfg and (sound_modes.count or sound_modes.turns)
+                else "Attract flipper sounds" if sound_modes_cfg  # PAD-641: theirs alone
+                else "Picture settings")
         if _modes_on or variant_slots or sound_modes_cfg or picture_cfg:
             t0 = time.monotonic()
             if progress:

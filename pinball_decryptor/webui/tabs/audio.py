@@ -3086,7 +3086,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         loads. Returns its path, or None."""
         from ...plugins.stern import media_share as MS
         project = self._assets()
-        if not project or not (self._modes or self._turns):
+        if not project or not (self._modes or self._turns or self._attract):
             compat.messagebox.showinfo(
                 "Save the music modes",
                 "This project has no music modes to save: no sound has a file for another mode "
@@ -3139,7 +3139,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             compat.messagebox.showinfo("Load music modes", str(e))
             return None
         rec = got["record"]
-        if not rec["slots"]:
+        if not rec["slots"] and not rec.get("attract"):
             compat.messagebox.showinfo(
                 "Load music modes", "Nothing in %s could be loaded here:\n\n%s" % (
                     os.path.basename(path), "\n".join("%s: %s" % (os.path.basename(r), w)
@@ -3161,8 +3161,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         self.log("Replace Audio: loaded the music modes of %s: %d sound(s), their files in the "
                  "\"%s\" folder." % (os.path.basename(path), n, MS.MUSIC_DIR), "success")
         lines = ["%d sound(s) have their files for the other music modes (%s)." % (
-            n, ", ".join("%d %s" % (m, self._mode_name(m))
-                         for m in range(1, self._modes_max() + 1)))]
+            len(rec["slots"]), ", ".join("%d %s" % (m, self._mode_name(m))
+                                         for m in range(1, self._modes_max() + 1)))]
+        if rec.get("attract"):
+            lines.append("The flipper buttons play %d sound(s) in attract mode." % len(rec["attract"]))
         made = (got["about"] or {}).get("label")
         if made:
             lines.append("The file was saved from a project of %s." % made)

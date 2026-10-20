@@ -55,6 +55,7 @@ def test_cachemigrate_moves_only_valid_entries_and_drops_stale_ones():
     assert "NEW=$(bash \"$RIG/cardmount.sh\" --cache-dir" in cmg
     assert '[ "$(stat -c \'%s %Y\' "$img" 2>/dev/null)" != "$rest" ]' in cmg       # the .src stamp must still hold
     assert "cp --sparse=always -p" in cmg
-    assert cmg.index('mv -f "$NEW/$label.raw.partial" "$NEW/$label.raw"') < cmg.index('rm -f "$raw" "$src"')
+    # the old entry goes only after the new one is in place (the last rm is the move branch's)
+    assert cmg.index('mv -f "$NEW/$label.raw.partial" "$NEW/$label.raw"') < cmg.rindex('rm -f "$raw" "$src"')
     assert 'pgrep -f "fuse2fs.*$label"' in cmg                                  # never a card a run has mounted
     assert "OLD=${1:-${PAD_HOME:-$HOME}/cardcache}" in cmg                      # runs without padpath.sh

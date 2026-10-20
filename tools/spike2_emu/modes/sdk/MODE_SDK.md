@@ -2704,7 +2704,12 @@ plays, it notes how far in the mode's clip was. Once the game asks for its main-
 the surface is idle, it plays the mode's clip again and seeks it on. It hooks `surface_play`
 too, whose second argument is the game's loop flag: a clip the game LOOPS is a background
 (Bond Women's `BondWomen_007_Loop` runs for as long as its multiplier does), so it plays one
-pass, its own length and at most 3 s, and then the mode's clip takes the surface back. A clip
+pass, its own length and at most 3 s, and then the mode's clip takes the surface back. But a
+loop that is the backdrop of one of the game's display effects (Bond's spinner satellite, effect
+75, a see-through picture over `Diamond_EarthSpin`) stays for as long as that effect has the
+screen, and the mode's clip comes back when it ends: with `data display_effects` (the effect
+manager pointer) the runtime reads the effect now, and one whose table record lacks the
+background flag 1 is over the TV (PAD-639). A clip
 the game plays once (a lock, a start, an award) is waited out. It does not come back if
 the mode ended, another mode of ours began, or its time ran out under the game's clip. James
 Bond LE and Pro 1.06 name them (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the

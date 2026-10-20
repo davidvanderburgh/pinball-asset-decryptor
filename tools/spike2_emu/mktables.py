@@ -269,8 +269,18 @@ def _dump_over_binary(sw_list, game, elf, log_path, wait_s, say):
     dump = swtable.read(log_path)
     if not dump:
         return False
-    wire = {r[0]: (r[2], r[3]) for r in _read_list(sw_list)}
+    old = _read_list(sw_list)
+    wire = {r[0]: (r[2], r[3]) for r in old}
     moved = sum(1 for r in dump if wire.get(r[0]) != (r[2], r[3]))
+    # ★ THE LIST BEING REPLACED ALREADY HOLDS THE STATIC TABLE'S NAMES (PAD-654, munsters_le 1.28). Its memo
+    # says the static table was asked - about ITS rows, which it named. The dump's rows are new and may be `?`
+    # (the shim's message-table address, item 29), so the memo let fill() skip the one source that names them:
+    # 29 rows of node 8 stayed `?` for good - the trough and the shooter lane among them - and the ball tools
+    # fell back to Godzilla's ids (trough 0/6, no game on the rig). The old list's names go across by the wire
+    # first, which is the static table's own join, and costs nothing.
+    named = {(r[2], r[3]): r[4] for r in old if r[4] != "?"}
+    dump = [(sid, num, node, bit, named.get((node, bit), name) if name == "?" else name)
+            for sid, num, node, bit, name in dump]
     filled, _report = swnames.fill(dump, game, elf, use_static=not asked)
     try:
         _write(sw_list, swtable.text(game, filled, elf, static_asked=True,
@@ -357,7 +367,7 @@ def _static_names_asked(dest, source):
     """
     if not os.path.exists(dest) or not source or not os.path.exists(source):
         return False
-    want = devicexy.binary_id(source)
+    want = swtable.static_memo(devicexy.binary_id(source))
     try:
         with open(dest) as f:
             for line in f:

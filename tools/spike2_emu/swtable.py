@@ -67,6 +67,17 @@ SOURCE_BINARY = "the binary"
 SOURCE_BINARY_NO_DUMP = "the binary (a run's dump never came)"
 
 
+#: Bumped when a memo written by older code may stand for a question that was never really asked. 2 (PAD-654):
+#: PAD-619's dump-over-binary carried the memo of the list it replaced onto the dump's own `?` rows unasked
+#: (munsters_le 1.28: 29 names, the trough among them) - an older memo is asked again, once.
+STATIC_MEMO_REV = 2
+
+
+def static_memo(binary):
+    """What the `# static-names:` line says for `binary` (mktables._static_names_asked compares it)."""
+    return "%s; rev %d" % (binary, STATIC_MEMO_REV)
+
+
 def text(game, rows, elf=None, static_asked=False, source=SOURCE_DUMP):
     """switch_list.txt, as a string.
 
@@ -104,7 +115,7 @@ def text(game, rows, elf=None, static_asked=False, source=SOURCE_DUMP):
              # PAD-367: which reader made it - see devicexy.READER_REV
              "%s%d" % (devicexy.READER_TAG, devicexy.READER_REV)]
     if static_asked:
-        lines.append("# static-names: %s" % binary)
+        lines.append("# static-names: %s" % static_memo(binary))
     lines += ["# %d switches on nodes %s." % (len(rows), nodes),
               "# %-4s %-5s %-5s %-4s %s" % ("id", "num", "node", "bit", "name")]
     for sid, num, node, bit, name in rows:

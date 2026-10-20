@@ -60,6 +60,7 @@ across, silently, so the write after it is a real edge. Before the arrays were
 split this script "worked" by writing the keyboard's own array, and every key
 press put the ball straight back in the trough.
 """
+import os
 import sys
 import time
 
@@ -137,8 +138,9 @@ def _resolve():
     got = [by_name[n] for n in _TROUGH_NAMES if n in by_name]
     if len(got) == 6:
         ids["trough"] = tuple(got)
-    # item 167: the van's balls are neither home nor in play, so a drain must not count them
-    ids["van"] = ballmodel.Van.from_names(by_name)
+    # item 167: the van's balls are neither home nor in play, so a drain must not count them - nor any other
+    # lock's (PAD-654: TMNT LE's glider, D&D LE's dragon)
+    ids["locks"] = ballmodel.lock_ids(by_name)
     return ids
 
 
@@ -301,6 +303,58 @@ def do_plunge(m):
     return 1
 
 
+#: ★ PAD-654: HOW LONG A GAME MAY TAKE TO SERVE BALL 1 after its Start, in game seconds. Five was enough on 50 of
+#: the 53 newest builds, and never on the three with a lock: D&D LE fills its dragon with four balls first (~10 s),
+#: TMNT LE runs its turtle select and serves late, so `game` found the lane empty, the job pressed coin and Start
+#: again into the game, and a sweep counted the build as no game. PAD_START_SERVE_S overrides it.
+SERVE_S = float(os.environ.get("PAD_START_SERVE_S") or 90)
+#: A ball that sits this long in the lane is the PLAYER's: the game's own launches - an attract show, a lock being
+#: loaded (D&D LE's dragon, TMNT LE's van) - fire the auto plunger within ~0.5 s of the ball arriving, and a hand
+#: launch of one of those takes it from the lock it was meant for.
+SERVED_S = 1.5
+#: ...and a Start that only made the game load its lock is not a game: D&D LE's first Start fills the dragon and
+#: then serves nothing for minutes - a SECOND Start serves ball 1 within two seconds (measured 2026-10-20). So once
+#: the game's own launches have stopped this long with no ball 1, the wait is over and the caller presses Start again.
+QUIET_S = 12.0
+
+
+def _locked(m):
+    """Balls in a lock (the van, its glider, D&D LE's dragon) as the game sees them."""
+    mrg = _mrg(m)
+    return sum(1 for i in _IDS.get("locks", ()) if mrg[i])
+
+
+def wait_serve(m, budget=None):
+    """Wait for the game to serve ball 1. "lane" once a ball has sat SERVED_S in the shooter lane (its launch is the
+    caller's, do_plunge); "self" when the game launched its own ball and QUIET_S later that ball is neither home
+    nor in a lock - ball 1, launched by the game itself (Godzilla LE 1.16 did, 0.6 s after serving it, on one run of
+    PAD-654's sweep); None at the end of `budget` game seconds (SERVE_S), or QUIET_S after the game's own launches
+    stopped with every one of them home or locked (a Start that only loaded a lock)."""
+    budget = SERVE_S if budget is None else budget
+    clock = padsw.GameClock(m)
+    t0 = clock.now()
+    since = last = None
+    gone = None                 # (trough, locked) just after the game's last own launch
+    while clock.now() - t0 < budget:
+        now = clock.now()
+        if _held(m, SHOOTER):
+            since = now if since is None else since
+            last = now
+            if now - since >= SERVED_S:
+                return "lane"
+        else:
+            if since is not None:
+                gone = (_model().count(_mrg(m)), _locked(m))
+            since = None
+            if last is not None and now - last >= QUIET_S:
+                if gone and _model().count(_mrg(m)) <= gone[0] and _locked(m) <= gone[1]:
+                    return "self"
+                print("  the game launched its own balls and then served none - Start again")
+                return None
+        padsw.game_sleep(m, 0.1)
+    return None
+
+
 def do_serve(m):
     """The whole story a plunge used to tell: eject, arrive, launch.
 
@@ -376,9 +430,8 @@ def do_drain(m):
     line prints, and the game goes on believing a ball is in play.
     """
     padsw.take(m, TROUGH)
-    van = _IDS.get("van")
     plan = ballmodel.plan_drain(_model(), _mrg(m), SHOOTER, _held(m, SHOOTER),
-                                van.count(_mrg(m)) if van else 0)
+                                sum(1 for i in _IDS.get("locks", ()) if _mrg(m)[i]))
     if plan.refused:
         print(plan.refused)
         return 1
@@ -433,7 +486,12 @@ def main():
         padsw.game_sleep(m, 1.5)
         do_start(m)
         padsw.game_sleep(m, 5)
-        rc = do_plunge(m)
+        if wait_serve(m) == "self":     # PAD-654: a late serve (a lock filled first, a turtle select)
+            print("the game launched ball 1 itself (trough %d/%d - a ball in play)"
+                  % (_model().count(_mrg(m)), len(TROUGH)))
+            rc = 0
+        else:
+            rc = do_plunge(m)
     elif what == "reset":
         do_reset(m)
     elif what == "drain":

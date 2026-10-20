@@ -927,6 +927,7 @@ CHALLENGE_MENU_PROVEN = {
     "rush_le-1.18": 6,                # PAD-619 2026-10-19 rig batch_r19 (retry; the r9 run had not opened the menu): PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call when it ended, one ball, GAME OVER
     "rush_le-1.19": 6,                # PAD-619 2026-10-19 rig batch_r11: PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call (the lookalike-proof site) when it ended, one ball, GAME OVER
     "rush_pro-1.19": 6,     # PAD-619 2026-10-19 rig sweep (job619d.sh): PAD CHALLENGE after the game's 6, picked: START (challenge pick), the game's end-of-ball call when it ended, GAME OVER after the one ball
+    "aerosmith-1.16": 2,              # PAD-619 2026-10-20 rig batch_r27 (once the rig's switch list was the game's own numbering: 93 of 93 ids had moved): PAD CHALLENGE after the game's 2, picked: START (challenge pick), the end-of-ball call, one ball, GAME OVER
     "aerosmith_le-1.15": 2,           # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - kept past the game's own start - one ball, GAME OVER
     "avengers_infinity_le-1.09": 3,   # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 3, picked: START past the game's ball-start mode, the end-of-ball call, the game left after the one ball (in_game last 1 -> 0, no second ball; no game_over event in its port)
     "elvira3-1.13": 2,                # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2 (the count in r5), picked: START (challenge pick), the end-of-ball call when it ended, the game left after the one ball (in_game last 1 -> 0, no second ball; no game_over event in its port)
@@ -940,6 +941,7 @@ CHALLENGE_MENU_PROVEN = {
     "jurassic_park_the_pin-1.05": 2,  # PAD-619 2026-10-19 rig batch_r8 (its buttons are L/R FLIPPER BUTTON): PAD CHALLENGE after the game's 2, picked: START (challenge pick), one ball, GAME OVER
     "sword_of_rage_le-1.18": 4,       # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 4, picked: START (challenge pick), one ball, GAME OVER
     "star_wars_le-1.30": 2,           # PAD-619 2026-10-20 rig batch_r23 (once the rig's switch list was the game's own numbering, mktables 70 of 103 ids moved): the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), one ball, HIGH SCORE initials (in_game last 1 -> 0, no second ball)
+    "star_wars_elg-1.10": 2,          # PAD-619 2026-10-20 rig batch_r27: PAD CHALLENGE after the game's 2, picked: START (challenge pick), an extra ball earned in it refused (challenge_extra_ball), the balls getter said 1, GAME OVER after the one ball
     "stranger_things-1.13": 6,        # PAD-619 2026-10-19 rig sweep: PAD CHALLENGE after the game's 6, picked: START (challenge pick) at the ball's start (its handler hands it over), one ball, GAME OVER
     "stranger_things_le-1.12": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.12 card
     "stranger_things_le-1.13": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.13 card

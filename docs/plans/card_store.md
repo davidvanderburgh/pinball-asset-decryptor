@@ -70,7 +70,36 @@ Nothing reads `older versions`: not a sweep list, not the cache, not the app's p
 - `cardstore.ps1 create`: the file made, formatted and attached by name in about a minute; 393 GB usable;
   `mountpoint /mnt/wsl/cards` true in Ubuntu and in PAD-Runtime.
 - PAD-Runtime's cache: 2 valid entries (8 GB) moved into the store in 18 s.
-- (filled in as the pre-cache completes)
+- Ubuntu's cache: 20 valid entries (101 GB) moved into the store NVMe to NVMe in about five minutes
+  (6-17 s a card); 7 stale entries - the older versions moved to the archive folder that afternoon - dropped.
+- `precache.sh` over the library's 60 `.raw` files: **38 copied off D: and 22 already there, 0 not cached, 27
+  minutes** (22-84 s a card, the 16 GB Rush and Bond images the slowest), with the two sweeps paused so D: had one
+  reader. The store then held 60 cards, 300 GB used of 393, and the file was 324 GB on disk; C: went from 552 GB
+  free to 219 GB and the Ubuntu distro disk is compacted straight after (its old 123 GB cache is empty).
+
+- The compaction after it (/prune's compact.ps1: fstrim, `wsl --shutdown`, diskpart): Ubuntu's distro disk
+  **194.4 GB -> 57.7 GB**, PAD-Runtime's 21.8 -> 13.8, the work disk unchanged at 21.3; 144.7 GB back to Windows,
+  C: at 367 GB free with the whole library resident (249 GB free that morning with none of it).
+- The file was first made as `C:\wsl\cards.vhdx` by an ELEVATED diskpart and moved into the data folder after the
+  pre-cache (a same-volume rename, 331 GB in a second). `wsl --mount` then refused it, "Access is denied": the
+  file had kept the ACL it inherited under C:\wsl (Administrators and SYSTEM full control, the user only
+  Modify), and attaching a disk needs the user to be able to change its permissions - the service adds the VM's
+  own SID to the file, which is what pad-data.vhdx's ACL shows. `icacls /setowner` + full control for the user
+  (one elevated step) and the attach went through; a file `cardstore.ps1 create` makes unelevated is the user's
+  from the start, so this is a note for anyone moving a disk file made another way.
+- Attached from its new home: `/mnt/wsl/cards` a mountpoint in Ubuntu and in PAD-Runtime, 60 cards; PAD-Runtime's
+  `cardmount.sh <card> --cache-now` answered "using local cache /mnt/wsl/cards/cardcache/jaws_le-1_02_0.raw" in
+  0 s - the app's distro reads what Ubuntu's sessions cached, no copy.
+- The emulator proof (Ubuntu, rig 1, `rigbatch.sh -n 1 --who PAD-651 ... -- startcheck.sh` over Godzilla Pro
+  1.16, Rush LE 1.19 and Venom Pro 1.07, all from the store): **3/3 pass in 3m02s**, the stager found all three
+  cached and copied nothing ("3 cached on the WSL disk, 0 booted where they lie"); Godzilla Pro started 2 s after
+  the batch did and passed in 34 s (attract 26 s, a game at 29 s), Venom Pro in 40 s, Rush LE in 101 s (its first
+  boot in that rig: Guided Setup); every watch.log reads "[card] using local cache /mnt/wsl/cards/cardcache/...".
+  Against this morning: 70-110 s of idle per build waiting for a copy, and 6 MB/s copies when two tickets read D:.
+- PAD-643 and PAD-645, let go afterwards: PAD-643 had four rigs in a game within 40 s of its resumed batch's
+  start, no copy record on the board; PAD-645 queued its remaining 40 newest builds as one rigbatch waiting for
+  rigs. Their worktrees run the older cardmount.sh, which only knows ~/cardcache: that path is a symlink to the
+  store in both distros until this ticket merges (harmless after - the store is preferred when mounted).
 
 ## What it leaves
 

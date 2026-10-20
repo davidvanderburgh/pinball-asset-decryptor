@@ -95,3 +95,28 @@ def test_a_list_from_before_the_source_line_is_checked_like_a_binary_one(rig):
     assert mktables._recorded_source(lst) is None
     assert mktables._dump_over_binary(lst, "star_wars_le", elf, log, 0, lambda m: None)
     assert _ids(lst)["LEFT FLIPPER BUTTON"] == 59
+
+
+#: PAD-654, munsters_le 1.28: the shim's dump names nothing on node 8 (item 29's message-table address)
+DUMP_UNNAMED = DUMP.replace("LEFT FLIPPER BUTTON", "?").replace("TROUGH 1", "?")
+
+
+def test_the_dumps_unnamed_rows_keep_the_replaced_lists_names_by_the_wire(rig):
+    """The list being replaced was named by the static table and memoed as asked; the dump's `?` rows used to
+    inherit the memo and never be asked, so the trough stayed `?` and the ball tools used Godzilla's ids."""
+    tmp_path, elf, lst = rig
+    assert mktables._dump_over_binary(lst, "star_wars_le", elf, _log(tmp_path, DUMP_UNNAMED), 0,
+                                      lambda m: None)
+    ids = _ids(lst)
+    assert ids["LEFT FLIPPER BUTTON"] == 59 and ids["TROUGH 1"] == 71, ids
+    assert "?" not in ids
+
+
+def test_a_memo_from_before_pad654_is_asked_again(rig, monkeypatch):
+    """A list PAD-619's dump path already wrote with `?` rows and the old memo heals on its next run."""
+    tmp_path, elf, lst = rig
+    monkeypatch.setattr(mktables.devicexy, "binary_id", lambda p: "game 68 bytes")
+    open(lst, "w").write("# static-names: game 68 bytes\n1 0 8 3 ?\n")
+    assert not mktables._static_names_asked(lst, elf)
+    open(lst, "w").write("# static-names: %s\n1 0 8 3 ?\n" % swtable.static_memo("game 68 bytes"))
+    assert mktables._static_names_asked(lst, elf)

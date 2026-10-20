@@ -182,6 +182,12 @@ VAN_LOWER = 2                    # the first two of VAN_STACK are the lower sect
 VAN_ENTER = "VAN ENTER OPTO"
 VAN_COIL_LOWER = "LOWER LOCK"
 VAN_COIL_UPPER = "UPPER LOCK"
+#: PAD-654: the one-ball lock an ATTRACT ball the van lets out is for (TMNT LE's glider). MEASURED (turtles_le 1.59,
+#: 2026-10-20): attract ran its van cycle - VAN DOOR, three balls in and out - every ~20 s for as long as the rig ran,
+#: and ignored Start through most of it; one ball closing GLIDER LOCK OPTO and the cycle ended at once, the next
+#: Start served ball 1. So the van's first attract release goes there while it is empty; the rest roll home.
+VAN_CATCH = "GLIDER LOCK OPTO"
+VAN_CATCH_S = 1.0                # from the van's lower lock to the glider
 #: from the auto plunger to the van's mouth, and how long a ball covers its opto
 VAN_FLIGHT_S = 0.8
 VAN_ENTER_S = 0.15
@@ -205,9 +211,10 @@ class Van:
     """The van's balls, read off its optos in the merged array every time - like Trough, it decides
     nothing about which switches the van is (from_names does, by name) and holds no count of its own."""
 
-    def __init__(self, stack, enter):
+    def __init__(self, stack, enter, catch=None):
         self.stack = list(stack)
         self.enter = enter
+        self.catch = catch          # VAN_CATCH's id, or None on a title without one
 
     @classmethod
     def from_names(cls, by_name):
@@ -216,7 +223,15 @@ class Van:
         enter = by_name.get(VAN_ENTER)
         if None in ids or enter is None:
             return None
-        return cls(ids, enter)
+        return cls(ids, enter, by_name.get(VAN_CATCH))
+
+    def plan_catch(self, mrg):
+        """An attract ball the van let out goes into an empty VAN_CATCH lock; None when there is none to fill."""
+        if self.catch is None or mrg[self.catch]:
+            return None
+        return Plan([("wait", VAN_CATCH_S, "the ride to the %s" % VAN_CATCH.lower()),
+                     ("set", self.catch, 1, "%s (%d) closed (the attract ball the van let out stays there)"
+                      % (VAN_CATCH, self.catch))])
 
     def flags(self, mrg):
         return [bool(mrg[i]) for i in self.stack]
@@ -281,6 +296,95 @@ class Van:
             if flags[i]:
                 steps += [("set", self.stack[i], 0, "%s (%d) opened" % (VAN_STACK[i], self.stack[i])),
                           ("set", self.stack[i - 1], 1, "%s (%d) closed" % (VAN_STACK[i - 1], self.stack[i - 1]))]
+        return Plan(steps)
+
+
+#: ★ PAD-654: A HOLD, a physical lock the game fills through a DIVERTER (D&D LE/Premium's dragon: DRAGON HOLD 1-4
+#: and DRAGON HOLD STACK, let out by DRAGON VUK). MEASURED in the rig (dungeons_and_dragons_le 1.10, 2026-10-20):
+#:   * attract fires TROUGH and DIVERTER together, then AUTO PLUNGER - the diverter sends the launch into the hold -
+#:     every ~8 s while the hold is empty. With nothing modelling it each ball came back to the trough, the loop never
+#:     ended and the game never took Start. One ball closing DRAGON HOLD STACK and attract went quiet for good.
+#:   * Start fills it to FOUR the same way (STACK, 4, 3, 2), and only then serves ball 1 - with NO diverter fire.
+#:     So the diverter alone says whose ball it is, in attract or a game. Sent onto the playfield instead, those
+#:     balls emptied the trough into a ball search.
+#:   * with six balls the trough read 2/6 once the hold had its four, and the game let one out with DRAGON VUK and
+#:     loaded again, round and round, before it served (one start in three tries, three minutes in). With the
+#:     hold's balls on top of the trough's six it served ball 1 at once - the TMNT LE van's story (eight balls
+#:     installed, a six-ball trough). `balls` is that complement, queued behind the trough (PAD_BALL_EXTRA
+#:     overrides it).
+#: The stack is listed from the release end: a ball rolls down to it first. MATCHED BY NAME like the van and the
+#: drop banks: a title with every switch and both coils has one.
+HOLDS = (
+    # (the stack, release end first, release coil, feed coil, its balls)            title
+    (("DRAGON HOLD STACK", "DRAGON HOLD 4", "DRAGON HOLD 3", "DRAGON HOLD 2", "DRAGON HOLD 1"),
+     "DRAGON VUK", "DIVERTER", 4),                                                    # dungeons_and_dragons_le
+)
+
+
+def lock_ids(by_name):
+    """Every switch of a lock this title has by name (the van, its glider, a HOLDS stack): a ball on one is neither
+    home nor in play. For plunge.py's drain, which has no coil table to match a lock by."""
+    van = Van.from_names(by_name)
+    ids = (van.stack + ([van.catch] if van.catch is not None else [])) if van else []
+    for names, _release, _feed, _balls in HOLDS:
+        got = [by_name.get(n) for n in names]
+        if None not in got:
+            ids += got
+    return ids
+
+
+#: how long after the feed coil an auto plunge is still the diverted one (game seconds), and the ball's flight
+HOLD_FEED_S = 2.5
+HOLD_FLIGHT_S = 0.8
+
+
+class Hold:
+    """One HOLDS lock. Like Van, its balls are read off the merged array every time."""
+
+    def __init__(self, stack, names, release, feed, balls=0):
+        self.stack = list(stack)
+        self.names = list(names)
+        self.release = release      # (node, index)
+        self.feed = feed
+        self.balls = balls          # installed on top of the trough's
+
+    @classmethod
+    def from_names(cls, by_name, coil_address):
+        """The first HOLDS lock this title has all of, from {SWITCH NAME: id} and name -> (node, index) or None."""
+        for names, release, feed, balls in HOLDS:
+            ids = [by_name.get(n) for n in names]
+            r, f = coil_address(release), coil_address(feed)
+            if None not in ids and r is not None and f is not None:
+                return cls(ids, names, r, f, balls)
+        return None
+
+    def flags(self, mrg):
+        return [bool(mrg[i]) for i in self.stack]
+
+    def count(self, mrg):
+        return sum(self.flags(mrg))
+
+    def plan_load(self, mrg):
+        """A diverted launch lands in the hold: the free place nearest the release end."""
+        free = [k for k, f in enumerate(self.flags(mrg)) if not f]
+        if not free:
+            return Plan(refused="the hold is full - the ball stays on the playfield")
+        k = free[0]
+        return Plan([("wait", HOLD_FLIGHT_S, "the flight to the hold"),
+                     ("set", self.stack[k], 1, "%s (%d) closed (a ball in the hold)" % (self.names[k], self.stack[k]))])
+
+    def plan_release(self, mrg):
+        """The release coil fired: the ball at the release end leaves and every ball behind it rolls down one."""
+        flags = self.flags(mrg)
+        if not flags[0]:
+            return Plan(refused="the hold's release fired with no ball at %s" % self.names[0])
+        n = sum(flags)
+        steps = [("set", self.stack[0], 0, "%s (%d) opened (a ball left the hold)" % (self.names[0], self.stack[0]))]
+        if n > 1:
+            # the stack fills from the release end (plan_load), so n-1 balls are at places 0..n-2 afterwards
+            steps.append(("wait", VAN_DROP_S, "the balls behind roll down"))
+            steps.append(("set", self.stack[n - 1], 0, "%s (%d) opened" % (self.names[n - 1], self.stack[n - 1])))
+            steps.append(("set", self.stack[0], 1, "%s (%d) closed" % (self.names[0], self.stack[0])))
         return Plan(steps)
 
 

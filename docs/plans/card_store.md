@@ -35,26 +35,32 @@ Nothing reads `older versions`: not a sweep list, not the cache, not the app's p
 
 ## What was built
 
-1. **`cardstore.ps1`** (Windows side). `create` makes an expandable VHDX on the NVMe (`C:\wsl\cards.vhdx`, 400 GB
-   maximum, grows as used; diskpart, since Windows Home has no Hyper-V module), attaches it bare with
-   `wsl --mount --vhd --bare`, has Ubuntu format it ext4 (label `cards`, no reserved blocks), detaches it and
-   attaches it again with `--name cards` - which puts it at **/mnt/wsl/cards in every distro at once** (Ubuntu
-   and PAD-Runtime, the app's runtime). The disk steps need administrator rights and run in an elevated child
-   (`Start-Process -Verb RunAs`, silent on David's PC); everything that touches a distro's files runs unelevated.
-   A mount does not survive a reboot, so `create` registers a logon task, **"PAD card store"**, that runs
-   `cardstore.ps1 mount` with highest privileges; the task names the main checkout's copy of the script
-   (`Documents\development\pinball-asset-decryptor\tools\spike2_emu\cardstore.ps1`), which outlives any ticket's
-   worktree - so it works from the first reboot after this ticket merges; before that, `cardstore.ps1 mount` by
-   hand. `status` shows the file's size on disk, the mount in each distro and the cache's use.
-2. **cardmount.sh keeps its cache in the store when it is there**: `/mnt/wsl/cards/cardcache` when that is a
-   mount, else `$PAD_HOME/cardcache` as before (a machine without the store, a reboot before the logon task
-   ran); `PAD_CARD_CACHE_DIR` names another; `cardmount.sh --cache-dir` says which. cardstage.sh's "did the copy
+1. **`cardstore.ps1`** (Windows side), made the app's own way: `core/rigdata.py` had already measured on this
+   Windows 11 Home box that `diskpart create vdisk` and `wsl --mount --vhd` need no administrator (New-VHD is a
+   Hyper-V cmdlet and is absent), so nothing here elevates. `create` makes an expandable VHDX beside the app's work
+   disk - `%LOCALAPPDATA%\pinball_decryptor\data\pad-cards.vhdx`, 400 GB maximum, grows as used - attaches it bare,
+   has Ubuntu format it ext4 with rigdata's inode-sparing flags (`-i 1048576 -J size=64 -m 0`, lazy init: the
+   defaults would materialise ~7 GB of inode tables on a 400 GB volume), detaches it and attaches it again with
+   `--name cards`, which puts it at **/mnt/wsl/cards in every distro at once** (Ubuntu and PAD-Runtime, the app's
+   runtime). A mount does not survive a reboot, so `create` also writes a Startup-folder entry, **`PAD card
+   store.cmd`**, that runs `cardstore.ps1 mount` at logon (`schtasks /Create /SC ONLOGON` is "Access is denied"
+   unelevated; pad-triage autostarts from the same folder); it names the main checkout's copy of the script, which
+   outlives a ticket's worktree. `status` shows the file's size on disk, the mount in each distro, the cache's use
+   and the logon entry. A separate file rather than a bigger work disk because the work disk's point is to be a
+   unit of reclaim the user can delete in one action: so is this one, without taking save states with it.
+2. **The app attaches it at every rig start** (`rigdata.ensure_cards` / `attach_cards` / `cards_attached`, called
+   from the Emulate tab where it re-attaches the work disk after a WSL restart), so a restart never silently sends
+   a run back to copying off D:. Never created by the app: 400 GB is a decision made with the script. Missing or
+   failing to attach is a line in the log, not a refusal - a run then copies into the runtime's own cache as before.
+3. **cardmount.sh keeps its cache in the store when it is there**: `/mnt/wsl/cards/cardcache` when that is a
+   mount, else `$PAD_HOME/cardcache` as before (a machine without the store, a reboot before anything attached
+   it); `PAD_CARD_CACHE_DIR` names another; `cardmount.sh --cache-dir` says which. cardstage.sh's "did the copy
    land in the cache" check and mkmulticard.py's copier check know the store too. The copier, the stamps, the
    `.boot` sidecars and the eviction are unchanged - there is just one of each now, for every distro.
-3. **`precache.sh`** copies every `.raw` in the library folder (never its `older versions` subfolder) into the
+4. **`precache.sh`** copies every `.raw` in the library folder (never its `older versions` subfolder) into the
    cache, one at a time under the machine-wide copy lock the sweeps use, skipping what is cached and valid, and
    reports each card to the dashboard (`PAD_PROGRESS=PAD-n`).
-4. **`cachemigrate.sh`** moves the VALID entries of an old per-distro cache into the store (sparse-preserving,
+5. **`cachemigrate.sh`** moves the VALID entries of an old per-distro cache into the store (sparse-preserving,
    NVMe to NVMe, the old entry removed once the new one matches), drops entries whose image is gone or changed
    (the older versions), and leaves a card a run has mounted alone - so the 123 GB Ubuntu had already copied
    were not read off D: again.

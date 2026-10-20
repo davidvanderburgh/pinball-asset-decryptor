@@ -12388,5 +12388,10 @@
 "Played by one of the game code's sound requests:": "Lo reproduce una petición de sonido del código del juego:",
 "Played by {} sound requests": "Lo reproducen {} peticiones de sonido",
 "No sound request plays it": "Ninguna petición de sonido lo reproduce",
-"Game Sound Requests": "Peticiones de sonido del juego"
+"Game Sound Requests": "Peticiones de sonido del juego",
+"One after another": "Uno tras otro",
+"At random": "Al azar",
+"Play at random": "Reproducir al azar",
+"Each time the game plays this sound it plays one of these at random, never the same one twice in a row: {}.": "Cada vez que el juego reproduce este sonido, reproduce uno de estos al azar, nunca el mismo dos veces seguidas: {}.",
+"**At random** in the same menu plays one of them at random each time instead, never the same one twice in a row: several songs for one multiball, like a jukebox. **One after another** goes back to taking turns.": "**Al azar** en el mismo menú reproduce en su lugar uno de ellos al azar cada vez, nunca el mismo dos veces seguidas: varias canciones para un multiball, como una gramola. **Uno tras otro** vuelve a reproducirlos por turnos."
 }

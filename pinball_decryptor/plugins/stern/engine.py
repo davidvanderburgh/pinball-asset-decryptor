@@ -10210,6 +10210,9 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     if modes.turns:
         log("Found %d sound(s) that play %d more file(s) in turn." % (
             len(modes.turns), sum(map(len, modes.turns.values()))), "info")
+        if modes.random:
+            log("%d of them pick one of their files at random each time." % len(modes.random),
+                "info")
     return modes, prof
 
 
@@ -11049,11 +11052,16 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
         log("Sounds in turn: none of the files can be played on this card; every sound plays its "
             "own.", "warning")
         return ""
+    # PAD-638: the slots whose files in turn play at random, by the key their turn lines name
+    byidx = {p["idx"]: p for p in params}
+    randoms = sorted({bytes(byidx[int(u["slot"])]["findkey"]) for u in used + banked
+                      if _SMo.is_turn(u["mode"]) and u.get("lines") and u["rel"] in modes.random
+                      and (byidx.get(int(u["slot"])) or {}).get("findkey")})
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
         f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
-                              turns=turns, bsids=bsids, tsids=tsids,
+                              turns=turns, bsids=bsids, tsids=tsids, randoms=randoms,
                               record=_SMo.card_record(modes, used + banked)))
     return path
 

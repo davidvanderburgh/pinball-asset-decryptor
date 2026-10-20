@@ -231,6 +231,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         # PAD-565: a slot's files the game plays IN TURN with its own ({rel: [path, ...]}, file 2
         # first), kept in the same record as the music modes
         self._turns = {}
+        # PAD-638: the slots of them whose files play AT RANDOM, not one after another
+        self._random = set()
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -721,6 +723,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                                  if rel in self._modes}
             self._turns = {rel: v for rel, v in self._turns.items()
                            if rel in self._by_rel}
+            self._random &= set(self._turns)
         self._loop = {
             s.rel_path: (bool(saved_loops[s.rel_path])
                          if s.rel_path in saved_loops
@@ -1235,6 +1238,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         if tn:
             row["tn"] = len(tn) + 1
             row["tn_tip"] = self._turns_words(rel)
+            if rel in self._random:
+                row["tr"] = True
         uses = self._uses.get(rel) if self._uses else None
         if uses is not None:
             row["rq"] = len(uses)
@@ -2646,6 +2651,9 @@ class AudioTab(FindOriginalsMixin, TabService):
             keep = [f for f in files if isinstance(f, str) and f.strip()][:_TURNS_MAX - 1]
             if keep:
                 self._turns[rel] = keep
+        rnd = raw.get("random")
+        self._random = {rel for rel in (rnd if isinstance(rnd, list) else ())
+                        if isinstance(rel, str) and rel in self._turns}
 
     def _modes_json(self):
         names = list(self._mode_names)
@@ -2665,6 +2673,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         out = {"names": names, "slots": slots, "levels": levels}
         if turns:
             out["turns"] = turns
+            rnd = sorted(rel for rel in self._random if rel in turns)
+            if rnd:
+                out["random"] = rnd
         return out
 
     def _mode_level(self, rel, m):
@@ -2875,6 +2886,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
                else "the game's own sound")
         names = [own] + [os.path.basename(f) for f in tn]
+        if rel in self._random:
+            return ("Each time the game plays this sound it plays one of these at random, never "
+                    "the same one twice in a row: "
+                    + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
         return ("Each time the game plays this sound it plays the next of these, then starts "
                 "again: " + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
 
@@ -2893,14 +2908,22 @@ class AudioTab(FindOriginalsMixin, TabService):
             sub.append({"label": "Add a sound to play in turn…", "action": "turn_add",
                         "icon": "plus"})
         if tn:
-            sub.append({"sep": True})
+            # PAD-638: one after another, or at random (a jukebox)
+            rnd = rel in self._random
+            sub += [{"sep": True},
+                    {"label": "One after another", "action": "turn_order:0",
+                     "checked": not rnd, "radio": True},
+                    {"label": "At random", "action": "turn_order:1",
+                     "checked": rnd, "radio": True},
+                    {"sep": True}]
             for k, f in enumerate(tn, 2):
                 if not why:
                     sub.append({"label": "Play sound %d (%s)" % (k, os.path.basename(f)),
                                 "action": "turn_play:%d" % k, "icon": "play"})
                 sub.append({"label": "Take off sound %d (%s)" % (k, os.path.basename(f)),
                             "action": "turn_off:%d" % k, "icon": "x"})
-        return {"label": "Play in turn" + (" (%d sounds)" % (len(tn) + 1) if tn else ""),
+        return {"label": ("Play at random" if tn and rel in self._random else "Play in turn")
+                + (" (%d sounds)" % (len(tn) + 1) if tn else ""),
                 "icon": "shuffle", "submenu": sub}
 
     def _turn_action(self, action, rel):
@@ -2934,6 +2957,17 @@ class AudioTab(FindOriginalsMixin, TabService):
                         len(self._turns[rel]) + 1), "info")
             self._modes_changed(rel)
             return True
+        if kind == "turn_order":
+            if not tn or bool(k) == (rel in self._random):
+                return False
+            if k:
+                self._random.add(rel)
+            else:
+                self._random.discard(rel)
+            self.log("Replace Audio: %s plays its %d sounds %s." % (
+                rel, len(tn) + 1, "at random" if k else "one after another"), "info")
+            self._modes_changed(rel)
+            return True
         if not 2 <= k <= len(tn) + 1:
             return False
         f = tn[k - 2]
@@ -2947,6 +2981,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             del tn[k - 2]
             if not tn:
                 self._turns.pop(rel, None)
+                self._random.discard(rel)
             self.log("Replace Audio: %s no longer plays %s in turn."
                      % (rel, os.path.basename(f)), "info")
             self._modes_changed(rel)

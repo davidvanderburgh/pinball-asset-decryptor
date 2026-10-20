@@ -59,10 +59,17 @@ def test_every_menu_port_names_the_whole_menu():
         if key.startswith("james_bond_"):
             continue                                                          # PAD-615's own menu lines
         assert "challenge_balls" in port["site"], key                       # a mode's challenge game is one ball
-        if key == "turtles_pro-1.58":
-            assert not port["event"], key                                   # its thin port names no events yet: the
-            continue                                                         # runtime leaves the menu alone there
         assert any(e[0] == "ball_start" for e in port["event"]), key        # where the plain one is handed over
+
+
+def test_tmnt_pro_1_58_has_its_own_event_ids():
+    """Its drafted port named no events; the rig saw 1.59's ids less 4 fire (its dispatch is bounded 16 lower)."""
+    port = _port("turtles_pro-1.58")
+    assert port["site"]["hook_dispatch"][0] == 0x183e08
+    text = (PORTS / "turtles_pro-1.58.port").read_text(encoding="utf-8")
+    ev = {l.split()[1]: int(l.split()[2], 0) for l in text.splitlines() if l.startswith("event ")}
+    assert ev == {"game_start": 0x49, "ball_start": 0x21, "ball_end": 0x30, "bonus_start": 0x23, "bonus_end": 0x24}
+    assert {e[0] for e in port["event"]} == set(ev)
 
 
 def test_named_challenges_by_their_flag_alone_where_the_game_has_no_handler_of_bonds_shape():

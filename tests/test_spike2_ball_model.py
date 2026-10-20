@@ -768,8 +768,10 @@ def test_game_waits_for_a_ball_that_stays_in_the_lane(tmp_path, monkeypatch):
     import padsw
     import plunge
     monkeypatch.setattr(plunge, "SHOOTER", 62)
+    monkeypatch.setattr(plunge, "TROUGH", FULL)
+    monkeypatch.setitem(plunge._IDS, "locks", [83])
     now = [0.0]
-    lane_at = {}                                    # game second -> lane made
+    at = {}                                         # game second -> [(switch, level)]
 
     class Clock:
         def __init__(self, m):
@@ -780,25 +782,32 @@ def test_game_waits_for_a_ball_that_stays_in_the_lane(tmp_path, monkeypatch):
 
     def sleep(m, s):
         now[0] += s
-        for t, v in lane_at.items():
+        for t, moves in at.items():
             if abs(now[0] - t) < 0.05:
-                m[padsw.OFF_MRG + 62] = v
+                for sw, v in moves:
+                    m[padsw.OFF_MRG + sw] = v
     monkeypatch.setattr(plunge.padsw, "GameClock", Clock)
     monkeypatch.setattr(plunge.padsw, "game_sleep", sleep)
-    m = _block(padsw)
-    lane_at.update({2.0: 1, 2.5: 0, 8.0: 1})       # a lock's ball launched at once, then ball 1 that waits
-    assert plunge.wait_serve(m, budget=20) is True
+
+    def run(moves, budget):
+        now[0] = 0.0
+        at.clear()
+        at.update(moves)
+        return plunge.wait_serve(_block(padsw, *FULL), budget=budget)
+
+    # a lock's ball launched at once (into the lock), then ball 1 that waits
+    assert run({2.0: [(66, 0), (62, 1)], 2.5: [(62, 0)], 3.3: [(83, 1)], 8.0: [(67, 0), (62, 1)]}, 20) == "lane"
     assert 9.4 <= now[0] < 10.0                     # 1.5 s after ball 1 arrived, not at the lock's ball
-    now[0] = 0.0
-    lane_at.clear()
-    assert plunge.wait_serve(_block(padsw), budget=3) is False and now[0] >= 3
-    # D&D LE's first Start: the dragon filled (the game's own launches), then nothing - over QUIET_S later, not at
-    # the end of the budget
-    now[0] = 0.0
-    lane_at.clear()
-    lane_at.update({2.0: 1, 2.5: 0, 4.0: 1, 4.5: 0})
-    assert plunge.wait_serve(_block(padsw), budget=90) is False
-    assert 4.5 + plunge.QUIET_S - 0.6 <= now[0] < 4.5 + plunge.QUIET_S + 0.6
+    assert run({}, 3) is None and now[0] >= 3       # nothing served
+    # D&D LE's first Start: the dragon filled by the game's own launches, then nothing - over QUIET_S later, not
+    # at the end of the budget
+    loads = {2.0: [(66, 0), (62, 1)], 2.5: [(62, 0)], 3.3: [(83, 1)]}
+    assert run(loads, 90) is None
+    assert 2.5 + plunge.QUIET_S - 0.6 <= now[0] < 2.5 + plunge.QUIET_S + 0.6
+    # Godzilla LE once: ball 1 launched by the game 0.6 s after its serve - in play, not home, not locked
+    assert run({2.0: [(66, 0), (62, 1)], 2.6: [(62, 0)]}, 90) == "self"
+    # an attract-style launch that came home is not a game
+    assert run({2.0: [(66, 0), (62, 1)], 2.6: [(62, 0)], 7.6: [(66, 1)]}, 90) is None
 
 
 # --- the van (item 167, TMNT LE/Premium) ------------------------------------

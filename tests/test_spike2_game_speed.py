@@ -354,7 +354,7 @@ def test_the_helpers_keep_the_games_time():
     swpoke = _text("swpoke.py")
     assert "padsw.game_sleep(m, ms / 1000.0)" in swpoke and "time.sleep(ms" not in swpoke
     plunge = _text("plunge.py")
-    assert "time.sleep(" not in plunge and plunge.count("padsw.game_sleep(m, ") == 8
+    assert "time.sleep(" not in plunge and plunge.count("padsw.game_sleep(m, ") == 9    # PAD-654: wait_serve
     sx = _text("swexercise.py")
     assert "padsw.game_sleep(m, press_ms / 1000.0)" in sx and "padsw.game_sleep(m, gap_ms / 1000.0)" in sx
     bf = _text("ballfeed.py")

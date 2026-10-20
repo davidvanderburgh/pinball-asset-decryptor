@@ -318,28 +318,41 @@ SERVED_S = 1.5
 QUIET_S = 12.0
 
 
+def _locked(m):
+    """Balls in a lock (the van, its glider, D&D LE's dragon) as the game sees them."""
+    mrg = _mrg(m)
+    return sum(1 for i in _IDS.get("locks", ()) if mrg[i])
+
+
 def wait_serve(m, budget=None):
-    """Wait for the game to serve ball 1: True once a ball has sat SERVED_S in the shooter lane; False at the end of
-    `budget` game seconds (SERVE_S) with none, or QUIET_S after the game's own launches stopped. Its launch is the
-    caller's (do_plunge)."""
+    """Wait for the game to serve ball 1. "lane" once a ball has sat SERVED_S in the shooter lane (its launch is the
+    caller's, do_plunge); "self" when the game launched its own ball and QUIET_S later that ball is neither home
+    nor in a lock - ball 1, launched by the game itself (Godzilla LE 1.16 did, 0.6 s after serving it, on one run of
+    PAD-654's sweep); None at the end of `budget` game seconds (SERVE_S), or QUIET_S after the game's own launches
+    stopped with every one of them home or locked (a Start that only loaded a lock)."""
     budget = SERVE_S if budget is None else budget
     clock = padsw.GameClock(m)
     t0 = clock.now()
     since = last = None
+    gone = None                 # (trough, locked) just after the game's last own launch
     while clock.now() - t0 < budget:
         now = clock.now()
         if _held(m, SHOOTER):
             since = now if since is None else since
             last = now
             if now - since >= SERVED_S:
-                return True
+                return "lane"
         else:
+            if since is not None:
+                gone = (_model().count(_mrg(m)), _locked(m))
             since = None
             if last is not None and now - last >= QUIET_S:
+                if gone and _model().count(_mrg(m)) <= gone[0] and _locked(m) <= gone[1]:
+                    return "self"
                 print("  the game launched its own balls and then served none - Start again")
-                return False
+                return None
         padsw.game_sleep(m, 0.1)
-    return False
+    return None
 
 
 def do_serve(m):
@@ -473,8 +486,12 @@ def main():
         padsw.game_sleep(m, 1.5)
         do_start(m)
         padsw.game_sleep(m, 5)
-        wait_serve(m)                   # PAD-654: a late serve (a lock filled first, a turtle select)
-        rc = do_plunge(m)
+        if wait_serve(m) == "self":     # PAD-654: a late serve (a lock filled first, a turtle select)
+            print("the game launched ball 1 itself (trough %d/%d - a ball in play)"
+                  % (_model().count(_mrg(m)), len(TROUGH)))
+            rc = 0
+        else:
+            rc = do_plunge(m)
     elif what == "reset":
         do_reset(m)
     elif what == "drain":

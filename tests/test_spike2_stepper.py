@@ -200,7 +200,7 @@ def test_dnd_dragon_axes_home_on_their_home_switches(sbin):
     homed onto LR AWAY: 'Dragon Jam - DEVICE MALFUNCTION'."""
     edges, st = _run(sbin, ["t0:10", DND_UD_CONFIG, DND_UD_HOME, DND_LR_CONFIG, DND_LR_HOME, "s10:1", "s10:0",
                             "t1000:10", "s10:1", "s10:0"])
-    assert st == [(0, 1, 3750, "02"), (0, 1, 3750, "02"), (1000, 1, 0, "04"), (1000, 1, 0, "04")]
+    assert st == [(0, 1, -3750, "02"), (0, 1, -3750, "02"), (1000, 1, 0, "04"), (1000, 1, 0, "04")]
     made = {(nid, bit) for _ms, nid, bit, level in edges if level}
     assert made == {(10, 2), (10, 1)}           # UD HOME and LR HOME; never LR AWAY (input 0)
 
@@ -212,8 +212,8 @@ DND_UD_DOWN = "8a133101bbff90000000d0070000d007000000003900"
 
 
 def test_dnd_moves_are_positive_from_home(sbin):
-    """Homed with direction 1, the positions lie ABOVE home: +69 lifts the head off UD HOME and -69 brings it back
-    on. (Godzilla's below-home clamp held every dragon move at 0.)"""
+    """The dragon's positions lie ABOVE home: +69 lifts the head off UD HOME and -69 brings it back on. (The
+    building's stop at home, positions <= 0 only, held every dragon move at 0.)"""
     edges, st = _run(sbin, ["t0:10", DND_UD_CONFIG, DND_UD_HOME, DND_LR_CONFIG, DND_LR_HOME, "t1000:10",
                             DND_LR_50, DND_UD_UP, "t1100:10", "s10:0", "s10:1",
                             DND_UD_DOWN, "t1200:10", "s10:1"])
@@ -225,6 +225,19 @@ def test_dnd_moves_are_positive_from_home(sbin):
             level = lv
     assert ud == [(0, 0), (1000, 1), (1000, 0), (1200, 1)]   # between; homed; lifted; back on
     assert (1000, 10, 1, 0) in edges            # LR leaves LR HOME
+
+
+#: james_bond_60th_le 1.11, node 6 motor 0 (PAD-656 sweep): one input, in byte 8; homed with direction 0, and its
+#: moves are positive too - so the side of home is not the direction's, and the model stops at neither
+BOND_CONFIG = "86143200c8ff7f004088004b000000000000000001da00"
+BOND_HOME = "86043400004200"
+BOND_60 = "861331003c0058020000e80300008813000000001a00"
+
+
+def test_bond_60th_one_input_in_byte_8(sbin):
+    edges, st = _run(sbin, ["t0:6", BOND_CONFIG, BOND_HOME, "t1000:6", "s6", BOND_60, "t1100:6", "s6"])
+    assert st == [(1000, 1, 0, "04"), (1100, 1, 60, "04")]
+    assert (1000, 6, 0, 1) in edges and (1000, 6, 0, 0) in edges   # home made, then left for +60
 
 
 def test_direction_zero_homes_to_byte_8(sbin):

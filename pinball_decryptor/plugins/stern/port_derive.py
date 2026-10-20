@@ -827,6 +827,10 @@ def framework_core(tgt, lines, placed, provenance):
         # PAD-645: the drain's values are this build's own, read off its code, also where the
         # references placed its sites (they carry no switch_* values a merge copies)
         out["values"] += src["values"]
+        if not src.get("mapped"):
+            # the drain is not this port's shots (the dispatch is): only the attract sounds use it (the runtime's
+            # switches_arm leaves the switch_hit sites the shots)
+            out["values"].append(("switch_edge_shots", 0))
         if src.get("mapped"):
             out["mapped"] = src["mapped"]
             out["switch_lines"] = portswitch.switch_lines(src["mapped"])

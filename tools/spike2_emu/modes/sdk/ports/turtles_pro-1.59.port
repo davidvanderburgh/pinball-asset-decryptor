@@ -546,3 +546,5 @@ value switch_level_at       24
 value switch_desc_via       8
 value switch_flags_at       26
 value switch_polarity_at    28
+#   the drain's edges are not this port's shots (they keep their own route): only the flipper buttons' sounds in attract use it
+value switch_edge_shots     0

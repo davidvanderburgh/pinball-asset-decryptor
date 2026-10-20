@@ -4,8 +4,10 @@
 - Every shipped port maps the framework's switch drain (21 had a shot dispatch instead, so the
   drain was never written; :func:`.portswitch.drain_source` gives the lines without `switch`
   lines), and a port derived on the user's machine gets it too (``port_derive.framework_core``).
-- A port whose shots come from switch_hit sites keeps them: the drain is hooked for the attract
-  sounds alone, and its edges are no second shot source (pad_mode_runtime.c ``edge_shots``).
+- A port whose shots come from switch_hit sites keeps them: a drain added for the attract sounds
+  says so (``value switch_edge_shots 0``), is hooked for them alone, and its edges are no second
+  shot source (pad_mode_runtime.c ``edge_shots``). Every other port keeps the drain's edges as its
+  shots, switch_hit sites or not (Godzilla Pro 1.16, James Bond).
 - A build no carrier was measured on (Batman 66 1.13, the older and locally derived builds) rides
   a call read off its own play tables (:func:`.mode_sounds.own_calls`).
 - A card of attract sounds alone is gated by the attract test, not by the sounds-in-turn one.
@@ -70,14 +72,30 @@ def test_a_port_without_the_drain_still_says_why(monkeypatch):
 
 
 # ---- the runtime ----------------------------------------------------------------------------------
+@pytest.mark.parametrize("name", SHIPPED)
+def test_only_a_drain_added_for_the_attract_sounds_leaves_the_switch_hit_sites_the_shots(name):
+    with open(os.path.join(PORTS, name + ".port"), encoding="utf-8") as f:
+        text = f.read()
+    port = MP.read_port(os.path.join(PORTS, name + ".port"))
+    added = "# ---- PAD-645: the framework's switch drain" in text
+    assert (port["value"].get("switch_edge_shots", 1) == 0) == added
+    hits = any(s.startswith("switch_hit") for s in port["site"])
+    p = MP.profile_from_port(os.path.join(PORTS, name + ".port"))
+    if port["switch"]:
+        # the profile names the route the runtime takes: the drain unless the port says otherwise
+        seen = MP.SWITCH_EDGE_PROVEN if (not added or not hits) else MP.SWITCH_SHOTS_PROVEN
+        assert bool(p.switch_shots_note) == (name not in seen)
+
+
 def test_the_drain_hooked_for_the_attract_sounds_is_no_second_shot_source():
     with open(RUNTIME, encoding="utf-8") as f:
         c = f.read()
     # a hit counts only when switches_arm made the drain the port's shots
     assert "if (!hit || !playing || !edge_shots) return;" in c
-    # a port with switch_hit sites (The Beatles 1.29) keeps them for its shots
+    # the drain's edges are the shots wherever a port has one (Godzilla Pro 1.16, Bond: switch_hit sites too),
+    # unless the port says the drain is there for the attract sounds alone (The Beatles 1.29 keeps switch_hit)
     assert "for (i = 0; i < port.n_site; i++) sites += is_switch_hit(port.site[i].name);" in c
-    assert "if (e && !sites) {" in c and "edge_shots = 1;" in c
+    assert 'if (e && (!sites || pm_port_value("switch_edge_shots", 1))) {' in c and "edge_shots = 1;" in c
     # a card with no modes still logs the game's own requests when asked (the proof's census)
     att = c[c.index("static void att_arm(void)"):]
     att = att[:att.index("\n}\n")]
@@ -105,7 +123,8 @@ def test_a_derived_port_with_a_shot_dispatch_gets_the_drain_and_no_switch_lines(
     assert lines["site"] == src["sites"]
     assert lines["data"] == ["data mode_mask 0x00005008", "data switch_records 0x00005000",
                              "data switch_count 0x00005004"]
-    assert out["values"] == src["values"] and out["mapped"] == [] and out["switch_lines"] == []
+    assert out["values"] == src["values"] + [("switch_edge_shots", 0)]
+    assert out["mapped"] == [] and out["switch_lines"] == []
     assert placed[("site", "switch_edge")] == 0x1000 and placed[("site", "switch_drain")] == 0x2000
 
 

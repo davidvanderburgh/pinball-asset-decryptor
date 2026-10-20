@@ -9828,9 +9828,9 @@ static void switches_arm(void)
     switch_at = at >= 0 && at <= 3 ? (unsigned)at : 0;
     for (id = 0; id < N_SWITCH_IDS; id++) switch_delivered[id] = switch_fired[id];
     for (i = 0; i < port.n_site; i++) sites += is_switch_hit(port.site[i].name);
-    /* PAD-645: a port with switch_hit sites keeps them for its shots; its switch_edge is there for the flipper
-     * buttons' sounds in attract (The Beatles 1.29) */
-    if (e && !sites) {                           /* the drain's edges: every switch */
+    /* PAD-645: `value switch_edge_shots 0` = the drain is there for the flipper buttons' sounds in attract alone
+     * (The Beatles 1.29): its switch_hit sites keep the shots */
+    if (e && (!sites || pm_port_value("switch_edge_shots", 1))) {   /* the drain's edges: every switch */
         if (e->ok && edge_arm(&why) && (edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
             can |= PM_CAN_SWITCH_SHOTS;
             edge_shots = 1;

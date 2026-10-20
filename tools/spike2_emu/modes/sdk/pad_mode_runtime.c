@@ -9972,6 +9972,7 @@ static void clipv_arm(void)
  *                                                            sound bank's id
  *     tsid <TAB> <k> <TAB> <slot key> <TAB> <id> <TAB> <bank id>   PAD-608: file k in turn of the slot
  *                                                            keyed <slot key> plays as a bank's id
+ *     random <TAB> <slot key>              PAD-638: the slot's files play AT RANDOM, not in turn
  *
  * The setting is read at every resolve (one word), so a change in the menu is heard from the next
  * sound the game starts; a value outside 1..n is mode 1. Read once at start, like clips.cfg.
@@ -10000,7 +10001,13 @@ static void clipv_arm(void)
  * request is pointed at a copy of its own list naming the bank ids the setting (or the turn) wants,
  * and at its own list again when it wants none - as pm_sound_sid points a mode's carrier. A slot with
  * a file in turn in a bank takes its turns from the worker too: a play of a request naming the slot
- * moves the turn on (SNDT_GAP apart), and the record lookup only swaps in the turn's image.bin file. */
+ * moves the turn on (SNDT_GAP apart), and the record lookup only swaps in the turn's image.bin file.
+ *
+ * AT RANDOM (PAD-638): an owner asked for "random audio variants ... like a jukebox" (each of
+ * Godzilla's multiball songs one of several). A slot with a `random` line takes the same files, but
+ * each play picks any of them but the one it played last (the clip variants' clipv_pick): its own
+ * one is no longer first. As with the random clips, one never plays twice running (so two files take
+ * turns, in a random first order). */
 #define SNDM_FILE_MAX   (512 * 1024)
 #define SNDM_SOUNDS     3072
 #define SNDM_DESC       96                  /* a descriptor's bytes as the resolver's caller reads them */
@@ -10026,6 +10033,7 @@ struct sndt {                               /* a sound that plays files in turn 
     unsigned char host[SNDT_MAX][8];        /* file k's record key at host[k - 1], k = 2..n */
     unsigned char n, pick;                  /* n files, its own one included; pick 0 = its own */
     unsigned char by_worker;                /* PAD-608: a file is in a bank: the worker moves the turn on */
+    unsigned char random;                   /* PAD-638: any file but the last, not the next one */
     unsigned plays;
     unsigned long last;                     /* pm_ms() of its last lookup (of its last play: by_worker) */
 };
@@ -10094,6 +10102,16 @@ static void sndt_line(const char *ks, const char *slot, const char *host)
     if (k > t->n) t->n = (unsigned char)k;
 }
 
+/* PAD-638: a `random` line: the slot whose record key is `slot` plays its files at random */
+static void sndt_random_line(const char *slot)
+{
+    unsigned char key[8];
+    int j;
+    if (!key_hex(slot, key)) { sndm_bad++; return; }
+    if ((j = sndt_slot(key)) < 0) { sndm_dropped++; return; }
+    sndt[j].random = 1;
+}
+
 /* PAD-608: a `bsid` line (mode m's bank id for a game id: `slot` 0) or a `tsid` line (file k in turn
  * of the slot keyed `slot`) */
 static void bsid_line(const char *ms, const char *slot, const char *ids, const char *banks)
@@ -10157,6 +10175,10 @@ static void sndm_line(char *s)
     }
     if (n >= 4 && str_eq(f[0], "turn")) {
         sndt_line(f[1], f[2], f[3]);
+        return;
+    }
+    if (n >= 2 && str_eq(f[0], "random")) {
+        sndt_random_line(f[1]);
         return;
     }
     if (n >= 4 && str_eq(f[0], "bsid")) {
@@ -10235,6 +10257,17 @@ static unsigned sndm_resolve(unsigned id, unsigned *out)
     return (unsigned)(unsigned long)e->desc;
 }
 
+/* PAD-565 / PAD-638: the file a new play of sndt `t` takes - the next in turn (its own one first), or
+ * at random any but the last one played (sndt_rand stirs the clip variants' generator) */
+static unsigned char sndt_next(struct sndt *t)
+{
+    unsigned k;
+    if (!t->random) return t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+    if (!t->plays) return (unsigned char)(clipv_rand() % t->n);
+    k = clipv_rand() % (t->n - 1u);
+    return (unsigned char)(k >= t->pick ? k + 1 : k);
+}
+
 /* PAD-565: the record the game looks up for a sound with files in turn - the next one, or the same
  * when it looks it up again within SNDT_GAP ms (a slot whose files skip a number plays its own there) */
 static void sndt_lookup(unsigned *r)
@@ -10253,12 +10286,13 @@ static void sndt_lookup(unsigned *r)
     }
     now = pm_ms();
     if (!t->plays || now - t->last > SNDT_GAP) {
-        t->pick = t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+        t->pick = sndt_next(t);
         t->plays++;
         if (sndt_says < 40 || !(t->plays % 50)) {
             sndt_says++;
-            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x looked up (%u time(s)) - file %u of %u plays",
-                k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7], t->plays, t->pick + 1, t->n);
+            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x looked up (%u time(s)) - file %u of %u plays%s",
+                k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7], t->plays, t->pick + 1, t->n,
+                t->random ? " (at random)" : "");
         }
     }
     t->last = now;
@@ -10272,13 +10306,13 @@ static void sndt_play(struct sndt *t)
 {
     unsigned long now = pm_ms();
     if (!t->plays || now - t->last > SNDT_GAP) {
-        t->pick = t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
+        t->pick = sndt_next(t);
         t->plays++;
         if (sndt_says < 40 || !(t->plays % 50)) {
             sndt_says++;
-            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x played (%u time(s)) - file %u of %u plays",
+            say("sounds in turn: %02x%02x%02x%02x%02x%02x%02x%02x played (%u time(s)) - file %u of %u plays%s",
                 t->key[0], t->key[1], t->key[2], t->key[3], t->key[4], t->key[5], t->key[6], t->key[7],
-                t->plays, t->pick + 1, t->n);
+                t->plays, t->pick + 1, t->n, t->random ? " (at random)" : "");
         }
     }
     t->last = now;
@@ -10418,8 +10452,12 @@ static void sndt_arm(void)
     }
     lookup_hooked = 1;
     sndt_live = 1;
-    say("sounds in turn: %u sound(s) play their files in turn; sound_lookup 0x%08x is hooked", n_sndt,
-        fn("sound_lookup"));
+    {
+        unsigned j, r = 0;
+        for (j = 0; j < n_sndt; j++) r += sndt[j].random;
+        say("sounds in turn: %u sound(s) play their files in turn (%u of them at random); sound_lookup "
+            "0x%08x is hooked", n_sndt, r, fn("sound_lookup"));
+    }
 }
 
 /* from the constructor, after the port gate: read sounds.cfg and wrap the game's resolver */

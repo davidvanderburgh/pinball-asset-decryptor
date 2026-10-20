@@ -933,6 +933,7 @@ CHALLENGE_MENU_PROVEN = {
     "guardians_le-1.14": 2,           # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2, picked: START (challenge pick), one ball, GAME OVER
     "batman-1.13": 2,                 # PAD-619 2026-10-19 rig batch_r8: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - the pick kept past the game's own start, which this build dispatches after the ball's - one ball, GAME OVER
     "iron_maiden_le-1.16": 2,         # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 2, picked: START (challenge pick) - the pick kept past the game's own start - the end-of-ball call, the game over after the one ball (in_game 1 -> 0, attract on screen; no game_over event in its port)
+    "jurassic_park_le-1.16": 8,       # PAD-619 2026-10-19 rig batch_r18 (NVRAM wiped, the service splash passed with Select and Back): the live-applied menu, PAD CHALLENGE after the game's 8, picked as Standard: START (challenge pick), one ball, GAME OVER
     "jurassic_park_pro-1.16": 8,      # PAD-619 2026-10-19 rig batch_r12: the live-applied menu (20-byte entries), PAD CHALLENGE after the game's 8, picked as Standard: START (challenge pick), one ball, GAME OVER
     "jurassic_park_the_pin-1.05": 2,  # PAD-619 2026-10-19 rig batch_r8 (its buttons are L/R FLIPPER BUTTON): PAD CHALLENGE after the game's 2, picked: START (challenge pick), one ball, GAME OVER
     "sword_of_rage_le-1.18": 4,       # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 4, picked: START (challenge pick), one ball, GAME OVER

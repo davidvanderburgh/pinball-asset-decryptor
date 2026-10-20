@@ -8612,6 +8612,7 @@ static int challenge_game_id = -1;       /* PAD-619: the bus id of a game's star
  * challenge game is one ball, as Bond's own are, also where the game leaves a challenge game's length to the
  * challenge (the builds whose challenges come from Stern Insider Connected). */
 static volatile int challenge_ours;
+static unsigned long challenge_ours_ms;   /* PAD-619: when it was taken */
 static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start menu shows for a taken one ("" = its own) */
 /* round 2: challenges of a mode's own, added to the game's start menu: slot CHALLENGE_OWN + k */
 #define CHALLENGE_OWN 16
@@ -8667,7 +8668,12 @@ static int chg_refuses(void)
 
 static void chg_began(void)
 {
-    if (chg_state() == 1 && current == chg.by) chg.state = 2;
+    /* PAD-619: the pick can come before the game's own game_start (Batman 66 1.13 dispatches the ball's start first),
+     * so the state is stamped with THIS game again when the mode that took it begins */
+    if (chg.state == 1 && current == chg.by && pm_player()) {
+        chg.game = chg_game_now();
+        chg.state = 2;
+    }
 }
 
 static void chg_mode_ended(int ran)
@@ -8827,7 +8833,7 @@ static int challenge_veto(unsigned *r, unsigned n)
             say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
                 took ? "its mode starts - the game's own challenge does not" : "the mode let it go - the game's own starts");
             if (took) {
-                challenge_ours = 1;
+                challenge_ours = 1; challenge_ours_ms = pm_ms();
                 chg_picked(own_challenge[k].by);
                 return 1;
             }
@@ -8844,7 +8850,7 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
-    if (took) { challenge_ours = 1; chg_picked(challenge_by[n]); }
+    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n]); }
     return took != 0;
 }
 
@@ -9038,7 +9044,7 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
             took ? "its mode starts as the ball starts" : "the mode let it go");
-        if (took) { challenge_ours = 1; chg_picked(own_challenge[k].by); }
+        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(own_challenge[k].by); }
         return;
     }
     for (n = 0; n < (unsigned)challenges_n; n++) {
@@ -9053,7 +9059,7 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
             took ? "the mode takes it - its pick cleared, the game's own does not start" : "the mode let it go");
-        if (took) { challenge_ours = 1; chg_picked(challenge_by[n]); }
+        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); chg_picked(challenge_by[n]); }
         return;
     }
 }
@@ -9227,7 +9233,10 @@ static void on_event_dispatch(unsigned *r)
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
-    if (challenge_game_id >= 0 && r[0] == (unsigned)challenge_game_id) challenge_ours = 0;      /* PAD-619 */
+    /* PAD-619: a new game forgets the last one's - not a pick from this very ball's start (Batman 66 1.13 dispatches
+     * the ball's start before the game's) */
+    if (challenge_game_id >= 0 && r[0] == (unsigned)challenge_game_id && pm_ms() - challenge_ours_ms > 2000)
+        challenge_ours = 0;
     if (challenge_ball_id >= 0 && r[0] == (unsigned)challenge_ball_id) challenge_ball_start();   /* PAD-619 */
 }
 

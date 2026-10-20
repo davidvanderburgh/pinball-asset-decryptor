@@ -3879,6 +3879,10 @@ The ball's end asks the extra-ball test (`site challenge_extra_ball`, one shape 
 takes one and the ball is played again) before the balls-per-game getter. An extra ball earned in a mode's challenge
 game is not played: the runtime has the test say none while one runs (Star Wars ELG 1.10 played one as a second ball).
 
+On Star Wars LE/Pro 1.31 a ball that reaches the mission select just as a mode's challenge ends the ball stops on
+"USE THE ACTION BUTTON TO SELECT YOUR MISSION" until the player picks: the countdown does not run while the ball ends.
+Picked, the game finishes the ball and the game as usual.
+
 **The challenge's end ends the ball (PAD-630).** The game's own challenge, once it is over, ends the ball: Ahoy Mr.
 Bond's ending (LE `0x1cda4`), in a challenge game, clears its running flag and calls the framework's "end this ball
 now" (LE `0x3f79bc(1, 1)`: the status bits `0x202`, the flippers and devices off by bus 177, as the game's wizard

@@ -3834,11 +3834,42 @@ the game's own (flags 29, 37). The start menu on every build of the generation: 
 (`C:\tmp\PAD-619\job619.sh`) opens the menu, steps to the mode's own entry, starts it, plays one ball and drains -
 `mode_project.CHALLENGE_MENU_PROVEN` lists each build that passed, with the entries its own menu took.
 
-**Other titles** (docs/plans/pad619_challenges.md): Godzilla, Jaws, John Wick, King Kong, Metallica and X-Men build
-the menu from a game-mode table (a list of table indices; Godzilla's challenges are table entries with a flag of
-their own, 40/41; Jaws', John Wick's and Metallica's are the index itself); Elvira keeps the count in a register;
-D&D, Foo Fighters, Jurassic Park, Mando, Star Wars LE/Pro, TMNT, Venom and Bond 60th have other menus. Until their
-lines are written the tab offers no challenge start there and says so.
+**The other titles (PAD-619).** Each other kind of challenge and menu has a route of its own in
+`portchallenge.find` (docs/plans/pad619_challenges.md has every build's numbers):
+
+* **A challenge by the game-play mode's index** - Godzilla, Jaws, John Wick, Metallica (the framework's
+  `GamePlayModes`: the current mode is the singleton's word +8; the table's 28-byte entries read off its constructor)
+  and Venom (the adapter keeps the current mode in a global, +4, and each mode's flag and name in u16 arrays). A
+  challenge there sets the challenge game's flag alone; which one is the index:
+
+  ```
+  data  game_play_modes     <the singleton / global>
+  value game_play_mode_at   8 | 4
+  value challenge_mode_plain  1 | 0          # Standard: what a mode's challenge game plays instead
+  value challenge_mode_<n>  <the challenge's index>
+  text  challenge_name_<n>  <its name, from its own message: 4th of July, Red Circle Reckoning, Challenge Mode Low>
+  value challenge_name_msg_<n>  <that message: the start menu shows the mode's name there>
+  ```
+
+  The ball's start takes a held one by setting the index to Standard's. Godzilla's two (King of the Monsters and
+  its Time Attack) have flags of their own (40 / 41) and are taken by them, as Rush's. Jaws' Default Game Mode cannot
+  pick its challenges (they unlock with shark teeth): the rig makes one as the start menu's pick does, by setting
+  the index in attract.
+* **Start menus of other shapes** - Elvira's count lives in r5 for the whole loop (`value challenge_menu_count_reg`:
+  the frame is hooked with every register saved); Star Wars LE/Pro picks with a compare chain and has no challenge
+  kind at all; Foo Fighters, Mando 1.45 and Jurassic Park LE/Pro apply the shown entry live and Start only leaves
+  the menu (20-byte entries on Mando and JP); TMNT's entries are 24 bytes with the kind at +4. Where the menu has
+  no challenge kind, ours play as Standard (`value challenge_menu_kind 0`, `value challenge_menu_sets_on 1`): the
+  pick is hooked where r3 points into the entry (`value challenge_menu_pick_back`), ours is made Standard's kind in
+  the entry itself and known after by the name it points to, and the ball's start hands the game to the mode -
+  one ball, as every mode's challenge game. Other layouts name their fields: `value challenge_menu_kind_at`,
+  `challenge_menu_caption_at`, `challenge_menu_caption2_at`, `challenge_menu_name_at`.
+* **No challenge at all** - King Kong 0.97, X-Men 0.98 and D&D have none among their game modes; Bond 60th's only
+  one is Challenge Mode, the whole game against the clock: their profiles say so.
+
+The older builds (Batman 66 1.13, Iron Maiden LE 1.16, ...) dispatch the ball's start before the game's: a pick taken
+in the last 2 s survives the game's start, and also has `site challenge_balls_2` (a per-player sum of the setting)
+answer 1. A port without a `game_over` event is proven by in_game last going to 0 with no second ball.
 
 **The challenge's end ends the ball (PAD-630).** The game's own challenge, once it is over, ends the ball: Ahoy Mr.
 Bond's ending (LE `0x1cda4`), in a challenge game, clears its running flag and calls the framework's "end this ball

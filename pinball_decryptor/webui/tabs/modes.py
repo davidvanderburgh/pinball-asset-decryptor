@@ -1725,6 +1725,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 # ... and, round 2, whether a mode may be a challenge of its own on the game's start menu (how many fit)
                 "challenge_new": self.CHALLENGE_NEW if getattr(p, "challenge_menu", 0) else "",
                 "challenge_room": int(getattr(p, "challenge_menu", 0) or 0),
+                "challenge_by_default": bool(getattr(p, "challenge_by_default", False)),   # PAD-619
                 # PAD-414: what a shake can be - one of the mode's own at a strength, or one of the game's
                 # (PAD-474: only the strengths the game itself shakes at; a one-power shaker has hard alone)
                 "shakes": ([{"value": w, "label": "a %s shake" % w} for k, w in MP.SHAKE_STRENGTHS.items()

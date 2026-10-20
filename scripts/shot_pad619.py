@@ -9,6 +9,8 @@ Writes into <out_dir>:
 - <prefix>_rush_starts.png      a form mode's page at Starts on, Rush Pro 1.19: on the branch, a challenge game of
                                 Cygnus Book 1; before it, the same mode (main had no challenge start on Rush)
 - <prefix>_deadpool_starts.png  the same on Deadpool Pro 1.16: on the branch, A new challenge of its own
+- <prefix>_jaws_starts.png      the same on Jaws Pro 1.02: on the branch, a challenge game of 4th of July (the game-play
+                                mode's index)
 """
 
 import json
@@ -23,7 +25,8 @@ import shot_pad232 as S  # noqa: E402
 import webui_shot  # noqa: E402
 
 CARDS = {"rush": ("rush_pro-1_19_0.Release.16G.sdcard.raw", "Rush Pro 1.19 Extract", "rush_pro_1_19"),
-         "deadpool": ("deadpool_pro-1_16_0.Release.8G.sdcard.raw", "Deadpool Pro 1.16 Extract", "deadpool_pro_1_16")}
+         "deadpool": ("deadpool_pro-1_16_0.Release.8G.sdcard.raw", "Deadpool Pro 1.16 Extract", "deadpool_pro_1_16"),
+         "jaws": ("jaws_pro-1_02_0.Release.16G.sdcard.raw", "Jaws Pro 1.02 Extract", "jaws_pro_1_02")}
 
 
 def _scroll_to(page, text, block="start"):
@@ -49,7 +52,7 @@ def main():
             json.dump({"input_path": os.path.join(project, card), "input_name": card}, f)
         spec = MP.ModeSpec(name="PAD CHALLENGE", title=title)
         spec.seconds = 60
-        prof = next((p for p in MP.PROFILES.values() if p.key == title), None)
+        prof = MP.profiles(MP.PORTS_DIR).get(title)
         if prof is not None and prof.can("challenge"):
             spec.starts_on = "challenge"
             spec.challenge = 0 if prof.challenges else MP.CHALLENGE_NEW

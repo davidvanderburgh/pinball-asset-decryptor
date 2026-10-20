@@ -342,3 +342,11 @@ def test_the_end_of_ball_call_is_told_from_its_lookalikes():
              0, 0, 0, 0, 0, 0, 0]                                                       # its 0xfe5f8 (no arg, no flippers)
     lines = PC.end_ball_lines(elf(other + real))
     assert lines[-1].split()[2] == "0x%08x" % (0x10000 + 4 * len(other))
+
+
+def test_the_tab_says_default_game_mode_only_where_it_can_pick_the_challenge():
+    P = MP.profiles(MP.PORTS_DIR)
+    assert P["james_bond_le_1_06"].challenge_by_default and P["rush_pro_1_19"].challenge_by_default
+    assert not P["jaws_pro_1_02"].challenge_by_default and not P["godzilla_pro_1_16"].challenge_by_default
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
+    assert '${prof.challenge_by_default ? " To start every game this way' in js

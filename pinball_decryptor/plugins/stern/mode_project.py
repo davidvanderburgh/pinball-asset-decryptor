@@ -90,6 +90,7 @@ class TitleProfile:
     roster: tuple = ()               # PAD-589: the battle selection's slots a mode may take (their names, slot order);
     #                                  () where the title has no roster a mode can take
     challenge_menu: int = 0          # PAD-615 round 2: how many challenges of the modes' own the game's start menu has
+    challenge_by_default: bool = False   # PAD-619: the service menu's Default Game Mode can pick its challenges
     #                                  room for (0 = none: the build's menu is not the runtime's to change)
     challenges: tuple = ()           # PAD-615: the game's Challenge list a mode may take a place in (the challenges'
     #                                  names, in the game's menu order); () where the title names none a mode can take
@@ -2338,6 +2339,10 @@ def profile_from_port(path):
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589
         challenges=_challenges(port) if key in CHALLENGE_PROVEN and not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
         challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
+        # PAD-619: not where a challenge is the game-play mode's index or a game-mode table's (Jaws, Godzilla, Venom:
+        # their Default Game Mode cannot select one) - only by its handler or its flag (Bond, Stranger Things, Rush)
+        challenge_by_default=bool(port) and not any(k.startswith(("challenge_mode_", "challenge_name_msg_"))
+                                                    for k in port["value"]),
         shakes=_shakes(port),                                                # PAD-414
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418

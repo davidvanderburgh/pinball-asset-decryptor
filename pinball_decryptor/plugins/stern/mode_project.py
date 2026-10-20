@@ -938,6 +938,11 @@ CHALLENGE_MENU_PROVEN = {
     "jurassic_park_the_pin-1.05": 2,  # PAD-619 2026-10-19 rig batch_r8 (its buttons are L/R FLIPPER BUTTON): PAD CHALLENGE after the game's 2, picked: START (challenge pick), one ball, GAME OVER
     "sword_of_rage_le-1.18": 4,       # PAD-619 2026-10-19 rig batch_r9: PAD CHALLENGE after the game's 4, picked: START (challenge pick), one ball, GAME OVER
     "star_wars_le-1.31": 2,           # PAD-619 2026-10-19 rig batch_r15: the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), the game left after the one ball (in_game last 1 -> 0, no second ball)
+    "stranger_things-1.13": 6,        # PAD-619 2026-10-19 rig sweep: PAD CHALLENGE after the game's 6, picked: START (challenge pick) at the ball's start (its handler hands it over), one ball, GAME OVER
+    "stranger_things_le-1.12": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.12 card
+    "stranger_things_le-1.13": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.13 card
+    "sword_of_rage_le-1.19": 4,       # PAD-619 2026-10-19 rig batch_all: PAD CHALLENGE after the game's 4, picked: START (challenge pick), one ball, GAME OVER
+    "sword_of_rage_pro-1.19": 4,      # PAD-619 2026-10-19 rig batch_all: the same on the stock Pro card
     "star_wars_pro-1.31": 2,          # PAD-619 2026-10-19 rig 2: the compare-chain menu (no challenge kind of the game's): PAD CHALLENGE appended after Standard and Competition, picked as Standard: START (challenge pick) at the ball's start, one ball, GAME OVER
 }
 #: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)

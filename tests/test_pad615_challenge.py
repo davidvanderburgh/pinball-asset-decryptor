@@ -35,6 +35,7 @@ PORTS = {"james_bond_le-1.06": BOND, "james_bond_pro-1.06": BOND, "stranger_thin
 LE = MP.profile_from_port(str(SDK / "ports" / "james_bond_le-1.06.port"))
 STP = MP.profile_from_port(str(SDK / "ports" / "stranger_things-1.13.port"))
 BARE = MP.profile_from_port(str(SDK / "ports" / "king_kong_pro-0.97.port"))   # PAD-619: no challenge in its game modes
+GZP = MP.profile_from_port(str(SDK / "ports" / "godzilla_pro-1.16.port"))    # PAD-619: challenges by flag, no menu of ours
 UNPROVEN = replace(LE, key="james_bond_le_1_06_challengenot", challenges=(),
                    cannot=tuple(LE.cannot) + MP._challenge_cannot(
                        "james_bond_le-9.99", LE.label, MP.read_port(str(SDK / "ports" / "james_bond_le-1.06.port"))))
@@ -488,8 +489,9 @@ def test_the_menu_lines_are_the_builds_own_never_a_references():
     assert PC.menu_lines(PC.Elf(_fake_game()[0])) == []          # a program with no such menu: no lines
 
 
-def test_bond_has_room_for_two_of_our_own_and_stranger_things_none():
-    assert LE.challenge_menu == 2 and STP.challenge_menu == 0
+def test_bond_has_room_for_two_of_our_own_and_stranger_things_two():
+    # PAD-619: Stranger Things' menu is read by menu_generic and proven (the game's 6 of 8)
+    assert LE.challenge_menu == 2 and STP.challenge_menu == 2 and GZP.challenge_menu == 0
     pro = MP.profile_from_port(str(SDK / "ports" / "james_bond_pro-1.06.port"))
     assert pro.challenge_menu == 2
     assert set(MP.CHALLENGE_MENU_PROVEN) >= set(BOND_PORTS)         # PAD-619: + every build of their generation
@@ -500,10 +502,10 @@ def test_a_challenge_of_its_own_is_written_as_new_and_refused_where_the_menu_is_
     assert MP.validate(spec) == []
     lines = _lines(spec)
     assert "challenge      new" in lines and not [l for l in lines if l.startswith("trigger")]
-    assert MP.validate(_spec(STP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)) == [
-        "A challenge of its own is not on Stranger Things 1.13: its start menu is not one the app can add to."]
-    spec = _spec(STP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)
-    MP._switch_off_what_it_cannot(spec, STP)
+    assert MP.validate(_spec(GZP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)) == [
+        "A challenge of its own is not on Godzilla Pro 1.16: its start menu is not one the app can add to."]
+    spec = _spec(GZP, starts_on="challenge", challenge=MP.CHALLENGE_NEW)
+    MP._switch_off_what_it_cannot(spec, GZP)
     assert (spec.starts_on, spec.challenge) == ("shot", -1)
 
 
@@ -635,11 +637,11 @@ def test_the_tab_offers_a_challenge_of_its_own_on_bond(tmp_path):
             assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("challenge") == MP.CHALLENGE_NEW)
             assert _wait(w, lambda: w.state("modes")["status"] == "Ready to build.")
             assert _wait(w, lambda: w.state("modes")["form"]["challenge"] == "A new challenge of its own")
-        proj = _card_project(tmp_path / "st", "stranger_things-1_13_0.Release.8G.sdcard.raw")
+        proj = _card_project(tmp_path / "gz", "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw")
         with web_app(tmp_path, mfr="stern") as w:
             _project(w, proj)
             w.call("modes.new")
-            assert w.state("modes")["profile"]["challenge_new"] == ""
+            assert w.state("modes")["profile"]["challenge_new"] == ""                 # PAD-619: Godzilla's menu
     finally:
         preview.enabled = old
 

@@ -576,3 +576,16 @@ value challenge_menu_kind      3
 value challenge_menu_caption   1921
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x002665b0 0xe30922d6 0xe3402086
+# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each challenge's champion category
+site  challenge_scores       0x0025214c 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x00251680 0xe1a03000 0xe30806e4
+# DR. NO CHALLENGE CHAMPION
+value challenge_scores_cat_0  10
+# AHOY MR. BOND CHALLENGE CHAMPION
+value challenge_scores_cat_1  11
+# GOLDFINGER'S JACKPOT CHALLENGE CHAMPION
+value challenge_scores_cat_2  12
+# DISCO VOLANTE CHALLENGE CHAMPION
+value challenge_scores_cat_3  13
+# CHALLENGE CHAMPION
+value challenge_scores_cat_4  14

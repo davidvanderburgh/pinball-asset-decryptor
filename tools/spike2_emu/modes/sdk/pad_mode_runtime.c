@@ -17,6 +17,7 @@ extern long  read(int, void *, __SIZE_TYPE__);
 extern long  write(int, const void *, __SIZE_TYPE__);
 extern int   close(int);
 extern int   unlink(const char *);
+extern int   rename(const char *, const char *);
 extern int   vsnprintf(char *, __SIZE_TYPE__, const char *, va_list);
 extern int   clock_gettime(int, void *);
 extern int   mprotect(void *, __SIZE_TYPE__, int);
@@ -8614,11 +8615,15 @@ static int chg_state(void)
     return chg.state;
 }
 
-static void chg_picked(const struct pm_mode *by)
+static void chg_scores_picked(unsigned slot, const char *name, const struct pm_mode *by);   /* PAD-640, below */
+
+/* slot: the game's challenge the game thinks it plays (an own challenge plays as challenge 0's); name: the menu's */
+static void chg_picked(const struct pm_mode *by, unsigned slot, const char *name)
 {
     chg.by = by;
     chg.game = chg_game_now();
     chg.state = 1;
+    chg_scores_picked(slot, name, by);
 }
 
 /* What the end of a mode does to a challenge game, from the state alone (tests lift it verbatim): 1 = end the ball
@@ -8786,7 +8791,7 @@ static int challenge_veto(unsigned *r, unsigned n)
             say("challenge %d (%s) picked on the start menu: %s", CHALLENGE_OWN + k, own_challenge[k].name,
                 took ? "its mode starts - the game's own challenge does not" : "the mode let it go - the game's own starts");
             if (took) {
-                chg_picked(own_challenge[k].by);
+                chg_picked(own_challenge[k].by, 0, own_challenge[k].name);
                 return 1;
             }
         }
@@ -8802,8 +8807,196 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
-    if (took) chg_picked(challenge_by[n]);
+    if (took) chg_picked(challenge_by[n], n, challenge_title[n]);
     return took != 0;
+}
+
+/* ---- PAD-640: a mode's challenge game keeps the MODE'S high score ---------------------------------------------
+ * luvthatapex (Bond LE): a challenge of a mode's own plays, to the game, as Chaos at Crab Key's challenge game (the
+ * menu pick becomes challenge 0's kind), so a score that beat it went in as the CHAOS CHALLENGE champion; a mode in
+ * a challenge's place filed its scores under that challenge the same way. The game keeps its champions in one
+ * framework (Bond LE/Pro 1.06 and Stranger Things alike): categories 1.. (HIGHEST SCORES, COMBO CHAMPION, ..., one
+ * "<x> CHALLENGE CHAMPION" per challenge, in the menu's order), each a list of score entries {u32 record, char
+ * *initials, char *name, fn, fn, char *title, char **titles, ...}; a record is 96 bytes: the initials at +32, the
+ * score u64 at +72, ~(the byte sum of the first 88) u16 at +88. At the game's end one function (LE 0x4e87dc)
+ * compares every category's score with its records and runs the initials entry, under the entry's title, for each
+ * one beaten (in a challenge game the game lets only the pick's challenge category through). The port names
+ * (portchallenge.py):
+ *   site  challenge_scores         that function (wrapped: hook_wrap)
+ *   site  challenge_score_entry    the game's (category, n) -> entry lookup (called)
+ *   value challenge_scores_cat_<n> challenge n's category
+ * While the end-of-game function runs for a challenge game whose pick a mode took, the challenge's entry points at a
+ * record of the MODE'S own and its title is the mode's name; the game's own record is not touched (not read, not
+ * written, never in the game's store). The modes' records are kept in CHG_SCORES, one line each: the record's 96
+ * bytes in hex, a space, the name (the menu's capitals). A mode's first record is the entry's default initials and
+ * a score of 0, so its first scoring game is its champion. */
+#define CHG_REC_SIZE 96
+#define CHG_SCORES_MAX 4096
+static const char CHG_SCORES[] = "/dump/pad_challenge_scores";
+static struct { int slot; unsigned game; char name[40]; } chg_hs = { -1, 0, "" };
+static unsigned char chg_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
+static const char *chg_rec_titles[8];
+static unsigned (*chg_scores_game)(unsigned, unsigned, unsigned, unsigned);
+
+/* the record's check, as the game makes it: ~(the byte sum of its first 88 bytes) (tests lift it verbatim) */
+static unsigned short chg_rec_check(const unsigned char *rec)
+{
+    unsigned k, sum = 0;
+    for (k = 0; k < 88; k++) sum += rec[k];
+    return (unsigned short)~sum;
+}
+
+/* a record of no one's: the initials given, a score of 0 (tests lift it verbatim) */
+static void chg_rec_fresh(unsigned char *rec, const char *initials)
+{
+    unsigned k;
+    unsigned short c;
+    for (k = 0; k < CHG_REC_SIZE; k++) rec[k] = 0;
+    for (k = 0; initials && initials[k] && k < 20; k++) rec[32 + k] = (unsigned char)initials[k];
+    c = chg_rec_check(rec);
+    rec[88] = (unsigned char)c;
+    rec[89] = (unsigned char)(c >> 8);
+}
+
+/* 1 when line [i, e) of b is name's: the record's hex, a space, the name (tests lift it verbatim) */
+static int chg_rec_line_is(const char *b, long i, long e, const char *name)
+{
+    long j;
+    const char *t = b + i + 2 * CHG_REC_SIZE + 1;
+    if (e - i <= 2 * CHG_REC_SIZE + 1 || b[i + 2 * CHG_REC_SIZE] != ' ') return 0;
+    for (j = 0; name[j] && t + j < b + e && t[j] == name[j]; j++) ;
+    return !name[j] && t + j == b + e;
+}
+
+/* name's record from the file's text (n bytes): 1 when its line was there whole, with a good check (tests lift it) */
+static int chg_rec_find(const char *b, long n, const char *name, unsigned char *rec)
+{
+    long i = 0, k;
+    while (i < n) {
+        long e = i;
+        while (e < n && b[e] != '\n') e++;
+        if (chg_rec_line_is(b, i, e, name)) {
+            unsigned char got[CHG_REC_SIZE];
+            for (k = 0; k < CHG_REC_SIZE; k++) {
+                int hi = hexval(b[i + 2 * k]), lo = hexval(b[i + 2 * k + 1]);
+                if (hi < 0 || lo < 0) break;
+                got[k] = (unsigned char)(hi * 16 + lo);
+            }
+            if (k == CHG_REC_SIZE && (unsigned)(got[88] | got[89] << 8) == chg_rec_check(got)) {
+                for (k = 0; k < CHG_REC_SIZE; k++) rec[k] = got[k];
+                return 1;
+            }
+        }
+        i = e + 1;
+    }
+    return 0;
+}
+
+/* the file's text with name's line replaced by rec (or rec's added): the new length in out, -1 when it does not
+ * fit (tests lift it verbatim) */
+static long chg_rec_put(const char *b, long n, const char *name, const unsigned char *rec, char *out, long cap)
+{
+    static const char hex[] = "0123456789abcdef";
+    long i = 0, o = 0, k, j;
+    while (i < n) {
+        long e = i;
+        while (e < n && b[e] != '\n') e++;
+        if (e > i && !chg_rec_line_is(b, i, e, name)) {
+            if (o + (e - i) + 1 > cap) return -1;
+            for (k = i; k < e; k++) out[o++] = b[k];
+            out[o++] = '\n';
+        }
+        i = e + 1;
+    }
+    for (j = 0; name[j]; j++) ;
+    if (o + 2 * CHG_REC_SIZE + 1 + j + 1 > cap) return -1;
+    for (k = 0; k < CHG_REC_SIZE; k++) { out[o++] = hex[rec[k] >> 4]; out[o++] = hex[rec[k] & 15]; }
+    out[o++] = ' ';
+    for (k = 0; k < j; k++) out[o++] = name[k];
+    out[o++] = '\n';
+    return o;
+}
+
+static void chg_scores_picked(unsigned slot, const char *name, const struct pm_mode *by)
+{
+    char key[32];
+    chg_hs.slot = -1;
+    if (!chg_scores_game) return;
+    pm_snprintf(key, sizeof key, "challenge_scores_cat_%u", slot);
+    if (pm_port_value(key, 0) <= 0) return;
+    challenge_words(chg_hs.name, name && *name ? name : by && by->name ? by->name : "");
+    if (!chg_hs.name[0]) return;
+    chg_hs.slot = (int)slot;
+    chg_hs.game = chg_game_now();
+}
+
+/* the end-of-game high scores, wrapped: in a mode's challenge game its challenge's entry is the mode's for the call */
+static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    static char b[CHG_SCORES_MAX], out[CHG_SCORES_MAX + 2 * CHG_REC_SIZE + 48];
+    char key[32];
+    unsigned *ent = 0, was[3], ret, k;
+    unsigned char before[CHG_REC_SIZE];
+    long n, m;
+    int slot = chg_hs.slot, changed = 0;
+    chg_hs.slot = -1;                                            /* one game's, once */
+    if (slot >= 0 && chg_hs.game == chg_game_now()) {
+        pm_snprintf(key, sizeof key, "challenge_scores_cat_%d", slot);
+        ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))(
+            (unsigned)pm_port_value(key, 0), 0);
+        if (ent && !maps_has((unsigned long)ent, 28, MAP_R)) ent = 0;
+        if (!ent) say("challenge scores: no entry for challenge %d - the game files this one under its own", slot);
+    }
+    if (!ent) return chg_scores_game(r0, r1, r2, r3);
+    n = pm_read_file(CHG_SCORES, b, sizeof b);
+    if (n < 0) n = 0;
+    if (!chg_rec_find(b, n, chg_hs.name, chg_rec))
+        chg_rec_fresh(chg_rec, maps_has(ent[1], 4, MAP_R) ? (const char *)(unsigned long)ent[1] : "");
+    for (k = 0; k < CHG_REC_SIZE; k++) before[k] = chg_rec[k];
+    for (k = 0; k + 1 < sizeof chg_rec_titles / sizeof chg_rec_titles[0]; k++) chg_rec_titles[k] = chg_hs.name;
+    chg_rec_titles[k] = 0;
+    was[0] = ent[0]; was[1] = ent[5]; was[2] = ent[6];
+    ent[0] = (unsigned)(unsigned long)chg_rec;
+    ent[5] = (unsigned)(unsigned long)chg_hs.name;
+    ent[6] = (unsigned)(unsigned long)chg_rec_titles;
+    say("challenge scores: %s's own high score (%llu, %s) in challenge %d's place for the game's end",
+        chg_hs.name, (unsigned long long)*(uint64_t *)(chg_rec + 72), (const char *)chg_rec + 32, slot);
+    ret = chg_scores_game(r0, r1, r2, r3);
+    ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];
+    for (k = 0; k < CHG_REC_SIZE; k++) changed |= chg_rec[k] != before[k];
+    if (!changed) {
+        say("challenge scores: %s's high score stands", chg_hs.name);
+        return ret;
+    }
+    say("challenge scores: %s's new high score %llu, %s", chg_hs.name,
+        (unsigned long long)*(uint64_t *)(chg_rec + 72), (const char *)chg_rec + 32);
+    m = chg_rec_put(b, n, chg_hs.name, chg_rec, out, (long)sizeof out);
+    if (m > 0) {
+        static const char tmp[] = "/dump/pad_challenge_scores.new";
+        int fd, ok;
+        unlink(tmp);
+        fd = open(tmp, O_WRONLY | O_CREAT, 0644);
+        ok = fd >= 0 && write(fd, out, (unsigned long)m) == m;
+        if (fd >= 0) ok = close(fd) == 0 && ok;
+        if (!(ok && rename(tmp, CHG_SCORES) == 0))
+            say("challenge scores: %s cannot be written - %s's new high score is not kept",
+                CHG_SCORES, chg_hs.name);
+    } else {
+        say("challenge scores: %s is full - %s's new high score is not kept", CHG_SCORES, chg_hs.name);
+    }
+    return ret;
+}
+
+static void chg_scores_arm(void)
+{
+    if (!site("challenge_scores") || !site("challenge_score_entry")) return;
+    if (!fn("challenge_scores") || !fn("challenge_score_entry")
+        || !(chg_scores_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn("challenge_scores"),
+                                                                                              (void *)chg_scores_wrap))) {
+        say("challenge scores: the game's end-of-game high scores could not be wrapped - a mode's challenge game files its score under the game's challenge");
+        return;
+    }
+    say("challenge scores: a mode's challenge game keeps its own high score (%s)", CHG_SCORES);
 }
 
 /* ---- round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract; Bond LE/Pro 1.06)
@@ -8891,6 +9084,7 @@ static void challenges_arm(void)
     can |= PM_CAN_CHALLENGE;
     say("challenges: %d of the game's a mode may take the place of (flag %ld for a challenge game)", challenges_n,
         pm_port_value("challenge_on_flag", 0));
+    chg_scores_arm();                                    /* PAD-640 */
     if (site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
         && pm_port_value("challenge_menu_list_at", 0) > 0 && pm_port_value("challenge_menu_count_at", 0) > 0) {
         if (fn("challenge_menu") && fn("challenge_menu_pick") && hook(fn("challenge_menu"), challenge_menu_built)

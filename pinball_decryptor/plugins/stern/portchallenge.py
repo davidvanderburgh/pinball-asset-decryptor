@@ -168,7 +168,7 @@ def find(elf):
                   "text  challenge_name_%d  %s" % (n, pretty(stem))]
     if notes:
         return [], notes
-    return lines + end_ball_lines(e) + menu_lines(e), notes
+    return lines + end_ball_lines(e) + menu_lines(e) + scores_lines(e, len(picks)), notes
 
 
 #: PAD-630: the framework's "end this ball now" - what the game's own challenge endings call in a challenge game
@@ -249,6 +249,65 @@ def menu_lines(e):
             "value challenge_menu_cap       %d" % cap,
             "value challenge_menu_kind      3",
             "value challenge_menu_caption   %d" % ((cw >> 4 & 0xF000) | (cw & 0xFFF))]
+
+
+def imm16(w):
+    """The 16-bit immediate of a movw / movt."""
+    return (w >> 4) & 0xF000 | w & 0xFFF
+
+
+#: PAD-640: the game's champions (one framework on Bond LE/Pro 1.06 and Stranger Things): categories 1.. of 36 bytes
+#: each in one table, {per-player bytes, score getter, reset, compare, qualify, fn, char **titles, u16 *entries,
+#: flags}, their count in a word. The category lookup checks the id against that count, then indexes the table:
+#:   cmp r0,#0 ; push {r3,lr} ; beq ; movw/movt r3 <count> ; ldr r3,[r3] ; cmp r0,r3 ; bcs ;
+#:   add r0,r0,r0,lsl #3 ; movw/movt r3 <table> ; add r0,r3,r0,lsl #2 ; ldr r3,[r0,#28]
+#: The entry lookup, (category, n) -> the n-th score entry:
+#:   mov r3,r0 ; movw r0 <map> ; push {r4,lr} ; movt r0 ; mov r4,r1 ; mov r1,r3 ; bl ; .. ; ldr r0,[r0,#28]
+#: and the end-of-game high scores, the one function that loads the table with movwhi/movthi.
+def scores_lines(e, n_challenges):
+    """The `site challenge_scores` / `challenge_score_entry` and `value challenge_scores_cat_<n>` lines (empty when
+    the build has not exactly one of each, or not one "... CHALLENGE CHAMPION" category per challenge)."""
+    w, base = e.words, e.text_va
+    n = len(w)
+    cats = [k for k in range(n - 13) if w[k] == 0xE3500000 and w[k + 1] == 0xE92D4008
+            and (w[k + 3] & 0xFFF0F000) == 0xE3003000 and (w[k + 4] & 0xFFF0F000) == 0xE3403000
+            and w[k + 5] == 0xE5933000 and w[k + 6] == 0xE1500003 and w[k + 8] == 0xE0800180
+            and (w[k + 9] & 0xFFF0F000) == 0xE3003000 and (w[k + 10] & 0xFFF0F000) == 0xE3403000
+            and w[k + 11] == 0xE0830100 and w[k + 12] == 0xE590301C]
+    ents = [k for k in range(n - 10) if w[k] == 0xE1A03000 and (w[k + 1] & 0xFFF0F000) == 0xE3000000
+            and w[k + 2] == 0xE92D4010 and (w[k + 3] & 0xFFF0F000) == 0xE3400000 and w[k + 4] == 0xE1A04001
+            and w[k + 5] == 0xE1A01003 and w[k + 6] >> 24 == 0xEB and w[k + 9] == 0xE590001C]
+    if len(cats) != 1 or len(ents) != 1:
+        return []
+    k = cats[0]
+    count_at = imm16(w[k + 3]) | imm16(w[k + 4]) << 16
+    table = imm16(w[k + 9]) | imm16(w[k + 10]) << 16
+    if e.off(count_at) is None or e.off(table) is None:
+        return []
+    count = e.word(count_at)
+    ends = [q for q in range(n - 1) if (w[q] & 0xFFF0F000) == 0x83003000 and imm16(w[q]) == table & 0xFFFF
+            and (w[q + 1] & 0xFFF0F000) == 0x83403000 and imm16(w[q + 1]) == table >> 16]
+    if len(ends) != 1 or not 2 <= count < 64:
+        return []
+    top = next((s for s in range(ends[0], max(ends[0] - 64, 0), -1) if (w[s] & 0xFFFF4000) == 0xE92D4000), None)
+    if top is None:
+        return []
+    picked = []
+    for c in range(1, count):
+        at = table + 36 * c
+        titles = e.word(at + 24) if e.off(at + 24) is not None else 0
+        title = e.cstr(e.word(titles)) if titles and e.off(titles) is not None else None
+        if title and title.endswith("CHALLENGE CHAMPION"):
+            picked.append((c, title))
+    if len(picked) != n_challenges:
+        return []
+    out = ["# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each "
+           "challenge's champion category",
+           "site  challenge_scores       0x%08x 0x%08x 0x%08x" % (base + 4 * top, w[top], w[top + 1]),
+           "site  challenge_score_entry  0x%08x 0x%08x 0x%08x" % (base + 4 * ents[0], w[ents[0]], w[ents[0] + 1])]
+    for slot, (c, title) in enumerate(picked):
+        out += ["# %s" % title.replace("/'", "'"), "value challenge_scores_cat_%d  %d" % (slot, c)]
+    return out
 
 
 def missing_from(lines, port_text):

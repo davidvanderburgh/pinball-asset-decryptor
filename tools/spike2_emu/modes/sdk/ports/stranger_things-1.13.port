@@ -458,3 +458,14 @@ value challenge_flag_3  147
 text  challenge_name_3  Final Showdown
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x002bd8d4 0xe30321aa 0xe340207e
+# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each challenge's champion category
+site  challenge_scores       0x003519e8 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x00350f1c 0xe1a03000 0xe3060204
+# DEMOGORGON CHALLENGE CHAMPION
+value challenge_scores_cat_0  9
+# SEND IT BACK CHALLENGE CHAMPION
+value challenge_scores_cat_1  10
+# LIGHT THE FIRE CHALLENGE CHAMPION
+value challenge_scores_cat_2  11
+# CHALLENGE CHAMPION
+value challenge_scores_cat_3  12

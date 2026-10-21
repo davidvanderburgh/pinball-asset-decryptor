@@ -255,6 +255,30 @@ def test_games_still_means_the_first_games_partition(parts):
     assert "games_guessed" not in found
 
 
+def test_an_os_partition_carrying_spk_is_not_the_games_partition(parts):
+    """PAD-659: a card whose p2 (the OS) also had /spk was read as p2 = games
+    and, with no other rootfs left, p2 = rootfs too: the emulator mounted the
+    OS, found no game ("mounted, but no directory in it holds a game ELF"),
+    and the boot-menu check read the same p2. The partition that HOLDS a game
+    is the games partition; the OS stays the rootfs."""
+    parts.fs[P2 * SECTOR] = {"/": [("lib", DIR), ("usr", DIR), ("etc", DIR),
+                                   ("bin", DIR), ("spk", DIR)]}
+    found = parts.mod.identify(parts.img)
+    assert found["games"] == P3 * SECTOR
+    assert found["rootfs"] == P2 * SECTOR
+    assert "games_guessed" not in found and "rootfs_guessed" not in found
+
+
+def test_a_games_tree_without_a_title_still_falls_back_to_spk(parts):
+    """No partition passes the strict rule: the old /spk rule still names
+    games, and an OS without /spk is still the rootfs."""
+    parts.fs[P3 * SECTOR] = {"/": [("lost+found", DIR), ("spk", DIR)]}
+    parts.fs[P7 * SECTOR] = {"/": [("lost+found", DIR)]}
+    found = parts.mod.identify(parts.img)
+    assert found["games"] == P3 * SECTOR
+    assert found["rootfs"] == P2 * SECTOR
+
+
 def _cli(parts, monkeypatch, capsys, *args):
     monkeypatch.setattr(sys, "argv", ["parts.py"] + list(args) + [parts.img])
     rc = parts.mod.main()

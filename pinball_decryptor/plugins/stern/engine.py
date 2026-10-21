@@ -374,6 +374,28 @@ def _save_firmware_for_support(gr_path, output_dir, log):
         return None
 
 
+#: _sounds_unread_why's sentence per job: whole sentences, so a language
+#: catalog translates each one with only the names as a hole
+_SOUNDS_UNREAD = {
+    "extract": "This card's sounds can't be extracted",
+    "rebuild": "This card's sounds can't be rebuilt",
+    "reset": "This card's original sounds can't be read back to reset them",
+}
+
+
+def _sounds_unread_why(missing, job="extract"):
+    """Why this card's sounds can't be extracted, rebuilt or reset (*job*):
+    the codec locator (:func:`.spike2.locate.missing`) found no sound decoder
+    it knows in the game program.  Every Stern Spike 2 build the developer
+    has, newest and older, locates (PAD-657), so this names what wasn't found
+    for the developer rather than guessing at a codec."""
+    return ("%s: its game program isn't one this version of the app can find "
+            "the sound decoder in (for the developer: %s not found). That "
+            "usually means the game program was changed outside the app, or "
+            "it's a build the app hasn't met yet."
+            % (_SOUNDS_UNREAD[job], ", ".join(missing) or "decoder"))
+
+
 # --------------------------------------------------------------------------
 # locating + extracting the card's game_real / image.bin
 # --------------------------------------------------------------------------
@@ -2660,7 +2682,8 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     phase = phase or (lambda i: None)
-    from .spike2.emulator import Spike2Emu, audio_decode_supported
+    from .spike2.emulator import (Spike2Emu, audio_decode_missing,
+                                  audio_decode_supported)
 
     def _read_prog(c, t):
         if progress:
@@ -2765,11 +2788,20 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             phase(5)  # Checksums
             return 0
         if not audio_decode_supported(gr_path):
-            log("Audio decode isn't supported for this title yet: its game "
-                "firmware uses a Spike 2 codec the engine can't locate a "
-                "single decode path for (e.g. a dual-path codec), so the "
-                "per-sound keystream can't be derived. Video + image "
-                "extraction completed normally.", "warning")
+            # PAD-657: every Stern build the library holds locates, so a card
+            # that doesn't is a program nobody here has seen: keep it for the
+            # developer, as the boot-failure path below does
+            saved = _save_firmware_for_support(gr_path, output_dir, log)
+            done = [w for w, on in (("video", do_video), ("images", do_images),
+                                    ("text", do_text)) if on]
+            log(_sounds_unread_why(audio_decode_missing(gr_path))
+                + ((" The %s extracted normally."
+                    % " and ".join([", ".join(done[:-1])] + done[-1:]
+                                   if len(done) > 1 else done))
+                   if done else "")
+                + ((" The game program was saved to %s -- send that file to "
+                    "the developer to get this card's sounds supported in a "
+                    "future update." % saved) if saved else ""), "warning")
             phase(5)  # Checksums
             return 0
         log("Booting firmware codec engine...", "info")
@@ -7511,7 +7543,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     import numpy as np
 
     from ...core.checksums import read_checksums
-    from .spike2.emulator import audio_decode_supported
+    from .spike2.emulator import audio_decode_missing, audio_decode_supported
 
     # Only re-encode/patch what the user actually changed.  The folder is
     # normally the whole Extract output (thousands of idxNNNN.wav + the LCD
@@ -7984,14 +8016,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if cancel():
                 return None, None, None, None, None
             if not audio_decode_supported(gr_path):
-                # This title's audio codec can't be re-encoded.  If the user
-                # only edited video/images, carry on and write those; otherwise
+                # This card's sounds can't be re-encoded.  If the user only
+                # edited video/images, carry on and write those; otherwise
                 # it's a hard error.
-                msg = (
-                    "Audio re-encode isn't supported for this title yet: its "
-                    "game firmware uses a Spike 2 codec the engine can't locate "
-                    "a single decode path for (e.g. a dual-path codec), so the "
-                    "per-sound keystream can't be derived.")
+                msg = _sounds_unread_why(audio_decode_missing(gr_path),
+                                         "rebuild")
                 if (not video_edits and not image_edits and not boot_edits
                         and not mode_list and not code_list):
                     raise RuntimeError(msg)
@@ -13539,10 +13568,11 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
             return reverted, failed
 
         if audio_idx:
-            from .spike2.emulator import Spike2Emu, audio_decode_supported
+            from .spike2.emulator import (Spike2Emu, audio_decode_missing,
+                                          audio_decode_supported)
             if not audio_decode_supported(gr_path):
-                log("This title's audio can't be re-decoded for revert; "
-                    "re-extract to reset those sounds.", "warning")
+                log(_sounds_unread_why(audio_decode_missing(gr_path), "reset"),
+                    "warning")
                 failed.extend(audio_idx.values())
             else:
                 log("Re-decoding %d original sound(s) from the card..."

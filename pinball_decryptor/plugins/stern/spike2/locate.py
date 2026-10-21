@@ -766,27 +766,59 @@ def locate_all(game_real_path=None, raw=None):
     """Locate every firmware address the codec oracle needs, generically.
 
     Returns a dict (keys = :data:`_REQUIRED` plus ``RBTREE_ACC`` and ``OBJREG``)
-    or ``None`` if the build isn't a single-path decodable codec (any required
-    address missing, or no PROV/QMUL resolvable -> dual-path / unsupported).
+    or ``None`` if any required address isn't found (:func:`missing` names
+    which).
     """
     if raw is None:
         with open(game_real_path, "rb") as f:
             raw = f.read()
+    res, _gone = _locate(raw)
+    return res
+
+
+def missing(game_real_path=None, raw=None):
+    """What :func:`locate_all` could not find in this game program, as the
+    :data:`_REQUIRED` names (``OBJREG`` for the band object's register, or
+    ``"ELF: <why>"`` when the file doesn't read as a game program at all).
+    Empty when everything locates.  PAD-657: a user's card that doesn't
+    locate says which part, so the program they send in is a lead."""
+    if raw is None:
+        with open(game_real_path, "rb") as f:
+            raw = f.read()
+    return _locate(raw)[1]
+
+
+def _locate(raw):
+    """``(addresses or None, [what is missing])`` for :func:`locate_all` and
+    :func:`missing`."""
+    step = "ELF"
     try:
         fw = _FwView(raw)
         idx = _loader_index(fw)
+        step = "BOOT_LO"
         boot = _find_boot(fw, idx) or {}
+        step = "CAT0_REGISTER"
         cat0 = _find_cat0(fw, idx)
+        step = "DISPATCH"
         disp = _find_dispatch(fw)
-        if not boot.get("BOOT_LO") or cat0 is None or disp is None:
-            return None
+        early = ((["BOOT_LO"] if not boot.get("BOOT_LO") else [])
+                 + (["CAT0_REGISTER"] if cat0 is None else [])
+                 + (["DISPATCH"] if disp is None else []))
+        if early:
+            return None, early
+        step = "MASTERDIR_DECODE"
         md, bh = _boot_md_hi(fw, boot["BOOT_LO"])
         if md is None or bh is None:
-            return None
+            return None, [k for k, v in (("MASTERDIR_DECODE", md),
+                                         ("BOOT_HI", bh)) if v is None]
+        step = "BANDLOOP"
         ipc = _find_internal_pcs(fw, md)
+        step = "FIND_BL"
         find_bl = _find_find_bl(fw, md, ipc["_end"])
         objreg = (fw.w_text(ipc["BANDOBJ"] - 8) >> 16) & 0xf if "BANDOBJ" in ipc else None
+        step = "RBTREE_HDR"
         hdr = _find_rbtree_hdr(fw, cat0)
+        step = "PROV"
         prov, qmul = _resolve_prov_qmul(fw, disp)
         res = dict(
             BOOT_LO=boot["BOOT_LO"], BOOT_HI=bh, VF2_VA=boot["VF2_VA"],
@@ -804,6 +836,7 @@ def locate_all(game_real_path=None, raw=None):
         # Optional: the master-directory cipher sites.  A build these miss
         # decodes audio exactly as before; only growing the sound bank is
         # refused, with a named reason (see :mod:`.masterdir`).
+        step = "MASTERDIR_CRYPTO"
         res["MASTERDIR_CRYPTO"] = find_masterdir_crypto(fw, md, ipc["_end"])
         # Optional: a build this misses decodes every plain sound as before;
         # its multi-band records decode through the resolved slot instead.
@@ -811,8 +844,9 @@ def locate_all(game_real_path=None, raw=None):
             res.update(find_band_codecs(fw, disp) or {})
         except Exception:
             pass
-    except Exception:
-        return None
-    if any(res.get(k) is None for k in _REQUIRED) or objreg is None:
-        return None
-    return res
+    except Exception as e:
+        return None, [("ELF: %s" % e) if step == "ELF" else step]
+    gone = [k for k in _REQUIRED if res.get(k) is None]
+    if objreg is None:
+        gone.append("OBJREG")
+    return (None, gone) if gone else (res, [])

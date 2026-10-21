@@ -10271,6 +10271,9 @@ static void challenge_menu_picked(unsigned *r)
             say("challenge menu: %s on the menu - picked, a challenge game whose ball starts its mode",
                 own_challenge[own_pending].name);
     } else {
+        if (was >= 0 && own_challenge[was].fn)                    /* PAD-663: say why a pick was not played */
+            say("challenge menu: %s no longer picked (the menu's entry is not ours: kind %u)", own_challenge[was].name,
+                back > 0 ? *(const unsigned *)(e8 + MENU_KIND_AT) : r[3]);
         own_pending = -1;
     }
 }
@@ -10332,7 +10335,11 @@ static void challenge_ball_start(void)
     long slot = pm_port_value("challenge_menu_slot", 0);
     unsigned n;
     if (on != 1 && k >= 0 && pm_port_value("challenge_menu_sets_on", 0)) on = 1;   /* PAD-619: a menu of no challenge */
-    if (on != 1) return;
+    if (on != 1) {
+        if (k >= 0) say("challenge %d (%s): the ball started in no challenge game (flag %ld is %d) - not played",
+                        CHALLENGE_OWN + k, own_challenge[k].name, pm_port_value("challenge_on_flag", 0), on);
+        return;
+    }
     if (k >= 0) {
         int how = slot < 0 ? -1 : slot < challenges_n && challenge_site[slot] ? -2 : (int)slot;
         if (!challenge_ball_takes(on, how, 0, 0)) return;          /* challenge 0's own handler hands it over */

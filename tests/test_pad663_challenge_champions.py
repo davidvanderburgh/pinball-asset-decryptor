@@ -175,3 +175,114 @@ def test_hook_call_moves_only_a_call_and_a_plain_word():
 def test_the_docs_say_how():
     sdk = (SDK / "MODE_SDK.md").read_text(encoding="utf-8")
     assert "challenge_scores_gate" in sdk and "PAD-663" in sdk
+
+
+# ---- the attract mode's champion page ------------------------------------------------------
+PAGES_MAIN = r"""
+#include <stdio.h>
+@FNS@
+int main(void)
+{
+    char t[48];
+    int first = 1 << 30;
+    chg_champion_title(t, sizeof t, "PAD CHALLENGE"); printf("[%s]\n", t);
+    chg_champion_title(t, sizeof t, "COMBO CHAMPION"); printf("[%s]\n", t);
+    chg_champion_title(t, sizeof t, "A VERY LONG MODE NAME HERE"); printf("[%s]\n", t);
+    /* the cycle's first page: category 2 (Iron Maiden's page starts there), then 3 .. - only 2 again follows */
+    printf("%d", chg_pages_follow(2, &first));
+    printf("%d", chg_pages_follow(3, &first));
+    printf("%d", chg_pages_follow(2, &first));
+    printf("%d", chg_pages_follow(1, &first));         /* a lower one seen later becomes the first */
+    printf("%d", chg_pages_follow(2, &first));
+    printf("%d\n", chg_pages_follow(-1, &first));
+    return 0;
+}
+"""
+
+
+def test_a_modes_page_is_titled_like_the_games_champions_and_follows_the_cycles_first(tmp_path):
+    R = _host()
+    src = RUNTIME.read_text(encoding="utf-8")
+    fns = "\n".join(R._lift(src, sig) for sig in (
+        "static void chg_champion_title(char *out, unsigned cap, const char *name)",
+        "static int chg_pages_follow(int cat, int count, int *first)"))
+    out = R._host_run(tmp_path, PAGES_MAIN.replace("@FNS@", fns)).splitlines()
+    assert out == ["[PAD CHALLENGE CHAMPION]", "[COMBO CHAMPION]", "[A VERY LONG MODE NAME HERE]", "0101100"]
+
+
+def test_the_page_repeat_follows_only_an_entrys_first_page_in_the_attract_mode():
+    R = _host()
+    src = RUNTIME.read_text(encoding="utf-8")
+    run = R._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")
+    own = run.index("ret = chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);")
+    gate = run.index("pm_in_game() || chg_scores_running || (k != CHG_LIST_PAGE && chg_pages_n != 0)")
+    swap = run.index("ent[0] = (unsigned)(unsigned long)chg_pages_rec;")
+    again = run.index("chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);", swap)
+    back = run.index("chg_pages_back();", again)
+    assert own < gate < swap < again < back
+    # a page cut short gives the entry back on the tick; the end-of-game wrap gives it back first
+    tick = src[src.index("static void chg_pages_tick(void)\n{"):]
+    assert "chg_pages_back();" in tick[:tick.index("\n}\n")]
+    wrap = R._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    assert wrap.index("chg_pages_back();") < wrap.index("chg_scores_game(r0, r1, r2, r3)")
+
+
+def test_the_host_category_is_its_first_entry_alone_for_the_call():
+    """HIGHEST SCORES' insert moved the game's HIGH SCORE #1-#4 down one when a mode's record (in the first entry's
+    place) was beaten (Avengers LE 1.10, the first rig run)."""
+    R = _host()
+    src = RUNTIME.read_text(encoding="utf-8")
+    one = R._lift(src, "static unsigned *chg_scores_one_entry(long cat, unsigned *was)")
+    assert "one[0] = l[0];" in one and "one[1] = 0;" in one and "desc[7] = (unsigned)(unsigned long)one;" in one
+    wrap = R._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    call = wrap.index("list = chg_scores_one_entry(cat, &list_was);")
+    assert call < wrap.index("ret = chg_scores_game(r0, r1, r2, r3);", call) < wrap.index("if (list) *list = list_was;")
+
+
+@pytest.mark.parametrize("key", ["avengers_infinity_le-1.10", "deadpool_le-1.16", "batman-1.14", "godzilla_le-1.16",
+                                 "iron_maiden_pro-1.18", "foo_fighters_le-1.04", "john_wick_le-1.02", "beatles-1.29"])
+def test_the_generic_page_ports_name_the_page_the_probe_saw(key):
+    """The probe (C:/tmp/PAD-663 probe663.c: every entry read in the attract mode, with its caller) found the attract
+    mode's champion page at these addresses; the finder names it (among up to four of that shape)."""
+    seen = {"avengers_infinity_le-1.10": 0x214D8, "deadpool_le-1.16": 0x2375C, "batman-1.14": 0x2492C,
+            "godzilla_le-1.16": 0x23B70, "iron_maiden_pro-1.18": 0x434C0, "foo_fighters_le-1.04": 0x1CBD8,
+            "john_wick_le-1.02": 0x24594, "beatles-1.29": 0x44AC8}
+    port = MP.read_port(str(PORTS / ("%s.port" % key)))
+    pages = [port["site"]["challenge_pages_%d" % k][0] for k in range(4) if "challenge_pages_%d" % k in port["site"]]
+    assert seen[key] in pages
+
+
+def test_the_per_category_page_route_on_aerosmith_and_guardians():
+    for key, cat in (("aerosmith-1.16", 4), ("aerosmith_le-1.16", 4), ("guardians-1.15", 5), ("guardians_le-1.15", 5)):
+        port = MP.read_port(str(PORTS / ("%s.port" % key)))
+        assert {"challenge_page", "challenge_page_text", "challenge_page_yield"} <= set(port["site"])
+        assert int(port["value"]["challenge_page_cat"]) == cat
+
+
+@pytest.mark.parametrize("before, start", [
+    ([0xE12FFF1E, 0xE302CA0C, 0xE340C065, 0xE59CC000], 1),   # Sword of Rage: movw ip ; movt ip ; ldr ip, [ip] ; push
+    ([0xE12FFF1E, 0xE307C8C4, 0xE340C075], 1),               # Avengers: movw ip ; movt ip ; push
+    ([0xE12FFF1E, 0xE30B3AFC, 0xE30D16F0, 0xE3403069, 0xE3401052, 0xE5933000], 1),   # TMNT's list page: two pairs
+    ([0xE12FFF1E, 0xE59CC000], 2),                           # a load alone is not the function's
+    ([0xE12FFF1E, 0xE1A00000], 2),
+])
+def test_a_page_function_starts_before_the_set_up_of_its_push(before, start):
+    """Wrapped at its push, Sword of Rage's champion page ran with ip unset and the game crashed in the attract mode."""
+    w = before + [0xE92D4FF0, 0xE1A08000]
+    assert PC._prologue_start(w, len(before)) == (start if start < len(before) else len(before))
+
+
+def test_sword_of_rage_pages_are_wrapped_where_they_start():
+    for key, va in (("sword_of_rage_le-1.19", 0x219BC), ("sword_of_rage_pro-1.19", 0x21908)):
+        assert MP.read_port(str(PORTS / ("%s.port" % key)))["site"]["challenge_pages_0"][0] == va
+
+
+def test_a_page_is_the_category_it_read_first_of_the_tables():
+    """After a game Jaws' page reads category 39 entry 3 and 63 entry 0 after the row it shows, Godzilla 53 entry 1,
+    Avengers shows the last scores under 55 (not one of its 38): the first read of one of the table's is the page's."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    seen = src[src.index("static void chg_lookup_seen(unsigned *r)\n{"):]
+    seen = seen[:seen.index("\n}\n")]
+    assert "if (chg_pages_cat >= 0 || (int)r[0] <= 0 || (int)r[0] >= chg_pages_count) return;" in seen
+    run = _host()._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")
+    assert run.index("chg_pages_count = chg_scores_count();") < run.index("ret = chg_pages_game[k](")

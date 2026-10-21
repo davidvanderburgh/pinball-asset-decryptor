@@ -47,20 +47,31 @@ picked as slot ~0u, which `chg_hs.slot` (an int) read as "no pick"; and Avengers
 pick is taken) before it counts the game's start, so the pick was stamped with the last game - re-stamped when the
 taking mode begins (`chg_scores_began`).
 
-## The attract pages (in progress)
+## The attract pages (done)
 
 Probe (rig instrument C:/tmp/PAD-663/rig/probe663.c, rigbatch over the 53): every read of the entry lookup in
-attract, with its caller. Two shapes so far:
+attract, with its caller. Four shapes, all wrapped the same way (the game's own call first; after the call that
+showed the cycle's first category, the same call again once per mode champion, the category's first entry pointed at
+the mode's record and titled "<NAME> CHAMPION", put back after):
 
-- One page PROCESS per category (Bond, Stranger Things, Aerosmith, Guardians): PAD-660's route
-  (`challenge_page`, its title message wrapped) works for any category with exactly one page.
-- One generic page FUNCTION, `page(object, category, n, frames, [stack])`, called per category and blocking for the
-  page's time (Avengers 0x214d8 - its first words are `movw/movt ip` - Deadpool 0x2375c, Godzilla 0x23b78,
-  Iron Maiden Pro 0x434c8 ...). It reads the entry's record (initials +32, score) and its TITLE from the entry's
-  titles list (+0x18) - the field PAD-640 already points at the mode's name. The plan: wrap it; after the game's own
-  call for its first category, call it again (same arguments, up to four stack words) once per mode champion, the
-  category's first entry pointed at the mode's record and titles, put back after.
+- One page PROCESS per category (Bond, Stranger Things, Aerosmith, Guardians): PAD-660's route (`challenge_page`).
+- One generic page FUNCTION called per category (`site challenge_pages_0..3`; most builds; Deadpool, Batman 66, Jaws,
+  The Beatles have up to four of that shape and all are named). It reads the entry's record and its titles (+0x18).
+- HIGHEST SCORES on one LIST page of five rows (TMNT, Venom: `site challenge_list_page`), repeated with the
+  category's list cut to the first entry.
+- One ROW page per HIGHEST SCORES row (Jurassic Park The Pin): the GRAND CHAMPION's row page named with the pages.
 
-Static finder for the generic page: a function calling the entry lookup with the category from a register, keeping
-the result (`subs/mov rE, r0`) and loading `[rE, #0x18]` - matches the probe on Avengers, Deadpool, Godzilla, Iron
-Maiden Pro; Batman, Beatles, Foo, Mando, Metallica, Rush, SoR, TMNT, Venom need their shapes read.
+Found on the way (fixed):
+- The site must be the function's first word: Sword of Rage opens `movw ip ; movt ip ; ldr ip, [ip] ; push` and,
+  wrapped at the push, crashed in attract; TMNT's list page sets r1/r3 up the same way (`_prologue_start`).
+- A page's category is the last entry read OF THE TABLE's: after a game Avengers shows the last scores under a
+  category of its own (55, table of 38) and Jaws' page reads category 63 entry 0 after the row it shows; the port's
+  `data challenge_scores_count` (the category lookup's own bound) is read at each page call.
+
+## Proof (emulator, the newest build of every title)
+
+- Attract (C:/tmp/PAD-663/kit/jobattract.sh: a mode champion record seeded, booted to attract, the page waited for
+  and pictured): 44/46 on the first full sweep; Led Zeppelin Pro / Rush Pro rerun.
+- A mode's challenge game played to its end, initials entered, the page in attract after, the game's own records
+  logged throughout and unchanged (kit/job663.sh on start-menu builds; kit/jobpick.sh on the nine with no start menu,
+  the pick made as the game's own selector makes it).

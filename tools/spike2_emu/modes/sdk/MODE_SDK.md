@@ -4161,6 +4161,24 @@ reads the entry's record and its title (the entry's titles list, +0x18, or the e
 site  challenge_pages_0     0x000214d8 0xe307c8c4 0xe340c075    # Avengers LE 1.10 (it opens with movw/movt ip)
 ```
 
+The site is the function's first word, before the push where the function sets a register up first: Avengers'
+`movw ip ; movt ip`, Sword of Rage's `movw ip ; movt ip ; ldr ip, [ip]`, TMNT's two pairs and a load. Wrapped at the
+push, the page runs with that register unset (Sword of Rage crashed in the attract mode).
+
+A build may have more than one function of that shape (Deadpool, Batman 66, Jaws, The Beatles): all are named,
+`challenge_pages_0` .. `_3`, and the runtime follows the one the attract mode calls. Jurassic Park The Pin shows
+HIGHEST SCORES one row per page, each a small function of its own handing the entry to a page body that reads its
+titles: the GRAND CHAMPION's row page is named with them. Teenage Mutant Ninja Turtles and Venom show their other
+champions on bespoke pages (the title is in the scene), and HIGHEST SCORES on one list page of five rows, each row
+asked of the category's list:
+
+```
+site  challenge_list_page   0x000301e8 0xe30b3afc 0xe30d16f0    # TMNT LE 1.59: HIGHEST SCORES' list page
+```
+
+repeated with the category's list cut to its first entry, pointed at the mode's record, so it lists the mode's
+champion alone.
+
 The wrapped page runs the game's own call first, noting (the entry lookup, logged on the same thread) which category
 it showed. After the call for the lowest category the attract mode shows (its cycle's first page, the grand
 champion's where it has one) the page is called again with the same arguments, once per mode with a champion, the

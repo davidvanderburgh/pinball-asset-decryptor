@@ -9899,13 +9899,16 @@ static void chg_page_arm(void)
  * of the mode's record and titled "<NAME> CHAMPION", and put back as each call returns. Outside the attract mode
  * (a game in play) nothing is repeated. A page cut short (a game starting) never returns: the tick puts the entry
  * back then, and the end-of-game wrap before anything else. */
-#define CHG_PAGES_SITES 4
+#define CHG_PAGES_SITES 5                       /* challenge_pages_0..3, and 4: challenge_list_page */
+#define CHG_LIST_PAGE 4
 typedef unsigned (*chg_pages_fn)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
 static chg_pages_fn chg_pages_game[CHG_PAGES_SITES];
 static volatile long chg_pages_tid;              /* the thread inside a wrapped page call of the game's, 0: none */
-static volatile int chg_pages_cat = -1;          /* the category and entry of that call's last entry read */
+static volatile int chg_pages_cat = -1;          /* the category and entry of that call's first read of the table's */
 static volatile int chg_pages_n = -1;
+static volatile int chg_pages_cat0 = -1, chg_pages_n0 = -1;   /* its first read (the log's) */
 static int chg_pages_first = 1 << 30;            /* the lowest category a page showed: the cycle's first */
+static volatile int chg_pages_count = 64;        /* the table's categories (chg_scores_count, at each page call) */
 static volatile int chg_pages_in;                /* a mode's page runs */
 static unsigned *volatile chg_pages_ent;         /* the entry pointed at a mode's record, until its call returns */
 static unsigned chg_pages_was[3];
@@ -9914,10 +9917,14 @@ static unsigned char chg_pages_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
 static char chg_pages_title[48];
 static const char *chg_pages_titles[8];
 
-/* the entry lookup's logger: which category the game's page call read first */
+/* the entry lookup's logger: which category the game's page call showed - its first read of one of the table's. After
+ * a game the page reads more after the row it shows: Jaws category 39 entry 3 and 63 entry 0 (a list of the game's
+ * own, not one of the table's 40), Godzilla 53 entry 1 */
 static void chg_lookup_seen(unsigned *r)
 {
     if (chg_pages_tid && syscall(SYS_GETTID) == chg_pages_tid) {
+        if (chg_pages_cat0 < 0) { chg_pages_cat0 = (int)r[0]; chg_pages_n0 = (int)r[1]; }
+        if (chg_pages_cat >= 0 || (int)r[0] <= 0 || (int)r[0] >= chg_pages_count) return;
         chg_pages_cat = (int)r[0];
         chg_pages_n = (int)r[1];
     }
@@ -9930,6 +9937,15 @@ static void chg_pages_back(void)
     if (!ent) return;
     ent[0] = chg_pages_was[0]; ent[5] = chg_pages_was[1]; ent[6] = chg_pages_was[2];
     chg_pages_ent = 0;
+}
+
+/* the game's category count (the port's `data challenge_scores_count`; 64 without it). After a game Avengers shows
+ * its last scores on the same page function under a category of its own, 55 - not one of the table's 38 */
+static int chg_scores_count(void)
+{
+    unsigned at = data("challenge_scores_count");
+    unsigned n = at && maps_has(at, 4, MAP_R) ? *(const unsigned *)(unsigned long)at : 64u;
+    return n > 64u || n < 2u ? 64 : (int)n;                      /* not counted yet: no limit */
 }
 
 /* a mode's page title: "<NAME> CHAMPION", the name alone where that would not fit the game's longest (27) or it says
@@ -9952,9 +9968,9 @@ static void chg_champion_title(char *out, unsigned cap, const char *name)
 
 /* whether the modes' pages follow the game's call that showed category cat: its lowest, the cycle's first (tests
  * lift it verbatim) */
-static int chg_pages_follow(int cat, int *first)
+static int chg_pages_follow(int cat, int count, int *first)
 {
-    if (cat <= 0 || cat > *first) return 0;
+    if (cat <= 0 || cat >= count || cat > *first) return 0;     /* a category of the table's (not a game's own list) */
     *first = cat;
     return 1;
 }
@@ -9964,19 +9980,26 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
 {
     static char b[CHG_SCORES_MAX];
     static char names[CHG_PAGES_MAX][40];
-    static int said;
-    unsigned ret, *ent;
+    static int said, calls;
+    unsigned ret, *ent, *list, list_was = 0;
     long n, me = syscall(SYS_GETTID);
     int cat, i, m, j;
     if (chg_pages_in || chg_pages_tid) return chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);
-    chg_pages_cat = chg_pages_n = -1;
+    chg_pages_cat = chg_pages_n = chg_pages_cat0 = chg_pages_n0 = -1;
+    chg_pages_count = chg_scores_count();
     chg_pages_tid = me;
     ret = chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);    /* the game's own page, as it was */
     cat = chg_pages_cat;
     chg_pages_tid = 0;
+    if (calls < 40) {                                            /* the first pages, for whoever reads the log */
+        calls++;
+        say("challenge scores: champion page %d showed category %d entry %d (first read %d/%d, in game %d)", k, cat,
+            chg_pages_n, chg_pages_cat0, chg_pages_n0, pm_in_game());
+    }
     /* a category's first entry only (the GRAND CHAMPION's page, not HIGH SCORE #1's: Avengers calls one page per entry),
      * never while the end-of-game high scores run (a page function the game's end calls: the attract mode's only) */
-    if (pm_in_game() || chg_scores_running || chg_pages_n != 0 || !chg_pages_follow(cat, &chg_pages_first)) return ret;
+    if (pm_in_game() || chg_scores_running || (k != CHG_LIST_PAGE && chg_pages_n != 0)
+        || !chg_pages_follow(cat, chg_pages_count, &chg_pages_first)) return ret;
     n = pm_read_file(CHG_SCORES, b, sizeof b);
     if (n <= 0) return ret;
     m = chg_page_names(names, CHG_PAGES_MAX);
@@ -10002,7 +10025,10 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
         ent[6] = (unsigned)(unsigned long)chg_pages_titles;
         chg_pages_in = 1;
         chg_pages_tid = me;                                      /* its reads are not a call of the game's */
+        /* a list page (TMNT's HIGHEST SCORES: five rows, each asked of the category's list) shows the one row */
+        list = k == CHG_LIST_PAGE ? chg_scores_one_entry(cat, &list_was) : 0;
         chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);
+        if (list) *list = list_was;
         chg_pages_tid = 0;
         chg_pages_in = 0;
         chg_pages_back();
@@ -10012,10 +10038,17 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
 
 #define CHG_PAGES_WRAP(k) static unsigned chg_pages_wrap##k(unsigned a0, unsigned a1, unsigned a2, unsigned a3, \
     unsigned s0, unsigned s1, unsigned s2, unsigned s3) { return chg_pages_run(k, a0, a1, a2, a3, s0, s1, s2, s3); }
-CHG_PAGES_WRAP(0) CHG_PAGES_WRAP(1) CHG_PAGES_WRAP(2) CHG_PAGES_WRAP(3)
+CHG_PAGES_WRAP(0) CHG_PAGES_WRAP(1) CHG_PAGES_WRAP(2) CHG_PAGES_WRAP(3) CHG_PAGES_WRAP(4)
 static void *const chg_pages_wraps[CHG_PAGES_SITES] = {
     (void *)chg_pages_wrap0, (void *)chg_pages_wrap1, (void *)chg_pages_wrap2, (void *)chg_pages_wrap3,
+    (void *)chg_pages_wrap4,
 };
+
+static void chg_pages_key(char *key, unsigned cap, int k)
+{
+    if (k == CHG_LIST_PAGE) pm_snprintf(key, cap, "challenge_list_page");
+    else pm_snprintf(key, cap, "challenge_pages_%d", k);
+}
 
 /* the tick: a page cut short (a game started while a mode's page ran: its process is gone) gives the entry back */
 static void chg_pages_tick(void)
@@ -10031,7 +10064,7 @@ static void chg_pages_arm(void)
     char key[32];
     int k, n = 0;
     for (k = 0; k < CHG_PAGES_SITES; k++) {
-        pm_snprintf(key, sizeof key, "challenge_pages_%d", k);
+        chg_pages_key(key, sizeof key, k);
         n += site(key) != 0;
     }
     if (!n) return;                                              /* a port without them: silent */
@@ -10040,7 +10073,7 @@ static void chg_pages_arm(void)
         return;
     }
     for (n = 0, k = 0; k < CHG_PAGES_SITES; k++) {               /* the lookup's logger first: no page without it */
-        pm_snprintf(key, sizeof key, "challenge_pages_%d", k);
+        chg_pages_key(key, sizeof key, k);
         if (!site(key)) continue;
         if (!fn(key) || !(chg_pages_game[k] = (chg_pages_fn)hook_wrap_at(fn(key), chg_pages_wraps[k], 0))) {
             say("challenge scores: the champion page %s could not be wrapped", key);

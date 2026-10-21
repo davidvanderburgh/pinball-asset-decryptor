@@ -669,8 +669,9 @@ site  challenge_scores_gate  0x002fd3a8 0xeb0094b6 0xe3500000
 value challenge_scores_gate_id       91
 value challenge_scores_gate_cat_at   2
 value challenge_scores_gate_entry_at 4
-# PAD-663: the category table (36 bytes each; +28 the entry list a category's insert shifts)
+# PAD-663: the category table (36 bytes each; +28 the entry list a category's insert shifts) and its count
 data  challenge_scores_table 0x0063f6d4
+data  challenge_scores_count 0x0054d6d0
 # PAD-663: HIGHEST SCORES, whose first entry a mode's challenge game goes in as the mode's own record
 value challenge_scores_cat   1
 # PAD-663: the champion page function(s) (each called per category; the attract mode's is the one it calls): a mode's challenge champion is shown on it after the lowest category the attract mode shows

@@ -719,7 +719,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         game_dir = str(getattr(p, "game_dir", "") or "") if p is not None else ""
         blocks = [{"name": name, "about": BM.example(name).get("about", ""),            # PAD-658: made of blocks
                    "based_on": bool(BM.example(name).get("based_on"))}
-                  for name in (BM.example_names(game_dir) if game_dir else ())]
+                  for name in (BM.example_names(game_dir) if game_dir else ())
+                  if BM.fits(BM.example(name), p)]                       # only what builds on this card
         ex_ok = bool(self._ex_ok and not self._no_port)
         self.set(examples=items, blocks_examples=blocks, new_ok=bool(self._new_ok and not self._no_port), ex_ok=ex_ok,
                  ex_tip="" if ex_ok else (self._no_port or MP.NO_PROJECT_HELP))
@@ -3056,7 +3057,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         def work():
             try:
                 slug, missing = BM.add_example(project, name, dirs=found, ffmpeg=ffmpeg,
-                                               log=lambda m, *a: self._say(m))
+                                               log=lambda m, *a: self._say(m), profile=p)
             except Exception as e:                          # noqa: BLE001
                 self._tryit_note("%s could not be added: %s" % (name, e))
                 self._post_refresh_code()

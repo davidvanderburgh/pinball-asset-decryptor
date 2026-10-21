@@ -1,0 +1,124 @@
+{
+ "clips": {
+  "intro": {
+   "film": "mg93",
+   "from": 2840.8,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Kyoto: Godzilla faces the camera head and shoulders and roars as debris flies, then black smoke billows up around him (0:47:20.8 to 0:47:25.8, one shot)."
+  },
+  "loop": {
+   "film": "mg93",
+   "from": 2679.0,
+   "length": 15.0,
+   "crop": "fill",
+   "what": "Kyoto: wide shot of Godzilla advancing behind a five-story pagoda past a temple, onlookers in the foreground, small explosions and a helicopter at right (0:44:39.0 to 0:44:54.0, one continuous shot)."
+  },
+  "lock": {
+   "film": "mg93",
+   "from": 2899.4,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "Kyoto: Godzilla roars over the top of a white office block, then tears through it in a burst of debris (0:48:19.4 to 0:48:22.9, a run of two shots)."
+  },
+  "baby": {
+   "film": "mg93",
+   "from": 3613.7,
+   "length": 4.5,
+   "crop": "fill",
+   "what": "Baby Godzilla in his pen at the research facility cries out with his mouth wide open, then turns to the people at the bars (1:00:13.7 to 1:00:18.2, one shot)."
+  },
+  "jackpot": {
+   "film": "mg93",
+   "from": 2223.6,
+   "length": 3.2,
+   "crop": "fill",
+   "what": "First battle: Godzilla fires his blue atomic ray, then from behind him the ray strikes Mechagodzilla in a red burst (0:37:03.6 to 0:37:06.8, a run of two shots)."
+  },
+  "super": {
+   "film": "mg93",
+   "from": 5726.8,
+   "length": 4.3,
+   "crop": "fill",
+   "what": "Climax at Makuhari: Godzilla glows and fires his red spiral ray, the ray streaks across, and Super Mechagodzilla is engulfed in a huge fireball (1:35:26.8 to 1:35:31.1, a run of three shots)."
+  },
+  "won": {
+   "film": "mg93",
+   "from": 6292.0,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Ending: wide night shot of Godzilla wading out to sea with Baby swimming beside him while three people watch from the beach (1:44:52.0 to 1:44:58.0, one shot)."
+  },
+  "lost": {
+   "film": "mg93",
+   "from": 2310.5,
+   "length": 4.9,
+   "crop": "fill",
+   "what": "First battle: Godzilla lies felled in the smoke, then Mechagodzilla hovers over his fallen body (0:38:30.5 to 0:38:35.4, a run of two shots)."
+  }
+ },
+ "music": {
+  "film": "mg93",
+  "from": 210.15,
+  "length": 13.25,
+  "what": "Opening titles: Akira Ifukube's main title music, rhythmic orchestral brass chords with cymbal and percussion, no dialogue or effects (0:03:30.15 to 0:03:43.40, loops cleanly)."
+ },
+ "calls": {
+  "rage": {
+   "film": "mg93",
+   "from": 6043.28,
+   "length": 1.6,
+   "priority": 3,
+   "what": "Revived Godzilla gives a short isolated roar in close-up at Makuhari (1:40:43.3), silence before and after."
+  },
+  "angry": {
+   "film": "mg93",
+   "from": 6013.2,
+   "length": 3.0,
+   "priority": 4,
+   "what": "Revived Godzilla, a silhouette in fire and smoke, lets out a long full roar out of near silence (1:40:13.2)."
+  },
+  "lock": {
+   "film": "mg93",
+   "from": 2675.35,
+   "length": 1.65,
+   "priority": 3,
+   "what": "Outside Kyoto a shell explodes in the smoke around Godzilla, one heavy blast that decays to quiet (0:44:35.4)."
+  },
+  "baby": {
+   "film": "mg93",
+   "from": 1655.37,
+   "length": 1.6,
+   "priority": 4,
+   "what": "Newly hatched Baby Godzilla gives a short cry in the dark lab (0:27:35.4), silence before and after."
+  },
+  "jackpot": {
+   "film": "mg93",
+   "from": 2223.85,
+   "length": 1.5,
+   "priority": 3,
+   "what": "Godzilla's atomic ray fires at Mechagodzilla, a rushing blast that swells and falls back, score underneath (0:37:03.9)."
+  },
+  "super": {
+   "film": "mg93",
+   "from": 5194.45,
+   "length": 2.25,
+   "priority": 4,
+   "what": "Super Mechagodzilla's salvo fires over burning Makuhari, a huge blast out of silence that rolls off (1:26:34.5)."
+  },
+  "won": {
+   "film": "mg93",
+   "from": 6167.55,
+   "length": 2.5,
+   "priority": 4,
+   "what": "Godzilla calls out to Baby at their night reunion by the bay, soft score underneath (1:42:47.6)."
+  },
+  "lost": {
+   "film": "mg93",
+   "from": 2311.75,
+   "length": 2.2,
+   "priority": 4,
+   "what": "Godzilla, felled by Mechagodzilla, gives a low pained cry from the ground in the smoke (0:38:31.8)."
+  }
+ }
+}

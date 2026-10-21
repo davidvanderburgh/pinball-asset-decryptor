@@ -918,7 +918,7 @@ def test_king_ghidoras_start_show_and_a_blink_that_quickens_in_blocks(tmp_path, 
     ], seconds=15)
     out = play(tmp_path, p, "shot", "Building", "secs", 22)
     start = _at(out, r"\[TEST MODE\] START")
-    assert "show its own: 4 step(s) over 18 placed inserts, 2 GI string(s)" in out
+    assert "show its own: 4 step(s) over 36 placed inserts, 2 GI string(s)" in out
     # the show has the playfield: the Building's light waits for it to end (3.2 s), then comes on
     over = _at(out, r"\[TEST MODE\] show its own: over")
     assert 3200 <= over - start <= 3250

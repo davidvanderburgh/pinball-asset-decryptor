@@ -251,8 +251,12 @@ def hud_line(text, value=None):
     return {"op": "hud_text", "which": "line", "text": text, "value": _v(value) if value is not None else None}
 
 
-def hud_counter(n, value, sub=None):
-    return {"op": "hud_counter", "counter": int(n), "value": _v(value), "sub": sub}
+def hud_counter(n, value, sub=None, label=None):
+    """Counter n (1-3) to a value; its line under it, and (PAD-658) its label, from now on when given."""
+    b = {"op": "hud_counter", "counter": int(n), "value": _v(value), "sub": sub}
+    if label is not None:
+        b["label"] = label
+    return b
 
 
 def hud_gauge(value):
@@ -270,6 +274,11 @@ def shake(ms, strength="hard"):
 
 def shake_game(name):
     return {"op": "shake_game", "shake": name}
+
+
+def scoop_hold(ms, which="next"):
+    """Hold the next ball (or every ball) that settles in the scoop for ms while the mode runs."""
+    return {"op": "scoop_hold", "ms": _v(ms), "which": which}
 
 
 def shield(where):

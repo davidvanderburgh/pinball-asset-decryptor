@@ -422,7 +422,9 @@ function StmtBody({ b, path, ed }) {
     case "hud_counter": return html`<span class="bk-w">Set the HUD's</span><${Pick} value=${b.counter} options=${COUNTERS}
         onChange=${(v) => set("counter", Number(v))} /><span class="bk-w">to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />
       <${Check} checked=${b.sub != null} label="and its line to" onChange=${(on) => set("sub", on ? "" : null)} />
-      ${b.sub != null ? html`<${Text} value=${b.sub} max=${16} width=${120} onChange=${(v) => set("sub", v)} placeholder="words" />` : null}`;
+      ${b.sub != null ? html`<${Text} value=${b.sub} max=${16} width=${120} onChange=${(v) => set("sub", v)} placeholder="words" />` : null}
+      <${Check} checked=${b.label != null} label="and its label to" onChange=${(on) => set("label", on ? "" : null)} />
+      ${b.label != null ? html`<${Text} value=${b.label} max=${16} width=${110} onChange=${(v) => set("label", v)} placeholder="label" />` : null}`;
     case "hud_gauge": return html`<span class="bk-w">Fill the HUD's gauge to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">pips</span>`;
     case "hud_award": return html`<span class="bk-w" ...${tip(TIP.hudAward)}>Award</span><${Text} value=${b.text} max=${40} width=${120} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} />

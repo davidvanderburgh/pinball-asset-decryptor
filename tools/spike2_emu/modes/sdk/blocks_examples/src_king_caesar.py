@@ -22,7 +22,7 @@ cash the super or take +1x), and failing still pays (a quarter of the pot).
   (45 s a stage) or a drain pays a quarter of it.
 """
 from blk import (BALLS, TOTAL, a_show, add, add_time, award, callout, change, clip, clips, div, end, eq, ge, gt,
-                 hud, hud_counter, hud_line, if_, light, light_insert, lt, mul, off, off_insert, on_drain, on_end,
+                 hud, hud_counter, hud_line, hud_title, if_, light, light_insert, lt, mul, off, off_insert, on_drain, on_end,
                  on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game, show, sound,
                  sounds, step, sub, timer_left, timer_start, timer_stop, AND, var)
 import pack
@@ -100,17 +100,17 @@ def setup_stage():
     """What each stage lights and says as it begins (run by the "next" timer once the stage before is done)."""
     return [
         if_(eq("stage", 2), stage_line(2, "REFLECT: ABSORB THE BEAM") + [
-            hud_counter(3, 0, "REFLECTED"),
+            hud_counter(3, 0, "OF 3", "REFLECTED"),
             set_("beam", 1), set_("charge", 0),
             timer_start("beam", var("beam ms")),
         ] + beam_lights() + [light(LANE, GOLD, "pulse"), light_insert("MECHA LANE", GOLD, "pulse")]),
         if_(eq("stage", 3), stage_line(3, "TAG TEAM: GODZILLA, THEN CAESAR") + [
-            hud_counter(3, 0, "COMBOS"),
+            hud_counter(3, 0, "OF 3", "COMBOS"),
             timer_stop("beam"),
         ] + [off(s) for s in BEAM] + [off(LANE), off_insert("MECHA LANE"),
                                       light("Godzilla target", BLUE, "blink", 300)]),
         if_(eq("stage", 4), stage_line(4, "THE FINAL BLOW: SHOOT THE BUILDING") + [
-            hud_counter(3, 3, "HITS LEFT"),
+            hud_counter(3, 3, "TO GO", "HEAD"),
             off("Godzilla target"), off("Pop bumper"), off(LANE), off_insert("MECHA LANE"),
             light("Building", RED, "chase", 100),
         ]),
@@ -144,7 +144,7 @@ SCRIPTS = [
              clip("intro", "full"), clip("loop", "loop"), sound("roar"), show("Awakening"),
              shake(700, "strong"),
              *stage_line(1, "AWAKENING: CRACK THE SHRINE"),
-             hud_counter(2, 0, "CASH AT SCOOP"), hud_counter(3, 0, "CRACKS"),
+             hud_counter(2, 0, "CASH AT SCOOP"), hud_counter(3, 0, "OF 3", "CRACKS"),
              light("Pop bumper", GOLD, "blink", 250), light("Right ramp", GOLD, "blink", 250),
              light(LANE, GOLD, "blink", 250), light_insert("MECHA LANE", GOLD, "blink", 250)),
 
@@ -162,10 +162,10 @@ SCRIPTS = [
             if_(eq("stage", 2), [timer_start("reflect", 1)]),
             if_(eq("stage", 3), [timer_start("caesar", 1)])),
     on_timer("crack",
-             score(1000000), *pot_up(var("crack value")), hud_counter(3, var("cracks"), "CRACKS"),
+             score(1000000), *pot_up(var("crack value")), hud_counter(3, var("cracks"), "OF 3"),
              clip("crack", "behind"), sound("crack"), show("Crack"), shake(300, "medium"),
              if_(ge("cracks", 3), [award("KING CAESAR AWAKENS", value=var("pot"), sub="POT"), clip("awake", "behind"),
-                                   sound("roar"), timer_start("next", 1)],
+                                   sound("roar"), timer_start("next", 700)],
                  [award("THE SHRINE CRACKS", value=var("cracks"), sub="OF 3", seconds=2)])),
 
     # ---- stage 2: absorb and reflect ---------------------------------------------------------------------------
@@ -189,11 +189,11 @@ SCRIPTS = [
     on_timer("reflect",
              if_(gt("charge", 0), [
                  *pot_up(mul(5000000, var("charge"))), score(2000000),
-                 change("reflects", 1), set_("charge", 0), hud_counter(3, var("reflects"), "REFLECTED"),
+                 change("reflects", 1), set_("charge", 0), hud_counter(3, var("reflects"), "OF 3"),
                  clip("reflect", "behind"), sound("reflect"), show("Reflect"), shake(400, "hard"),
                  light(LANE, GOLD, "pulse"), light_insert("MECHA LANE", GOLD, "pulse"),
                  if_(ge("reflects", 3), [award("MECHAGODZILLA REELS", value=var("pot"), sub="POT"),
-                                         timer_start("next", 1)],
+                                         timer_start("next", 700)],
                      [award("REFLECTED", value=var("reflects"), sub="OF 3")])])),
 
     # ---- stage 3: tag team with Godzilla ----------------------------------------------------------------------
@@ -206,16 +206,16 @@ SCRIPTS = [
     on_timer("caesar",
              if_(gt(timer_left("combo"), 0), [
                  timer_stop("combo"), change("combos", 1), *pot_up(mul(8000000, var("combos"))), score(2000000),
-                 hud_counter(3, var("combos"), "COMBOS"), add_time(5),
+                 hud_counter(3, var("combos"), "OF 3"), add_time(5),
                  clip("tagteam", "behind"), show("Tag team"), shake(350, "strong"),
                  off("Pop bumper"), off(LANE), off_insert("MECHA LANE"),
-                 if_(ge("combos", 3), [award("THE TAG TEAM", value=var("pot"), sub="POT"), timer_start("next", 1)],
+                 if_(ge("combos", 3), [award("THE TAG TEAM", value=var("pot"), sub="POT"), timer_start("next", 700)],
                      [award("TAG TEAM COMBO", value=var("combos"), sub="OF 3")])])),
     on_timer("combo", off("Pop bumper"), off(LANE), off_insert("MECHA LANE")),
 
     # ---- stage 4: the final blow -------------------------------------------------------------------------------
     on_timer("blow",
-             change("head", 1), hud_counter(3, sub(3, var("head")), "HITS LEFT"), score(3000000),
+             change("head", 1), hud_counter(3, sub(3, var("head")), "TO GO"), score(3000000),
              shake(500, "hard"), sound("reflect"),
              if_(ge("head", 3), [
                  set_("won", 1), score(add(mul(var("pot"), 2), 25000000)),
@@ -227,17 +227,21 @@ SCRIPTS = [
 
     # ---- a stage done: on to the next, or cash out --------------------------------------------------------------
     on_timer("next",
-             change("stage", 1), set_time(45), show("Stage up"), shake_game("jackpot"),
-             *pack.cash_out_lit(), *setup_stage()),
+             if_(eq("cashed", 1), [end()], [
+                 change("stage", 1), set_time(45), show("Stage up"), shake_game("jackpot"),
+                 *pack.cash_out_lit(), *setup_stage()])),
     on_shot(pack.CASH_SHOT,
-            if_(AND(ge("stage", 2), eq("won", 0)), [
+            if_(AND(ge("stage", 2), eq("won", 0), eq("cashed", 0)), [
                 set_("cashed", 1), score(var("pot")),
                 award("CASHED OUT", value=var("pot"), sub="KING CAESAR SLEEPS", seconds=4),
-                clip("cashout", "full"), sound("cashout"), show("Back to sleep"), end()])),
+                clip("cashout", "full"), sound("cashout"), show("Back to sleep"), timer_start("next", 1500)])),
     secs_left(10, callout("ten_seconds"), light(pack.CASH_SHOT, pack.WHITE, "hurry")),
 
     # ---- the end -----------------------------------------------------------------------------------------------
     on_end(*pack.finish(), set_("stage", 0),
+           if_(eq("won", 1), [hud_title("MECHAGODZILLA DEFEATED"), hud_line("KING CAESAR AND GODZILLA WIN")]),
+           if_(eq("cashed", 1), [hud_title("KING CAESAR SLEEPS"), hud_line("THE POT IS CASHED OUT")]),
+           if_(AND(eq("won", 0), eq("cashed", 0)), [hud_title("KING CAESAR FALLS"), hud_line("A QUARTER OF THE POT")]),
            *[timer_stop(t) for t in ("crack", "beam", "absorb", "reflect", "combo", "caesar", "blow", "next")],
            if_(AND(eq("won", 0), eq("cashed", 0)), [
                score(div(var("pot"), 4)),
@@ -268,7 +272,7 @@ PROGRAM = {
 }
 
 EXAMPLE = {
-    "name": NAME, "slug": SLUG, "order": 1, "titles": ["godzilla_le"], "based_on": "",
+    "name": NAME, "slug": SLUG, "order": 1, "titles": ["godzilla_le", "godzilla_pro"], "based_on": "",
     "about": ("New (PAD-658). The prayer at his pop bumper wakes him at the Mecha lane; four stages, each with its "
               "own shots (crack the shrine, absorb and reflect the beam, tag team with Godzilla, the final blow); "
               "cash the pot out at the right scoop after any stage. Godzilla vs. Mechagodzilla (1974)."),
@@ -300,12 +304,12 @@ DESK = [
      ["WORDS PadMode_king_caesar_Hud_Award: KING CAESAR IS LIT", "[KING CAESAR] START (its lit shot)",
       "Hud_AwardSub: MORE TO WAKE KING CAESAR"]),
     ("stage one then cash out", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
-     ["Hud_Award: KING CAESAR AWAKENS", "Hud_Line: REFLECT: ABSORB THE BEAM", "SCORE +9000000",
+     ["Hud_Title: KING CAESAR SLEEPS", "Hud_Award: KING CAESAR AWAKENS", "Hud_Line: REFLECT: ABSORB THE BEAM", "SCORE +9000000",
       "END (a block): 4 scores, total 12000000", "lamps held 0"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 +
      ["shot", "Building", "ms", 500, "shot", "Building", "ms", 500, "shot", "Building", "secs", 6],
-     ["Hud_Award: MECHAGODZILLA REELS", "Hud_Award: THE TAG TEAM", "Hud_Line: THE FINAL BLOW: SHOOT THE BUILDING",
-      "SCORE +169000000", "lamps held 0"]),
+     ["Hud_Title: MECHAGODZILLA DEFEATED", "Hud_Award: MECHAGODZILLA REELS", "Hud_Award: THE TAG TEAM", "Hud_Line: THE FINAL BLOW: SHOOT THE BUILDING",
+      "SCORE +169000000", "END (a block)"]),    # (its Godzilla target hits lit MINILLA too: built in beside it)
     ("the clock pays a quarter", _START + _STAGE1 + ["secs", 50],
-     ["END (time ran out)", "SCORE +2250000", "lamps held 0"]),
+     ["Hud_Title: KING CAESAR FALLS", "END (time ran out)", "SCORE +2250000", "lamps held 0"]),
 ]

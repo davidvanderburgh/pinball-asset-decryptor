@@ -730,6 +730,7 @@ static const struct { const char *name; uint64_t shot; int x, y; } LAMPS[] = {  
     { "TAIL WHIP", 0, 176, 297 }, { "DESTRUCTION JACKPOT", 0, 170, 273 }, { "KAIJU", 0, 127, 392 },
     { "GODZILLA SPOT", 0, 33, 205 }, { "GLOBE FLASH", 0, 287, 206 }, { "TOP SPINNER FLASH", 0x2000ull, 172, 100 },
     { "RIGHT RETURN LANE", 0x10ull, 242, 472 }, { "MASER FLASH", 0x200ull, 30, 388 },
+    { "BUILDING SPOT", 0, 57, 382 },
 };
 #define N_LAMPS (int)(sizeof LAMPS / sizeof LAMPS[0])
 static const char *const PATTERN[] = { "solid", "blink", "pulse", "chase" };

@@ -1,0 +1,2498 @@
+{
+ "name": "FINAL WARS",
+ "slug": "final_wars",
+ "order": 104,
+ "titles": [
+  "godzilla_le"
+ ],
+ "based_on": "final_wars.c",
+ "about": "The C example FINAL WARS rebuilt in blocks: lit by playing KING GHIDORAH, OXYGEN DESTROYER and MASER BARRAGE (or winning two), started at the Building; three timed phases (save the cities, hit the moving Monster X, the Building wizard shot), shields add time.",
+ "lost": [
+  "No randomness in blocks: Monster X moves to the next target in turn (Powerline left, center, right, the Godzilla target, round again) every 3 s and when hit, where the C picked another target at random.",
+  "The ledger is six shared variables (ghidorah / oxygen / maser played and won) the blocks KING GHIDORAH, OXYGEN DESTROYER and MASER BARRAGE set; the C modes' own ledger (kit_ledger) is a different store, so the C versions of those modes do not light this blocks version, nor the other way round.",
+  "It lights on the next shot after it qualifies (blocks only look while a shot is made), where the C looked twice a second; and the FINAL WARS IS LIT note shows then, not 7 s after the other mode's total.",
+  "The lit Building pulses as any lit mode does (the runtime's light), where the C pulsed it only while none of our modes ran and not between balls.",
+  "The ending title (GODZILLA WINS or THE XILIENS WIN) and its total stay up 3 s, the runtime's: the C kept them 10 s.",
+  "The ending has no FINAL WARS TOTAL under the total: the C put those words there.",
+  "The game's own light shows (Strobe storm, Red and blue fade) always play at the start and the end; the C played its own start/won/lost shows on a game without them (Godzilla LE has both, so the C never did there).",
+  "The jackpot shake starts as the mode ends rather than being run out past the end (pm_shake_outlast).",
+  "Godzilla LE only: the program names the center shield target (Godzilla Pro has two shields), where the C simply had one shield fewer there."
+ ],
+ "program": {
+  "name": "FINAL WARS",
+  "seconds": 25,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 190,
+  "vars": [
+   {
+    "name": "ghidorah played",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "oxygen played",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "maser played",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "ghidorah won",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "oxygen won",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "maser won",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "phase",
+    "reset": "mode"
+   },
+   {
+    "name": "cities left",
+    "reset": "mode"
+   },
+   {
+    "name": "left done",
+    "reset": "mode"
+   },
+   {
+    "name": "right done",
+    "reset": "mode"
+   },
+   {
+    "name": "loop done",
+    "reset": "mode"
+   },
+   {
+    "name": "monster x",
+    "reset": "mode"
+   },
+   {
+    "name": "hits",
+    "reset": "mode"
+   },
+   {
+    "name": "adds",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "drained",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "lights"
+   },
+   {
+    "name": "saved"
+   },
+   {
+    "name": "hit"
+   },
+   {
+    "name": "move"
+   },
+   {
+    "name": "next"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "SAVE THE CITIES",
+   "counters": [
+    {
+     "label": "PHASE",
+     "sub": "INVASION",
+     "value": {
+      "k": "var",
+      "name": "phase"
+     }
+    },
+    {
+     "label": "TARGETS",
+     "sub": "OF 3",
+     "value": null
+    },
+    {
+     "label": "ADD TIME",
+     "sub": "SHIELDS +3 SEC",
+     "value": {
+      "k": "op",
+      "op": "-",
+      "a": {
+       "k": "num",
+       "v": 3
+      },
+      "b": {
+       "k": "var",
+       "name": "adds"
+      }
+     }
+    }
+   ],
+   "timer": {
+    "on": true,
+    "label": "FINAL WARS",
+    "icon": "xilien"
+   },
+   "gauge": {
+    "on": true,
+    "label": "PHASES",
+    "kind": "diamond",
+    "count": 3,
+    "color": "#ff3c00",
+    "value": {
+     "k": "op",
+     "op": "-",
+     "a": {
+      "k": "var",
+      "name": "phase"
+     },
+     "b": {
+      "k": "num",
+      "v": 1
+     }
+    }
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "loop2",
+    "file": "loop2.mp4"
+   },
+   {
+    "name": "loop3",
+    "file": "loop3.mp4"
+   },
+   {
+    "name": "phase",
+    "file": "phase.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "phase1",
+    "file": "phase1.wav",
+    "priority": 4
+   },
+   {
+    "name": "phase2",
+    "file": "phase2.wav",
+    "priority": 4
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   },
+   {
+    "name": "lost",
+    "file": "lost.wav",
+    "priority": 4
+   }
+  ],
+  "music": "music.wav",
+  "shows": [
+   {
+    "name": "Phase won",
+    "steps": [
+     {
+      "fx": "burst",
+      "ms": 700,
+      "a": "#ffffff",
+      "b": "#ffbe00",
+      "at": "center",
+      "rate": 0,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#ffbe00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "any_shot",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "ghidorah played"
+           },
+           "b": {
+            "k": "var",
+            "name": "oxygen played"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "maser played"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "ghidorah won"
+           },
+           "b": {
+            "k": "var",
+            "name": "oxygen won"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "maser won"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        }
+       },
+       "b": {
+        "k": "not",
+        "a": {
+         "k": "lit"
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_mode",
+        "shot": "Building",
+        "color": "#ffaa00",
+        "pattern": "pulse",
+        "insert": ""
+       },
+       {
+        "op": "hud_award",
+        "text": "FINAL WARS IS LIT",
+        "value": null,
+        "sub": "SHOOT THE BUILDING",
+        "seconds": 4
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "ghidorah played",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "oxygen played",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "maser played",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "ghidorah won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "oxygen won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "maser won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "phase",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "adds",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "drained",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "hits",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "monster x",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "cities left",
+      "value": {
+       "k": "num",
+       "v": 3
+      }
+     },
+     {
+      "op": "set",
+      "var": "left done",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "right done",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "loop done",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "shield",
+      "where": "toward"
+     },
+     {
+      "op": "game_show",
+      "name": "Strobe storm"
+     },
+     {
+      "op": "shake_game",
+      "shake": "multiball_start"
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "hud_text",
+      "which": "title",
+      "text": "GODZILLA: FINAL WARS",
+      "value": null
+     },
+     {
+      "op": "hud_counter",
+      "counter": 1,
+      "value": {
+       "k": "num",
+       "v": 1
+      },
+      "sub": "INVASION"
+     },
+     {
+      "op": "hud_award",
+      "text": "PHASE 1: INVASION",
+      "value": null,
+      "sub": "SAVE THE CITIES",
+      "seconds": 3
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "lights"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "left done"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Left ramp",
+          "color": "#ff5000",
+          "pattern": "hurry"
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Left ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "right done"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Right ramp",
+          "color": "#ff5000",
+          "pattern": "hurry"
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Right ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "loop done"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#ff5000",
+          "pattern": "hurry"
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "left done"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "right done"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "loop done"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "SAVE  LEFT RAMP  RIGHT RAMP  BIG LOOP",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "SAVE  LEFT RAMP  RIGHT RAMP",
+              "value": null
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "loop done"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "SAVE  LEFT RAMP  BIG LOOP",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "SAVE  LEFT RAMP",
+              "value": null
+             }
+            ]
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "right done"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "loop done"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "SAVE  RIGHT RAMP  BIG LOOP",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "SAVE  RIGHT RAMP",
+              "value": null
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "loop done"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "SAVE  BIG LOOP",
+              "value": null
+             }
+            ],
+            "else": null
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "cities left"
+        },
+        "sub": "TO SAVE",
+        "label": "CITIES"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "lights_off",
+        "shot": "Left ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Right ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Big loop"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "monster x"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline left",
+          "color": "#aa00ff",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 150
+          }
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "HIT MONSTER X AT POWERLINE L",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline left"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "monster x"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline center",
+          "color": "#aa00ff",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 150
+          }
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "HIT MONSTER X AT POWERLINE C",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline center"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "monster x"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline right",
+          "color": "#aa00ff",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 150
+          }
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "HIT MONSTER X AT POWERLINE R",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline right"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "monster x"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Godzilla target",
+          "color": "#aa00ff",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 150
+          }
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "HIT MONSTER X AT GODZILLA",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Godzilla target"
+         }
+        ]
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "hits"
+        },
+        "sub": "OF 3 HITS",
+        "label": "MONSTER X"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "lights_off",
+        "shot": "Powerline left"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Powerline center"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Powerline right"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Godzilla target"
+       },
+       {
+        "op": "light_shot",
+        "shot": "Building",
+        "color": "#ffaa00",
+        "pattern": "hurry"
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "WIZARD SHOT: THE BUILDING",
+        "value": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 30000000
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 1000000
+          },
+          "b": {
+           "k": "secs_left"
+          }
+         }
+        },
+        "sub": "BUILDING",
+        "label": "WIZARD"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "adds"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target left",
+        "color": "#00ff3c",
+        "pattern": "pulse",
+        "rate": {
+         "k": "num",
+         "v": 1200
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Shield target center",
+        "color": "#00ff3c",
+        "pattern": "pulse",
+        "rate": {
+         "k": "num",
+         "v": 1200
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Shield target right",
+        "color": "#00ff3c",
+        "pattern": "pulse",
+        "rate": {
+         "k": "num",
+         "v": 1200
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Shield target left"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Shield target center"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Shield target right"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "left done"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "left done",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 3000000
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "LEFT RAMP SAVED",
+        "value": null,
+        "sub": "3,000,000",
+        "seconds": 1
+       },
+       {
+        "op": "timer_start",
+        "timer": "saved",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "right done"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "right done",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 3000000
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "RIGHT RAMP SAVED",
+        "value": null,
+        "sub": "3,000,000",
+        "seconds": 1
+       },
+       {
+        "op": "timer_start",
+        "timer": "saved",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Big loop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "loop done"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "loop done",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 3000000
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "BIG LOOP SAVED",
+        "value": null,
+        "sub": "3,000,000",
+        "seconds": 1
+       },
+       {
+        "op": "timer_start",
+        "timer": "saved",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "saved"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "cities left",
+      "by": {
+       "k": "num",
+       "v": -1
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "cities left"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "monster x"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "hit",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "monster x"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "hit",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "monster x"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "hit",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Godzilla target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "monster x"
+        },
+        "b": {
+         "k": "num",
+         "v": 4
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "hit",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "hit"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "hits",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "score",
+      "points": {
+       "k": "op",
+       "op": "*",
+       "a": {
+        "k": "num",
+        "v": 5000000
+       },
+       "b": {
+        "k": "var",
+        "name": "hits"
+       }
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "hits"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "hud_award",
+        "text": "MONSTER X HIT",
+        "value": {
+         "k": "var",
+         "name": "hits"
+        },
+        "sub": "5,000,000 X HITS",
+        "seconds": 1
+       },
+       {
+        "op": "change",
+        "var": "monster x",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "monster x"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "monster x",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "move",
+        "ms": {
+         "k": "num",
+         "v": 3000
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "move"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "monster x",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "monster x"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "monster x",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "move",
+        "ms": {
+         "k": "num",
+         "v": 3000
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 30000000
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 1000000
+          },
+          "b": {
+           "k": "secs_left"
+          }
+         }
+        }
+       },
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "won",
+        "fallback": ""
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 30000000
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 1000000
+          },
+          "b": {
+           "k": "secs_left"
+          }
+         }
+        },
+        "sub": "BUILDING"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "next"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "phase",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "adds",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Phase won"
+     },
+     {
+      "op": "clip",
+      "clip": "phase",
+      "where": "behind"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 25
+        }
+       },
+       {
+        "op": "set",
+        "var": "hits",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "move",
+        "ms": {
+         "k": "num",
+         "v": 3000
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "phase1",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "loop2",
+        "where": "loop"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 2
+        },
+        "sub": "MONSTER X"
+       },
+       {
+        "op": "hud_award",
+        "text": "PHASE 2: MONSTER X",
+        "value": null,
+        "sub": "HIT MONSTER X 3 TIMES",
+        "seconds": 2
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 20
+        }
+       },
+       {
+        "op": "timer_stop",
+        "timer": "move"
+       },
+       {
+        "op": "sound",
+        "sound": "phase2",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "loop3",
+        "where": "loop"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 3
+        },
+        "sub": "GHIDORAH"
+       },
+       {
+        "op": "hud_award",
+        "text": "PHASE 3: GHIDORAH",
+        "value": null,
+        "sub": "THE BUILDING IS THE WIZARD SHOT",
+        "seconds": 2
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "adds"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "adds",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "add_time",
+        "seconds": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "SHIELDS",
+        "value": null,
+        "sub": "+3 SECONDS",
+        "seconds": 1
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "adds"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "adds",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "add_time",
+        "seconds": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "SHIELDS",
+        "value": null,
+        "sub": "+3 SECONDS",
+        "seconds": 1
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "adds"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "adds",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "add_time",
+        "seconds": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "SHIELDS",
+        "value": null,
+        "sub": "+3 SECONDS",
+        "seconds": 1
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "ball_end"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "drained",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "timer_stop",
+      "timer": "lights"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "saved"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "hit"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "move"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "next"
+     },
+     {
+      "op": "set",
+      "var": "phase",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "game_show",
+      "name": "Red and blue fade"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "won"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       },
+       {
+        "op": "shake_game",
+        "shake": "jackpot"
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "GODZILLA WINS",
+        "value": null
+       }
+      ],
+      "else": [
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "THE XILIENS WIN",
+        "value": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "drained"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "sound",
+          "sound": "lost",
+          "fallback": "time_up"
+         }
+        ],
+        "else": null
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "fw04",
+    "from": 5323.0,
+    "length": 6.0,
+    "crop": "fill",
+    "what": "Godzilla close-up at night: his dorsal plates and mouth light up blue as he charges his ray (one shot)"
+   },
+   "loop": {
+    "film": "fw04",
+    "from": 1212.6,
+    "length": 12.4,
+    "crop": "fill",
+    "what": "New York at night: Rodan swoops past the Empire State Building and a full moon, glass shatters, ends on Rodan silhouetted against the moon"
+   },
+   "loop2": {
+    "film": "fw04",
+    "from": 5362.7,
+    "length": 15.9,
+    "crop": "fill",
+    "what": "Dark blue ruined Tokyo: Godzilla faces Monster X, then a wide shot of the two fighting among burning ruins"
+   },
+   "loop3": {
+    "film": "fw04",
+    "from": 6702.6,
+    "length": 14.5,
+    "crop": "fill",
+    "what": "Keizer Ghidorah towers over the dark smoking city, then its heads attack Godzilla"
+   },
+   "phase": {
+    "film": "fw04",
+    "from": 5330.1,
+    "length": 2.5,
+    "crop": "fill",
+    "what": "Godzilla's ray erupts across the night city in a blue-white blast"
+   },
+   "won": {
+    "film": "fw04",
+    "from": 6874.2,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Godzilla glows blue and fires his red spiral ray, a blazing column across the screen"
+   },
+   "lost": {
+    "film": "fw04",
+    "from": 6689.0,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Keizer Ghidorah's golden gravity beams pour into Godzilla, draining him"
+   }
+  },
+  "music": {
+   "film": "fw04",
+   "from": 7249.602,
+   "length": 18.3,
+   "what": "the end-title score (bed finder: final 0.895, the best of the eight films)"
+  },
+  "calls": {
+   "phase1": {
+    "film": "fw04",
+    "from": 5437.7,
+    "length": 2.4,
+    "what": "Godzilla roaring through the smoke in the city (the game's own 1954 roar matches 0.77; a harmonic roar)"
+   },
+   "won": {
+    "film": "fw04",
+    "from": 6896.9,
+    "length": 2.4,
+    "what": "Godzilla's roar after the battle (harmonic roar cpp 0.43, the strongest)"
+   },
+   "lost": {
+    "film": "fw04",
+    "from": 6698.9,
+    "length": 2.2,
+    "what": "Keizer Ghidorah's gravity beams striking (broadband onset at 1:51:39.0)"
+   },
+   "phase2": {
+    "film": "fw04",
+    "from": 6604.0,
+    "length": 2.0,
+    "what": "Keizer Ghidorah's three heads rising and roaring as Monster X becomes it"
+   }
+  }
+ }
+}

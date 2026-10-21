@@ -1,0 +1,110 @@
+{
+ "clips": {
+  "intro": {
+   "film": "des95",
+   "from": 3576.1,
+   "length": 4.4,
+   "crop": "fill",
+   "what": "Crab-like juvenile Destoroyahs crawl up out of the smoking ground by the waterfront in daylight, 0:59:36."
+  },
+  "loop": {
+   "film": "des95",
+   "from": 3553.0,
+   "length": 13.9,
+   "crop": "fill",
+   "what": "SDF tanks and trucks draw up in a field below an elevated expressway to face the aggregates, one calm shot, 0:59:13."
+  },
+  "kill": {
+   "film": "des95",
+   "from": 3704.15,
+   "length": 2.75,
+   "crop": "fill",
+   "what": "A juvenile Destoroyah beside a building is hit by the SDF freezer beam and bursts in blue light, sparks and smoke, 1:01:44."
+  },
+  "escape": {
+   "film": "des95",
+   "from": 3637.0,
+   "length": 2.3,
+   "crop": "fill",
+   "what": "A juvenile Destoroyah, struck by sparks, rears up and lunges toward a yellow SDF vehicle in the foreground, 1:00:37."
+  },
+  "wave": {
+   "film": "des95",
+   "from": 4151.5,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "A glittering red swarm of aggregates converges and the giant aggregate form of Destoroyah takes shape out of it, 1:09:11."
+  },
+  "boss": {
+   "film": "des95",
+   "from": 5046.95,
+   "length": 4.9,
+   "crop": "fill",
+   "what": "The perfect form of Destoroyah in close-up, eye glowing and jaws open, roars through blue mist, 1:24:07."
+  },
+  "won": {
+   "film": "des95",
+   "from": 5540.5,
+   "length": 4.2,
+   "crop": "fill",
+   "what": "Destoroyah crashes down in a burst of sparks and lies sprawled on the ground, wings crumpled, 1:32:20."
+  },
+  "lost": {
+   "film": "des95",
+   "from": 4854.0,
+   "length": 3.05,
+   "crop": "fill",
+   "what": "A run of shots: Destoroyah's purple micro-oxygen beam strikes Godzilla in a shower of sparks and he disappears in a fiery explosion, 1:20:54."
+  }
+ },
+ "music": {
+  "film": "des95",
+  "from": 4002.337,
+  "length": 25.09,
+  "what": "Ifukube's pounding brass battle music as the flying form of Destoroyah attacks the city and crowds flee, 1:06:42."
+ },
+ "calls": {
+  "kill": {
+   "film": "des95",
+   "from": 2322.58,
+   "length": 1.42,
+   "priority": 3,
+   "what": "A sharp explosion bursts against a juvenile Destoroyah in the night street, 0:38:42."
+  },
+  "escape": {
+   "film": "des95",
+   "from": 2111.82,
+   "length": 1.4,
+   "priority": 3,
+   "what": "A juvenile Destoroyah shrieks in close-up, horns crackling with lightning, as it turns on the riot police, 0:35:11."
+  },
+  "wave": {
+   "film": "des95",
+   "from": 4895.6,
+   "length": 2.15,
+   "priority": 4,
+   "what": "Destoroyah roars in close-up at the airport, a harsh rasping cry, 1:21:35."
+  },
+  "boss": {
+   "film": "des95",
+   "from": 5084.65,
+   "length": 2.5,
+   "priority": 4,
+   "what": "The perfect form of Destoroyah screeches in close-up with its jaws wide open, 1:24:44."
+  },
+  "won": {
+   "film": "des95",
+   "from": 5607.32,
+   "length": 3.0,
+   "priority": 4,
+   "what": "A huge explosion engulfs Destoroyah as Godzilla's ray strikes it, 1:33:27."
+  },
+  "lost": {
+   "film": "des95",
+   "from": 4889.4,
+   "length": 2.9,
+   "priority": 4,
+   "what": "Godzilla cries out in pain, glowing and staggering, after Destoroyah's beam hits him, 1:21:29."
+  }
+ }
+}

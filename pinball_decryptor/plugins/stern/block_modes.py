@@ -937,8 +937,67 @@ def without_media(program):
     return out
 
 
-def add_example(project, name, dirs=(), ffmpeg=None, log=None):
-    """Put blocks example ``name`` in the project as ``modes/<slug>/``: its blocks, the C they make, and its own
+def _rename_shots(stack, names):
+    for b in stack or []:
+        if not isinstance(b, dict):
+            continue
+        for key in ("shot",):
+            if b.get(key) in names:
+                b[key] = names[b[key]]
+        for key in ("points", "value", "by", "seconds", "ms", "rate", "cond", "a", "b"):
+            if isinstance(b.get(key), dict):
+                _rename_shots([b[key]], names)
+        if b.get("k") == "hits" and b.get("shot") in names:
+            b["shot"] = names[b["shot"]]
+        _rename_shots(b.get("then"), names)
+        _rename_shots(b.get("else"), names)
+
+
+def adapt(ex, profile):
+    """Example ``ex``'s program for the card's title ``profile`` (PAD-658: Premium/LE and Pro get the same modes):
+    its shots renamed where the title's port names them otherwise (``title_shots``: {game_dir prefix: {name: name}},
+    e.g. Premium's "Shield ramp spinner" is a Pro's "Right spinner"), and its blocks that turn the shield platform
+    left out on a title with none (a Pro's shields are fixed, facing the player)."""
+    program = copy.deepcopy(ex["program"])
+    if profile is None:
+        return program
+    game_dir = str(getattr(profile, "game_dir", "") or "")
+    names = {}
+    for prefix, m in (ex.get("title_shots") or {}).items():
+        if game_dir.startswith(prefix):
+            names.update(m)
+    no_shield = not profile.can("shield")
+
+    def keep(stack):
+        out = []
+        for b in stack or []:
+            if not isinstance(b, dict) or (no_shield and b.get("op") == "shield"):
+                continue
+            if b.get("op") == "if":
+                b = dict(b, then=keep(b.get("then")), **({"else": keep(b.get("else"))} if b.get("else") else {}))
+            out.append(b)
+        return out
+
+    for s in program.get("scripts") or []:
+        if names:
+            if (s.get("hat") or {}).get("shot") in names:
+                s["hat"]["shot"] = names[s["hat"]["shot"]]
+            _rename_shots(s.get("do"), names)
+        s["do"] = keep(s.get("do"))
+    return program
+
+
+def fits(ex, profile):
+    """Does example ``ex`` build on ``profile``'s card once adapted (the wizard offers only the ones that do)?"""
+    try:
+        return not problems(adapt(ex, profile), **card_checks(profile))
+    except Exception:                                   # noqa: BLE001 - an example that cannot be read is not offered
+        return False
+
+
+def add_example(project, name, dirs=(), ffmpeg=None, log=None, profile=None):
+    """Put blocks example ``name`` in the project as ``modes/<slug>/``: its blocks (:func:`adapt`-ed to ``profile``, the
+    card's title, when given), the C they make, and its own
     clips, sounds and music cut from the films in ``dirs`` (the C examples' cutter, :func:`.code_modes.cut_example`).
     Returns ``(slug, missing)``: ``missing`` the film keys not found, when the mode is added without its own media
     (:func:`without_media`). Refuses a folder that is already there."""
@@ -952,12 +1011,12 @@ def add_example(project, name, dirs=(), ffmpeg=None, log=None):
     folder = MP.mode_folder(project, slug)
     if os.path.exists(folder):
         raise BlocksError("%s is already in this project (modes/%s)." % (ex["name"], slug))
-    program = copy.deepcopy(ex["program"])
+    program = adapt(ex, profile)                        # the card's own shot names, what its game can do
     missing = [k for k in example_films(ex) if not CM.find_film(k, dirs)]
     os.makedirs(folder)
     if ex.get("recipe") and not missing:
-        CM.cut_example(project, slug, dict(ex, hud=True), dirs, ffmpeg=ffmpeg, log=log)
-    elif ex.get("recipe"):
+        CM.cut_example(project, slug, {k: v for k, v in ex.items() if k != "hud"}, dirs, ffmpeg=ffmpeg, log=log)
+    else:                                                   # nothing to cut them from: the game's own callouts
         program = without_media(program)
     save(project, slug, program)
     return slug, missing
@@ -1365,7 +1424,7 @@ def _check_stack(stack, depth, where, ctx):
             if not _int_ok(b.get("counter"), 1, 3):
                 ctx["out"].append("%s sets a HUD counter: 1, 2 or 3." % where)
             _check_num(b.get("value"), where, ctx)
-            if len(str(b.get("sub") or "")) > COUNTER_MAX:
+            if len(str(b.get("sub") or "")) > COUNTER_MAX or len(str(b.get("label") or "")) > COUNTER_MAX:
                 ctx["out"].append("%s has a counter's words of more than %d letters." % (where, COUNTER_MAX))
         elif op == "hud_gauge":
             _check_num(b.get("value"), where, ctx)
@@ -1976,9 +2035,11 @@ class _Gen:
                 except (TypeError, ValueError):
                     k = 1
                 sub = b.get("sub")
-                out.append(pad + "hud_counter(%d, %s, %s);" % (
+                label = b.get("label")                      # PAD-658: the counter's label from now on, or none
+                out.append(pad + "hud_counter(%d, %s, %s, %s);" % (
                     k - 1, self.num(b.get("value")),
-                    "0" if sub is None else _c_str(str(sub)[:COUNTER_MAX])))
+                    "0" if sub is None else _c_str(str(sub)[:COUNTER_MAX]),
+                    "0" if not label else _c_str(str(label)[:COUNTER_MAX])))
             elif op == "hud_gauge":
                 out.append(pad + "hud_level = %s;" % self.num(b.get("value")))
             elif op == "hud_award":
@@ -2378,6 +2439,7 @@ def to_c(program, slug):
         L.append("UNUSED static const char *const HUD_SUB[3] = {%s};" % ", ".join(
             _c_str(c["sub"]) for c in hud["counters"]))
         L.append("static char hud_val[3][24], hud_sub[3][24];   /* each counter's value and sub-label now */")
+        L.append("static char hud_lab[3][24];                     /* PAD-658: and its label now (a block may change it) */")
         L.append("UNUSED static long long hud_level;          /* the gauge's pips lit */")
     L.append("")
     L.append("static unsigned P(void)")
@@ -2553,11 +2615,12 @@ def to_c(program, slug):
     L.append("")
     if has_hud:
         L.append("/* a counter (0-2) to a value, short enough for its 200 px (950,000 / 4.25M); sub 0 = as it is */")
-        L.append("UNUSED static void hud_counter(int k, long long value, const char *sub)")
+        L.append("UNUSED static void hud_counter(int k, long long value, const char *sub, const char *label)")
         L.append("{")
         L.append("    if (k < 0 || k > 2 || !HUD_LABEL[k][0]) return;      /* a counter with no label is not shown */")
         L.append("    kit_short(hud_val[k], sizeof hud_val[k], value < 0 ? 0 : (uint64_t)value);")
         L.append("    if (sub) kit_copy(hud_sub[k], sizeof hud_sub[k], sub);")
+        L.append("    if (label && label[0]) kit_copy(hud_lab[k], sizeof hud_lab[k], label);   /* PAD-658 */")
         L.append("}")
         L.append("")
         L.append("static void hud_line(char *line, unsigned cap, const char *text, long long value, int with_value)")
@@ -2572,10 +2635,13 @@ def to_c(program, slug):
         L.append("}")
         L.append("")
         L.append("/* the title (0) or the instruction line (1); kept until the mode starts again */")
+        L.append("/* PAD-658: the title and line When the mode ends wrote: its TOTAL's, in the place of \"<NAME> TOTAL\" */")
+        L.append("static char end_title[KIT_HUD_WORDS], end_line[KIT_HUD_WORDS];")
         L.append("UNUSED static void hud_words(int which, const char *text, long long value, int with_value)")
         L.append("{")
         L.append("    char line[KIT_HUD_WORDS];")
         L.append("    hud_line(line, sizeof line, text, value, with_value);")
+        L.append("    if (ending) kit_copy(which ? end_line : end_title, KIT_HUD_WORDS, line);")
         L.append("    if (which) kit_hud_title(&hud, 0, line);")
         L.append("    else kit_hud_title(&hud, line, 0);")
         L.append("}")
@@ -2596,11 +2662,11 @@ def to_c(program, slug):
         L.append("{")
         L.append("    int k;")
         for k, expr in live:
-            L.append("    hud_counter(%d, %s, 0);" % (k, expr))
+            L.append("    hud_counter(%d, %s, 0, 0);" % (k, expr))
         if gauge_live is not None:
             L.append("    hud_level = %s;" % gauge_live)
         L.append("    for (k = 0; k < 3; k++)")
-        L.append("        if (HUD_LABEL[k][0]) kit_hud_counter(&hud, k, HUD_LABEL[k], hud_val[k], hud_sub[k]);")
+        L.append("        if (HUD_LABEL[k][0]) kit_hud_counter(&hud, k, hud_lab[k], hud_val[k], hud_sub[k]);")
         L.append("    kit_hud_timer(&hud, HUD_TIMER ? (int)secs_left() : -1);")
         L.append("    if (HUD_GAUGE)")
         L.append("        kit_hud_gauge(&hud, hud_level < 0 ? 0 : hud_level > HUD_GAUGE ? HUD_GAUGE : (int)hud_level,")
@@ -2734,6 +2800,7 @@ def to_c(program, slug):
         L.append("        for (k = 0; k < 3; k++) {")
         L.append('            kit_copy(hud_val[k], sizeof hud_val[k], "0");')
         L.append("            kit_copy(hud_sub[k], sizeof hud_sub[k], HUD_SUB[k]);")
+        L.append("            kit_copy(hud_lab[k], sizeof hud_lab[k], HUD_LABEL[k]);")
         L.append("        }")
         L.append("    }")
         L.append("    hud_level = 0;")
@@ -2792,7 +2859,8 @@ def to_c(program, slug):
         L.append("    {                                 /* the TOTAL, as the examples end */")
         L.append("        char n[32];")
         L.append("        int k;")
-        L.append('        kit_hud_title(&hud, MODE_NAME " TOTAL", "");')
+        L.append('        kit_hud_title(&hud, end_title[0] ? end_title : MODE_NAME " TOTAL", end_line[0] ? end_line : "");')
+        L.append("        end_title[0] = end_line[0] = 0;")
         L.append("        for (k = 0; k < 3; k++) kit_hud_counter(&hud, k, 0, 0, 0);")
         L.append("        kit_hud_timer(&hud, -1);")
         L.append("        kit_hud_gauge(&hud, -1, 0);")
@@ -2934,6 +3002,7 @@ def to_c(program, slug):
     L.append("    (void)i; (void)was_on;")
     if g.lit:
         L.append("    lit_shot(shot);                   /* PAD-503: the shot it is lit at starts it */")
+        L.append("    if (!was_on && run.on) return;    /* PAD-658: and is that alone, not a shot \"while it is not running\" too */")
     L.extend(scripts_of("shot", "any_shot"))
     L.append("}")
     L.append("")

@@ -1,0 +1,66 @@
+{
+ "clips": {
+  "intro": {
+   "film": "gvkg91",
+   "from": 4976.9,
+   "length": 5.9,
+   "crop": "fill",
+   "what": "Night Tokyo street: a maser dish tank rolls up, then the tank line takes aim and the first beam fires"
+  },
+  "loop": {
+   "film": "gvkg91",
+   "from": 4945.3,
+   "length": 12.9,
+   "crop": "fill",
+   "what": "Night Tokyo battle: maser tanks roll and fire, blue beams strike Godzilla in showers of sparks (fast run of shots, dark)"
+  },
+  "barrage": {
+   "film": "gvkg91",
+   "from": 4947.4,
+   "length": 2.85,
+   "crop": "fill",
+   "what": "A volley of blue maser beams fires and hits Godzilla, erupting in sparks"
+  },
+  "broken": {
+   "film": "gvm92",
+   "from": 4604.2,
+   "length": 2.8,
+   "crop": "fill",
+   "what": "Godzilla's ray hits a tank, which explodes in a fireball"
+  },
+  "won": {
+   "film": "gvkg91",
+   "from": 4985.2,
+   "length": 4.8,
+   "crop": "fill",
+   "what": "Maser dishes fire; blue beams strike Godzilla, who staggers in sparks and smoke"
+  },
+  "lost": {
+   "film": "meg73",
+   "from": 2599.8,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Tanks blasted by lightning amid a sea of fire (the attacker is Megalon, not Godzilla)"
+  }
+ },
+ "music": {
+  "film": "meg73",
+  "from": 4301.985,
+  "length": 21.57,
+  "what": "Riichiro Manabe's score, the final battle (bed finder: final 0.806, loop chroma 0.865)"
+ },
+ "calls": {
+  "barrage": {
+   "film": "meg73",
+   "from": 2589.6,
+   "length": 2.2,
+   "what": "a Maser volley hitting Megalon and the blast (broadband onset at 0:43:09.8)"
+  },
+  "broken": {
+   "film": "meg73",
+   "from": 2607.4,
+   "length": 1.8,
+   "what": "Megalon's cry as it shrugs the attack off (harmonic roar cpp 0.34)"
+  }
+ }
+}

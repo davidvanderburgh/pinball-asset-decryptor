@@ -1,0 +1,2630 @@
+{
+ "name": "BIOLLANTE",
+ "slug": "biollante",
+ "order": 109,
+ "titles": [
+  "godzilla_le"
+ ],
+ "based_on": "biollante.c",
+ "about": "The C example BIOLLANTE rebuilt in blocks: six ramps start her, every shot feeds the SAP JACKPOT, each vine bank cut (the Shield targets, the Powerlines) collects it x1, x2, x3, then her BEAST form gives 20 s to land the final blow at the Building.",
+ "lost": [
+  "Only the port's named shots feed the sap: the C scored every playfield switch (its 0x1 switch dispatch), rollovers and other unnamed switches included.",
+  "The counters show bare numbers: BANKS CUT 2 where the C showed 2/3, and PER SWITCH 125 over THOUSAND SAP where it showed 125K over SAP (an edge counter holds about four characters).",
+  "The gauge stays one vine green labelled VINES: the C shaded its six pips from green to rose and relabelled it BEAST in the beast form.",
+  "The ramp count note reads RAMPS TO BIOLLANTE 5 (the number after the words) where the C said 5 RAMPS TO BIOLLANTE.",
+  "The shield vines light at once: the C lit them only once the shield platform had turned to face the player.",
+  "A vine's clip plays at most once in each 4 s window of the mode's own (a block's every 4 seconds): the C waited 4 s from the last one it played.",
+  "The ending's line puts the switches last (2 BANKS CUT  -  SWITCHES 14) where the C said 14 SWITCHES  -  2 BANKS CUT, and its SWITCHES are the named shots made (the C counted every switch).",
+  "The ending (BIOLLANTE IS FREE or BIOLLANTE WITHERS, its line and the total) stays up 3 s, the runtime's: the C kept it 10 s.",
+  "No debounce: the C counted the same target once in 250 ms (a bouncing standup pays once); the blocks count every report.",
+  "A hit no longer answers by itself: the C flashed every scoring shot's inserts white and played the game's climbing orchestra hit (PAD-415).",
+  "Its ending call plays after one of the game's own modes ends it too (the C kept quiet then, as it does for a drain or a tilt).",
+  "Its own start, win and end light shows are gone: the C used them only on a game without the game's Playfield wave and Red and blue fade, which Godzilla Premium/LE has.",
+  "For Godzilla Premium/LE only: the C also ran on Godzilla Pro, where its shield bank is two targets."
+ ],
+ "program": {
+  "name": "BIOLLANTE",
+  "seconds": 40,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
+  "vars": [
+   {
+    "name": "ramps",
+    "reset": "game"
+   },
+   {
+    "name": "plays",
+    "reset": "game"
+   },
+   {
+    "name": "phase",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "drained",
+    "reset": "mode"
+   },
+   {
+    "name": "collects",
+    "reset": "mode"
+   },
+   {
+    "name": "sap",
+    "reset": "mode"
+   },
+   {
+    "name": "collected",
+    "reset": "mode"
+   },
+   {
+    "name": "got",
+    "reset": "mode"
+   },
+   {
+    "name": "switch",
+    "reset": "mode"
+   },
+   {
+    "name": "switches",
+    "reset": "mode"
+   },
+   {
+    "name": "cut",
+    "reset": "mode"
+   },
+   {
+    "name": "bank",
+    "reset": "mode"
+   },
+   {
+    "name": "rate",
+    "reset": "mode"
+   },
+   {
+    "name": "clip ok",
+    "reset": "mode"
+   },
+   {
+    "name": "l1",
+    "reset": "mode"
+   },
+   {
+    "name": "l2",
+    "reset": "mode"
+   },
+   {
+    "name": "l3",
+    "reset": "mode"
+   },
+   {
+    "name": "p1",
+    "reset": "mode"
+   },
+   {
+    "name": "p2",
+    "reset": "mode"
+   },
+   {
+    "name": "p3",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "ramp"
+   },
+   {
+    "name": "cut"
+   },
+   {
+    "name": "lamps"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "SWITCHES FEED THE SAP - CUT A VINE BANK",
+   "counters": [
+    {
+     "label": "BANKS CUT",
+     "sub": "VINE BANKS",
+     "value": {
+      "k": "var",
+      "name": "collects"
+     }
+    },
+    {
+     "label": "SAP JACKPOT",
+     "sub": "X1 AT A BANK",
+     "value": {
+      "k": "op",
+      "op": "+",
+      "a": {
+       "k": "op",
+       "op": "*",
+       "a": {
+        "k": "var",
+        "name": "sap"
+       },
+       "b": {
+        "k": "op",
+        "op": "-",
+        "a": {
+         "k": "num",
+         "v": 2
+        },
+        "b": {
+         "k": "var",
+         "name": "phase"
+        }
+       }
+      },
+      "b": {
+       "k": "op",
+       "op": "*",
+       "a": {
+        "k": "var",
+        "name": "collected"
+       },
+       "b": {
+        "k": "op",
+        "op": "-",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "label": "PER SWITCH",
+     "sub": "THOUSAND SAP",
+     "value": {
+      "k": "op",
+      "op": "/",
+      "a": {
+       "k": "var",
+       "name": "switch"
+      },
+      "b": {
+       "k": "num",
+       "v": 1000
+      }
+     }
+    }
+   ],
+   "timer": {
+    "on": true,
+    "label": "BIOLLANTE",
+    "icon": "rose"
+   },
+   "gauge": {
+    "on": true,
+    "label": "VINES",
+    "kind": "segment",
+    "count": 6,
+    "color": "#14c828",
+    "value": {
+     "k": "var",
+     "name": "cut"
+    }
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "cut",
+    "file": "cut.mp4"
+   },
+   {
+    "name": "collect",
+    "file": "collect.mp4"
+   },
+   {
+    "name": "beast",
+    "file": "beast.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "cut",
+    "file": "cut.wav",
+    "priority": 3
+   },
+   {
+    "name": "collect",
+    "file": "collect.wav",
+    "priority": 3
+   },
+   {
+    "name": "beast",
+    "file": "beast.wav",
+    "priority": 4
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   },
+   {
+    "name": "lost",
+    "file": "lost.wav",
+    "priority": 4
+   }
+  ],
+  "music": "music.wav",
+  "shows": [
+   {
+    "name": "Collect",
+    "steps": [
+     {
+      "fx": "sparkle",
+      "ms": 700,
+      "a": "#ffe678",
+      "b": "#14c828",
+      "at": "center",
+      "rate": 0,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#14c828",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Beast",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 500,
+      "a": "#ff1446",
+      "b": "#000000",
+      "at": "center",
+      "rate": 60,
+      "gi": "flash"
+     },
+     {
+      "fx": "implode",
+      "ms": 800,
+      "a": "#ff1446",
+      "b": "#00280a",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "fire",
+      "ms": 900,
+      "a": "#14c828",
+      "b": "#00280a",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "timer_start",
+      "timer": "ramp",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "timer_start",
+      "timer": "ramp",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "ramp"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "not",
+       "a": {
+        "k": "running"
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "var",
+          "name": "ramps"
+         },
+         "b": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "num",
+           "v": 6
+          },
+          "b": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 2
+           },
+           "b": {
+            "k": "var",
+            "name": "plays"
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "change",
+          "var": "ramps",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "ramps"
+         },
+         "b": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "num",
+           "v": 6
+          },
+          "b": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 2
+           },
+           "b": {
+            "k": "var",
+            "name": "plays"
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "RAMPS TO BIOLLANTE",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 6
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 2
+             },
+             "b": {
+              "k": "var",
+              "name": "plays"
+             }
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "ramps"
+           }
+          },
+          "sub": "THE ROSE IS GROWING",
+          "seconds": 2
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "ramps",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "change",
+      "var": "plays",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "phase",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "drained",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "collects",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "sap",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "collected",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "cut",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "switches",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "clip ok",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "switch",
+      "value": {
+       "k": "num",
+       "v": 100000
+      }
+     },
+     {
+      "op": "set",
+      "var": "l1",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "l2",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "l3",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "p1",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "p2",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "p3",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "shield",
+      "where": "toward"
+     },
+     {
+      "op": "game_show",
+      "name": "Playfield wave"
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "hud_award",
+      "text": "BIOLLANTE",
+      "value": null,
+      "sub": "EVERY SWITCH FEEDS HER SAP",
+      "seconds": 3
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "any_shot",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "score",
+      "points": {
+       "k": "var",
+       "name": "switch"
+      }
+     },
+     {
+      "op": "change",
+      "var": "switches",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "sap",
+        "by": {
+         "k": "var",
+         "name": "switch"
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Pop bumper",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "or",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "secs_left"
+         },
+         "b": {
+          "k": "num",
+          "v": 40
+         }
+        }
+       },
+       "b": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "secs_left"
+         },
+         "b": {
+          "k": "num",
+          "v": 20
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "add_time",
+        "seconds": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "l1"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "l1",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "bank",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "cut",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "l2"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "l2",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "bank",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "cut",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "l3"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "l3",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "bank",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "cut",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "p1"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "p1",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "bank",
+        "value": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "cut",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "p2"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "p2",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "bank",
+        "value": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "cut",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "p3"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "p3",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "bank",
+        "value": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "cut",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "cut"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "cut",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "secs_left"
+       },
+       "b": {
+        "k": "num",
+        "v": 15
+       }
+      },
+      "then": [
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "or",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bank"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "l1"
+           },
+           "b": {
+            "k": "var",
+            "name": "l2"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "l3"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        }
+       },
+       "b": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bank"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "p1"
+           },
+           "b": {
+            "k": "var",
+            "name": "p2"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "p3"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "collects",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "got",
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "var",
+          "name": "sap"
+         },
+         "b": {
+          "k": "var",
+          "name": "collects"
+         }
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "got"
+        }
+       },
+       {
+        "op": "change",
+        "var": "collected",
+        "by": {
+         "k": "var",
+         "name": "got"
+        }
+       },
+       {
+        "op": "set",
+        "var": "sap",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "change",
+        "var": "cut",
+        "by": {
+         "k": "num",
+         "v": -3
+        }
+       },
+       {
+        "op": "set",
+        "var": "switch",
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 100000
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 25000
+          },
+          "b": {
+           "k": "var",
+           "name": "collects"
+          }
+         }
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "collects"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "SAP JACKPOT X1",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "",
+          "seconds": 2
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "collects"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "SAP JACKPOT X2",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "",
+          "seconds": 2
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "collects"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "SAP JACKPOT X3",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "",
+          "seconds": 2
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "collects"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 2,
+          "value": {
+           "k": "var",
+           "name": "sap"
+          },
+          "sub": "X2 AT A BANK"
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "collects"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 2,
+          "value": {
+           "k": "var",
+           "name": "sap"
+          },
+          "sub": "X3 AT A BANK"
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Collect"
+       },
+       {
+        "op": "sound",
+        "sound": "collect",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "collect",
+        "where": "behind"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bank"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "l1",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "set",
+          "var": "l2",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "set",
+          "var": "l3",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "set",
+          "var": "p1",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "set",
+          "var": "p2",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "set",
+          "var": "p3",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "collects"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "phase",
+          "value": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 20
+          }
+         },
+         {
+          "op": "set",
+          "var": "cut",
+          "value": {
+           "k": "num",
+           "v": 6
+          }
+         },
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "BIOLLANTE BEAST",
+          "value": null
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "FINAL BLOW: SHOOT THE BUILDING",
+          "value": null
+         },
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "var",
+           "name": "collects"
+          },
+          "sub": "THE BEAST"
+         },
+         {
+          "op": "hud_counter",
+          "counter": 2,
+          "value": {
+           "k": "var",
+           "name": "collected"
+          },
+          "sub": "BUILDING",
+          "label": "FINAL BLOW"
+         },
+         {
+          "op": "hud_award",
+          "text": "BEAST FORM!",
+          "value": null,
+          "sub": "FINAL BLOW: SHOOT THE BUILDING",
+          "seconds": 3
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Beast"
+         },
+         {
+          "op": "sound",
+          "sound": "beast",
+          "fallback": ""
+         },
+         {
+          "op": "clip",
+          "clip": "beast",
+          "where": "full"
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": [
+       {
+        "op": "sound",
+        "sound": "cut",
+        "fallback": ""
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "clip ok"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "clip",
+          "clip": "cut",
+          "where": "behind"
+         },
+         {
+          "op": "set",
+          "var": "clip ok",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        ],
+        "else": null
+       }
+      ]
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 4
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "clip ok",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "collected"
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "FINAL BLOW",
+        "value": {
+         "k": "var",
+         "name": "collected"
+        },
+        "sub": "",
+        "seconds": 3
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "lamps"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "l1"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target left",
+          "color": "#14c828",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 500
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Shield target left"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "l2"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target center",
+          "color": "#14c828",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 500
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Shield target center"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "l3"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target right",
+          "color": "#14c828",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 500
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Shield target right"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "p1"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline left",
+          "color": "#14c828",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 500
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline left"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "p2"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline center",
+          "color": "#14c828",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 500
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline center"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "p3"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline right",
+          "color": "#14c828",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 500
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline right"
+         }
+        ]
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Shield target left"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Shield target center"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Shield target right"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Powerline left"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Powerline center"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Powerline right"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "rate",
+        "value": {
+         "k": "num",
+         "v": 100
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "secs_left"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "rate",
+          "value": {
+           "k": "num",
+           "v": 200
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "secs_left"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 20
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "rate",
+          "value": {
+           "k": "num",
+           "v": 400
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "secs_left"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 40
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "rate",
+          "value": {
+           "k": "num",
+           "v": 700
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "light_shot",
+        "shot": "Building",
+        "color": "#ffaa00",
+        "pattern": "blink",
+        "rate": {
+         "k": "var",
+         "name": "rate"
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Building"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "ball_end"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "drained",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "timer_stop",
+      "timer": "ramp"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "cut"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "lamps"
+     },
+     {
+      "op": "set",
+      "var": "phase",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "drained"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "sound",
+          "sound": "won",
+          "fallback": ""
+         }
+        ],
+        "else": [
+         {
+          "op": "sound",
+          "sound": "lost",
+          "fallback": "time_up"
+         }
+        ]
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "won"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "BIOLLANTE IS FREE",
+        "value": null
+       }
+      ],
+      "else": [
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "BIOLLANTE WITHERS",
+        "value": null
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "collects"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "0 BANKS CUT  -  SWITCHES",
+        "value": {
+         "k": "var",
+         "name": "switches"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "collects"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "1 BANK CUT  -  SWITCHES",
+        "value": {
+         "k": "var",
+         "name": "switches"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "collects"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "2 BANKS CUT  -  SWITCHES",
+        "value": {
+         "k": "var",
+         "name": "switches"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "collects"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "3 BANKS CUT  -  SWITCHES",
+        "value": {
+         "k": "var",
+         "name": "switches"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "game_show",
+      "name": "Red and blue fade"
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "bio89",
+    "from": 2059.4,
+    "length": 3.6,
+    "crop": "fill",
+    "what": "0:34:19.4, the camera tilts up across Lake Ashi to reveal Biollante's rose form standing in the misty, glowing lake, one shot."
+   },
+   "loop": {
+    "film": "bio89",
+    "from": 2067.0,
+    "length": 11.6,
+    "crop": "fill",
+    "what": "0:34:27, a slow low-angle tilt up Biollante's rose-form stalk and leaves to the closed red rose head, vines gently swaying, one continuous shot."
+   },
+   "cut": {
+    "film": "bio89",
+    "from": 3309.8,
+    "length": 3.2,
+    "crop": "fill",
+    "what": "0:55:10, at night on the lake Godzilla's ray strikes a vine reaching out from Biollante and the vine bursts into smoke, one shot."
+   },
+   "collect": {
+    "film": "bio89",
+    "from": 3295.4,
+    "length": 2.5,
+    "crop": "fill",
+    "what": "0:54:55, a run of two shots: a vine mouth sprays yellow sap into Godzilla's face, then Godzilla's head steams with it."
+   },
+   "beast": {
+    "film": "bio89",
+    "from": 5479.45,
+    "length": 5.5,
+    "crop": "fill",
+    "what": "1:31:19, a run of two shots: extreme close-ups of the beast form's huge tooth-lined jaws, then the jaws opening on the red mouth, under lightning flashes."
+   },
+   "won": {
+    "film": "bio89",
+    "from": 5773.0,
+    "length": 6.0,
+    "crop": "fill",
+    "what": "1:36:13, Biollante's beast form dissolves into a glowing pink cloud of spores that drift upward, one shot."
+   },
+   "lost": {
+    "film": "bio89",
+    "from": 5635.45,
+    "length": 4.3,
+    "crop": "fill",
+    "what": "1:33:55, a run of two shots: Biollante's beast jaws close on Godzilla's head, then a close-up of the jaws clamped on him."
+   }
+  },
+  "music": {
+   "film": "bio89",
+   "from": 6128.682,
+   "length": 19.12,
+   "what": "1:42:08.682, Koichi Sugiyama's Super X2 march as reprised in the end credits (the same passage the earlier bed took at 0:43:05 under the Super X2 launch), orchestra only, no dialogue or effects."
+  },
+  "calls": {
+   "cut": {
+    "film": "bio89",
+    "from": 4140.22,
+    "length": 2.02,
+    "priority": 3,
+    "what": "1:09:00, a short, clean Godzilla roar during the Osaka attack, from its onset until it falls away at 1:09:02."
+   },
+   "collect": {
+    "film": "bio89",
+    "from": 3295.56,
+    "length": 1.46,
+    "priority": 3,
+    "what": "0:54:55, the wet burst of Biollante's sap spraying from a vine mouth into Godzilla's face and the first hiss of it burning, ending at a dip."
+   },
+   "beast": {
+    "film": "bio89",
+    "from": 5459.85,
+    "length": 3.0,
+    "priority": 4,
+    "what": "1:30:59.9, Biollante's beast-form roar as she rises at night, a falling screech into a deep growl."
+   },
+   "won": {
+    "film": "bio89",
+    "from": 5774.38,
+    "length": 2.4,
+    "priority": 4,
+    "what": "1:36:14.4, Biollante's soft, eerie dying cry, a falling wail that settles and fades as she turns to spores, over a quiet score."
+   },
+   "lost": {
+    "film": "bio89",
+    "from": 5569.05,
+    "length": 3.0,
+    "priority": 4,
+    "what": "1:32:49, Godzilla's pained roar as Biollante's vine mouths bite into his hands, ending as it falls away."
+   }
+  }
+ }
+}

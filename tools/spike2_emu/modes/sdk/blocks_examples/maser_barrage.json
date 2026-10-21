@@ -1,0 +1,1870 @@
+{
+ "name": "MASER BARRAGE",
+ "slug": "maser_barrage",
+ "order": 103,
+ "titles": [
+  "godzilla_le"
+ ],
+ "based_on": "maser_barrage.c",
+ "about": "The C example MASER BARRAGE rebuilt in blocks: a combo chain. Three Maser target hits start it; the Left ramp, Right ramp and Building in order, each within the window, pay more as the multiplier climbs to x5, and a broken chain starts again at x1.",
+ "lost": [
+  "The start counts every Maser target hit this ball, with no 250 ms debounce, and the chain's shots have none either: a ball rattling in the Left ramp's entrance can count twice (the C counted one a quarter second).",
+  "The next shot's blink quickens once a second as its window closes (the C every tick), and the HUD shows the multiplier as 2 where the C showed X2, and the window as 0 with NO CLOCK YET where it showed -.",
+  "Awards say their numbers after the words: LEFT RAMP X 2 / NOW THE RIGHT RAMP and BARRAGE JACKPOT 10,000,000 / NOW X3, where the C said LEFT RAMP X2 over 2,000,000 and 10,000,000   NOW X3 under BARRAGE JACKPOT.",
+  "The ending's line under MASER BARRAGE TOTAL puts the count last (BEST X3  -  BARRAGES 2) where the C said 2 BARRAGES  -  BEST X3, and says BARRAGES for one too.",
+  "The ending stays up 3 s, the runtime's: the C kept it 10 s.",
+  "The counters are in the film recipe's order (MULTIPLIER, BARRAGES, WINDOW); the C drew MULTIPLIER, WINDOW, BARRAGES.",
+  "The countdown's 5, 4, 3, 2, 1 callouts are gone (the blocks say only ten seconds and time up).",
+  "For Godzilla Premium/LE only: the C also ran on Godzilla Pro, playing its own shows where the game has no Insert chase or Colour fade (a Pro 1.15 has none of the game's shows, a Pro 1.16 no Insert chase); a blocks program cannot ask whether the game has a show. Its own three shows are kept under Light shows (Maser start, Maser won, Maser lost), not run, to swap in.",
+  "The blocks pack keeps its own FINAL WARS ledger in shared variables ('maser played', 'maser won'), which the blocks FINAL WARS reads: the C FINAL WARS does not read them, and the blocks FINAL WARS does not read the C's ledger."
+ ],
+ "program": {
+  "name": "MASER BARRAGE",
+  "seconds": 40,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
+  "vars": [
+   {
+    "name": "ran ball",
+    "reset": "ball"
+   },
+   {
+    "name": "maser played",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "maser won",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "step",
+    "reset": "mode"
+   },
+   {
+    "name": "mult",
+    "reset": "mode"
+   },
+   {
+    "name": "best",
+    "reset": "mode"
+   },
+   {
+    "name": "window",
+    "reset": "mode"
+   },
+   {
+    "name": "barrages",
+    "reset": "mode"
+   },
+   {
+    "name": "breaks",
+    "reset": "mode"
+   },
+   {
+    "name": "pace",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "window"
+   },
+   {
+    "name": "lights"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "LEFT RAMP  >  RIGHT RAMP  >  BUILDING",
+   "counters": [
+    {
+     "label": "MULTIPLIER",
+     "sub": "MAX X5",
+     "value": {
+      "k": "var",
+      "name": "mult"
+     }
+    },
+    {
+     "label": "BARRAGES",
+     "sub": "",
+     "value": {
+      "k": "var",
+      "name": "barrages"
+     }
+    },
+    {
+     "label": "WINDOW",
+     "sub": "SECONDS",
+     "value": {
+      "k": "op",
+      "op": "/",
+      "a": {
+       "k": "op",
+       "op": "+",
+       "a": {
+        "k": "timer_left",
+        "timer": "window"
+       },
+       "b": {
+        "k": "num",
+        "v": 999
+       }
+      },
+      "b": {
+       "k": "num",
+       "v": 1000
+      }
+     }
+    }
+   ],
+   "timer": {
+    "on": true,
+    "label": "MASER",
+    "icon": "maser"
+   },
+   "gauge": {
+    "on": true,
+    "label": "CHAIN",
+    "kind": "diamond",
+    "count": 3,
+    "color": "#008cff",
+    "value": {
+     "k": "var",
+     "name": "step"
+    }
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "barrage",
+    "file": "barrage.mp4"
+   },
+   {
+    "name": "broken",
+    "file": "broken.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "barrage",
+    "file": "barrage.wav",
+    "priority": 4
+   },
+   {
+    "name": "broken",
+    "file": "broken.wav",
+    "priority": 3
+   }
+  ],
+  "music": "music.wav",
+  "shows": [
+   {
+    "name": "Maser start",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 450,
+      "a": "#ffffff",
+      "b": "#0078ff",
+      "at": "xy",
+      "rate": 55,
+      "gi": "flash",
+      "x": 51,
+      "y": 417
+     },
+     {
+      "fx": "spin",
+      "ms": 1600,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 110,
+      "gi": "dark",
+      "x": 51,
+      "y": 417
+     },
+     {
+      "fx": "sweep_lr",
+      "ms": 500,
+      "a": "#ffffff",
+      "b": "#0078ff",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_rl",
+      "ms": 500,
+      "a": "#ffffff",
+      "b": "#0078ff",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#0078ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Maser won",
+    "steps": [
+     {
+      "fx": "implode",
+      "ms": 800,
+      "a": "#ffffff",
+      "b": "#0078ff",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "strobe",
+      "ms": 600,
+      "a": "#ffffff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 50,
+      "gi": "flash"
+     },
+     {
+      "fx": "chase",
+      "ms": 1400,
+      "a": "#8cdcff",
+      "b": "#0078ff",
+      "at": "center",
+      "rate": 45,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#0078ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Maser lost",
+    "steps": [
+     {
+      "fx": "sparkle",
+      "ms": 700,
+      "a": "#ff0000",
+      "b": "#0078ff",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_down",
+      "ms": 900,
+      "a": "#0078ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#0078ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Maser target",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "ran ball"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "hits",
+          "shot": "Maser target"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "hits",
+            "shot": "Maser target"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "MASER 2 OF 3",
+            "value": null,
+            "sub": "MASER BARRAGE",
+            "seconds": 2
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "MASER 1 OF 3",
+            "value": null,
+            "sub": "MASER BARRAGE",
+            "seconds": 2
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "ran ball",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "maser played",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "mult",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "best",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "window",
+      "value": {
+       "k": "num",
+       "v": 7000
+      }
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "game_show",
+      "name": "Insert chase"
+     },
+     {
+      "op": "hud_award",
+      "text": "MASER BARRAGE",
+      "value": null,
+      "sub": "LEFT RAMP  >  RIGHT RAMP  >  BUILDING",
+      "seconds": 3
+     },
+     {
+      "op": "hud_counter",
+      "counter": 1,
+      "value": {
+       "k": "num",
+       "v": 1
+      },
+      "sub": "JACKPOT 5M"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "NO CLOCK YET"
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "step"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 1000000
+         },
+         "b": {
+          "k": "var",
+          "name": "mult"
+         }
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "secs_left"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        },
+        "then": [
+         {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 10
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "set",
+        "var": "step",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "window",
+        "ms": {
+         "k": "var",
+         "name": "window"
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "LEFT RAMP X",
+        "value": {
+         "k": "var",
+         "name": "mult"
+        },
+        "sub": "NOW THE RIGHT RAMP",
+        "seconds": 1
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "timer_left",
+           "timer": "window"
+          },
+          "b": {
+           "k": "num",
+           "v": 999
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 1000
+         }
+        },
+        "sub": "SECONDS"
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "step"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 1000000
+         },
+         "b": {
+          "k": "var",
+          "name": "mult"
+         }
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "secs_left"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        },
+        "then": [
+         {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 10
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "set",
+        "var": "step",
+        "value": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "window",
+        "ms": {
+         "k": "var",
+         "name": "window"
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "RIGHT RAMP X",
+        "value": {
+         "k": "var",
+         "name": "mult"
+        },
+        "sub": "NOW THE BUILDING",
+        "seconds": 1
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "timer_left",
+           "timer": "window"
+          },
+          "b": {
+           "k": "num",
+           "v": 999
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 1000
+         }
+        },
+        "sub": "SECONDS"
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "step"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 1000000
+         },
+         "b": {
+          "k": "var",
+          "name": "mult"
+         }
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "secs_left"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        },
+        "then": [
+         {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 10
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 5000000
+         },
+         "b": {
+          "k": "var",
+          "name": "mult"
+         }
+        }
+       },
+       {
+        "op": "change",
+        "var": "barrages",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "maser won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "mult"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "BARRAGE JACKPOT",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 5000000
+           },
+           "b": {
+            "k": "var",
+            "name": "mult"
+           }
+          },
+          "sub": "NOW X2",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "mult"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "BARRAGE JACKPOT",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 5000000
+             },
+             "b": {
+              "k": "var",
+              "name": "mult"
+             }
+            },
+            "sub": "NOW X3",
+            "seconds": 3
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "mult"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "BARRAGE JACKPOT",
+              "value": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 5000000
+               },
+               "b": {
+                "k": "var",
+                "name": "mult"
+               }
+              },
+              "sub": "NOW X4",
+              "seconds": 3
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_award",
+              "text": "BARRAGE JACKPOT",
+              "value": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 5000000
+               },
+               "b": {
+                "k": "var",
+                "name": "mult"
+               }
+              },
+              "sub": "NOW X5",
+              "seconds": 3
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "var",
+          "name": "mult"
+         },
+         "b": {
+          "k": "num",
+          "v": 5
+         }
+        },
+        "then": [
+         {
+          "op": "change",
+          "var": "mult",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "mult"
+         },
+         "b": {
+          "k": "var",
+          "name": "best"
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "best",
+          "value": {
+           "k": "var",
+           "name": "mult"
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "window"
+         },
+         "b": {
+          "k": "num",
+          "v": 4000
+         }
+        },
+        "then": [
+         {
+          "op": "change",
+          "var": "window",
+          "by": {
+           "k": "num",
+           "v": -1000
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "add_time",
+        "seconds": {
+         "k": "num",
+         "v": 5
+        }
+       },
+       {
+        "op": "set",
+        "var": "step",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_stop",
+        "timer": "window"
+       },
+       {
+        "op": "sound",
+        "sound": "barrage",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "barrage",
+        "where": "behind"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "mult"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "var",
+           "name": "mult"
+          },
+          "sub": "JACKPOT 5M"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "mult"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_counter",
+            "counter": 1,
+            "value": {
+             "k": "var",
+             "name": "mult"
+            },
+            "sub": "JACKPOT 10M"
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "mult"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "hud_counter",
+              "counter": 1,
+              "value": {
+               "k": "var",
+               "name": "mult"
+              },
+              "sub": "JACKPOT 15M"
+             }
+            ],
+            "else": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": "=",
+               "a": {
+                "k": "var",
+                "name": "mult"
+               },
+               "b": {
+                "k": "num",
+                "v": 4
+               }
+              },
+              "then": [
+               {
+                "op": "hud_counter",
+                "counter": 1,
+                "value": {
+                 "k": "var",
+                 "name": "mult"
+                },
+                "sub": "JACKPOT 20M"
+               }
+              ],
+              "else": [
+               {
+                "op": "hud_counter",
+                "counter": 1,
+                "value": {
+                 "k": "var",
+                 "name": "mult"
+                },
+                "sub": "JACKPOT 25M"
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "NO CLOCK YET"
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "window"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "breaks",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "step",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "mult",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "window",
+      "value": {
+       "k": "num",
+       "v": 7000
+      }
+     },
+     {
+      "op": "hud_award",
+      "text": "CHAIN BROKEN",
+      "value": null,
+      "sub": "BACK TO X1 - START AT THE LEFT RAMP",
+      "seconds": 2
+     },
+     {
+      "op": "sound",
+      "sound": "broken",
+      "fallback": ""
+     },
+     {
+      "op": "clip",
+      "clip": "broken",
+      "where": "behind"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 1,
+      "value": {
+       "k": "num",
+       "v": 1
+      },
+      "sub": "JACKPOT 5M"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 2,
+      "value": {
+       "k": "var",
+       "name": "barrages"
+      },
+      "sub": "CHAIN BROKEN"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "NO CLOCK YET"
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "lights"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "pace",
+      "value": {
+       "k": "num",
+       "v": 500
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">",
+       "a": {
+        "k": "var",
+        "name": "step"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<=",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "timer_left",
+           "timer": "window"
+          },
+          "b": {
+           "k": "num",
+           "v": 10
+          }
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "var",
+           "name": "window"
+          },
+          "b": {
+           "k": "num",
+           "v": 6
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pace",
+          "value": {
+           "k": "num",
+           "v": 250
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<=",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "timer_left",
+           "timer": "window"
+          },
+          "b": {
+           "k": "num",
+           "v": 10
+          }
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "var",
+           "name": "window"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pace",
+          "value": {
+           "k": "num",
+           "v": 100
+          }
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "step"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Left ramp",
+        "color": "#005aff",
+        "pattern": "blink",
+        "rate": {
+         "k": "var",
+         "name": "pace"
+        }
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "SHOOT THE LEFT RAMP",
+        "value": null
+       }
+      ],
+      "else": [
+       {
+        "op": "light_shot",
+        "shot": "Left ramp",
+        "color": "#001e5a",
+        "pattern": "pulse",
+        "rate": {
+         "k": "num",
+         "v": 1600
+        }
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "step"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Right ramp",
+        "color": "#005aff",
+        "pattern": "blink",
+        "rate": {
+         "k": "var",
+         "name": "pace"
+        }
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "SHOOT THE RIGHT RAMP",
+        "value": null
+       }
+      ],
+      "else": [
+       {
+        "op": "light_shot",
+        "shot": "Right ramp",
+        "color": "#001e5a",
+        "pattern": "pulse",
+        "rate": {
+         "k": "num",
+         "v": 1600
+        }
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "step"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Building",
+        "color": "#005aff",
+        "pattern": "blink",
+        "rate": {
+         "k": "var",
+         "name": "pace"
+        }
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "SHOOT THE BUILDING",
+        "value": null
+       }
+      ],
+      "else": [
+       {
+        "op": "light_shot",
+        "shot": "Building",
+        "color": "#001e5a",
+        "pattern": "pulse",
+        "rate": {
+         "k": "num",
+         "v": 1600
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "seconds_left",
+     "seconds": 10
+    },
+    "do": [
+     {
+      "op": "callout",
+      "role": "ten_seconds"
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "timer_stop",
+      "timer": "window"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "lights"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "secs_left"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "callout",
+        "role": "time_up"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">",
+       "a": {
+        "k": "var",
+        "name": "barrages"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       }
+      ],
+      "else": [
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "best"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "BEST X1  -  BARRAGES",
+        "value": {
+         "k": "var",
+         "name": "barrages"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "best"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "BEST X2  -  BARRAGES",
+        "value": {
+         "k": "var",
+         "name": "barrages"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "best"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "BEST X3  -  BARRAGES",
+        "value": {
+         "k": "var",
+         "name": "barrages"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "best"
+       },
+       "b": {
+        "k": "num",
+        "v": 4
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "BEST X4  -  BARRAGES",
+        "value": {
+         "k": "var",
+         "name": "barrages"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "best"
+       },
+       "b": {
+        "k": "num",
+        "v": 5
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "BEST X5  -  BARRAGES",
+        "value": {
+         "k": "var",
+         "name": "barrages"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "game_show",
+      "name": "Colour fade"
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "gvkg91",
+    "from": 4976.9,
+    "length": 5.9,
+    "crop": "fill",
+    "what": "Night Tokyo street: a maser dish tank rolls up, then the tank line takes aim and the first beam fires"
+   },
+   "loop": {
+    "film": "gvkg91",
+    "from": 4945.3,
+    "length": 12.9,
+    "crop": "fill",
+    "what": "Night Tokyo battle: maser tanks roll and fire, blue beams strike Godzilla in showers of sparks (fast run of shots, dark)"
+   },
+   "barrage": {
+    "film": "gvkg91",
+    "from": 4947.4,
+    "length": 2.85,
+    "crop": "fill",
+    "what": "A volley of blue maser beams fires and hits Godzilla, erupting in sparks"
+   },
+   "broken": {
+    "film": "gvm92",
+    "from": 4604.2,
+    "length": 2.8,
+    "crop": "fill",
+    "what": "Godzilla's ray hits a tank, which explodes in a fireball"
+   },
+   "won": {
+    "film": "gvkg91",
+    "from": 4985.2,
+    "length": 4.8,
+    "crop": "fill",
+    "what": "Maser dishes fire; blue beams strike Godzilla, who staggers in sparks and smoke"
+   },
+   "lost": {
+    "film": "meg73",
+    "from": 2599.8,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Tanks blasted by lightning amid a sea of fire (the attacker is Megalon, not Godzilla)"
+   }
+  },
+  "music": {
+   "film": "meg73",
+   "from": 4301.985,
+   "length": 21.57,
+   "what": "Riichiro Manabe's score, the final battle (bed finder: final 0.806, loop chroma 0.865)"
+  },
+  "calls": {
+   "barrage": {
+    "film": "meg73",
+    "from": 2589.6,
+    "length": 2.2,
+    "what": "a Maser volley hitting Megalon and the blast (broadband onset at 0:43:09.8)"
+   },
+   "broken": {
+    "film": "meg73",
+    "from": 2607.4,
+    "length": 1.8,
+    "what": "Megalon's cry as it shrugs the attack off (harmonic roar cpp 0.34)"
+   }
+  }
+ }
+}

@@ -1,0 +1,85 @@
+{
+ "clips": {
+  "intro": {
+   "film": "fw04",
+   "from": 5323.0,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Godzilla close-up at night: his dorsal plates and mouth light up blue as he charges his ray (one shot)"
+  },
+  "loop": {
+   "film": "fw04",
+   "from": 1212.6,
+   "length": 12.4,
+   "crop": "fill",
+   "what": "New York at night: Rodan swoops past the Empire State Building and a full moon, glass shatters, ends on Rodan silhouetted against the moon"
+  },
+  "loop2": {
+   "film": "fw04",
+   "from": 5362.7,
+   "length": 15.9,
+   "crop": "fill",
+   "what": "Dark blue ruined Tokyo: Godzilla faces Monster X, then a wide shot of the two fighting among burning ruins"
+  },
+  "loop3": {
+   "film": "fw04",
+   "from": 6702.6,
+   "length": 14.5,
+   "crop": "fill",
+   "what": "Keizer Ghidorah towers over the dark smoking city, then its heads attack Godzilla"
+  },
+  "phase": {
+   "film": "fw04",
+   "from": 5330.1,
+   "length": 2.5,
+   "crop": "fill",
+   "what": "Godzilla's ray erupts across the night city in a blue-white blast"
+  },
+  "won": {
+   "film": "fw04",
+   "from": 6874.2,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Godzilla glows blue and fires his red spiral ray, a blazing column across the screen"
+  },
+  "lost": {
+   "film": "fw04",
+   "from": 6689.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Keizer Ghidorah's golden gravity beams pour into Godzilla, draining him"
+  }
+ },
+ "music": {
+  "film": "fw04",
+  "from": 7249.602,
+  "length": 18.3,
+  "what": "the end-title score (bed finder: final 0.895, the best of the eight films)"
+ },
+ "calls": {
+  "phase1": {
+   "film": "fw04",
+   "from": 5437.7,
+   "length": 2.4,
+   "what": "Godzilla roaring through the smoke in the city (the game's own 1954 roar matches 0.77; a harmonic roar)"
+  },
+  "won": {
+   "film": "fw04",
+   "from": 6896.9,
+   "length": 2.4,
+   "what": "Godzilla's roar after the battle (harmonic roar cpp 0.43, the strongest)"
+  },
+  "lost": {
+   "film": "fw04",
+   "from": 6698.9,
+   "length": 2.2,
+   "what": "Keizer Ghidorah's gravity beams striking (broadband onset at 1:51:39.0)"
+  },
+  "phase2": {
+   "film": "fw04",
+   "from": 6604.0,
+   "length": 2.0,
+   "what": "Keizer Ghidorah's three heads rising and roaring as Monster X becomes it"
+  }
+ }
+}

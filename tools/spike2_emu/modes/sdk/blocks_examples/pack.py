@@ -4,12 +4,14 @@
   stays lit and starts on its shot once the other is over, so one ball through the Mecha lane cannot start two.
 - THE CASH-OUT SHOT. The right scoop (the port's "Right scoop" switch shot) is where every deeper-and-deeper mode
   cashes out: once a stage is done it chases white with the scoop's own inserts (SELECT CITY and the three SCOOP BB
-  lights), and the mode's POT is paid there.
+  lights), and the mode's POT is paid there. The ball that lands there is held for the cash-out clip, and the mode
+  ends 1.5 s after it (its "next" timer, with "cashed" set), so the game handling that same scoop with the mode
+  still running gives no award of its own over the clip (emulator run a2: an ADVANCE TANKS took the glass).
 - THE QUALIFYING NOTE. A mode's count toward its start shows as a note on the HUD every few hits ("12 MORE TO WAKE
   KING CAESAR"), and nothing counts while a multiball runs (David's rule for PAD-379's meter, applied to all).
 """
 from blk import (AND, BALLS, NOT, LIT, add, award, change, eq, ge, if_, light, light_insert, light_mode, lt, off,
-                 off_insert, on_any_shot, set_, sub, var)
+                 off_insert, on_any_shot, scoop_hold, set_, sub, var)
 
 CASH_SHOT = "Right scoop"
 CASH_INSERTS = ("SELECT CITY", "SCOOP BB-BATTLE", "SCOOP BB-GODZILLA PWR UP", "SCOOP BB-SUMMON ALLY")
@@ -18,7 +20,8 @@ WHITE = "#ffffff"
 
 def cash_out_lit():
     """The scoop chases white: shoot it to cash out."""
-    return [light(CASH_SHOT, WHITE, "chase", 120)] + [light_insert(n, WHITE, "chase", 120) for n in CASH_INSERTS]
+    return ([light(CASH_SHOT, WHITE, "chase", 120)] + [light_insert(n, WHITE, "chase", 120) for n in CASH_INSERTS]
+            + [scoop_hold(2500, "next")])
 
 
 def cash_out_off():

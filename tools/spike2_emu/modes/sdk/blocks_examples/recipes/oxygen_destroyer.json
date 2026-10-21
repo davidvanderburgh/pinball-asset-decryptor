@@ -1,0 +1,65 @@
+{
+ "clips": {
+  "intro": {
+   "film": "g54",
+   "from": 5497.3,
+   "length": 5.5,
+   "crop": "fill",
+   "what": "The Oxygen Destroyer canister on the sea bed, beginning to fizz and bubble (one shot)"
+  },
+  "loop": {
+   "film": "g54",
+   "from": 5316.4,
+   "length": 13.0,
+   "crop": "fill",
+   "what": "Murky underwater depths: a diver sinks slowly through grey gloom, fish drift past (one continuous shot, dark and even)"
+  },
+  "collect": {
+   "film": "g54",
+   "from": 5503.9,
+   "length": 2.4,
+   "crop": "fill",
+   "what": "The device goes off: a column of bubbles erupts from the sea bed (one shot)"
+  },
+  "won": {
+   "film": "g54",
+   "from": 5655.5,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "On the sea bed Godzilla's body dissolves to a skeleton, which fades away (one shot)"
+  },
+  "lost": {
+   "film": "g54",
+   "from": 5616.1,
+   "length": 4.5,
+   "crop": "fill",
+   "what": "Godzilla surges up out of the sea, roaring (one shot)"
+  }
+ },
+ "music": {
+  "film": "des95",
+  "from": 5852.394,
+  "length": 14.4,
+  "what": "Destoroyah's score near the end (bed finder: final 0.820, 1 of 30 blocks untuned)"
+ },
+ "calls": {
+  "collect": {
+   "film": "g54",
+   "from": 5502.0,
+   "length": 2.5,
+   "what": "the Oxygen Destroyer starting on the sea bed (the frames: it glows at 1:31:42, its bubbles erupt at 1:31:44)"
+  },
+  "won": {
+   "film": "g54",
+   "from": 5616.8,
+   "length": 3.0,
+   "what": "Godzilla's last roar as it surfaces (harmonic roar, -15 dB, the loudest in the scene)"
+  },
+  "lost": {
+   "film": "g54",
+   "from": 3391.9,
+   "length": 3.0,
+   "what": "Godzilla's roar in the Tokyo rampage (the game's own 1954 roar matches 0.86)"
+  }
+ }
+}

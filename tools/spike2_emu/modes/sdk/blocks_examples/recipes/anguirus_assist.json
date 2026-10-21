@@ -1,0 +1,67 @@
+{
+ "clips": {
+  "intro": {
+   "film": "fw04",
+   "from": 1421.4,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Shanghai: Anguirus bursts through an explosion, rolls in and roars into the camera"
+  },
+  "spike": {
+   "film": "fw04",
+   "from": 4709.8,
+   "length": 1.6,
+   "crop": "fill",
+   "what": "Close on Anguirus roaring, the spiked shell behind its head (one shot)"
+  },
+  "roll": {
+   "film": "fw04",
+   "from": 4800.7,
+   "length": 2.6,
+   "crop": "fill",
+   "what": "Anguirus as a spiked ball hurtles at the camera and smashes into Godzilla"
+  },
+  "won": {
+   "film": "dam68",
+   "from": 4802.5,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Godzilla and Anguirus stand side by side, allies victorious (one shot)"
+  },
+  "lost": {
+   "film": "fw04",
+   "from": 4852.8,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Anguirus, Rodan and King Caesar lie in a smoking heap, then Godzilla stands triumphant before Mt Fuji"
+  }
+ },
+ "music": {
+  "film": "ra55",
+  "from": 4888.482,
+  "length": 15.53,
+  "what": "Masaru Sato's score at the end (loop chroma 0.62, in tune 0.68)"
+ },
+ "calls": {
+  "spike": {
+   "film": "ra55",
+   "from": 2732.0,
+   "length": 1.8,
+   "priority": 3,
+   "what": "Anguirus's short roar (the game's own short Anguirus roar matches 0.87)"
+  },
+  "roll": {
+   "film": "ra55",
+   "from": 2680.6,
+   "length": 1.8,
+   "priority": 3,
+   "what": "Anguirus's roar as it charges (the game's own Anguirus roar matches 0.95)"
+  },
+  "won": {
+   "film": "ra55",
+   "from": 2751.0,
+   "length": 1.8,
+   "what": "Anguirus's roar in the castle fight (the game's own Anguirus roar matches 0.88)"
+  }
+ }
+}

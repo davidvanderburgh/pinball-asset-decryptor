@@ -562,6 +562,11 @@ value switch_polarity_at    28
 switch 34   0x1000000000000000 Action button
 switch 60   0x2000000000000000 Left flipper button
 switch 59   0x4000000000000000 Right flipper button
+# PAD-658: two playfield switches the game's shot dispatch never names (MODE_API.md's census on Pro 1.15: the scoop
+# sends nothing, Mecha Exit Top only 0x1), as shots of their own, the same as Premium/LE 1.16's: the right scoop and
+# the top of the Mecha lane
+switch 53   0x0100000000000000 Right scoop
+switch 50   0x0200000000000000 Mecha exit top
 # the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
 # a mode that lights its shots lights the button
 lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front

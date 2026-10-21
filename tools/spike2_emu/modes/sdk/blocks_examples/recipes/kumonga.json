@@ -1,0 +1,138 @@
+{
+ "clips": {
+  "intro": {
+   "film": "son67",
+   "from": 3563.5,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Kumonga stirs awake in its rocky pit, legs churning dust, then a low shot of it rising toward the sky, a run of two shots, 0:59:23."
+  },
+  "loop": {
+   "film": "son67",
+   "from": 4023.0,
+   "length": 11.9,
+   "crop": "fill",
+   "what": "Kumonga lurks in the jungle bushes, eyes glowing, while Minilla wanders nearby, then creeps closer with Minilla beyond its legs, a calm run of four shots, 1:07:03."
+  },
+  "web": {
+   "film": "son67",
+   "from": 4166.2,
+   "length": 3.0,
+   "crop": "fill",
+   "what": "Kumonga sprays a white jet of web from its mouth across the valley at Minilla, 1:09:26."
+  },
+  "tear": {
+   "film": "son67",
+   "from": 4503.4,
+   "length": 3.3,
+   "crop": "fill",
+   "what": "Godzilla stands in the web field and burns the strands with his blue ray, 1:15:03."
+  },
+  "strand": {
+   "film": "son67",
+   "from": 4413.6,
+   "length": 2.6,
+   "crop": "fill",
+   "what": "Minilla lies wrapped in Kumonga's web, struggling under the strands, 1:13:33."
+  },
+  "sting": {
+   "film": "son67",
+   "from": 4722.5,
+   "length": 5.6,
+   "crop": "fill",
+   "what": "Kumonga's needle stabs out again and again at Godzilla, cut with Godzilla's face and eye, a run of shots, 1:18:42."
+  },
+  "burn": {
+   "film": "son67",
+   "from": 4669.6,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "Minilla's ray blasts Kumonga full in the face and the spider recoils, 1:17:49."
+  },
+  "won": {
+   "film": "son67",
+   "from": 4843.1,
+   "length": 3.8,
+   "crop": "fill",
+   "what": "Kumonga lies dead on its back in the snow, legs curled up, 1:20:43."
+  },
+  "lost": {
+   "film": "son67",
+   "from": 4586.8,
+   "length": 3.0,
+   "crop": "fill",
+   "what": "Godzilla, smothered in web, topples and thrashes on the ground, 1:16:26."
+  },
+  "cashout": {
+   "film": "son67",
+   "from": 4746.3,
+   "length": 2.85,
+   "crop": "fill",
+   "what": "A calm view of the island from the sea after the fight, 1:19:06."
+  }
+ },
+ "music": {
+  "film": "son67",
+  "from": 173.632,
+  "length": 20.03,
+  "what": "Masaru Sato's opening title music, a pulsing driving loop with no dialogue, 0:02:53."
+ },
+ "calls": {
+  "chitter": {
+   "film": "son67",
+   "from": 3570.74,
+   "length": 2.7,
+   "what": "Kumonga's shrill warbling whirr as its eyes light up in the dark pit, 0:59:30.",
+   "priority": 4
+  },
+  "web": {
+   "film": "son67",
+   "from": 3580.97,
+   "length": 1.65,
+   "what": "The hissing spray of Kumonga's web shooting out in the cave, 0:59:40.",
+   "priority": 3
+  },
+  "tear": {
+   "film": "son67",
+   "from": 4482.25,
+   "length": 1.4,
+   "what": "A crackling run of snaps as Godzilla's thrown rock smashes into Kumonga's lair, 1:14:42.",
+   "priority": 3
+  },
+  "sting": {
+   "film": "son67",
+   "from": 4728.5,
+   "length": 0.9,
+   "what": "Two sharp stabbing bursts as Kumonga's needle strikes Godzilla's eye, 1:18:48.",
+   "priority": 3
+  },
+  "burn": {
+   "film": "son67",
+   "from": 4568.85,
+   "length": 1.5,
+   "what": "The crackling zap of Godzilla's ray hitting Kumonga, 1:16:08.",
+   "priority": 3
+  },
+  "won": {
+   "film": "son67",
+   "from": 4733.45,
+   "length": 1.5,
+   "what": "A heavy crash as Kumonga is flipped onto its back, 1:18:53.",
+   "priority": 4
+  },
+  "lost": {
+   "film": "son67",
+   "from": 4440.05,
+   "length": 1.6,
+   "what": "Minilla's pained wavering cry while trapped in the web, 1:14:00.",
+   "priority": 4
+  },
+  "cashout": {
+   "film": "son67",
+   "from": 4915.3,
+   "length": 1.5,
+   "what": "Minilla's soft calls in the snow after the battle, 1:21:55.",
+   "priority": 4
+  }
+ }
+}

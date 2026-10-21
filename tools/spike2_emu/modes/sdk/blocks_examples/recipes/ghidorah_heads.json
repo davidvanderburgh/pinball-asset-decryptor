@@ -1,0 +1,78 @@
+{
+ "clips": {
+  "intro": {
+   "film": "ghi64",
+   "from": 3242.0,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Ghidorah's birth: the flaming shape in a dark blue sky resolves into the golden three-headed dragon, wings spread (one continuous shot)"
+  },
+  "loop": {
+   "film": "gmk01",
+   "from": 4392.9,
+   "length": 14.0,
+   "crop": "fill",
+   "what": "Night, Yokohama in flames: Ghidorah's golden necks weave among burning buildings and power lines, dark orange, starts and ends on necks among flames"
+  },
+  "sever": {
+   "film": "gvkg91",
+   "from": 4663.35,
+   "length": 3.0,
+   "crop": "fill",
+   "what": "Godzilla fires his atomic ray; it slams into Ghidorah's neck in a burst of light and sparks"
+  },
+  "regrow": {
+   "film": "gmk01",
+   "from": 4676.3,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "GMK: Ghidorah re-forms in golden light over the city, wings sweeping up and the three heads rearing"
+  },
+  "won": {
+   "film": "gvkg91",
+   "from": 4746.7,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Godzilla fires his atomic ray; it blasts Ghidorah's wing to pieces and Ghidorah tumbles out of the sky"
+  },
+  "lost": {
+   "film": "ghi64",
+   "from": 5150.8,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "Ghidorah's lightning blasts Godzilla off his feet into smoke, then the three heads fire again"
+  }
+ },
+ "music": {
+  "film": "am65",
+  "from": 1607.37,
+  "length": 14.48,
+  "what": "Akira Ifukube's score, Planet X (bed finder: final 0.833, loop chroma 0.82, 0 untuned blocks)"
+ },
+ "calls": {
+  "sever": {
+   "film": "ghi64",
+   "from": 5379.4,
+   "length": 1.4,
+   "what": "Ghidorah's shriek in the final battle at Mt. Fuji (the game's own Ghidorah screech matches 0.74; a pulsed trill clear of music)"
+  },
+  "won": {
+   "film": "am65",
+   "from": 5484.5,
+   "length": 2.2,
+   "what": "Godzilla's roar in the final fight (harmonic roar cpp 0.38)"
+  },
+  "lost": {
+   "film": "am65",
+   "from": 5601.3,
+   "length": 3.0,
+   "what": "Ghidorah flying off at the end (the game's own Ghidorah flying matches 0.97)"
+  },
+  "regrow": {
+   "film": "ghi64",
+   "from": 4787.1,
+   "length": 1.3,
+   "what": "Ghidorah's trilling cackle in the final battle (the game's own Ghidorah screech matches 0.84; the clearest trill, a 6 dB step at its start)"
+  }
+ }
+}

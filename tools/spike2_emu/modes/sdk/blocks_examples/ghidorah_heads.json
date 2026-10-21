@@ -1,0 +1,3877 @@
+{
+ "name": "KING GHIDORAH",
+ "slug": "ghidorah_heads",
+ "order": 101,
+ "titles": [
+  "godzilla_le"
+ ],
+ "based_on": "ghidorah_heads.c",
+ "about": "The C example KING GHIDORAH rebuilt in blocks: a boss battle with health. The three powerlines in one ball start it; only the lit head (two shots each) takes damage, the lit head turns every 8 s, a wounded head left alone grows back; sever all three and the Maser lands the super jackpot.",
+ "lost": [
+  "The heads' shots have no 250 ms debounce: a ball rattling on a target is several hits (the C counted one hit a quarter second per shot).",
+  "A start from the tab's Start mode now counts as the ball's and the game's start too (the C counted only the three powerlines).",
+  "When a run will not count (it already ran this ball, or twice this game) the powerlines say nothing; the C logged why once.",
+  "The HUD shows a severed head's health as 0, where the C showed X; and in the final blow the left and right counters stay up (0, SEVERED) beside the SUPER JACKPOT counter, where the C hid them.",
+  "Awards say their numbers after the words: LEFT HEAD SEVERED 5,000,000 / +10 SECONDS, where the C put 5,000,000   +10 SECONDS under LEFT HEAD SEVERED.",
+  "The ending title (GHIDORAH DEFEATED or GHIDORAH ESCAPES) and its total stay up 3 s, the runtime's: the C kept them 10 s.",
+  "The ending has no KING GHIDORAH TOTAL under the total: the C put those words there.",
+  "The lit head moves on its own 8 s timer, and moves a tick after a sever (the C moved it in the same tick); its inserts change a tick after a hit too.",
+  "The countdown's 5, 4, 3, 2, 1 callouts are gone (the blocks say only ten seconds and time up).",
+  "For Godzilla Premium/LE only: the C also ran on Godzilla Pro, playing its own shows where the game has no Strobe burst or Colour fade (a Pro 1.15 has none of the game's shows, nor a MASER READY insert); a blocks program cannot ask whether the game has a show. Its own three shows are kept under Light shows (Ghidorah start, Ghidorah won, Ghidorah lost), not run, to swap in.",
+  "The blocks pack keeps its own FINAL WARS ledger in shared variables ('ghidorah played', 'ghidorah won'), which the blocks FINAL WARS reads: the C FINAL WARS does not read them, and the blocks FINAL WARS does not read the C's ledger."
+ ],
+ "program": {
+  "name": "KING GHIDORAH",
+  "seconds": 50,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
+  "vars": [
+   {
+    "name": "pl left",
+    "reset": "ball"
+   },
+   {
+    "name": "pl center",
+    "reset": "ball"
+   },
+   {
+    "name": "pl right",
+    "reset": "ball"
+   },
+   {
+    "name": "ran ball",
+    "reset": "ball"
+   },
+   {
+    "name": "ran game",
+    "reset": "game"
+   },
+   {
+    "name": "ghidorah played",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "ghidorah won",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "hp l",
+    "reset": "mode"
+   },
+   {
+    "name": "hp m",
+    "reset": "mode"
+   },
+   {
+    "name": "hp r",
+    "reset": "mode"
+   },
+   {
+    "name": "lit",
+    "reset": "mode"
+   },
+   {
+    "name": "severed",
+    "reset": "mode"
+   },
+   {
+    "name": "phase",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "cut",
+    "reset": "mode"
+   },
+   {
+    "name": "pace",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "turn"
+   },
+   {
+    "name": "regrow l"
+   },
+   {
+    "name": "regrow m"
+   },
+   {
+    "name": "regrow r"
+   },
+   {
+    "name": "sever"
+   },
+   {
+    "name": "glance"
+   },
+   {
+    "name": "next"
+   },
+   {
+    "name": "lights"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "SHOOT THE LIT HEAD",
+   "counters": [
+    {
+     "label": "LEFT HEAD",
+     "sub": "HEALTH",
+     "value": {
+      "k": "var",
+      "name": "hp l"
+     }
+    },
+    {
+     "label": "MIDDLE HEAD",
+     "sub": "HEALTH",
+     "value": {
+      "k": "op",
+      "op": "+",
+      "a": {
+       "k": "var",
+       "name": "hp m"
+      },
+      "b": {
+       "k": "op",
+       "op": "*",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "op",
+        "op": "+",
+        "a": {
+         "k": "num",
+         "v": 20000000
+        },
+        "b": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 1000000
+         },
+         "b": {
+          "k": "secs_left"
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "label": "RIGHT HEAD",
+     "sub": "HEALTH",
+     "value": {
+      "k": "var",
+      "name": "hp r"
+     }
+    }
+   ],
+   "timer": {
+    "on": true,
+    "label": "GHIDORAH",
+    "icon": "bolt"
+   },
+   "gauge": {
+    "on": true,
+    "label": "SEVERED",
+    "kind": "diamond",
+    "count": 3,
+    "color": "#ffaa00",
+    "value": {
+     "k": "var",
+     "name": "severed"
+    }
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "sever",
+    "file": "sever.mp4"
+   },
+   {
+    "name": "regrow",
+    "file": "regrow.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "sever",
+    "file": "sever.wav",
+    "priority": 3
+   },
+   {
+    "name": "regrow",
+    "file": "regrow.wav",
+    "priority": 3
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   },
+   {
+    "name": "lost",
+    "file": "lost.wav",
+    "priority": 4
+   }
+  ],
+  "music": "music.wav",
+  "shows": [
+   {
+    "name": "Ghidorah start",
+    "steps": [
+     {
+      "fx": "bolts",
+      "ms": 1500,
+      "a": "#ffaf00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 190,
+      "gi": "dark"
+     },
+     {
+      "fx": "strobe",
+      "ms": 500,
+      "a": "#ffffff",
+      "b": "#ffaf00",
+      "at": "center",
+      "rate": 60,
+      "gi": "flash"
+     },
+     {
+      "fx": "burst",
+      "ms": 800,
+      "a": "#ffaf00",
+      "b": "#5a1e00",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#5a1e00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Ghidorah won",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 50,
+      "gi": "flash"
+     },
+     {
+      "fx": "burst",
+      "ms": 700,
+      "a": "#ffffff",
+      "b": "#ffaf00",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 51,
+      "y": 417
+     },
+     {
+      "fx": "rainbow",
+      "ms": 1800,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 60,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#ffaf00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Ghidorah lost",
+    "steps": [
+     {
+      "fx": "sweep_up",
+      "ms": 900,
+      "a": "#ffaf00",
+      "b": "#5a1e00",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_up",
+      "ms": 900,
+      "a": "#ffaf00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sparkle",
+      "ms": 700,
+      "a": "#ffaf00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#5a1e00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline left",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ran ball"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "ran game"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "pl left",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "pl left"
+           },
+           "b": {
+            "k": "var",
+            "name": "pl center"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "pl right"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "pl left"
+             },
+             "b": {
+              "k": "var",
+              "name": "pl center"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "pl right"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "POWERLINES 2 OF 3",
+            "value": null,
+            "sub": "KING GHIDORAH",
+            "seconds": 2
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "POWERLINES 1 OF 3",
+            "value": null,
+            "sub": "KING GHIDORAH",
+            "seconds": 2
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline center",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ran ball"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "ran game"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "pl center",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "pl left"
+           },
+           "b": {
+            "k": "var",
+            "name": "pl center"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "pl right"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "pl left"
+             },
+             "b": {
+              "k": "var",
+              "name": "pl center"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "pl right"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "POWERLINES 2 OF 3",
+            "value": null,
+            "sub": "KING GHIDORAH",
+            "seconds": 2
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "POWERLINES 1 OF 3",
+            "value": null,
+            "sub": "KING GHIDORAH",
+            "seconds": 2
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline right",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ran ball"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "ran game"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "pl right",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "pl left"
+           },
+           "b": {
+            "k": "var",
+            "name": "pl center"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "pl right"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "pl left"
+             },
+             "b": {
+              "k": "var",
+              "name": "pl center"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "pl right"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "POWERLINES 2 OF 3",
+            "value": null,
+            "sub": "KING GHIDORAH",
+            "seconds": 2
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "POWERLINES 1 OF 3",
+            "value": null,
+            "sub": "KING GHIDORAH",
+            "seconds": 2
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "ran ball",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "change",
+      "var": "ran game",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "ghidorah played",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "pl left",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "pl center",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "pl right",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "hp l",
+      "value": {
+       "k": "num",
+       "v": 3
+      }
+     },
+     {
+      "op": "set",
+      "var": "hp m",
+      "value": {
+       "k": "num",
+       "v": 3
+      }
+     },
+     {
+      "op": "set",
+      "var": "hp r",
+      "value": {
+       "k": "num",
+       "v": 3
+      }
+     },
+     {
+      "op": "set",
+      "var": "lit",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "game_show",
+      "name": "Strobe burst"
+     },
+     {
+      "op": "hud_text",
+      "which": "line",
+      "text": "SHOOT THE LEFT HEAD",
+      "value": null
+     },
+     {
+      "op": "hud_award",
+      "text": "GHIDORAH ATTACKS",
+      "value": null,
+      "sub": "SEVER ALL THREE HEADS",
+      "seconds": 3
+     },
+     {
+      "op": "timer_start",
+      "timer": "turn",
+      "ms": {
+       "k": "num",
+       "v": 8000
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "hp l"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
+           "a": {
+            "k": "var",
+            "name": "hp l"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "score",
+            "points": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 1000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hp l"
+             }
+            }
+           },
+           {
+            "op": "set",
+            "var": "hp l",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "set",
+            "var": "cut",
+            "value": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "sever",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "change",
+            "var": "hp l",
+            "by": {
+             "k": "num",
+             "v": -2
+            }
+           },
+           {
+            "op": "score",
+            "points": {
+             "k": "num",
+             "v": 2000000
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "LEFT HEAD -2",
+            "value": null,
+            "sub": "2,000,000",
+            "seconds": 1
+           },
+           {
+            "op": "timer_start",
+            "timer": "regrow l",
+            "ms": {
+             "k": "num",
+             "v": 10000
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "lights",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "score",
+          "points": {
+           "k": "num",
+           "v": 250000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "glance",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "hp m"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
+           "a": {
+            "k": "var",
+            "name": "hp m"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "score",
+            "points": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 1000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hp m"
+             }
+            }
+           },
+           {
+            "op": "set",
+            "var": "hp m",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "set",
+            "var": "cut",
+            "value": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "sever",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "change",
+            "var": "hp m",
+            "by": {
+             "k": "num",
+             "v": -2
+            }
+           },
+           {
+            "op": "score",
+            "points": {
+             "k": "num",
+             "v": 2000000
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "MIDDLE HEAD -2",
+            "value": null,
+            "sub": "2,000,000",
+            "seconds": 1
+           },
+           {
+            "op": "timer_start",
+            "timer": "regrow m",
+            "ms": {
+             "k": "num",
+             "v": 10000
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "lights",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "score",
+          "points": {
+           "k": "num",
+           "v": 250000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "glance",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "hp r"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
+           "a": {
+            "k": "var",
+            "name": "hp r"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "score",
+            "points": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 1000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hp r"
+             }
+            }
+           },
+           {
+            "op": "set",
+            "var": "hp r",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "set",
+            "var": "cut",
+            "value": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "sever",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "change",
+            "var": "hp r",
+            "by": {
+             "k": "num",
+             "v": -2
+            }
+           },
+           {
+            "op": "score",
+            "points": {
+             "k": "num",
+             "v": 2000000
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "RIGHT HEAD -2",
+            "value": null,
+            "sub": "2,000,000",
+            "seconds": 1
+           },
+           {
+            "op": "timer_start",
+            "timer": "regrow r",
+            "ms": {
+             "k": "num",
+             "v": 10000
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "lights",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "score",
+          "points": {
+           "k": "num",
+           "v": 250000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "glance",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "hp l"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
+           "a": {
+            "k": "var",
+            "name": "hp l"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "score",
+            "points": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 1000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hp l"
+             }
+            }
+           },
+           {
+            "op": "set",
+            "var": "hp l",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "set",
+            "var": "cut",
+            "value": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "sever",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "change",
+            "var": "hp l",
+            "by": {
+             "k": "num",
+             "v": -1
+            }
+           },
+           {
+            "op": "score",
+            "points": {
+             "k": "num",
+             "v": 1000000
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "LEFT HEAD -1",
+            "value": null,
+            "sub": "1,000,000",
+            "seconds": 1
+           },
+           {
+            "op": "timer_start",
+            "timer": "regrow l",
+            "ms": {
+             "k": "num",
+             "v": 10000
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "lights",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "score",
+          "points": {
+           "k": "num",
+           "v": 250000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "glance",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "hp m"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
+           "a": {
+            "k": "var",
+            "name": "hp m"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "score",
+            "points": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 1000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hp m"
+             }
+            }
+           },
+           {
+            "op": "set",
+            "var": "hp m",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "set",
+            "var": "cut",
+            "value": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "sever",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "change",
+            "var": "hp m",
+            "by": {
+             "k": "num",
+             "v": -1
+            }
+           },
+           {
+            "op": "score",
+            "points": {
+             "k": "num",
+             "v": 1000000
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "MIDDLE HEAD -1",
+            "value": null,
+            "sub": "1,000,000",
+            "seconds": 1
+           },
+           {
+            "op": "timer_start",
+            "timer": "regrow m",
+            "ms": {
+             "k": "num",
+             "v": 10000
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "lights",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "score",
+          "points": {
+           "k": "num",
+           "v": 250000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "glance",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "hp r"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
+           "a": {
+            "k": "var",
+            "name": "hp r"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "score",
+            "points": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 1000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hp r"
+             }
+            }
+           },
+           {
+            "op": "set",
+            "var": "hp r",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "set",
+            "var": "cut",
+            "value": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "sever",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "change",
+            "var": "hp r",
+            "by": {
+             "k": "num",
+             "v": -1
+            }
+           },
+           {
+            "op": "score",
+            "points": {
+             "k": "num",
+             "v": 1000000
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "RIGHT HEAD -1",
+            "value": null,
+            "sub": "1,000,000",
+            "seconds": 1
+           },
+           {
+            "op": "timer_start",
+            "timer": "regrow r",
+            "ms": {
+             "k": "num",
+             "v": 10000
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "lights",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "score",
+          "points": {
+           "k": "num",
+           "v": 250000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "glance",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "glance"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "lit"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_award",
+        "text": "GLANCING BLOW",
+        "value": null,
+        "sub": "HIT THE LEFT HEAD",
+        "seconds": 1
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "GLANCING BLOW",
+          "value": null,
+          "sub": "HIT THE MIDDLE HEAD",
+          "seconds": 1
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "GLANCING BLOW",
+          "value": null,
+          "sub": "HIT THE RIGHT HEAD",
+          "seconds": 1
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "regrow l"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "hp l"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "hp l"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "hp l",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "LEFT HEAD REGROWS",
+        "value": null,
+        "sub": "FINISH IT BEFORE IT TURNS",
+        "seconds": 2
+       },
+       {
+        "op": "sound",
+        "sound": "regrow",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "regrow",
+        "where": "behind"
+       },
+       {
+        "op": "timer_start",
+        "timer": "regrow l",
+        "ms": {
+         "k": "num",
+         "v": 10000
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "regrow m"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "hp m"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "hp m"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "hp m",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "MIDDLE HEAD REGROWS",
+        "value": null,
+        "sub": "FINISH IT BEFORE IT TURNS",
+        "seconds": 2
+       },
+       {
+        "op": "sound",
+        "sound": "regrow",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "regrow",
+        "where": "behind"
+       },
+       {
+        "op": "timer_start",
+        "timer": "regrow m",
+        "ms": {
+         "k": "num",
+         "v": 10000
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "regrow r"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "hp r"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "hp r"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "hp r",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "RIGHT HEAD REGROWS",
+        "value": null,
+        "sub": "FINISH IT BEFORE IT TURNS",
+        "seconds": 2
+       },
+       {
+        "op": "sound",
+        "sound": "regrow",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "regrow",
+        "where": "behind"
+       },
+       {
+        "op": "timer_start",
+        "timer": "regrow r",
+        "ms": {
+         "k": "num",
+         "v": 10000
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "turn"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "turn",
+        "ms": {
+         "k": "num",
+         "v": 8000
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "next"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "lit"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "hp m"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "lit",
+          "value": {
+           "k": "num",
+           "v": 2
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "hp r"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "lit",
+            "value": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "hp r"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "lit",
+            "value": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp l"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "lit",
+              "value": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "hp l"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "lit",
+            "value": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp m"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "lit",
+              "value": {
+               "k": "num",
+               "v": 2
+              }
+             }
+            ],
+            "else": null
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "lights"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT HEAD",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "lit"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE MIDDLE HEAD",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE RIGHT HEAD",
+            "value": null
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "hp l"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "lights_off",
+        "shot": "Left ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Powerline left"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "SEVERED"
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pace",
+          "value": {
+           "k": "num",
+           "v": 180
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "hp l"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pace",
+            "value": {
+             "k": "num",
+             "v": 400
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "hp l"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pace",
+            "value": {
+             "k": "num",
+             "v": 700
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "light_shot",
+          "shot": "Left ramp",
+          "color": "#ffaa00",
+          "pattern": "blink",
+          "rate": {
+           "k": "var",
+           "name": "pace"
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Powerline left",
+          "color": "#ffaa00",
+          "pattern": "blink",
+          "rate": {
+           "k": "var",
+           "name": "pace"
+          }
+         },
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "var",
+           "name": "hp l"
+          },
+          "sub": ">> LIT <<"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<",
+           "a": {
+            "k": "var",
+            "name": "hp l"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Left ramp",
+            "color": "#00ff3c",
+            "pattern": "pulse",
+            "rate": {
+             "k": "num",
+             "v": 1200
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Powerline left",
+            "color": "#00ff3c",
+            "pattern": "pulse",
+            "rate": {
+             "k": "num",
+             "v": 1200
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "lights_off",
+            "shot": "Left ramp"
+           },
+           {
+            "op": "lights_off",
+            "shot": "Powerline left"
+           }
+          ]
+         },
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "var",
+           "name": "hp l"
+          },
+          "sub": "HEALTH"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "hp m"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "lights_off",
+        "shot": "Building"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Powerline center"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "SEVERED"
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pace",
+          "value": {
+           "k": "num",
+           "v": 180
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "hp m"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pace",
+            "value": {
+             "k": "num",
+             "v": 400
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "hp m"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pace",
+            "value": {
+             "k": "num",
+             "v": 700
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "light_shot",
+          "shot": "Building",
+          "color": "#ffaa00",
+          "pattern": "blink",
+          "rate": {
+           "k": "var",
+           "name": "pace"
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Powerline center",
+          "color": "#ffaa00",
+          "pattern": "blink",
+          "rate": {
+           "k": "var",
+           "name": "pace"
+          }
+         },
+         {
+          "op": "hud_counter",
+          "counter": 2,
+          "value": {
+           "k": "var",
+           "name": "hp m"
+          },
+          "sub": ">> LIT <<"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<",
+           "a": {
+            "k": "var",
+            "name": "hp m"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Building",
+            "color": "#00ff3c",
+            "pattern": "pulse",
+            "rate": {
+             "k": "num",
+             "v": 1200
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Powerline center",
+            "color": "#00ff3c",
+            "pattern": "pulse",
+            "rate": {
+             "k": "num",
+             "v": 1200
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "lights_off",
+            "shot": "Building"
+           },
+           {
+            "op": "lights_off",
+            "shot": "Powerline center"
+           }
+          ]
+         },
+         {
+          "op": "hud_counter",
+          "counter": 2,
+          "value": {
+           "k": "var",
+           "name": "hp m"
+          },
+          "sub": "HEALTH"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "hp r"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "lights_off",
+        "shot": "Right ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Powerline right"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "SEVERED"
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "lit"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pace",
+          "value": {
+           "k": "num",
+           "v": 180
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "hp r"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pace",
+            "value": {
+             "k": "num",
+             "v": 400
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "hp r"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pace",
+            "value": {
+             "k": "num",
+             "v": 700
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "light_shot",
+          "shot": "Right ramp",
+          "color": "#ffaa00",
+          "pattern": "blink",
+          "rate": {
+           "k": "var",
+           "name": "pace"
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Powerline right",
+          "color": "#ffaa00",
+          "pattern": "blink",
+          "rate": {
+           "k": "var",
+           "name": "pace"
+          }
+         },
+         {
+          "op": "hud_counter",
+          "counter": 3,
+          "value": {
+           "k": "var",
+           "name": "hp r"
+          },
+          "sub": ">> LIT <<"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<",
+           "a": {
+            "k": "var",
+            "name": "hp r"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Right ramp",
+            "color": "#00ff3c",
+            "pattern": "pulse",
+            "rate": {
+             "k": "num",
+             "v": 1200
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Powerline right",
+            "color": "#00ff3c",
+            "pattern": "pulse",
+            "rate": {
+             "k": "num",
+             "v": 1200
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "lights_off",
+            "shot": "Right ramp"
+           },
+           {
+            "op": "lights_off",
+            "shot": "Powerline right"
+           }
+          ]
+         },
+         {
+          "op": "hud_counter",
+          "counter": 3,
+          "value": {
+           "k": "var",
+           "name": "hp r"
+          },
+          "sub": "HEALTH"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "sever"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "severed",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "score",
+      "points": {
+       "k": "op",
+       "op": "*",
+       "a": {
+        "k": "num",
+        "v": 5000000
+       },
+       "b": {
+        "k": "var",
+        "name": "severed"
+       }
+      }
+     },
+     {
+      "op": "sound",
+      "sound": "sever",
+      "fallback": ""
+     },
+     {
+      "op": "clip",
+      "clip": "sever",
+      "where": "behind"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "severed"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "phase",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        }
+       },
+       {
+        "op": "timer_stop",
+        "timer": "turn"
+       },
+       {
+        "op": "hud_award",
+        "text": "ALL HEADS SEVERED",
+        "value": null,
+        "sub": "FINAL BLOW: THE MASER",
+        "seconds": 3
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "FINAL BLOW: SHOOT THE MASER",
+        "value": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 20000000
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 1000000
+          },
+          "b": {
+           "k": "secs_left"
+          }
+         }
+        },
+        "sub": "MASER TARGET",
+        "label": "SUPER JACKPOT"
+       },
+       {
+        "op": "light_shot",
+        "shot": "Maser target",
+        "color": "#ffffff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 150
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "MASER READY",
+        "color": "#ffffff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 150
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "add_time",
+        "seconds": {
+         "k": "num",
+         "v": 10
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "turn",
+        "ms": {
+         "k": "num",
+         "v": 8000
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "cut"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "LEFT HEAD SEVERED",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 5000000
+           },
+           "b": {
+            "k": "var",
+            "name": "severed"
+           }
+          },
+          "sub": "+10 SECONDS",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "cut"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "MIDDLE HEAD SEVERED",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 5000000
+           },
+           "b": {
+            "k": "var",
+            "name": "severed"
+           }
+          },
+          "sub": "+10 SECONDS",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "cut"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "RIGHT HEAD SEVERED",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 5000000
+           },
+           "b": {
+            "k": "var",
+            "name": "severed"
+           }
+          },
+          "sub": "+10 SECONDS",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ]
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "seconds_left",
+     "seconds": 5
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Maser target",
+        "color": "#ffffff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 80
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "MASER READY",
+        "color": "#ffffff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 80
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Maser target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 20000000
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 1000000
+          },
+          "b": {
+           "k": "secs_left"
+          }
+         }
+        }
+       },
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "ghidorah won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "won",
+        "fallback": ""
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "seconds_left",
+     "seconds": 10
+    },
+    "do": [
+     {
+      "op": "callout",
+      "role": "ten_seconds"
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "timer_stop",
+      "timer": "turn"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "regrow l"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "regrow m"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "regrow r"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "sever"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "glance"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "next"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "lights"
+     },
+     {
+      "op": "lights_off",
+      "insert": "MASER READY"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "secs_left"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "sound",
+        "sound": "lost",
+        "fallback": "time_up"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "won"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "GHIDORAH DEFEATED",
+        "value": null
+       }
+      ],
+      "else": [
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "GHIDORAH ESCAPES",
+        "value": null
+       }
+      ]
+     },
+     {
+      "op": "game_show",
+      "name": "Colour fade"
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "ghi64",
+    "from": 3242.0,
+    "length": 6.0,
+    "crop": "fill",
+    "what": "Ghidorah's birth: the flaming shape in a dark blue sky resolves into the golden three-headed dragon, wings spread (one continuous shot)"
+   },
+   "loop": {
+    "film": "gmk01",
+    "from": 4392.9,
+    "length": 14.0,
+    "crop": "fill",
+    "what": "Night, Yokohama in flames: Ghidorah's golden necks weave among burning buildings and power lines, dark orange, starts and ends on necks among flames"
+   },
+   "sever": {
+    "film": "gvkg91",
+    "from": 4663.35,
+    "length": 3.0,
+    "crop": "fill",
+    "what": "Godzilla fires his atomic ray; it slams into Ghidorah's neck in a burst of light and sparks"
+   },
+   "regrow": {
+    "film": "gmk01",
+    "from": 4676.3,
+    "length": 3.5,
+    "crop": "fill",
+    "what": "GMK: Ghidorah re-forms in golden light over the city, wings sweeping up and the three heads rearing"
+   },
+   "won": {
+    "film": "gvkg91",
+    "from": 4746.7,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Godzilla fires his atomic ray; it blasts Ghidorah's wing to pieces and Ghidorah tumbles out of the sky"
+   },
+   "lost": {
+    "film": "ghi64",
+    "from": 5150.8,
+    "length": 3.5,
+    "crop": "fill",
+    "what": "Ghidorah's lightning blasts Godzilla off his feet into smoke, then the three heads fire again"
+   }
+  },
+  "music": {
+   "film": "am65",
+   "from": 1607.37,
+   "length": 14.48,
+   "what": "Akira Ifukube's score, Planet X (bed finder: final 0.833, loop chroma 0.82, 0 untuned blocks)"
+  },
+  "calls": {
+   "sever": {
+    "film": "ghi64",
+    "from": 5379.4,
+    "length": 1.4,
+    "what": "Ghidorah's shriek in the final battle at Mt. Fuji (the game's own Ghidorah screech matches 0.74; a pulsed trill clear of music)"
+   },
+   "won": {
+    "film": "am65",
+    "from": 5484.5,
+    "length": 2.2,
+    "what": "Godzilla's roar in the final fight (harmonic roar cpp 0.38)"
+   },
+   "lost": {
+    "film": "am65",
+    "from": 5601.3,
+    "length": 3.0,
+    "what": "Ghidorah flying off at the end (the game's own Ghidorah flying matches 0.97)"
+   },
+   "regrow": {
+    "film": "ghi64",
+    "from": 4787.1,
+    "length": 1.3,
+    "what": "Ghidorah's trilling cackle in the final battle (the game's own Ghidorah screech matches 0.84; the clearest trill, a 6 dB step at its start)"
+   }
+  }
+ }
+}

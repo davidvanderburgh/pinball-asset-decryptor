@@ -1,0 +1,1844 @@
+{
+ "name": "OXYGEN DESTROYER",
+ "slug": "oxygen_destroyer",
+ "order": 102,
+ "titles": [
+  "godzilla_le"
+ ],
+ "based_on": "oxygen_destroyer.c",
+ "about": "The C example OXYGEN DESTROYER rebuilt in blocks: a hurry-up with a super jackpot. 25 Left spinner spins start it; 20,000,000 drains away over 25 s, the Left ramp collects it, the Godzilla target holds it off, and the Right ramp delivers it for double.",
+ "lost": [
+  "The value falls on a timer the blocks keep in milliseconds, but the clock the HUD badge shows is whole seconds: a hold-off puts the clock to the next whole second above the value's time (the C counted both from one drain, and a stalled frame drained at most 100 ms).",
+  "The Godzilla target has no 250 ms debounce: a ball rattling on the captive ball can use up two hold-offs (the C counted one hit a quarter second).",
+  "The Left ramp blinks faster as the mode's clock runs down (the blocks' Hurry pattern) and changes colour once a second; the C's blink followed the value itself, every tick, with a flicker in the last 3 s.",
+  "The HUD keeps one counter: HURRY-UP, then SUPER JACKPOT; the C showed a COLLECTED counter beside it in the super jackpot (a counter the HUD does not have from the start cannot appear later). Its gauge is one blue, where the C's ten segments went from deep to pale blue, and a note says SPINS TO GO 24 where the C said 24 SPINS TO GO.",
+  "The ending title (GODZILLA IS GONE, OXYGEN DESTROYER or THE OXYGEN IS GONE) and its total stay up 3 s, the runtime's: the C kept them 10 s.",
+  "The ending has no OXYGEN DESTROYER TOTAL under the total: the C put those words there.",
+  "The cooldown is 15 s on a timer that a new ball clears (the C kept each player's own across balls), and a start from the tab's Start mode now counts toward the 3 a game.",
+  "The countdown's 5, 4, 3, 2, 1 callouts are gone (the blocks say only ten seconds and time up).",
+  "For Godzilla Premium/LE only: the C also ran on Godzilla Pro, playing its own shows where the game has no Playfield wave or Blue fade (a Pro 1.15 has none of the game's shows, a Pro 1.16 no Playfield wave); a blocks program cannot ask whether the game has a show. Its own three shows are kept under Light shows (Oxygen start, Oxygen won, Oxygen lost), not run, to swap in.",
+  "The blocks pack keeps its own FINAL WARS ledger in shared variables ('oxygen played', 'oxygen won'), which the blocks FINAL WARS reads: the C FINAL WARS does not read them, and the blocks FINAL WARS does not read the C's ledger."
+ ],
+ "program": {
+  "name": "OXYGEN DESTROYER",
+  "seconds": 25,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
+  "vars": [
+   {
+    "name": "spins",
+    "reset": "ball"
+   },
+   {
+    "name": "cooling",
+    "reset": "ball"
+   },
+   {
+    "name": "ran game",
+    "reset": "game"
+   },
+   {
+    "name": "oxygen played",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "oxygen won",
+    "reset": "game",
+    "shared": true
+   },
+   {
+    "name": "phase",
+    "reset": "mode"
+   },
+   {
+    "name": "holds",
+    "reset": "mode"
+   },
+   {
+    "name": "collected",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "gone",
+    "reset": "mode"
+   },
+   {
+    "name": "t",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "oxygen"
+   },
+   {
+    "name": "cool"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "SHOOT THE LEFT RAMP",
+   "counters": [
+    {
+     "label": "",
+     "sub": "",
+     "value": null
+    },
+    {
+     "label": "HURRY-UP",
+     "sub": "LEFT RAMP",
+     "value": {
+      "k": "op",
+      "op": "+",
+      "a": {
+       "k": "op",
+       "op": "*",
+       "a": {
+        "k": "op",
+        "op": "/",
+        "a": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "timer_left",
+          "timer": "oxygen"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "b": {
+         "k": "num",
+         "v": 25
+        }
+       },
+       "b": {
+        "k": "num",
+        "v": 10000
+       }
+      },
+      "b": {
+       "k": "op",
+       "op": "*",
+       "a": {
+        "k": "var",
+        "name": "collected"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      }
+     }
+    },
+    {
+     "label": "",
+     "sub": "",
+     "value": null
+    }
+   ],
+   "timer": {
+    "on": true,
+    "label": "OXYGEN",
+    "icon": "oxygen"
+   },
+   "gauge": {
+    "on": true,
+    "label": "OXYGEN",
+    "kind": "segment",
+    "count": 10,
+    "color": "#00aaff",
+    "value": {
+     "k": "op",
+     "op": "+",
+     "a": {
+      "k": "op",
+      "op": "/",
+      "a": {
+       "k": "op",
+       "op": "+",
+       "a": {
+        "k": "timer_left",
+        "timer": "oxygen"
+       },
+       "b": {
+        "k": "num",
+        "v": 2499
+       }
+      },
+      "b": {
+       "k": "num",
+       "v": 2500
+      }
+     },
+     "b": {
+      "k": "op",
+      "op": "*",
+      "a": {
+       "k": "var",
+       "name": "phase"
+      },
+      "b": {
+       "k": "num",
+       "v": 10
+      }
+     }
+    }
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "collect",
+    "file": "collect.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "collect",
+    "file": "collect.wav",
+    "priority": 3
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   },
+   {
+    "name": "lost",
+    "file": "lost.wav",
+    "priority": 4
+   }
+  ],
+  "music": "music.wav",
+  "shows": [
+   {
+    "name": "Oxygen start",
+    "steps": [
+     {
+      "fx": "sparkle",
+      "ms": 900,
+      "a": "#3cdcff",
+      "b": "#001446",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_up",
+      "ms": 900,
+      "a": "#ffffff",
+      "b": "#001446",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_up",
+      "ms": 800,
+      "a": "#3cdcff",
+      "b": "#001446",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "pulse",
+      "ms": 900,
+      "a": "#3cdcff",
+      "b": "#001446",
+      "at": "center",
+      "rate": 220,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Oxygen won",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 60,
+      "gi": "flash"
+     },
+     {
+      "fx": "burst",
+      "ms": 900,
+      "a": "#ffffff",
+      "b": "#3cdcff",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 89,
+      "y": 260
+     },
+     {
+      "fx": "sparkle",
+      "ms": 1200,
+      "a": "#ffffff",
+      "b": "#001446",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 900,
+      "a": "#3cdcff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Oxygen lost",
+    "steps": [
+     {
+      "fx": "sweep_down",
+      "ms": 900,
+      "a": "#3cdcff",
+      "b": "#001446",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "pulse",
+      "ms": 900,
+      "a": "#ff0000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 300,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 600,
+      "a": "#001446",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left spinner",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "ran game"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cooling"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "var",
+          "name": "spins"
+         },
+         "b": {
+          "k": "num",
+          "v": 25
+         }
+        },
+        "then": [
+         {
+          "op": "change",
+          "var": "spins",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "spins"
+         },
+         "b": {
+          "k": "num",
+          "v": 25
+         }
+        },
+        "then": [
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "spins"
+           },
+           "b": {
+            "k": "num",
+            "v": 24
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "1 SPIN TO GO",
+            "value": null,
+            "sub": "OXYGEN DESTROYER",
+            "seconds": 2
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "SPINS TO GO",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "num",
+              "v": 25
+             },
+             "b": {
+              "k": "var",
+              "name": "spins"
+             }
+            },
+            "sub": "OXYGEN DESTROYER",
+            "seconds": 2
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "spins",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "change",
+      "var": "ran game",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "oxygen played",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "oxygen",
+      "ms": {
+       "k": "num",
+       "v": 25000
+      }
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "game_show",
+      "name": "Playfield wave"
+     },
+     {
+      "op": "hud_award",
+      "text": "OXYGEN DESTROYER",
+      "value": null,
+      "sub": "COLLECT IT BEFORE IT IS GONE",
+      "seconds": 3
+     },
+     {
+      "op": "hud_text",
+      "which": "line",
+      "text": "LEFT RAMP COLLECTS - CAPTIVE BALL HOLDS",
+      "value": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "holds"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "op",
+          "op": "/",
+          "a": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "timer_left",
+            "timer": "oxygen"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 25
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 10000
+         }
+        },
+        "sub": "3 HOLD-OFFS LEFT"
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "holds"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 2,
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "/",
+            "a": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "timer_left",
+              "timer": "oxygen"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 25
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 10000
+           }
+          },
+          "sub": "2 HOLD-OFFS LEFT"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "holds"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_counter",
+            "counter": 2,
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "/",
+              "a": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "timer_left",
+                "timer": "oxygen"
+               },
+               "b": {
+                "k": "num",
+                "v": 2
+               }
+              },
+              "b": {
+               "k": "num",
+               "v": 25
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 10000
+             }
+            },
+            "sub": "1 HOLD-OFF LEFT"
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_counter",
+            "counter": 2,
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "/",
+              "a": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "timer_left",
+                "timer": "oxygen"
+               },
+               "b": {
+                "k": "num",
+                "v": 2
+               }
+              },
+              "b": {
+               "k": "num",
+               "v": 25
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 10000
+             }
+            },
+            "sub": "0 HOLD-OFFS LEFT"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "light_shot",
+      "shot": "Left ramp",
+      "color": "#00ff3c",
+      "pattern": "hurry"
+     },
+     {
+      "op": "light_shot",
+      "shot": "Godzilla target",
+      "color": "#ffffff",
+      "pattern": "pulse",
+      "rate": {
+       "k": "num",
+       "v": 1000
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "/",
+            "a": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "timer_left",
+              "timer": "oxygen"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 25
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 10000
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 40000000
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Left ramp",
+          "color": "#00ff3c",
+          "pattern": "hurry"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "/",
+              "a": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "timer_left",
+                "timer": "oxygen"
+               },
+               "b": {
+                "k": "num",
+                "v": 2
+               }
+              },
+              "b": {
+               "k": "num",
+               "v": 25
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 10000
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 20000000
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Left ramp",
+            "color": "#ffc800",
+            "pattern": "hurry"
+           }
+          ],
+          "else": [
+           {
+            "op": "light_shot",
+            "shot": "Left ramp",
+            "color": "#ff0000",
+            "pattern": "hurry"
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Godzilla target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "holds"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "holds",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "t",
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "timer_left",
+          "timer": "oxygen"
+         },
+         "b": {
+          "k": "num",
+          "v": 2000
+         }
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "t"
+         },
+         "b": {
+          "k": "num",
+          "v": 25000
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "t",
+          "value": {
+           "k": "num",
+           "v": 25000
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "oxygen",
+        "ms": {
+         "k": "var",
+         "name": "t"
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "var",
+           "name": "t"
+          },
+          "b": {
+           "k": "num",
+           "v": 999
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 1000
+         }
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "HELD OFF",
+        "value": null,
+        "sub": "+2 SECONDS",
+        "seconds": 1
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "holds"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 2,
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "/",
+            "a": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "timer_left",
+              "timer": "oxygen"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 25
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 10000
+           }
+          },
+          "sub": "3 HOLD-OFFS LEFT"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "holds"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_counter",
+            "counter": 2,
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "/",
+              "a": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "timer_left",
+                "timer": "oxygen"
+               },
+               "b": {
+                "k": "num",
+                "v": 2
+               }
+              },
+              "b": {
+               "k": "num",
+               "v": 25
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 10000
+             }
+            },
+            "sub": "2 HOLD-OFFS LEFT"
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "holds"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "hud_counter",
+              "counter": 2,
+              "value": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "timer_left",
+                  "timer": "oxygen"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 2
+                 }
+                },
+                "b": {
+                 "k": "num",
+                 "v": 25
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 10000
+               }
+              },
+              "sub": "1 HOLD-OFF LEFT"
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_counter",
+              "counter": 2,
+              "value": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "timer_left",
+                  "timer": "oxygen"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 2
+                 }
+                },
+                "b": {
+                 "k": "num",
+                 "v": 25
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 10000
+               }
+              },
+              "sub": "0 HOLD-OFFS LEFT"
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "holds"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "lights_off",
+          "shot": "Godzilla target"
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "op",
+          "op": "/",
+          "a": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "timer_left",
+            "timer": "oxygen"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 25
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 10000
+         }
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "collected",
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "op",
+          "op": "/",
+          "a": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "timer_left",
+            "timer": "oxygen"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 25
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 10000
+         }
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "collected"
+        }
+       },
+       {
+        "op": "set",
+        "var": "phase",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_stop",
+        "timer": "oxygen"
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 12
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Left ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Godzilla target"
+       },
+       {
+        "op": "light_shot",
+        "shot": "Right ramp",
+        "color": "#ffffff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 150
+        }
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "SUPER JACKPOT: SHOOT THE RIGHT RAMP",
+        "value": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "var",
+          "name": "collected"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "sub": "RIGHT RAMP",
+        "label": "SUPER JACKPOT"
+       },
+       {
+        "op": "hud_award",
+        "text": "COLLECTED",
+        "value": {
+         "k": "var",
+         "name": "collected"
+        },
+        "sub": "DOUBLE IT AT THE RIGHT RAMP",
+        "seconds": 3
+       },
+       {
+        "op": "sound",
+        "sound": "collect",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "collect",
+        "where": "behind"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "oxygen"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "gone",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "var",
+          "name": "collected"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        }
+       },
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "oxygen won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "won",
+        "fallback": ""
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "seconds_left",
+     "seconds": 3
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Right ramp",
+        "color": "#ffffff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 80
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "seconds_left",
+     "seconds": 10
+    },
+    "do": [
+     {
+      "op": "callout",
+      "role": "ten_seconds"
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "timer_stop",
+      "timer": "oxygen"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "cool"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "gone"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "secs_left"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "sound",
+        "sound": "lost",
+        "fallback": "time_up"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "won"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "GODZILLA IS GONE",
+        "value": null
+       }
+      ],
+      "else": [
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "collected"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "OXYGEN DESTROYER",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "THE OXYGEN IS GONE",
+          "value": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "game_show",
+      "name": "Blue fade"
+     },
+     {
+      "op": "set",
+      "var": "cooling",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "cool",
+      "ms": {
+       "k": "num",
+       "v": 15000
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "cool"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "cooling",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "g54",
+    "from": 5497.3,
+    "length": 5.5,
+    "crop": "fill",
+    "what": "The Oxygen Destroyer canister on the sea bed, beginning to fizz and bubble (one shot)"
+   },
+   "loop": {
+    "film": "g54",
+    "from": 5316.4,
+    "length": 13.0,
+    "crop": "fill",
+    "what": "Murky underwater depths: a diver sinks slowly through grey gloom, fish drift past (one continuous shot, dark and even)"
+   },
+   "collect": {
+    "film": "g54",
+    "from": 5503.9,
+    "length": 2.4,
+    "crop": "fill",
+    "what": "The device goes off: a column of bubbles erupts from the sea bed (one shot)"
+   },
+   "won": {
+    "film": "g54",
+    "from": 5655.5,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "On the sea bed Godzilla's body dissolves to a skeleton, which fades away (one shot)"
+   },
+   "lost": {
+    "film": "g54",
+    "from": 5616.1,
+    "length": 4.5,
+    "crop": "fill",
+    "what": "Godzilla surges up out of the sea, roaring (one shot)"
+   }
+  },
+  "music": {
+   "film": "des95",
+   "from": 5852.394,
+   "length": 14.4,
+   "what": "Destoroyah's score near the end (bed finder: final 0.820, 1 of 30 blocks untuned)"
+  },
+  "calls": {
+   "collect": {
+    "film": "g54",
+    "from": 5502.0,
+    "length": 2.5,
+    "what": "the Oxygen Destroyer starting on the sea bed (the frames: it glows at 1:31:42, its bubbles erupt at 1:31:44)"
+   },
+   "won": {
+    "film": "g54",
+    "from": 5616.8,
+    "length": 3.0,
+    "what": "Godzilla's last roar as it surfaces (harmonic roar, -15 dB, the loudest in the scene)"
+   },
+   "lost": {
+    "film": "g54",
+    "from": 3391.9,
+    "length": 3.0,
+    "what": "Godzilla's roar in the Tokyo rampage (the game's own 1954 roar matches 0.86)"
+   }
+  }
+ }
+}

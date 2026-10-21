@@ -1,0 +1,110 @@
+{
+ "clips": {
+  "intro": {
+   "film": "amg02",
+   "from": 3741.25,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "Kiryu's face at night against an orange sky, its eyes light up yellow and the head turns as it comes online, 1:02:21.2."
+  },
+  "loop": {
+   "film": "amg02",
+   "from": 2722.0,
+   "length": 9.0,
+   "crop": "fill",
+   "what": "Kiryu's head in profile against the sunset sky, red eye glowing, almost still, 0:45:22.0."
+  },
+  "charge": {
+   "film": "amg02",
+   "from": 4139.0,
+   "length": 3.7,
+   "crop": "fill",
+   "what": "Kiryu faces the camera in the night city as the Absolute Zero cannon in its chest glows orange then blue white, 1:08:59.0."
+  },
+  "ready": {
+   "film": "amg02",
+   "from": 2472.0,
+   "length": 3.6,
+   "crop": "fill",
+   "what": "Close-up of Kiryu's twin shoulder cannons, the camera rising to its head against a blue sky, 0:41:12.0."
+  },
+  "fire": {
+   "film": "amg02",
+   "from": 4149.95,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "A run of quick shots: the Absolute Zero beam fires and streaks blue white across the night city, 1:09:09.9."
+  },
+  "overheat": {
+   "film": "amg02",
+   "from": 2516.9,
+   "length": 3.6,
+   "crop": "fill",
+   "what": "Kiryu stands engulfed in fireballs and billowing smoke, 0:41:56.9."
+  },
+  "won": {
+   "film": "amg02",
+   "from": 4742.2,
+   "length": 5.8,
+   "crop": "fill",
+   "what": "Wounded Godzilla stands in the frozen sea at dusk as ice falls around him and he roars in pain, 1:19:02.2."
+  },
+  "lost": {
+   "film": "amg02",
+   "from": 2731.0,
+   "length": 4.2,
+   "crop": "fill",
+   "what": "Close on Kiryu's head at sunset as its red eye fades out and the machine goes dead, 0:45:31.0."
+  }
+ },
+ "music": {
+  "film": "amg02",
+  "from": 5067.248,
+  "length": 11.33,
+  "what": "End-credits orchestral score by Michiru Oshima, a repeating phrase over a steady pulse with no dialogue or effects, 1:24:27.2."
+ },
+ "calls": {
+  "charge": {
+   "film": "amg02",
+   "from": 4660.2,
+   "length": 1.95,
+   "what": "A rising rush of energy as Kiryu's chest cannon charges at dusk, peaking and falling away, 1:17:40.2.",
+   "priority": 3
+  },
+  "ready": {
+   "film": "amg02",
+   "from": 3802.4,
+   "length": 2.1,
+   "what": "Kiryu's mechanical blast with a high metallic whine as it squares up to Godzilla at night, 1:03:22.4.",
+   "priority": 4
+  },
+  "fire": {
+   "film": "amg02",
+   "from": 4149.1,
+   "length": 2.75,
+   "what": "The Absolute Zero cannon fires, a hissing blast and a second burst as the beam crosses the city, 1:09:09.1.",
+   "priority": 4
+  },
+  "overheat": {
+   "film": "amg02",
+   "from": 4155.2,
+   "length": 2.15,
+   "what": "Crackling electric discharge with a falling whine after the Absolute Zero shot, 1:09:15.2.",
+   "priority": 3
+  },
+  "won": {
+   "film": "amg02",
+   "from": 4697.4,
+   "length": 2.35,
+   "what": "A rushing whoosh and the huge booming eruption as the Absolute Zero blast freezes the sea, 1:18:17.4.",
+   "priority": 4
+  },
+  "lost": {
+   "film": "amg02",
+   "from": 2398.3,
+   "length": 2.3,
+   "what": "Godzilla's roar, the cry that sends Kiryu out of control, 0:39:58.3.",
+   "priority": 4
+  }
+ }
+}

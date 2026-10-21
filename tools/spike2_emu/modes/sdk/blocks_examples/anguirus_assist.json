@@ -1,0 +1,1491 @@
+{
+ "name": "ANGUIRUS",
+ "slug": "anguirus_assist",
+ "order": 105,
+ "titles": [
+  "godzilla_le"
+ ],
+ "based_on": "anguirus_assist.c",
+ "about": "The C example ANGUIRUS rebuilt in blocks: he joins the game's own battle and leaves with it; the three shields charge his spikes, then the Big loop is a rolling attack that doubles to 16M.",
+ "lost": [
+  "He joins on the first shot after one of the game's own modes begins (blocks only look at a shot), where the C looked twice a second; and blocks cannot tell a battle from the game's other modes: he joins any of its modes while one ball is in play (its multiballs are left out), where the C joined only kaiju battles.",
+  "He leaves within a second of the game's mode ending (an Every second check) and his total shows at once for 3 s; the C waited for the battle's own total screen first, then kept his 4 s in view.",
+  "As he leaves with the battle, ANGUIRUS TOTAL is the title over his total: the C put it under the total, with no title.",
+  "Ended while the battle still runs (a stop, another of our modes), his total shows alone: the C put ANGUIRUS RETREATS under it. His HUD's title and line are the battle's while it runs, so a title block cannot say it.",
+  "His screen is not shared in moments: with the HUD on he holds display priority 180 the whole time he runs, where the C held it only for each moment (entrance, a spike, the roll, a rolling attack) and gave the battle its own displays between them.",
+  "His entrance (clip, music, words) comes a fixed 2 s after he joins; the C waited until the battle's start screen had gone (up to 12 s). His music starts as he joins, not with the entrance.",
+  "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls.",
+  "The Big loop's blink quickens once a second (400, 200, 100 ms), where the C stepped it every tick.",
+  "Godzilla LE only: the program names the center shield target; the C charged with two spikes on Godzilla Pro 1.15/1.16's two shields.",
+  "The C's total gave way at once when another of our modes asked to start; the blocks' runtime TOTAL runs its 3 s."
+ ],
+ "program": {
+  "name": "ANGUIRUS",
+  "seconds": 0,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "stack",
+  "wait_multiball": false,
+  "priority": 0,
+  "vars": [
+   {
+    "name": "joined",
+    "reset": "game"
+   },
+   {
+    "name": "rolling",
+    "reset": "mode"
+   },
+   {
+    "name": "roll value",
+    "reset": "mode"
+   },
+   {
+    "name": "rolls",
+    "reset": "mode"
+   },
+   {
+    "name": "entered",
+    "reset": "mode"
+   },
+   {
+    "name": "spike l",
+    "reset": "mode"
+   },
+   {
+    "name": "spike c",
+    "reset": "mode"
+   },
+   {
+    "name": "spike r",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "enter"
+   },
+   {
+    "name": "roll"
+   },
+   {
+    "name": "charged"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "",
+   "counters": [
+    {
+     "label": "",
+     "sub": "",
+     "value": null
+    },
+    {
+     "label": "",
+     "sub": "",
+     "value": null
+    },
+    {
+     "label": "",
+     "sub": "",
+     "value": null
+    }
+   ],
+   "timer": {
+    "on": false,
+    "label": "",
+    "icon": "xilien"
+   },
+   "gauge": {
+    "on": true,
+    "label": "SPIKES",
+    "kind": "spike",
+    "count": 3,
+    "color": "#ff7800",
+    "value": {
+     "k": "op",
+     "op": "+",
+     "a": {
+      "k": "op",
+      "op": "+",
+      "a": {
+       "k": "var",
+       "name": "spike l"
+      },
+      "b": {
+       "k": "var",
+       "name": "spike c"
+      }
+     },
+     "b": {
+      "k": "var",
+      "name": "spike r"
+     }
+    }
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "spike",
+    "file": "spike.mp4"
+   },
+   {
+    "name": "roll",
+    "file": "roll.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "spike",
+    "file": "spike.wav",
+    "priority": 3
+   },
+   {
+    "name": "roll",
+    "file": "roll.wav",
+    "priority": 3
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   }
+  ],
+  "music": "music.wav",
+  "shows": [
+   {
+    "name": "He enters",
+    "steps": [
+     {
+      "fx": "burst",
+      "ms": 700,
+      "a": "#ffffff",
+      "b": "#ff6e00",
+      "at": "xy",
+      "rate": 0,
+      "gi": "flash",
+      "x": 199,
+      "y": 346
+     },
+     {
+      "fx": "spin",
+      "ms": 1400,
+      "a": "#ff6e00",
+      "b": "#501900",
+      "at": "xy",
+      "rate": 90,
+      "gi": "keep",
+      "x": 199,
+      "y": 346
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#ff6e00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Rolling attack",
+    "steps": [
+     {
+      "fx": "chase",
+      "ms": 900,
+      "a": "#00e6ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 40,
+      "gi": "keep"
+     },
+     {
+      "fx": "burst",
+      "ms": 500,
+      "a": "#ffffff",
+      "b": "#00e6ff",
+      "at": "top",
+      "rate": 0,
+      "gi": "flash"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "He rolled",
+    "steps": [
+     {
+      "fx": "burst",
+      "ms": 800,
+      "a": "#ffffff",
+      "b": "#ff6e00",
+      "at": "center",
+      "rate": 0,
+      "gi": "flash"
+     },
+     {
+      "fx": "rainbow",
+      "ms": 1600,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 60,
+      "gi": "keep",
+      "x": 199,
+      "y": 346
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#ff6e00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Embers",
+    "steps": [
+     {
+      "fx": "sparkle",
+      "ms": 900,
+      "a": "#ff6e00",
+      "b": "#501900",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 800,
+      "a": "#501900",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "any_shot",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "stock"
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "joined"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "joined",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": [
+       {
+        "op": "set",
+        "var": "joined",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "joined",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "rolling",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "rolls",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "entered",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "spike l",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "spike c",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "spike r",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "spike l"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target left",
+        "color": "#ff5000",
+        "pattern": "solid"
+       }
+      ],
+      "else": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target left",
+        "color": "#ff5000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 400
+        }
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "spike c"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target center",
+        "color": "#ff5000",
+        "pattern": "solid"
+       }
+      ],
+      "else": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target center",
+        "color": "#ff5000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 400
+        }
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "spike r"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target right",
+        "color": "#ff5000",
+        "pattern": "solid"
+       }
+      ],
+      "else": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target right",
+        "color": "#ff5000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 400
+        }
+       }
+      ]
+     },
+     {
+      "op": "timer_start",
+      "timer": "enter",
+      "ms": {
+       "k": "num",
+       "v": 2000
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "enter"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "running"
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "entered",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "intro",
+        "where": "full"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "He enters"
+       },
+       {
+        "op": "hud_award",
+        "text": "ANGUIRUS JOINS",
+        "value": null,
+        "sub": "SHIELDS CHARGE HIS SPIKES",
+        "seconds": 3
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "rolling"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "spike l"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "spike l",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 500000
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "spike",
+        "fallback": ""
+       },
+       {
+        "op": "light_shot",
+        "shot": "Shield target left",
+        "color": "#ff5000",
+        "pattern": "solid"
+       },
+       {
+        "op": "timer_start",
+        "timer": "charged",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "rolling"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "spike c"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "spike c",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 500000
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "spike",
+        "fallback": ""
+       },
+       {
+        "op": "light_shot",
+        "shot": "Shield target center",
+        "color": "#ff5000",
+        "pattern": "solid"
+       },
+       {
+        "op": "timer_start",
+        "timer": "charged",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "rolling"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "spike r"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "spike r",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 500000
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "spike",
+        "fallback": ""
+       },
+       {
+        "op": "light_shot",
+        "shot": "Shield target right",
+        "color": "#ff5000",
+        "pattern": "solid"
+       },
+       {
+        "op": "timer_start",
+        "timer": "charged",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "charged"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "op",
+        "op": "+",
+        "a": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "var",
+          "name": "spike l"
+         },
+         "b": {
+          "k": "var",
+          "name": "spike c"
+         }
+        },
+        "b": {
+         "k": "var",
+         "name": "spike r"
+        }
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "rolling",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "roll value",
+        "value": {
+         "k": "num",
+         "v": 4000000
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "roll",
+        "ms": {
+         "k": "num",
+         "v": 6000
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Big loop",
+        "color": "#00e6ff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 400
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "spike",
+        "where": "full"
+       },
+       {
+        "op": "hud_award",
+        "text": "ROLLING ATTACK LIT",
+        "value": null,
+        "sub": "SHOOT THE BIG LOOP",
+        "seconds": 3
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "entered"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "SPIKE",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "var",
+             "name": "spike l"
+            },
+            "b": {
+             "k": "var",
+             "name": "spike c"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "spike r"
+           }
+          },
+          "sub": "OF 3 CHARGED",
+          "seconds": 2
+         }
+        ],
+        "else": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Big loop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "rolling"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "roll value"
+        }
+       },
+       {
+        "op": "change",
+        "var": "rolls",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "roll",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "roll",
+        "where": "full"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Rolling attack"
+       },
+       {
+        "op": "hud_award",
+        "text": "ROLLING ATTACK",
+        "value": {
+         "k": "var",
+         "name": "roll value"
+        },
+        "sub": "AGAIN WITHIN 6 S TO DOUBLE",
+        "seconds": 3
+       },
+       {
+        "op": "set",
+        "var": "roll value",
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "var",
+          "name": "roll value"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "roll value"
+         },
+         "b": {
+          "k": "num",
+          "v": 16000000
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "roll value",
+          "value": {
+           "k": "num",
+           "v": 16000000
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "roll",
+        "ms": {
+         "k": "num",
+         "v": 6000
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Big loop",
+        "color": "#00e6ff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 400
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "roll"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "rolling"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "rolling",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "spike l",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "spike c",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "spike r",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Big loop"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "spike l"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target left",
+          "color": "#ff5000",
+          "pattern": "solid"
+         }
+        ],
+        "else": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target left",
+          "color": "#ff5000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 400
+          }
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "spike c"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target center",
+          "color": "#ff5000",
+          "pattern": "solid"
+         }
+        ],
+        "else": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target center",
+          "color": "#ff5000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 400
+          }
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "spike r"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target right",
+          "color": "#ff5000",
+          "pattern": "solid"
+         }
+        ],
+        "else": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target right",
+          "color": "#ff5000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 400
+          }
+         }
+        ]
+       },
+       {
+        "op": "hud_award",
+        "text": "CHARGE THE SPIKES",
+        "value": null,
+        "sub": "HIT THE SHIELDS",
+        "seconds": 2
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "rolling"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<=",
+         "a": {
+          "k": "timer_left",
+          "timer": "roll"
+         },
+         "b": {
+          "k": "num",
+          "v": 2000
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#00e6ff",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 100
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
+           "a": {
+            "k": "timer_left",
+            "timer": "roll"
+           },
+           "b": {
+            "k": "num",
+            "v": 4000
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Big loop",
+            "color": "#00e6ff",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 200
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "not",
+       "a": {
+        "k": "stock"
+       }
+      },
+      "then": [
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "timer_stop",
+      "timer": "enter"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "roll"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "charged"
+     },
+     {
+      "op": "set",
+      "var": "rolling",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">",
+       "a": {
+        "k": "var",
+        "name": "rolls"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "won",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "He rolled"
+       }
+      ],
+      "else": [
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Embers"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "fw04",
+    "from": 1421.4,
+    "length": 6.0,
+    "crop": "fill",
+    "what": "Shanghai: Anguirus bursts through an explosion, rolls in and roars into the camera"
+   },
+   "spike": {
+    "film": "fw04",
+    "from": 4709.8,
+    "length": 1.6,
+    "crop": "fill",
+    "what": "Close on Anguirus roaring, the spiked shell behind its head (one shot)"
+   },
+   "roll": {
+    "film": "fw04",
+    "from": 4800.7,
+    "length": 2.6,
+    "crop": "fill",
+    "what": "Anguirus as a spiked ball hurtles at the camera and smashes into Godzilla"
+   },
+   "won": {
+    "film": "dam68",
+    "from": 4802.5,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Godzilla and Anguirus stand side by side, allies victorious (one shot)"
+   },
+   "lost": {
+    "film": "fw04",
+    "from": 4852.8,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Anguirus, Rodan and King Caesar lie in a smoking heap, then Godzilla stands triumphant before Mt Fuji"
+   }
+  },
+  "music": {
+   "film": "ra55",
+   "from": 4888.482,
+   "length": 15.53,
+   "what": "Masaru Sato's score at the end (loop chroma 0.62, in tune 0.68)"
+  },
+  "calls": {
+   "spike": {
+    "film": "ra55",
+    "from": 2732.0,
+    "length": 1.8,
+    "priority": 3,
+    "what": "Anguirus's short roar (the game's own short Anguirus roar matches 0.87)"
+   },
+   "roll": {
+    "film": "ra55",
+    "from": 2680.6,
+    "length": 1.8,
+    "priority": 3,
+    "what": "Anguirus's roar as it charges (the game's own Anguirus roar matches 0.95)"
+   },
+   "won": {
+    "film": "ra55",
+    "from": 2751.0,
+    "length": 1.8,
+    "what": "Anguirus's roar in the castle fight (the game's own Anguirus roar matches 0.88)"
+   }
+  }
+ }
+}

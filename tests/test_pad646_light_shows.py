@@ -144,10 +144,10 @@ def test_the_harness_runs_a_show_twice_then_one_until_the_mode_ends(tmp_path, mo
     monkeypatch.setenv("HARNESS_PLACES", "1")
     out = T.play(tmp_path, _prog(), "shot", "Building", "secs", 12)
     start = T._at(out, r"\[TEST MODE\] START")
-    assert "show Kaiju roar: 3 step(s) over 18 placed inserts, 2 GI string(s), 2 times" in out
+    assert "show Kaiju roar: 3 step(s) over 36 placed inserts, 2 GI string(s), 2 times" in out
     over = T._at(out, r"\[TEST MODE\] show Kaiju roar: over")
     assert 2400 <= over - start <= 2450                   # three 400 ms steps, twice
-    loop = T._at(out, r"\[TEST MODE\] show Loop: 1 step\(s\) over 18 placed inserts, 2 GI string\(s\), until the mode ends")
+    loop = T._at(out, r"\[TEST MODE\] show Loop: 1 step\(s\) over 36 placed inserts, 2 GI string\(s\), until the mode ends")
     assert 2950 <= loop - start <= 3050                   # 5 s left of 8
     end = T._at(out, r"\[TEST MODE\] END \(time ran out\)")
     assert "show Loop: over" not in out                   # the end's own show took its place

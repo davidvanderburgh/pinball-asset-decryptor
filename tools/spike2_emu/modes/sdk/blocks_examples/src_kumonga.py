@@ -9,7 +9,8 @@ regrowth that pushes back (KING GHIDORAH's heads, TWD's walkers), a hurry-up (EH
 (Metallica's Crank It Up), and failing still pays a quarter of it.
 
 - SPIN THE WEB: every spin of the Shield ramp spinner counts; 40 lights the Big loop (20 more each time).
-- STAGE 1, THE WEB: the shields turn toward the player; the three Shield targets and both ramps are webbed (purple).
+- STAGE 1, THE WEB: the shields turn toward the player (Premium/LE); the two outer Shield targets, the centre
+  Powerline and both ramps are webbed (purple).
   Each one torn pays 2M and 1M more for each torn before it, to the pot; Kumonga webs one again every 10 s (7 s,
   then 5 s, the more often she has been fought). Tear all five.
 - STAGE 2, STRANDS: the shields turn away; every spinner spin cuts a strand (100K): 60 of them (20 more each time),
@@ -20,7 +21,7 @@ regrowth that pushes back (KING GHIDORAH's heads, TWD's walkers), a hurry-up (EH
 - CASH OUT at the right scoop after any stage; the clock (45 s a stage) or a drain pays a quarter of the pot.
 """
 from blk import (AND, BALLS, a_show, add, add_time, award, callout, change, clip, clips, div, end, eq, every, ge, gt,
-                 hud, hud_counter, hud_line, if_, le, light, light_insert, lt, mul, off, off_insert, on_end, on_shot, on_start,
+                 hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, lt, mul, off, off_insert, on_end, on_shot, on_start,
                  on_timer, score, secs_left, set_, set_time, shake, shake_game, shield, show, sound, sounds, step, sub,
                  timer_left, timer_start, timer_stop, var)
 import pack
@@ -28,7 +29,7 @@ import pack
 SLUG, NAME = "kumonga", "KUMONGA"
 PURPLE, WHITE, AMBER, RED, BLUE = "#b040ff", "#ffffff", "#ffb000", "#ff2000", "#3080ff"
 SPIN, START_SHOT = "Shield ramp spinner", "Big loop"
-WEBS = (("web l", "Shield target left"), ("web c", "Shield target center"), ("web r", "Shield target right"),
+WEBS = (("web l", "Shield target left"), ("web c", "Powerline center"), ("web r", "Shield target right"),
         ("web lr", "Left ramp"), ("web rr", "Right ramp"))
 SPINNERS = ("Left spinner", "Top spinner", "Shield ramp spinner")
 NEED = add(40, mul(20, var("fought")))
@@ -98,14 +99,14 @@ def setup_stage():
         if_(eq("stage", 2), stage_line(2, "STRANDS: SPIN EVERY SPINNER") + [
             shield("away"), timer_stop("regrow"),
             set_("strands", add(60, mul(20, sub(var("fought"), 1)))),
-            hud_counter(3, var("strands"), "STRANDS LEFT"),
+            hud_counter(3, var("strands"), "TO CUT", "STRANDS"),
         ] + [off(s) for _v, s in WEBS] + [light(s, WHITE, "blink", 200) for s in SPINNERS]
           + [light_insert("LEFT SPINNER", WHITE, "blink", 200)]),
         if_(eq("stage", 3), stage_line(3, "THE STING: SHOOT THE BIG LOOP") + [
-            set_("sting", 20000000), hud_counter(3, var("sting"), "STING"),
+            set_("sting", 20000000), hud_counter(3, var("sting"), "INTO THE POT", "STING"),
         ] + [off(s) for s in SPINNERS] + [off_insert("LEFT SPINNER"), light(START_SHOT, RED, "hurry")]),
         if_(eq("stage", 4), stage_line(4, "FIRE: BUILDING, THEN RIGHT RAMP") + [
-            off(START_SHOT), hud_counter(3, 0, "BURNS"), light("Building", AMBER, "blink", 200),
+            off(START_SHOT), hud_counter(3, 0, "OF 3", "BURNS"), light("Building", AMBER, "blink", 200),
         ]),
     ]
 
@@ -128,7 +129,7 @@ SCRIPTS = [
              shield("toward"),
              clip("intro", "full"), clip("loop", "loop"), sound("chitter"), show("She wakes"), shake(600, "strong"),
              *stage_line(1, "THE WEB: TEAR THE PURPLE SHOTS"),
-             hud_counter(2, 0, "CASH AT SCOOP"), hud_counter(3, 5, "WEBS LEFT"),
+             hud_counter(2, 0, "CASH AT SCOOP"), hud_counter(3, 5, "TO TEAR", "WEBS"),
              *web_lights()),
 
     # ---- stage 1: tear the web -----------------------------------------------------------------------------------
@@ -141,9 +142,9 @@ SCRIPTS = [
             if_(AND(eq("stage", 4), gt(timer_left("fire"), 0)), [timer_start("burn", 1)])),
     on_timer("tear",
              change("torn", 1), score(500000), *pot_up(add(2000000, mul(1000000, sub(var("torn"), 1)))),
-             hud_counter(3, webbed_left(), "WEBS LEFT"),
+             hud_counter(3, webbed_left(), "TO TEAR"),
              clip("tear", "behind"), sound("tear"), show("Tear"), shake(250, "medium"),
-             if_(eq(webbed_left(), 0), [award("THE WEB IS TORN", value=var("pot"), sub="POT"), timer_start("next", 1)],
+             if_(eq(webbed_left(), 0), [award("THE WEB IS TORN", value=var("pot"), sub="POT"), timer_start("next", 700)],
                  [award("WEB TORN", value=webbed_left(), sub="LEFT")])),
     on_timer("regrow",
              if_(eq("stage", 1), [
@@ -152,32 +153,32 @@ SCRIPTS = [
                          if_(eq("web r", 0), [set_("web r", 1)], [
                              if_(eq("web lr", 0), [set_("web lr", 1)], [
                                  if_(eq("web rr", 0), [set_("web rr", 1)])])])])]),
-                 *web_lights(), hud_counter(3, webbed_left(), "WEBS LEFT"),
+                 *web_lights(), hud_counter(3, webbed_left(), "TO TEAR"),
                  clip("web", "behind"), sound("web"), show("Web"),
                  award("KUMONGA WEBS AGAIN", value=webbed_left(), sub="LEFT"),
                  timer_start("regrow", var("regrow ms"))])),
 
     # ---- stage 2: cut the strands ----------------------------------------------------------------------------------
     *[on_shot(s, if_(eq("stage", 2), [
-        change("strands", -1), score(100000), hud_counter(3, var("strands"), "STRANDS LEFT"),
+        change("strands", -1), score(100000), hud_counter(3, var("strands"), "TO CUT"),
         change("cut", 1),
         if_(ge("cut", 10), [set_("cut", 0), *pot_up(5000000), sound("tear"), show("Strands"),
                             award("STRANDS CUT", value=var("strands"), sub="LEFT")]),
         if_(le(var("strands"), 0), [award("CUT FREE", value=var("pot"), sub="POT"), clip("strand", "behind"),
-                                      timer_start("next", 1)])])) for s in SPINNERS if s != SPIN],
+                                      timer_start("next", 700)])])) for s in SPINNERS if s != SPIN],
     on_shot(SPIN, if_(eq("stage", 2), [
-        change("strands", -1), score(100000), hud_counter(3, var("strands"), "STRANDS LEFT"), change("cut", 1),
+        change("strands", -1), score(100000), hud_counter(3, var("strands"), "TO CUT"), change("cut", 1),
         if_(ge("cut", 10), [set_("cut", 0), *pot_up(5000000), sound("tear"), show("Strands"),
                             award("STRANDS CUT", value=var("strands"), sub="LEFT")]),
         if_(le(var("strands"), 0), [award("CUT FREE", value=var("pot"), sub="POT"), clip("strand", "behind"),
-                                      timer_start("next", 1)])])),
+                                      timer_start("next", 700)])])),
 
     # ---- stage 3: the sting -----------------------------------------------------------------------------------------
     every(1, if_(AND(eq("stage", 3), gt("sting", 5000000)), [change("sting", -250000),
-                                                              hud_counter(3, var("sting"), "STING")])),
+                                                              hud_counter(3, var("sting"), "INTO THE POT")])),
     on_shot(START_SHOT, if_(eq("stage", 3), [
         *pot_up(var("sting")), score(2000000), clip("sting", "behind"), sound("sting"), show("Sting"),
-        shake(450, "hard"), award("THE STING", value=var("sting"), sub="INTO THE POT"), timer_start("next", 1)])),
+        shake(450, "hard"), award("THE STING", value=var("sting"), sub="INTO THE POT"), timer_start("next", 700)])),
 
     # ---- stage 4: fire ----------------------------------------------------------------------------------------------
     on_shot("Building", if_(eq("stage", 4), [
@@ -185,7 +186,7 @@ SCRIPTS = [
         light("Right ramp", AMBER, "blink", 100), award("GODZILLA FIRES", sub="NOW MINILLA: THE RIGHT RAMP")])),
     on_timer("burn",
              timer_stop("fire"), off("Right ramp"), change("burns", 1), *pot_up(10000000), score(3000000),
-             hud_counter(3, var("burns"), "BURNS"), clip("burn", "behind"), show("Burn"), shake(500, "hard"),
+             hud_counter(3, var("burns"), "OF 3"), clip("burn", "behind"), show("Burn"), shake(500, "hard"),
              if_(ge("burns", 3), [
                  set_("won", 1), score(add(mul(var("pot"), 2), 30000000)),
                  award("KUMONGA BURNS", value=add(mul(var("pot"), 2), 30000000), sub="SUPER JACKPOT", seconds=4),
@@ -194,14 +195,17 @@ SCRIPTS = [
     on_timer("fire", off("Right ramp")),
 
     # ---- a stage done: on to the next, or cash out -------------------------------------------------------------------
-    on_timer("next", change("stage", 1), set_time(45), show("Stage up"), shake_game("jackpot"),
-             *pack.cash_out_lit(), *setup_stage()),
-    on_shot(pack.CASH_SHOT, if_(AND(ge("stage", 2), eq("won", 0)), [
+    on_timer("next", if_(eq("cashed", 1), [end()], [
+        change("stage", 1), set_time(45), show("Stage up"), shake_game("jackpot"), *pack.cash_out_lit(), *setup_stage()])),
+    on_shot(pack.CASH_SHOT, if_(AND(ge("stage", 2), eq("won", 0), eq("cashed", 0)), [
         set_("cashed", 1), score(var("pot")), award("CASHED OUT", value=var("pot"), sub="KUMONGA RETREATS", seconds=4),
-        clip("cashout", "full"), sound("cashout"), show("She leaves"), end()])),
+        clip("cashout", "full"), sound("cashout"), show("She leaves"), timer_start("next", 1500)])),
     secs_left(10, callout("ten_seconds"), light(pack.CASH_SHOT, pack.WHITE, "hurry")),
 
     on_end(*pack.finish(), set_("stage", 0), *[timer_stop(t) for t in TIMERS],
+           if_(eq("won", 1), [hud_title("KUMONGA BURNS"), hud_line("GODZILLA AND MINILLA WIN")]),
+           if_(eq("cashed", 1), [hud_title("KUMONGA RETREATS"), hud_line("THE POT IS CASHED OUT")]),
+           if_(AND(eq("won", 0), eq("cashed", 0)), [hud_title("CAUGHT IN THE WEB"), hud_line("A QUARTER OF THE POT")]),
            if_(AND(eq("won", 0), eq("cashed", 0)), [
                score(div(var("pot"), 4)),
                award("CAUGHT IN THE WEB", value=div(var("pot"), 4), sub="A QUARTER OF THE POT", seconds=3),
@@ -228,7 +232,9 @@ PROGRAM = {
 }
 
 EXAMPLE = {
-    "name": NAME, "slug": SLUG, "order": 2, "titles": ["godzilla_le"], "based_on": "",
+    "name": NAME, "slug": SLUG, "order": 2, "titles": ["godzilla_le", "godzilla_pro"],
+    # a Pro's port calls the spinner on the shield ramp the Right spinner; its shields are fixed (no platform to turn)
+    "title_shots": {"godzilla_pro": {"Shield ramp spinner": "Right spinner"}}, "based_on": "",
     "about": ("New (PAD-658). Spin the Shield ramp spinner to wake her at the Big loop; four stages (tear the web "
               "on the shield platform while she webs it again, cut the strands on every spinner, the sting "
               "hurry-up, burn her with Godzilla and Minilla); cash the pot out at the right scoop. Son of "
@@ -245,7 +251,7 @@ def _shots(name, n, gap=200):
 
 
 _START = ["trigger", "kumonga.start", "secs", 1]
-_STAGE1 = ["shot", "Shield target left", "ms", 300, "shot", "Shield target center", "ms", 300,
+_STAGE1 = ["shot", "Shield target left", "ms", 300, "shot", "Powerline center", "ms", 300,
            "shot", "Shield target right", "ms", 300, "shot", "Left ramp", "ms", 300, "shot", "Right ramp", "secs", 1]
 _STAGE2 = _shots("Top spinner", 60, 60) + ["secs", 1]
 _STAGE3 = ["secs", 4, "shot", "Big loop", "secs", 1]
@@ -256,10 +262,10 @@ DESK = [
     ("the web grows back", _START + ["shot", "Left ramp", "secs", 11],
      ["Hud_Award: KUMONGA WEBS AGAIN", "LAMP LEFT RAMP b040ff chase"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 + _STAGE4,
-     ["Hud_Award: THE WEB IS TORN", "Hud_Award: CUT FREE", "Hud_Award: THE STING", "SHIELD away",
+     ["Hud_Title: KUMONGA BURNS", "Hud_Award: THE WEB IS TORN", "Hud_Award: CUT FREE", "Hud_Award: THE STING", "SHIELD away",
       "END (a block)", "lamps held 0"]),
     ("cash out after the web", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
-     ["SCORE +20000000", "END (a block)", "lamps held 0"]),
+     ["Hud_Title: KUMONGA RETREATS", "SCORE +20000000", "END (a block)", "lamps held 0"]),
 ]
 
 

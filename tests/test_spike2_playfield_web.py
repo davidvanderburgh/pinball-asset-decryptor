@@ -167,6 +167,41 @@ def test_a_frame_carries_only_what_changed(pf, monkeypatch, tmp_path):
     assert gone is None
 
 
+def test_a_mode_s_colour_on_a_one_colour_insert_is_named_not_drawn(pf, monkeypatch):
+    """PAD-668: a mode's light show paints a one-colour insert red; the board gets one level, and on the machine
+    the insert glows in its lens's colour. The view draws it as the game's own lighting (the orange ramp at the
+    wire's level) and names the colour the mode asked for in its tooltip - PAD-658 had drawn it red."""
+    import coilmap
+    fixtures = [dict(name="MASER", channels={"W": (8, 3)}, x=10, y=20, group=6),
+                dict(name="SHIELD", channels={"R": (9, 0), "G": (9, 1), "B": (9, 2)}, x=30, y=40, group=7)]
+    monkeypatch.setattr(pf, "layout_is_usable", lambda: True)
+    monkeypatch.setattr(pf, "load_switches", lambda: [])
+    monkeypatch.setattr(pf, "load_switch_list", lambda: [])
+    monkeypatch.setattr(pf, "load_leds", lambda: [])
+    monkeypatch.setattr(pf, "load_coils", lambda: [])
+    monkeypatch.setattr(pf, "group_fixtures", lambda leds: [dict(f) for f in fixtures])
+    monkeypatch.setattr(pf, "layout_art", lambda: None)
+    monkeypatch.setattr(pf, "layout_extent", lambda pad=14: (100, 200))
+    monkeypatch.setattr(pf, "FADE_MS", 0.0)
+    monkeypatch.setattr(pf, "GROUP_NODE", {6: 8, 7: 9})
+    view = pf.Playfield().view
+    b = bytearray(16384)
+    b[:pf.PADLED_READ] = _led_block(pf, {(8, 3): 128})
+    struct.pack_into("<I", b, coilmap.PAINT_OFF, coilmap.PAINT_MAGIC)
+    b[coilmap.PAINT_OFF + 8:coilmap.PAINT_OFF + 14] = bytes((6, 3, 255, 0, 0, 1))     # the mode painted it red
+    with open(pf.LED_PATH, "wb") as f:
+        f.write(bytes(b))
+    frame = view.tick(0.0)
+    assert frame["fx"][0][:3] == list(pf.fixture_color({"W": 128})[0])                # the ramp, not red
+    tip = view.describe("led", 0)
+    assert "MASER   (one colour)" in tip and "value 128" in tip
+    assert "a mode asks for #ff0000" in tip and "lens's colour" in tip
+    with open(pf.LED_PATH, "wb") as f:
+        f.write(_led_block(pf, {(8, 3): 128}))                                         # no mode holds it
+    view.tick(0.0)
+    assert "mode" not in view.describe("led", 0)
+
+
 def test_the_page_script_parses():
     node = shutil.which("node")
     if node is None:

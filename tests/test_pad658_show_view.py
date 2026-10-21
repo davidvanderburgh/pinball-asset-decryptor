@@ -8,7 +8,9 @@ insert each tick); the view missed them for two reasons, both fixed here:
   test_spike2_cabinet_lights.py carry that half;
 - a one-colour insert takes one level, the colour's brightest part, and the view drew every one on its orange ramp,
   so a red or blue show read as yellow dots. The mode runtime now publishes the colour it painted (padled's paint
-  plane, after version 6's hi plane) and the view draws the insert in that hue at the wire's level.
+  plane, after version 6's hi plane). PAD-668 took the hue back off the picture - on the machine a one-colour insert
+  glows in its lens's colour, never the show's - and puts it in the insert's tooltip instead
+  (tests/test_spike2_playfield_web.py, test_a_mode_s_colour_on_a_one_colour_insert_is_named_not_drawn).
 """
 import os
 import re
@@ -81,20 +83,6 @@ def test_the_view_reads_the_tints_by_its_own_group_to_node_map():
     assert coilmap.paint_tints(blk, gn) == {(8, 7): (255, 0, 0), (9, 44): (0, 64, 255)}
     assert coilmap.paint_tints(bytes(16384), gn) == {}            # no runtime wrote it: no plane
     assert coilmap.paint_tints(blk[:9000], gn) == {}              # an older watch.sh's block
-
-
-def test_a_one_colour_insert_takes_the_mode_s_hue_at_the_wire_s_level():
-    import playfield
-    mono = {"channels": {"W": (8, 7)}}
-    rgb = {"channels": {"R": (8, 1), "G": (8, 2), "B": (8, 3)}}
-    tints = {(8, 7): (255, 32, 0)}
-    assert playfield.tinted({"W": 128}, mono, tints) == {"R": 128, "G": 16, "B": 0}
-    assert playfield.tinted({"W": 0}, mono, tints) == {"W": 0}    # dark on the wire is dark
-    assert playfield.tinted({"W": 200}, mono, {}) == {"W": 200}   # no mode painted it: the orange ramp
-    vals = {"R": 9, "G": 8, "B": 7}
-    assert playfield.tinted(vals, rgb, tints) is vals              # an RGB insert's colour is the wire's own
-    col, level = playfield.fixture_color(playfield.tinted({"W": 255}, mono, {(8, 7): (0, 0, 255)}))
-    assert col == (0, 0, 255) and level == 1.0                     # blue, where the ramp drew yellow
 
 
 # the runtime's lamp section with the port's "I/O group G index I" comments (Godzilla LE 1.16's own lines)

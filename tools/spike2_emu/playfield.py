@@ -1130,7 +1130,12 @@ def fixture_color(vals):
 
     Single-channel inserts keep the orange ramp the window has always used -
     the lens colour is not in any table, and the coil flash's "nothing else
-    here is magenta" contrast depends on it.
+    here is magenta" contrast depends on it. That holds while a MODE lights
+    one too (PAD-668): the mode's colour reaches the board as one level, and
+    on the machine the insert glows in its lens's colour, never the show's -
+    so the view draws it as it draws the game's own lighting of it, at the
+    wire's level. PAD-658 had painted it in the show's colour, which the
+    machine cannot show; the colour asked for is in its tooltip instead.
     """
     if "W" in vals:
         v = vals.get("W") or 0
@@ -1144,24 +1149,6 @@ def fixture_color(vals):
     k = 255.0 * (m / 255.0) ** 0.5 / m
     return ((min(255, int(r * k)), min(255, int(g * k)), min(255, int(b * k))),
             m / 255.0)
-
-
-def tinted(vals, F, tints):
-    """A one-colour fixture's values as the colour a MODE painted it (PAD-658), else ``vals`` as they are.
-
-    The wire gives a single-colour insert one level and no colour, so it is drawn on the orange ramp above - and a
-    blocks mode's light show, red or blue over the whole playfield, read as yellow dots here while the Modes tab's
-    preview paints every insert in the show's colour. The mode runtime publishes the colour it painted
-    (coilmap.paint_tints, padled's paint plane): such an insert becomes R/G/B at the WIRE's level - the hue from
-    the mode, the brightness (and so the timing) from what the game actually sent the board."""
-    if not tints or set(vals) != {"W"}:
-        return vals
-    tint = tints.get(F["channels"]["W"])
-    v = vals.get("W") or 0
-    if not tint or not v:
-        return vals
-    m = max(tint)
-    return {c: t * v // m for c, t in zip("RGB", tint)}
 
 
 #: How a level (0..1) becomes a marker. Both floors are deliberate: a lamp at
@@ -3658,8 +3645,14 @@ class Field(LedRing):
                  % (d.get("group", -1), idx))
         if "W" in d["channels"]:
             node, idx = d["channels"]["W"]
-            return ("LED  %s\n%s\nvalue %s"
-                    % (d["name"], where(node, idx), fmt(vals.get("W"))))
+            # PAD-668: a mode's colour here is what it ASKED for; a
+            # one-colour insert shows its lens's colour whatever it asks
+            asked = coilmap.paint_tints(self.last, GROUP_NODE).get((node, idx))
+            return ("LED  %s   (one colour)\n%s\nvalue %s%s"
+                    % (d["name"], where(node, idx), fmt(vals.get("W")),
+                       "\na mode asks for #%02x%02x%02x; one colour, so it"
+                       "\nglows in its lens's colour on the machine" % asked
+                       if asked else ""))
         lines = ["LED  %s   (RGB fixture)" % d["name"]]
         for chan in "RGB":
             if chan in d["channels"]:
@@ -3821,9 +3814,8 @@ class Field(LedRing):
         decoded state moves - the honest picture rate - not tween frames."""
         lit = 0
         changed = 0
-        tints = coilmap.paint_tints(d, GROUP_NODE)
         for F in self.fixtures:
-            rgb, level = fixture_color(tinted(self._chan_vals(F, d, now), F, tints))
+            rgb, level = fixture_color(self._chan_vals(F, d, now))
             if rgb:
                 lit += 1
             st = (rgb, level)

@@ -418,17 +418,26 @@ def firmware_build_supported(game_real_path):
 
 def audio_decode_supported(game_real_path):
     """True if this firmware's audio can be decoded: either the validated build
-    (above) or a *different* single-path build whose codec addresses locate
-    generically (see :mod:`.locate`).  Dual-path codecs (no resolvable
-    ``PROV``/``QMUL``) return False, so the engine skips audio gracefully."""
+    (above) or a *different* build whose codec addresses locate generically
+    (see :mod:`.locate`).  A game program they don't locate in (one no build
+    in the library is like: a program changed outside PAD, a build the
+    locator has never met) returns False, so the engine skips audio
+    gracefully; :func:`audio_decode_missing` says what wasn't found."""
+    return not audio_decode_missing(game_real_path)
+
+
+def audio_decode_missing(game_real_path):
+    """What keeps this firmware's audio from decoding: ``[]`` when it decodes,
+    else the names :func:`.locate.missing` gives (``["unreadable: <why>"]``
+    when the file can't be read)."""
     try:
         raw = open(game_real_path, "rb").read()
-    except Exception:
-        return False
+    except Exception as e:
+        return ["unreadable: %s" % e]
     if _build_supported_raw(raw):
-        return True
+        return []
     from . import locate
-    return locate.locate_all(raw=raw) is not None
+    return locate.missing(raw=raw)
 
 
 class _Static:
@@ -603,7 +612,7 @@ class Spike2Emu:
         # Firmware addresses: the validated (TMNT) build uses the hardcoded
         # module constants; any other build's codec lives elsewhere, so locate
         # every address generically (see :mod:`.locate`).  ``audio_supported``
-        # is False for dual-path / unlocatable builds (engine skips audio).
+        # is False for a build that doesn't locate (engine skips audio).
         st = _static_analysis(raw, segs)
         self._generic = st.generic
         self.audio_supported = st.audio_supported

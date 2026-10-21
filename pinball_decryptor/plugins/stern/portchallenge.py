@@ -1286,7 +1286,84 @@ def scores_lines(e, n_challenges):
            "site  challenge_score_entry  0x%08x 0x%08x 0x%08x" % (base + 4 * ents[0], w[ents[0]], w[ents[0] + 1])]
     for slot, (c, title) in enumerate(picked):
         out += ["# %s" % title.replace("/'", "'"), "value challenge_scores_cat_%d  %d" % (slot, c)]
-    return out
+    return out + page_lines(e, base + 4 * ents[0], picked[-1][0])
+
+
+def _wrappable(w0, w1):
+    """1 when hook_wrap takes a function opening with these two words: `push {.., lr}` and neither reads or writes
+    pc (pad_mode_runtime.c hook_wrap's checks)."""
+    if (w0 & 0xFFFF4000) != 0xE92D4000:
+        return False
+    for x in (w0, w1):
+        if (x & 0x0C000000) == 0x04000000 and (x >> 16) & 0xF == 15:
+            return False
+        if (x & 0x0C000000) == 0 and ((x >> 16) & 0xF == 15 or (not x & 0x02000000 and x & 0xF == 15)):
+            return False
+        if (x >> 12) & 0xF == 15:
+            return False
+    return True
+
+
+#: PAD-660: the attract mode's champion pages. One page function per category, each the proc the attract mode's
+#: page list starts (Bond LE 0x7a6864: {shown?, page} pairs), each reading its champion once, before its first frame:
+#:   push {r4-fp,lr} ; mov r0,#<cat> ; vpush {d8} ; mov r1,#0 ; sub sp ; bl <the record, or 0> ; .. ;
+#:   mov r1,#0 ; mov r0,#<cat> ; bl <the entry lookup> ; ..
+#: then sets its lines: the title (`mov r0,#<message>; bl <message text>`, two or three times), CHAMPION, the record's
+#: initials and the entry's score, and only then draws frames: a loop that yields with
+#:   movw r3 <proc list> ; movt r3 ; add r1,r3,#12 ; ..
+#: until its time is up (Bond: a timer; Stranger Things: 187 frames).
+def page_lines(e, entry_va, cat):
+    """The `site challenge_page` / `challenge_page_text` / `challenge_page_yield` and `value challenge_page_cat` /
+    `challenge_page_title` lines for category `cat`'s page (empty when the build has not exactly one such page, or the
+    page's title, yield or opening words are not of the known shapes)."""
+    w, base = e.words, e.text_va
+    n = len(w)
+    pages = []
+    for k in range(n - 14):
+        if (w[k] & 0xFFFF4000) != 0xE92D4000:
+            continue
+        win = w[k:k + 14]
+        if sum(1 for x in win if x == 0xE3A00000 | cat) == 2 and \
+                any(bl_target(base + 4 * (k + i), x) == entry_va for i, x in enumerate(win)):
+            pages.append(k)
+    if len(pages) != 1 or not _wrappable(w[pages[0]], w[pages[0] + 1]):
+        return []
+    k = pages[0]
+    end = next((q for q in range(k + 2, min(n, k + 4000)) if (w[q] & 0xFFFF8000) == 0xE8BD8000), None)
+    if end is None:
+        return []
+    titles = {}
+    for q in range(k + 1, end):
+        t = bl_target(base + 4 * q, w[q])
+        r0 = w[q - 1]
+        imm = rot_imm(r0) if (r0 & 0xFFFFF000) == 0xE3A00000 else _imm16(r0) if (r0 & 0xFFF0F000) == 0xE3000000 \
+            else None
+        if t is not None and imm is not None and imm > 0xFF:
+            titles[(t, imm)] = titles.get((t, imm), 0) + 1
+    best = sorted(titles.items(), key=lambda kv: -kv[1])
+    if not best or best[0][1] < 2 or (len(best) > 1 and best[1][1] == best[0][1]):
+        return []
+    (text, title), _count = best[0]
+    if e.off(text) is None or not _wrappable(e.word(text), e.word(text + 4)):
+        return []
+    yld = None
+    for q in range(end - 1, max(k, end - 16), -1):
+        t = bl_target(base + 4 * q, w[q])
+        if t is None or e.off(t) is None:
+            continue
+        y = [e.word(t + 4 * i) for i in range(3)]
+        if (y[0] & 0xFFF0F000) == 0xE3003000 and (y[1] & 0xFFF0F000) == 0xE3403000 and y[2] == 0xE283100C:
+            yld = t
+            break
+    if yld is None:
+        return []
+    return ["# PAD-660: the attract mode's last challenge champion page; a mode's challenge champion is shown after it, "
+            "in the same page",
+            "site  challenge_page        0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1]),
+            "site  challenge_page_text   0x%08x 0x%08x 0x%08x" % (text, e.word(text), e.word(text + 4)),
+            "site  challenge_page_yield  0x%08x 0x%08x 0x%08x" % (yld, e.word(yld), e.word(yld + 4)),
+            "value challenge_page_cat    %d" % cat,
+            "value challenge_page_title  %d" % title]
 
 
 def missing_from(lines, port_text):

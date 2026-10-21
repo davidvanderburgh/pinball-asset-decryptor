@@ -3221,6 +3221,18 @@ PREVIEW_HELP = {
              "older card gives back what it holds, and says what did not come back. "
              "**Save a card image's modes to a file…** makes the same .zip without "
              "loading it."),
+            ("The rules sheet",
+             "**Rules sheet…**, under the list, makes the printable sheet for the cabinet "
+             "from the mode files, so it is never out of date: one row per mode (its name "
+             "as the game shows it, how it starts with what the 1st / 2nd / 3rd start "
+             "take, its stages a line each, and whether it cashes out), the rules every "
+             "mode shares under it, and the game and version from the project above it. "
+             "A mode made of blocks is played through by the app to word it; a form mode "
+             "says its fields; a mode in C says its clock, and the rest is yours to write. "
+             "Click a mode to put your own words in any field: yours win, and an empty "
+             "field gives the app's back. Untick a mode to leave it off, and move it up "
+             "or down. **Save as PDF…** lays it out on one Letter or A4 page when it "
+             "fits; **Save as HTML…** saves the same sheet as a web page."),
             ("Five things people ask for", _limits("Examples")),
             ("Why your mode always gives way", _limits("Why your mode always gives way")),
             ("Sizes", _limits("Sizes")),

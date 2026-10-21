@@ -182,6 +182,9 @@ Source: "install_prerequisites.ps1"; DestDir: "{app}"; Flags: ignoreversion
 ; install_gdre.sh ships beside it — install_prerequisites.ps1 hands this
 ; file to WSL to install GDRE Tools (shared with the Linux installer).
 Source: "install_gdre.sh"; DestDir: "{app}"; Flags: ignoreversion
+; ...and wsl_default_user.sh, which gives a root-login Ubuntu the ordinary
+; user its skipped first boot would have made (PAD-661).
+Source: "wsl_default_user.sh"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- Documentation -------------------------------------------------------
 Source: "{#ProjectDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

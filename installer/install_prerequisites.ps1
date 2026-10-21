@@ -281,8 +281,10 @@ function Get-WslInstallPlan {
     } catch {}
     $online = Get-WslOnlineDistros
     $distro = Select-WslInstallDistro $online
-    # --no-launch skips the interactive 'create UNIX user' first boot; we
-    # only ever exec via 'wsl -u root' so a default user isn't needed.
+    # --no-launch skips the interactive 'create UNIX user' first boot, so
+    # this script never waits on a window.  The distro then logs in as root,
+    # which the emulator cannot use; Set-WslOrdinaryUser gives it the user
+    # that first boot would have made (PAD-661).
     $installArgs  = @("--install", "-d", $distro)
     $fallbackArgs = @("--install", "-d", "Ubuntu")
     if ($help -match '--no-launch') {
@@ -309,6 +311,80 @@ function Get-WslInstallPlan {
         # a try before settling for an older Ubuntu.
         Stale        = [bool](@($online).Count -gt 0 -and
                               @($online) -notcontains $PadKnownGoodDistro)
+    }
+}
+
+# --- AN UBUNTU THAT LOGS IN AS ROOT --------------------------------------
+# What --no-launch leaves behind: Ubuntu's first-boot "create a default Unix
+# user" step never ran, so the distro has no user and every `wsl` lands in it
+# as root - and as root the emulator's game window stays black (PAD-659,
+# PAD-661).  wsl_default_user.sh does that first-boot step without the
+# prompt; this makes the user it names the login.
+#
+# Asked of the default distro on every run, not only right after an install:
+# the install that needs a restart is followed by a SECOND run, which is the
+# first one that can reach the distro, and every machine an older release set
+# up is in the same state.  A distro that already logs in as somebody is left
+# alone.  So is the app's own runtime, which carries its own user.
+function Set-WslOrdinaryUser {
+    if ($script:PadDistro) { return }
+    $def = Get-WslDefaultDistro
+    if ($null -eq $def) { return }
+    $name = $def.Name
+    $who = ((& wsl -d $name -- id -un 2>$null | Out-String) -replace "`0", "").Trim()
+    if ($LASTEXITCODE -ne 0 -or $who -ne "root") { return }
+
+    Write-Step ("Giving {0} a user account (it logs in as root)..." -f $name)
+    $sh = Join-Path $PSScriptRoot "wsl_default_user.sh"
+    if (-not (Test-Path -LiteralPath $sh)) {
+        Write-FAIL ("{0} user account (wsl_default_user.sh missing beside the installer)" -f $name)
+        return
+    }
+    # -e, never `--`: `--` hands the line to Linux's shell, and wsl.exe quotes
+    # only an argument with a space in it, so a Windows path without one
+    # (C:\PAD, a source checkout) reached wslpath with its backslashes eaten -
+    # "C:PADwsl_default_user.sh".  The GDRE and repair steps below had the
+    # same line and the same hole.
+    $wslSh = ((& wsl -d $name -u root -e wslpath -a "$sh" | Out-String) -replace "`0", "").Trim()
+    $out = @(& wsl -d $name -u root -e bash $wslSh "$env:USERNAME" 2>&1 |
+             ForEach-Object { ("$_" -replace "`0", "") })
+    $out | Where-Object { $_ -notmatch '^PADUSER=' } |
+        ForEach-Object { Write-Host "    $_" }
+    $line = $out | Where-Object { $_ -match '^PADUSER=' } | Select-Object -Last 1
+    if (-not ($line -match '^PADUSER=(\S+) (\d+)')) {
+        Write-FAIL ("{0} user account (could not make one; the emulator's window stays black as root)" -f $name)
+        return
+    }
+    $user = $Matches[1]; $uid = [int]$Matches[2]
+
+    # wsl.conf only counts from the distro's next start; the login WSL reads
+    # for a new `wsl` is the distro's DefaultUid.  `wsl --manage
+    # --set-default-user` sets it at once where wsl.exe has it; before that,
+    # the registry value is the same setting (what `ubuntu.exe config
+    # --default-user` always wrote), read when the distro next starts.
+    $help = ((& wsl --help 2>&1 | Out-String) -replace "`0", "")
+    if ($help -match '--set-default-user') {
+        & wsl --manage $name --set-default-user $user *> $null
+    }
+    $who = ((& wsl -d $name -- id -un 2>$null | Out-String) -replace "`0", "").Trim()
+    if ($who -ne $user) {
+        $lxss = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss"
+        Get-ChildItem $lxss -ErrorAction SilentlyContinue | ForEach-Object {
+            $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+            if ($p -and $p.DistributionName -eq $name) {
+                Set-ItemProperty $_.PSPath -Name DefaultUid -Value $uid -Type DWord
+            }
+        }
+        # A running distro keeps the login it started with (measured on WSL
+        # 2.6: the value was 1000 and `wsl` still said root).  Stopping it
+        # makes the next `wsl` start it with the new one, and with wsl.conf's.
+        & wsl --terminate $name *> $null
+        $who = ((& wsl -d $name -- id -un 2>$null | Out-String) -replace "`0", "").Trim()
+    }
+    if ($who -eq $user) {
+        Write-Installed ("{0} user account '{1}' (it logged in as root)" -f $name, $user)
+    } else {
+        Write-FAIL ("{0} still logs in as {1}, not '{2}' (the emulator's window stays black as root)" -f $name, $who, $user)
     }
 }
 
@@ -1090,6 +1166,8 @@ if ($needsWsl) {
         Write-SKIP "Ubuntu (WSL2 not available yet)"
     }
 
+    if ($wslAvailable -and $ubuntuFound) { Set-WslOrdinaryUser }
+
     # --- Is that distro WSL 2? -------------------------------------------
     # Only asked when something in the plan loop-mounts an image (Stern's
     # file growth, every JJP flow): those are the features WSL 1 cannot do
@@ -1207,13 +1285,13 @@ function Repair-WslPackages($failed) {
         return
     }
 
-    $wslFix = wsl @script:PadWslArgs -u root -- wslpath -a "$fix"
+    $wslFix = wsl @script:PadWslArgs -u root -e wslpath -a "$fix"
     if ($wslFix) { $wslFix = "$wslFix".Trim() }
     if (-not $wslFix) {
         Write-Host "  Could not reach the repair script from inside WSL." -ForegroundColor Yellow
         return
     }
-    wsl @script:PadWslArgs -u root -- bash $wslFix --packages $names 2>&1 |
+    wsl @script:PadWslArgs -u root -e bash $wslFix --packages $names 2>&1 |
         ForEach-Object { Write-Host "    $_" }
 
     # RE-PROBED, not trusted.  The script's own exit status answers for apt;
@@ -1340,8 +1418,8 @@ function Install-GdreTools {
         Write-FAIL "GDRE Tools (install_gdre.sh missing beside the installer)"
         return
     }
-    $wslSh = (wsl @script:PadWslArgs -u root -- wslpath -a "$gdreSh").Trim()
-    wsl @script:PadWslArgs -u root -- bash $wslSh 2>&1 | ForEach-Object { Write-Host "    $_" }
+    $wslSh = (wsl @script:PadWslArgs -u root -e wslpath -a "$gdreSh").Trim()
+    wsl @script:PadWslArgs -u root -e bash $wslSh 2>&1 | ForEach-Object { Write-Host "    $_" }
     wsl @script:PadWslArgs -u root -- bash -c "test -x /usr/local/bin/gdre_tools" *> $null
     if ($LASTEXITCODE -eq 0) {
         Write-Installed "GDRE Tools (wrapper at /usr/local/bin/gdre_tools)"

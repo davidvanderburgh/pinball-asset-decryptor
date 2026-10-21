@@ -121,8 +121,10 @@ def root_notice() -> str:
 
     THE ONE CASE WHERE ``absent`` IS WORTH A NOTICE.  The app's own installer
     sets Ubuntu up with ``--no-launch``, which skips the first-boot "create a
-    UNIX user" step, so the distro it leaves behind logs in as root - and as
-    root the game window stays black.  The cure the tab gave was three
+    UNIX user" step, so the distro it left behind logged in as root - and as
+    root the game window stays black.  (Since PAD-661 the installer makes
+    that user itself, wsl_default_user.sh; this is for every machine set up
+    before, and any other root-login distro.)  The cure the tab gave was three
     commands typed into a Windows terminal.  The runtime carries an ordinary
     user (``pad``, tools/runtime/Dockerfile) and is one button, and installing
     it leaves the user's own distro exactly as it is.

@@ -122,7 +122,7 @@ def chain_step(i):
     body = [score(mul(1000000, var("mult"))),
             if_(lt(SECS_LEFT, 10), [set_time(10)])]                  # PAD-371
     if i < 2:
-        body += [set_("step", i + 1), timer_start("window", var("window")),
+        body += [set_("step", i + 1), timer_start("window", var("window")), shake(200, "medium"),
                  award("%s X" % says, value=var("mult"), sub="NOW THE %s" % STEPS[i + 1][1], seconds=1),
                  hud_counter(3, WINDOW_SECS, "SECONDS")]
     else:

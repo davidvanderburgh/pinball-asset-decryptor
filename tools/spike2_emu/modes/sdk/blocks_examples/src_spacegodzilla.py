@@ -180,7 +180,7 @@ def jackpot():
         *[if_(eq("hit", i), [change(hp, -1)]) for i, hp in enumerate(HPS, 1)],
         if_(fell_any, [change("standing", -1), clip("tower", "behind"), sound("tower"), show("Tower falls"),
                        shake(450, "strong")] + per_stage_fall,
-            per_stage_jp + [sound("jackpot"), show("Jackpot")]),      # (the shaker is kept for the falls: 20 a minute)
+            per_stage_jp + [sound("jackpot"), show("Jackpot"), shake(250, "medium")]),
         if_(AND(eq("super lit", 0), eq("standing", 0)), [
             set_("super lit", 1), timer_start("window", 20000), show("Super lit"),
             award("SUPER JACKPOT IS LIT", value=mul(var("sum"), var("stage")), sub="20 SECONDS", seconds=3),

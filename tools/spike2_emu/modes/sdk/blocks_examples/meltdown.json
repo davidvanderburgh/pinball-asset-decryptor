@@ -1789,6 +1789,14 @@
             "op": "sound",
             "sound": "heat",
             "fallback": ""
+           },
+           {
+            "op": "shake",
+            "ms": {
+             "k": "num",
+             "v": 300
+            },
+            "strength": "soft"
            }
           ],
           "else": null
@@ -1824,6 +1832,14 @@
             "op": "clip",
             "clip": "critical",
             "where": "behind"
+           },
+           {
+            "op": "shake",
+            "ms": {
+             "k": "num",
+             "v": 500
+            },
+            "strength": "medium"
            }
           ],
           "else": null
@@ -1854,6 +1870,14 @@
             "op": "sound",
             "sound": "heat",
             "fallback": ""
+           },
+           {
+            "op": "shake",
+            "ms": {
+             "k": "num",
+             "v": 800
+            },
+            "strength": "medium"
            }
           ],
           "else": null
@@ -3937,6 +3961,14 @@
         },
         "sub": "",
         "seconds": 2
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 250
+        },
+        "strength": "medium"
        }
       ]
      },

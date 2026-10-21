@@ -1114,6 +1114,14 @@
         }
        },
        {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 200
+        },
+        "strength": "medium"
+       },
+       {
         "op": "hud_award",
         "text": "LEFT RAMP X",
         "value": {
@@ -1252,6 +1260,14 @@
          "k": "var",
          "name": "window"
         }
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 200
+        },
+        "strength": "medium"
        },
        {
         "op": "hud_award",

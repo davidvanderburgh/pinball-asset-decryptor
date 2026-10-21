@@ -155,11 +155,11 @@ def core_sub():
                                                 "X%d HEAT" % MULT[lv])])
               for lv in range(4)],
             if_(gt("level", "was level"), [
-                if_(eq("level", 1), [award("HOT", sub="JACKPOTS ARE WORTH MORE"), sound("heat")]),
+                if_(eq("level", 1), [award("HOT", sub="JACKPOTS ARE WORTH MORE"), sound("heat"), shake(300, "soft")]),
                 if_(eq("level", 2), [award("CRITICAL", sub="JACKPOTS ARE WORTH MORE"), sound("critical"),
-                                     clip("critical", "behind")]),
+                                     clip("critical", "behind"), shake(500, "medium")]),
                 if_(eq("level", 3), [award("MELTDOWN IMMINENT", sub="SHOOT THE SHIELDS TO COOL HIM"),
-                                     sound("heat")]),
+                                     sound("heat"), shake(800, "medium")]),
             ]),
             set_("was level", var("level")),
         ]),
@@ -257,7 +257,7 @@ SCRIPTS = [
              if_(AND(eq("stage", 1), eq("jp", "heart")), [
                  award("HEART JACKPOT", value=var("got"), seconds=2), change("core", 4), *heart_moves(),
                  shake(300, "strong")], [
-                 award("JACKPOT", value=var("got"), seconds=2)]),
+                 award("JACKPOT", value=var("got"), seconds=2), shake(250, "medium")]),
              if_(eq("stage", 2), [set_("ray at", sub(3, var("ray at"))), show("Spiral ray")]),
              timer_start("core", 1)),
 

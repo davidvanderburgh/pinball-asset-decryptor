@@ -4399,6 +4399,14 @@
       "name": "Chase shot"
      },
      {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 200
+      },
+      "strength": "soft"
+     },
+     {
       "op": "if",
       "cond": {
        "k": "cmp",

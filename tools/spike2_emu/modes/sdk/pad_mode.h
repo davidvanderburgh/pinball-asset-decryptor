@@ -600,15 +600,18 @@ int pm_game_shows(void);
  *   - `ms` is at least 100 and never longer than the game's own longest shake at that strength (Godzilla:
  *     1000 ms at 0 and 1, 5000 ms at 2 and 3; the port's `text shake_max_ms`).
  *   - only while your mode runs, in a game (not attract, not tilted); never with the shaker set to off (or
- *     none fitted), while one of the game's own shakes runs, or while one of yours does; at most 20 shakes
- *     and 15 s of shaking in any minute.
- *   - the runtime stops your shake when your mode ends, the ball ends, or the game ends or tilts (and on
- *     pm_shake_stop) - unless the game has since asked for a shake of its own, which it leaves to run.
+ *     none fitted), or while one of the game's own shakes runs; at most 30 s of the motor running the modes'
+ *     shakes in any minute (counted as it runs: a shake cut short counts what ran). PAD-658: one of yours at a
+ *     time, as the game's own call has it - a longer one takes the motor over, a shorter one is skipped (0).
+ *   - the runtime stops your shake when the ball ends, or the game ends or tilts (and on pm_shake_stop) -
+ *     unless the game has since asked for a shake of its own, which it leaves to run. PAD-658: your mode's end
+ *     leaves it to run out (as pm_shake_outlast did for the ending one).
  * pm_shake_game plays one of the GAME's own shakes by name, as the program has it (the port's `text
  * shake_<name>` lines): on Godzilla "hit" (200 ms, hard: a battle's shot), "big_hit" (334 ms), "jackpot"
  * (500 ms, hard: every super jackpot), "rumble" (3000 ms, soft: O2 Destroyer), "multiball_start" (five
  * shakes over 4 s: the Godzilla Multiball start); on the other titles the one the game calls most in each
- * length: "tap", "short", "medium", "long", "rumble". Same limits; its steps count as one shake.
+ * length: "tap", "short", "medium", "long", "rumble". Same limits; its steps are one shake (their span is what a
+ * longer one is measured by).
  * pm_shake / pm_shake_game: 1 = shaking; 0 = refused (the reason is in mode.log) or no shaker on this
  * game's port (PM_CAN_SHAKER). pm_shaking: 1 while a shake of yours runs. */
 #define PM_CAN_SHAKER       0x1000000u /* pm_shake / pm_shake_game / pm_shake_stop / pm_shaking / pm_shake_outlast */

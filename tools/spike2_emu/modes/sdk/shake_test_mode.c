@@ -6,7 +6,8 @@
  *                 game <name>       pm_shake_game(name)
  *                 stop              pm_shake_stop
  *                 outlast           pm_shake_outlast
- *   shake.end             pm_end: the runtime must stop a shake of the mode's (unless it outlasts)
+ *   shake.end             pm_end: PAD-658 - the runtime leaves a shake of the mode's to run out (PAD-414 stopped it
+ *                         unless it outlasted)
  * Every change of pm_shaking() is logged with the time since the mode began. The runtime's "shaker:" lines and
  * hwshim's [coildrive] lines (PAD_COIL_PROBE=1) say what reached the board. */
 #include "pad_mode.h"

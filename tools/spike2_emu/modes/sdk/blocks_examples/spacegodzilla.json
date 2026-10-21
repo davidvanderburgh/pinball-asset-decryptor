@@ -3646,6 +3646,14 @@
         "op": "show",
         "show": "mine",
         "name": "Jackpot"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 250
+        },
+        "strength": "medium"
        }
       ]
      },

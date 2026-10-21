@@ -270,8 +270,7 @@ def lights_and_line():
 
 def made_shot():
     """One of the place's red shots made (its flag already set)."""
-    # (no shake for each red shot: the runtime allows 20 shakes a minute, and the multiball needs its own)
-    out = [score(VALUE), change("jackpot", div(VALUE, 8)), show("Chase shot")]
+    out = [score(VALUE), change("jackpot", div(VALUE, 8)), show("Chase shot"), shake(200, "soft")]
     out += [if_(eq("place", i), [award(name, value=VALUE, seconds=2)]) for i, (name, shots) in enumerate(PLACES)
             if shots]
     return out + [

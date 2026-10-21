@@ -2151,6 +2151,14 @@
           "name": "Vine cut"
          },
          {
+          "op": "shake",
+          "ms": {
+           "k": "num",
+           "v": 150
+          },
+          "strength": "soft"
+         },
+         {
           "op": "if",
           "cond": {
            "k": "cmp",
@@ -2292,6 +2300,14 @@
           "op": "clip",
           "clip": "collect",
           "where": "behind"
+         },
+         {
+          "op": "shake",
+          "ms": {
+           "k": "num",
+           "v": 400
+          },
+          "strength": "medium"
          },
          {
           "op": "timer_start",

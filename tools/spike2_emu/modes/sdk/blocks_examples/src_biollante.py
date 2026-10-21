@@ -213,12 +213,12 @@ SCRIPTS = [
              change("cut", 1), if_(lt(SECS_LEFT, FLOOR), [set_time(FLOOR)]),
              if_(eq("stage", 1), [
                  if_(OR(AND(eq("bank", 1), eq(bank_sum(0), 3)), AND(eq("bank", 2), eq(bank_sum(1), 3))), collect(),
-                     [sound("cut"), show("Vine cut"),            # (no shake: the game allows 20 a minute)
+                     [sound("cut"), show("Vine cut"), shake(150, "soft"),
                       if_(eq("clip ok", 1), [clip("cut", "behind"), set_("clip ok", 0)])])],
                  [*pot_up(add(1000000, mul(1000000, var("cut")))), score(500000), timer_start("grow", REGROW),
                   sound("cut"), show("Vine cut"),
                   if_(ge("cut", 6), [timer_stop("grow"), award("THE VINES ARE DOWN", value=var("pot"), sub="POT"),
-                                     clip("collect", "behind"), timer_start("next", 700)],
+                                     clip("collect", "behind"), shake(400, "medium"), timer_start("next", 700)],
                       [award("VINE CUT", value=sub(6, var("cut")), sub="VINES TO GO"), shake(150, "soft"),
                        if_(eq("clip ok", 1), [clip("cut", "behind"), set_("clip ok", 0)])])]),
              timer_start("lamps", 1)),

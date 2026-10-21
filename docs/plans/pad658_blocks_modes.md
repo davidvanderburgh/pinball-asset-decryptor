@@ -80,6 +80,23 @@ and fixed for every mode (the runtime, the kit or the generator, not one mode):
   Built without its films a mode has no clip of its own to loop, and the game's live city map shows behind its HUD,
   its map labels under our words; with its clips (any build from the films, David's project) the loop covers it.
 
+## The shaker, freed (David: "Why the shaker limit? Arbitrary? Can we get past that?")
+
+PAD-414's 20 shakes and 15 s of shaking a minute were picked as a cautious guardrail - never measured, and not the
+game's: Godzilla's own shake call (`0x189a54`) has no per-minute limit, only its per-shake ones (the operator's
+SHAKER MOTOR setting, the game's own longest at each strength, the board ending every shake by itself), which still
+apply to every shake of ours. The modes ran into the guardrail (a finale's shake refused after twenty small ones, a
+stage-up shake refused while a hit's still ran, the 6.9 s multiball start costing half the minute, a won shake cut at
+the mode's end), so the runtime now:
+- counts no shakes, only the motor's RUNNING time for the modes' shakes, as it runs (a shake cut short or taken over
+  counts what ran), against 30 s in any minute;
+- keeps one of ours at a time the game's way: a longer one takes the motor over (stopping ours first when the game's
+  call would not take it, then 50 ms later), a shorter one is skipped;
+- leaves a mode's shake to run out at the mode's end (the ball's end, a tilt or the game's end still stop it).
+The shakes the examples had dropped for the old limits are back (BIOLLANTE's vine cuts and the vines down,
+GODZILLA ANGRY's red shots, SPACEGODZILLA's jackpots, MELTDOWN's jackpots and heat levels, MASER BARRAGE's chain).
+Proven on the emulator's board (run shake_proof_r1, MODE_SDK.md "The shaker").
+
 ## What there is now
 
 - **Blocks examples.** New mode ▸ Blocks lists whole modes made of blocks for the card's title, in two lists: the new

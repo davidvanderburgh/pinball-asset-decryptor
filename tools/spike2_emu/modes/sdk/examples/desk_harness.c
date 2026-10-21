@@ -371,8 +371,9 @@ int pm_building(int floor)
     return 1;
 }
 int pm_building_floor(void) { return building_none() ? -1 : building_at; }
-/* PAD-414: the shaker - a SHAKE line for each one asked for (the runtime's limits are not modelled here, but one at a
- * time is: a shake asked for while one runs is refused); HARNESS_SHAKER=none: a game without one */
+/* PAD-414: the shaker - a SHAKE line for each one asked for (the runtime's 30 s a minute is not modelled here, but
+ * PAD-658's one at a time is: a longer one takes over, a shorter one is skipped); HARNESS_SHAKER=none: a game without
+ * one */
 static unsigned long shake_until;
 static int shake_none(void)
 {
@@ -382,10 +383,11 @@ static int shake_none(void)
 static int shake_go(const char *what, unsigned ms)
 {
     if (shake_none()) return 0;
-    if (now_ms < shake_until) {
-        printf("%6lu SHAKE %s - refused, one is running\n", now_ms, what);
+    if (now_ms < shake_until && now_ms + ms <= shake_until) {
+        printf("%6lu SHAKE %s - skipped, the one running outlasts it\n", now_ms, what);
         return 0;
     }
+    if (now_ms < shake_until) printf("%6lu SHAKE taken over\n", now_ms);
     shake_until = now_ms + ms;
     printf("%6lu SHAKE %s\n", now_ms, what);
     return 1;

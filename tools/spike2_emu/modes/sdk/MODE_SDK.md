@@ -1962,8 +1962,9 @@ The limits are the runtime's and cannot be raised:
   strength**: on Godzilla 1000 ms at 0 and 1, 5000 ms at 2 and 3; most other titles shake at one strength only,
   0 (`text shake_max_ms`). At least 100 ms.
 - Only while your mode runs, in a game (not attract, not tilted); never while one of the game's own shakes
-  runs; at most **30 s of the motor running the modes' shakes in any minute**, counted as it runs (a shake cut
-  short or taken over counts only what ran).
+  runs; at most **30 s of the motor running in any minute**, counted as it runs (a shake cut short or taken over
+  counts only what ran) - PAD-670: **the game's own shakes count too** (the runtime reads the drive's time left
+  every tick), since the motor heats the same whoever asked. Where 30 s comes from is below ("PAD-670").
 - **One of yours at a time, the game's way** (PAD-658): a shake asked for while one of yours runs takes the motor
   over when it is longer than what is left of the running one (a game shake of several steps is measured by its
   span), and is skipped (0, and a line in mode.log) when it is not - the game's own call does the same. A take-over
@@ -2027,6 +2028,19 @@ takes over through the game's own call); the game's 3 s rumble taking over the R
 inside it skipped (nothing on the board); the Big loop's multiball start taking over its 150 - the game's OFF, then
 its five steps 50 ms later than its own times (317 ms in: 330, 100, 500, 1000, 5000 ms at 31/255) - and running out
 after the mode's END in the same tick. segv 0, fatal 0.
+
+**PAD-670: where the 30 s comes from (emulator, stock Godzilla LE 1.16 at its default SHAKER MOTOR Maximal Use,
+real time, muted, `PAD_COIL_PROBE=1`; `tools/spike2_emu/coilduty.py` on the board's lines;
+docs/plans/pad670_shaker_ceiling.md).** The game's call has no limit a minute and no rating for the motor is
+published, so the game's own shaking is the measure: 6.7 min of hard unattended play (longplay.sh's shots, one ball
+kept alive, until the game ended) ran the motor 42 s in all, **13.5 s in its busiest minute**, at most 5.1 s
+unbroken, its long rumbles only at its softest power (23/255); Stern's own Cycling Coil Test gives it 1 s a pass.
+30 s is that busiest minute twice over and never more on than off, and it now counts **the whole motor** - the
+game's own shakes too, and what ran (the game's own stop cut three of six 5 s shakes of ours 3.5, 4.0 and 0.5 s
+short, which the runtime had counted whole). The run: `shake_test_mode.c` asking 5000 ms at 3 every 5.5 s for 80 s
+while the play went on. Main's runtime refused at "the modes have run the shaker for 30 s" while the board showed
+ours at 22 s; this one refused exactly when the board's minute (26.2 s, the game's 3.2 s in it) plus the 5 s asked
+for passed 30 s, shook at 24.8 s, and the motor's busiest minute stayed at 27.6 s. segv 0, fatal 0.
 ### Every other latest title with a shaker (PAD-474)
 
 Every Spike 2 title but the two Home Editions has a SHAKER MOTOR device (coil 0 of the cabinet board; on most

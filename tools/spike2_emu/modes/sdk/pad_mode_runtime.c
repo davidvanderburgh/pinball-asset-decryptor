@@ -9488,12 +9488,26 @@ static unsigned char chg_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
 static const char *chg_rec_titles[8];
 static unsigned (*chg_scores_game)(unsigned, unsigned, unsigned, unsigned);
 
-/* the record's check, as the game makes it: ~(the byte sum of its first 88 bytes) (tests lift it verbatim) */
+/* PAD-663: the record's layout - most builds: the score u64 at +72, the check at +88; The Beatles 1.29 and Star Wars
+ * ELG 1.10: a u32 at +80, the check at +84 (the port's `value challenge_record_*`, read when the scores are armed).
+ * A record whose check fails, the game takes its category as damaged and resets it: no initials, no champion. */
+static unsigned chg_rec_check_at = 88, chg_rec_score_at = 72, chg_rec_score_size = 8;
+
+/* the record's check, as the game makes it: ~(the byte sum of the bytes before it) (tests lift it verbatim) */
 static unsigned short chg_rec_check(const unsigned char *rec)
 {
     unsigned k, sum = 0;
-    for (k = 0; k < 88; k++) sum += rec[k];
+    for (k = 0; k < chg_rec_check_at; k++) sum += rec[k];
     return (unsigned short)~sum;
+}
+
+/* the record's score (tests lift it verbatim) */
+static unsigned long long chg_rec_score(const unsigned char *rec)
+{
+    unsigned long long v = 0;
+    unsigned k;
+    for (k = chg_rec_score_size; k-- > 0; ) v = v << 8 | rec[chg_rec_score_at + k];
+    return v;
 }
 
 /* a record of no one's: the initials given, a score of 0 (tests lift it verbatim) */
@@ -9504,8 +9518,8 @@ static void chg_rec_fresh(unsigned char *rec, const char *initials)
     for (k = 0; k < CHG_REC_SIZE; k++) rec[k] = 0;
     for (k = 0; initials && initials[k] && k < 20; k++) rec[32 + k] = (unsigned char)initials[k];
     c = chg_rec_check(rec);
-    rec[88] = (unsigned char)c;
-    rec[89] = (unsigned char)(c >> 8);
+    rec[chg_rec_check_at] = (unsigned char)c;
+    rec[chg_rec_check_at + 1] = (unsigned char)(c >> 8);
 }
 
 /* 1 when line [i, e) of b is name's: the record's hex, a space, the name (tests lift it verbatim) */
@@ -9532,7 +9546,7 @@ static int chg_rec_find(const char *b, long n, const char *name, unsigned char *
                 if (hi < 0 || lo < 0) break;
                 got[k] = (unsigned char)(hi * 16 + lo);
             }
-            if (k == CHG_REC_SIZE && (unsigned)(got[88] | got[89] << 8) == chg_rec_check(got)) {
+            if (k == CHG_REC_SIZE && (unsigned)(got[chg_rec_check_at] | got[chg_rec_check_at + 1] << 8) == chg_rec_check(got)) {
                 for (k = 0; k < CHG_REC_SIZE; k++) rec[k] = got[k];
                 return 1;
             }
@@ -9714,7 +9728,7 @@ static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
     ent[6] = (unsigned)(unsigned long)chg_rec_titles;
     *(unsigned short *)(ent + 8) = 0;                            /* a mode's champion wins no credit of the game's */
     say("challenge scores: %s's own high score (%llu, %s) in category %ld's place for the game's end%s",
-        chg_hs.name, (unsigned long long)*(uint64_t *)(chg_rec + 72), (const char *)chg_rec + 32, cat,
+        chg_hs.name, chg_rec_score(chg_rec), (const char *)chg_rec + 32, cat,
         chg_gate_game ? " - the game's own records are shut for it" : "");
     if (chg_gate_game) chg_gate_cat = (int)cat;                  /* PAD-663: only that entry takes this game */
     list = chg_scores_one_entry(cat, &list_was);
@@ -9730,7 +9744,7 @@ static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
         return ret;
     }
     say("challenge scores: %s's new high score %llu, %s", chg_hs.name,
-        (unsigned long long)*(uint64_t *)(chg_rec + 72), (const char *)chg_rec + 32);
+        chg_rec_score(chg_rec), (const char *)chg_rec + 32);
     m = chg_rec_put(b, n, chg_hs.name, chg_rec, out, (long)sizeof out);
     if (m > 0) {
         static const char tmp[] = "/dump/pad_challenge_scores.new";
@@ -9858,7 +9872,7 @@ static void chg_page_wrap(void)
     if (n <= 0) return;
     k = chg_page_names(names, CHG_PAGES_MAX);
     for (i = 0; i < k; i++) {
-        if (!chg_rec_find(b, n, names[i], chg_page_rec) || !*(uint64_t *)(chg_page_rec + 72)) continue;
+        if (!chg_rec_find(b, n, names[i], chg_page_rec) || !chg_rec_score(chg_page_rec)) continue;
         ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))(
             (unsigned)pm_port_value("challenge_page_cat", 0), 0);
         if (!ent || !maps_has((unsigned long)ent, 28, MAP_R)) return;
@@ -9866,7 +9880,7 @@ static void chg_page_wrap(void)
         if (said < 2 * CHG_PAGES_MAX) {
             said++;
             say("challenge scores: the attract mode shows %s's champion (%llu, %s) under \"%s\"", names[i],
-                (unsigned long long)*(uint64_t *)(chg_page_rec + 72), (const char *)chg_page_rec + 32, chg_page_title);
+                chg_rec_score(chg_page_rec), (const char *)chg_page_rec + 32, chg_page_title);
         }
         chg_page_was = ent[0];
         chg_page_proc = *chg_page_cur;
@@ -10025,7 +10039,7 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
     if (n <= 0) return ret;
     m = chg_page_names(names, CHG_PAGES_MAX);
     for (i = 0; i < m && !pm_in_game(); i++) {
-        if (!chg_rec_find(b, n, names[i], chg_pages_rec) || !*(uint64_t *)(chg_pages_rec + 72)) continue;
+        if (!chg_rec_find(b, n, names[i], chg_pages_rec) || !chg_rec_score(chg_pages_rec)) continue;
         ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))((unsigned)cat, 0);
         if (!ent || !maps_has((unsigned long)ent, 28, MAP_R)) return ret;
         chg_champion_title(chg_pages_title, sizeof chg_pages_title, names[i]);
@@ -10035,7 +10049,7 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
         if (said < 2 * CHG_PAGES_MAX) {
             said++;
             say("challenge scores: the attract mode shows %s's champion (%llu, %s) under \"%s\", after category %d's page",
-                names[i], (unsigned long long)*(uint64_t *)(chg_pages_rec + 72), (const char *)chg_pages_rec + 32,
+                names[i], chg_rec_score(chg_pages_rec), (const char *)chg_pages_rec + 32,
                 chg_pages_title, cat);
         }
         chg_pages_was[0] = ent[0]; chg_pages_was[1] = ent[5]; chg_pages_was[2] = ent[6];
@@ -10114,7 +10128,17 @@ static void chg_pages_arm(void)
 
 static void chg_scores_arm(void)
 {
+    long check_at = pm_port_value("challenge_record_check_at", 88), score_at = pm_port_value("challenge_record_score_at", 72);
+    long score_size = pm_port_value("challenge_record_score_size", 8);
     if (!site("challenge_scores") || !site("challenge_score_entry")) return;
+    if (check_at + 2 > CHG_REC_SIZE || (score_size != 4 && score_size != 8) || score_at < 0 || score_at + score_size > check_at) {
+        say("challenge scores: the port's record layout (check +%ld, score +%ld, %ld bytes) does not fit - left as the game's",
+            check_at, score_at, score_size);
+        return;
+    }
+    chg_rec_check_at = (unsigned)check_at;                       /* PAD-663: the build's own record layout */
+    chg_rec_score_at = (unsigned)score_at;
+    chg_rec_score_size = (unsigned)score_size;
     if (!fn("challenge_scores") || !fn("challenge_score_entry")
         || !(chg_scores_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn("challenge_scores"),
                                                                                               (void *)chg_scores_wrap))) {

@@ -1296,6 +1296,7 @@ def scores_lines(e, n_challenges):
     if gate and titles.get(1):
         out += ["# PAD-663: %s, whose first entry a mode's challenge game goes in as the mode's own record" % titles[1],
                 "value challenge_scores_cat   1"]
+    out += record_lines(e, table)
     if per:
         out.append("# PAD-640: each challenge's champion category")
         for slot, (c, title) in enumerate(picked):
@@ -1309,6 +1310,38 @@ def scores_lines(e, n_challenges):
             break
         pages = page_lines(e, base + 4 * ents[0], c)
     return out + (pages or list_page_lines(e, base + 4 * ents[0]))      # PAD-663: else HIGHEST SCORES' list page
+
+
+#: PAD-663: a champion record's layout, as HIGHEST SCORES' compare (category 1's +0x10) reads it:
+#:   ldr r4, [r1] ; mov r1, #<check at> ; .. ; ldrh r5, [r4, #<check at>] ; bl <byte sum> ; .. ; blx r3 (the score)
+#:   ; ldrd r2, r3, [r4, #<score at>] (u64) or ldr r3, [r4, #<score at>] (u32)
+#: Most builds: u64 score at +72, check at +88 (the runtime's default). The Beatles 1.29 and Star Wars ELG 1.10: u32
+#: at +80, check at +84 - a record of the default layout fails their check and the game resets the category.
+RECORD_DEFAULT = (88, 72, 8)
+
+
+def record_lines(e, table):
+    """`value challenge_record_check_at` / `_score_at` / `_score_size` when the build's records are not laid out as
+    the runtime's default (empty when they are, or the compare is not of the known shape)."""
+    if e.off(table + 36 + 16) is None:
+        return []
+    fn = e.word(table + 36 + 16)
+    if e.off(fn) is None or fn % 4 or not e.text_va <= fn < e.text_va + 4 * len(e.words):
+        return []
+    w = e.words[(fn - e.text_va) // 4:(fn - e.text_va) // 4 + 24]
+    movs = {x & 0xFF for x in w[:8] if (x & 0xFFFFFF00) == 0xE3A01000}
+    checks = [(x >> 4 & 0xF0) | (x & 0xF) for x in w[:8] if (x & 0xFFF000F0) == 0xE1D000B0]
+    if len(checks) != 1 or checks[0] not in movs or 0xE12FFF33 not in w:
+        return []
+    after = w[w.index(0xE12FFF33) + 1:]
+    score = next(((((x >> 4 & 0xF0) | (x & 0xF)), 8) if (x & 0xFFF000F0) == 0xE1C000D0 else (x & 0xFFF, 4)
+                  for x in after[:3] if (x & 0xFFF000F0) == 0xE1C000D0 or (x & 0xFFF00000) == 0xE5900000), None)
+    if score is None or (checks[0], score[0], score[1]) == RECORD_DEFAULT:
+        return []
+    return ["# PAD-663: the champion records' layout (the score's place and size, the check's place)",
+            "value challenge_record_check_at   %d" % checks[0],
+            "value challenge_record_score_at   %d" % score[0],
+            "value challenge_record_score_size %d" % score[1]]
 
 
 #: PAD-663: the end-of-game function asks the bus before it files a player under a category's entry, one shape on

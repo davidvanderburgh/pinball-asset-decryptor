@@ -671,6 +671,10 @@ data  challenge_scores_table 0x00556e80
 data  challenge_scores_count 0x0049b8a0
 # PAD-663: HIGHEST SCORES, whose first entry a mode's challenge game goes in as the mode's own record
 value challenge_scores_cat   1
+# PAD-663: the champion records' layout (the score's place and size, the check's place)
+value challenge_record_check_at   84
+value challenge_record_score_at   80
+value challenge_record_score_size 4
 # PAD-663: the champion page function(s) (each called per category; the attract mode's is the one it calls): a mode's challenge champion is shown on it after the lowest category the attract mode shows
 site  challenge_pages_0     0x00031f08 0xe92d40f0 0xe24dd0cc
 site  challenge_pages_1     0x00044ac8 0xe92d43f0 0xe1a06000

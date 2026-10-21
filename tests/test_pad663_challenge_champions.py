@@ -188,13 +188,15 @@ int main(void)
     chg_champion_title(t, sizeof t, "PAD CHALLENGE"); printf("[%s]\n", t);
     chg_champion_title(t, sizeof t, "COMBO CHAMPION"); printf("[%s]\n", t);
     chg_champion_title(t, sizeof t, "A VERY LONG MODE NAME HERE"); printf("[%s]\n", t);
+    /* a category past the table's (Avengers shows its last scores under 55 of 38): never the cycle's */
+    printf("%d", chg_pages_follow(55, 38, &first));
     /* the cycle's first page: category 2 (Iron Maiden's page starts there), then 3 .. - only 2 again follows */
-    printf("%d", chg_pages_follow(2, &first));
-    printf("%d", chg_pages_follow(3, &first));
-    printf("%d", chg_pages_follow(2, &first));
-    printf("%d", chg_pages_follow(1, &first));         /* a lower one seen later becomes the first */
-    printf("%d", chg_pages_follow(2, &first));
-    printf("%d\n", chg_pages_follow(-1, &first));
+    printf("%d", chg_pages_follow(2, 38, &first));
+    printf("%d", chg_pages_follow(3, 38, &first));
+    printf("%d", chg_pages_follow(2, 38, &first));
+    printf("%d", chg_pages_follow(1, 38, &first));     /* a lower one seen later becomes the first */
+    printf("%d", chg_pages_follow(2, 38, &first));
+    printf("%d\n", chg_pages_follow(-1, 38, &first));
     return 0;
 }
 """
@@ -298,3 +300,60 @@ def test_a_games_page_cut_short_does_not_leave_the_pages_passed_through():
     assert tick.index("chg_pages_tid = 0;", clear) < tick.index("chg_pages_in = 0;", clear + 1)
     run = _host()._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")
     assert run.index("chg_pages_call_ms = pm_ms();") < run.index("chg_pages_tid = me;")
+
+
+# ---- the records' layout ------------------------------------------------------------------
+# HIGHEST SCORES' compare (category 1's +0x10), word for word: The Beatles 1.29 (0x19d3ac) and Bond LE 1.06 (0x4e804c)
+COMPARE_SHORT = [0xE92D40F8, 0xE1A07000, 0xE5914000, 0xE3A01054, 0xE1A06002, 0xE1A00004, 0xE1D455B4, 0xEBFE2805,
+                 0xE1E00000, 0xE6FF3070, 0xE1550003, 0x0A000001, 0xE3A00000, 0xE8BD80F8, 0xE5973004, 0xE1A00006,
+                 0xE12FFF33, 0xE5943050, 0xE1500003, 0x93A00000, 0x83A00001, 0xE8BD80F8]
+COMPARE_BOND = [0xE92D40F8, 0xE1A07000, 0xE5914000, 0xE3A01058, 0xE1A06002, 0xE1A00004, 0xE1D455B8, 0xEBFD3DB6,
+                0xE1E00000, 0xE6FF3070, 0xE1550003, 0x0A000001, 0xE3A00000, 0xE8BD80F8, 0xE5973004, 0xE1A00006,
+                0xE12FFF33, 0xE1C424D8, 0xE1510003, 0x01500002, 0x83A00001, 0x93A00000, 0xE8BD80F8]
+
+
+class _Prog:
+    """A code segment at 0x10000 (the compare) and the category table at 0x20000, its category 1 pointing at it."""
+    def __init__(self, compare):
+        self.text_va, self.words = 0x10000, tuple(compare)
+        self.data = {0x20000 + 36 + 16: 0x10000}
+
+    def off(self, va):
+        return va if va in self.data or self.text_va <= va < self.text_va + 4 * len(self.words) else None
+
+    def word(self, va):
+        return self.data[va] if va in self.data else self.words[(va - self.text_va) // 4]
+
+
+def test_the_finder_names_a_record_layout_only_where_it_is_not_the_default():
+    """The Beatles 1.29 / Star Wars ELG 1.10 keep a u32 score at +80 and the check at +84: a mode's record checked at
+    +88 failed the game's check, the game reset the category, and no initials were asked (rig, The Beatles)."""
+    assert PC.record_lines(_Prog(COMPARE_SHORT), 0x20000)[1:] == [
+        "value challenge_record_check_at   84", "value challenge_record_score_at   80",
+        "value challenge_record_score_size 4"]
+    assert PC.record_lines(_Prog(COMPARE_BOND), 0x20000) == []             # u64 at +72, check at +88: the default
+    assert PC.record_lines(_Prog(COMPARE_SHORT[:10]), 0x20000) == []        # not the known shape: nothing said
+    for line in PC.record_lines(_Prog(COMPARE_SHORT), 0x20000)[1:]:
+        key, rest = line.split(" ", 1)
+        assert portgen.generated(key, rest), line
+
+
+@pytest.mark.parametrize("key", ["beatles-1.29", "star_wars_elg-1.10", "james_bond_le-1.06", "turtles_le-1.59"])
+def test_the_short_record_builds_name_their_layout(key):
+    port = MP.read_port(str(PORTS / ("%s.port" % key)))
+    got = {k: int(port["value"][k]) for k in ("challenge_record_check_at", "challenge_record_score_at",
+                                               "challenge_record_score_size") if k in port["value"]}
+    short = key in ("beatles-1.29", "star_wars_elg-1.10")
+    assert got == ({"challenge_record_check_at": 84, "challenge_record_score_at": 80,
+                    "challenge_record_score_size": 4} if short else {})
+
+
+def test_the_runtime_takes_the_layout_from_the_port_and_refuses_one_that_does_not_fit():
+    src = RUNTIME.read_text(encoding="utf-8")
+    arm = _host()._lift(src, "static void chg_scores_arm(void)")
+    take = arm.index("chg_rec_check_at = (unsigned)check_at;")
+    assert arm.index("check_at + 2 > CHG_REC_SIZE") < take < arm.index("hook_wrap(fn(\"challenge_scores\")")
+    for v, dflt in (("check_at", 88), ("score_at", 72), ("score_size", 8)):
+        assert 'pm_port_value("challenge_record_%s", %d)' % (v, dflt) in arm
+    # every read of a record's score goes through the layout (the attract pages' and the end-of-game wrap's)
+    assert "+ 72)" not in src[src.index("#define CHG_REC_SIZE 96"):]

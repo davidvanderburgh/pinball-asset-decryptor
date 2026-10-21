@@ -39,6 +39,7 @@ from ..modes_reading import TitleReadMixin
 from ..modes_stock_remap import StockRemapMixin
 from ..modes_stock_rewrite import StockRewriteMixin   # item 161
 from ..modes_check import GameCheckMixin
+from ..modes_sheet import RulesSheetMixin     # PAD-664
 from ..modes_tryit import TryItMixin
 from .base import TabService, rpc
 
@@ -194,7 +195,8 @@ def fix_chip(problems):
     return dict(PAGES)[pages[0]] + (" •" if len(pages) == 1 else " +%d •" % (len(pages) - 1))
 
 
-class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin, TabService):
+class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin, RulesSheetMixin,
+               TabService):
     ns = "modes"
     key = "Modes"
     label = "Modes"
@@ -382,6 +384,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._init_tryit()
         self._init_check()
         self._init_reading()
+        self._init_sheet()
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -397,7 +400,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
                  no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
                  game_hidden=0, check_offer=False, check_wanted=False, check_done=None,
-                 check_tip=self.CHECK_TIP, insider_note="")
+                 check_tip=self.CHECK_TIP, insider_note="", sheet=None)
         self._show_starts_words()
 
     # ------------------------------------------------------------------
@@ -1693,7 +1696,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         card, or a card whose build has no port) the refusal says why."""
         if self._profile is None or self._no_port:
             raise MP.ModeProjectError(self._no_port or MP.NO_CARD_HELP)
-        return MP.blank_spec(self._profile)
+        return MP.blank_spec(self._profile, taken=MP.start_shots_taken(self.project()))  # PAD-666
 
     # ------------------------------------------------------------------
     # the title: which card, which port (item 148)
@@ -3015,6 +3018,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._save_if_edited()
         p = self._shown or self._profile
         shots = [n for n, _m in p.shots] if p is not None else list(self._shot_names)
+        taken = MP.start_shots_taken(self.project())        # PAD-666: start on a shot no other mode starts on
+        shots = [n for n in shots if n not in taken] + [n for n in shots if n in taken]
         try:
             slug, _path = BM.new_blocks_mode(self.project(), str(name).strip(), shots=shots)
         except (MT.TryItError, OSError) as e:

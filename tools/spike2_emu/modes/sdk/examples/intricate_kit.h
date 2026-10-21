@@ -920,6 +920,7 @@ struct kit_hud {
     unsigned tries;
     int found, up, timer_up, timer2_up, gauge_up, n_pips, pip_lit[KIT_HUD_PIPS];
     int aside;                             /* PAD-347: the kind of the game's mode it stepped aside for, 0 = none */
+    int words;                             /* PAD-662: stepped aside for a screen of the game's (pm_game_words) */
     char w_title[KIT_HUD_WORDS], w_line[KIT_HUD_WORDS], w_award[KIT_HUD_WORDS], w_awardsub[KIT_HUD_WORDS];
     char w_timer[8], w_timer2[8], w_glabel[24], w_c[3][3][24];
     /* what is wanted (written to the glass when found and up) */
@@ -1227,7 +1228,7 @@ static KIT_UNUSED void kit_hud_recheck(struct kit_hud *h)
 /* every tick: find, expire the award, and send the glass what changed */
 static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
 {
-    int k, j, aside, low, off, covered;
+    int k, j, aside, low, off, covered, words;
     const char *title, *line, *award, *awardsub;
     kit_hud_find(h);
     kit_hud_recheck(h);
@@ -1252,6 +1253,11 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
      * is the award line already, so it has nowhere to step aside to */
     aside = pm_aside();
     covered = pm_display_covered();
+    /* PAD-662: a screen of the game's own under the HUD (any one: Mechagodzilla's SHOOT TARGETS TO DISABLE BARRIER sat
+     * under SUPER X2's line, PAD-658 run kiryu_r2 k15) letters its words in the title, line and counter places - ours
+     * step aside as they do for the game's modes: the lines in the award line, the counters hidden; a note goes in the
+     * award line, which those screens keep clear */
+    words = !aside && pm_game_words();
     off = covered || (h->noting && aside);
     if (h->noting && !h->metering && h->hide_at) {
         /* PAD-658: a note WAITS out a display of the game's (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER
@@ -1271,12 +1277,20 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     }
     if (h->noting) aside = 0;                    /* a qualification note is in the award line already */
     kit_hud_aside_note(h, aside);
+    if (words != h->words) {
+        pm_log("hud %s: %s", h->slug, words ? (h->noting ? "a screen of the game's has its words up - the note in the award line"
+                                                : "a screen of the game's has its words up - its lines in the award line, its counters hidden")
+                                      : "the game's words are gone - back in its places");
+        h->words = words;
+    }
     title = h->want_title;
     line = h->want_line;
     award = h->want_award;
     awardsub = h->want_awardsub;
     if (off) {
         title = line = award = awardsub = "";
+    } else if (h->noting && words) {
+        /* PAD-662: the award line, clear of the game's screen's words (the place a note had before PAD-658) */
     } else if (h->noting) {
         /* PAD-658: a note goes where the game letters its own mode titles, above the score panel: the award line in
          * the middle of the live screen sits on the game's own RAID / BRIDGE / POWER words there (emulator run
@@ -1284,7 +1298,7 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
         title = award;
         line = awardsub;
         award = awardsub = "";
-    } else if (aside) {
+    } else if (aside || words) {
         if (!award[0] && !awardsub[0]) {
             award = title;
             awardsub = line;
@@ -1297,7 +1311,7 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     kit_hud_text(h->t_awardsub, h->w_awardsub, sizeof h->w_awardsub, awardsub);
     for (k = 0; k < 3; k++)
         for (j = 0; j < 3; j++)
-            kit_hud_text(h->t_c[k][j], h->w_c[k][j], sizeof h->w_c[k][j], aside || off ? "" : h->want_c[k][j]);
+            kit_hud_text(h->t_c[k][j], h->w_c[k][j], sizeof h->w_c[k][j], aside || words || off ? "" : h->want_c[k][j]);
     low = aside == (int)PM_STOCK_BATTLE;          /* the game's BATTLE badge has the top slot */
     if (h->timer) {
         int up = h->want_timer >= 0 && !low;

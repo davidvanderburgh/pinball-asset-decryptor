@@ -359,13 +359,19 @@ picture** (Pro 1.15: 585, 260, 86); 24 lines carry a shot. The inserts of the sh
 | Left / right return lane | LEFT / RIGHT RETURN LANE | | the outlanes (0x8, 0x20) | LEFT / RIGHT OUTLANE |
 | the left spinner (0x800000000) | LEFT SPINNER (RGB) | | the top spinner (0x800, 0x1000) | TOP SPINNER (RGB) |
 | 0x2000000000 | SELECT CITY | | 0x4000000000 | MECHA LANE (RGB) |
+| the shield ramp spinner (0x20000; a Pro's right spinner) | ATTACK MECHA | | | |
+
+PAD-658 and PAD-669 added ties the game's shot table lacks: the Left spinner's, Top spinner's and Mecha exit
+bottom's switch shots (0x200, 0x2000, 0x10000000000) to LEFT SPINNER, TOP SPINNER and MECHA LANE, and the shield
+ramp spinner's (0x20000) to ATTACK MECHA - the insert in front of it, the one the game's own Ebirah battle lights
+for that spinner (`ebirah_stage_lamp_shield`).
 
 The rest are named but tied to no shot by the game: the feature inserts in front of each ramp
 (TANK 2, ADV TRAIN, MAGNA GRAB, TANK 3, ATTACK BRIDGE before the left ramp; TANK 5, HEAT RAY L1-L3,
 HEAT RAY before the right; LITE DESTRUCTION JACKPOT, TANK 4, TESLA STRIKE, BUILDING FIRE LEFT/RIGHT
 1-3 at the building; DESTRUCTION JACKPOT, TAIL WHIP inside the big loop), the scoop's SCOOP BB-BATTLE
 / -GODZILLA PWR UP / -SUMMON ALLY (the scoop dispatches only 0x1), the saucers and allies (TOP /
-BOTTOM SAUCER, SAUCER, MOTHRA, RODAN, ANGUIRUS, ATTACK MECHA, TANK 6), the cities and wizard modes
+BOTTOM SAUCER, SAUCER, MOTHRA, RODAN, ANGUIRUS, TANK 6), the cities and wizard modes
 (NY, LONDON, PARIS, TOKYO, PLANET X, KAIJU, BRIDGE, POWER, TANKS, the three WIZ), the fighters, lanes
 and SHOOT AGAIN, and the GI strings and flashers (their lines carry one light each). The
 port's lines say where each is (`# lamp N, I/O group G index I, at x,y` on the playfield picture).
@@ -1014,6 +1020,30 @@ What steps aside, and how:
   the badge is hidden during a battle rather than drawn over the game's.
 - **A mode of your own in C**: ask `pm_aside()` in your tick and keep your words out of the
   game's places while it is not 0.
+
+**The game's own words, any screen (PAD-662).** `pm_aside()` knows only the game's modes its port
+can ask about. Other screens of the game's letter their words in the same places: in PAD-658's
+emulator run kiryu_r2 (k15), SUPER X2's instruction line sat on Godzilla's own SHOOT TARGETS TO
+DISABLE BARRIER, Mechagodzilla's DEFENSE NEO BARRIER, which no list names. Every such screen comes
+up as a BACKGROUND of the layered display other than the main play (the city), with its own scene
+and words (the emulator probe saw the game write that line into the barrier background's own text
+node). So the runtime watches what is drawn: `pm_game_words()` is 1 while a background of the
+game's other than the city has its scene shown, kept up for 300 ms, and goes back to 0 after
+several ticks and 400 ms with none. A mode's clip drawn in that screen's place (a mode that keeps
+the game's modes from starting gets the barrier's place, PAD-658) means its words are not drawn,
+so it is 0 then. Each change is logged:
+
+```
+[pad] game words: a screen of the game's is on the glass (background 0x007b8db8, vtable 0x00645de8) - its words are where a mode's are, so a mode's step aside
+[pad] game words: gone - the main play is back (or a mode's clip is in its place)
+```
+
+While it is 1 the examples' HUDs step aside as for a mode of the game's (the lines in the award
+line, the counters hidden; the badge stays in its own slot), a qualification note goes in the award
+line (those screens keep it clear), and a mode file's own screen and a blocks mode's own screen and
+info line are hidden (`aside keep` still keeps a mode file's up). Unlike `pm_aside()` it never ends a
+`give_way` mode or holds a start. 0 on a port without the backdrop lines (it watches the same
+`backdrop_draw` / `scene_show` hooks).
 
 The examples' single-ball modes also wait out a MULTIBALL now (David: "when I was in multi-ball
 and I did the outlane oxygen destroyer mode, it should not have triggered because I had multiple

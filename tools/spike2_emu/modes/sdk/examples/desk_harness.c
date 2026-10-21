@@ -27,6 +27,7 @@
  *   new_game            a new game: player 1, every score 0, pm_in_game() 1
  *   trigger <file>      /dump/<file> appears (a mode's test trigger), with optional text: trigger f=text
  *   covered <0|1>       a display of the game's has the screen (a mode's words, or a note, wait for it)
+ *   words <0|1>         a screen of the game's own has its words up (PAD-662: pm_game_words, a mode's step aside)
  *   rescene             the game makes its HUD scene again (PAD-390): every node found so far is an old copy,
  *                       renamed "STALE:<name>", and the next lookups find fresh ones
  *   lamps               print every insert held now: "HELD <name> <rrggbb> <pattern> <ms> <mode>"
@@ -756,12 +757,13 @@ static const struct { const char *name; uint64_t shot; int x, y; } LAMPS[] = {  
     { "SHIELD LEFT", 0x80000000ull, 189, 335 }, { "SHIELD CENTER", 0x100000000ull, 199, 346 },
     { "SHIELD RIGHT", 0x200000000ull, 215, 356 },
     { "SKILL SHOT", 0x400000000ull, 49, 284 }, { "BIG LOOP", 0x1000000000ull, 195, 251 },
-    { "TOP SPINNER", 0x1800ull, 165, 207 },
+    { "TOP SPINNER", 0x3800ull, 165, 207 },
     { "POP BUMPER", 0x40ull, 251, 413 }, { "TANK 2", 0, 76, 287 }, { "HEAT RAY", 0, 180, 144 },
     { "LOWER PLAYFIELD GI-WHT(X9)", 0, 0, 0 }, { "UPPER PLAYFIELD GI-WHT(X12)", 0, 0, 0 },
-    /* PAD-658: the right side's inserts the pack lights by name, and the flashers */
-    { "LEFT SPINNER", 0x800000000ull, 55, 373 }, { "SELECT CITY", 0x2000000000ull, 236, 380 },
-    { "MECHA LANE", 0x4000000000ull, 282, 393 }, { "ATTACK MECHA", 0, 200, 381 }, { "TANK 6", 0, 227, 394 },
+    /* PAD-658: the right side's inserts the pack lights by name, and the flashers; PAD-669: the spinners'
+     * and the Mecha lane's shot ties as the port has them (ATTACK MECHA is the shield ramp spinner's) */
+    { "LEFT SPINNER", 0x800000200ull, 55, 373 }, { "SELECT CITY", 0x2000000000ull, 236, 380 },
+    { "MECHA LANE", 0x14000000000ull, 282, 393 }, { "ATTACK MECHA", 0x20000ull, 200, 381 }, { "TANK 6", 0, 227, 394 },
     { "SCOOP BB-BATTLE", 0, 254, 346 }, { "SCOOP BB-GODZILLA PWR UP", 0, 254, 346 },
     { "SCOOP BB-SUMMON ALLY", 0, 254, 346 }, { "SCOOP BB MECHA SPOT", 0, 259, 337 },
     { "TAIL WHIP", 0, 176, 297 }, { "DESTRUCTION JACKPOT", 0, 170, 273 }, { "KAIJU", 0, 127, 392 },
@@ -773,6 +775,7 @@ static const struct { const char *name; uint64_t shot; int x, y; } LAMPS[] = {  
 static const char *const PATTERN[] = { "solid", "blink", "pulse", "chase" };
 static struct { const struct pm_mode *owner; unsigned rgb, ms; int pattern; } held[N_LAMPS];
 static int covered;
+static int game_words;                 /* PAD-662: `words` */
 
 static const char *mode_name(const struct pm_mode *m) { return m && m->name ? m->name : "?"; }
 
@@ -959,6 +962,7 @@ int pm_display_priority(unsigned p)
     return 1;
 }
 int pm_display_covered(void) { return covered; }      /* PAD-658: held or not (a note looks too) */
+int pm_game_words(void) { return in_game && game_words; }   /* PAD-662 */
 int pm_end_holding(unsigned ms)
 {
     if (!running || running != current) return 0;
@@ -1100,6 +1104,9 @@ int main(int argc, char **argv)
         } else if (!strcmp(c, "covered")) {
             covered = atoi(argv[++k]);
             printf("%6lu >> covered %d\n", now_ms, covered);
+        } else if (!strcmp(c, "words")) {
+            game_words = atoi(argv[++k]);
+            printf("%6lu >> words %d\n", now_ms, game_words);
         } else if (!strcmp(c, "lamps")) {
             int n = 0;
             for (int i = 0; i < N_LAMPS; i++)

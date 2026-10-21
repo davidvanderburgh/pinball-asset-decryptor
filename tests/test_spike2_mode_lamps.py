@@ -102,6 +102,8 @@ def test_the_shots_inserts_are_the_ones_in_front_of_them(key):
             continue
         assert shot < (1 << 43), name
     assert lamps["LEFT OUTLANE"][2] == 0x8 and lamps["TOP SPINNER"][2] == 0x3800   # PAD-658: + the Top spinner shot
+    assert lamps["ATTACK MECHA"][2] == 0x20000 == shots[[n for n in shots if n in ("Shield ramp spinner",
+                                                                       "Right spinner")][0]]   # PAD-669
 
 
 def test_the_app_reads_the_lamp_lines_and_an_old_port_has_none(tmp_path):

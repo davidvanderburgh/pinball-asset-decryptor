@@ -2607,6 +2607,7 @@ static unsigned frame_loops, frame_builds;  /* the game's main-loop turns and th
 static unsigned long frame_minute;
 static void clip_frames_said(void);
 
+static void gw_tick(void);
 static void clip_tick(void)
 {
     void *player, *surface, *display;
@@ -2614,6 +2615,7 @@ static void clip_tick(void)
     unsigned long now;
     long playing = pm_port_value("surface_playing", 2);
     display_tick();                           /* item 154 display: the hold, the covered state */
+    gw_tick();                                /* PAD-662: the game's own words up or gone, said as they change */
     block_tick();                             /* PAD-347: a block ends with its mode */
     bd2_tick();                               /* PAD-521: the loop on the bank's surface */
     ck_tick();                                /* PAD-530: a mode's clip back after the game's */
@@ -2981,8 +2983,76 @@ static void bd_other_said(unsigned e, int ok)
 static unsigned disp_prio;
 static unsigned char *disp_layered_mgr;
 
-/* scene_show(scene, layer): the city's own scene is where the backdrop goes */
+/* PAD-662: THE GAME'S OWN WORDS ON THE GLASS. Every screen of the game's that is not the main play (the city) comes up as a
+ * background of the layered display with its own scene, and that scene letters its words where Stern always puts them
+ * - a title above the score panel, an instruction line under it, counters along the top - which are the places a mode's
+ * HUD and its own screen copy. Godzilla's Mechagodzilla letters DEFENSE NEO BARRIER / SHOOT TARGETS TO DISABLE BARRIER
+ * there (emulator, PAD-658 run kiryu_r2 k15: SUPER X2's line lettered over it), and no list of the game's modes names
+ * that screen. So the runtime watches what is DRAWN: while a background of the game's other than the city has its
+ * scene shown (scene_show let through, not swapped for a mode's clip in its place), the game's words are up
+ * (pm_game_words), and a mode's words step aside until it is gone. Decided once a tick (gw_tick, from clip_tick): up
+ * once its shows have kept coming for GW_HOLD_MS (the one frame a backdrop is played again in its place is not
+ * counted), gone once GW_MISS_TICKS ticks in a row and GW_GAP_MS have passed with none - a pause of the whole machine
+ * (the first tick after it finds the last show long ago, and the next frame shows it again: emulator run after1,
+ * 96150/96160) is not "gone". */
+#define GW_HOLD_MS 300
+#define GW_GAP_MS 400
+#define GW_RECENT_MS 150
+#define GW_MISS_TICKS 4
+static struct { unsigned long last, run; unsigned elem, shows, shows_seen, miss; int on, restart; } gw;
+
+static void gw_seen(unsigned e)
+{
+    gw.last = pm_ms() | 1;
+    if (e != gw.elem) gw.restart = 1;     /* another screen of the game's: its own time up */
+    gw.elem = e;
+    gw.shows++;
+}
+
+static void gw_tick(void)
+{
+    unsigned long now = pm_ms();
+    int on;
+    if (gw.shows != gw.shows_seen) {
+        gw.shows_seen = gw.shows;
+        gw.miss = 0;
+        if (!gw.run || gw.restart) gw.run = now | 1;
+        gw.restart = 0;
+    } else if (gw.miss < GW_MISS_TICKS) {
+        gw.miss++;
+    } else if (now - gw.last >= GW_GAP_MS) {
+        gw.run = 0;
+    }
+    on = (can & PM_CAN_BACKDROP) && !bd_v2 && pm_in_game() && gw.run &&
+         (gw.on ? 1 : now - gw.run >= GW_HOLD_MS && now - gw.last < GW_RECENT_MS);
+    if (on != gw.on) {
+        if (on) say("game words: a screen of the game's is on the glass (background 0x%08x, vtable 0x%08x) - its words "
+                    "are where a mode's are, so a mode's step aside", gw.elem, *(unsigned *)(unsigned long)gw.elem);
+        else say("game words: gone - the main play is back (or a mode's clip is in its place)");
+        gw.on = on;
+    }
+}
+
+int pm_game_words(void)
+{
+    return gw.on && pm_in_game();
+}
+
+static void scene_show_backdrop(unsigned *r);
+
+/* scene_show(scene, layer): a background of the game's let through is on the glass (PAD-662) - not under a full-screen
+ * clip of ours, drawn over everything (emulator run block1: KIRYU's ending clip over the barrier moved its HUD for
+ * nothing) */
 static void on_scene_show(unsigned *r)
+{
+    unsigned e = bd.elem, sc = e ? *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18)) : 0;
+    int bg = e && r[0] && r[0] == sc;
+    scene_show_backdrop(r);
+    if (bg && r[0] == sc && !bd_is_city(e) && !clip.on) gw_seen(e);
+}
+
+/* scene_show(scene, layer): the city's own scene is where the backdrop goes */
+static void scene_show_backdrop(unsigned *r)
 {
     unsigned e = bd.elem, playing = (unsigned)pm_port_value("surface_playing", 2);
     /* PAD-301: while our full-screen clip plays, the hand-over draws the one video player LAST in every

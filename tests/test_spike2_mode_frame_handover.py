@@ -136,7 +136,8 @@ def test_the_games_foreground_words_are_never_hidden():
 def test_scene_show_settles_our_player_before_the_backdrop():
     """While our full-screen clip plays, nothing of the game's puts the player in the frame first (the
     hand-over draws it last); only then the backdrop's own business."""
-    body = _lift(RUNTIME.read_text(encoding="utf-8"), "static void on_scene_show(unsigned *r)")
+    # PAD-662: the hook (on_scene_show) watches the game's own words around it; the backdrop's business is here
+    body = _lift(RUNTIME.read_text(encoding="utf-8"), "static void scene_show_backdrop(unsigned *r)\n{")
     ours = body.index('fn("video_player"))()) {')
     assert body.index("frame_draws && clip.on") < ours < body.index("if (!e ||")
     assert "r[0] = 0;" in body[ours:body.index("if (!e ||")]

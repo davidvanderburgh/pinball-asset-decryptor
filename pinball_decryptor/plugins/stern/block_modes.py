@@ -3318,7 +3318,7 @@ def to_c(program, slug):
     L.append('        end("time ran out");')
     if watch:
         L.append("    if (run.on && screen) {           /* its screen out of the way of the game's (PAD-375) */")
-        L.append("        int away = pm_display_covered() || pm_aside();")
+        L.append("        int away = pm_display_covered() || pm_aside() || pm_game_words();   /* PAD-662: any screen of the game's */")
         L.append("        if (away != screen_away) {")
         L.append("            pm_show(screen, !away && (!WORDS_ONLY || flash_ticks));")
         L.append("            screen_away = away;")
@@ -3327,7 +3327,7 @@ def to_c(program, slug):
     if has_hud:
         L.append("    if (run.on) hud_show();")
     if has_info:
-        L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside());   /* PAD-547: out of the way of the game's */")
+        L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside() && !pm_game_words());   /* PAD-547, PAD-662 */")
     L.append("}")
     L.append("")
     L.append("/* PAD-622: a drain while it runs ends it as its clock would - an Award it ended on, then its TOTAL - and the")

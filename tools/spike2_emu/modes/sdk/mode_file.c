@@ -2973,20 +2973,23 @@ static void poll_bound(void)
 }
 
 /* PAD-347: while its screen is up (the mode running, or its total showing) and one of the game's own modes
- * runs, the screen steps aside: hidden, and shown again when the game's mode ends (`aside keep`: never). */
+ * runs, the screen steps aside: hidden, and shown again when the game's mode ends (`aside keep`: never). PAD-662: so
+ * while a screen of the game's own has its words up (pm_game_words: any background of the game's but the main play). */
 static void screen_aside_tick(struct slot *M)
 {
-    int a;
+    int a, w;
     if (!own_screen(M) || !M->node || cfg.aside_keep) return;
     if (!running(M) && !M->hide_ticks) {     /* down anyway: nothing to put back */
         M->aside = 0;
         return;
     }
     a = pm_aside();
-    if (!a == !M->aside) return;
-    M->aside = a != 0;
+    w = !a && pm_game_words();           /* PAD-662: a screen of the game's own, listed or not, has its words up */
+    if (!(a || w) == !M->aside) return;
+    M->aside = a || w;
     pm_show(M->node, !M->aside);
-    if (M->aside) pm_log("%s: its screen steps aside - %s has the middle of the screen", cfg.name, pm_stock_mode_what((unsigned)a));
+    if (M->aside && w) pm_log("%s: its screen steps aside - a screen of the game's has its words up", cfg.name);
+    else if (M->aside) pm_log("%s: its screen steps aside - %s has the middle of the screen", cfg.name, pm_stock_mode_what((unsigned)a));
     else pm_log("%s: its screen is back - the game's mode is over", cfg.name);
 }
 

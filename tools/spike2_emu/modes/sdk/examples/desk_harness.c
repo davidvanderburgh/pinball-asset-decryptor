@@ -27,6 +27,7 @@
  *   new_game            a new game: player 1, every score 0, pm_in_game() 1
  *   trigger <file>      /dump/<file> appears (a mode's test trigger), with optional text: trigger f=text
  *   covered <0|1>       a display of the game's has the screen (a mode's words, or a note, wait for it)
+ *   words <0|1>         a screen of the game's own has its words up (PAD-662: pm_game_words, a mode's step aside)
  *   rescene             the game makes its HUD scene again (PAD-390): every node found so far is an old copy,
  *                       renamed "STALE:<name>", and the next lookups find fresh ones
  *   lamps               print every insert held now: "HELD <name> <rrggbb> <pattern> <ms> <mode>"
@@ -773,6 +774,7 @@ static const struct { const char *name; uint64_t shot; int x, y; } LAMPS[] = {  
 static const char *const PATTERN[] = { "solid", "blink", "pulse", "chase" };
 static struct { const struct pm_mode *owner; unsigned rgb, ms; int pattern; } held[N_LAMPS];
 static int covered;
+static int game_words;                 /* PAD-662: `words` */
 
 static const char *mode_name(const struct pm_mode *m) { return m && m->name ? m->name : "?"; }
 
@@ -959,6 +961,7 @@ int pm_display_priority(unsigned p)
     return 1;
 }
 int pm_display_covered(void) { return covered; }      /* PAD-658: held or not (a note looks too) */
+int pm_game_words(void) { return in_game && game_words; }   /* PAD-662 */
 int pm_end_holding(unsigned ms)
 {
     if (!running || running != current) return 0;
@@ -1100,6 +1103,9 @@ int main(int argc, char **argv)
         } else if (!strcmp(c, "covered")) {
             covered = atoi(argv[++k]);
             printf("%6lu >> covered %d\n", now_ms, covered);
+        } else if (!strcmp(c, "words")) {
+            game_words = atoi(argv[++k]);
+            printf("%6lu >> words %d\n", now_ms, game_words);
         } else if (!strcmp(c, "lamps")) {
             int n = 0;
             for (int i = 0; i < N_LAMPS; i++)

@@ -286,3 +286,15 @@ def test_a_page_is_the_category_it_read_first_of_the_tables():
     assert "if (chg_pages_cat >= 0 || (int)r[0] <= 0 || (int)r[0] >= chg_pages_count) return;" in seen
     run = _host()._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")
     assert run.index("chg_pages_count = chg_scores_count();") < run.index("ret = chg_pages_game[k](")
+
+
+def test_a_games_page_cut_short_does_not_leave_the_pages_passed_through():
+    """A game started during the game's own page: the call never returned, chg_pages_tid stayed set and every later
+    page went straight to the game (Batman 66 1.14: no mode champion after a game)."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    tick = src[src.index("static void chg_pages_tick(void)\n{"):]
+    tick = tick[:tick.index("\n}\n")]
+    clear = tick.index("if (chg_pages_tid && !chg_scores_running && (pm_in_game() || pm_ms() - chg_pages_call_ms > 60000))")
+    assert tick.index("chg_pages_tid = 0;", clear) < tick.index("chg_pages_in = 0;", clear + 1)
+    run = _host()._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")
+    assert run.index("chg_pages_call_ms = pm_ms();") < run.index("chg_pages_tid = me;")

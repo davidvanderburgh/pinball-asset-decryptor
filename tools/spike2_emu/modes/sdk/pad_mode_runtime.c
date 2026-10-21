@@ -880,6 +880,9 @@ static unsigned long lit_hold_until;  /* PAD-503: a lit mode's claimed shot hold
 static int chg_refuses(void);         /* PAD-630: the challenge section, below */
 static void chg_began(void);
 static void chg_mode_ended(int was_taker);
+static volatile int chg_end_owed;           /* PAD-663: the challenge's "end this ball now", owed to the game's next bus call */
+static volatile unsigned long chg_end_owed_ms;
+static void chg_end_ball_now(const char *from);
 
 int pm_begin(void)
 {
@@ -8778,6 +8781,7 @@ static void on_tick(unsigned *r)
     wizards_tick();                           /* PAD-436: a mini-wizard's refused start, kept lit */
     launch_tick();                            /* PAD-643: a mode's challenge ball launched for the player */
     chg_pages_tick();                         /* PAD-663: a champion page cut short gives its entry back */
+    if (chg_end_owed && pm_ms() - chg_end_owed_ms > 1000) chg_end_ball_now("the tick");   /* PAD-663: no bus call came */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
@@ -9274,6 +9278,21 @@ static void chg_mode_ended(int ran)
         return;
     }
     say("challenge: its mode ended - the ball ends now, as the game's own challenges do (0x%08x)", f);
+    chg_end_owed_ms = pm_ms();
+    chg_end_owed = 1;                /* made from the game's next bus call (on_event_dispatch), else the tick's */
+}
+
+/* PAD-663: "end this ball now" kills the game's processes but the current one, and it was called from the tick, where
+ * there is no current process: a process of The Beatles 1.29 asks the current one's id as it is killed and the game
+ * crashed (null read at 0x6dd2c) as a mode's challenge ended. The game's own challenge endings call it from a process,
+ * as a handler of a bus call; so is ours now, at the start of the next bus call (a game in play makes several a
+ * second), and from the tick as before only when none comes within a second. */
+static void chg_end_ball_now(const char *from)
+{
+    unsigned f = fn("challenge_end_ball");
+    if (!__sync_bool_compare_and_swap(&chg_end_owed, 1, 0)) return;
+    if (!f || !pm_in_game()) return;
+    say("challenge: the ball ended from %s, %lu ms after the mode", from, pm_ms() - chg_end_owed_ms);
     ((int (*)(int, int))(unsigned long)f)(1, 1);
 }
 
@@ -9913,6 +9932,7 @@ static volatile int chg_pages_in;                /* a mode's page runs */
 static unsigned *volatile chg_pages_ent;         /* the entry pointed at a mode's record, until its call returns */
 static unsigned chg_pages_was[3];
 static unsigned long chg_pages_ms;
+static volatile unsigned long chg_pages_call_ms;     /* when the game's page call in chg_pages_tid began */
 static unsigned char chg_pages_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
 static char chg_pages_title[48];
 static const char *chg_pages_titles[8];
@@ -9987,6 +10007,7 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
     if (chg_pages_in || chg_pages_tid) return chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);
     chg_pages_cat = chg_pages_n = chg_pages_cat0 = chg_pages_n0 = -1;
     chg_pages_count = chg_scores_count();
+    chg_pages_call_ms = pm_ms();
     chg_pages_tid = me;
     ret = chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);    /* the game's own page, as it was */
     cat = chg_pages_cat;
@@ -10055,6 +10076,12 @@ static void chg_pages_tick(void)
 {
     if (chg_pages_ent && (pm_in_game() || pm_ms() - chg_pages_ms > 60000)) {
         chg_pages_back();
+        chg_pages_in = 0;
+    }
+    /* the game's own page cut short the same way: left marked in a call, every later page was passed straight to the
+     * game (Batman 66 showed no mode champion after a game started during its page) */
+    if (chg_pages_tid && !chg_scores_running && (pm_in_game() || pm_ms() - chg_pages_call_ms > 60000)) {
+        chg_pages_tid = 0;
         chg_pages_in = 0;
     }
 }
@@ -10666,6 +10693,7 @@ static void on_event_dispatch(unsigned *r)
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
+    if (chg_end_owed) chg_end_ball_now("the game's bus call");       /* PAD-663: from a process of the game's */
     /* PAD-619: a new game forgets the last one's - not a pick from this very ball's start (Batman 66 1.13 dispatches
      * the ball's start before the game's) */
     if (challenge_game_id >= 0 && r[0] == (unsigned)challenge_game_id && pm_ms() - challenge_ours_ms > 2000)

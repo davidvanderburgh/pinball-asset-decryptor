@@ -963,36 +963,92 @@ def _rename_shots(stack, names):
 
 
 def adapt(ex, profile):
-    """Example ``ex``'s program for the card's title ``profile`` (PAD-658: Premium/LE and Pro get the same modes):
-    its shots renamed where the title's port names them otherwise (``title_shots``: {game_dir prefix: {name: name}},
-    e.g. Premium's "Shield ramp spinner" is a Pro's "Right spinner"), and its blocks that turn the shield platform
-    left out on a title with none (a Pro's shields are fixed, facing the player)."""
+    """Example ``ex``'s program for the card's title ``profile`` (PAD-658: Premium/LE and Pro get the same modes, with
+    alternate rules where the Pro's layout and mechanisms differ).
+
+    ``title_alt`` (``{game_dir prefix: {"shots": {name: name or None}, "shows": {name: name or None},
+    "inserts": {name: name or None}}}``) names the title's alternates: a shot it calls otherwise or replaces with
+    another (Premium's "Shield ramp spinner" is a Pro's "Right spinner"; its "Shield target center" a Pro has not),
+    the game's own light show it plays instead, the insert it lights instead. None takes the shot (its scripts and
+    lights), show or insert out. ``title_shots`` (round 1's) is the same as ``title_alt``'s "shots".
+
+    Then what the card's game cannot do at all is left out, as a person would take the block away: turning the
+    shield platform (a Pro's shields are fixed, facing the player), moving the building, holding a mechanism the
+    game has not, a game light show or insert it has not. :func:`fits` says whether what is left builds."""
     program = copy.deepcopy(ex["program"])
     if profile is None:
         return program
     game_dir = str(getattr(profile, "game_dir", "") or "")
-    names = {}
+    alt = {"shots": {}, "shows": {}, "inserts": {}}
     for prefix, m in (ex.get("title_shots") or {}).items():
         if game_dir.startswith(prefix):
-            names.update(m)
-    no_shield = not profile.can("shield")
+            alt["shots"].update(m)
+    for prefix, a in (ex.get("title_alt") or {}).items():
+        if game_dir.startswith(prefix):
+            for k in alt:
+                alt[k].update((a or {}).get(k) or {})
+    card = card_checks(profile)
+    shots = set(card.get("shots") or ())
+    shows = set(card.get("game_shows") or ())
+    inserts = set(card.get("inserts") or ())
+    mechs = card.get("mechs") or {}
+    gone_shots = {n for n, v in alt["shots"].items() if v is None}
+    names = {n: v for n, v in alt["shots"].items() if v}
+
+    def shot_ok(name):
+        return name not in gone_shots
 
     def keep(stack):
         out = []
         for b in stack or []:
-            if not isinstance(b, dict) or (no_shield and b.get("op") == "shield"):
+            if not isinstance(b, dict):
                 continue
-            if b.get("op") == "if":
-                b = dict(b, then=keep(b.get("then")), **({"else": keep(b.get("else"))} if b.get("else") else {}))
+            b = copy.deepcopy(b)
+            op = b.get("op")
+            if op == "shield" and card.get("shield") is False:
+                continue
+            if op == "building" and card.get("building") is False:
+                continue
+            if op == "hold" and b.get("what") not in mechs:
+                continue
+            if op == "game_show":
+                name = alt["shows"].get(b.get("name"), b.get("name"))
+                if not name or (shows and name not in shows):
+                    continue
+                b["name"] = name
+            if op in ("light_shot", "lights_off") and b.get("insert"):
+                name = alt["inserts"].get(b["insert"], b["insert"])
+                if not name or (inserts and name not in inserts):
+                    continue
+                b["insert"] = name
+            if op in ("light_shot", "lights_off", "set_hits") and b.get("shot") and not shot_ok(b["shot"]):
+                continue
+            if op == "light_mode":
+                if not shot_ok(b.get("shot")):
+                    continue
+                kept = [n for n in (alt["inserts"].get(x.strip(), x.strip())
+                                    for x in str(b.get("insert") or "").split(",") if x.strip())
+                        if n and (not inserts or n in inserts)]
+                b["insert"] = ",".join(kept)
+            if op == "if":
+                b["then"] = keep(b.get("then"))
+                if b.get("else"):
+                    b["else"] = keep(b.get("else"))
             out.append(b)
         return out
 
+    scripts = []
     for s in program.get("scripts") or []:
+        hat = s.get("hat") or {}
+        if hat.get("kind") == "shot" and not shot_ok(hat.get("shot")):
+            continue
         if names:
-            if (s.get("hat") or {}).get("shot") in names:
-                s["hat"]["shot"] = names[s["hat"]["shot"]]
+            if hat.get("shot") in names:
+                hat["shot"] = names[hat["shot"]]
             _rename_shots(s.get("do"), names)
         s["do"] = keep(s.get("do"))
+        scripts.append(s)
+    program["scripts"] = scripts
     return program
 
 

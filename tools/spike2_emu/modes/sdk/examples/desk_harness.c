@@ -68,6 +68,7 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Left return lane", 0x4ull }, { "Right return lane", 0x10ull }, { "Pop bumper", 0x40ull },
     { "Mecha exit bottom", 0x10000000000ull }, { "Left spinner", 0x200ull },
     { "Top spinner", 0x2000ull }, { "Shield ramp spinner", 0x20000ull },
+    { "Right spinner", 0x20000ull },                    /* PAD-658: the same spinner, as a Pro's port names it */
     { "Right scoop", 0x0100000000000000ull },           /* PAD-658: `switch` lines of the port, the scoop */
     { "Mecha exit top", 0x0200000000000000ull },        /* and the top of the Mecha lane */
     { "Action button", 0x1000000000000000ull },         /* a `switch` line of the port (PAD-228) */

@@ -8,7 +8,8 @@
     python make_examples.py --desk [slug]   also play each example's desk scenarios (needs Linux or WSL: gcc and the
                                             desk harness; on Windows it runs itself under WSL)
 
-Each ``src_<slug>.py`` has ``build()`` -> the example (blk.py's words; block_modes.py's "the blocks examples" says
+Each ``src_<slug>.py`` has ``build()`` -> the example (``title_alt``: its Pro alternates, BM.adapt), optionally
+``DESK_PRO`` (scenarios played on the program as a Pro gets it), (blk.py's words; block_modes.py's "the blocks examples" says
 the shape) and, optionally, ``DESK``: [(what, [harness args], [lines the output must hold])]. The film recipe of
 its own clips, sounds and music is ``recipes/<slug>.json`` (film_recipes.json's shape), when there is one.
 
@@ -33,6 +34,7 @@ from pinball_decryptor.plugins.stern import block_modes as BM  # noqa: E402
 from pinball_decryptor.plugins.stern import mode_project as MP  # noqa: E402
 
 TITLE = "godzilla_le_1_16"
+PRO_TITLE = "godzilla_pro_1_16"
 
 
 def sources():
@@ -66,6 +68,9 @@ def check(ex):
         out.append("the program does not normalise to itself")
     prof = MP.profile(TITLE)
     out += BM.problems(p, **BM.card_checks(prof))
+    if "godzilla_pro" in (ex.get("titles") or ()):          # PAD-658: the Pro's own rules where its layout differs
+        pro = MP.profile(PRO_TITLE)
+        out += ["on Godzilla Pro 1.16: " + t for t in BM.problems(BM.adapt(ex, pro), **BM.card_checks(pro))]
     r = ex.get("recipe") or {}
     clips = {c["name"] for c in p["clips"]}
     sounds = {c["name"] for c in p["sounds"]}
@@ -143,6 +148,37 @@ def desk(slugs, examples):
             ok = r.returncode == 0 and not missing
             bad += not ok
             print("%-12s %-40s %s%s" % (ex["slug"], what, "ok" if ok else "FAILED", "" if ok else
+                                         " (missing: %s; rc %d) see %s" % (missing, r.returncode, log)))
+    # PAD-658: DESK_PRO - the same mode as a Pro gets it (BM.adapt to Godzilla Pro 1.16), in a harness of its own
+    for ex in examples:
+        if slugs and ex["slug"] not in slugs:
+            continue
+        mod = importlib.import_module("src_" + ex["slug"])
+        if not getattr(mod, "DESK_PRO", ()):
+            continue
+        pdir = os.path.join(work, "pro_" + ex["slug"])
+        os.makedirs(pdir, exist_ok=True)
+        src = os.path.join(pdir, ex["slug"] + ".c")
+        with open(src, "w") as f:
+            f.write(BM.to_c(BM.adapt(ex, MP.profile(PRO_TITLE)), ex["slug"]))
+        shutil.copy(os.path.join(SDK, "examples", BM.KIT_FILE), pdir)
+        pexe = os.path.join(pdir, "harness")
+        r = subprocess.run(["gcc", "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", SDK, "-I", pdir,
+                            "-o", pexe, os.path.join(SDK, "examples", "desk_harness.c"), src],
+                           capture_output=True, text=True)
+        if r.returncode or "warning" in r.stderr.lower():
+            print(r.stderr)
+            bad += 1
+            continue
+        for what, args, want in mod.DESK_PRO:
+            r = subprocess.run([pexe, "new_game"] + [str(a) for a in args], capture_output=True, text=True, timeout=120)
+            log = os.path.join(pdir, "%s_%s.txt" % (ex["slug"], what.replace(" ", "_")))
+            with open(log, "w") as f:
+                f.write(r.stdout + r.stderr)
+            missing = [w for w in want if w not in r.stdout]
+            ok = r.returncode == 0 and not missing
+            bad += not ok
+            print("%-12s %-40s %s%s" % (ex["slug"], "PRO " + what, "ok" if ok else "FAILED", "" if ok else
                                          " (missing: %s; rc %d) see %s" % (missing, r.returncode, log)))
     return 1 if bad else 0
 

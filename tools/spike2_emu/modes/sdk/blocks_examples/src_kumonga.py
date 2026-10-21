@@ -273,3 +273,12 @@ def build():
     p = dict(PROGRAM)
     p["scripts"] = SCRIPTS
     return dict(EXAMPLE, program=p)
+
+
+#: PAD-658: as a Pro gets it - the spinner on the shield ramp is the Pro's Right spinner, and its shields are fixed
+DESK_PRO = [
+    ("spinning the Right spinner lights it", _shots("Right spinner", 40) + ["shot", "Big loop", "secs", 2],
+     ["Hud_Award: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)"]),
+    ("the web on the fixed shields", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
+     ["Hud_Title: KUMONGA RETREATS", "SCORE +20000000"]),
+]

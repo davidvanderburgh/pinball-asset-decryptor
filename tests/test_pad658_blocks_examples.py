@@ -66,9 +66,10 @@ def test_a_rebuild_keeps_its_c_examples_name_clock_and_cues(slug):
     ex, c = _example(slug), CM.example(_example(slug)["name"])
     assert c is not None and c["slug"] == slug
     r = c["recipe"]
-    assert set(ex["recipe"]["clips"]) == set(r.get("clips") or {})
-    assert set(ex["recipe"]["calls"]) == set(r.get("calls") or {})
-    assert ex["recipe"]["clips"] == r.get("clips") and ex["recipe"]["calls"] == r.get("calls")
+    # every cue of its C's, with the same pick (round 2's stages add cues of their own)
+    for kind in ("clips", "calls"):
+        for cue, pick in (r.get(kind) or {}).items():
+            assert ex["recipe"][kind].get(cue) == pick, (kind, cue)
 
 
 def test_the_wizard_offers_what_builds_on_the_card():
@@ -326,3 +327,35 @@ def test_every_example_fits_the_glass():
     font = hud_fit.font_from_card(card)
     bad = {ex["slug"]: hud_fit.check(font, ex) for ex in BM.EXAMPLES}
     assert not {k: v for k, v in bad.items() if v}
+
+
+def test_the_pro_gets_alternate_rules_where_its_layout_differs():
+    """A Pro 1.16 has no centre shield, calls the shield-ramp spinner its Right spinner, has no platform, building,
+    Mechagodzilla magnet or bridge, and not every Premium light show or insert: an example's title_alt says what the
+    Pro does instead, and what the Pro cannot do at all is left out."""
+    pro, le = MP.profile("godzilla_pro_1_16"), MP.profile("godzilla_le_1_16")
+    num = {"k": "num", "v": 1}
+    ex = {"name": "ALT", "slug": "alt", "titles": ["godzilla_le", "godzilla_pro"],
+          "title_alt": {"godzilla_pro": {"shots": {"Shield ramp spinner": "Right spinner", "Shield target center": None},
+                                         "shows": {"Insert chase": "Glow"}, "inserts": {"GODZILLA SPOT": "MASER FLASH"}}},
+          "program": BM.normalize({"name": "ALT", "seconds": 30, "game_modes": "block", "scripts": [
+              {"hat": {"kind": "shot", "shot": "Shield ramp spinner", "when": "idle"}, "do": [
+                  {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "hits", "shot": "Shield ramp spinner"}, "b": num},
+                   "then": [{"op": "start_mode"}], "else": None}]},
+              {"hat": {"kind": "shot", "shot": "Shield target center", "when": "running"}, "do": [{"op": "score", "points": num}]},
+              {"hat": {"kind": "mode_start"}, "do": [
+                  {"op": "shield", "where": "toward"}, {"op": "building", "floor": "2"},
+                  {"op": "hold", "what": "mg_magnet", "ms": {"k": "num", "v": 500}}, {"op": "hold", "what": "magnet", "ms": {"k": "num", "v": 500}},
+                  {"op": "game_show", "name": "Insert chase"}, {"op": "game_show", "name": "Playfield wave"},
+                  {"op": "light_shot", "insert": "GODZILLA SPOT", "color": "#ffffff", "pattern": "solid"},
+                  {"op": "light_shot", "shot": "Shield target center", "color": "#ffffff", "pattern": "solid"}]}]})}
+    p = BM.adapt(ex, pro)
+    hats = [s["hat"].get("shot") for s in p["scripts"]]
+    assert hats == ["Right spinner", None]                                   # the centre shield's script is gone
+    assert p["scripts"][0]["do"][0]["cond"]["a"]["shot"] == "Right spinner"   # its hits too
+    start = p["scripts"][1]["do"]
+    assert [b["op"] for b in start] == ["hold", "game_show", "light_shot"]
+    assert start[0]["what"] == "magnet" and start[1]["name"] == "Glow" and start[2]["insert"] == "MASER FLASH"
+    assert BM.problems(p, **BM.card_checks(pro)) == []
+    assert BM.adapt(ex, le) == ex["program"]                                # Premium/LE: as written
+    assert BM.fits(ex, pro) and BM.fits(ex, le)

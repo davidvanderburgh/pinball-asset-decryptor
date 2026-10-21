@@ -1094,8 +1094,8 @@ static KIT_UNUSED void kit_hud_award(struct kit_hud *h, unsigned ms, const char 
     h->award_until = pm_ms() + ms;
 }
 
-/* A QUALIFICATION note on a HUD the mode is not using ("POWERLINES 2 OF 3"): the award line alone for
- * `ms`, then hidden. Polite: while another of the pack's HUDs is up (a mode running, or the total of
+/* A QUALIFICATION note on a HUD the mode is not using ("POWERLINES 2 OF 3"): its two lines for `ms`, then hidden,
+ * lettered in the title and line places above the score panel (PAD-658: not the award line over the game's own). Polite: while another of the pack's HUDs is up (a mode running, or the total of
  * one that just ended) nothing is shown - a METER of another mode (kit_hud_meter) gives way to it. On a HUD
  * showing its own meter the note goes in the award line and the meter stays. 1 = shown. */
 static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *big, const char *sub)
@@ -1247,6 +1247,13 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     awardsub = h->want_awardsub;
     if (off) {
         title = line = award = awardsub = "";
+    } else if (h->noting) {
+        /* PAD-658: a note goes where the game letters its own mode titles, above the score panel: the award line in
+         * the middle of the live screen sits on the game's own RAID / BRIDGE / POWER words there (emulator run
+         * oxygen_destroyer_r1, od_note.png) */
+        title = award;
+        line = awardsub;
+        award = awardsub = "";
     } else if (aside) {
         if (!award[0] && !awardsub[0]) {
             award = title;

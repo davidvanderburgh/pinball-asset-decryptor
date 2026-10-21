@@ -1056,7 +1056,7 @@ def test_the_hud_c_calls_only_the_header_and_the_kit():
     assert kit_used and kit_used <= kit, kit_used - kit
     assert 'static struct kit_hud hud = { .slug = "maser" };' in src
     # a HUD with no priority of its own takes a mode's 180 (PAD-377's choice wins when made)
-    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_NOW_MS + total_due" in src
+    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_HOLD_MS + total_due" in src
     p = maser_hud()
     p["priority"] = 190
     assert re.search(r"#define DISPLAY_PRIORITY 190\b", BM.to_c(p, "maser"))
@@ -1098,8 +1098,8 @@ def test_the_hud_follows_the_blocks_and_ends_with_the_total(tmp_path):
     assert "1.00M" in _hud_words(out, "C3_Value")         # short enough for the counter (kit_short)
     # the award for its two seconds, the badge counting the clock, the chain gauge lit 1, 2, then 0
     award = _hud_words(out, "Award")
-    assert award[:3] == [" ", "BARRAGE 1", " "]
-    assert "MULTIPLIER UP" in _hud_words(out, "AwardSub")
+    assert award[:3] == [" ", "BARRAGE", " "]                 # PAD-658: the words big, the number under them
+    assert "1  -  MULTIPLIER UP" in _hud_words(out, "AwardSub")
     timer = _hud_words(out, "Timer_Num")
     assert timer[0] == "20" and "10" in timer
     lit = re.findall(r"SHOW \S+_Hud_G(\d)_On 1", out)
@@ -1149,9 +1149,10 @@ def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
          "seconds": 2}]})
     out = play(tmp_path, p, "shot", "Big loop", "secs", 3, slug="maser")
     note = out[out.index(">> shot Big loop"):]
-    assert "Hud_Award: MASER 1" in note and "Hud_AwardSub: TEST MODE" in note
+    # PAD-658: a note is lettered where the game letters its own mode titles, not over its live screen's words
+    assert "Hud_Title: MASER" in note and "Hud_Line: 1  -  TEST MODE" in note
     assert "SHOW PadMode_maser_Hud 1" in note and "SHOW PadMode_maser_Hud 0" in note
-    assert "Hud_Title:  " in note                  # a note is the award line alone
+    assert "Hud_Award:  " in note                  # the award line stays clear
 
 
 def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, monkeypatch):

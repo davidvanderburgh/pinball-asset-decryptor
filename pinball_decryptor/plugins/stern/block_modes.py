@@ -2480,6 +2480,9 @@ def to_c(program, slug):
     L.append("    uint64_t total;")
     L.append("} run;")
     L.append("static int sec_changed, ending;")
+    L.append("UNUSED static int end_clip;                /* PAD-658: When the mode ends played a full-screen clip */")
+    L.append("#define END_CLIP_MS      6000      /* ... its TOTAL stays this much longer: the clip covers it first */")
+    L.append("#define ENDING_HOLD_MS   (ENDING_NOW_MS + (end_clip ? END_CLIP_MS : 0))")
     L.append("static unsigned flash_ticks;           /* PAD-521: words alone: how long its words stay up */")
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
@@ -2731,6 +2734,7 @@ def to_c(program, slug):
         L.append("                             unsigned ms)")
         L.append("{")
         L.append("    char line[KIT_HUD_WORDS], under[KIT_HUD_WORDS], number[32];")
+        L.append("    if (!run.on && !sub[0]) sub = MODE_NAME;   /* a note says whose it is */")
         L.append("    if (with_value && text[0]) {      /* PAD-658: the words big, the number under them with the sub */")
         L.append("        pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);   /* (one line of both ran off) */")
         L.append("        kit_copy(line, sizeof line, text);")
@@ -2741,7 +2745,7 @@ def to_c(program, slug):
         L.append("        hud_line(line, sizeof line, text, value, with_value);")
         L.append("    }")
         L.append("    if (run.on) kit_hud_award(&hud, ms, line, sub);")
-        L.append("    else kit_hud_note(&hud, ms, line, sub[0] ? sub : MODE_NAME);")
+        L.append("    else kit_hud_note(&hud, ms, line, sub);")
         L.append("}")
         L.append("")
         L.append("/* every tick while it runs: the counters that follow a value, the badge, the gauge */")
@@ -2951,18 +2955,19 @@ def to_c(program, slug):
         L.append("        for (k = 0; k < 3; k++) kit_hud_counter(&hud, k, 0, 0, 0);")
         L.append("        kit_hud_timer(&hud, -1);")
         L.append("        kit_hud_gauge(&hud, -1, 0);")
-        L.append('        kit_hud_award(&hud, ENDING_NOW_MS, kit_num(n, sizeof n, run.total), " ");')
-        L.append("        kit_hud_hide_in(&hud, ENDING_NOW_MS);")
+        L.append('        kit_hud_award(&hud, ENDING_HOLD_MS, kit_num(n, sizeof n, run.total), " ");')
+        L.append("        kit_hud_hide_in(&hud, ENDING_HOLD_MS);")
         L.append("    }")
     L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
     L.append("    /* the total keeps the display watched for its moment on its HUD or its own screen (the kit's")
     L.append("     * kit_end_after, pm_end_holding); a drain or the game hands it back at once (end_now) */")
-    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_NOW_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
+    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_HOLD_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
              % ("1" if has_hud else "screen"))
     L.append("        pm_display_priority(0);")
     L.append("        pm_end();")
     L.append("    }")
     L.append('    pm_log("END (%s): %u scores, total %llu", why, run.shots, (unsigned long long)run.total);')
+    L.append("    end_clip = 0;")
     L.append("}")
     L.append("")
     L.append("/* ended by a drain, a tilt's drain, the game moving on or one of its modes beginning: the game's own")
@@ -4048,6 +4053,7 @@ UNUSED static void clip_full(const char *cue)
         pm_log("own clip %%s dropped before it played: %%s was asked for after it", clip_waiting, cue);
     clip_waiting = cue;
     clip_due = pm_ms() + PA_CLIP_AFTER_MS;
+    if (ending) end_clip = 1;
 }
 
 /* behind the HUD over and over while the mode runs (after a full-screen clip still waiting) */

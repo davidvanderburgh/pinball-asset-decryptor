@@ -1083,7 +1083,37 @@ function startMain() {
     kb.append(el("div", "kp-hint", "green dot = switch made"));
     kb.append(el("div", "kp-hint", "Pause or F9 = freeze / resume the game"));
     if (spec.rows.some((r) => r.click != null)) kb.append(el("div", "kp-hint", "click Start Button or Left Coin to press it"));
-    root.append(kb);
+
+    // the BALLS section (PAD-134)
+    let ball = null, drain = null, note = null, dots = null;
+    if (spec.balls) {
+      const sec = el("div", "kp-sec");
+      const h = el("div", "kp-head");
+      h.append(el("span", "kp-group", "BALLS"));
+      if (spec.trough_keys) { const t = el("span", "ks mono", spec.trough_keys); t.style.color = "var(--key)"; t.style.fontSize = "10.5px"; h.append(t); }
+      sec.append(h);
+      ball = el("div", "kp-ball", "");
+      sec.append(ball);
+      dots = troughStrip(Object.assign({}, spec.balls, { clickable: false }), null);
+      sec.append(dots.el);
+      const bs = el("div", "kp-btns");
+      bs.append(btn("Plunge", () => api("ball", "plunge")));
+      drain = btn("Drain", () => api("ball", "drain"));
+      bs.append(drain, btn("Reset balls", () => api("ball", "reset")));
+      // PAD-259: a spinning disc has no position on the artwork; holding
+      // this rips its angle sensor, which turns the disc
+      if (spec.disc != null) {
+        const disc = btn("Spin disc (hold)", () => {});
+        disc.addEventListener("pointerdown", (e) =>
+          holdWith(disc, e, () => api("rip", spec.disc, true),
+            () => api("rip", spec.disc, false)));
+        bs.append(disc);
+      }
+      sec.append(bs);
+      note = el("div", "kp-note");
+      sec.append(note);
+      root.append(sec);
+    }
 
     // the service cluster, drawn as the real coin-door panel
     let svcEls = [];
@@ -1125,36 +1155,10 @@ function startMain() {
       root.append(door);
     }
 
-    // the BALLS section (PAD-134)
-    let ball = null, drain = null, note = null, dots = null;
-    if (spec.balls) {
-      const sec = el("div", "kp-sec");
-      const h = el("div", "kp-head");
-      h.append(el("span", "kp-group", "BALLS"));
-      if (spec.trough_keys) { const t = el("span", "ks mono", spec.trough_keys); t.style.color = "var(--key)"; t.style.fontSize = "10.5px"; h.append(t); }
-      sec.append(h);
-      ball = el("div", "kp-ball", "");
-      sec.append(ball);
-      dots = troughStrip(Object.assign({}, spec.balls, { clickable: false }), null);
-      sec.append(dots.el);
-      const bs = el("div", "kp-btns");
-      bs.append(btn("Plunge", () => api("ball", "plunge")));
-      drain = btn("Drain", () => api("ball", "drain"));
-      bs.append(drain, btn("Reset balls", () => api("ball", "reset")));
-      // PAD-259: a spinning disc has no position on the artwork; holding
-      // this rips its angle sensor, which turns the disc
-      if (spec.disc != null) {
-        const disc = btn("Spin disc (hold)", () => {});
-        disc.addEventListener("pointerdown", (e) =>
-          holdWith(disc, e, () => api("rip", spec.disc, true),
-            () => api("rip", spec.disc, false)));
-        bs.append(disc);
-      }
-      sec.append(bs);
-      note = el("div", "kp-note");
-      sec.append(note);
-      root.append(sec);
-    }
+    // the keyboard list goes LAST (PAD-672): it is a reference, read now and
+    // then, and above the controls it pushed Plunge out of sight - the BALLS
+    // buttons, used all the time, lead instead
+    root.append(kb);
 
     function fitNote(msgs) {
       // WHOLE MESSAGES ARE DROPPED, OLDEST FIRST - never the head of one; a

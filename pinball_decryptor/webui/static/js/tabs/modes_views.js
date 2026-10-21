@@ -87,7 +87,7 @@ export function countBlocks(sc) {
 export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode",
   add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score", set: "var", change: "var",
   if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show",
-  log: "show", clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
+  log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
 const COLOR_NAMES = { "#ffd000": "yellow", "#00a0ff": "blue", "#ff0000": "red", "#00c040": "green", "#ffffff": "white",
@@ -181,6 +181,7 @@ export function stmtWords(b, ch = {}) {
     case "log": return `Write ${quote(b.text)} in the log`;
     case "clip": return `Play the clip ${b.clip || "?"}`;
     case "sound": return `Play the sound ${b.sound || "?"}`;
+    case "music": return b.bed ? `Play the music bed ${b.bed}` : "Play its own music";     // PAD-658
     case "hud_text": return withValue(`HUD ${b.which === "title" ? "title" : "line"}: ${quote(b.text)}`, b.value);
     case "hud_counter": return `HUD counter ${b.counter} to ${valWords(b.value)}`;
     case "hud_gauge": return `Fill the HUD's gauge to ${valWords(b.value)} pips`;

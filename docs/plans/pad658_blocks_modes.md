@@ -624,3 +624,17 @@ over). Cash the pot out at the right scoop once the swarm is beaten.
     has no clock now, as DESTOROYAH's C had none); the cash-out ending the mode on the scoop switch itself, so the
     game's own scoop award took the glass over the cash-out clip (the ball is now held in the scoop and the mode ends
     1.5 s later: run pa1 shows the clip full screen, the ball held, nothing of the game's over it).
+- **Round 2 on the emulator** (`C:\tmp\PAD-658\steps\<name>.txt` played by `rig\run_steps.sh`: real switch presses,
+  hidden and muted, never rig 0; every run segv 0, fatal 0; every glass shot looked at):
+  - Each upgraded mode by its real start rule through every stage, its beds switching, on Godzilla LE 1.16 and as a
+    Pro 1.16 with its Pro rules: oxygen_destroyer_r2 / _pro_r1, sgk_pro_r2, kiryu_r2, spacegodzilla_r5,
+    anguirus_assist_r1 / r3, meltdown_r3 / r4, agm_pro_r3, bio_r2, bio_pro1, des_r4, des_pro1, ghidorah_heads_r2 /
+    _pro1, maser_barrage_r2 / _pro1, godzilla_angry_r4 (RODAN'S NEST, GARUDA and the six-ball after BABY) /
+    godzilla_angry_pro_r2; the second start of each needing more (6 Maser hits, each powerline twice, 12 ramps).
+  - bedfix_pro_r1 (Pro): OXYGEN DESTROYER's finale bed and FINAL WARS's rises bed each on its own mode's music
+    carrier (86), where the set before the fix put FINAL WARS's on OXYGEN DESTROYER's; ANGUIRUS IS READY waiting out
+    the game's MASER CANNON CHARGING, then shown.
+  - loopfix_r2 (LE): MELTDOWN's note over its loop, its TOTAL over its loop until the ending was over; ANGUIRUS's note
+    over his entrance clip; nothing of the game's city map under our words.
+  - heisei_smoke_r1: David's delivered project (all 17 modes, 145 sounds, built on stock Godzilla LE 1.16 in 9 min)
+    running EBIRAH, SUPER X2 and KING CAESAR in his words over his clips.

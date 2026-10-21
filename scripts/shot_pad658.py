@@ -11,11 +11,13 @@ project had them before. Writes into <out_dir>:
 - <prefix>_modes_list.png   the project's list of modes
 - <prefix>_destoroyah.png   DESTOROYAH open (before: its C; after: its blocks)
 - <prefix>_<slug>.png       after only: each new mode open in the block editor (king_caesar, kumonga, minilla,
-                            kamacuras)
+                            kamacuras), and round 2's GODZILLA ANGRY (Gappa Angry)
+- <prefix>_godzilla_angry_media.png  after only: its own clips, sounds, music and music beds (round 2's beds)
 """
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -26,7 +28,7 @@ sys.path.insert(0, HERE)
 import shot_pad232 as S  # noqa: E402
 
 CARD = r"D:\Pinball\images\Stern\spike2\godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
-NEW = ("king_caesar", "kumonga", "minilla", "kamacuras")
+NEW = ("king_caesar", "kumonga", "minilla", "kamacuras", "godzilla_angry")
 
 
 def _project(scratch):
@@ -99,6 +101,16 @@ def main():
                         tab.first.click()
                         time.sleep(1.5)
                 shot(page, slug)
+                if slug == "godzilla_angry":           # round 2: its music beds, in the blocks view's own media
+                    tab = page.locator("button, [role=tab]").filter(has_text=re.compile(r"^\s*Blocks\s*$"))
+                    if tab.count():
+                        tab.first.click()
+                        time.sleep(1.5)
+                    media = page.locator(".bk-media button", has_text="Music bed")   # its beds just above it
+                    if media.count():
+                        media.first.scroll_into_view_if_needed()
+                        time.sleep(0.8)
+                        shot(page, slug + "_media")
         S._shoot(url, go, height=1100)
     finally:
         proc.terminate()

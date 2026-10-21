@@ -246,3 +246,83 @@ def test_the_label_is_checked_and_reaches_the_c():
     src = BM.to_c(_hud_prog(), "blk")
     assert 'hud_counter(0, ' in src and '"SEEN", "COUNT");' in src
     assert re.search(r"if \(!was_on && run\.on\) return;", src)
+
+
+# ---- more music beds (PAD-658: a soundtrack per multiball) ------------------------------------------------------
+def test_more_beds_ride_through_the_build_and_the_assets_file(tmp_path):
+    folder = tmp_path / "modes" / "gz"
+    folder.mkdir(parents=True)
+    for f in ("music.wav", "music_swamp.wav"):
+        (folder / f).write_bytes(b"RIFF")
+    spec = CM.CodeAssets(name="GZ", music="music.wav", beds={"swamp": "music_swamp.wav"})
+    assert CM.validate(spec, str(folder)) == []
+    assert "more music beds need its own music first" in " ".join(
+        CM.validate(CM.CodeAssets(name="GZ", beds={"swamp": "music_swamp.wav"}), str(folder)))
+    wants = CM.sound_wants(str(tmp_path), [("gz", spec)])
+    assert [(w["key"], w["music"]) for w in wants] == [("music", True), ("music:swamp", True)]
+    used = [{"slug": "gz", "key": "music", "request": 125, "sid": 610},
+            {"slug": "gz", "key": "music:swamp", "request": 125, "sid": 611}]
+    text = CM.runtime_text("gz", spec, None, own_sounds=used)
+    assert "music  125 610" in text and "bed    swamp 611" in text
+    swapped = [{"slug": "gz", "key": "music", "request": 125, "sid": 610},
+               {"slug": "gz", "key": "music:swamp", "request": 125, "stock_key": "00" * 8, "our_key": "11" * 8}]
+    assert "swap   125 %s %s music:swamp" % ("00" * 8, "11" * 8) in CM.runtime_text("gz", spec, None, own_sounds=swapped)
+
+
+def test_past_the_titles_bed_sids_a_bed_is_swapped_in(tmp_path):
+    """Godzilla LE 1.16 has 12 bed sids; the 13th music rides the carrier swapped in (no ceiling)."""
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    code = []
+    for k in range(14):
+        folder = tmp_path / "modes" / ("m%d" % k)
+        folder.mkdir(parents=True)
+        (folder / "music.wav").write_bytes(b"RIFF")
+        code.append(("m%d" % k, CM.CodeAssets(name="M%d" % k, music="music.wav")))
+    logs = []
+    out = MW.choose_code_sounds(str(tmp_path), code, (True, ""), MP.profile("godzilla_le_1_16"),
+                                log=lambda m, *a: logs.append(m))
+    music = [o for o in out if o["music"]]
+    assert len(music) == 14
+    assert sum(1 for o in music if o.get("sid")) == 12 and sum(1 for o in music if o.get("swap")) == 2
+    assert all(o["request"] == 125 for o in music)
+    assert sum("swapped in at run time" in m for m in logs) == 2
+
+
+def test_a_play_the_music_block_switches_the_bed(tmp_path):
+    cc = _cc()
+    p = {"name": "TEST MODE", "seconds": 20, "game_modes": "stack", "music": "music.wav",
+         "beds": [{"name": "swamp", "file": "music_swamp.wav"}],
+         "scripts": [{"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [{"op": "music", "bed": "swamp"}]},
+                     {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"}, "do": [{"op": "music", "bed": ""}]},
+                     {"hat": {"kind": "shot", "shot": "Building", "when": "running"}, "do": [{"op": "music", "bed": "nope"}]}]}
+    assert any("music bed nope, which the mode does not have" in t for t in BM.problems(p))
+    p["scripts"].pop()
+    assert BM.problems(p) == []
+    dump = tmp_path / "dump"
+    dump.mkdir()
+    (dump / "bd.assets").write_text("name T\nmusic 125 610\nbed swamp 611\n", encoding="utf-8")
+    src = tmp_path / "bd.c"
+    src.write_text(BM.to_c(p, "bd"), encoding="utf-8")
+    exe = tmp_path / "h"
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", SDK, "-I",
+                        os.path.join(SDK, "examples"), "-o", str(exe), os.path.join(SDK, "examples", "desk_harness.c"),
+                        str(src)], capture_output=True, text=True)
+    assert r.returncode == 0 and "warning" not in r.stderr.lower(), r.stderr
+    out = subprocess.run([str(exe), "new_game", "trigger", "bd.start", "secs", "1", "shot", "Left ramp", "secs", "1",
+                          "shot", "Right ramp", "secs", "1"], capture_output=True, text=True, timeout=60,
+                         env=dict(os.environ, HARNESS_DUMP=str(dump))).stdout
+    assert "music 125 switches to the bed swamp (sound id 611)" in out
+    assert "music 125 switches to its own bed (sound id 610)" in out
+    assert re.search(r"SID 125 611\n.*\n\s*\d+ SOUND 125", out) or out.count("SOUND 125") >= 3
+    # without its own media the block is dropped with the rest
+    assert all(b.get("op") != "music" for s in BM.without_media(p)["scripts"] for b in BM._walk(s["do"]))
+
+
+def test_every_example_fits_the_glass():
+    card = os.environ.get("PAD_FIT_CARD", r"D:\Pinball\images\Stern\spike2\godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
+    if not os.path.isfile(card):
+        pytest.skip("no Godzilla LE 1.16 card here to read the game's font from")
+    import hud_fit
+    font = hud_fit.font_from_card(card)
+    bad = {ex["slug"]: hud_fit.check(font, ex) for ex in BM.EXAMPLES}
+    assert not {k: v for k, v in bad.items() if v}

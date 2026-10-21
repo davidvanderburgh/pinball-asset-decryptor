@@ -42,7 +42,7 @@ EVERY_BLOCK = [
     {"op": "lights_off", "shot": "*"}, {"op": "show", "show": "burst"}, {"op": "game_show", "name": "flashy"},
     {"op": "show", "show": "mine", "name": "Kaiju roar"},                                           # PAD-646
     {"op": "log", "text": ""}, {"op": "clip", "clip": "sever", "where": "full"},
-    {"op": "sound", "sound": "roar", "fallback": None},
+    {"op": "sound", "sound": "roar", "fallback": None}, {"op": "music", "bed": "swamp"},   # PAD-658: a music bed
     {"op": "hud_text", "which": "line", "text": "SHOOT THE LIT SHOT", "value": None},
     {"op": "hud_counter", "counter": 1, "value": num(0), "sub": None}, {"op": "hud_gauge", "value": num(1)},
     {"op": "hud_award", "text": "JACKPOT", "value": None, "sub": "", "seconds": 2},

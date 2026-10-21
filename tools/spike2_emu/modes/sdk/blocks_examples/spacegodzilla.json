@@ -3044,7 +3044,8 @@
   "format": 1,
   "screen_style": "panel",
   "keep_rules": [],
-  "block_modes": []
+  "block_modes": [],
+  "beds": []
  },
  "recipe": {
   "clips": {

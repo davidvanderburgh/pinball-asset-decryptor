@@ -34,6 +34,8 @@ THE PROGRAM (``blocks.json``)::
       "clips": [{"name": "sever", "file": "sever.mp4"}],      PAD-374: its own clips and sounds,
       "sounds": [{"name": "roar", "file": "roar.wav", "priority": 4}],   files in its folder
       "music": "music.wav",       its own music bed while it runs ("" = the game's music)
+      "beds": [{"name": "swamp", "file": "music_swamp.wav"}],   PAD-658: more beds; a Play the music block switches
+                                  to one while it runs ({"op": "music", "bed": "swamp"}; "" = its own music again)
       "screen_style": "words",    PAD-521: its own screen as words alone, large and white over the game's video (the
                                   game's own look: a name over its intro, the TOTAL over its end); "panel" = the panel
       "bar": {"on": true, "color": "#00c040"},   PAD-521: its name in the game's own status bar (James Bond: the
@@ -258,6 +260,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
+              "music",                                                   # PAD-658: switch to another music bed
               "light_mode", "unlight_mode", "set_hits")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
@@ -436,6 +439,7 @@ CLIP_WHERE = {"full": "full screen", "behind": "behind the HUD, once",
 MEDIA_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
 MAX_CLIPS = 12                   # pad_mode_assets.h PA_CLIPS_MAX
 MAX_SOUNDS = 16                  # pad_mode_assets.h PA_CALLS_MAX
+MAX_BEDS = 6                     # PAD-658: pad_mode_assets.h PA_BEDS_MAX
 VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
 VAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _]{0,23}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -501,6 +505,7 @@ def normalize(data):
     out["clips"] = [c for c in (out.get("clips") or []) if isinstance(c, dict)]
     out["sounds"] = [c for c in (out.get("sounds") or []) if isinstance(c, dict)]
     out["music"] = str(out.get("music") or "")
+    out["beds"] = [c for c in (out.get("beds") or []) if isinstance(c, dict)]   # PAD-658
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
     out["shows"] = _norm_shows(out.get("shows"))         # PAD-646
     out["hud"] = _norm_hud(out.get("hud"))
@@ -718,7 +723,10 @@ def _sync_assets(project, slug, program):
         spec = CM.CodeAssets(screen=False)
     hud = hud_spec(program, slug)
     clips, calls = media_assets(program)
+    beds = {c["name"]: c["file"] for c in program.get("beds") or []
+            if MEDIA_RE.match(str(c.get("name") or "")) and c.get("file")}          # PAD-658
     changed = (spec.name != (program["name"] or slug.upper()) or bool(spec.screen) != program["screen"]
+               or dict(getattr(spec, "beds", None) or {}) != beds
                or spec.seconds != max(1, program["seconds"] or 60)
                or (spec.clips or {}) != clips or (spec.calls or {}) != calls
                or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud
@@ -732,6 +740,7 @@ def _sync_assets(project, slug, program):
         spec.clips = clips
         spec.calls = calls
         spec.music = program["music"]
+        spec.beds = beds
         spec.screen_style = "words" if program["screen_style"] == "words" else ""
         spec.info_line = program["info"]["on"]          # PAD-547: the build adds PadMode_<slug>_Info
         CM.save(project, slug, spec)
@@ -911,14 +920,14 @@ def without_media(program):
     """``program`` with none of its own clips, sounds or music: a clip block goes, a sound block becomes its
     fallback callout (or goes). What a blocks example plays until its films are found."""
     out = copy.deepcopy(program)
-    out["clips"], out["sounds"], out["music"] = [], [], ""
+    out["clips"], out["sounds"], out["music"], out["beds"] = [], [], "", []
 
     def strip(stack):
         kept = []
         for b in stack or []:
             if not isinstance(b, dict):
                 continue
-            if b.get("op") == "clip":
+            if b.get("op") in ("clip", "music"):
                 continue
             if b.get("op") == "sound":
                 fb = b.get("fallback")
@@ -1099,10 +1108,13 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     sounds = _check_media(program["sounds"], "sound", MAX_SOUNDS, folder, out)
     if program["music"] and folder is not None and not os.path.isfile(os.path.join(folder, program["music"])):
         out.append("Its music %s is not in the mode's folder: pick it again." % program["music"])
+    beds = _check_media(program["beds"], "music bed", MAX_BEDS, folder, out)        # PAD-658
+    if beds and not program["music"]:
+        out.append("More music beds need its own music first: pick its music.")
     ctx = {"vars": set(n.lower() for n in names), "timers": tseen,
            "shots": set(shots) if shots is not None else None,
            "events": set(events) if events is not None else None, "count": 0, "out": out,
-           "seconds": program["seconds"], "clips": clips, "sounds": sounds,
+           "seconds": program["seconds"], "clips": clips, "sounds": sounds, "beds": beds,
            "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield,
            "hold_caps": dict(hold_caps or {}),        # PAD-621: {name: ms} a mechanism held longer than 5 s
            "building": building,
@@ -1453,6 +1465,13 @@ def _check_stack(stack, depth, where, ctx):
                                   "Its own clips and sounds." % (where, b.get("clip")))
             if b.get("where") not in CLIP_WHERE:
                 ctx["out"].append("%s plays a clip with no where." % where)
+        elif op == "music":                                                          # PAD-658
+            bed = b.get("bed") or ""
+            if not ctx["program"].get("music"):
+                ctx["out"].append("%s plays a music bed, and the mode has no music of its own: pick its music." % where)
+            elif bed and bed not in ctx["beds"]:
+                ctx["out"].append("%s plays the music bed %s, which the mode does not have: add it under Its own clips "
+                                  "and sounds." % (where, bed))
         elif op == "sound":
             if not b.get("sound"):
                 ctx["out"].append("%s plays a sound with none chosen." % where)
@@ -2058,6 +2077,10 @@ class _Gen:
                     fn = {"full": "clip_full", "behind": "clip_behind", "loop": "clip_loop"}.get(
                         b.get("where"), "clip_full")
                     out.append(pad + "%s(%s);" % (fn, _c_str(name)))
+            elif op == "music":                          # PAD-658: another of its music beds, or its own again
+                bed = str(b.get("bed") or "")
+                if bed == "" or MEDIA_RE.match(bed):
+                    out.append(pad + "pa_music_bed(&own, %s);" % _c_str(bed))
             elif op == "sound":
                 name = str(b.get("sound") or "")
                 if MEDIA_RE.match(name):
@@ -2651,8 +2674,16 @@ def to_c(program, slug):
         L.append("UNUSED static void hud_award(const char *text, long long value, int with_value, const char *sub,")
         L.append("                             unsigned ms)")
         L.append("{")
-        L.append("    char line[KIT_HUD_WORDS];")
-        L.append("    hud_line(line, sizeof line, text, value, with_value);")
+        L.append("    char line[KIT_HUD_WORDS], under[KIT_HUD_WORDS], number[32];")
+        L.append("    if (with_value && text[0]) {      /* PAD-658: the words big, the number under them with the sub: one")
+        L.append("        pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);   /* line of both ran off the glass */")
+        L.append("        kit_copy(line, sizeof line, text);")
+        L.append('        if (sub[0]) pm_snprintf(under, sizeof under, "%s  -  %s", number, sub);')
+        L.append("        else kit_copy(under, sizeof under, number);")
+        L.append("        sub = under;")
+        L.append("    } else {")
+        L.append("        hud_line(line, sizeof line, text, value, with_value);")
+        L.append("    }")
         L.append("    if (run.on) kit_hud_award(&hud, ms, line, sub);")
         L.append("    else kit_hud_note(&hud, ms, line, sub[0] ? sub : MODE_NAME);")
         L.append("}")
@@ -3931,9 +3962,9 @@ static void scoop_tick(void)
 
 def uses_media(program):
     """1 when the mode has clips, sounds or music of its own, or a block that plays one."""
-    if program.get("clips") or program.get("sounds") or program.get("music"):
+    if program.get("clips") or program.get("sounds") or program.get("music") or program.get("beds"):
         return True
-    return any(b.get("op") in ("clip", "sound") for s in program.get("scripts") or []
+    return any(b.get("op") in ("clip", "sound", "music") for s in program.get("scripts") or []
                for b in _walk(s.get("do") or []))
 
 

@@ -3,6 +3,8 @@
     python make_examples.py                 write <slug>.json for every src_<slug>.py, then check them all
     python make_examples.py --check         check the JSON files as they are (nothing written)
     python make_examples.py [slug ...]      only those
+    (every word is also measured in the game's own font against its place on the glass when the LE 1.16 card is
+    there: hud_fit.py; PAD_FIT_CARD names another card, --no-fit skips it)
     python make_examples.py --desk [slug]   also play each example's desk scenarios (needs Linux or WSL: gcc and the
                                             desk harness; on Windows it runs itself under WSL)
 
@@ -74,11 +76,16 @@ def check(ex):
             out.append("sounds %s but the recipe cuts %s" % (sorted(sounds), sorted(r.get("calls") or {})))
         if bool(p["music"]) != bool(r.get("music")):
             out.append("music and the recipe disagree")
+        if {c["name"] for c in p["beds"]} != set(r.get("beds") or {}):
+            out.append("beds %s but the recipe cuts %s" % (sorted(c["name"] for c in p["beds"]), sorted(r.get("beds") or {})))
+        for c in p["beds"]:
+            if c["file"] != "music_%s.wav" % c["name"]:
+                out.append("bed %s's file is not music_%s.wav" % (c["name"], c["name"]))
         from pinball_decryptor.plugins.stern import code_modes as CM
         for k in BM.example_films(ex):
             if k not in CM.FILMS:
                 out.append("film %s is not in film_recipes.json's films" % k)
-    elif clips or sounds or p["music"]:
+    elif clips or sounds or p["music"] or p["beds"]:
         out.append("it has its own clips or sounds but no recipe to cut them from")
     for c in p["clips"]:
         if c["file"] != c["name"] + ".mp4":
@@ -154,9 +161,17 @@ def main(argv):
         examples = [build(s) for s in (only or sources())]   # named: only those (others may be mid-edit)
         for ex in examples:
             write(ex)
+    fit = None                                 # PAD-658: every word fits its place on the glass (hud_fit.py)
+    card = os.environ.get("PAD_FIT_CARD", r"D:\Pinball\images\Stern\spike2\godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
+    if os.path.isfile(card) and "--no-fit" not in argv:
+        import hud_fit
+        fit = hud_fit.font_from_card(card)
     bad = 0
     for ex in examples:
         probs = check(ex)
+        if fit is not None:
+            import hud_fit
+            probs += ["too wide on the glass: " + t for t in hud_fit.check(fit, ex)]
         n = sum(1 for s in ex["program"]["scripts"] for _b in BM._walk(s.get("do") or []))
         print("%-18s %2d scripts %3d blocks  %s" % (ex["slug"], len(ex["program"]["scripts"]), n,
                                                     "ok" if not probs else "PROBLEMS"))

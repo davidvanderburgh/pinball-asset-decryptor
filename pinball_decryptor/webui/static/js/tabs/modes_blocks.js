@@ -84,6 +84,7 @@ const TIP = {
   keepRule: "Ticked: this feature of the game's goes on counting its shots while this mode runs (its progress, its jackpots, its locks and the multiball it leads to). Not ticked: it sees none of them until this mode ends.",
   blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
   blockLast: "One at least: to let them all start, choose \"may start\" above.",
+  bed: "More music of the mode's own: a Play the music block switches to one while the mode runs (a multiball of its own, a stage), and back to its own music. Each is a WAV copied into its folder; Write carries up to six.",
   own: "Clips and sounds of the mode's own, picked from your files and copied into its folder. Write and Try it carry them onto the card; a Play a clip or Play a sound block plays one by its name.",
   where: "Full screen plays over everything, the HUD too, half a second after it is asked for (so the game's own clip for the same shot does not take its place). Behind the HUD, over and over, plays in the city's place under the score while the mode runs. Behind the HUD, once, plays in that loop's place and then the loop again.",
   fallback: "What to say instead when the card could not carry this sound (a card with no spare sound for it): one of the game's own callouts, or nothing.",
@@ -172,7 +173,8 @@ export function stmtTemplates(ch, vars, prog = {}) {
       { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" },
       { op: "show", show: "burst" }, { op: "game_show", name: (ch.game_shows || []).find((x) => x.kind === "flashy")?.name || ((ch.game_shows || [])[0] || {}).name || "" },
       { op: "log", text: "" }]],
-    ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null }]],
+    ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null },
+      { op: "music", bed: ((prog.beds || [])[0] || {}).name || "" }]],
     ["HUD", [{ op: "hud_text", which: "line", text: "SHOOT THE LIT SHOT", value: null },
       { op: "hud_counter", counter: 1, value: num(0), sub: null }, { op: "hud_gauge", value: num(1) },
       { op: "hud_award", text: "JACKPOT", value: null, sub: "", seconds: 2 }]],
@@ -195,7 +197,7 @@ const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: 
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs" };
 export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
-  clip: "own", sound: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
+  clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
@@ -435,6 +437,9 @@ function StmtBody({ b, path, ed }) {
     case "timer_stop": return html`<span class="bk-w">Stop timer</span><${TimerPick} value=${b.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
     case "clip": return html`<span class="bk-w">Play the clip</span><${Pick} value=${b.clip} options=${(ed.prog.clips || []).map((x) => x.name)} missing="(not one of its own)" onChange=${(v) => set("clip", v)} />
       <${Pick} value=${b.where} options=${CLIP_WHERE} title=${TIP.where} onChange=${(v) => set("where", v)} />`;
+    case "music": return html`<span class="bk-w" ...${tip(TIP.bed)}>Play the music</span><${Pick} value=${b.bed || ""}
+        options=${[["", "its own music"], ...(ed.prog.beds || []).map((x) => [x.name, x.name])]} missing="(not one of its beds)"
+        onChange=${(v) => set("bed", v)} />`;
     case "sound": {
       const opts = [["-", "nothing"], ...(ed.ch.callouts || []).map((c) => [c.role || String(c.id), c.label])];
       const cur = b.fallback == null || b.fallback === "" ? "-" : String(b.fallback);
@@ -617,7 +622,7 @@ export function stmtLabel(b) {
   return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
-    clip: "Play a clip", sound: "Play a sound",
+    clip: "Play a clip", sound: "Play a sound", music: "Play the music",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", building: "Move the building to",
@@ -812,14 +817,16 @@ function OwnMedia({ prog, ed, s, folder }) {
   const ch = ed.ch;
   const clips = prog.clips || [];
   const sounds = prog.sounds || [];
+  const beds = prog.beds || [];     // PAD-658: more music beds a Play the music block switches to
   const sep = String(folder || "").includes("/") ? "/" : "\\";
   const pathOf = (f) => (folder && f ? folder + sep + f : "");
   const pick = async (what) => {
-    const got = await call("modes.blocks_pick", what, (what === "clip" ? clips : sounds).map((x) => x.name));
+    const got = await call("modes.blocks_pick", what, (what === "clip" ? clips : what === "bed" ? beds : sounds).map((x) => x.name));
     if (!got) return;
     ed.edit((d) => {
       if (what === "music") d.music = got.file;
       else if (what === "clip") d.clips = [...(d.clips || []), { name: got.name, file: got.file }];
+      else if (what === "bed") d.beds = [...(d.beds || []), { name: got.name, file: got.file }];
       else d.sounds = [...(d.sounds || []), { name: got.name, file: got.file, priority: 4 }];
     });
   };
@@ -844,9 +851,14 @@ function OwnMedia({ prog, ed, s, folder }) {
       <span class="small muted">music</span>${file(prog.music)}<${PlayButton} path=${pathOf(prog.music)} />
       <${X} title="No music of its own (the game's plays on)" onClick=${() => ed.set(["music"], "")} />
     </span>` : null}
+    ${beds.map((x, i) => html`<span class="bk-varbox bk-ownbox" key=${"b" + i} ...${tip(TIP.bed)}>
+      <span class="small muted">music bed</span>${name("beds", i, x)}${file(x.file)}<${PlayButton} path=${pathOf(x.file)} />
+      <${X} title="Take this music bed out (its file stays in the folder)" onClick=${() => ed.edit((d) => { d.beds.splice(i, 1); })} />
+    </span>`)}
     <${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_clip} title=${ch.why_clip || "Pick a video for the mode to play (it is copied into its folder)."} onClick=${() => pick("clip")}>Clip…<//>
     <${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_sound} title=${ch.why_sound || "Pick a WAV for the mode to play (it is copied into its folder)."} onClick=${() => pick("sound")}>Sound…<//>
-    ${prog.music ? null : html`<${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_music} title=${ch.why_music || TIP.music} onClick=${() => pick("music")}>Music…<//>`}
+    ${prog.music ? html`<${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_music || beds.length >= 6} title=${ch.why_music || TIP.bed} onClick=${() => pick("bed")}>Music bed…<//>`
+      : html`<${Button} size="sm" kind="ghost" icon="plus" disabled=${!!ch.why_music} title=${ch.why_music || TIP.music} onClick=${() => pick("music")}>Music…<//>`}
   </div>`;
 }
 
@@ -987,11 +999,12 @@ export function useEd(pg, ch) {
     renameMedia: (kind, i, name) => edit((d) => {
       const old = (d[kind][i] || {}).name;
       d[kind][i].name = name;
-      const op = kind === "clips" ? "clip" : "sound";
+      const op = kind === "clips" ? "clip" : kind === "beds" ? "music" : "sound";
+      const key = kind === "beds" ? "bed" : op;
       const walk = (o) => {
         if (Array.isArray(o)) { o.forEach(walk); return; }
         if (!o || typeof o !== "object") return;
-        if (o.op === op && o[op] === old) o[op] = name;
+        if (o.op === op && o[key] === old) o[key] = name;
         Object.values(o).forEach(walk);
       };
       walk(d.scripts);

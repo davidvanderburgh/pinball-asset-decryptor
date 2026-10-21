@@ -325,6 +325,16 @@ def clips(*cues):
     return [{"name": c, "file": c + ".mp4"} for c in cues]
 
 
+def beds(*names):
+    """PAD-658: further music beds by name -> the program's beds (music_<name>.wav, as the recipe cuts them)."""
+    return [{"name": n, "file": "music_%s.wav" % n} for n in names]
+
+
+def music(bed=""):
+    """Switch the running music to bed ``bed`` ("" = its own music again)."""
+    return {"op": "music", "bed": bed}
+
+
 def sounds(priorities):
     """``{cue: priority}`` -> the program's sounds."""
     return [{"name": c, "file": c + ".wav", "priority": int(p)} for c, p in priorities.items()]

@@ -3191,17 +3191,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if not project or not slug or not BM.is_blocks(project, slug):
             return None
         ch = self._blocks_choices()
-        why = {"clip": ch["why_clip"], "sound": ch["why_sound"], "music": ch["why_music"]}.get(what)
+        why = {"clip": ch["why_clip"], "sound": ch["why_sound"], "music": ch["why_music"],
+               "bed": ch["why_music"]}.get(what)                                   # PAD-658: another music bed
         if why is None:
             return None
         if why:
             self._say("%s: %s" % ({"clip": "A clip of its own", "sound": "A sound of its own",
-                                   "music": "Its own music"}[what], why))
+                                   "music": "Its own music", "bed": "Another music bed"}[what], why))
             return None
         if what == "clip":
             path = self.window.ask_open("modes_file", "Choose a clip for the mode", self.VIDEO_TYPES)
         else:
             path = self.window.ask_open("modes_file", "Choose the mode's music" if what == "music"
+                                        else "Choose another music bed for the mode" if what == "bed"
                                         else "Choose a sound for the mode", [("WAV sounds", "*.wav")])
         if not path:
             return None
@@ -3215,7 +3217,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return None
         name = "music" if what == "music" else BM.media_name(stem, taken)
         folder = MP.mode_folder(project, slug)
-        dest = name + ext
+        dest = ("music_" + name if what == "bed" else name) + ext
         n = 2
         while os.path.isfile(os.path.join(folder, dest)) and not _same_file(path, os.path.join(folder, dest)):
             dest = "%s_%d%s" % (name, n, ext)

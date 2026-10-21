@@ -34,6 +34,8 @@ THE PROGRAM (``blocks.json``)::
       "clips": [{"name": "sever", "file": "sever.mp4"}],      PAD-374: its own clips and sounds,
       "sounds": [{"name": "roar", "file": "roar.wav", "priority": 4}],   files in its folder
       "music": "music.wav",       its own music bed while it runs ("" = the game's music)
+      "beds": [{"name": "swamp", "file": "music_swamp.wav"}],   PAD-658: more beds; a Play the music block switches
+                                  to one while it runs ({"op": "music", "bed": "swamp"}; "" = its own music again)
       "screen_style": "words",    PAD-521: its own screen as words alone, large and white over the game's video (the
                                   game's own look: a name over its intro, the TOTAL over its end); "panel" = the panel
       "bar": {"on": true, "color": "#00c040"},   PAD-521: its name in the game's own status bar (James Bond: the
@@ -211,7 +213,7 @@ BLOCKS_FILE = "blocks.json"
 FORMAT = 1
 SECONDS_MAX = 600
 MAX_SCRIPTS = 48
-MAX_BLOCKS = 400
+MAX_BLOCKS = 600                    # PAD-658: 400 held the bigger examples back once their lines named every shot
 MAX_DEPTH = 10
 MAX_VARS = 24
 MAX_TIMERS = 8
@@ -258,6 +260,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
+              "music",                                                   # PAD-658: switch to another music bed
               "light_mode", "unlight_mode", "set_hits")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
@@ -282,9 +285,13 @@ BUILDING_FLOOR = {"1": "floor 1", "2": "floor 2", "3": "floor 3", "0": "back whe
 SHAKE_STRENGTH = {v: k for k, v in MP.SHAKE_STRENGTHS.items()}
 SHAKE_MIN_MS, SHAKE_MAX_MS = MP.SHAKE_MIN_MS, 5000
 #: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
-HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus")
-GAUGE_KINDS = ("diamond", "segment", "spike")
-GAUGE_MAX = 12                   # intricate_kit.h's KIT_HUD_PIPS
+HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus",
+             # PAD-658: the badges PAD-379's modes drew (mode_hud.py), so their blocks keep them
+             "rage", "crystal", "snowflake", "rose", "claw")
+GAUGE_KINDS = ("diamond", "segment", "spike",
+               "bar")            # PAD-658: PAD-416's POWERUP-style meter at the top-right corner; its value a percent
+GAUGE_MAX = 12                   # a pip gauge's pips
+BAR_MAX = 40                     # a bar's slices (intricate_kit.h's KIT_HUD_PIPS, mode_hud.BAR_SLICES_MAX)
 HUD_TEXT_MAX = 40                # a title or line (the kit's KIT_HUD_WORDS is 48, with its number)
 COUNTER_MAX = 16                 # a counter's label or sub-label (the kit holds 23)
 BADGE_MAX = 12                   # the badge's label, lettered on the stock BATTLE panel
@@ -434,6 +441,7 @@ CLIP_WHERE = {"full": "full screen", "behind": "behind the HUD, once",
 MEDIA_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
 MAX_CLIPS = 12                   # pad_mode_assets.h PA_CLIPS_MAX
 MAX_SOUNDS = 16                  # pad_mode_assets.h PA_CALLS_MAX
+MAX_BEDS = 6                     # PAD-658: pad_mode_assets.h PA_BEDS_MAX
 VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
 VAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _]{0,23}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -499,6 +507,7 @@ def normalize(data):
     out["clips"] = [c for c in (out.get("clips") or []) if isinstance(c, dict)]
     out["sounds"] = [c for c in (out.get("sounds") or []) if isinstance(c, dict)]
     out["music"] = str(out.get("music") or "")
+    out["beds"] = [c for c in (out.get("beds") or []) if isinstance(c, dict)]   # PAD-658
     out["scripts"] = [s for s in (out.get("scripts") or []) if isinstance(s, dict)]
     out["shows"] = _norm_shows(out.get("shows"))         # PAD-646
     out["hud"] = _norm_hud(out.get("hud"))
@@ -599,19 +608,29 @@ def _norm_hud(h):
                          "value": value(c.get("value"))})
     t = h.get("timer") if isinstance(h.get("timer"), dict) else {}
     g = h.get("gauge") if isinstance(h.get("gauge"), dict) else {}
+    kind = g.get("kind") if g.get("kind") in GAUGE_KINDS else GAUGE_KINDS[0]
+    bar = kind == "bar"
     try:
-        count = max(1, min(GAUGE_MAX, int(g.get("count", 3))))
+        count = max(1, min(BAR_MAX if bar else GAUGE_MAX, int(g.get("count", 20 if bar else 3))))
     except (TypeError, ValueError):
-        count = 3
+        count = 20 if bar else 3
+    words = [text(w, COUNTER_MAX) for w in (g.get("words") if isinstance(g.get("words"), list) else [])][:2]
     return {"on": bool(h.get("on", False)), "line": text(h.get("line"), HUD_TEXT_MAX),
             "counters": counters,
             "timer": {"on": bool(t.get("on", True)), "label": text(t.get("label"), BADGE_MAX),
                       "icon": t.get("icon") if t.get("icon") in HUD_ICONS else HUD_ICONS[0]},
             "gauge": {"on": bool(g.get("on", False)), "label": text(g.get("label"), COUNTER_MAX),
-                      "kind": g.get("kind") if g.get("kind") in GAUGE_KINDS else GAUGE_KINDS[0],
+                      "kind": kind,
                       "count": count,
                       "color": g.get("color") if COLOR_RE.match(str(g.get("color") or "")) else "#ff7800",
-                      "value": value(g.get("value"))}}
+                      "value": value(g.get("value")),
+                      # PAD-658: shown while the mode is not running too - a meter toward its start (David: "it
+                      # should always be shown (whenever the HUD is shown)")
+                      "meter": bool(g.get("meter", False)),
+                      # a bar's two lines of words beside it (the stock meter's GODZILLA / POWERUP), the word its
+                      # label says when full (else 100%), its icon
+                      "words": [w for w in words if w], "full": text(g.get("full"), COUNTER_MAX),
+                      "icon": g.get("icon") if g.get("icon") in HUD_ICONS else "rage"}}
 
 
 def hud_spec(program, slug=""):
@@ -629,7 +648,11 @@ def hud_spec(program, slug=""):
     out = {"title": title, "line": h["line"] or " ", "counters": counters}
     if h["timer"]["on"]:
         out["timer"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
-    if h["gauge"]["on"]:
+    if h["gauge"]["on"] and h["gauge"]["kind"] == "bar":        # PAD-658: the corner meter, in the stock's fire
+        gg = h["gauge"]
+        out["gauge"] = {"label": " ", "kind": "bar", "count": gg["count"], "icon": gg["icon"],
+                        "words": gg["words"] or [gg["label"] or title[:COUNTER_MAX]]}
+    elif h["gauge"]["on"]:
         rgb = int(h["gauge"]["color"][1:], 16)
         out["gauge"] = {"label": h["gauge"]["label"] or " ", "kind": h["gauge"]["kind"],
                         "count": h["gauge"]["count"],
@@ -716,7 +739,10 @@ def _sync_assets(project, slug, program):
         spec = CM.CodeAssets(screen=False)
     hud = hud_spec(program, slug)
     clips, calls = media_assets(program)
+    beds = {c["name"]: c["file"] for c in program.get("beds") or []
+            if MEDIA_RE.match(str(c.get("name") or "")) and c.get("file")}          # PAD-658
     changed = (spec.name != (program["name"] or slug.upper()) or bool(spec.screen) != program["screen"]
+               or dict(getattr(spec, "beds", None) or {}) != beds
                or spec.seconds != max(1, program["seconds"] or 60)
                or (spec.clips or {}) != clips or (spec.calls or {}) != calls
                or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud
@@ -730,6 +756,7 @@ def _sync_assets(project, slug, program):
         spec.clips = clips
         spec.calls = calls
         spec.music = program["music"]
+        spec.beds = beds
         spec.screen_style = "words" if program["screen_style"] == "words" else ""
         spec.info_line = program["info"]["on"]          # PAD-547: the build adds PadMode_<slug>_Info
         CM.save(project, slug, spec)
@@ -847,6 +874,277 @@ def new_blocks_mode(project, name, shots=(), example=None):
     return slug, path
 
 
+# ---- the blocks examples (PAD-658) ---------------------------------------------------------------
+#: Whole modes made of blocks, offered by the wizard's Blocks step on the titles each names: the SDK's C examples
+#: rebuilt in blocks (what each lost is in its ``lost``) and new ones. One JSON file each in the SDK's
+#: ``blocks_examples`` folder: {"name", "slug", "order", "titles" (game_dir prefixes), "about", "based_on" (the C
+#: example it was rebuilt from, or ""), "lost" [sentences], "program" (blocks.json; its clips, sounds and music
+#: are files named after their cue: <cue>.mp4, <cue>.wav, music.wav), "recipe" (film_recipes.json's shape: where
+#: each is cut from)}. ``make_examples.py`` beside them writes the files from their Python.
+EXAMPLES_DIRNAME = "blocks_examples"
+
+
+def examples_dir():
+    from . import mode_runtime as MR
+    return os.path.join(MR.sdk_dir(), EXAMPLES_DIRNAME)
+
+
+def _load_examples():
+    out = []
+    folder = examples_dir()
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".json"))
+    except OSError:
+        return out
+    for n in names:
+        try:
+            with open(os.path.join(folder, n), "r", encoding="utf-8") as f:
+                ex = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(ex, dict) and ex.get("name") and SLUG_RE.match(str(ex.get("slug") or "")) \
+                and isinstance(ex.get("program"), dict):
+            out.append(ex)
+    out.sort(key=lambda e: (int(e.get("order", 999)), e["name"]))
+    return out
+
+
+EXAMPLES = _load_examples()
+
+
+def example_names(game_dir=None):
+    """The blocks examples' names, in the order the wizard lists them; with ``game_dir`` only the ones made for
+    that title (its port's game directory, "godzilla_le" ...)."""
+    return [e["name"] for e in EXAMPLES
+            if game_dir is None or any(str(game_dir).startswith(t) for t in e.get("titles") or ())]
+
+
+def example(name):
+    for e in EXAMPLES:
+        if e["name"] == name:
+            return e
+    return None
+
+
+def example_films(ex):
+    """The film keys an example's recipe cuts from, in the order first used."""
+    from . import code_modes as CM
+    return CM.recipe_films(ex)
+
+
+def without_media(program):
+    """``program`` with none of its own clips, sounds or music: a clip block goes, a sound block becomes its
+    fallback callout (or goes). What a blocks example plays until its films are found."""
+    out = copy.deepcopy(program)
+    out["clips"], out["sounds"], out["music"], out["beds"] = [], [], "", []
+
+    def strip(stack):
+        kept = []
+        for b in stack or []:
+            if not isinstance(b, dict):
+                continue
+            if b.get("op") in ("clip", "music"):
+                continue
+            if b.get("op") == "sound":
+                fb = b.get("fallback")
+                if fb in CALLOUT_ROLES:
+                    kept.append({"op": "callout", "role": fb})
+                elif _int_ok(fb, 1, 65535):
+                    kept.append({"op": "callout", "id": int(fb)})
+                continue
+            if b.get("op") == "if":
+                b = dict(b, then=strip(b.get("then")), **({"else": strip(b.get("else"))} if b.get("else") else {}))
+            kept.append(b)
+        return kept
+
+    for s in out.get("scripts") or []:
+        s["do"] = strip(s.get("do"))
+    return out
+
+
+def _rename_shots(stack, names):
+    for b in stack or []:
+        if not isinstance(b, dict):
+            continue
+        for key in ("shot",):
+            if b.get(key) in names:
+                b[key] = names[b[key]]
+        for key in ("points", "value", "by", "seconds", "ms", "rate", "cond", "a", "b"):
+            if isinstance(b.get(key), dict):
+                _rename_shots([b[key]], names)
+        if b.get("k") == "hits" and b.get("shot") in names:
+            b["shot"] = names[b["shot"]]
+        _rename_shots(b.get("then"), names)
+        _rename_shots(b.get("else"), names)
+
+
+def adapt(ex, profile):
+    """Example ``ex``'s program for the card's title ``profile`` (PAD-658: Premium/LE and Pro get the same modes, with
+    alternate rules where the Pro's layout and mechanisms differ).
+
+    ``title_alt`` (``{game_dir prefix: {"shots": {name: name or None}, "shows": {name: name or None},
+    "inserts": {name: name or None}, "words": {words: words}}}``) names the title's alternates: a shot it calls otherwise or replaces with
+    another (Premium's "Shield ramp spinner" is a Pro's "Right spinner"; its "Shield target center" a Pro has not),
+    the game's own light show it plays instead, the insert it lights instead. None takes the shot (its scripts and
+    lights), show or insert out. ``title_shots`` (round 1's) is the same as ``title_alt``'s "shots". "words"
+    (PAD-658) swaps whole strings the HUD shows (a line, an award, a counter's words), so a line names the shot the
+    title has instead ("SHOOT THE CENTER SHIELD" -> "SHOOT THE MASER TARGET").
+
+    Then what the card's game cannot do at all is left out, as a person would take the block away: turning the
+    shield platform (a Pro's shields are fixed, facing the player), moving the building, holding a mechanism the
+    game has not, a game light show or insert it has not. :func:`fits` says whether what is left builds."""
+    program = copy.deepcopy(ex["program"])
+    if profile is None:
+        return program
+    game_dir = str(getattr(profile, "game_dir", "") or "")
+    alt = {"shots": {}, "shows": {}, "inserts": {}, "words": {}}
+    for prefix, m in (ex.get("title_shots") or {}).items():
+        if game_dir.startswith(prefix):
+            alt["shots"].update(m)
+    for prefix, a in (ex.get("title_alt") or {}).items():
+        if game_dir.startswith(prefix):
+            for k in alt:
+                alt[k].update((a or {}).get(k) or {})
+    card = card_checks(profile)
+    shots = set(card.get("shots") or ())
+    shows = set(card.get("game_shows") or ())
+    inserts = set(card.get("inserts") or ())
+    mechs = card.get("mechs") or {}
+    gone_shots = {n for n, v in alt["shots"].items() if v is None}
+    names = {n: v for n, v in alt["shots"].items() if v}
+
+    def shot_ok(name):
+        return name not in gone_shots
+
+    words = alt["words"]
+
+    def reword(b):
+        for k in ("text", "sub", "label"):
+            if isinstance(b.get(k), str) and b[k] in words:
+                b[k] = words[b[k]]
+
+    if words and isinstance(program.get("hud"), dict):
+        h = program["hud"]
+        if h.get("line") in words:
+            h["line"] = words[h["line"]]
+        for c in h.get("counters") or []:
+            if isinstance(c, dict):
+                reword(c)
+
+    def keep(stack):
+        out = []
+        for b in stack or []:
+            if not isinstance(b, dict):
+                continue
+            b = copy.deepcopy(b)
+            op = b.get("op")
+            if words and op in ("hud_text", "hud_award", "hud_counter"):
+                reword(b)
+            if op == "shield" and card.get("shield") is False:
+                continue
+            if op == "building" and card.get("building") is False:
+                continue
+            if op == "hold" and b.get("what") not in mechs:
+                continue
+            if op == "game_show":
+                name = alt["shows"].get(b.get("name"), b.get("name"))
+                if not name or (shows and name not in shows):
+                    continue
+                b["name"] = name
+            if op in ("light_shot", "lights_off") and b.get("insert"):
+                name = alt["inserts"].get(b["insert"], b["insert"])
+                if not name or (inserts and name not in inserts):
+                    continue
+                b["insert"] = name
+            if op in ("light_shot", "lights_off", "set_hits") and b.get("shot") and not shot_ok(b["shot"]):
+                continue
+            if op == "light_mode":
+                if not shot_ok(b.get("shot")):
+                    continue
+                kept = [n for n in (alt["inserts"].get(x.strip(), x.strip())
+                                    for x in str(b.get("insert") or "").split(",") if x.strip())
+                        if n and (not inserts or n in inserts)]
+                b["insert"] = ",".join(kept)
+            if op == "if":
+                b["then"] = keep(b.get("then"))
+                if b.get("else"):
+                    b["else"] = keep(b.get("else"))
+            out.append(b)
+        return out
+
+    scripts = []
+    for s in program.get("scripts") or []:
+        hat = s.get("hat") or {}
+        if hat.get("kind") == "shot" and not shot_ok(hat.get("shot")):
+            continue
+        if names:
+            if hat.get("shot") in names:
+                hat["shot"] = names[hat["shot"]]
+            _rename_shots(s.get("do"), names)
+        s["do"] = keep(s.get("do"))
+        scripts.append(s)
+    program["scripts"] = scripts
+    return program
+
+
+def fits(ex, profile):
+    """Does example ``ex`` build on ``profile``'s card once adapted (the wizard offers only the ones that do)?"""
+    try:
+        return not problems(adapt(ex, profile), **card_checks(profile))
+    except Exception:                                   # noqa: BLE001 - an example that cannot be read is not offered
+        return False
+
+
+def add_example(project, name, dirs=(), ffmpeg=None, log=None, profile=None):
+    """Put blocks example ``name`` in the project as ``modes/<slug>/``: its blocks (:func:`adapt`-ed to ``profile``, the
+    card's title, when given), the C they make, and its own
+    clips, sounds and music cut from the films in ``dirs`` (the C examples' cutter, :func:`.code_modes.cut_example`).
+    Returns ``(slug, missing)``: ``missing`` the film keys not found, when the mode is added without its own media
+    (:func:`without_media`). Refuses a folder that is already there."""
+    from . import code_modes as CM
+    ex = example(name)
+    if ex is None:
+        raise BlocksError("there is no blocks example called %s" % name)
+    if not project or not os.path.isdir(project):
+        raise BlocksError(MP.NO_PROJECT_HELP)
+    slug = ex["slug"]
+    folder = MP.mode_folder(project, slug)
+    if os.path.exists(folder):
+        raise BlocksError("%s is already in this project (modes/%s)." % (ex["name"], slug))
+    program = adapt(ex, profile)                        # the card's own shot names, what its game can do
+    missing = [k for k in example_films(ex) if not CM.find_film(k, dirs)]
+    os.makedirs(folder)
+    if ex.get("recipe") and not missing:
+        CM.cut_example(project, slug, {k: v for k, v in ex.items() if k != "hud"}, dirs, ffmpeg=ffmpeg, log=log)
+    else:                                                   # nothing to cut them from: the game's own callouts
+        program = without_media(program)
+    save(project, slug, program)
+    return slug, missing
+
+
+def card_checks(p):
+    """The keyword arguments :func:`problems` takes for title profile ``p`` (the card's shots, events, mechanisms,
+    shaker, the game's own light shows, mini-wizards, inserts, building, challenges and coil limits), as the
+    Modes tab checks a program."""
+    if p is None:
+        return {}
+    return {
+        "shots": [n for n, _m in p.shots],
+        "events": list(p.events or ()),
+        "mechs": ({"magnet": "magnet"} if p.can("magnet") else {}) | (dict(p.held_coils) if p.can("coils") else {}),
+        "scoop": p.can("scoop"),
+        "shield": getattr(p, "shield_rule", "") if p.can("shield") else False,
+        "game_shows": [n for n, _k, _s in getattr(p, "game_shows", ())],
+        "shaker": {"shakes": [n for n, _l in p.shakes], "max": list(p.shake_max_ms)} if p.can("shaker") else False,
+        "game_wizards": [n for n, _f in getattr(p, "game_wizards", ())] if p.can("wizard") else [],
+        "inserts": list(getattr(p, "inserts", ()) or ()),
+        "building": getattr(p, "building_rule", "") if p.can("building") else False,
+        "challenges": list(getattr(p, "challenges", ()) or ()) + ([CHALLENGE_NEW] if getattr(p, "challenge_menu", 0)
+                                                                   else []),
+        "hold_caps": {n: ms for n, ms in getattr(p, "coil_caps", ()) or ()},
+    }
+
+
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None):
@@ -901,10 +1199,13 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     sounds = _check_media(program["sounds"], "sound", MAX_SOUNDS, folder, out)
     if program["music"] and folder is not None and not os.path.isfile(os.path.join(folder, program["music"])):
         out.append("Its music %s is not in the mode's folder: pick it again." % program["music"])
+    beds = _check_media(program["beds"], "music bed", MAX_BEDS, folder, out)        # PAD-658
+    if beds and not program["music"]:
+        out.append("More music beds need its own music first: pick its music.")
     ctx = {"vars": set(n.lower() for n in names), "timers": tseen,
            "shots": set(shots) if shots is not None else None,
            "events": set(events) if events is not None else None, "count": 0, "out": out,
-           "seconds": program["seconds"], "clips": clips, "sounds": sounds,
+           "seconds": program["seconds"], "clips": clips, "sounds": sounds, "beds": beds,
            "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield,
            "hold_caps": dict(hold_caps or {}),        # PAD-621: {name: ms} a mechanism held longer than 5 s
            "building": building,
@@ -1020,6 +1321,9 @@ def notes(program):
                            "give it one under Its HUD." % k)
         if "hud_gauge" in ops and not hud["gauge"]["on"]:
             out.append("A block fills the HUD's gauge, which is switched off: tick Gauge under Its HUD.")
+        if hud["gauge"]["on"] and hud["gauge"]["meter"] and hud["gauge"]["value"] is None:
+            out.append("The HUD's gauge shows while the mode is not running, and follows nothing: give it a value "
+                       "to follow (lit to).")
         if hud["timer"]["on"] and not program["seconds"]:
             out.append("The HUD's timer badge counts the mode's clock, and it has none: it is not shown.")
     if any((s.get("hat") or {}).get("kind") == "challenge"
@@ -1052,6 +1356,10 @@ def notes(program):
     if "behind" in wheres and "loop" not in wheres:
         out.append("A clip behind the HUD, once, plays in the place of the mode's loop: start a "
                    "clip over and over behind the HUD first (When the mode starts is the place).")
+    ends = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") == "mode_end"]
+    if any(b.get("op") == "clip" and b.get("where") == "behind" for s in ends for b in _walk(s.get("do") or [])):
+        out.append("A clip behind the HUD in When the mode ends plays full screen: the mode's loop ends with it, "   # PAD-658
+                   "so there is nothing left to play behind. Its TOTAL shows after the clip.")
     return out
 
 
@@ -1226,7 +1534,7 @@ def _check_stack(stack, depth, where, ctx):
             if not _int_ok(b.get("counter"), 1, 3):
                 ctx["out"].append("%s sets a HUD counter: 1, 2 or 3." % where)
             _check_num(b.get("value"), where, ctx)
-            if len(str(b.get("sub") or "")) > COUNTER_MAX:
+            if len(str(b.get("sub") or "")) > COUNTER_MAX or len(str(b.get("label") or "")) > COUNTER_MAX:
                 ctx["out"].append("%s has a counter's words of more than %d letters." % (where, COUNTER_MAX))
         elif op == "hud_gauge":
             _check_num(b.get("value"), where, ctx)
@@ -1255,6 +1563,13 @@ def _check_stack(stack, depth, where, ctx):
                                   "Its own clips and sounds." % (where, b.get("clip")))
             if b.get("where") not in CLIP_WHERE:
                 ctx["out"].append("%s plays a clip with no where." % where)
+        elif op == "music":                                                          # PAD-658
+            bed = b.get("bed") or ""
+            if not ctx["program"].get("music"):
+                ctx["out"].append("%s plays a music bed, and the mode has no music of its own: pick its music." % where)
+            elif bed and bed not in ctx["beds"]:
+                ctx["out"].append("%s plays the music bed %s, which the mode does not have: add it under Its own clips "
+                                  "and sounds." % (where, bed))
         elif op == "sound":
             if not b.get("sound"):
                 ctx["out"].append("%s plays a sound with none chosen." % where)
@@ -1803,6 +2118,9 @@ class _Gen:
                         self.shows.append({"key": key, "steps": steps, "name": name, "repeat": show_repeat(b, self.p)})
                         i = len(self.shows) - 1
                     out.append(pad + "show_start(SHOW_%d, %d, %s, %d);" % (i, len(steps), _c_str(name), self.shows[i]["repeat"]))
+            elif op == "set_time" and b.get("at_least"):     # PAD-658: Keep at least N seconds on the clock
+                n = self.num(b.get("seconds"))
+                out.append(pad + "if (run.on && RUN_SECONDS && secs_left() < (%s)) set_time(%s);" % (n, n))
             elif op in ("add_time", "set_time"):
                 out.append(pad + "%s(%s);" % (op, self.num(b.get("seconds"))))
             elif op == "multiball":
@@ -1837,9 +2155,11 @@ class _Gen:
                 except (TypeError, ValueError):
                     k = 1
                 sub = b.get("sub")
-                out.append(pad + "hud_counter(%d, %s, %s);" % (
+                label = b.get("label")                      # PAD-658: the counter's label from now on, or none
+                out.append(pad + "hud_counter(%d, %s, %s, %s);" % (
                     k - 1, self.num(b.get("value")),
-                    "0" if sub is None else _c_str(str(sub)[:COUNTER_MAX])))
+                    "0" if sub is None else _c_str(str(sub)[:COUNTER_MAX]),
+                    "0" if not label else _c_str(str(label)[:COUNTER_MAX])))
             elif op == "hud_gauge":
                 out.append(pad + "hud_level = %s;" % self.num(b.get("value")))
             elif op == "hud_award":
@@ -1858,6 +2178,10 @@ class _Gen:
                     fn = {"full": "clip_full", "behind": "clip_behind", "loop": "clip_loop"}.get(
                         b.get("where"), "clip_full")
                     out.append(pad + "%s(%s);" % (fn, _c_str(name)))
+            elif op == "music":                          # PAD-658: another of its music beds, or its own again
+                bed = str(b.get("bed") or "")
+                if bed == "" or MEDIA_RE.match(bed):
+                    out.append(pad + "pa_music_bed(&own, %s);" % _c_str(bed))
             elif op == "sound":
                 name = str(b.get("sound") or "")
                 if MEDIA_RE.match(name):
@@ -2057,6 +2381,14 @@ def to_c(program, slug):
 
     hud = program["hud"]
     has_hud = hud["on"]
+    # PAD-658: the clip a note, and a TOTAL with nothing looping, show over: the mode's first clip "over and over"
+    # (When the mode starts' first, else any script's), else the first clip When the mode starts plays (ANGUIRUS: his
+    # entrance), else its first clip
+    in_order = [b for s in sorted(program["scripts"], key=lambda s: (s.get("hat") or {}).get("kind") != "mode_start")
+                for b in _walk(s.get("do") or []) if b.get("op") == "clip" and b.get("clip")]
+    covers = [b["clip"] for b in in_order if b.get("where") == "loop"] + [b["clip"] for b in in_order] + \
+        [c["name"] for c in program.get("clips") or []]
+    note_cue = covers[0] if media and has_hud and covers else None
     # PAD-375: a mode with a HUD or a screen of its own watches the game's displays (the kit's
     # kit_display): its words step aside under one, so it holds a display priority while it runs
     watch = has_hud or program["screen"]
@@ -2201,6 +2533,10 @@ def to_c(program, slug):
     L.append("    uint64_t total;")
     L.append("} run;")
     L.append("static int sec_changed, ending;")
+    L.append("UNUSED static int end_clip;                /* PAD-658: When the mode ends played a full-screen clip */")
+    L.append("#define END_CLIP_MS      7000      /* ... its TOTAL stays this much longer: the clip covers it first (it "
+             "starts half a second in and runs up to 6 s: the TOTAL still has its 3 s after it, run godzilla_angry_r4) */")
+    L.append("#define ENDING_HOLD_MS   (ENDING_NOW_MS + (end_clip ? END_CLIP_MS : 0))")
     L.append("static unsigned flash_ticks;           /* PAD-521: words alone: how long its words stay up */")
     L.append("static void *screen, *screen_words;")
     L.append("static unsigned hide_ticks, poll;")
@@ -2227,19 +2563,27 @@ def to_c(program, slug):
         L.append("/* ---- the HUD at the glass's edges (PAD-375): the build's PadMode_%s_Hud group, driven by" % slug)
         L.append(" * the kit's struct kit_hud as the examples drive theirs - blank under a display of the game's,")
         L.append(" * aside while one of the game's modes runs. No HUD on the card: nothing shows, the mode runs. */")
-        L.append('static struct kit_hud hud = { .slug = "%s" };' % slug)
+        gg = hud["gauge"]
+        bar = gg["on"] and gg["kind"] == "bar"
+        meter = gg["on"] and gg["meter"] and gg["value"] is not None
+        # PAD-658: a corner bar shown while it is not running stands BESIDE another mode's HUD (the kit's beside)
+        L.append('static struct kit_hud hud = { .slug = "%s"%s };' % (slug, ", .beside = 1" if bar and meter else ""))
         L.append("#define HUD_LINE   %s" % _c_str(hud["line"]))
         L.append("#define HUD_TIMER  %d          /* the badge counts the clock */" % (
             1 if hud["timer"]["on"] and program["seconds"] else 0))
         L.append("#define HUD_GAUGE  %d          /* pips of the gauge; 0 = no gauge */" % (
             hud["gauge"]["count"] if hud["gauge"]["on"] else 0))
         L.append("#define HUD_GAUGE_LABEL %s" % _c_str(hud["gauge"]["label"]))
+        L.append("#define HUD_GAUGE_BAR %d       /* PAD-658: 1 = the corner bar, its value a percent */" % bar)
+        L.append("#define HUD_GAUGE_FULL %s" % _c_str(gg["full"]))
+        L.append("#define HUD_METER  %d          /* PAD-658: 1 = the gauge shows while it is not running too */" % meter)
         L.append("UNUSED static const char *const HUD_LABEL[3] = {%s};" % ", ".join(
             _c_str(c["label"]) for c in hud["counters"]))
         L.append("UNUSED static const char *const HUD_SUB[3] = {%s};" % ", ".join(
             _c_str(c["sub"]) for c in hud["counters"]))
         L.append("static char hud_val[3][24], hud_sub[3][24];   /* each counter's value and sub-label now */")
-        L.append("UNUSED static long long hud_level;          /* the gauge's pips lit */")
+        L.append("static char hud_lab[3][24];                     /* PAD-658: and its label now (a block may change it) */")
+        L.append("UNUSED static long long hud_level;          /* the gauge's pips lit (a bar: its percent) */")
     L.append("")
     L.append("static unsigned P(void)")
     L.append("{")
@@ -2414,11 +2758,12 @@ def to_c(program, slug):
     L.append("")
     if has_hud:
         L.append("/* a counter (0-2) to a value, short enough for its 200 px (950,000 / 4.25M); sub 0 = as it is */")
-        L.append("UNUSED static void hud_counter(int k, long long value, const char *sub)")
+        L.append("UNUSED static void hud_counter(int k, long long value, const char *sub, const char *label)")
         L.append("{")
         L.append("    if (k < 0 || k > 2 || !HUD_LABEL[k][0]) return;      /* a counter with no label is not shown */")
         L.append("    kit_short(hud_val[k], sizeof hud_val[k], value < 0 ? 0 : (uint64_t)value);")
         L.append("    if (sub) kit_copy(hud_sub[k], sizeof hud_sub[k], sub);")
+        L.append("    if (label && label[0]) kit_copy(hud_lab[k], sizeof hud_lab[k], label);   /* PAD-658 */")
         L.append("}")
         L.append("")
         L.append("static void hud_line(char *line, unsigned cap, const char *text, long long value, int with_value)")
@@ -2433,23 +2778,63 @@ def to_c(program, slug):
         L.append("}")
         L.append("")
         L.append("/* the title (0) or the instruction line (1); kept until the mode starts again */")
+        L.append("/* PAD-658: the title and line When the mode ends wrote: its TOTAL's, in the place of \"<NAME> TOTAL\" */")
+        L.append("static char end_title[KIT_HUD_WORDS], end_line[KIT_HUD_WORDS];")
         L.append("UNUSED static void hud_words(int which, const char *text, long long value, int with_value)")
         L.append("{")
         L.append("    char line[KIT_HUD_WORDS];")
         L.append("    hud_line(line, sizeof line, text, value, with_value);")
+        L.append("    if (ending) kit_copy(which ? end_line : end_title, KIT_HUD_WORDS, line);")
         L.append("    if (which) kit_hud_title(&hud, 0, line);")
         L.append("    else kit_hud_title(&hud, line, 0);")
         L.append("}")
+        L.append("")
+        if note_cue:
+            L.append("UNUSED static void note_loop(void);")
+        else:
+            L.append("#define note_loop() ((void)0)           /* no clip of its own loops behind its HUD: a note shows alone */")
         L.append("")
         L.append("/* the award line for a moment; on a mode not running, a note shown alone (kit_hud_note: not over")
         L.append(" * another mode's HUD) */")
         L.append("UNUSED static void hud_award(const char *text, long long value, int with_value, const char *sub,")
         L.append("                             unsigned ms)")
         L.append("{")
-        L.append("    char line[KIT_HUD_WORDS];")
-        L.append("    hud_line(line, sizeof line, text, value, with_value);")
+        L.append("    char line[KIT_HUD_WORDS], under[KIT_HUD_WORDS], number[32];")
+        L.append("    if (!run.on && !sub[0]) sub = MODE_NAME;   /* a note says whose it is */")
+        L.append("    if (with_value && text[0]) {      /* PAD-658: the words big, the number under them with the sub */")
+        L.append("        pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);   /* (one line of both ran off) */")
+        L.append("        kit_copy(line, sizeof line, text);")
+        L.append('        if (sub[0]) pm_snprintf(under, sizeof under, "%s  -  %s", number, sub);')
+        L.append("        else kit_copy(under, sizeof under, number);")
+        L.append("        sub = under;")
+        L.append("    } else {")
+        L.append("        hud_line(line, sizeof line, text, value, with_value);")
+        L.append("    }")
         L.append("    if (run.on) kit_hud_award(&hud, ms, line, sub);")
-        L.append("    else kit_hud_note(&hud, ms, line, sub[0] ? sub : MODE_NAME);")
+        L.append("    else if (kit_hud_note(&hud, ms, line, sub)) note_loop();")
+        L.append("}")
+        L.append("")
+        L.append("/* PAD-658: the gauge at `v`: a bar's slices lit in proportion to a percent, the percent its label (its full")
+        L.append(" * word at 100); a pip gauge's pips. As a meter (`idle`) while the mode is not running. */")
+        L.append("UNUSED static void gauge_now(long long v, int idle)")
+        L.append("{")
+        L.append("    char label[24];")
+        L.append("    int lit;")
+        L.append("    if (HUD_GAUGE_BAR) {")
+        L.append("        v = v < 0 ? 0 : v > 100 ? 100 : v;")
+        L.append("        lit = (int)(v * HUD_GAUGE / 100);")
+        L.append("        if (v >= 100 && HUD_GAUGE_FULL[0]) kit_copy(label, sizeof label, HUD_GAUGE_FULL);")
+        L.append('        else pm_snprintf(label, sizeof label, "%d%%", (int)v);')
+        L.append("    } else {")
+        L.append("        lit = v < 0 ? 0 : v > HUD_GAUGE ? HUD_GAUGE : (int)v;")
+        L.append("        kit_copy(label, sizeof label, HUD_GAUGE_LABEL);")
+        L.append("    }")
+        L.append("    if (!idle) {")
+        L.append("        kit_hud_gauge(&hud, lit, label);")
+        L.append("        return;")
+        L.append("    }")
+        L.append("    kit_hud_pips(&hud, HUD_GAUGE);      /* the build's count, as at a start */")
+        L.append("    kit_hud_meter(&hud, lit, label);")
         L.append("}")
         L.append("")
         L.append("/* every tick while it runs: the counters that follow a value, the badge, the gauge */")
@@ -2457,15 +2842,13 @@ def to_c(program, slug):
         L.append("{")
         L.append("    int k;")
         for k, expr in live:
-            L.append("    hud_counter(%d, %s, 0);" % (k, expr))
+            L.append("    hud_counter(%d, %s, 0, 0);" % (k, expr))
         if gauge_live is not None:
             L.append("    hud_level = %s;" % gauge_live)
         L.append("    for (k = 0; k < 3; k++)")
-        L.append("        if (HUD_LABEL[k][0]) kit_hud_counter(&hud, k, HUD_LABEL[k], hud_val[k], hud_sub[k]);")
+        L.append("        if (HUD_LABEL[k][0]) kit_hud_counter(&hud, k, hud_lab[k], hud_val[k], hud_sub[k]);")
         L.append("    kit_hud_timer(&hud, HUD_TIMER ? (int)secs_left() : -1);")
-        L.append("    if (HUD_GAUGE)")
-        L.append("        kit_hud_gauge(&hud, hud_level < 0 ? 0 : hud_level > HUD_GAUGE ? HUD_GAUGE : (int)hud_level,")
-        L.append("                      HUD_GAUGE_LABEL);")
+        L.append("    if (HUD_GAUGE) gauge_now(hud_level, 0);")
         L.append("}")
         L.append("")
     if g.shows:
@@ -2483,6 +2866,8 @@ def to_c(program, slug):
         L.extend(_SHOW_C.split("\n"))
     if media:
         L.extend((_MEDIA_C % {"slug": slug}).split("\n"))
+    if note_cue:
+        L.extend((_NOTE_LOOP_C % {"cue": _c_str(note_cue)}).split("\n"))
     if g.game_show:
         L.extend(_GAME_SHOW_C.split("\n"))
     if g.game_wizard:
@@ -2595,6 +2980,7 @@ def to_c(program, slug):
         L.append("        for (k = 0; k < 3; k++) {")
         L.append('            kit_copy(hud_val[k], sizeof hud_val[k], "0");')
         L.append("            kit_copy(hud_sub[k], sizeof hud_sub[k], HUD_SUB[k]);")
+        L.append("            kit_copy(hud_lab[k], sizeof hud_lab[k], HUD_LABEL[k]);")
         L.append("        }")
         L.append("    }")
         L.append("    hud_level = 0;")
@@ -2624,10 +3010,10 @@ def to_c(program, slug):
     L.append("    run.on = 0;")
     if media:
         L.append("    loop_waiting = 0;")
-        L.append("    if (looping) {                    /* the city behind the HUD again */")
-        L.append("        pm_backdrop(0);")
-        L.append("        looping = 0;")
-        L.append("    }")
+        if note_cue:
+            L.append("    if (!looping) cover_total();       /* PAD-658: nothing loops: its cover clip behind the TOTAL */")
+        L.append("    looping = 0;                      /* PAD-658: the runtime keeps the loop behind the TOTAL it holds, then")
+        L.append("                                       * the city again (at once for an end that holds nothing) */")
         L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
     if g.shows:
         L.append("    show_last_pass();                 /* PAD-646: a show running until the mode ends finishes its pass */")
@@ -2653,22 +3039,24 @@ def to_c(program, slug):
         L.append("    {                                 /* the TOTAL, as the examples end */")
         L.append("        char n[32];")
         L.append("        int k;")
-        L.append('        kit_hud_title(&hud, MODE_NAME " TOTAL", "");')
+        L.append('        kit_hud_title(&hud, end_title[0] ? end_title : MODE_NAME " TOTAL", end_line[0] ? end_line : "");')
+        L.append("        end_title[0] = end_line[0] = 0;")
         L.append("        for (k = 0; k < 3; k++) kit_hud_counter(&hud, k, 0, 0, 0);")
         L.append("        kit_hud_timer(&hud, -1);")
-        L.append("        kit_hud_gauge(&hud, -1, 0);")
-        L.append('        kit_hud_award(&hud, ENDING_NOW_MS, kit_num(n, sizeof n, run.total), " ");')
-        L.append("        kit_hud_hide_in(&hud, ENDING_NOW_MS);")
+        L.append("        if (!HUD_METER) kit_hud_gauge(&hud, -1, 0);   /* PAD-658: a meter stays, following on */")
+        L.append('        kit_hud_award(&hud, ENDING_HOLD_MS, kit_num(n, sizeof n, run.total), " ");')
+        L.append("        kit_hud_hide_in(&hud, ENDING_HOLD_MS);")
         L.append("    }")
     L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
     L.append("    /* the total keeps the display watched for its moment on its HUD or its own screen (the kit's")
     L.append("     * kit_end_after, pm_end_holding); a drain or the game hands it back at once (end_now) */")
-    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_NOW_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
+    L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_HOLD_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
              % ("1" if has_hud else "screen"))
     L.append("        pm_display_priority(0);")
     L.append("        pm_end();")
     L.append("    }")
     L.append('    pm_log("END (%s): %u scores, total %llu", why, run.shots, (unsigned long long)run.total);')
+    L.append("    end_clip = 0;")
     L.append("}")
     L.append("")
     L.append("/* ended by a drain, a tilt's drain, the game moving on or one of its modes beginning: the game's own")
@@ -2795,6 +3183,7 @@ def to_c(program, slug):
     L.append("    (void)i; (void)was_on;")
     if g.lit:
         L.append("    lit_shot(shot);                   /* PAD-503: the shot it is lit at starts it */")
+        L.append("    if (!was_on && run.on) return;    /* PAD-658: and is that alone, not a shot \"while it is not running\" too */")
     L.extend(scripts_of("shot", "any_shot"))
     L.append("}")
     L.append("")
@@ -2821,6 +3210,8 @@ def to_c(program, slug):
         L.append("    find_info();")
     if has_hud:
         L.append("    kit_hud_tick(&hud);                /* finds it, expires an award, writes what changed */")
+    if note_cue:
+        L.append("    note_loop_tick();                 /* PAD-658: a note's loop goes with it */")
     if media:
         L.append("    own_tick();                       /* every tick: an end call outlives the mode */")
     if g.shows:
@@ -2886,6 +3277,13 @@ def to_c(program, slug):
         L.append("            if (due[t]) T[t] = 0;")
         L.append("        }")
         L.extend("    " + line if line else line for code in timer_scripts for line in code.split("\n"))
+        L.append("    }")
+    if has_hud and gauge_live is not None and hud["gauge"]["meter"]:
+        L.append("    if (!run.on) {                    /* PAD-658: the gauge as a meter while it is not running */")
+        L.append("        if (in_game) {")
+        L.append("            hud_level = %s;" % gauge_live)
+        L.append("            gauge_now(hud_level, 1);")
+        L.append("        } else kit_hud_meter(&hud, -1, 0);")
         L.append("    }")
     L.append("    sec_changed = 0;")
     L.append("    if (!run.on) return;")
@@ -2966,6 +3364,8 @@ def to_c(program, slug):
     L.append("    if (ENDS_ON_DRAIN) drain_end();")
     if media:
         L.append("    looping = 0;                      /* no backdrop outlives the ball */")
+    if note_cue:
+        L.append("    note_looping = 0;")
     L.append("    {")
     L.append("        unsigned p = P(), v;")
     L.append("        for (v = 0; v < %d; v++) H[v][p] = 0;" % nhits)
@@ -3056,6 +3456,7 @@ UNUSED static void lamp_send(int i)
 UNUSED static void light(int i, unsigned rgb, int pattern, long long ms, int hurry)
 {
     if (i < 0 || i >= N_LIGHTS) return;
+    if (!run.on && !ending) return;   /* PAD-658: after the end (a timer still counting) it would be held for good */
     if (pattern == PM_LAMP_SOLID || hurry) ms = 0;
     else if (ms < RATE_MIN) ms = RATE_MIN;
     else if (ms > RATE_MAX) ms = RATE_MAX;
@@ -3722,13 +4123,49 @@ static void scoop_tick(void)
 
 def uses_media(program):
     """1 when the mode has clips, sounds or music of its own, or a block that plays one."""
-    if program.get("clips") or program.get("sounds") or program.get("music"):
+    if program.get("clips") or program.get("sounds") or program.get("music") or program.get("beds"):
         return True
-    return any(b.get("op") in ("clip", "sound") for s in program.get("scripts") or []
+    return any(b.get("op") in ("clip", "sound", "music") for s in program.get("scripts") or []
                for b in _walk(s.get("do") or []))
 
 
 #: the C of a mode with its own clips and sounds (pad_mode_assets.h); %(slug)s is its folder
+# PAD-658: a note (the mode not running) over the mode's own loop clip, as the game's own feedback screens letter their
+# two lines over a clip of theirs (MASER CANNON CHARGING): on the live city the note's words sat on the game's map labels
+# (run bedfix_pro_r1, bf_ready_c: HE JOINS THE NEXT BATTLE over TANKS 0/10). Its first "over and over" clip.
+_NOTE_LOOP_C = """/* PAD-658: a note shows over the mode's own loop (its cover clip), as the game's feedback screens show over a clip
+ * of theirs; a TOTAL too when nothing loops as it ends */
+#define COVER_CLIP %(cue)s
+static int note_looping;
+UNUSED static void note_loop(void)
+{
+    const char *n;
+    if (note_looping || hud.metering || !own_clip(COVER_CLIP)) return;
+    n = pa_clip_name(&own, COVER_CLIP);
+    note_looping = n && pm_backdrop(n);
+    if (note_looping) pm_log("own clip %%s (%%s) behind its note", COVER_CLIP, n);
+}
+
+static void cover_total(void)
+{
+    const char *n = pa_clip_name(&own, COVER_CLIP);
+    if (n && pm_backdrop(n)) pm_log("own clip %%s (%%s) behind its TOTAL", COVER_CLIP, n);
+}
+
+static void note_loop_tick(void)
+{
+    if (!note_looping) return;
+    if (run.on) {                     /* its own run's loop now */
+        note_looping = 0;
+        return;
+    }
+    if (hud.up && hud.noting && !hud.metering) return;
+    note_looping = 0;
+    pm_backdrop(0);                   /* (another of ours began: the runtime gave the backdrop to it already) */
+}
+"""
+
+
 _MEDIA_C = """/* ---- its own clips and sounds (PAD-374): what Write carried, named in %(slug)s.assets ---- */
 static struct pa_assets own = { .folder = "%(slug)s" };
 static const char *clip_waiting, *loop_waiting;   /* MODE_SDK.md "Clips race the game's own" */
@@ -3752,6 +4189,7 @@ UNUSED static void clip_full(const char *cue)
         pm_log("own clip %%s dropped before it played: %%s was asked for after it", clip_waiting, cue);
     clip_waiting = cue;
     clip_due = pm_ms() + PA_CLIP_AFTER_MS;
+    if (ending) end_clip = 1;
 }
 
 /* behind the HUD over and over while the mode runs (after a full-screen clip still waiting) */
@@ -3759,8 +4197,8 @@ UNUSED static void clip_loop(const char *cue)
 {
     const char *n;
     if (!own_clip(cue)) return;
-    if (!run.on) {
-        pm_log("own clip %%s: not looped behind the HUD - the mode is not running", cue);
+    if (!run.on || ending) {
+        pm_log("own clip %%s: not looped behind the HUD - the mode is %%s", cue, ending ? "ending" : "not running");
         return;
     }
     if (clip_waiting) {
@@ -3773,9 +4211,15 @@ UNUSED static void clip_loop(const char *cue)
            looping ? "asked" : "this port has no backdrop");
 }
 
-/* behind the HUD once, in the loop's place, then the loop again */
+/* behind the HUD once, in the loop's place, then the loop again. In When the mode ends there is no loop left to
+ * play in (PAD-658, run meltdown_r4: the game's screen showed, not the clip): full screen, the TOTAL after it */
 UNUSED static void clip_behind(const char *cue)
 {
+    if (ending) {
+        pm_log("own clip %%s: the mode is ending - played full screen, not behind the HUD", cue);
+        clip_full(cue);
+        return;
+    }
     if (!own_clip(cue)) return;
     if (!run.on || !looping || !pa_clip_event(&own, cue))
         pm_log("own clip %%s: not played behind the HUD - %%s", cue,

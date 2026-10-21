@@ -931,8 +931,10 @@ struct kit_hud {
     int noting;                            /* up only for a qualification note */
     int metering;                          /* PAD-379: up only for a meter (kit_hud_meter) */
     int off;                               /* PAD-353: its words wait for a display of the game's */
+    unsigned long note_left, off_since;    /* PAD-658: a note's time still to show, held while it waits */
     unsigned long checked_at;              /* PAD-390: the last look at the scene's HUD group */
     unsigned begun;                        /* PAD-413: pm_begun() when its mode last ran, or it was last down */
+    int beside;                            /* PAD-658: its meter is a corner bar - up BESIDE another pack HUD */
 };
 
 /* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
@@ -1094,8 +1096,8 @@ static KIT_UNUSED void kit_hud_award(struct kit_hud *h, unsigned ms, const char 
     h->award_until = pm_ms() + ms;
 }
 
-/* A QUALIFICATION note on a HUD the mode is not using ("POWERLINES 2 OF 3"): the award line alone for
- * `ms`, then hidden. Polite: while another of the pack's HUDs is up (a mode running, or the total of
+/* A QUALIFICATION note on a HUD the mode is not using ("POWERLINES 2 OF 3"): its two lines for `ms`, then hidden,
+ * lettered in the title and line places above the score panel (PAD-658: not the award line over the game's own). Polite: while another of the pack's HUDs is up (a mode running, or the total of
  * one that just ended) nothing is shown - a METER of another mode (kit_hud_meter) gives way to it. On a HUD
  * showing its own meter the note goes in the award line and the meter stays. 1 = shown. */
 static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *big, const char *sub)
@@ -1105,7 +1107,7 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
     /* PAD-390 (David's Premium, 2026-10-05: MELTDOWN IS READY during the game's multiball, a SPACEGODZILLA lock
      * while one of the game's modes ran): a note's line IS the award line, in the middle, so it has no place to
      * step aside to - while the game's mode or multiball has the middle it is not shown (a meter's gauge at the
-     * edge stays; a note already up waits in kit_hud_tick) */
+     * edge stays; a note already up waits in kit_hud_tick, its time held) */
     if (pm_aside() && !h->metering) return 0;
     if (h->up && !h->noting) return 0;
     h->want_title[0] = h->want_line[0] = 0;
@@ -1114,6 +1116,10 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
     if (!h->metering) h->want_gauge = -1;
     kit_hud_award(h, ms, big, sub);
     if (!h->up) kit_hud_show(h, 1);
+    else if (h->beside && kit_hud_up != h) {        /* PAD-658: a corner meter's note has the middle for its time */
+        if (kit_hud_up) kit_hud_show(kit_hud_up, 0);
+        kit_hud_up = h;
+    }
     h->noting = 1;
     h->hide_at = h->metering ? 0 : pm_ms() + ms;
     return 1;
@@ -1124,7 +1130,11 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
  * edge, `level` pips lit, and its label, nothing in the middle. Call it every tick while it should show, and
  * with level -1 to take it down. It is the politest thing on the glass: it waits while another pack HUD is up (a
  * mode, a total, a note), a note or a mode of the pack takes its place at once, and it comes back by itself once
- * they are gone. A note of its own (kit_hud_note) goes in the award line above it and the meter stays. */
+ * they are gone. A note of its own (kit_hud_note) goes in the award line above it and the meter stays.
+ * PAD-658: a corner bar (`beside`, the top-right POWERUP-style meter, PAD-416) shares the glass instead (David:
+ * "it should always be shown (whenever the HUD is shown)"): it comes up beside another pack HUD without taking its
+ * place, nothing of another HUD's covers it, and only its own notes make it the pack's HUD (for their time). With
+ * its own mode's HUD up (the mode, its TOTAL) a corner meter's level and label still follow. */
 static KIT_UNUSED void kit_hud_meter(struct kit_hud *h, int level, const char *label)
 {
     int k;
@@ -1137,8 +1147,11 @@ static KIT_UNUSED void kit_hud_meter(struct kit_hud *h, int level, const char *l
         }
         return;
     }
-    if (h->up && !h->noting) return;                 /* the mode itself has its HUD */
-    if (kit_hud_up && kit_hud_up != h) return;       /* another pack HUD is up: wait for it */
+    if (h->up && !h->noting) {                       /* the mode itself has its HUD */
+        if (h->beside) kit_hud_gauge(h, level, label);   /* PAD-658: a corner meter follows on (its TOTAL) */
+        return;
+    }
+    if (kit_hud_up && kit_hud_up != h && !h->beside) return;   /* another pack HUD is up: wait for it */
     h->want_gauge = level;
     if (label) kit_copy(h->want_glabel, sizeof h->want_glabel, label);
     if (h->up && h->metering) return;
@@ -1148,7 +1161,11 @@ static KIT_UNUSED void kit_hud_meter(struct kit_hud *h, int level, const char *l
     if (!h->up) {
         h->want_award[0] = h->want_awardsub[0] = 0;
         h->award_until = 0;
-        kit_hud_show(h, 1);
+        if (h->beside) {                             /* PAD-658: up beside whatever else is, in no one's place */
+            h->up = 1;
+            h->hide_at = 0;
+            if (h->group) pm_show(h->group, 1);
+        } else kit_hud_show(h, 1);
     }
     h->noting = 1;
     h->metering = 1;
@@ -1205,6 +1222,8 @@ static KIT_UNUSED void kit_hud_recheck(struct kit_hud *h)
     for (k = 0; k < h->n_pips; k++) h->pip_lit[k] = -1;
 }
 
+#define KIT_NOTE_WAIT_MS 8000
+
 /* every tick: find, expire the award, and send the glass what changed */
 static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
 {
@@ -1224,6 +1243,7 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     if (h->award_until && pm_ms() >= h->award_until) {
         h->award_until = 0;
         h->want_award[0] = h->want_awardsub[0] = 0;
+        if (h->beside && h->metering && kit_hud_up == h) kit_hud_up = 0;   /* PAD-658: its note is over, the bar stays */
     }
     if (!h->found || !h->up) return;
     /* PAD-353: a display of the game's has the screen (an award, a mode's start screen): its words are where
@@ -1233,6 +1253,16 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     aside = pm_aside();
     covered = pm_display_covered();
     off = covered || (h->noting && aside);
+    if (h->noting && !h->metering && h->hide_at) {
+        /* PAD-658: a note WAITS out a display of the game's (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER
+         * CANNON CHARGING), then shows for the time it had left; held up to KIT_NOTE_WAIT_MS, then let go */
+        unsigned long now = pm_ms();
+        if (off && !h->off) {
+            h->note_left = h->hide_at > now ? h->hide_at - now : 0;
+            h->off_since = now;
+        }
+        if (off && now - h->off_since < KIT_NOTE_WAIT_MS) h->hide_at = h->award_until = now + h->note_left;
+    }
     if (off != h->off) {
         pm_log("hud %s: %s", h->slug, !off ? "its words are back"
                : covered ? "its words wait while a display of the game's has the screen"
@@ -1247,6 +1277,13 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     awardsub = h->want_awardsub;
     if (off) {
         title = line = award = awardsub = "";
+    } else if (h->noting) {
+        /* PAD-658: a note goes where the game letters its own mode titles, above the score panel: the award line in
+         * the middle of the live screen sits on the game's own RAID / BRIDGE / POWER words there (emulator run
+         * oxygen_destroyer_r1, od_note.png) */
+        title = award;
+        line = awardsub;
+        award = awardsub = "";
     } else if (aside) {
         if (!award[0] && !awardsub[0]) {
             award = title;

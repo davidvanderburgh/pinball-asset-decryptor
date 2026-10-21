@@ -498,6 +498,7 @@ def play_many(tmp_path, programs, *args):
         srcs.append(str(src))
     exe = tmp_path / "harness"
     r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", SDK,
+                        "-I", os.path.join(SDK, "examples"),           # PAD-658: modes with a HUD (the kit)
                         "-o", str(exe), os.path.join(SDK, "examples", "desk_harness.c")] + srcs,
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -918,7 +919,7 @@ def test_king_ghidoras_start_show_and_a_blink_that_quickens_in_blocks(tmp_path, 
     ], seconds=15)
     out = play(tmp_path, p, "shot", "Building", "secs", 22)
     start = _at(out, r"\[TEST MODE\] START")
-    assert "show its own: 4 step(s) over 18 placed inserts, 2 GI string(s)" in out
+    assert "show its own: 4 step(s) over 36 placed inserts, 2 GI string(s)" in out
     # the show has the playfield: the Building's light waits for it to end (3.2 s), then comes on
     over = _at(out, r"\[TEST MODE\] show its own: over")
     assert 3200 <= over - start <= 3250
@@ -1056,7 +1057,7 @@ def test_the_hud_c_calls_only_the_header_and_the_kit():
     assert kit_used and kit_used <= kit, kit_used - kit
     assert 'static struct kit_hud hud = { .slug = "maser" };' in src
     # a HUD with no priority of its own takes a mode's 180 (PAD-377's choice wins when made)
-    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_NOW_MS + total_due" in src
+    assert re.search(r"#define DISPLAY_PRIORITY 180\b", src) and "pm_end_holding(ENDING_HOLD_MS + total_due" in src
     p = maser_hud()
     p["priority"] = 190
     assert re.search(r"#define DISPLAY_PRIORITY 190\b", BM.to_c(p, "maser"))
@@ -1098,8 +1099,8 @@ def test_the_hud_follows_the_blocks_and_ends_with_the_total(tmp_path):
     assert "1.00M" in _hud_words(out, "C3_Value")         # short enough for the counter (kit_short)
     # the award for its two seconds, the badge counting the clock, the chain gauge lit 1, 2, then 0
     award = _hud_words(out, "Award")
-    assert award[:3] == [" ", "BARRAGE 1", " "]
-    assert "MULTIPLIER UP" in _hud_words(out, "AwardSub")
+    assert award[:3] == [" ", "BARRAGE", " "]                 # PAD-658: the words big, the number under them
+    assert "1  -  MULTIPLIER UP" in _hud_words(out, "AwardSub")
     timer = _hud_words(out, "Timer_Num")
     assert timer[0] == "20" and "10" in timer
     lit = re.findall(r"SHOW \S+_Hud_G(\d)_On 1", out)
@@ -1149,9 +1150,59 @@ def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
          "seconds": 2}]})
     out = play(tmp_path, p, "shot", "Big loop", "secs", 3, slug="maser")
     note = out[out.index(">> shot Big loop"):]
-    assert "Hud_Award: MASER 1" in note and "Hud_AwardSub: TEST MODE" in note
+    # PAD-658: a note is lettered where the game letters its own mode titles, not over its live screen's words
+    assert "Hud_Title: MASER" in note and "Hud_Line: 1  -  TEST MODE" in note
     assert "SHOW PadMode_maser_Hud 1" in note and "SHOW PadMode_maser_Hud 0" in note
-    assert "Hud_Title:  " in note                  # a note is the award line alone
+    assert "Hud_Award:  " in note                  # the award line stays clear
+
+
+def test_keep_at_least_puts_the_clock_up_only_when_it_is_under(tmp_path):
+    """PAD-658 (David: "successful shots reset the countdown timer to 15 seconds (if it's below 15)"): Keep at least N
+    seconds on the clock - one block, the clock up to N when under it, left alone when over it."""
+    p = maser_hud()                                     # its clock: 20 s
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "running"}, "do": [
+        {"op": "set_time", "seconds": num(15), "at_least": True}]})
+    src = BM.to_c(p, "maser")
+    assert "if (run.on && RUN_SECONDS && secs_left() < ((15LL))) set_time((15LL));" in src
+    out = play(tmp_path, p, "shot", "Maser target", "secs", 2, "shot", "Big loop", "secs", 8, "shot", "Big loop",
+               "secs", 1, slug="maser")
+    first = _hud_words(out[out.index(">> shot Big loop"):], "Timer_Num")[0]
+    assert first in ("18", "17")                            # 18 s left: left alone
+    assert _hud_words(out[out.rindex(">> shot Big loop"):], "Timer_Num")[0] == "15"   # 10 s left: up to 15
+
+
+def test_a_note_waits_out_a_display_of_the_games(tmp_path):
+    """PAD-658 (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER CANNON CHARGING): with no mode running a note
+    still keeps off a display of the game's, and shows its whole time once that is gone."""
+    p = maser_hud()
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "hud_award", "text": "MASER", "value": {"k": "hits", "shot": "Big loop"}, "sub": "",
+         "seconds": 2}]})
+    out = play(tmp_path, p, "covered", 1, "shot", "Big loop", "secs", 4, "covered", 0, "secs", 3, slug="maser")
+    under = out[out.index(">> shot Big loop"):out.index(">> covered 0")]
+    assert "its words wait while a display of the game's has the screen" in under
+    assert "Hud_Title: MASER" not in under and "SHOW PadMode_maser_Hud 0" not in under   # held, not timed out
+    after = out[out.index(">> covered 0"):]
+    assert "its words are back" in after and "Hud_Title: MASER" in after
+    back = _at(out, ">> covered 0")
+    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_maser_Hud 0", after, re.M)]
+    assert hidden and 1900 <= hidden[0] - back <= 2100, (back, hidden)
+
+
+def test_a_clip_behind_the_hud_as_the_mode_ends_plays_full_screen(tmp_path, monkeypatch):
+    """PAD-658 (run meltdown_r4: the game's screen showed, not the clip): the loop ends with the mode, so a clip
+    behind the HUD in When the mode ends plays full screen."""
+    _cc()
+    p = _media_prog()
+    p["scripts"][3]["do"][1]["where"] = "behind"
+    assert any(t.startswith("A clip behind the HUD in When the mode ends plays full screen") for t in BM.notes(p))
+    dump = _assets(tmp_path, "blk", p, [])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Building", "secs", 12)
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert "own clip won: the mode is ending - played full screen, not behind the HUD" in out
+    assert "BACKDROP ONCE PadMode_blk_Won" not in out
+    assert 500 <= _at(out, "CLIP PadMode_blk_Won") - end <= 600
 
 
 def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, monkeypatch):
@@ -1178,6 +1229,74 @@ def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, 
     assert t - _at(out, ">> ball_end") >= 5900
     assert [x for x in map(int, re.findall(r"^\s*(\d+) SHOW PadMode_blk_Hud 0", out, re.M)) if t - 100 <= x <= t + 40]
     assert "END lamps held 0, display priority 0" in out
+
+
+def _hud_media_prog():
+    p = _media_prog()
+    p["hud"] = maser_hud()["hud"]
+    p["vars"] = [{"name": "step"}, {"name": "mult"}, {"name": "barrages"}]
+    return p
+
+
+def test_the_loop_stays_behind_the_total_it_holds(tmp_path, monkeypatch):
+    """PAD-658 (run meltdown_r4, md_16_end: MELTDOWN TOTAL over the live city's RAID and TANKS labels): the mode's loop
+    stays behind its TOTAL while the TOTAL holds the screen, and goes with it."""
+    _cc()
+    p = _hud_media_prog()
+    monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
+    out = play(tmp_path, p, "shot", "Building", "secs", 22)
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert 0 <= _at(out, "BACKDROP KEPT behind TEST MODE's ending") - end <= 20
+    off = _at(out, r"BACKDROP OFF \(its ending is over\)")
+    assert 9900 <= off - end <= 10100                    # the won clip full screen: the TOTAL held 7 s more
+    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Hud 0", out, re.M)]
+    assert any(abs(t - off) <= 40 for t in hidden), (off, hidden)
+
+
+def test_a_drain_takes_the_loop_with_its_total(tmp_path, monkeypatch):
+    _cc()
+    p = _hud_media_prog()
+    monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
+    out = play(tmp_path, p, "shot", "Building", "secs", 2, "ball_end", "secs", 8)
+    on = _at(out, "BALL END goes on")
+    assert abs(_at(out, "BACKDROP OFF") - on) <= 40
+
+
+def test_a_note_shows_over_the_modes_loop(tmp_path, monkeypatch):
+    """PAD-658 (run bedfix_pro_r1, bf_ready_c: HE JOINS THE NEXT BATTLE over the live city's TANKS 0/10): a note shows
+    over the mode's own loop, as the game's feedback screens show over a clip of theirs; it goes with the note, and a
+    start on it keeps it as the run's own."""
+    _cc()
+    p = _hud_media_prog()
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "hud_award", "text": "READY", "value": None, "sub": "", "seconds": 2}]})
+    assert "#define COVER_CLIP \"loop\"" in BM.to_c(p, "blk")
+    assert "note_loop" not in BM.to_c(_media_prog(), "blk")            # no HUD: no note
+    monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
+    out = play(tmp_path, p, "shot", "Big loop", "secs", 4)
+    assert "own clip loop (PadMode_blk_Loop) behind its note" in out
+    assert 1900 <= _at(out, "BACKDROP OFF") - _at(out, "BACKDROP PadMode_blk_Loop") <= 2100
+    # the mode started while its note shows: the loop is its run's now, never taken away between
+    out = play(tmp_path, p, "shot", "Big loop", "secs", 0.5, "shot", "Building", "secs", 3)
+    assert "BACKDROP PadMode_blk_Loop" in out and "BACKDROP OFF" not in out
+    assert "[TEST MODE] START" in out
+
+
+def test_with_no_loop_its_start_clip_covers_its_note_and_its_total(tmp_path, monkeypatch):
+    """PAD-658 (run loopfix_r1, lf_an_note_b: ANGUIRUS IS READY over TANKS - he has no loop of his own): a mode with no
+    clip over and over shows its notes and its TOTAL over the first clip it starts with."""
+    _cc()
+    p = _hud_media_prog()
+    p["scripts"][1]["do"] = p["scripts"][1]["do"][:1]                   # its intro, and no loop
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "hud_award", "text": "READY", "value": None, "sub": "", "seconds": 2}]})
+    assert "#define COVER_CLIP \"intro\"" in BM.to_c(p, "blk")
+    monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
+    out = play(tmp_path, p, "shot", "Big loop", "secs", 3, "shot", "Building", "secs", 14)
+    assert "own clip intro (PadMode_blk_Intro) behind its note" in out
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert "own clip intro (PadMode_blk_Intro) behind its TOTAL" in out
+    assert 0 <= _at(out, "BACKDROP KEPT behind TEST MODE's ending") - end <= 20
 
 
 def test_a_hud_mode_that_gives_way_takes_its_hud_down_when_a_game_mode_begins(tmp_path):
@@ -2042,3 +2161,45 @@ def test_a_light_held_by_name_comes_back_after_a_light_show_and_goes_at_the_end_
     sent = re.findall(r"^\s*\d+ LAMP HEAT RAY ff2000 blink (\d+)", out, re.M)
     assert len(sent) == 2 and sent[0] == sent[1]                        # lit, then again once the show is over
     assert "END lamps held 0" in out
+
+
+def rage_meter():
+    """PAD-658: GODZILLA ANGRY's RAGE meter in blocks (David: "we somehow lost our godzilla rage meter in the top right
+    of the HUD. it should always be shown (whenever the HUD is shown)"): a corner bar that follows a percent, shown
+    while the mode is not running too."""
+    return prog([
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [
+            {"op": "change", "var": "rage", "by": num(25)}]},
+        {"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+    ], vars=[{"name": "rage", "reset": "game"}], seconds=5,
+        hud={"on": True, "line": "SHOOT THE BUILDING", "counters": [{"label": "RAGE", "value": var("rage")}],
+             "timer": {"on": False},
+             "gauge": {"on": True, "kind": "bar", "count": 20, "words": ["GODZILLA", "RAGE"], "full": "ANGRY!",
+                       "meter": True, "value": var("rage")}})
+
+
+def test_a_corner_meter_shows_before_its_mode_starts_and_beside_another_modes_hud(tmp_path):
+    p = rage_meter()
+    assert BM.problems(p, SHOTS) == []
+    assert BM.hud_spec(p, "rage")["gauge"] == {"label": " ", "kind": "bar", "count": 20, "icon": "rage",
+                                               "words": ["GODZILLA", "RAGE"]}
+    src = BM.to_c(p, "rage")
+    assert '.slug = "rage", .beside = 1' in src and "#define HUD_METER  1" in src
+    other = maser_hud()
+    out = play_many(tmp_path, {"rage": p, "maser": other},
+                    "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Left ramp", "secs", 1,
+                    "shot", "Maser target", "secs", 2,                         # the other mode runs: its HUD up
+                    "shot", "Left ramp", "secs", 1, "shot", "Left ramp", "secs", 22,   # it times out
+                    "shot", "Building", "secs", 7)                             # the rage mode itself
+    # in a game, before anything: the bar at 0%, then 25%, 50%
+    assert _hud_words(out, "Gauge_Label")[:3] == ["0%", "25%", "50%"]
+    gauge = re.compile(r"SHOW \S*PadMode_rage_Hud_Gauge (\d)")
+    assert "SHOW PadMode_rage_Hud 1" in out and gauge.findall(out)[0] == "1"
+    after = out[out.index(">> shot Maser target"):out.index(">> shot Building")]
+    # the other mode's HUD came up BESIDE it: the bar was not taken down, and it went on filling to ANGRY!
+    assert "SHOW PadMode_maser_Hud 1" in after
+    assert "SHOW PadMode_rage_Hud 0" not in after and "0" not in gauge.findall(after)
+    assert "75%" in _hud_words(after, "Gauge_Label") and "ANGRY!" in _hud_words(after, "Gauge_Label")
+    # its own mode: the bar stays up and full until its end
+    mine = out[out.index(">> shot Building"):]
+    assert "0" not in gauge.findall(mine[:mine.index("] END")])

@@ -1,0 +1,153 @@
+{
+ "clips": {
+  "intro": {
+   "film": "bio89",
+   "from": 2059.4,
+   "length": 3.6,
+   "crop": "fill",
+   "what": "0:34:19.4, the camera tilts up across Lake Ashi to reveal Biollante's rose form standing in the misty, glowing lake, one shot."
+  },
+  "loop": {
+   "film": "bio89",
+   "from": 2067.0,
+   "length": 11.6,
+   "crop": "fill",
+   "what": "0:34:27, a slow low-angle tilt up Biollante's rose-form stalk and leaves to the closed red rose head, vines gently swaying, one continuous shot."
+  },
+  "cut": {
+   "film": "bio89",
+   "from": 3309.8,
+   "length": 3.2,
+   "crop": "fill",
+   "what": "0:55:10, at night on the lake Godzilla's ray strikes a vine reaching out from Biollante and the vine bursts into smoke, one shot."
+  },
+  "collect": {
+   "film": "bio89",
+   "from": 3295.4,
+   "length": 2.5,
+   "crop": "fill",
+   "what": "0:54:55, a run of two shots: a vine mouth sprays yellow sap into Godzilla's face, then Godzilla's head steams with it."
+  },
+  "beast": {
+   "film": "bio89",
+   "from": 5479.45,
+   "length": 5.5,
+   "crop": "fill",
+   "what": "1:31:19, a run of two shots: extreme close-ups of the beast form's huge tooth-lined jaws, then the jaws opening on the red mouth, under lightning flashes."
+  },
+  "won": {
+   "film": "bio89",
+   "from": 5773.0,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "1:36:13, Biollante's beast form dissolves into a glowing pink cloud of spores that drift upward, one shot."
+  },
+  "lost": {
+   "film": "bio89",
+   "from": 5635.45,
+   "length": 4.3,
+   "crop": "fill",
+   "what": "1:33:55, a run of two shots: Biollante's beast jaws close on Godzilla's head, then a close-up of the jaws clamped on him."
+  },
+  "ablaze": {
+   "film": "bio89",
+   "from": 3352.25,
+   "length": 5.4,
+   "crop": "fill",
+   "what": "A run of three shots: Godzilla's ray strikes Biollante's rose-form stalk in fiery orange bursts, smoke rolls over the lake, then his blue ray pours into the blazing rose, at 0:55:52."
+  },
+  "burn": {
+   "film": "bio89",
+   "from": 3361.7,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Close on Biollante's red rose head engulfed in roaring orange flames, the petals showing through the fire, at 0:56:02."
+  },
+  "grab": {
+   "film": "bio89",
+   "from": 3174.15,
+   "length": 2.7,
+   "crop": "fill",
+   "what": "At night on Lake Ashi Biollante's vines whip across and coil round the head of a roaring Godzilla, at 0:52:54."
+  },
+  "cashout": {
+   "film": "bio89",
+   "from": 3403.5,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "A column of glittering golden spores rises from the burnt rose into the dark sky as the last flames flicker, at 0:56:43."
+  }
+ },
+ "music": {
+  "film": "bio89",
+  "from": 6128.682,
+  "length": 19.12,
+  "what": "1:42:08.682, Koichi Sugiyama's Super X2 march as reprised in the end credits (the same passage the earlier bed took at 0:43:05 under the Super X2 launch), orchestra only, no dialogue or effects."
+ },
+ "calls": {
+  "cut": {
+   "film": "bio89",
+   "from": 4140.22,
+   "length": 2.02,
+   "priority": 3,
+   "what": "1:09:00, a short, clean Godzilla roar during the Osaka attack, from its onset until it falls away at 1:09:02."
+  },
+  "collect": {
+   "film": "bio89",
+   "from": 3295.56,
+   "length": 1.46,
+   "priority": 3,
+   "what": "0:54:55, the wet burst of Biollante's sap spraying from a vine mouth into Godzilla's face and the first hiss of it burning, ending at a dip."
+  },
+  "beast": {
+   "film": "bio89",
+   "from": 5459.85,
+   "length": 3.0,
+   "priority": 4,
+   "what": "1:30:59.9, Biollante's beast-form roar as she rises at night, a falling screech into a deep growl."
+  },
+  "won": {
+   "film": "bio89",
+   "from": 5774.38,
+   "length": 2.4,
+   "priority": 4,
+   "what": "1:36:14.4, Biollante's soft, eerie dying cry, a falling wail that settles and fades as she turns to spores, over a quiet score."
+  },
+  "lost": {
+   "film": "bio89",
+   "from": 5569.05,
+   "length": 3.0,
+   "priority": 4,
+   "what": "1:32:49, Godzilla's pained roar as Biollante's vine mouths bite into his hands, ending as it falls away."
+  },
+  "ablaze": {
+   "film": "bio89",
+   "from": 3327.6,
+   "length": 2.8,
+   "priority": 4,
+   "what": "Godzilla's ray fires with a sudden roaring hiss and blasts into Biollante across the lake, ending where the shot cuts away, at 0:55:27.6."
+  },
+  "grab": {
+   "film": "bio89",
+   "from": 5508.58,
+   "length": 1.5,
+   "priority": 3,
+   "what": "Biollante's eerie whistling cry, a high glide that falls away, as a vine mouth lunges at Godzilla, at 1:31:48.6."
+  },
+  "cashout": {
+   "film": "bio89",
+   "from": 5771.2,
+   "length": 1.75,
+   "priority": 3,
+   "what": "A soft, eerie wail from Biollante as her shape melts into the glowing pink spore cloud, fading to quiet, at 1:36:11.2."
+  }
+ },
+ "beds": {
+  "beast": {
+   "film": "bio89",
+   "from": 5034.79,
+   "length": 19.65,
+   "what": "The film's own driving military battle march, steady brass chords over a pulsing orchestra, under the wireframe battle-plan display before the final battle, at 1:23:54.8."
+  }
+ }
+}

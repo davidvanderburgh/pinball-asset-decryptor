@@ -26,7 +26,7 @@
  *   game_over           pm_in_game() falls
  *   new_game            a new game: player 1, every score 0, pm_in_game() 1
  *   trigger <file>      /dump/<file> appears (a mode's test trigger), with optional text: trigger f=text
- *   covered <0|1>       a display of the game's that beats the held display priority has the screen
+ *   covered <0|1>       a display of the game's has the screen (a mode's words, or a note, wait for it)
  *   rescene             the game makes its HUD scene again (PAD-390): every node found so far is an old copy,
  *                       renamed "STALE:<name>", and the next lookups find fresh ones
  *   lamps               print every insert held now: "HELD <name> <rrggbb> <pattern> <ms> <mode>"
@@ -68,6 +68,9 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Left return lane", 0x4ull }, { "Right return lane", 0x10ull }, { "Pop bumper", 0x40ull },
     { "Mecha exit bottom", 0x10000000000ull }, { "Left spinner", 0x200ull },
     { "Top spinner", 0x2000ull }, { "Shield ramp spinner", 0x20000ull },
+    { "Right spinner", 0x20000ull },                    /* PAD-658: the same spinner, as a Pro's port names it */
+    { "Right scoop", 0x0100000000000000ull },           /* PAD-658: `switch` lines of the port, the scoop */
+    { "Mecha exit top", 0x0200000000000000ull },        /* and the top of the Mecha lane */
     { "Action button", 0x1000000000000000ull },         /* a `switch` line of the port (PAD-228) */
     { "Trough", 0x8000000000000000ull },                /* the trough's switches (PAD-416): a drain */
 };
@@ -169,6 +172,9 @@ static unsigned disp_prio;
 static unsigned long disp_linger_until;   /* pm_end_holding: the hold kept for an ending, until then */
 static void disp_linger_release(const char *why);
 static unsigned begun;                     /* PAD-413: pm_begun */
+static void backdrop_other_began(void);    /* PAD-658: the backdrop, below */
+static void backdrop_mode_ended(void);
+static void backdrop_hold_over(void);
 static int clip_on;                        /* PAD-413: our full-screen clip plays (until it is stopped) */
 static const struct pm_mode *clip_owner;
 static const struct pm_mode *refused[16];   /* PAD-399: as the runtime, a refusal is said once until it changes */
@@ -198,6 +204,7 @@ int pm_begin(void)
         printf("%6lu CLIP STOPPED %s (another mode began)\n", now_ms, clip_owner ? clip_owner->name : "-");
         clip_on = 0;
     }
+    backdrop_other_began();
     return 1;
 }
 unsigned pm_begun(void) { return begun; }
@@ -205,6 +212,7 @@ static void mechs_let_go(const char *why);   /* PAD-395: the held mechanisms, be
 void pm_end(void)
 {
     if (running == current) running = 0, refused_forget();
+    if (!running) backdrop_mode_ended();
     if (!running) mechs_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }
@@ -238,18 +246,47 @@ void pm_clip_stop(void)
     if (clip_on) printf("%6lu CLIP STOPPED\n", now_ms);
     clip_on = 0;
 }
-/* hud-layers: the backdrop (a clip behind the HUD) */
+/* hud-layers: the backdrop (a clip behind the HUD). PAD-658, as the runtime: the mode that asked owns it (running, or
+ * showing a note); it stays behind an ending held with pm_end_holding until the hold is over */
 static char backdrop_now[96];
+static const struct pm_mode *backdrop_owner;
+static int backdrop_lingers;
+static void backdrop_off(const char *why)
+{
+    if (backdrop_now[0]) printf("%6lu BACKDROP OFF%s%s\n", now_ms, why ? " " : "", why ? why : "");
+    backdrop_now[0] = 0;
+    backdrop_owner = 0;
+    backdrop_lingers = 0;
+}
 int pm_backdrop(const char *name)
 {
+    if (running && running != current) return 0;
+    backdrop_lingers = 0;
     if (!name || !*name) {
-        if (backdrop_now[0]) printf("%6lu BACKDROP OFF\n", now_ms);
-        backdrop_now[0] = 0;
+        backdrop_off(0);
         return 1;
     }
+    backdrop_owner = current;
     if (strcmp(backdrop_now, name)) printf("%6lu BACKDROP %s\n", now_ms, name);
     snprintf(backdrop_now, sizeof backdrop_now, "%s", name);
     return 1;
+}
+static void backdrop_mode_ended(void)
+{
+    if (backdrop_now[0] && backdrop_owner == current && disp_linger_until && disp_owner == current) {
+        backdrop_lingers = 1;
+        printf("%6lu BACKDROP KEPT behind %s's ending\n", now_ms, current && current->name ? current->name : "?");
+        return;
+    }
+    backdrop_off("(the mode ended)");
+}
+static void backdrop_other_began(void)
+{
+    if (backdrop_now[0] && backdrop_owner != current) backdrop_off("(another mode began)");
+}
+static void backdrop_hold_over(void)
+{
+    if (backdrop_lingers && !running) backdrop_off("(its ending is over)");
 }
 int pm_backdrop_once(const char *name)
 {
@@ -334,8 +371,9 @@ int pm_building(int floor)
     return 1;
 }
 int pm_building_floor(void) { return building_none() ? -1 : building_at; }
-/* PAD-414: the shaker - a SHAKE line for each one asked for (the runtime's limits are not modelled here, but one at a
- * time is: a shake asked for while one runs is refused); HARNESS_SHAKER=none: a game without one */
+/* PAD-414: the shaker - a SHAKE line for each one asked for (the runtime's 30 s a minute is not modelled here, but
+ * PAD-658's one at a time is: a longer one takes over, a shorter one is skipped); HARNESS_SHAKER=none: a game without
+ * one */
 static unsigned long shake_until;
 static int shake_none(void)
 {
@@ -345,10 +383,11 @@ static int shake_none(void)
 static int shake_go(const char *what, unsigned ms)
 {
     if (shake_none()) return 0;
-    if (now_ms < shake_until) {
-        printf("%6lu SHAKE %s - refused, one is running\n", now_ms, what);
+    if (now_ms < shake_until && now_ms + ms <= shake_until) {
+        printf("%6lu SHAKE %s - skipped, the one running outlasts it\n", now_ms, what);
         return 0;
     }
+    if (now_ms < shake_until) printf("%6lu SHAKE taken over\n", now_ms);
     shake_until = now_ms + ms;
     printf("%6lu SHAKE %s\n", now_ms, what);
     return 1;
@@ -720,6 +759,15 @@ static const struct { const char *name; uint64_t shot; int x, y; } LAMPS[] = {  
     { "TOP SPINNER", 0x1800ull, 165, 207 },
     { "POP BUMPER", 0x40ull, 251, 413 }, { "TANK 2", 0, 76, 287 }, { "HEAT RAY", 0, 180, 144 },
     { "LOWER PLAYFIELD GI-WHT(X9)", 0, 0, 0 }, { "UPPER PLAYFIELD GI-WHT(X12)", 0, 0, 0 },
+    /* PAD-658: the right side's inserts the pack lights by name, and the flashers */
+    { "LEFT SPINNER", 0x800000000ull, 55, 373 }, { "SELECT CITY", 0x2000000000ull, 236, 380 },
+    { "MECHA LANE", 0x4000000000ull, 282, 393 }, { "ATTACK MECHA", 0, 200, 381 }, { "TANK 6", 0, 227, 394 },
+    { "SCOOP BB-BATTLE", 0, 254, 346 }, { "SCOOP BB-GODZILLA PWR UP", 0, 254, 346 },
+    { "SCOOP BB-SUMMON ALLY", 0, 254, 346 }, { "SCOOP BB MECHA SPOT", 0, 259, 337 },
+    { "TAIL WHIP", 0, 176, 297 }, { "DESTRUCTION JACKPOT", 0, 170, 273 }, { "KAIJU", 0, 127, 392 },
+    { "GODZILLA SPOT", 0, 33, 205 }, { "GLOBE FLASH", 0, 287, 206 }, { "TOP SPINNER FLASH", 0x2000ull, 172, 100 },
+    { "RIGHT RETURN LANE", 0x10ull, 242, 472 }, { "MASER FLASH", 0x200ull, 30, 388 },
+    { "BUILDING SPOT", 0, 57, 382 },
 };
 #define N_LAMPS (int)(sizeof LAMPS / sizeof LAMPS[0])
 static const char *const PATTERN[] = { "solid", "blink", "pulse", "chase" };
@@ -889,6 +937,7 @@ static void disp_linger_release(const char *why)
     disp_prio = 0;
     disp_owner = 0;
     disp_linger_until = 0;
+    backdrop_hold_over();
 }
 
 int pm_display_priority(unsigned p)
@@ -899,6 +948,7 @@ int pm_display_priority(unsigned p)
             disp_prio = 0;
             disp_owner = 0;
             disp_linger_until = 0;
+            backdrop_hold_over();
         }
         return 1;
     }
@@ -908,7 +958,7 @@ int pm_display_priority(unsigned p)
     printf("%6lu DISPLAY %u %s\n", now_ms, disp_prio, mode_name(current));
     return 1;
 }
-int pm_display_covered(void) { return disp_prio && covered; }
+int pm_display_covered(void) { return covered; }      /* PAD-658: held or not (a note looks too) */
 int pm_end_holding(unsigned ms)
 {
     if (!running || running != current) return 0;

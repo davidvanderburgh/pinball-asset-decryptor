@@ -2065,6 +2065,8 @@ def sound_words(key):
     (``call:<cue>`` -> "<cue> call")."""
     if str(key).startswith("call:"):
         return "%s call" % str(key)[5:]
+    if str(key).startswith("music:"):                   # PAD-658: a further music bed
+        return "%s music bed" % str(key)[6:]
     return SOUND_WORDS.get(key, key)
 
 
@@ -2103,13 +2105,23 @@ def choose_code_sounds(project, code, sound_ok, prof, taken=(), taken_beds=(), l
         try:
             got = MS.assign(game, version, [(kind,)], taken=taken, taken_beds=taken_beds)[0]
         except MS.ModeSoundError as e:
+            if w["music"] and c.swap_calls:
+                # PAD-658: the title's spare bed sids are all taken (Godzilla LE 1.16 has 12): the bed rides the
+                # music carrier SWAPPED in at run time, as a Pro's music and this title's calls do - no ceiling
+                entry = dict(w, request=0, swap=True)
+                entry.pop("priority", None)
+                out.append(entry)
+                log("Modes: %s's %s plays through the music carrier swapped in at run time (%s)."
+                    % (w["name"], sound_words(w["key"]), e), "info")
+                continue
             log("Modes: %s's %s is not put on this card: %s." % (w["name"], sound_words(w["key"]), e), "warning")
             continue
         entry = dict(w, request=int(got[kind]))
-        taken.append(entry["request"])
         if w["music"] and got.get("music_sid"):
             entry["sid"] = int(got["music_sid"])
             taken_beds.append(entry["sid"])
+        else:                           # PAD-658: a bed shares the music carrier (its own sid): not taken
+            taken.append(entry["request"])
         if MS.carriers(game, version).swap:
             entry["swap"] = True        # item 163: swapped in at run time
         entry.pop("priority", None)

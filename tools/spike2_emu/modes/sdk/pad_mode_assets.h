@@ -19,6 +19,8 @@
  *                                                 an event (pa_clip_event) or at the end
  *                                                 (pa_clip_full)
  *     music  125 618                              the music carrier, and this mode's own bed (a sid)
+ *     bed    swamp 619                            PAD-658: a further bed by name (a sid; a swapped one is a
+ *                                                 `swap ... music:swamp` line), switched to with pa_music_bed
  *     call   sever 1251 1850 4                    a call of its own: cue, carrier request, its own
  *     call   spike 1249 700 3                     length in ms, and its priority on the voice bus
  *     sid    1251 65537 call:sever                 (PAD-595) the build put the sound in a sound bank
@@ -89,6 +91,7 @@
 #define PA_POLL_MS          500
 #define PA_FILE_MAX         8192
 #define PA_SWAPS_MAX        24          /* the calls and the music, each swapped in (item 163) */
+#define PA_BEDS_MAX         6           /* PAD-658: further music beds, switched to by name (pa_music_bed) */
 #define PA_SWAP_TAG         24          /* "call:<cue>" or "music", with its 0 */
 #define PA_CLIPS_MAX        12          /* hud-layers: clips by cue */
 #define PA_BLOCK_MAX        128         /* PAD-363: the game's mode ids `block_modes` may list */
@@ -105,6 +108,8 @@ struct pa_assets {
     struct { char cue[PA_CUE]; char name[PA_NAME]; } clips[PA_CLIPS_MAX];   /* hud-layers: by cue */
     unsigned n_clips;
     unsigned music, music_sid;            /* 0 = no music of its own */
+    struct { char name[PA_CUE]; unsigned sid; } beds[PA_BEDS_MAX];   /* PAD-658: `bed <name> <sid>` */
+    unsigned n_beds;
     struct pa_call calls[PA_CALLS_MAX];
     unsigned n_calls;
     struct { unsigned request; unsigned char keys[16]; char tag[PA_SWAP_TAG]; } swaps[PA_SWAPS_MAX];   /* item 163 */
@@ -273,6 +278,13 @@ static PA_UNUSED void pa_parse_line(struct pa_assets *a, const char *s)
     } else if (pa_is(key, "music")) {
         if (pa_word(&s, w, sizeof w)) a->music = pa_num(w);
         if (pa_word(&s, w, sizeof w)) a->music_sid = pa_num(w);
+    } else if (pa_is(key, "bed") && a->n_beds < PA_BEDS_MAX) {       /* PAD-658: bed <name> <sid> */
+        unsigned i;
+        if (!pa_word(&s, w, sizeof w) || !w[0]) return;
+        for (i = 0; w[i] && i + 1 < PA_CUE; i++) a->beds[a->n_beds].name[i] = w[i];
+        a->beds[a->n_beds].name[i] = 0;
+        if (!pa_word(&s, w, sizeof w) || !(a->beds[a->n_beds].sid = pa_num(w))) return;
+        a->n_beds++;
     } else if (pa_is(key, "sid") && a->n_points < PA_SWAPS_MAX) {     /* PAD-595 */
         unsigned r, v, i;
         if (!pa_word(&s, w, sizeof w) || !(r = pa_num(w))) return;
@@ -336,6 +348,7 @@ static PA_UNUSED int pa_load(struct pa_assets *a)
     a->looked = a->loaded = 1;
     a->n_calls = 0;
     a->music = a->music_sid = 0;
+    a->n_beds = 0;
     a->clip_start[0] = 0;
     a->n_clips = 0;
     a->keep_n = 0;
@@ -615,6 +628,47 @@ static PA_UNUSED void pa_music_under(struct pa_assets *a)
         pm_log("own sound: music %u had stopped - started again (%u)", a->music, a->music_restarts);
 }
 
+/* PAD-658: switch the running music to the bed called `name` ("" = its own first bed again): the one playing fades
+ * (200 ms), the carrier is pointed at the bed's sound id (or the bed's record is swapped in), and it starts again
+ * once the fade is over. 1 = switched (or already that bed); 0 when the mode's music is not playing or the card
+ * does not carry that bed (the music plays on). */
+static PA_UNUSED int pa_music_bed(struct pa_assets *a, const char *name)
+{
+    char tag[PA_SWAP_TAG];
+    const unsigned char *swap = 0;
+    unsigned sid = 0, i, k;
+    if (!a->music || pa_music.request != a->music || pa_music.owner != a->folder) return 0;
+    if (!name || !name[0] || pa_is(name, "music")) {
+        sid = a->music_sid;
+        swap = pa_swap_of(a, a->music, "music");
+    } else {
+        for (i = 0; i < a->n_beds; i++)
+            if (pa_is(a->beds[i].name, name)) sid = a->beds[i].sid;
+        for (k = 0; k + 1 < PA_SWAP_TAG && "music:"[k]; k++) tag[k] = "music:"[k];
+        for (i = 0; name[i] && k + 1 < PA_SWAP_TAG; i++) tag[k++] = name[i];
+        tag[k] = 0;
+        if (!sid)
+            for (i = 0; i < a->n_swaps; i++)
+                if (a->swaps[i].request == a->music && pa_is(a->swaps[i].tag, tag)) swap = a->swaps[i].keys;
+        if (!sid && !swap) {
+            pm_log("own sound: music bed %s is not on this card - the music plays on", name);
+            return 0;
+        }
+    }
+    if (sid == pa_music.sid && swap == pa_music.swap) return 1;
+    pm_sound_fade(a->music, 200);
+    if (pa_music.swap && pa_music.swap != swap)       /* the old bed's swap lasts out the fade only */
+        pm_sound_swap(a->music, pa_music.swap, pa_music.swap + 8, -1, 200);
+    if (sid) pm_sound_sid(a->music, sid);
+    else if (pa_music.sid) pm_sound_sid(a->music, 0);   /* the carrier's own list again: a swap plays on it */
+    pa_music.sid = sid;
+    pa_music.swap = swap;
+    pa_music.start_due = pm_ms() + PA_MUSIC_WAIT_MS;
+    pm_log("own sound: music %u switches to %s%s (%s %u)", a->music, name && name[0] ? "the bed " : "its own bed",
+           name && name[0] ? name : "", sid ? "sound id" : "swapped record, request", sid ? sid : a->music);
+    return 1;
+}
+
 static PA_UNUSED void pa_music_finish(struct pa_assets *a)
 {
     int playing;
@@ -720,7 +774,8 @@ static PA_UNUSED void pa_end(struct pa_assets *a)
         pm_log("own clip %s dropped before it played: the mode ended first", a->clip_start);
         a->clip_due = 0;
     }
-    if (pa_clip_name(a, "loop")) pm_backdrop(0);        /* hud-layers: the city again */
+    /* hud-layers: the city again - the runtime takes the loop away at pm_end, or (PAD-658) once the ending it holds
+     * the screen for is over: the loop stays behind its TOTAL, where the game's live map labels were */
     pa_music_finish(a);
 }
 

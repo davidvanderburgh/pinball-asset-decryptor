@@ -263,6 +263,9 @@ test). This is a last line of defence, not a guardrail of ours.
     setting 0, over the game's own shake (`drive_left`, `0x3e8bcc`) or one of the mode's; 100 ms .. the game's own
     longest at that strength; 20 shakes and 15 s of shaking a minute; the game's own stop at the mode, ball or game
     end - unless the game has asked for a longer one since, and except the mode's ending shake (outlast).
+    PAD-658 changed the per-minute limits (neither was measured, and the game's call has none): no count, 30 s of the
+    motor RUNNING the modes' shakes in any minute (counted as it runs), one at a time the game's way (a longer one
+    takes over, a shorter one is skipped), and a mode's end leaves its shake to run out.
   - The drive's time left reads 0 straight after the call (the game's coil service sends the request a moment later),
     so the first run thought no shake was running and the stop never fired; the runtime now counts its shake from
     the request, cut to the setting (`text shake_setting_ms`).

@@ -540,17 +540,23 @@ function startMain() {
       const g = cv.getContext("2d");
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, cv.width, cv.height);
-      // every glow before any core marker: fixtures overlap on this picture
+      // every glow before any core marker: fixtures overlap on this picture.
+      // PAD-658: THE MODES TAB'S LOOK - a lit insert glows in its own colour, as
+      // the light-show preview draws it (modes.css .ls-ins.lit: drop-shadow 5px
+      // and 10px of the colour itself), so a mode's show reads on this picture
+      // as it does in the editor. The glow was half the colour at half opacity,
+      // which left a show's dim steps as dark smudges on the X-ray.
       for (const [fid, x, y] of V.fixtures) {
         const v = fx[fid];
         if (!v) continue;
         const [r, gg, b, a, rad] = v;
         const cx = x * scale, cy = y * scale, gr = GLOW_R * (rad / LED_R);
-        const grad = g.createRadialGradient(cx, cy, 0, cx, cy, gr);
-        grad.addColorStop(0, `rgba(${r >> 1},${gg >> 1},${b >> 1},${a * 0.55})`);
-        grad.addColorStop(1, `rgba(${r >> 1},${gg >> 1},${b >> 1},0)`);
+        const grad = g.createRadialGradient(cx, cy, 0, cx, cy, gr * 1.4);
+        grad.addColorStop(0, `rgba(${r},${gg},${b},${a * 0.9})`);
+        grad.addColorStop(0.45, `rgba(${r},${gg},${b},${a * 0.45})`);
+        grad.addColorStop(1, `rgba(${r},${gg},${b},0)`);
         g.fillStyle = grad;
-        g.beginPath(); g.arc(cx, cy, gr, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.arc(cx, cy, gr * 1.4, 0, Math.PI * 2); g.fill();
       }
       for (const [fid, x, y] of V.fixtures) {
         const v = fx[fid];
@@ -564,7 +570,13 @@ function startMain() {
         } else {
           const [r, gg, b, a, rad] = v;
           g.arc(cx, cy, rad, 0, Math.PI * 2);
-          g.fillStyle = `rgba(${r},${gg},${b},${a})`; g.fill();
+          g.save();                     // the preview's drop-shadows, 5 px and 10 px of the colour
+          g.fillStyle = `rgba(${r},${gg},${b},${a})`;
+          g.shadowColor = `rgba(${r},${gg},${b},${a})`;
+          g.shadowBlur = 10 * dpr; g.fill();
+          g.shadowBlur = 5 * dpr; g.fill();
+          g.restore();
+          g.lineWidth = 1; g.strokeStyle = "rgba(0,0,0,.4)"; g.stroke();
         }
       }
       for (const [k, x, y, key] of V.coils) {

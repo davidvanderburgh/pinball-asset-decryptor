@@ -387,7 +387,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  game_mode=None, title_origin="",
                  cap_text="", new_ok=False, ex_ok=False, dup_ok=False, del_ok=False, copy_ok=False,
                  port_ok=False, port_shown=False, port_word="", port_targets=[],                 # PAD-396
-                 examples=[], open=False, editor_on=False, form=dict(self.f),
+                 examples=[], blocks_examples=[], open=False, editor_on=False, form=dict(self.f),
                  shots_on=[], end_shots_on=[], awards=dict(self._shot_awards), shots_text="", status="",
                  save_state="", labels={}, files={}, starts_words="", preview=None,
                  reasons={}, dis={}, code=None, code_words="", cut_ok=False,
@@ -716,8 +716,14 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             for name in CM.example_names():
                 items.append({"name": name, "label": name + self.CODE_EXAMPLE_SUFFIX,
                               "code": True, "disabled": False})
+        game_dir = str(getattr(p, "game_dir", "") or "") if p is not None else ""
+        blocks = [{"name": name, "about": BM.example(name).get("about", ""),            # PAD-658: made of blocks
+                   "lost": [str(t) for t in BM.example(name).get("lost") or ()],   # what a rebuild lost against its C
+                   "based_on": bool(BM.example(name).get("based_on"))}
+                  for name in (BM.example_names(game_dir) if game_dir else ())
+                  if BM.fits(BM.example(name), p)]                       # only what builds on this card
         ex_ok = bool(self._ex_ok and not self._no_port)
-        self.set(examples=items, new_ok=bool(self._new_ok and not self._no_port), ex_ok=ex_ok,
+        self.set(examples=items, blocks_examples=blocks, new_ok=bool(self._new_ok and not self._no_port), ex_ok=ex_ok,
                  ex_tip="" if ex_ok else (self._no_port or MP.NO_PROJECT_HELP))
 
     def _code_examples_ok(self):
@@ -2962,23 +2968,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         """``(problems, notes)`` of a program on the shown title (its shots, events and mechanisms),
         its own clips and sounds looked for in ``folder``."""
         p = self._shown or self._profile
-        shots = [n for n, _m in p.shots] if p is not None else None
-        events = list(p.events or ()) if p is not None else None
-        mechs = self._blocks_mechs(p) if p is not None else None
-        scoop = p.can("scoop") if p is not None else None
-        shield = (getattr(p, "shield_rule", "") if p.can("shield") else False) if p is not None else None   # PAD-392
-        shaker = ({"shakes": [n for n, _l in p.shakes], "max": list(p.shake_max_ms)} if p.can("shaker") else False) \
-            if p is not None else None                                                                          # PAD-414
-        shows = [n for n, _k, _s in getattr(p, "game_shows", ())] if p is not None else None   # PAD-418
-        wizards = ([n for n, _f in getattr(p, "game_wizards", ())] if p.can("wizard") else []) if p is not None else None
-        inserts = list(getattr(p, "inserts", ()) or ()) if p is not None else None                     # PAD-503
-        building = (getattr(p, "building_rule", "") if p.can("building") else False) if p is not None else None
         modes = [s for s, _n in self._blocks_modes()] if self.project() else None                     # PAD-600
-        challenges = (list(getattr(p, "challenges", ()) or ())                                     # PAD-615
-                      + ([BM.CHALLENGE_NEW] if getattr(p, "challenge_menu", 0) else [])) if p is not None else None
-        caps = {n: ms for n, ms in getattr(p, "coil_caps", ()) or ()} if p is not None else None             # PAD-621
-        problems = BM.problems(program, shots, events, folder, mechs, scoop, shield, shows, shaker, wizards,   # PAD-436
-                               inserts, building, modes, challenges, hold_caps=caps)                         # PAD-589
+        problems = BM.problems(program, folder=folder, modes=modes, **BM.card_checks(p))             # PAD-658: one list
         if self._code_slug and self.project() and self._blocks_own_challenge(program):   # PAD-615 round 3
             problems += self._own_challenge_problems(blocks=(self._code_slug, program)).get(self._code_slug, [])
         return problems, BM.notes(program)
@@ -3033,6 +3024,59 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._say("made modes/%s: a mode made of blocks" % slug)
         self.refresh(select_code=slug)
         return slug
+
+    @rpc
+    def blocks_example(self, name, dirs=None, wait=False):
+        """New mode ▸ Blocks ▸ one of the blocks examples (PAD-658): its blocks, and its own clips, sounds and music
+        cut from the person's films (asked for when they are not found where a mode already cut from)."""
+        project = self.project()
+        why = self._refusal() if project else MP.NO_PROJECT_HELP
+        ex = BM.example(name)
+        p = self._shown or self._profile
+        game_dir = str(getattr(p, "game_dir", "") or "") if p is not None else ""
+        if not why and (ex is None or name not in BM.example_names(game_dir)):
+            why = "%s is not a blocks example for %s." % (name, p.label if p is not None else "this card")
+        if why:
+            self._tryit_note(why)
+            return False
+        if os.path.exists(MP.mode_folder(project, ex["slug"])):
+            self._tryit_note("%s is already in this project (modes/%s)." % (name, ex["slug"]))
+            return False
+        from ...plugins.stern import code_modes as CM
+        found = list(dirs or ()) + CM.film_dirs(project)
+        missing = [k for k in BM.example_films(ex) if not CM.find_film(k, found)]
+        if missing and dirs is None:
+            got = self._ask_films_dir("Where are the films? %s's clips and sounds are cut from %s"
+                                      % (name, CM.missing_words(missing)))
+            if got:
+                found = [got] + found
+        self._save_if_edited()
+        ffmpeg = self._ffmpeg_path()
+        title = p.key if p is not None else ""
+        self._tryit_note("adding the example %s (blocks)…" % name)
+
+        def work():
+            try:
+                slug, missing = BM.add_example(project, name, dirs=found, ffmpeg=ffmpeg,
+                                               log=lambda m, *a: self._say(m), profile=p)
+            except Exception as e:                          # noqa: BLE001
+                self._tryit_note("%s could not be added: %s" % (name, e))
+                self._post_refresh_code()
+                return
+            self.stamp_code_title(project, slug, title)
+            self._tryit_note(("added the example %s as modes/%s, made of blocks: its own clips, sounds and music "
+                              "were cut from the films." % (name, slug)) if not missing else
+                             ("added the example %s as modes/%s, made of blocks. Its clips, sounds and music are cut "
+                              "from your copy of %s, which was not found, so it plays the game's own callouts for "
+                              "now: delete it and add it again once the films are found." % (name, slug,
+                                                                                    CM.missing_words(missing))))
+            self._post_refresh_code(slug)
+
+        t = threading.Thread(target=work, daemon=True, name="modes-blocks-example")
+        t.start()
+        if wait:
+            t.join()
+        return True
 
     @rpc
     def blocks_save(self, slug, program):
@@ -3147,17 +3191,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if not project or not slug or not BM.is_blocks(project, slug):
             return None
         ch = self._blocks_choices()
-        why = {"clip": ch["why_clip"], "sound": ch["why_sound"], "music": ch["why_music"]}.get(what)
+        why = {"clip": ch["why_clip"], "sound": ch["why_sound"], "music": ch["why_music"],
+               "bed": ch["why_music"]}.get(what)                                   # PAD-658: another music bed
         if why is None:
             return None
         if why:
             self._say("%s: %s" % ({"clip": "A clip of its own", "sound": "A sound of its own",
-                                   "music": "Its own music"}[what], why))
+                                   "music": "Its own music", "bed": "Another music bed"}[what], why))
             return None
         if what == "clip":
             path = self.window.ask_open("modes_file", "Choose a clip for the mode", self.VIDEO_TYPES)
         else:
             path = self.window.ask_open("modes_file", "Choose the mode's music" if what == "music"
+                                        else "Choose another music bed for the mode" if what == "bed"
                                         else "Choose a sound for the mode", [("WAV sounds", "*.wav")])
         if not path:
             return None
@@ -3171,7 +3217,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return None
         name = "music" if what == "music" else BM.media_name(stem, taken)
         folder = MP.mode_folder(project, slug)
-        dest = name + ext
+        dest = ("music_" + name if what == "bed" else name) + ext
         n = 2
         while os.path.isfile(os.path.join(folder, dest)) and not _same_file(path, os.path.join(folder, dest)):
             dest = "%s_%d%s" % (name, n, ext)

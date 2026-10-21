@@ -156,7 +156,7 @@ The few mechanisms a mode may hold (Godzilla's magnet and scoop, and on a Premiu
 - The scoop's kick-out is always the game's own.
 - The shield platform turns at most once every 1.5 s and 12 times a minute, never while one of the game's own modes or multiballs runs. It stays toward the player only while the game's own Mechagodzilla Shield feature isn't counting, because that feature turns it back. It turns back where it was when the mode ends, the ball drains, the player tilts or the game ends.
 
-- The shaker shakes only the way the game itself shakes it, so the operator's Shaker Motor setting always applies (off means nothing). One shake at a time, never over one of the game's own, never longer than the game's own longest at that strength, at most 20 shakes and 15 s of shaking a minute. It stops when the mode ends (except a shake as it ends, which runs out), the ball drains, the player tilts or the game ends.
+- The shaker shakes only the way the game itself shakes it, so the operator's Shaker Motor setting always applies (off means nothing). One shake at a time - a longer one takes over, a shorter one is skipped, as in the game - never over one of the game's own, never longer than the game's own longest at that strength, at most 30 s of the motor running the modes' shakes a minute (counted as it runs). It runs out when the mode ends, and stops when the ball drains, the player tilts or the game ends.
 
 All of it was tested on a real Godzilla Premium, except the shield and the shaker, so far tested only in the emulator.
 
@@ -258,7 +258,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Form modes | 64 per project (blocks and C modes not counted) |
 | Running at once | 1 |
 | Clock | up to 600 seconds (0 = no clock) |
-| Blocks mode | 48 scripts, 400 blocks, nested at most 10 deep |
+| Blocks mode | 48 scripts, 600 blocks, nested at most 10 deep |
 | Variables | 24 per mode, names up to 24 characters |
 | Timers | 8 per mode, up to 600 seconds each |
 | Numbers | whole numbers |

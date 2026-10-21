@@ -796,6 +796,8 @@ static char running_as[40];      /* PAD-363: pm_running_name - the running mode'
 static unsigned begun;           /* PAD-413: pm_begun - how many times one of ours has begun */
 static void disp_linger_other_began(void);
 static void clip_other_began(void);
+static void bd_other_began(void);              /* PAD-658: the backdrop section */
+static void bd_mode_ended(void);
 
 /* the name the runtime's lines give mode m: what pm_running_name said while it runs, else its .name */
 static const char *mode_name(const struct pm_mode *m, const char *none)
@@ -848,6 +850,7 @@ int pm_begin(void)
     lit_hold_until = 0;              /* PAD-503: a lit mode's claimed shot has done its work */
     disp_linger_other_began();
     clip_other_began();
+    bd_other_began();
     return 1;
 }
 
@@ -880,7 +883,7 @@ void pm_end(void)
     if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0, refused_forget();
     if (was_taker) chg_mode_ended(1);   /* PAD-630: a challenge game's mode ended - its ball ends */
-    if (!running) bd_reset("the mode ended");
+    if (!running) bd_mode_ended();
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();
     if (!running) building_let_go("the mode ended");
@@ -1335,7 +1338,8 @@ int pm_lights_as(unsigned owner, const char *command)
 #define LAMP_MODES   64
 #define LAMP_SAY_MAX 400
 
-struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; int x, y; };   /* x, y: -1 = not placed */
+struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; int x, y;      /* x, y: -1 = not placed */
+              int grp, gidx; };     /* PAD-658: the comment's "I/O group G index I", -1 = not given */
 static struct lamp lamps[N_LAMPS];
 static int n_lamps;
 
@@ -1399,15 +1403,28 @@ static void lamp_line(const char *s)
     if (!ok) return;
     rest(s, x->name, sizeof x->name);
     x->x = x->y = -1;
+    x->grp = x->gidx = -1;
     {   /* hud-layers: the comment's "at X,Y" (the insert's place on the playfield picture), when given */
         const char *c = s;
-        for (; *c && *c != 10; c++)
+        for (; *c && *c != 10; c++) {
             if (c[0] == 'a' && c[1] == 't' && c[2] == ' ' && c > s && c[-1] == ' ') {
                 const char *q = c + 3;
                 int ok1 = 0, ok2 = 0;
                 long px = (long)number(&q, &ok1), py;
                 if (*q == ',') { q++; py = (long)number(&q, &ok2); if (ok1 && ok2 && (px || py)) { x->x = (int)px; x->y = (int)py; } }
             }
+            /* PAD-658: "I/O group G index I" - the insert's board place, for the emulator's view (lamp_paint_note) */
+            if (c[0] == 'g' && c[1] == 'r' && c[2] == 'o' && c[3] == 'u' && c[4] == 'p' && c[5] == ' ' && c > s && c[-1] == ' ') {
+                const char *q = c + 6;
+                int ok1 = 0, ok2 = 0;
+                long g = (long)number(&q, &ok1), ix;
+                if (ok1 && q[0] == 'i' && q[1] == 'n' && q[2] == 'd' && q[3] == 'e' && q[4] == 'x' && q[5] == ' ') {
+                    q += 6;
+                    ix = (long)number(&q, &ok2);
+                    if (ok2 && g >= 0 && g < 256 && ix >= 0 && ix < 256) { x->grp = (int)g; x->gidx = (int)ix; }
+                }
+            }
+        }
     }
     for (i = 0; x->name[i]; i++)                          /* a trailing comment is not the name */
         if (x->name[i] == '#' && i && (x->name[i - 1] == ' ' || x->name[i - 1] == '\t')) {
@@ -1562,6 +1579,68 @@ static unsigned lamp_prio_of(const struct pm_mode *m)
     return 255;
 }
 
+/* ★ THE COLOUR A MODE PAINTED ON A ONE-COLOUR INSERT, FOR THE EMULATOR'S PLAYFIELD VIEW (PAD-658).
+ *
+ * A single-colour insert takes one level - the colour's brightest part (lamp_write) - so the wire says how bright
+ * it is and nothing of the colour: on the machine it glows in its lens's colour, and the emulator's view, which
+ * knows no lens, drew every such insert on one orange ramp. A blocks mode's light show painted red, blue or green
+ * over the whole playfield came out yellow there, where the Modes tab's preview paints each insert in the show's
+ * colour. So, in the emulator only, the colour is published beside the level: padled.h's paint plane (version 7),
+ * one 8-byte entry per port lamp - its I/O group and index, the colour, on - which the view draws the insert in, at
+ * the brightness the wire carries. The block is the shim's (PAD_LED_SHM, dump/padled, created zeroed by watch.sh
+ * for each run); on a machine there is no such variable and this is never mapped. */
+extern int   open(const char *, int, ...);       /* as at the top: this section is also compiled alone (tests) */
+extern int   close(int);
+extern char *getenv(const char *);
+extern void *mmap(void *, __SIZE_TYPE__, int, int, int, long);
+extern long  lseek(int, long, int);
+#define PAINT_OFF    13500u                /* padled.h: paint_magic, right after version 6's hi plane */
+#define PAINT_MAGIC  0x544e4950u            /* 'PINT' */
+#define PAINT_BYTES  16384u                 /* padled.h PADLED_BYTES: the block the plane needs */
+static unsigned char *lamp_paint_plane;     /* &paint_magic in the block, 0 = none */
+
+static void lamp_paint_map(void)
+{
+    static int tried;
+    const char *path;
+    int fd;
+    void *m;
+    if (lamp_paint_plane || tried) return;
+    tried = 1;
+    path = getenv("PAD_LED_SHM");
+    if (!path || !*path) return;
+    fd = open(path, 2 /* O_RDWR */);
+    if (fd < 0) return;
+    /* a block too small for the plane (an older watch.sh's) is left alone: a page past its end would fault */
+    m = lseek(fd, 0, 2 /* SEEK_END */) >= (long)PAINT_BYTES
+        ? mmap(0, PAINT_BYTES, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, fd, 0) : 0;
+    if (m == (void *)-1) m = 0;
+    close(fd);
+    if (!m) return;
+    lamp_paint_plane = (unsigned char *)m + PAINT_OFF;
+    *(volatile unsigned *)lamp_paint_plane = PAINT_MAGIC;
+}
+
+/* lamp k's entry: on with its colour, or off (the game has it back) */
+static void lamp_paint_note(int k, unsigned rgb, int on)
+{
+    unsigned char *e;
+    struct lamp *x = &lamps[k];
+    lamp_paint_map();
+    if (!lamp_paint_plane || k < 0 || k >= 256 || x->grp < 0) return;
+    e = lamp_paint_plane + 8 + 8u * (unsigned)k;
+    if (e[5] == (on != 0) && (!on || (e[2] == ((rgb >> 16) & 255u) && e[3] == ((rgb >> 8) & 255u) && e[4] == (rgb & 255u))))
+        return;
+    e[5] = 0;                                   /* single writer; a reader takes an entry only while it is on */
+    e[0] = (unsigned char)x->grp;
+    e[1] = (unsigned char)x->gidx;
+    e[2] = (unsigned char)(rgb >> 16);
+    e[3] = (unsigned char)(rgb >> 8);
+    e[4] = (unsigned char)rgb;
+    e[5] = (unsigned char)(on != 0);
+    ((volatile unsigned *)lamp_paint_plane)[1]++;      /* paint_gen */
+}
+
 static void lamp_write(int k, int level_r, int level_g, int level_b)
 {
     struct lamp_held *h = &lamp_held[k];
@@ -1569,6 +1648,9 @@ static void lamp_write(int k, int level_r, int level_g, int level_b)
     int want[3], c;
     if (h->layer < 0) return;
     if (x->mono) {
+        /* PAD-658: the colour beside the level, for the emulator's view (lamp_paint_note) */
+        if (level_r > 0 || level_g > 0 || level_b > 0)
+            lamp_paint_note(k, (unsigned)(level_r & 255) << 16 | (unsigned)(level_g & 255) << 8 | (unsigned)(level_b & 255), 1);
         want[0] = level_r > level_g ? level_r : level_g;
         if (level_b > want[0]) want[0] = level_b;
         want[1] = want[2] = 0;
@@ -1590,6 +1672,7 @@ static void lamp_let_go(int k)
     if (h->layer >= 0)
         for (c = 0; c < 3; c++)
             if (lamps[k].light[c]) lamp_slot_put(lamp_layer[h->layer].group, lamps[k].light[c], 0, 0);
+    if (lamps[k].mono) lamp_paint_note(k, 0, 0);       /* PAD-658: the game has it back */
     h->owner = 0;
     h->flash_until = 0;
     h->flash_only = 0;
@@ -2684,14 +2767,71 @@ static void frame_arm(void)
  * The one surface is shared: a framed award of the game's (the Maser) plays in its place and the loop is
  * played again once the surface is idle; while one of our full-screen clips plays (pm_clip, layer 0) the
  * video field is 0, so the tick's draw of it is not refused. Everything here runs on the display
- * processes' thread (the hooks) or the tick's, which is the same thread (the runtime logs both). */
+ * processes' thread (the hooks) or the tick's, which is the same thread (the runtime logs both).
+ *
+ * PAD-658: NOT ONLY THE CITY. David's SUPER X2 "froze" (emulator, Premium 1.16): it starts on Shield ramp spinner
+ * spins, which bring the game's Mechagodzilla online, so the main-play background is the game's barrier
+ * (Mechagodzilla behind a barrier, "SHOOT TARGETS TO DISABLE BARRIER", its own looped clip on the one surface)
+ * and not the city. The backdrop refused it ("another background"), but the mode's full-screen intro took the
+ * surface from the barrier's clip, and the barrier - its video field the surface - showed the intro's last frame
+ * for the rest of the mode (runs kiryu_r2, vid1: no backdrop line in 51 s, ch0 idle, the glass the same picture
+ * under a counting timer, the game's words over the mode's). So a background of the game's other than the city
+ * takes the backdrop too while the mode that asked keeps the game's modes from starting (no mode of the game's can
+ * be showing there) or through that mode's ending, its own field put back after (bd.was); and wherever ours left
+ * a background of the game's that shows the surface with nothing playing, the game's own looped clip goes back on
+ * it (gbg, below), as the game's own award displays give it back after theirs. */
 static struct {
     char loop[96], once[96];          /* the loop, and a clip to play once in its place first */
     int on, pending, playing_once, lost;
-    unsigned elem, obj;               /* the background element drawing now; the city whose field we set */
+    unsigned elem, obj;               /* the background element drawing now; the one whose field we set */
+    unsigned was;                     /* PAD-658: that field as the game had it (the city: 0) */
     unsigned long since;              /* pm_ms() of the last play */
     unsigned plays, frames;
 } bd;
+static const struct pm_mode *bd_owner;    /* PAD-658: the mode that asked for it (running, or showing a note) */
+static int bd_lingers;                     /* PAD-658: kept behind its mode's ending (pm_end_holding) */
+static const struct pm_mode *block_owner; /* PAD-658: the mode keeping the game's modes from starting (the block section) */
+
+/* PAD-658: THE GAME'S OWN BACKGROUND CLIP BACK. The last looped clip the game played itself (a background's: its
+ * update plays it once, when the background comes up, and never again on its own - after a clip of ours took the
+ * surface the barrier stayed on our last frame), the background element seen showing it, and whether the last
+ * clip on the surface was ours. */
+static struct {
+    char name[96], crop[32];
+    unsigned elem;                    /* the background of the game's seen showing the surface while it played */
+    int ours, due;                    /* the last clip on the surface is ours; give the game's back at once */
+    unsigned long ours_ms;
+    unsigned said;
+} gbg;
+
+static void gbg_ours(void)
+{
+    gbg.ours = 1;
+    gbg.due = 0;
+    gbg.ours_ms = pm_ms();
+}
+
+static void gbg_copy(char *to, unsigned n, const char *from)
+{
+    unsigned i;
+    for (i = 0; from && from[i] && i + 1 < n; i++) to[i] = from[i];
+    to[i] = 0;
+}
+
+/* the clip_play hook, a clip of the game's: name, loop, crop. A looped one is the background's drawing now (the game
+ * plays a background's clip from inside its draw; one that comes up later is put right by gbg_back) */
+static void gbg_seen(const unsigned *r)
+{
+    static unsigned said;
+    gbg.ours = gbg.due = 0;
+    if (!r[0] || !r[1]) return;
+    gbg_copy(gbg.name, sizeof gbg.name, (const char *)(unsigned long)r[0]);
+    gbg_copy(gbg.crop, sizeof gbg.crop, (const char *)(unsigned long)r[2]);
+    gbg.elem = bd.elem;
+    if (pm_in_game() && said++ < 10)
+        say("backdrop: the game's own looped clip \"%s\" (crop %s) - kept, to give back to its background", gbg.name,
+            gbg.crop[0] ? gbg.crop : "none");
+}
 static unsigned char *disp_layered_mgr;   /* the layered display's manager (display priority, below) */
 /* PAD-521: THE BACKDROP ON CLIP V2 (James Bond LE). A build whose clips play on the video bank's own surface
  * (clip v2, below) has no background element to take over, and the game keeps its own videos in front of that
@@ -2738,7 +2878,8 @@ static void bd_release(const char *why)
             ((void (*)(void *))(unsigned long)fn("surface_stop"))(surf);
         say("backdrop: taken away (%s) after %u play(s)", why, bd.plays);
     } else if (bd.obj) {
-        bd_field(bd.obj, 0);
+        bd_field(bd.obj, bd.was);         /* PAD-658: as the game had it (the city: 0) */
+        if (bd.was && gbg.ours) gbg.due = 1;   /* it showed a clip of the game's: that clip back (gbg_back) */
         say("backdrop: taken away (%s) after %u play(s), %u frame(s)", why, bd.plays, bd.frames);
     }
     bd.obj = 0;
@@ -2747,6 +2888,28 @@ static void bd_release(const char *why)
 static void on_backdrop_draw(unsigned *r)
 {
     bd.elem = r[0];
+}
+
+static unsigned bd_video_field(unsigned e)
+{
+    return *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_video_at", 0x54));
+}
+
+static int bd_is_city(unsigned e)
+{
+    return *(unsigned *)(unsigned long)e == data("backdrop_city_vtable");
+}
+
+static unsigned bd_held;                  /* PAD-658: the background the backdrop last played in */
+
+/* PAD-658: may the backdrop go in this background's place? The city always; any other background of the game's
+ * while the mode that asked keeps the game's modes from starting (a qualifying screen like the barrier, never a
+ * running mode of the game's), and the one it already held through that mode's ending (its TOTAL) */
+static int bd_place_ok(unsigned e)
+{
+    if (bd_is_city(e)) return 1;
+    if (block_owner && running == block_owner && bd_owner == running) return 1;
+    return bd_lingers && e == bd_held;
 }
 
 static void bd_play(unsigned e)
@@ -2764,12 +2927,51 @@ static void bd_play(unsigned e)
     disp_clip_ours = 0;
     bd.playing_once = once;
     if (once) bd.once[0] = 0;
+    if (bd.obj != e) bd.was = bd_is_city(e) ? 0 : bd_video_field(e);   /* PAD-658: put back as it was */
     bd_field(e, (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_surface"))());
-    bd.obj = e;
+    bd.obj = bd_held = e;
     bd.pending = bd.lost = 0;
     bd.since = pm_ms();
     if (bd.plays++ < 60)
-        say("backdrop: \"%s\" %s behind the HUD, in the city 0x%08x's place", was, once ? "once" : "looped", e);
+        say("backdrop: \"%s\" %s behind the HUD, in the %s 0x%08x's place", was, once ? "once" : "looped",
+            bd_is_city(e) ? "city" : "game's background", e);
+}
+
+/* PAD-658: a background of the game's that shows the surface (its video field is the surface: not the city) is
+ * noted as the one the game's own looped clip is for while that clip plays; when the surface it shows is left with
+ * nothing playing after a clip of ours - or ours is still on it after the backdrop was taken away (`due`) - the
+ * game's clip goes back on it, looped, as the game played it */
+static void gbg_back(unsigned e)
+{
+    unsigned surf = (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_surface"))();
+    int playing = bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2), due = gbg.due;
+    if (!e || !surf || bd_video_field(e) != surf) return;      /* a background with no clip of its own (the city) */
+    if (!gbg.ours) {                      /* the game's own clip on it (or nothing of ours since) */
+        if (playing && gbg.name[0]) gbg.elem = e;
+        return;
+    }
+    if (clip.on || !gbg.name[0] || gbg.elem != e) return;
+    if (!due && (playing || pm_ms() - gbg.ours_ms < 500)) return;   /* ours still plays there (or was just asked) */
+    disp_clip_ours = 1;                   /* (the hook: not a clip of the game's taking the surface from ours) */
+    ((void (*)(const char *, int, const char *))(unsigned long)fn("clip_play"))(gbg.name, 1, gbg.crop[0] ? gbg.crop : 0);
+    disp_clip_ours = 0;
+    gbg.ours = gbg.due = 0;               /* (after: the hook marked it ours) */
+    if (gbg.said++ < 20)
+        say("backdrop: the game's own clip \"%s\" back on its background 0x%08x (ours %s)", gbg.name, e,
+            due ? "was taken away from it" : "had ended there, its last frame on the glass");
+}
+
+/* PAD-658: once per background, which one it is and whether the backdrop goes there */
+static void bd_other_said(unsigned e, int ok)
+{
+    static unsigned last, n;
+    if (e == last || n >= 20) return;
+    last = e;
+    n++;
+    say("backdrop: the background is not the city (0x%08x, vtable 0x%08x, its clip field 0x%08x) - %s", e,
+        *(unsigned *)(unsigned long)e, bd_video_field(e),
+        ok ? "the mode's clip goes in its place (it keeps the game's modes from starting, or it is its ending)"
+           : "the game's stays (the mode asking does not keep the game's modes from starting)");
 }
 
 /* PAD-353: the game's foreground words are never hidden. PAD-301 emptied the scene_show of a layered
@@ -2793,11 +2995,13 @@ static void on_scene_show(unsigned *r)
         return;
     }
     if (!e || r[0] != *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18))) return;
-    if (!bd.on || *(unsigned *)(unsigned long)e != data("backdrop_city_vtable")) {
+    if (bd.on && !bd_is_city(e)) bd_other_said(e, bd_place_ok(e));
+    if (!bd.on || !bd_place_ok(e)) {
         if (bd.obj) bd_release(!bd.on ? "the mode ended it" : "another background");
+        gbg_back(e);                   /* PAD-658: the game's own clip back where ours left it */
         return;
     }
-    if (bd.obj && bd.obj != e) bd_release("the city changed");
+    if (bd.obj && bd.obj != e) bd_release("the background changed");
     if (clip.on) {                     /* our full-screen clip (layer 0) plays: the tick draws it over all */
         if (bd.obj) bd_release("a full-screen clip of ours plays");
         bd.pending = 1;
@@ -2815,7 +3019,7 @@ static void on_scene_show(unsigned *r)
         if (pm_ms() - bd.since < 1500) return;          /* still starting */
     }
     if (bd.lost && bd_surface_state() == playing) {      /* the game's clip on the surface: the city */
-        if (bd.obj) { bd_field(bd.obj, 0); bd.obj = 0; }
+        if (bd.obj) { bd_field(bd.obj, bd.was); bd.obj = 0; }   /* (PAD-658: as the game had it) */
         return;
     }
     bd_play(e);                        /* asked, a one-shot or the game's clip over: play (again) */
@@ -2932,7 +3136,10 @@ int pm_backdrop(const char *name)
 {
     unsigned i;
     if (!(can & PM_CAN_BACKDROP)) return 0;
+    if (running && running != current) return 0;     /* PAD-658: another of ours runs - the backdrop is its */
+    bd_lingers = 0;
     if (!name || !*name) {
+        bd_owner = 0;
         if (!bd_v2 && bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
             ((void (*)(void))(unsigned long)fn("clip_stop"))();
         bd.on = 0;
@@ -2941,6 +3148,7 @@ int pm_backdrop(const char *name)
         bd_release("the mode ended it");
         return 1;
     }
+    bd_owner = current;
     if (bd.on && str_eq(bd.loop, name)) return 1;
     for (i = 0; name[i] && i + 1 < sizeof bd.loop; i++) bd.loop[i] = name[i];
     bd.loop[i] = 0;
@@ -2974,10 +3182,18 @@ static void bd_clip_lost(void)
 /* a ball end or leaving the game: no backdrop outlives the mode that asked for it */
 static void bd_reset(const char *why)
 {
+    bd_owner = 0;
+    bd_lingers = 0;
     if (!bd.on && !bd.obj) return;
     bd.on = 0;
     bd.loop[0] = bd.once[0] = 0;
     bd_release(why);
+}
+
+/* a backdrop another mode asked for (its ending's, its note's) is not the one beginning */
+static void bd_other_began(void)
+{
+    if (bd.on && bd_owner != current) bd_reset("another mode began");
 }
 
 static int have_sites(const char *const *names);
@@ -3231,6 +3447,7 @@ static void disp_release(const char *why)
     disp_linger_until = 0;
     disp_covered_now = 0;
     say("display: priority %u given up (%s)", p, why);
+    if (bd_lingers && !running) bd_reset(why);       /* PAD-658: the loop kept behind the ending goes with it */
 }
 
 int pm_display_priority(unsigned priority)
@@ -3252,7 +3469,42 @@ int pm_display_priority(unsigned priority)
     return 1;
 }
 
-int pm_display_covered(void) { return disp_prio && disp_covered_now; }
+/* the display of the game's that has the screen now: 1 an effect over the layered display, 2 a layered foreground (any,
+ * full screen or framed: framed ones put their words where a mode's title is), 0 none */
+static int disp_taken(void)
+{
+    unsigned char *m = disp_manager();
+    unsigned now;
+    int covered;
+    if (!m) return 0;
+    now = disp_now(m);
+    covered = now && now != disp_host();
+    if (!covered && disp_layered_mgr && now == disp_host() &&
+        *(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58)))
+        covered = 2;
+    return covered;
+}
+
+/* PAD-658: with no hold (a mode that is not running: its qualification note) it looks now, so a note keeps off the
+ * game's words too (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER CANNON CHARGING) */
+int pm_display_covered(void)
+{
+    if (disp_prio) return disp_covered_now != 0;
+    return (can & PM_CAN_DISPLAY_PRIORITY) && pm_in_game() && disp_taken();
+}
+
+/* PAD-658: an ending its mode holds the screen for (pm_end_holding: its TOTAL) keeps the mode's loop behind it. On the
+ * live city the game's map labels (RAID, BRIDGE, TANKS, POWER) sat under the TOTAL's words (run meltdown_r4, md_16_end).
+ * It goes with the hold (disp_release), at the ball's end, or as another mode begins. */
+static void bd_mode_ended(void)
+{
+    if (bd.on && bd_owner == current && disp_linger_until && disp_owner == current) {
+        bd_lingers = 1;
+        say("backdrop: kept behind %s's ending", current && current->name ? current->name : "the mode");
+        return;
+    }
+    bd_reset("the mode ended");
+}
 
 /* an ending kept by pm_end_holding is not the new mode's */
 static void disp_linger_other_began(void)
@@ -3289,10 +3541,7 @@ static void display_tick(void)
     m = disp_manager();
     if (!m) return;
     now = disp_now(m);
-    covered = now && now != disp_host();
-    if (!covered && disp_layered_mgr && now == disp_host() &&
-        *(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58)))
-        covered = 2;
+    covered = disp_taken();
     if (!covered != !disp_covered_now) {
         if (covered == 1) say("display: the game's effect %u (priority %u) has the screen", now, disp_level_now(m));
         else if (covered) say("display: a layered display of the game's has the screen");
@@ -3314,6 +3563,8 @@ static void on_clip_play(unsigned *r)
     const char *name = (const char *)(unsigned long)r[0];
     unsigned i;
     if (!disp_clip_ours) bd_clip_lost();      /* hud-layers: the backdrop is played again after it */
+    if (disp_clip_ours) gbg_ours();           /* PAD-658: ours took the one surface (a full-screen clip, the backdrop) */
+    else gbg_seen(r);                         /* PAD-658: the game's own (a background's, when it loops) */
     if (disp_clip_ours || !clip.on) return;
     for (i = 0; name && name[i] && i + 1 < sizeof disp_lost_name; i++) disp_lost_name[i] = name[i];
     disp_lost_name[i] = 0;
@@ -5981,13 +6232,16 @@ static void building_arm(void)
  *   1. Only through the game's own call, so the operator's setting (off, or how long) always applies and
  *      the board ends every shake by itself. Never forced.
  *   2. Only the running mode, only in a game (not attract, not tilted); refused with the shaker set to off
- *      (or not fitted), while one of the game's own shakes runs, while one of ours does.
+ *      (or not fitted), or while one of the game's own shakes runs.
  *   3. A strength the game uses (0..3), never longer than the game's own longest shake at that strength;
  *      at least SHAKE_MIN_MS.
- *   4. At most SHAKE_PER_MIN shakes (a game shake of several steps counts once) and SHAKE_ON_MS of shaking
- *      in any 60 s.
- *   5. Stopped (the game's own stop) when the mode ends, the ball ends, or the game ends or tilts - unless
- *      the game has since asked for a longer shake of its own, which then has the motor.
+ *   4. PAD-658: one of ours at a time, as the game's own call has it: a new one longer than what is left of
+ *      the one running takes the motor over, a shorter one is skipped (the 20 a minute PAD-414 set is gone).
+ *   5. PAD-658: SHAKE_ON_MS of the motor RUNNING ours in any 60 s - counted as it runs, so a shake cut short
+ *      or taken over counts only what ran (PAD-414 counted every shake whole, against 15 s).
+ *   6. Stopped (the game's own stop) when the ball ends, or the game ends or tilts - unless the game has since
+ *      asked for a longer shake of its own, which then has the motor. PAD-658: a mode's end leaves its shake
+ *      to run out (the board ends each step; a game shake's steps still to come are the port's own).
  *
  * PAD-474: every other Spike 2 build with the shaker motor has the same ONE routine (shaker_lines.py finds it by
  * AD_SHAKER_MOTOR and the error text, and reads its lines), in three shapes - `text shake_call`:
@@ -6005,8 +6259,9 @@ static void building_arm(void)
  * coil_fire on the drive (what `site shake_stop` sends on the first). */
 #define SHAKE_MIN_MS        100u
 #define SHAKE_STRENGTHS       4u
-#define SHAKE_PER_MIN        20u
-#define SHAKE_ON_MS       15000u   /* the motor's running time a mode may ask for in any 60 s */
+#define SHAKE_ON_MS       30000u   /* PAD-658: the motor's running time the modes may use in any 60 s (what ran) */
+#define SHAKE_HANDOVER_MS    50u   /* PAD-658: a shake taking over starts this long after ours is stopped */
+#define SHAKE_RETRY_MS      150u   /* ... and a step is sent again this long while the motor still runs */
 #define SHAKE_STEPS           8u
 #define SHAKE_CALL_STRENGTH   0    /* PAD-474: shake(ms, strength, force) */
 #define SHAKE_CALL_MS         1    /* "ms force": shake(ms, force) */
@@ -6021,14 +6276,15 @@ static struct {
     unsigned max_ms[SHAKE_STRENGTHS];       /* the game's own longest shake at each strength */
     unsigned long until;                    /* pm_ms() our shake (or a game shake's last step) runs to; 0 none */
     unsigned long sent_until;               /* pm_ms() the step we sent last runs to: the motor is ours till then */
-    unsigned long starts[SHAKE_PER_MIN];
-    unsigned on_ms[SHAKE_PER_MIN];
-    unsigned next;
+    unsigned long sent_from;                /* PAD-658: pm_ms() that step began */
+    unsigned long counted_to;               /* PAD-658: the motor's running time counted up to here */
+    unsigned long run_sec[60];              /* PAD-658: the second (+1) each bucket counts, 0 = none */
+    unsigned run_ms[60];                    /* ... and how long the motor ran ours in it */
     struct shake_step step[SHAKE_STEPS];    /* a game shake under way: its steps after the first */
     unsigned n_step, i_step;
     unsigned long t0;
-    int outlast;                            /* pm_shake_outlast: the mode's ending shake runs out after the mode */
-    char name[24];
+    int outlast;                            /* the shake runs out after the mode (PAD-658: every one at the mode's end) */
+    char name[48];                          /* PAD-658: "the game's multiball_start shake" whole in mode.log */
 } shk;
 
 /* The steps of a `text shake_<name>` line ("at:ms:strength ..."), each clamped to the game's own longest at
@@ -6056,22 +6312,43 @@ static unsigned shake_parse(const char *t, const unsigned max_ms[SHAKE_STRENGTHS
     return n;
 }
 
-/* Why a shake of `ms` (all its steps) may not start now, or 0. (tests lift it verbatim) */
-static const char *shake_refusal(int running_mode, int in_game, unsigned setting, int game_shaking,
-                                 unsigned long ours_until, unsigned ms, unsigned long now,
-                                 const unsigned long starts[SHAKE_PER_MIN], const unsigned on_ms[SHAKE_PER_MIN])
+/* Why a shake of `ms` (all its steps) may not start now, or 0; `ran_ms` is what the motor ran ours in the last 60 s.
+ * (tests lift it verbatim) */
+static const char *shake_refusal(int running_mode, int in_game, unsigned setting, int game_shaking, unsigned ran_ms,
+                                 unsigned ms)
 {
-    unsigned i, recent = 0, on = 0;
     if (!running_mode) return "only the running mode may shake it";
     if (!in_game) return "no game is being played (attract or a tilt)";
     if (!setting) return "the operator has the shaker switched off (or none is fitted)";
-    if (ours_until && now < ours_until) return "a shake of the mode's is still running";
     if (game_shaking) return "one of the game's own shakes is running";
-    for (i = 0; i < SHAKE_PER_MIN; i++)
-        if (starts[i] && now - starts[i] < 60000ul) recent++, on += on_ms[i];
-    if (recent >= SHAKE_PER_MIN) return "twenty shakes in the last minute already";
-    if (on + ms > SHAKE_ON_MS) return "the mode has shaken the cabinet for 15 s in the last minute already";
+    if (ran_ms + ms > SHAKE_ON_MS) return "the modes have run the shaker for 30 s in the last minute already";
     return 0;
+}
+
+/* PAD-658: the motor's running time for the modes' shakes, counted as it runs (from the step sent last, to now or its
+ * end) in a bucket a second; a shake cut short or taken over counts only what ran. (tests lift both verbatim) */
+static void shake_count(unsigned long now)
+{
+    unsigned long t = shk.counted_to > shk.sent_from ? shk.counted_to : shk.sent_from;
+    unsigned long end = shk.sent_until < now ? shk.sent_until : now;
+    while (t < end) {
+        unsigned long sec = t / 1000ul, stop = (sec + 1ul) * 1000ul;
+        unsigned b = (unsigned)(sec % 60ul);
+        if (stop > end) stop = end;
+        if (shk.run_sec[b] != sec + 1ul) shk.run_sec[b] = sec + 1ul, shk.run_ms[b] = 0;
+        shk.run_ms[b] += (unsigned)(stop - t);
+        t = stop;
+    }
+    if (now > shk.counted_to) shk.counted_to = now;
+}
+
+static unsigned shake_ran(unsigned long now)       /* what the motor ran ours in the last 60 s */
+{
+    unsigned long sec = now / 1000ul + 1ul;
+    unsigned b, sum = 0;
+    for (b = 0; b < 60u; b++)
+        if (shk.run_sec[b] && sec - shk.run_sec[b] < 60ul) sum += shk.run_ms[b];
+    return sum;
 }
 
 static unsigned shake_setting(void)
@@ -6122,6 +6399,8 @@ static unsigned shake_coil(unsigned power, unsigned ms)    /* PAD-474: the frame
 static unsigned shake_send(unsigned ms, unsigned strength)
 {
     unsigned cap = shake_setting_ms(shake_setting()), r;
+    unsigned long now = pm_ms();
+    shake_count(now);                        /* PAD-658: a step taken over counts only what it ran */
     if (shk.call == SHAKE_CALL_DRIVE)
         r = cap && shake_left() < (ms > cap ? cap : ms) && shake_coil(shake_power(), ms > cap ? cap : ms) != 0;
     else if (shk.call == SHAKE_CALL_MS)
@@ -6130,23 +6409,41 @@ static unsigned shake_send(unsigned ms, unsigned strength)
         r = ((unsigned (*)(unsigned, unsigned, unsigned))(unsigned long)fn("shake"))(ms, strength, 0) & 0xffu;
     if (!r) return 0;
     if (ms > cap) ms = cap;
-    shk.sent_until = pm_ms() + ms;
+    shk.sent_from = now;
+    shk.sent_until = now + ms;
     if (shk.sent_until > shk.until) shk.until = shk.sent_until;
     return ms;
 }
 
-static int shake_begin(const char *what, const struct shake_step *steps, unsigned n)
+static int shake_motor_stop(unsigned long now);
+
+static int shake_begin(const char *what, const struct shake_step *given, unsigned n)
 {
     unsigned long now = pm_ms();
-    unsigned total = 0, i, ran;
+    unsigned total = 0, i, ran, delay = 0;
+    int ours = shk.until && now < shk.until;
+    struct shake_step steps[SHAKE_STEPS];
     const char *why;
     if (!(can & PM_CAN_SHAKER) || !n) return 0;
-    for (i = 0; i < n; i++) total += steps[i].ms;
-    why = shake_refusal(pm_running(), pm_in_game(), shake_setting(), shk.until && now < shk.until ? 0 : shake_left() != 0,
-                        shk.until, total, now, shk.starts, shk.on_ms);
+    for (i = 0; i < n; i++) total += given[i].ms, steps[i] = given[i];
+    shake_count(now);
+    why = shake_refusal(pm_running(), pm_in_game(), shake_setting(), ours ? 0 : shake_left() != 0, shake_ran(now), total);
     if (why) {
         say("shaker: no %s - %s", what, why);
         return 0;
+    }
+    if (ours) {          /* PAD-658: one of ours runs - as in the game's own call, the longer one has the motor */
+        if (steps[n - 1].at + steps[n - 1].ms <= shk.until - now) {
+            say("shaker: no %s - %s, running now, outlasts it", what, shk.name);
+            return 0;
+        }
+        /* the game's call takes over only from a shorter step: a later first step, or a shorter one, needs ours
+         * stopped first, and starts once the stop is on the board */
+        if (shk.sent_until > now && (steps[0].at || steps[0].ms <= shk.sent_until - now) && shake_motor_stop(now)) {
+            delay = SHAKE_HANDOVER_MS;
+            for (i = 0; i < n; i++) steps[i].at += delay;
+        }
+        say("shaker: %s takes over from %s", what, shk.name);
     }
     shk.n_step = shk.i_step = 0;
     shk.until = shk.sent_until = 0;
@@ -6168,10 +6465,8 @@ static int shake_begin(const char *what, const struct shake_step *steps, unsigne
         say("shaker: no %s - the game's own shake call did nothing", what);
         return 0;
     }
-    shk.starts[shk.next % SHAKE_PER_MIN] = now;
-    shk.on_ms[shk.next++ % SHAKE_PER_MIN] = total;
-    say("shaker: %s - %u step(s), %u ms of shaking in all, through the game's own shake (setting %u)", what, n, total,
-        shake_setting());
+    say("shaker: %s - %u step(s), %u ms of shaking in all, through the game's own shake (setting %u)%s", what, n, total,
+        shake_setting(), delay ? ", once ours is off the motor" : "");
     return 1;
 }
 
@@ -6209,26 +6504,36 @@ int pm_shake_game(const char *name)
 
 int pm_shaking(void) { return shk.until && pm_ms() < shk.until; }
 
+/* The motor's step stopped (the game's own stop) if what it runs now is ours: 1 = stopped. Counted to now. */
+static int shake_motor_stop(unsigned long now)
+{
+    unsigned left = shake_left();
+    if (!(shk.sent_until > now && left <= shk.sent_until - now + 50ul)) return 0;
+    if (fn("shake_stop")) ((void (*)(void))(unsigned long)fn("shake_stop"))();
+    else shake_coil(0, 0);                           /* PAD-474: the game's OFF, what its own stop sends */
+    shake_count(now);
+    shk.sent_until = now;                            /* PAD-658: no more of it counted */
+    return 1;
+}
+
 /* Stop ours: the steps still to come, and the motor if what it runs now is ours (the game's own stop) */
 static void shake_let_go(const char *why)
 {
     unsigned long now = pm_ms();
-    unsigned left;
+    unsigned long had = shk.sent_until;
     int steps = shk.n_step > shk.i_step;
     shk.n_step = shk.i_step = 0;
     shk.outlast = 0;
     if (!shk.until) return;
     if (now >= shk.until) { shk.until = shk.sent_until = 0; return; }
-    left = shake_left();
-    if (shk.sent_until > now && left <= shk.sent_until - now + 50ul) {
-        if (fn("shake_stop")) ((void (*)(void))(unsigned long)fn("shake_stop"))();
-        else shake_coil(0, 0);                       /* PAD-474: the game's OFF, what its own stop sends */
-        say("shaker: %s stopped with %lu ms left (%s)", shk.name, shk.sent_until - now, why);
-    } else if (left) {
+    if (shake_motor_stop(now)) {
+        say("shaker: %s stopped with %lu ms left (%s)", shk.name, had - now, why);
+    } else if (shake_left()) {
         say("shaker: %s - the shake running now is the game's own, left to run (%s)", shk.name, why);
     } else if (steps) {
         say("shaker: %s - its steps still to come dropped (%s)", shk.name, why);
     }
+    shake_count(now);
     shk.until = shk.sent_until = 0;
 }
 
@@ -6244,24 +6549,33 @@ void pm_shake_outlast(void)
     if (pm_running() && pm_shaking()) shk.outlast = 1;
 }
 
-/* pm_end: stop the mode's shake, unless it is the mode's ending one */
+/* pm_end: PAD-658 - the mode's shake runs out (each step never longer than the game's own longest, the board ends it;
+ * a game shake's steps are the port's own), as the ending one always did; the ball's end, a tilt or the game's end
+ * still stop it, and another mode's shake may take it over. A won shake started a moment before the end was cut short
+ * (KING GHIDORAH's multiball_start, DESTOROYAH's super jackpot). */
 static void shake_mode_ended(void)
 {
-    if (shk.outlast && pm_shaking()) say("shaker: %s runs out after the mode's end", shk.name);
-    else shake_let_go("the mode ended");
+    if (!pm_shaking()) return;
+    shk.outlast = 1;
+    say("shaker: %s runs out after the mode's end", shk.name);
 }
 
 static void shake_tick(void)
 {
     struct shake_step *s;
+    shake_count(pm_ms());                    /* PAD-658: the running time, as it runs */
     if (!shk.until) return;
     if (!pm_in_game()) { shake_let_go("the game ended or tilted"); return; }
     if (!running && !shk.outlast) { shake_let_go("no mode is running"); return; }
     while (shk.i_step < shk.n_step && pm_ms() - shk.t0 >= shk.step[shk.i_step].at) {
-        s = &shk.step[shk.i_step++];
-        if (!shake_send(s->ms, s->strength))
+        s = &shk.step[shk.i_step];
+        if (!shake_send(s->ms, s->strength)) {
+            /* PAD-658: the step before (or ours, stopped for a take-over) still on the motor: again next tick */
+            if (shake_left() && pm_ms() - shk.t0 - s->at < SHAKE_RETRY_MS) break;
             say("shaker: %s, step %u - the game's own shake call did nothing (one of its own longer?)", shk.name,
-                shk.i_step);
+                shk.i_step + 1);
+        }
+        shk.i_step++;
     }
     if (shk.i_step >= shk.n_step && pm_ms() >= shk.until) shk.until = shk.sent_until = 0, shk.n_step = shk.i_step = 0;
 }
@@ -6303,9 +6617,9 @@ static void shake_arm(void)
     }
     can |= PM_CAN_SHAKER;
     say("shaker: a mode may shake the cabinet through %s 0x%08x (drive %ld, setting %ld); at most "
-        "%u/%u/%u/%u ms at strength 0..3, %u shakes and %u s of shaking a minute, stopped when the mode ends",
-        how[shk.call], fn("shake"), pm_port_value("shake_drive", 0), pm_port_value("shake_adj", 0), shk.max_ms[0],
-        shk.max_ms[1], shk.max_ms[2], shk.max_ms[3], SHAKE_PER_MIN, SHAKE_ON_MS / 1000);
+        "%u/%u/%u/%u ms at strength 0..3, one at a time (the longer takes over), %u s of shaking a minute, run out "
+        "at the mode's end", how[shk.call], fn("shake"), pm_port_value("shake_drive", 0), pm_port_value("shake_adj", 0),
+        shk.max_ms[0], shk.max_ms[1], shk.max_ms[2], shk.max_ms[3], SHAKE_ON_MS / 1000);
 }
 
 /* ---- the game's own mini-wizards (PAD-436) --------------------------------------------------------

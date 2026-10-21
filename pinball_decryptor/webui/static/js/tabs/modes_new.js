@@ -123,7 +123,23 @@ function NameField({ id, name, setName, ask }) {
   </div>`;
 }
 
-function BlocksStep({ name, setName }) {
+// PAD-658: the blocks examples for this card's title: new modes, and the C examples rebuilt in blocks
+function BlocksExamples({ s, onExample }) {
+  const all = s.blocks_examples || [];
+  if (!all.length) return null;
+  const group = (title, list) => list.length ? html`<div class="stack">
+      <div class="nmw-sub">${title}</div>
+      <div class="nmw-exlist">${list.map((x) => html`<button type="button" key=${x.name} class="nmw-ex"
+          onClick=${() => onExample(x.name)} ...${tip({ head: x.about || x.name, lines: (x.lost || []).length
+            ? ["What the blocks lost against its C:", ...x.lost.map((l) => "- " + l)] : [] })}><${Icon} name="blocks" /><span class="ellip">${x.name}</span><${Icon} name="right" /></button>`)}</div>
+    </div>` : null;
+  return html`<div class="nmw-cols">
+    <div class="stack nmw-col">${group("Or start from a new mode in blocks", all.filter((x) => !x.based_on))}</div>
+    <div class="stack nmw-col">${group("Or one of the C examples, in blocks", all.filter((x) => x.based_on))}</div>
+  </div>`;
+}
+
+function BlocksStep({ s, name, setName, onExample }) {
   return html`<div class="nmw-step">
     <${NameField} id="nmw-blocks-name" name=${name} setName=${setName} />
     <div class="nmw-how">
@@ -131,6 +147,7 @@ function BlocksStep({ name, setName }) {
       <div class="nmw-how-row"><span class="nmw-num">2</span><span>Drag blocks from the left into its rules: when something happens, do this.</span></div>
       <div class="nmw-how-row"><span class="nmw-num">3</span><span>Try it builds it in and plays it in the emulator.</span></div>
     </div>
+    <${BlocksExamples} s=${s} onExample=${onExample} />
   </div>`;
 }
 
@@ -218,7 +235,8 @@ export function NewModeWizard({ s, start = "", onClose }) {
       <${KindTiles} s=${s} onPick=${pick} />`
     : html`<div class="nmw-crumb"><span class=${cx("nmw-tile-ic", "nmw-" + kind)}><${Icon} name=${k.icon} /></span>
         <span class="nmw-pitch">${k.pitch}</span></div>
-      ${kind === "blocks" ? html`<${BlocksStep} name=${name} setName=${setName} />`
+      ${kind === "blocks" ? html`<${BlocksStep} s=${s} name=${name} setName=${setName}
+            onExample=${(n) => { call("modes.blocks_example", n); onClose(); }} />`
         : kind === "c" ? html`<${CStep} s=${s} name=${name} setName=${setName} brief=${brief} setBrief=${setBrief}
             onExample=${(n) => { call("modes.code_example", n); onClose(); }} />`
         : html`<${FormStep} s=${s} onBlank=${() => { call("modes.new"); onClose(); }}

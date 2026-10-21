@@ -91,7 +91,8 @@ SAY = {
                                                                colour(b.get("color")), PATTERN_WORDS.get(b.get("pattern"), "")),
     "unlight_mode": lambda b: "Put out the light of %s" % (b.get("mode") or "this mode"),
     "add_time": lambda b: "Add %s s to the clock" % val(b.get("seconds")),
-    "set_time": lambda b: "Set the clock to %s s" % val(b.get("seconds")),
+    "set_time": lambda b: ("Keep at least %s s on the clock" if b.get("at_least") else "Set the clock to %s s")
+    % val(b.get("seconds")),
     "multiball": lambda b: "%s-ball multiball, ball save %s s" % (b.get("balls"), b.get("save", 0)),
     "game_wizard": lambda b: "%s the game's %s" % ("Start" if b.get("how") == "start" else "Light", b.get("name") or "mini-wizard"),
     "hold": lambda b: "Hold the %s for %s" % (b.get("what") or "magnet", _ms(b.get("ms"))),
@@ -118,6 +119,7 @@ SAY = {
     "log": lambda b: "Log “%s”" % (b.get("text") or ""),
     "clip": lambda b: "Play clip %s (%s)" % (b.get("clip"), BM.CLIP_WHERE.get(b.get("where"), "")),
     "sound": lambda b: "Play sound %s" % b.get("sound"),
+    "music": lambda b: "Play the music %s" % (b.get("bed") or "(its own)"),   # PAD-658
     "hud_text": lambda b: "HUD %s: “%s”" % ("title" if b.get("which") == "title" else "line", b.get("text") or ""),
     "hud_counter": lambda b: "HUD counter %s = %s" % (b.get("counter"), val(b.get("value"))),
     "hud_gauge": lambda b: "HUD gauge = %s" % val(b.get("value")),
@@ -127,7 +129,7 @@ SAY = {
 FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "set_hits": "var", "end_mode": "mode",
           "add_time": "mode", "set_time": "mode", "multiball": "mode", "game_wizard": "mode", "score": "score",
           "set": "var", "change": "var", "if": "flow", "callout": "show", "words": "show", "light_shot": "show",
-          "lights_off": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own",
+          "lights_off": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own", "music": "own",
           "timer_start": "timer", "timer_stop": "timer", "hud_text": "hud", "hud_counter": "hud", "hud_gauge": "hud",
           "hud_award": "hud", "hold": "mech", "scoop_hold": "mech", "let_go": "mech", "shield": "mech",
           "building": "mech", "shake": "mech", "shake_game": "mech"}

@@ -421,8 +421,8 @@ static void magnet_shot(struct slot *M, uint64_t mask)
  *   shake shot <ms> <strength> <mask>  another's tap, short...: the port's `text shake_<name>`); `shot` on every
  *   shake shot game <name> <mask>      hit of <mask> while it runs (the starting hit included); `end` as it ends,
  *   shake end <ms> <strength>          left to run out after the end (pm_shake_outlast). Every limit is
- *   shake end game <name>              pm_shake's: the operator's setting, its length per strength, 20 shakes and
- *                                      15 s a minute. Up to 4 lines. */
+ *   shake end game <name>              pm_shake's: the operator's setting, its length per strength, one at a time
+ *                                      (the longer takes over) and 30 s a minute (PAD-658). Up to 4 lines. */
 static int shake_line(struct slot *M, const char *line)
 {
     const char *a = key_is(line, "shake"), *b;

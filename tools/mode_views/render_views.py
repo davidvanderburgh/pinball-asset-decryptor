@@ -256,7 +256,7 @@ def track_of(b):
         return "Lights"
     if op in ("show", "game_show"):
         return "Light shows"
-    if op in ("callout", "sound"):
+    if op in ("callout", "sound", "music"):
         return "Sound"
     if op in ("words", "hud_text", "hud_counter", "hud_gauge", "hud_award", "clip"):
         return "Screen and HUD"

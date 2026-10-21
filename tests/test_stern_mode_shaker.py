@@ -5,11 +5,12 @@ Premium/LE 1.16 card (MODE_SDK.md "The shaker"; ``mode_project.SHAKER_PROVEN``).
 What is worth failing on:
   * ONLY THROUGH THE GAME'S OWN SHAKE: the operator's SHAKER MOTOR setting always applies (off = nothing), the
     runtime never forces it, and the stop is the game's own.
-  * THE LIMITS ARE THE RUNTIME'S: the running mode, in a game, the setting on, not over the game's own shake or
-    one of the mode's, 20 shakes and 15 s a minute - in that order of reasons; never longer than the game's own
-    longest shake at that strength.
-  * EVERY END STOPS IT, except the mode's ending shake (pm_shake_outlast), which a ball end, game end or tilt
-    still stops.
+  * THE LIMITS ARE THE RUNTIME'S: the running mode, in a game, the setting on, not over the game's own shake,
+    30 s of the motor running ours a minute (counted as it runs) - in that order of reasons; never longer than the
+    game's own longest shake at that strength. PAD-658: one of ours at a time as the game's own call has it - the
+    longer one takes the motor over, a shorter one is skipped (PAD-414's 20 a minute and 15 s counted whole are gone).
+  * A BALL END, GAME END OR TILT STOPS IT; PAD-658: the mode's end leaves it to run out (PAD-414 kept only the
+    ending shake, pm_shake_outlast).
   * THE GAME'S SHAKES ARE THE GAME'S: the port's `text shake_<name>` steps, read from its program.
 """
 import os
@@ -68,30 +69,21 @@ def test_the_refusals_and_their_order(tmp_path):
     src = _rt()
     code = "#include <stdio.h>\n" + "\n".join(re.findall(r"^#define SHAKE_\w+ .*$", src, re.M)) + "\n" + \
         _lift(src, "static const char *shake_refusal(") + r"""
-static unsigned long st[SHAKE_PER_MIN];
-static unsigned on[SHAKE_PER_MIN];
-static void t(const char *label, int run, int game, unsigned setting, int theirs, unsigned long ours, unsigned ms,
-              unsigned long now)
+static void t(const char *label, int run, int game, unsigned setting, int theirs, unsigned ran, unsigned ms)
 {
-    const char *w = shake_refusal(run, game, setting, theirs, ours, ms, now, st, on);
+    const char *w = shake_refusal(run, game, setting, theirs, ran, ms);
     printf("%s|%s\n", label, w ? w : "-");
 }
 int main(void)
 {
-    unsigned i;
-    t("ok", 1, 1, 4, 0, 0, 500, 100000);
-    t("not_running", 0, 0, 0, 1, 100500, 500, 100000);
-    t("no_game", 1, 0, 0, 1, 100500, 500, 100000);
-    t("setting_off", 1, 1, 0, 1, 100500, 500, 100000);
-    t("ours_runs", 1, 1, 1, 1, 100500, 500, 100000);
-    t("ours_ended", 1, 1, 1, 0, 100000, 500, 100000);
-    t("theirs", 1, 1, 1, 1, 0, 500, 100000);
-    st[0] = 90000, on[0] = 14600;
-    t("on_time_full", 1, 1, 4, 0, 0, 500, 100000);
-    t("on_time_fits", 1, 1, 4, 0, 0, 400, 100000);
-    t("on_time_old", 1, 1, 4, 0, 0, 500, 150001);
-    for (i = 0; i < SHAKE_PER_MIN; i++) st[i] = 50000 + i * 2000, on[i] = 100;
-    t("twenty_in_a_minute", 1, 1, 4, 0, 0, 100, 100000);
+    t("ok", 1, 1, 4, 0, 0, 500);
+    t("not_running", 0, 0, 0, 1, 30000, 500);
+    t("no_game", 1, 0, 0, 1, 30000, 500);
+    t("setting_off", 1, 1, 0, 1, 30000, 500);
+    t("theirs", 1, 1, 1, 1, 30000, 500);
+    t("on_time_full", 1, 1, 4, 0, 29600, 500);
+    t("on_time_fits", 1, 1, 4, 0, 29600, 400);
+    t("many_short_ones", 1, 1, 4, 0, 2900, 100);      /* PAD-658: no count: 29 shakes of 100 ms, and one more */
     return 0;
 }
 """
@@ -100,14 +92,35 @@ int main(void)
     assert rows["not_running"].startswith("only the running mode")
     assert rows["no_game"].startswith("no game is being played")
     assert rows["setting_off"].startswith("the operator has the shaker switched off")
-    assert rows["ours_runs"].startswith("a shake of the mode's is still running")
-    assert rows["ours_ended"] == "-"
     assert rows["theirs"].startswith("one of the game's own shakes is running")
-    assert rows["on_time_full"].startswith("the mode has shaken the cabinet for 15 s")
+    assert rows["on_time_full"].startswith("the modes have run the shaker for 30 s")
     assert rows["on_time_fits"] == "-"
-    assert rows["on_time_old"] == "-"
-    assert rows["twenty_in_a_minute"].startswith("twenty shakes in the last minute")
+    assert rows["many_short_ones"] == "-"
+    assert "SHAKE_PER_MIN" not in src and "#define SHAKE_ON_MS       30000u" in src
 
+
+@needs_cc
+def test_the_running_time_is_counted_as_it_runs(tmp_path):
+    """PAD-658: what the motor ran ours, a bucket a second - a shake cut short counts what ran, a minute ago drops out."""
+    src = _rt()
+    code = "#include <stdio.h>\n" + r"""
+static struct { unsigned long sent_until, sent_from, counted_to, run_sec[60]; unsigned run_ms[60]; } shk;
+""" + _lift(src, "static void shake_count(") + "\n" + _lift(src, "static unsigned shake_ran(") + r"""
+int main(void)
+{
+    shk.sent_from = 10500, shk.sent_until = 12000;      /* 1.5 s from 10.5 s */
+    shake_count(11000); printf("half|%u\n", shake_ran(11000));
+    shake_count(13000); printf("whole|%u\n", shake_ran(13000));
+    shk.sent_from = 20000, shk.sent_until = 25000;      /* 5 s asked for ... */
+    shake_count(21200); shk.sent_until = 21200;          /* ... stopped at 1.2 s (a take-over, a stop) */
+    shake_count(26000); printf("cut|%u\n", shake_ran(26000));
+    printf("later|%u\n", shake_ran(71000));             /* the first one has dropped out, the second not yet */
+    printf("gone|%u\n", shake_ran(82000));
+    return 0;
+}
+"""
+    rows = dict(line.split("|", 1) for line in _compile_run(tmp_path, code).strip().splitlines())
+    assert rows == {"half": "500", "whole": "1500", "cut": "2700", "later": "1200", "gone": "0"}
 
 @needs_cc
 def test_a_game_shake_is_read_in_order_and_clamped_to_the_games_own_longest(tmp_path):
@@ -160,9 +173,10 @@ def test_only_the_games_own_shake_drives_the_motor_and_never_forced():
     power = _lift(sec, "static unsigned shake_power(")
     assert "if (!shk.power_adj) return shk.power;" in power and 'fn("adjustment"))(shk.power_adj) & 0xffu' in power
     # ... and the OFF (an all-zero coil_fire) only where the port names no stop of the game's beside its call
-    let_go = _lift(sec, "static void shake_let_go(")
-    assert sec.count('fn("shake_stop")') == 3 and 'if (fn("shake_stop"))' in let_go     # the stop, the arm's check
-    assert "else shake_coil(0, 0);" in let_go
+    stop = _lift(sec, "static int shake_motor_stop(unsigned long now)\n{")
+    assert sec.count('fn("shake_stop")') == 3 and 'if (fn("shake_stop"))' in stop       # the stop, the arm's check
+    assert "else shake_coil(0, 0);" in stop
+    assert "shake_motor_stop(now)" in _lift(sec, "static void shake_let_go(")
     arm = _lift(sec, "static void shake_arm(")
     assert '(!fn("shake_stop") && !fn("coil_fire"))' in arm
     assert '(shk.call == SHAKE_CALL_DRIVE && (!fn("coil_fire") || (!shk.power && !shk.power_adj) || shk.power > 255u))' \
@@ -173,17 +187,24 @@ def test_only_the_games_own_shake_drives_the_motor_and_never_forced():
     assert "strength >= SHAKE_STRENGTHS" in shake and "shk.max_ms[strength]" in shake
     begin = _lift(sec, "static int shake_begin(")
     assert "shake_setting()" in begin and "shake_refusal(pm_running(), pm_in_game()" in begin
+    # PAD-658: one of ours running - the longer takes over (the game's rule), stopping ours first where the game's
+    # call would not take it (a later or shorter first step); a shorter one is skipped
+    assert "steps[n - 1].at + steps[n - 1].ms <= shk.until - now" in begin and "outlasts it" in begin
+    assert "(steps[0].at || steps[0].ms <= shk.sent_until - now) && shake_motor_stop(now)" in begin
+    assert "steps[i].at += delay;" in begin
 
 
-def test_every_end_stops_it_except_the_modes_ending_shake():
+def test_the_ball_the_game_and_a_tilt_stop_it_and_the_modes_end_lets_it_run_out():
     src = _rt()
     assert "if (!running) shake_mode_ended();" in _lift(src, "void pm_end(void)")
     assert 'shake_let_go("the ball ended");' in _lift(src, "static void on_ball_end(")
     tick = _lift(src, "static void shake_tick(")
     assert 'shake_let_go("the game ended or tilted")' in tick           # a tilt or game end: always
-    assert "!running && !shk.outlast" in tick                            # the mode's end: unless it outlasts
+    assert "!running && !shk.outlast" in tick                            # no mode, and not one run out
     ended = _lift(src, "static void shake_mode_ended(")
-    assert "shk.outlast" in ended and 'shake_let_go("the mode ended")' in ended
+    assert "shk.outlast = 1;" in ended and "shake_let_go" not in ended  # PAD-658: the mode's end lets it run out
+    # a step sent again while the motor still runs the one before (a take-over's stop not yet on the board)
+    assert "shake_left() && pm_ms() - shk.t0 - s->at < SHAKE_RETRY_MS" in tick
     # the outlast mark ends with the shake: any let-go and any new shake clear it
     assert "shk.outlast = 0;" in _lift(src, "static void shake_let_go(")
     assert "shk.outlast = 0;" in _lift(src, "static int shake_begin(")
@@ -192,9 +213,9 @@ def test_every_end_stops_it_except_the_modes_ending_shake():
 
 def test_a_stop_cuts_only_the_shake_the_mode_sent():
     """The game's own shake (one asked for since, longer) is left to run; ours is stopped with the game's stop."""
-    let_go = _lift(_rt(), "static void shake_let_go(")
-    assert "shk.sent_until > now && left <= shk.sent_until - now + 50ul" in let_go
-    assert "the shake running now is the game's own, left to run" in let_go
+    stop = _lift(_rt(), "static int shake_motor_stop(unsigned long now)\n{")
+    assert "shk.sent_until > now && left <= shk.sent_until - now + 50ul" in stop
+    assert "the shake running now is the game's own, left to run" in _lift(_rt(), "static void shake_let_go(")
 
 
 # ---- the port, against the game's program ----------------------------------------------------

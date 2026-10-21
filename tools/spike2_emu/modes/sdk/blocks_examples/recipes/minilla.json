@@ -1,0 +1,152 @@
+{
+ "clips": {
+  "intro": {
+   "film": "son67",
+   "from": 2074.7,
+   "length": 3.6,
+   "crop": "fill",
+   "what": "Newly hatched Minilla turns his head and grins up at Godzilla, close up, 0:34:35."
+  },
+  "loop": {
+   "film": "son67",
+   "from": 2711.2,
+   "length": 11.4,
+   "crop": "fill",
+   "what": "A run of shots on the beach: Minilla toddles ahead, Godzilla looks on, then the two walk side by side, 0:45:11."
+  },
+  "ring": {
+   "film": "ama69",
+   "from": 2381.0,
+   "length": 4.5,
+   "crop": "fill",
+   "what": "Minilla puffs out his cheeks and blows a little smoke ring, close up, 0:39:41."
+  },
+  "puff": {
+   "film": "ama69",
+   "from": 2860.9,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "Minilla blows a smoke ring from between Gabara's legs and it lands on Gabara's head like a halo, 0:47:41."
+  },
+  "stomp": {
+   "film": "son67",
+   "from": 3100.9,
+   "length": 1.5,
+   "crop": "fill",
+   "what": "A run of shots: Minilla strains beside Godzilla, then Godzilla's foot comes down on Minilla's tail, 0:51:41."
+  },
+  "ray": {
+   "film": "son67",
+   "from": 3102.4,
+   "length": 2.5,
+   "crop": "fill",
+   "what": "Minilla shoots his first real atomic ray, then the beam hits the ground, 0:51:42."
+  },
+  "gabara": {
+   "film": "ama69",
+   "from": 2857.9,
+   "length": 2.2,
+   "crop": "fill",
+   "what": "Gabara snarls into the camera, close up, 0:47:38."
+  },
+  "gabara_hit": {
+   "film": "ama69",
+   "from": 3101.0,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "A run of shots: Minilla jumps on the see-saw log and Gabara is flung high through the sky, 0:51:41."
+  },
+  "mb": {
+   "film": "ama69",
+   "from": 3129.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Godzilla and Minilla stand side by side in the valley, ready to fight, 0:52:09."
+  },
+  "won": {
+   "film": "son67",
+   "from": 5013.6,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Minilla hugs Godzilla in the falling snow, 1:23:34."
+  },
+  "lost": {
+   "film": "son67",
+   "from": 4916.8,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Minilla stands alone in the snow crying, then slumps, 1:21:57."
+  },
+  "cashout": {
+   "film": "son67",
+   "from": 5080.5,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Godzilla and Minilla huddle together asleep under the snow, 1:24:41."
+  }
+ },
+ "music": {
+  "film": "son67",
+  "from": 5112.294,
+  "length": 17.65,
+  "what": "The gentle father-and-son theme over the snowy ending of Son of Godzilla, a clean loop with no effects, 1:25:12."
+ },
+ "calls": {
+  "cry": {
+   "film": "son67",
+   "from": 2075.98,
+   "length": 1.8,
+   "what": "Baby Minilla's two chirping cries just after hatching, 0:34:36.",
+   "priority": 3
+  },
+  "ring": {
+   "film": "son67",
+   "from": 3083.95,
+   "length": 0.9,
+   "what": "Three soft puffs as Minilla blows a smoke ring for Godzilla, 0:51:24.",
+   "priority": 3
+  },
+  "stomp": {
+   "film": "ama69",
+   "from": 3107.4,
+   "length": 1.6,
+   "what": "A heavy crash as Gabara slams into the ground, 0:51:47.",
+   "priority": 3
+  },
+  "ray": {
+   "film": "son67",
+   "from": 3102.05,
+   "length": 2.85,
+   "what": "The hissing roar of Minilla's first real atomic ray, 0:51:42.",
+   "priority": 4
+  },
+  "gabara": {
+   "film": "ama69",
+   "from": 2939.0,
+   "length": 2.0,
+   "what": "Gabara bellows with his arms raised, over the score, 0:48:59.",
+   "priority": 3
+  },
+  "jackpot": {
+   "film": "son67",
+   "from": 3018.75,
+   "length": 1.6,
+   "what": "Godzilla roars on the hillside before showing Minilla his ray, 0:50:19.",
+   "priority": 3
+  },
+  "won": {
+   "film": "son67",
+   "from": 2065.9,
+   "length": 2.5,
+   "what": "Godzilla's victory roar with his arms raised after saving the hatchling, 0:34:26.",
+   "priority": 4
+  },
+  "lost": {
+   "film": "son67",
+   "from": 4914.95,
+   "length": 1.9,
+   "what": "Minilla's sad cry beside Godzilla in the freezing snow, 1:21:55.",
+   "priority": 3
+  }
+ }
+}

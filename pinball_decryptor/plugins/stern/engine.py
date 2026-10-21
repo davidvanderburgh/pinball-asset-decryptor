@@ -18645,8 +18645,15 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
     picked = None
     fits = []                       # a call: every carrier that takes it, the shortest one wins
     longs = []                      # PAD-533: the shorter ones, the longest wins when none fits
-    for req in (int(r) for r in s["candidates"]):
-        if req in taken:
+    # PAD-658: a further music bed rides its mode's own music carrier (pa_music_bed swaps it in on that request;
+    # the beds never play at once), so it takes that carrier first, taken or not
+    bed = str(s.get("key") or "").startswith("music:")
+    main = ctx.setdefault("music_req", {}).get(slug) if bed else None
+    cands = [int(r) for r in s["candidates"]]
+    if main is not None:
+        cands = [main] + [r for r in cands if r != main]
+    for req in cands:
+        if req in taken and req != main:
             continue
         if req not in ctx["located"]:
             try:
@@ -18705,6 +18712,8 @@ def _mode_shared_sound(s, what, ctx, audio_edits, grows, mine, work_dir, log):
     grows[host] = (emitted_length(hlen), max(int(want), clen, hlen))
     mine.add(host)
     taken.add(req)
+    if s.get("key") == "music":
+        ctx.setdefault("music_req", {})[slug] = req          # PAD-658: its further beds ride this carrier
     log("Modes: %s (%s, %.2f s) goes on the card as a new record (a copy of sound idx %d%s) that "
         "request %d plays for the mode alone; the game still plays its own on that request%s%s." % (
             what, os.path.basename(s["wav"]), _wav_frames_44k(s["wav"]) / 44100.0, host,
@@ -18755,7 +18764,8 @@ def _mode_own_sounds_grow(gr_path, img_path, params, sites, audio_edits, grows,
     # host record is picked from what the others left); *used* comes back in the modes' own order
     order = {(s.get("slug"), s.get("key")): i for i, s in enumerate(own)}
     shared = sorted((s for s in own if s.get("candidates")),       # a mode's longest call chooses first
-                    key=lambda s: (bool(not s.get("music")), -(_wav_frames_44k(s["wav"]) or 0)))
+                    key=lambda s: (bool(not s.get("music")), s.get("key") != "music",    # PAD-658: its own
+                                   -(_wav_frames_44k(s["wav"]) or 0)))                   # music before its beds
     own = [s for s in own if not s.get("candidates")] + shared
     ctx = {"elf": elf, "head": head, "params": params, "sites": sites, "mask": mask,
            "byidx": byidx, "located": {}, "by_mode": {}}

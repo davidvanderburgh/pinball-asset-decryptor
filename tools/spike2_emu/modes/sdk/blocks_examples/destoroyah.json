@@ -1,0 +1,7918 @@
+{
+ "name": "DESTOROYAH",
+ "slug": "destoroyah",
+ "order": 110,
+ "titles": [
+  "godzilla_le",
+  "godzilla_pro"
+ ],
+ "based_on": "destoroyah.c",
+ "title_alt": {
+  "godzilla_pro": {
+   "shots": {
+    "Shield target center": "Mecha exit bottom"
+   },
+   "words": {
+    "SHOOT THE CENTER SHIELD": "SHOOT THE MECHA LANE",
+    "OR THE CENTER SHIELD": "OR THE MECHA LANE"
+   }
+  }
+ },
+ "about": "The C example DESTOROYAH rebuilt in blocks and taken deeper (PAD-658): 30 Top spinner spins start it (60 the second time, 90 the third). Three stages: THE SWARM (three waves of aggregates advance from the Powerlines to the ramps and loop to the close targets, 10 s at each, a kill paying more the closer it is, each cleared wave into the pot; the title and line name where they are), his FLYING FORM (four hits in 40 s where he flies over the ramps and the Big loop, moving on every 10 s), then his PERFECT FORM (three Building hits in 40 s, the super jackpot every kill and the pot twice over). Cash the pot out at the right scoop once the swarm is beaten.",
+ "lost": [
+  "No randomness in blocks: each aggregate's next shot is dealt in turn from a counter that runs all game (the far ring left, center, right, the near ring and the close ring likewise, skipping the shot the other aggregate stands on), where the C picked one at random; the flying form flies over the Left ramp, the Big loop and the Right ramp in that order. A player who learns the order can wait for it.",
+  "Aggregates come to the shield targets at once: the C sent none there until the shield platform had turned to face the player (or ever, with the shields fixed away).",
+  "The flying and perfect forms' seconds are a counter (SECONDS, TO STOP HIM), not the badge (the blocks' badge counts the mode's clock, and this mode has none): the Building's blink still quickens as they run out.",
+  "The counters show bare numbers: WAVE 2 over the kills to go where the C showed the wave as 2/3 and the kills as 1/4, and no counter says what the wave has paid so far.",
+  "The line does not say the wave or the kills (the WAVE counter does): in the swarm the title names the first aggregate's shot and the line the second's (SHOOT THE MASER TARGET / OR THE LEFT POWERLINE), where the C's line said WAVE 2: 3 MORE  -  CLOSER PAYS MORE and its lit shots alone said where they were.",
+  "An aggregate stands 10 s at each shot and the flying form moves on every 10 s, the same each time he comes back (PAD-658: a moving target stays 10 s at least), where the C's advanced every 7, 6 and 5 s, faster each time, and its flying form moved on every 3 s; its flying and perfect forms' clocks were 30 and 25 s.",
+  "No KILLS gauge: on the glass its pips sat over the game's own POWER widget at the right edge (the C showed as many pips as the wave needs, shaded yellow to red); the kills to go are on the WAVE counter.",
+  "A kill's clip plays at most once in each 4 s window of the mode's own (a block's every 4 seconds): the C waited 4 s from the last one it played.",
+  "An aggregate that would advance onto the other's shot takes the next one in turn: the C waited half a second and tried again.",
+  "The ending (DESTOROYAH DEFEATED, DESTOROYAH WITHDRAWS or DESTOROYAH WINS, its line and the total) stays up 3 s, the runtime's: the C kept it 10 s, with the kills and the wave in its line.",
+  "No debounce: the C counted the same target once in 250 ms; the blocks count every report.",
+  "A hit no longer answers by itself: the C flashed every kill's inserts white and played the game's climbing orchestra hit (PAD-415).",
+  "Its ending call plays after one of the game's own modes ends it too (the C kept quiet then, as it does for a drain or a tilt).",
+  "On Godzilla Pro the close ring's middle shield is the Mecha lane (the Pro has two fixed shields): the C dealt aggregates to the Pro's two shields only."
+ ],
+ "program": {
+  "name": "DESTOROYAH",
+  "seconds": 0,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
+  "vars": [
+   {
+    "name": "spins",
+    "reset": "game"
+   },
+   {
+    "name": "plays",
+    "reset": "game"
+   },
+   {
+    "name": "turn",
+    "reset": "game"
+   },
+   {
+    "name": "phase",
+    "reset": "mode"
+   },
+   {
+    "name": "wave",
+    "reset": "mode"
+   },
+   {
+    "name": "kills",
+    "reset": "mode"
+   },
+   {
+    "name": "city",
+    "reset": "mode"
+   },
+   {
+    "name": "hits",
+    "reset": "mode"
+   },
+   {
+    "name": "kill total",
+    "reset": "mode"
+   },
+   {
+    "name": "wave total",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "cashed",
+    "reset": "mode"
+   },
+   {
+    "name": "a",
+    "reset": "mode"
+   },
+   {
+    "name": "b",
+    "reset": "mode"
+   },
+   {
+    "name": "pos",
+    "reset": "mode"
+   },
+   {
+    "name": "ring",
+    "reset": "mode"
+   },
+   {
+    "name": "killed",
+    "reset": "mode"
+   },
+   {
+    "name": "kill value",
+    "reset": "mode"
+   },
+   {
+    "name": "clip ok",
+    "reset": "mode"
+   },
+   {
+    "name": "all kills",
+    "reset": "mode"
+   },
+   {
+    "name": "pot",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "step a"
+   },
+   {
+    "name": "step b"
+   },
+   {
+    "name": "spawn"
+   },
+   {
+    "name": "kill"
+   },
+   {
+    "name": "boss"
+   },
+   {
+    "name": "lamps"
+   },
+   {
+    "name": "next"
+   },
+   {
+    "name": "fly"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "THE NEXT ONE IS COMING",
+   "counters": [
+    {
+     "label": "WAVE 1",
+     "sub": "KILLS TO GO",
+     "value": null
+    },
+    {
+     "label": "POT",
+     "sub": "CASH AT SCOOP",
+     "value": {
+      "k": "var",
+      "name": "pot"
+     }
+    },
+    {
+     "label": "CITY",
+     "sub": "HITS TO TAKE",
+     "value": null
+    }
+   ],
+   "timer": {
+    "on": false,
+    "label": "",
+    "icon": "xilien"
+   },
+   "gauge": {
+    "on": false,
+    "label": "",
+    "kind": "diamond",
+    "count": 3,
+    "color": "#ff7800",
+    "value": null,
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "kill",
+    "file": "kill.mp4"
+   },
+   {
+    "name": "escape",
+    "file": "escape.mp4"
+   },
+   {
+    "name": "wave",
+    "file": "wave.mp4"
+   },
+   {
+    "name": "fly",
+    "file": "fly.mp4"
+   },
+   {
+    "name": "wing",
+    "file": "wing.mp4"
+   },
+   {
+    "name": "boss",
+    "file": "boss.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   },
+   {
+    "name": "cashout",
+    "file": "cashout.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "kill",
+    "file": "kill.wav",
+    "priority": 3
+   },
+   {
+    "name": "escape",
+    "file": "escape.wav",
+    "priority": 3
+   },
+   {
+    "name": "wave",
+    "file": "wave.wav",
+    "priority": 4
+   },
+   {
+    "name": "fly",
+    "file": "fly.wav",
+    "priority": 3
+   },
+   {
+    "name": "boss",
+    "file": "boss.wav",
+    "priority": 4
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   },
+   {
+    "name": "lost",
+    "file": "lost.wav",
+    "priority": 4
+   },
+   {
+    "name": "cashout",
+    "file": "cashout.wav",
+    "priority": 4
+   }
+  ],
+  "music": "music.wav",
+  "beds": [
+   {
+    "name": "fly",
+    "file": "music_fly.wav"
+   }
+  ],
+  "shows": [
+   {
+    "name": "Swarm",
+    "steps": [
+     {
+      "fx": "fade_in",
+      "ms": 700,
+      "a": "#ff7800",
+      "b": "#000000",
+      "at": "flippers",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_down",
+      "ms": 900,
+      "a": "#ff7800",
+      "b": "#28000a",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sparkle",
+      "ms": 900,
+      "a": "#ff001e",
+      "b": "#28000a",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#ff7800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 150
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Kill",
+    "steps": [
+     {
+      "fx": "burst",
+      "ms": 450,
+      "a": "#78c8ff",
+      "b": "#ff7800",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 250,
+      "a": "#ff7800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Wave",
+    "steps": [
+     {
+      "fx": "implode",
+      "ms": 800,
+      "a": "#ff7800",
+      "b": "#28000a",
+      "at": "center",
+      "rate": 0,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#ff7800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "City",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ff001e",
+      "b": "#000000",
+      "at": "center",
+      "rate": 60,
+      "gi": "flash"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Takes wing",
+    "steps": [
+     {
+      "fx": "sweep_up",
+      "ms": 700,
+      "a": "#b428ff",
+      "b": "#000000",
+      "at": "flippers",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "bounce",
+      "ms": 1200,
+      "a": "#b428ff",
+      "b": "#28000a",
+      "at": "xy",
+      "rate": 350,
+      "gi": "dark",
+      "x": 150,
+      "y": 240
+     },
+     {
+      "fx": "spiral_out",
+      "ms": 900,
+      "a": "#ff001e",
+      "b": "#b428ff",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 150,
+      "y": 240
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#b428ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 200
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Wing hit",
+    "steps": [
+     {
+      "fx": "ripple",
+      "ms": 600,
+      "a": "#ffffff",
+      "b": "#b428ff",
+      "at": "xy",
+      "rate": 200,
+      "gi": "flash",
+      "x": 150,
+      "y": 240
+     },
+     {
+      "fx": "sweep_rl",
+      "ms": 400,
+      "a": "#b428ff",
+      "b": "#000000",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 250,
+      "a": "#b428ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Perfect form",
+    "steps": [
+     {
+      "fx": "bolts",
+      "ms": 900,
+      "a": "#ff001e",
+      "b": "#28000a",
+      "at": "center",
+      "rate": 130,
+      "gi": "dark"
+     },
+     {
+      "fx": "burst",
+      "ms": 800,
+      "a": "#ff7800",
+      "b": "#ff001e",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "spin",
+      "ms": 900,
+      "a": "#ff001e",
+      "b": "#28000a",
+      "at": "xy",
+      "rate": 90,
+      "gi": "keep",
+      "x": 123,
+      "y": 202
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Super jackpot",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 500,
+      "a": "#ffffff",
+      "b": "#ff001e",
+      "at": "center",
+      "rate": 45,
+      "gi": "flash"
+     },
+     {
+      "fx": "fire",
+      "ms": 1300,
+      "a": "#ff7800",
+      "b": "#ff001e",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "rainbow",
+      "ms": 1800,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 50,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 700,
+      "a": "#ff7800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 300
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Withdraws",
+    "steps": [
+     {
+      "fx": "solid",
+      "ms": 500,
+      "a": "#78c8ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "spiral_in",
+      "ms": 1200,
+      "a": "#78c8ff",
+      "b": "#001020",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "fade",
+      "ms": 900,
+      "a": "#78c8ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 400
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "He wins",
+    "steps": [
+     {
+      "fx": "pulse",
+      "ms": 900,
+      "a": "#ff001e",
+      "b": "#28000a",
+      "at": "center",
+      "rate": 450,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_lr",
+      "ms": 700,
+      "a": "#ff001e",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 800,
+      "a": "#ff001e",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 300
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Top spinner",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "spins"
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 30
+        },
+        "b": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "var",
+          "name": "plays"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "spins",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "spins"
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 30
+        },
+        "b": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "var",
+          "name": "plays"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "start_mode"
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "op",
+          "op": "-",
+          "a": {
+           "k": "var",
+           "name": "spins"
+          },
+          "b": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "/",
+            "a": {
+             "k": "var",
+             "name": "spins"
+            },
+            "b": {
+             "k": "num",
+             "v": 5
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 5
+           }
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "SPIN THE TOP SPINNER",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 30
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "plays"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "spins"
+           }
+          },
+          "sub": "SPINS TO DESTOROYAH",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "spins",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "change",
+      "var": "plays",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "phase",
+      "value": {
+       "k": "num",
+       "v": 2
+      }
+     },
+     {
+      "op": "set",
+      "var": "wave",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "kills",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "city",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "hits",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "pot",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "kill total",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "wave total",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "all kills",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "cashed",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "a",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "b",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "clip ok",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "shield",
+      "where": "toward"
+     },
+     {
+      "op": "game_show",
+      "name": "Strobe burst"
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Swarm"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 800
+      },
+      "strength": "strong"
+     },
+     {
+      "op": "hud_award",
+      "text": "DESTOROYAH",
+      "value": null,
+      "sub": "THE AGGREGATES ARE COMING",
+      "seconds": 3
+     },
+     {
+      "op": "hud_counter",
+      "counter": 2,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "CASH AT SCOOP"
+     },
+     {
+      "op": "timer_start",
+      "timer": "spawn",
+      "ms": {
+       "k": "num",
+       "v": 3000
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "step a"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "a"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 8
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "set",
+          "var": "killed",
+          "value": {
+           "k": "num",
+           "v": 99
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "set",
+          "var": "ring",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "a"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "ring",
+            "value": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "a"
+           },
+           "b": {
+            "k": "num",
+            "v": 7
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "ring",
+            "value": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pos",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "num",
+              "v": 4
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "turn"
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 4
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 4
+               }
+              }
+             }
+            }
+           },
+           {
+            "op": "change",
+            "var": "turn",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "pos"
+             },
+             "b": {
+              "k": "var",
+              "name": "b"
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "pos",
+              "value": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "num",
+                "v": 4
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "op",
+                  "op": "/",
+                  "a": {
+                   "k": "var",
+                   "name": "turn"
+                  },
+                  "b": {
+                   "k": "num",
+                   "v": 4
+                  }
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 4
+                 }
+                }
+               }
+              }
+             },
+             {
+              "op": "change",
+              "var": "turn",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pos",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "num",
+              "v": 8
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "turn"
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 5
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 5
+               }
+              }
+             }
+            }
+           },
+           {
+            "op": "change",
+            "var": "turn",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "pos"
+             },
+             "b": {
+              "k": "var",
+              "name": "b"
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "pos",
+              "value": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "num",
+                "v": 8
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "op",
+                  "op": "/",
+                  "a": {
+                   "k": "var",
+                   "name": "turn"
+                  },
+                  "b": {
+                   "k": "num",
+                   "v": 5
+                  }
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 5
+                 }
+                }
+               }
+              }
+             },
+             {
+              "op": "change",
+              "var": "turn",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "set",
+          "var": "a",
+          "value": {
+           "k": "var",
+           "name": "pos"
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "step a",
+          "ms": {
+           "k": "num",
+           "v": 10000
+          }
+         }
+        ]
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "step b"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "b"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 8
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "b",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "set",
+          "var": "killed",
+          "value": {
+           "k": "num",
+           "v": 99
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "set",
+          "var": "ring",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "b"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "ring",
+            "value": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "b"
+           },
+           "b": {
+            "k": "num",
+            "v": 7
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "ring",
+            "value": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pos",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "num",
+              "v": 4
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "turn"
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 4
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 4
+               }
+              }
+             }
+            }
+           },
+           {
+            "op": "change",
+            "var": "turn",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "pos"
+             },
+             "b": {
+              "k": "var",
+              "name": "a"
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "pos",
+              "value": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "num",
+                "v": 4
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "op",
+                  "op": "/",
+                  "a": {
+                   "k": "var",
+                   "name": "turn"
+                  },
+                  "b": {
+                   "k": "num",
+                   "v": 4
+                  }
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 4
+                 }
+                }
+               }
+              }
+             },
+             {
+              "op": "change",
+              "var": "turn",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pos",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "num",
+              "v": 8
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "turn"
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 5
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 5
+               }
+              }
+             }
+            }
+           },
+           {
+            "op": "change",
+            "var": "turn",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "pos"
+             },
+             "b": {
+              "k": "var",
+              "name": "a"
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "pos",
+              "value": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "num",
+                "v": 8
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "op",
+                  "op": "/",
+                  "a": {
+                   "k": "var",
+                   "name": "turn"
+                  },
+                  "b": {
+                   "k": "num",
+                   "v": 5
+                  }
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 5
+                 }
+                }
+               }
+              }
+             },
+             {
+              "op": "change",
+              "var": "turn",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "set",
+          "var": "b",
+          "value": {
+           "k": "var",
+           "name": "pos"
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "step b",
+          "ms": {
+           "k": "num",
+           "v": 10000
+          }
+         }
+        ]
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "spawn"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "phase",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "kills",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "wave total",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "wave"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "num",
+            "v": 2
+           },
+           "b": {
+            "k": "var",
+            "name": "wave"
+           }
+          },
+          "sub": null,
+          "label": "WAVE 1"
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "wave"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "num",
+            "v": 2
+           },
+           "b": {
+            "k": "var",
+            "name": "wave"
+           }
+          },
+          "sub": null,
+          "label": "WAVE 2"
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "wave"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "num",
+            "v": 2
+           },
+           "b": {
+            "k": "var",
+            "name": "wave"
+           }
+          },
+          "sub": null,
+          "label": "WAVE 3"
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "wave"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "HERE THEY COME",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "num",
+            "v": 2
+           },
+           "b": {
+            "k": "var",
+            "name": "wave"
+           }
+          },
+          "sub": "KILLS IN THIS WAVE",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": ">",
+          "a": {
+           "k": "var",
+           "name": "b"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a",
+          "value": {
+           "k": "var",
+           "name": "b"
+          }
+         },
+         {
+          "op": "set",
+          "var": "b",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "step a",
+          "ms": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "timer_left",
+            "timer": "step b"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         {
+          "op": "timer_stop",
+          "timer": "step b"
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         "b": {
+          "k": "or",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "op",
+            "op": "-",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "num",
+              "v": 2
+             },
+             "b": {
+              "k": "var",
+              "name": "wave"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "kills"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pos",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "num",
+            "v": 1
+           },
+           "b": {
+            "k": "op",
+            "op": "-",
+            "a": {
+             "k": "var",
+             "name": "turn"
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "/",
+              "a": {
+               "k": "var",
+               "name": "turn"
+              },
+              "b": {
+               "k": "num",
+               "v": 3
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            }
+           }
+          }
+         },
+         {
+          "op": "change",
+          "var": "turn",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "pos"
+           },
+           "b": {
+            "k": "var",
+            "name": "b"
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pos",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "num",
+              "v": 1
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "turn"
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 3
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 3
+               }
+              }
+             }
+            }
+           },
+           {
+            "op": "change",
+            "var": "turn",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "set",
+          "var": "a",
+          "value": {
+           "k": "var",
+           "name": "pos"
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "step a",
+          "ms": {
+           "k": "num",
+           "v": 10000
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">=",
+            "a": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 2
+              },
+              "b": {
+               "k": "var",
+               "name": "wave"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "kills"
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "pos",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "num",
+              "v": 1
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "turn"
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 3
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 3
+               }
+              }
+             }
+            }
+           },
+           {
+            "op": "change",
+            "var": "turn",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "pos"
+             },
+             "b": {
+              "k": "var",
+              "name": "a"
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "pos",
+              "value": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "num",
+                "v": 1
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "turn"
+                },
+                "b": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "op",
+                  "op": "/",
+                  "a": {
+                   "k": "var",
+                   "name": "turn"
+                  },
+                  "b": {
+                   "k": "num",
+                   "v": 3
+                  }
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 3
+                 }
+                }
+               }
+              }
+             },
+             {
+              "op": "change",
+              "var": "turn",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "set",
+            "var": "b",
+            "value": {
+             "k": "var",
+             "name": "pos"
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "step b",
+            "ms": {
+             "k": "num",
+             "v": 10000
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       },
+       {
+        "op": "timer_start",
+        "timer": "spawn",
+        "ms": {
+         "k": "num",
+         "v": 1200
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 4
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "pos"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Big loop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 6
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 6
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 6
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "pos"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 5
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 5
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 5
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "pos"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Maser target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 8
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 8
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 8
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 9
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 9
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 9
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 10
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 11
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 11
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 11
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Godzilla target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 12
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 12
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 12
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "kill"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "killed"
+        },
+        "b": {
+         "k": "num",
+         "v": 99
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "city",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "THE CITY IS HIT",
+        "value": {
+         "k": "op",
+         "op": "-",
+         "a": {
+          "k": "num",
+          "v": 3
+         },
+         "b": {
+          "k": "var",
+          "name": "city"
+         }
+        },
+        "sub": "HITS LEFT",
+        "seconds": 3
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "City"
+       },
+       {
+        "op": "sound",
+        "sound": "escape",
+        "fallback": ""
+       },
+       {
+        "op": "clip",
+        "clip": "escape",
+        "where": "behind"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 400
+        },
+        "strength": "strong"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "city"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "end_mode"
+         }
+        ],
+        "else": [
+         {
+          "op": "timer_start",
+          "timer": "spawn",
+          "ms": {
+           "k": "num",
+           "v": 1200
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "killed"
+        },
+        "b": {
+         "k": "num",
+         "v": 99
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a"
+          },
+          "b": {
+           "k": "var",
+           "name": "killed"
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "b"
+          },
+          "b": {
+           "k": "var",
+           "name": "killed"
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a"
+           },
+           "b": {
+            "k": "var",
+            "name": "killed"
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "a",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "timer_stop",
+            "timer": "step a"
+           }
+          ],
+          "else": [
+           {
+            "op": "set",
+            "var": "b",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "timer_stop",
+            "timer": "step b"
+           }
+          ]
+         },
+         {
+          "op": "set",
+          "var": "ring",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "killed"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "ring",
+            "value": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "killed"
+           },
+           "b": {
+            "k": "num",
+            "v": 7
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "ring",
+            "value": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "num",
+            "v": 1000000
+           },
+           "b": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 250000
+            },
+            "b": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "var",
+              "name": "wave"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           }
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "var",
+              "name": "kill value"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "FAR KILL X1",
+            "value": {
+             "k": "var",
+             "name": "kill value"
+            },
+            "sub": "",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "var",
+              "name": "kill value"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "NEAR KILL X2",
+            "value": {
+             "k": "var",
+             "name": "kill value"
+            },
+            "sub": "",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "var",
+              "name": "kill value"
+             },
+             "b": {
+              "k": "num",
+              "v": 4
+             }
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "CLOSE KILL X4",
+            "value": {
+             "k": "var",
+             "name": "kill value"
+            },
+            "sub": "",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "score",
+          "points": {
+           "k": "var",
+           "name": "kill value"
+          }
+         },
+         {
+          "op": "change",
+          "var": "wave total",
+          "by": {
+           "k": "var",
+           "name": "kill value"
+          }
+         },
+         {
+          "op": "change",
+          "var": "kill total",
+          "by": {
+           "k": "var",
+           "name": "kill value"
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "sound",
+          "sound": "kill",
+          "fallback": ""
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Kill"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "clip ok"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "clip",
+            "clip": "kill",
+            "where": "behind"
+           },
+           {
+            "op": "set",
+            "var": "clip ok",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "kills"
+           },
+           "b": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 2
+            },
+            "b": {
+             "k": "var",
+             "name": "wave"
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "score",
+            "points": {
+             "k": "var",
+             "name": "wave total"
+            }
+           },
+           {
+            "op": "change",
+            "var": "pot",
+            "by": {
+             "k": "var",
+             "name": "wave total"
+            }
+           },
+           {
+            "op": "hud_award",
+            "text": "WAVE CLEARED",
+            "value": {
+             "k": "var",
+             "name": "wave total"
+            },
+            "sub": "INTO THE POT",
+            "seconds": 3
+           },
+           {
+            "op": "hud_counter",
+            "counter": 1,
+            "value": {
+             "k": "num",
+             "v": 0
+            },
+            "sub": null
+           },
+           {
+            "op": "show",
+            "show": "mine",
+            "name": "Wave"
+           },
+           {
+            "op": "sound",
+            "sound": "wave",
+            "fallback": ""
+           },
+           {
+            "op": "clip",
+            "clip": "wave",
+            "where": "behind"
+           },
+           {
+            "op": "set",
+            "var": "a",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "set",
+            "var": "b",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "timer_stop",
+            "timer": "step a"
+           },
+           {
+            "op": "timer_stop",
+            "timer": "step b"
+           },
+           {
+            "op": "set",
+            "var": "phase",
+            "value": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">=",
+             "a": {
+              "k": "var",
+              "name": "wave"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "timer_stop",
+              "timer": "spawn"
+             },
+             {
+              "op": "timer_start",
+              "timer": "next",
+              "ms": {
+               "k": "num",
+               "v": 3000
+              }
+             }
+            ],
+            "else": [
+             {
+              "op": "shake",
+              "ms": {
+               "k": "num",
+               "v": 500
+              },
+              "strength": "medium"
+             },
+             {
+              "op": "change",
+              "var": "wave",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             {
+              "op": "timer_start",
+              "timer": "spawn",
+              "ms": {
+               "k": "num",
+               "v": 3500
+              }
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "shake",
+            "ms": {
+             "k": "num",
+             "v": 200
+            },
+            "strength": "soft"
+           },
+           {
+            "op": "timer_start",
+            "timer": "spawn",
+            "ms": {
+             "k": "num",
+             "v": 1200
+            }
+           }
+          ]
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "killed"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "hits"
+        },
+        "b": {
+         "k": "num",
+         "v": 4
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "hits",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "change",
+        "var": "pos",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "pos"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pos",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "fly",
+        "ms": {
+         "k": "num",
+         "v": 10000
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 1000000
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "timer_left",
+          "timer": "boss"
+         },
+         "b": {
+          "k": "num",
+          "v": 15000
+         }
+        },
+        "then": [
+         {
+          "op": "timer_start",
+          "timer": "boss",
+          "ms": {
+           "k": "num",
+           "v": 15000
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "var",
+         "name": "hits"
+        },
+        "sub": null
+       },
+       {
+        "op": "change",
+        "var": "pot",
+        "by": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 5000000
+         },
+         "b": {
+          "k": "var",
+          "name": "hits"
+         }
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "wing",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "fly",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Wing hit"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "hits"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pos",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "timer_stop",
+          "timer": "fly"
+         },
+         {
+          "op": "timer_stop",
+          "timer": "boss"
+         },
+         {
+          "op": "shake",
+          "ms": {
+           "k": "num",
+           "v": 600
+          },
+          "strength": "hard"
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "HIS PERFECT FORM IS NEXT",
+          "value": null
+         },
+         {
+          "op": "hud_award",
+          "text": "SHOT DOWN",
+          "value": {
+           "k": "var",
+           "name": "pot"
+          },
+          "sub": "IN THE POT",
+          "seconds": 3
+         },
+         {
+          "op": "timer_start",
+          "timer": "next",
+          "ms": {
+           "k": "num",
+           "v": 3000
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "shake",
+          "ms": {
+           "k": "num",
+           "v": 350
+          },
+          "strength": "medium"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "pos"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WING HIT",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 5000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hits"
+             }
+            },
+            "sub": "NOW THE LEFT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "pos"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WING HIT",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 5000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hits"
+             }
+            },
+            "sub": "NOW THE BIG LOOP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "pos"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WING HIT",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 5000000
+             },
+             "b": {
+              "k": "var",
+              "name": "hits"
+             }
+            },
+            "sub": "NOW THE RIGHT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "fly"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "pos",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "pos"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pos",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "fly",
+        "ms": {
+         "k": "num",
+         "v": 10000
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 4
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "clip ok",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 7
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 7
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "killed",
+        "value": {
+         "k": "num",
+         "v": 7
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "kill",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 4
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "hits",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 5000000
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "timer_left",
+          "timer": "boss"
+         },
+         "b": {
+          "k": "num",
+          "v": 15000
+         }
+        },
+        "then": [
+         {
+          "op": "timer_start",
+          "timer": "boss",
+          "ms": {
+           "k": "num",
+           "v": 15000
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "var",
+         "name": "hits"
+        },
+        "sub": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "var",
+          "name": "hits"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "hits"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SUPER JACKPOT: SHOOT THE BUILDING",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE BUILDING AGAIN",
+            "value": null
+           }
+          ]
+         },
+         {
+          "op": "hud_award",
+          "text": "DESTOROYAH IS HIT",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "num",
+            "v": 3
+           },
+           "b": {
+            "k": "var",
+            "name": "hits"
+           }
+          },
+          "sub": "MORE AT THE BUILDING",
+          "seconds": 3
+         },
+         {
+          "op": "sound",
+          "sound": "kill",
+          "fallback": ""
+         },
+         {
+          "op": "clip",
+          "clip": "wing",
+          "where": "behind"
+         },
+         {
+          "op": "shake",
+          "ms": {
+           "k": "num",
+           "v": 350
+          },
+          "strength": "hard"
+         }
+        ],
+        "else": [
+         {
+          "op": "set",
+          "var": "won",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "timer_stop",
+          "timer": "boss"
+         },
+         {
+          "op": "score",
+          "points": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "kill total"
+           },
+           "b": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "var",
+             "name": "pot"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          }
+         },
+         {
+          "op": "lights_off",
+          "shot": "Right scoop"
+         },
+         {
+          "op": "lights_off",
+          "insert": "SELECT CITY"
+         },
+         {
+          "op": "lights_off",
+          "insert": "SCOOP BB-BATTLE"
+         },
+         {
+          "op": "lights_off",
+          "insert": "SCOOP BB-GODZILLA PWR UP"
+         },
+         {
+          "op": "lights_off",
+          "insert": "SCOOP BB-SUMMON ALLY"
+         },
+         {
+          "op": "lights_off",
+          "insert": "BUILDING SPOT"
+         },
+         {
+          "op": "hud_award",
+          "text": "SUPER JACKPOT",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "kill total"
+           },
+           "b": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "var",
+             "name": "pot"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "sub": "KILLS AND THE POT X2",
+          "seconds": 4
+         },
+         {
+          "op": "clip",
+          "clip": "won",
+          "where": "full"
+         },
+         {
+          "op": "sound",
+          "sound": "won",
+          "fallback": ""
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Super jackpot"
+         },
+         {
+          "op": "shake_game",
+          "shake": "jackpot"
+         },
+         {
+          "op": "timer_start",
+          "timer": "next",
+          "ms": {
+           "k": "num",
+           "v": 3000
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "boss"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": ">=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "timer_left",
+         "timer": "boss"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "timer_left",
+           "timer": "boss"
+          },
+          "b": {
+           "k": "num",
+           "v": 999
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 1000
+         }
+        },
+        "sub": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "lamps"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "a"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "b"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "a",
+        "value": {
+         "k": "var",
+         "name": "b"
+        }
+       },
+       {
+        "op": "set",
+        "var": "b",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "step a",
+        "ms": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "timer_left",
+          "timer": "step b"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        }
+       },
+       {
+        "op": "timer_stop",
+        "timer": "step b"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Powerline left",
+        "color": "#ffc800",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 700
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Powerline left"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Powerline center",
+        "color": "#ffc800",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 700
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Powerline center"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Powerline right",
+        "color": "#ffc800",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 700
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Powerline right"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Left ramp",
+        "color": "#ff5000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 400
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "phase"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "pos"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Left ramp",
+          "color": "#b428ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 60
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Left ramp"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 5
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 5
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Right ramp",
+        "color": "#ff5000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 400
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "phase"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "pos"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Right ramp",
+          "color": "#b428ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 60
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Right ramp"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 6
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 6
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Big loop",
+        "color": "#ff5000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 400
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "phase"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "pos"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#b428ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 60
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Building",
+        "color": "#ff001e",
+        "pattern": "blink",
+        "rate": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 80
+         },
+         "b": {
+          "k": "op",
+          "op": "/",
+          "a": {
+           "k": "timer_left",
+           "timer": "boss"
+          },
+          "b": {
+           "k": "num",
+           "v": 60
+          }
+         }
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "phase"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "or",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a"
+           },
+           "b": {
+            "k": "num",
+            "v": 7
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b"
+           },
+           "b": {
+            "k": "num",
+            "v": 7
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Building",
+          "color": "#ff5000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 400
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Building"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 8
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 8
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Maser target",
+        "color": "#ff0000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Maser target"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 9
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 9
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target left",
+        "color": "#ff0000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Shield target left"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target center",
+        "color": "#ff0000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Shield target center"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 11
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 11
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Shield target right",
+        "color": "#ff0000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Shield target right"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a"
+         },
+         "b": {
+          "k": "num",
+          "v": 12
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "b"
+         },
+         "b": {
+          "k": "num",
+          "v": 12
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Godzilla target",
+        "color": "#ff0000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Godzilla target"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "op",
+         "op": "-",
+         "a": {
+          "k": "num",
+          "v": 3
+         },
+         "b": {
+          "k": "var",
+          "name": "city"
+         }
+        },
+        "sub": "HITS TO TAKE"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 2
+            },
+            "b": {
+             "k": "var",
+             "name": "wave"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "kills"
+           }
+          },
+          "sub": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "a"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE LEFT POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE CENTER POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE RIGHT POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 4
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE LEFT RAMP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 5
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE RIGHT RAMP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 6
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE BIG LOOP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 7
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE BUILDING",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 8
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE MASER TARGET",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 9
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE LEFT SHIELD",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 10
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE CENTER SHIELD",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 11
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE RIGHT SHIELD",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 12
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "SHOOT THE GODZILLA TARGET",
+              "value": null
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "DESTOROYAH",
+            "value": null
+           }
+          ]
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "b"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE LEFT POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE CENTER POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE RIGHT POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 4
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE LEFT RAMP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 5
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE RIGHT RAMP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 6
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE BIG LOOP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 7
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE BUILDING",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 8
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE MASER TARGET",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 9
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE LEFT SHIELD",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 10
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE CENTER SHIELD",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 11
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE RIGHT SHIELD",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b"
+             },
+             "b": {
+              "k": "num",
+              "v": 12
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE GODZILLA TARGET",
+              "value": null
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "a"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "THE CLOSER IT IS, THE MORE IT PAYS",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "THE NEXT ONE IS COMING",
+              "value": null
+             }
+            ]
+           }
+          ]
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "kills"
+           },
+           "b": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 2
+            },
+            "b": {
+             "k": "var",
+             "name": "wave"
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "THE SWARM IS BEATEN",
+            "value": null
+           },
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "NOW HE TAKES WING",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "DESTOROYAH",
+            "value": null
+           },
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "THE NEXT WAVE IS COMING",
+            "value": null
+           }
+          ]
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "pos"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "pos"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE BIG LOOP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "pos"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE RIGHT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "next"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "or",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "phase",
+          "value": {
+           "k": "num",
+           "v": 4
+          }
+         },
+         {
+          "op": "set",
+          "var": "hits",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "timer_stop",
+          "timer": "fly"
+         },
+         {
+          "op": "timer_start",
+          "timer": "boss",
+          "ms": {
+           "k": "num",
+           "v": 40000
+          }
+         },
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "PERFECT DESTOROYAH",
+          "value": null
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE BUILDING 3 TIMES",
+          "value": null
+         },
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "num",
+           "v": 0
+          },
+          "sub": "OF 3",
+          "label": "HITS"
+         },
+         {
+          "op": "hud_counter",
+          "counter": 3,
+          "value": {
+           "k": "num",
+           "v": 40
+          },
+          "sub": "TO STOP HIM",
+          "label": "SECONDS"
+         },
+         {
+          "op": "hud_award",
+          "text": "PERFECT FORM",
+          "value": null,
+          "sub": "SHOOT THE BUILDING 3 TIMES",
+          "seconds": 3
+         },
+         {
+          "op": "light_shot",
+          "insert": "BUILDING SPOT",
+          "color": "#ff001e",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 100
+          }
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Perfect form"
+         },
+         {
+          "op": "sound",
+          "sound": "boss",
+          "fallback": ""
+         },
+         {
+          "op": "clip",
+          "clip": "boss",
+          "where": "full"
+         },
+         {
+          "op": "shake_game",
+          "shake": "rumble"
+         }
+        ],
+        "else": [
+         {
+          "op": "set",
+          "var": "phase",
+          "value": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         {
+          "op": "set",
+          "var": "hits",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "set",
+          "var": "pos",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "fly",
+          "ms": {
+           "k": "num",
+           "v": 10000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "boss",
+          "ms": {
+           "k": "num",
+           "v": 40000
+          }
+         },
+         {
+          "op": "music",
+          "bed": "fly"
+         },
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "FLYING DESTOROYAH",
+          "value": null
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT RAMP",
+          "value": null
+         },
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "num",
+           "v": 0
+          },
+          "sub": "OF 4",
+          "label": "HITS"
+         },
+         {
+          "op": "hud_counter",
+          "counter": 3,
+          "value": {
+           "k": "num",
+           "v": 40
+          },
+          "sub": "TO DOWN HIM",
+          "label": "SECONDS"
+         },
+         {
+          "op": "hud_award",
+          "text": "HE TAKES WING",
+          "value": null,
+          "sub": "SHOOT THE LEFT RAMP",
+          "seconds": 3
+         },
+         {
+          "op": "light_shot",
+          "shot": "Right scoop",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 120
+          }
+         },
+         {
+          "op": "light_shot",
+          "insert": "SELECT CITY",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 120
+          }
+         },
+         {
+          "op": "light_shot",
+          "insert": "SCOOP BB-BATTLE",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 120
+          }
+         },
+         {
+          "op": "light_shot",
+          "insert": "SCOOP BB-GODZILLA PWR UP",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 120
+          }
+         },
+         {
+          "op": "light_shot",
+          "insert": "SCOOP BB-SUMMON ALLY",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 120
+          }
+         },
+         {
+          "op": "scoop_hold",
+          "ms": {
+           "k": "num",
+           "v": 2500
+          },
+          "which": "next"
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Takes wing"
+         },
+         {
+          "op": "sound",
+          "sound": "fly",
+          "fallback": ""
+         },
+         {
+          "op": "clip",
+          "clip": "fly",
+          "where": "behind"
+         },
+         {
+          "op": "shake_game",
+          "shake": "jackpot"
+         }
+        ]
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right scoop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "phase"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "cashed",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_stop",
+        "timer": "boss"
+       },
+       {
+        "op": "timer_stop",
+        "timer": "fly"
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "pot"
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Right scoop"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SELECT CITY"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-BATTLE"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-GODZILLA PWR UP"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-SUMMON ALLY"
+       },
+       {
+        "op": "lights_off",
+        "insert": "BUILDING SPOT"
+       },
+       {
+        "op": "set",
+        "var": "pos",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "CASHED OUT",
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "DESTOROYAH WITHDRAWS",
+        "seconds": 4
+       },
+       {
+        "op": "clip",
+        "clip": "cashout",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "cashout",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Withdraws"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 600
+        },
+        "strength": "medium"
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 1500
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "timer_stop",
+      "timer": "step a"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "step b"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "spawn"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "kill"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "boss"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "lamps"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "next"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "fly"
+     },
+     {
+      "op": "set",
+      "var": "phase",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "won"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "DESTOROYAH DEFEATED",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "KILLS",
+        "value": {
+         "k": "var",
+         "name": "all kills"
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "cashed"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "DESTOROYAH WITHDRAWS",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "THE POT IS CASHED OUT",
+        "value": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "DESTOROYAH WINS",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "A QUARTER OF THE POT",
+        "value": null
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "pot"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "lost",
+        "fallback": "time_up"
+       },
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "He wins"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "game_show",
+      "name": "Ember fade"
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "des95",
+    "from": 3576.1,
+    "length": 4.4,
+    "crop": "fill",
+    "what": "Crab-like juvenile Destoroyahs crawl up out of the smoking ground by the waterfront in daylight, 0:59:36."
+   },
+   "loop": {
+    "film": "des95",
+    "from": 3553.0,
+    "length": 13.9,
+    "crop": "fill",
+    "what": "SDF tanks and trucks draw up in a field below an elevated expressway to face the aggregates, one calm shot, 0:59:13."
+   },
+   "kill": {
+    "film": "des95",
+    "from": 3704.15,
+    "length": 2.75,
+    "crop": "fill",
+    "what": "A juvenile Destoroyah beside a building is hit by the SDF freezer beam and bursts in blue light, sparks and smoke, 1:01:44."
+   },
+   "escape": {
+    "film": "des95",
+    "from": 3637.0,
+    "length": 2.3,
+    "crop": "fill",
+    "what": "A juvenile Destoroyah, struck by sparks, rears up and lunges toward a yellow SDF vehicle in the foreground, 1:00:37."
+   },
+   "wave": {
+    "film": "des95",
+    "from": 4151.5,
+    "length": 3.5,
+    "crop": "fill",
+    "what": "A glittering red swarm of aggregates converges and the giant aggregate form of Destoroyah takes shape out of it, 1:09:11."
+   },
+   "boss": {
+    "film": "des95",
+    "from": 5046.95,
+    "length": 4.9,
+    "crop": "fill",
+    "what": "The perfect form of Destoroyah in close-up, eye glowing and jaws open, roars through blue mist, 1:24:07."
+   },
+   "won": {
+    "film": "des95",
+    "from": 5540.5,
+    "length": 4.2,
+    "crop": "fill",
+    "what": "Destoroyah crashes down in a burst of sparks and lies sprawled on the ground, wings crumpled, 1:32:20."
+   },
+   "lost": {
+    "film": "des95",
+    "from": 4854.0,
+    "length": 3.05,
+    "crop": "fill",
+    "what": "A run of shots: Destoroyah's purple micro-oxygen beam strikes Godzilla in a shower of sparks and he disappears in a fiery explosion, 1:20:54."
+   },
+   "fly": {
+    "film": "des95",
+    "from": 4114.2,
+    "length": 5.4,
+    "crop": "fill",
+    "what": "A run of shots: the flying form of Destoroyah flies between the towers over the city, then swoops toward the camera with its red wings spread, 1:08:34."
+   },
+   "wing": {
+    "film": "des95",
+    "from": 4332.2,
+    "length": 3.3,
+    "crop": "fill",
+    "what": "A run of shots: Godzilla Junior's blue ray strikes the flying form of Destoroyah in a burst of red fire and it drops out of the sky in front of a factory, 1:12:12."
+   },
+   "cashout": {
+    "film": "des95",
+    "from": 5710.35,
+    "length": 4.0,
+    "crop": "fill",
+    "what": "A run of shots: the Super X3 fires its crackling blue freezing beam and Destoroyah sinks away into the night sky wrapped in a cloud of icy white mist, 1:35:10."
+   }
+  },
+  "music": {
+   "film": "des95",
+   "from": 4002.337,
+   "length": 25.09,
+   "what": "Ifukube's pounding brass battle music as the flying form of Destoroyah attacks the city and crowds flee, 1:06:42."
+  },
+  "calls": {
+   "kill": {
+    "film": "des95",
+    "from": 2322.58,
+    "length": 1.42,
+    "priority": 3,
+    "what": "A sharp explosion bursts against a juvenile Destoroyah in the night street, 0:38:42."
+   },
+   "escape": {
+    "film": "des95",
+    "from": 2111.82,
+    "length": 1.4,
+    "priority": 3,
+    "what": "A juvenile Destoroyah shrieks in close-up, horns crackling with lightning, as it turns on the riot police, 0:35:11."
+   },
+   "wave": {
+    "film": "des95",
+    "from": 4895.6,
+    "length": 2.15,
+    "priority": 4,
+    "what": "Destoroyah roars in close-up at the airport, a harsh rasping cry, 1:21:35."
+   },
+   "boss": {
+    "film": "des95",
+    "from": 5084.65,
+    "length": 2.5,
+    "priority": 4,
+    "what": "The perfect form of Destoroyah screeches in close-up with its jaws wide open, 1:24:44."
+   },
+   "won": {
+    "film": "des95",
+    "from": 5607.32,
+    "length": 3.0,
+    "priority": 4,
+    "what": "A huge explosion engulfs Destoroyah as Godzilla's ray strikes it, 1:33:27."
+   },
+   "lost": {
+    "film": "des95",
+    "from": 4889.4,
+    "length": 2.9,
+    "priority": 4,
+    "what": "Godzilla cries out in pain, glowing and staggering, after Destoroyah's beam hits him, 1:21:29."
+   },
+   "fly": {
+    "film": "des95",
+    "from": 4118.85,
+    "length": 2.7,
+    "priority": 4,
+    "what": "The flying form of Destoroyah screeches as it swoops in, a falling, warbling cry over the rush of its flight, 1:08:38."
+   },
+   "cashout": {
+    "film": "des95",
+    "from": 5710.45,
+    "length": 3.75,
+    "priority": 4,
+    "what": "The Super X3 fires its freezing beam at Destoroyah, a long icy hiss that fades away, 1:35:10."
+   }
+  },
+  "beds": {
+   "fly": {
+    "film": "des95",
+    "from": 6057.798,
+    "length": 12.92,
+    "what": "Ifukube's driving battle ostinato under the end titles, the same music that drives Godzilla's fight with the perfect form, 1:40:57."
+   }
+  }
+ }
+}

@@ -1,0 +1,7164 @@
+{
+ "name": "KAMACURAS",
+ "slug": "kamacuras",
+ "order": 4,
+ "titles": [
+  "godzilla_le",
+  "godzilla_pro"
+ ],
+ "based_on": "destoroyah.c",
+ "about": "Reworked (PAD-658): DESTOROYAH's waves as Kamacuras, now harder to start (50 Top spinner spins, then its own right scoop) and with its mantis shots far more obvious (chasing in the ring's colour, the HUD's title and line naming where they are, 10 s at each shot, a swoop clip and light show as each lands), then the biggest mantis at the Building for 40 s. Son of Godzilla (1967) and Godzilla: Final Wars (2004).",
+ "lost": [],
+ "program": {
+  "name": "KAMACURAS",
+  "seconds": 0,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
+  "vars": [
+   {
+    "name": "spins",
+    "reset": "game"
+   },
+   {
+    "name": "ready",
+    "reset": "game"
+   },
+   {
+    "name": "note at",
+    "reset": "game"
+   },
+   {
+    "name": "fought",
+    "reset": "game"
+   },
+   {
+    "name": "wave",
+    "reset": "mode"
+   },
+   {
+    "name": "kills",
+    "reset": "mode"
+   },
+   {
+    "name": "all kills",
+    "reset": "mode"
+   },
+   {
+    "name": "strikes",
+    "reset": "mode"
+   },
+   {
+    "name": "boss",
+    "reset": "mode"
+   },
+   {
+    "name": "boss hits",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "wave total",
+    "reset": "mode"
+   },
+   {
+    "name": "kill total",
+    "reset": "mode"
+   },
+   {
+    "name": "kill value",
+    "reset": "mode"
+   },
+   {
+    "name": "turn",
+    "reset": "mode"
+   },
+   {
+    "name": "a ring",
+    "reset": "mode"
+   },
+   {
+    "name": "a at",
+    "reset": "mode"
+   },
+   {
+    "name": "a stay",
+    "reset": "mode"
+   },
+   {
+    "name": "b ring",
+    "reset": "mode"
+   },
+   {
+    "name": "b at",
+    "reset": "mode"
+   },
+   {
+    "name": "b stay",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "spawn"
+   },
+   {
+    "name": "lights"
+   },
+   {
+    "name": "kill"
+   },
+   {
+    "name": "wave"
+   },
+   {
+    "name": "boss"
+   },
+   {
+    "name": "strike"
+   },
+   {
+    "name": "boss clock"
+   },
+   {
+    "name": "next"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "THE NEXT MANTIS IS COMING",
+   "counters": [
+    {
+     "label": "WAVE",
+     "sub": "OF 3",
+     "value": null
+    },
+    {
+     "label": "KILLS",
+     "sub": "OF WAVE",
+     "value": null
+    },
+    {
+     "label": "GODZILLA",
+     "sub": "STRIKES LEFT",
+     "value": null
+    }
+   ],
+   "timer": {
+    "on": false,
+    "label": "",
+    "icon": "xilien"
+   },
+   "gauge": {
+    "on": false,
+    "label": "",
+    "kind": "diamond",
+    "count": 3,
+    "color": "#ff7800",
+    "value": null,
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "kill",
+    "file": "kill.mp4"
+   },
+   {
+    "name": "escape",
+    "file": "escape.mp4"
+   },
+   {
+    "name": "wave",
+    "file": "wave.mp4"
+   },
+   {
+    "name": "boss",
+    "file": "boss.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   },
+   {
+    "name": "swoop",
+    "file": "swoop.mp4"
+   },
+   {
+    "name": "lit",
+    "file": "lit.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "kill",
+    "file": "kill.wav",
+    "priority": 3
+   },
+   {
+    "name": "escape",
+    "file": "escape.wav",
+    "priority": 3
+   },
+   {
+    "name": "wave",
+    "file": "wave.wav",
+    "priority": 4
+   },
+   {
+    "name": "boss",
+    "file": "boss.wav",
+    "priority": 4
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   },
+   {
+    "name": "lost",
+    "file": "lost.wav",
+    "priority": 4
+   },
+   {
+    "name": "swoop",
+    "file": "swoop.wav",
+    "priority": 3
+   }
+  ],
+  "music": "music.wav",
+  "shows": [
+   {
+    "name": "They come",
+    "steps": [
+     {
+      "fx": "sparkle",
+      "ms": 1000,
+      "a": "#20ff40",
+      "b": "#002008",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_down",
+      "ms": 800,
+      "a": "#20ff40",
+      "b": "#002008",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#20ff40",
+      "at": "center",
+      "rate": 55,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#20ff40",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 200
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Swoop",
+    "steps": [
+     {
+      "fx": "ripple",
+      "ms": 900,
+      "a": "#20ff40",
+      "b": "#002008",
+      "at": "top",
+      "rate": 300,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#20ff40",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Kill",
+    "steps": [
+     {
+      "fx": "burst",
+      "ms": 500,
+      "a": "#ffffff",
+      "b": "#20ff40",
+      "at": "center",
+      "rate": 0,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#20ff40",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Strike",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 500,
+      "a": "#ff1010",
+      "b": "#000000",
+      "at": "center",
+      "rate": 60,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#ff1010",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Wave cleared",
+    "steps": [
+     {
+      "fx": "implode",
+      "ms": 800,
+      "a": "#d0ff00",
+      "b": "#002008",
+      "at": "center",
+      "rate": 0,
+      "gi": "flash"
+     },
+     {
+      "fx": "rainbow",
+      "ms": 900,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 60,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#20ff40",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "The biggest",
+    "steps": [
+     {
+      "fx": "bolts",
+      "ms": 900,
+      "a": "#20ff40",
+      "b": "#002008",
+      "at": "center",
+      "rate": 130,
+      "gi": "dark"
+     },
+     {
+      "fx": "burst",
+      "ms": 800,
+      "a": "#ffffff",
+      "b": "#20ff40",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "spin",
+      "ms": 900,
+      "a": "#20ff40",
+      "b": "#002008",
+      "at": "xy",
+      "rate": 90,
+      "gi": "keep",
+      "x": 123,
+      "y": 202
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Won",
+    "steps": [
+     {
+      "fx": "burst",
+      "ms": 800,
+      "a": "#ffffff",
+      "b": "#d0ff00",
+      "at": "xy",
+      "rate": 0,
+      "gi": "flash",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "fire",
+      "ms": 1200,
+      "a": "#d0ff00",
+      "b": "#20ff40",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     },
+     {
+      "fx": "rainbow",
+      "ms": 1500,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 50,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 700,
+      "a": "#20ff40",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 300
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Lost",
+    "steps": [
+     {
+      "fx": "sparkle",
+      "ms": 900,
+      "a": "#ff1010",
+      "b": "#002008",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 900,
+      "a": "#002008",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Top spinner",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "spins",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "spins"
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 50
+          },
+          "b": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "fought"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ready",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "light_mode",
+          "shot": "Right scoop",
+          "color": "#20ff40",
+          "pattern": "chase",
+          "insert": "SELECT CITY,SCOOP BB-BATTLE,SCOOP BB-GODZILLA PWR UP,SCOOP BB-SUMMON ALLY"
+         },
+         {
+          "op": "hud_award",
+          "text": "KAMACURAS IS LIT",
+          "value": null,
+          "sub": "SHOOT THE RIGHT SCOOP",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "spins"
+           },
+           "b": {
+            "k": "var",
+            "name": "note at"
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "SPIN THE TOP SPINNER",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 50
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "fought"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "spins"
+             }
+            },
+            "sub": "SPINS TO KAMACURAS",
+            "seconds": 3
+           },
+           {
+            "op": "set",
+            "var": "note at",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "spins"
+             },
+             "b": {
+              "k": "num",
+              "v": 10
+             }
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "any_shot",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "not",
+        "a": {
+         "k": "lit"
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_mode",
+        "shot": "Right scoop",
+        "color": "#20ff40",
+        "pattern": "chase",
+        "insert": "SELECT CITY,SCOOP BB-BATTLE,SCOOP BB-GODZILLA PWR UP,SCOOP BB-SUMMON ALLY"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "ready",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "spins",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "note at",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "change",
+      "var": "fought",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "wave",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "kills",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "all kills",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "strikes",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "boss",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "wave total",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "kill total",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "turn",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "a ring",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "b ring",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "shield",
+      "where": "toward"
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "sound",
+      "sound": "wave",
+      "fallback": ""
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "They come"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 600
+      },
+      "strength": "strong"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 1,
+      "value": {
+       "k": "num",
+       "v": 1
+      },
+      "sub": "OF 3"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 2,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "OF 3"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "num",
+       "v": 3
+      },
+      "sub": "STRIKES LEFT"
+     },
+     {
+      "op": "timer_start",
+      "timer": "spawn",
+      "ms": {
+       "k": "num",
+       "v": 1500
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "spawn"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": ">",
+          "a": {
+           "k": "var",
+           "name": "b ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "var",
+           "name": "b ring"
+          }
+         },
+         {
+          "op": "set",
+          "var": "a at",
+          "value": {
+           "k": "var",
+           "name": "b at"
+          }
+         },
+         {
+          "op": "set",
+          "var": "a stay",
+          "value": {
+           "k": "var",
+           "name": "b stay"
+          }
+         },
+         {
+          "op": "set",
+          "var": "b ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "a ring"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "turn",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "turn"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "turn",
+            "value": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "set",
+          "var": "a at",
+          "value": {
+           "k": "var",
+           "name": "turn"
+          }
+         },
+         {
+          "op": "set",
+          "var": "a stay",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "clip",
+          "clip": "swoop",
+          "where": "behind"
+         },
+         {
+          "op": "sound",
+          "sound": "swoop",
+          "fallback": ""
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Swoop"
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">=",
+            "a": {
+             "k": "var",
+             "name": "wave"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "turn",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "turn"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "turn",
+              "value": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "set",
+            "var": "b at",
+            "value": {
+             "k": "var",
+             "name": "turn"
+            }
+           },
+           {
+            "op": "set",
+            "var": "b stay",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "clip",
+            "clip": "swoop",
+            "where": "behind"
+           },
+           {
+            "op": "sound",
+            "sound": "swoop",
+            "fallback": ""
+           },
+           {
+            "op": "show",
+            "show": "mine",
+            "name": "Swoop"
+           }
+          ],
+          "else": null
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "b ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": ">=",
+          "a": {
+           "k": "var",
+           "name": "wave"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "timer_start",
+          "timer": "spawn",
+          "ms": {
+           "k": "num",
+           "v": 1200
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "a stay",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "change",
+        "var": "b stay",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "a stay"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "change",
+            "var": "a ring",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a ring"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": "=",
+               "a": {
+                "k": "var",
+                "name": "a at"
+               },
+               "b": {
+                "k": "num",
+                "v": 3
+               }
+              },
+              "then": [
+               {
+                "op": "set",
+                "var": "a at",
+                "value": {
+                 "k": "num",
+                 "v": 4
+                }
+               }
+              ],
+              "else": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "a ring"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": ">",
+               "a": {
+                "k": "var",
+                "name": "a at"
+               },
+               "b": {
+                "k": "num",
+                "v": 3
+               }
+              },
+              "then": [
+               {
+                "op": "set",
+                "var": "a at",
+                "value": {
+                 "k": "num",
+                 "v": 3
+                }
+               }
+              ],
+              "else": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "a ring"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "a ring",
+              "value": {
+               "k": "num",
+               "v": 0
+              }
+             },
+             {
+              "op": "timer_start",
+              "timer": "strike",
+              "ms": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "set",
+          "var": "a stay",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "lights",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "b stay"
+         },
+         "b": {
+          "k": "num",
+          "v": 10
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "change",
+            "var": "b ring",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b ring"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": "=",
+               "a": {
+                "k": "var",
+                "name": "b at"
+               },
+               "b": {
+                "k": "num",
+                "v": 3
+               }
+              },
+              "then": [
+               {
+                "op": "set",
+                "var": "b at",
+                "value": {
+                 "k": "num",
+                 "v": 4
+                }
+               }
+              ],
+              "else": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "b ring"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": ">",
+               "a": {
+                "k": "var",
+                "name": "b at"
+               },
+               "b": {
+                "k": "num",
+                "v": 3
+               }
+              },
+              "then": [
+               {
+                "op": "set",
+                "var": "b at",
+                "value": {
+                 "k": "num",
+                 "v": 3
+                }
+               }
+              ],
+              "else": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "b ring"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "set",
+              "var": "b ring",
+              "value": {
+               "k": "num",
+               "v": 0
+              }
+             },
+             {
+              "op": "timer_start",
+              "timer": "strike",
+              "ms": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "set",
+          "var": "b stay",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "lights",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "op",
+           "op": "/",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "timer_left",
+             "timer": "boss clock"
+            },
+            "b": {
+             "k": "num",
+             "v": 999
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 1000
+           }
+          },
+          "sub": null
+         }
+        ],
+        "else": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "lights"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": ">",
+          "a": {
+           "k": "var",
+           "name": "b ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "var",
+           "name": "b ring"
+          }
+         },
+         {
+          "op": "set",
+          "var": "a at",
+          "value": {
+           "k": "var",
+           "name": "b at"
+          }
+         },
+         {
+          "op": "set",
+          "var": "a stay",
+          "value": {
+           "k": "var",
+           "name": "b stay"
+          }
+         },
+         {
+          "op": "set",
+          "var": "b ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline left",
+          "color": "#20ff40",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 160
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline left"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline center",
+          "color": "#20ff40",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 160
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline center"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline right",
+          "color": "#20ff40",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 160
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline right"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Left ramp",
+          "color": "#d0ff00",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Left ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Right ramp",
+          "color": "#d0ff00",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Right ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#d0ff00",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Building",
+          "color": "#d0ff00",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Building"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Maser target",
+          "color": "#ff1010",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 60
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Maser target"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Godzilla target",
+          "color": "#ff1010",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 60
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Godzilla target"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "or",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "a at"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          }
+         },
+         "b": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "b at"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target right",
+          "color": "#ff1010",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 60
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Shield target right"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "a ring"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE LEFT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE CENTER POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE RIGHT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE LEFT RAMP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE RIGHT RAMP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE BIG LOOP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 4
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE BUILDING",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE MASER TARGET",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE GODZILLA TARGET",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "a at"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "SHOOT THE RIGHT SHIELD",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "b ring"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE LEFT POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 2
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE CENTER POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 3
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE RIGHT POWERLINE",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 2
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE LEFT RAMP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 2
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 2
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE RIGHT RAMP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 2
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 3
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE BIG LOOP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 2
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 4
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE BUILDING",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 3
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE MASER TARGET",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 3
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 2
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE GODZILLA TARGET",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "and",
+             "a": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b ring"
+              },
+              "b": {
+               "k": "num",
+               "v": 3
+              }
+             },
+             "b": {
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "var",
+               "name": "b at"
+              },
+              "b": {
+               "k": "num",
+               "v": 3
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "OR THE RIGHT SHIELD",
+              "value": null
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "THE CLOSER IT IS, THE MORE IT PAYS",
+            "value": null
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "wave"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "THE SWARM IS BEATEN",
+            "value": null
+           },
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "THE BIGGEST MANTIS IS COMING",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "KAMACURAS",
+            "value": null
+           },
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "THE NEXT MANTIS IS COMING",
+            "value": null
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Powerline right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Big loop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Maser target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 4
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Godzilla target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 4
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 4
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "boss"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a ring"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "a at"
+          },
+          "b": {
+           "k": "num",
+           "v": 4
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "a ring",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "change",
+          "var": "all kills",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "kill value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "num",
+             "v": 1000000
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "num",
+              "v": 250000
+             },
+             "b": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "var",
+               "name": "wave"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "kill",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b ring"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "b at"
+            },
+            "b": {
+             "k": "num",
+             "v": 4
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "b ring",
+            "value": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           {
+            "op": "change",
+            "var": "kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "all kills",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "set",
+            "var": "kill value",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 1000000
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 250000
+               },
+               "b": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "var",
+                 "name": "wave"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            }
+           },
+           {
+            "op": "timer_start",
+            "timer": "kill",
+            "ms": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "boss"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "boss",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "kill"
+    },
+    "do": [
+     {
+      "op": "score",
+      "points": {
+       "k": "var",
+       "name": "kill value"
+      }
+     },
+     {
+      "op": "change",
+      "var": "wave total",
+      "by": {
+       "k": "var",
+       "name": "kill value"
+      }
+     },
+     {
+      "op": "change",
+      "var": "kill total",
+      "by": {
+       "k": "var",
+       "name": "kill value"
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "wave"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "kills"
+        },
+        "sub": "OF 3"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "wave"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "kills"
+        },
+        "sub": "OF 4"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "wave"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "kills"
+        },
+        "sub": "OF 5"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "hud_award",
+      "text": "MANTIS DOWN",
+      "value": {
+       "k": "var",
+       "name": "kill value"
+      },
+      "sub": "",
+      "seconds": 3
+     },
+     {
+      "op": "clip",
+      "clip": "kill",
+      "where": "behind"
+     },
+     {
+      "op": "sound",
+      "sound": "kill",
+      "fallback": ""
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Kill"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 250
+      },
+      "strength": "medium"
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "spawn",
+      "ms": {
+       "k": "num",
+       "v": 1200
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "kills"
+       },
+       "b": {
+        "k": "op",
+        "op": "+",
+        "a": {
+         "k": "num",
+         "v": 2
+        },
+        "b": {
+         "k": "var",
+         "name": "wave"
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "wave",
+        "ms": {
+         "k": "num",
+         "v": 700
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "strike"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "strikes",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "op",
+       "op": "-",
+       "a": {
+        "k": "num",
+        "v": 3
+       },
+       "b": {
+        "k": "var",
+        "name": "strikes"
+       }
+      },
+      "sub": "STRIKES LEFT"
+     },
+     {
+      "op": "clip",
+      "clip": "escape",
+      "where": "behind"
+     },
+     {
+      "op": "sound",
+      "sound": "escape",
+      "fallback": ""
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Strike"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 400
+      },
+      "strength": "hard"
+     },
+     {
+      "op": "hud_award",
+      "text": "MANTIS STRIKE",
+      "value": {
+       "k": "op",
+       "op": "-",
+       "a": {
+        "k": "num",
+        "v": 3
+       },
+       "b": {
+        "k": "var",
+        "name": "strikes"
+       }
+      },
+      "sub": "STRIKES LEFT",
+      "seconds": 3
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "strikes"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "lost",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Lost"
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": [
+       {
+        "op": "timer_start",
+        "timer": "spawn",
+        "ms": {
+         "k": "num",
+         "v": 1200
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "wave"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">",
+       "a": {
+        "k": "var",
+        "name": "wave"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "boss",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "boss clock",
+        "ms": {
+         "k": "num",
+         "v": 40000
+        }
+       },
+       {
+        "op": "set",
+        "var": "boss hits",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "THE BIGGEST MANTIS",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "SHOOT THE BUILDING 3 TIMES",
+        "value": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "OF 3",
+        "label": "HITS"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 40
+        },
+        "sub": "TO HIT IT",
+        "label": "SECONDS"
+       },
+       {
+        "op": "hud_award",
+        "text": "THE BIGGEST MANTIS",
+        "value": null,
+        "sub": "SHOOT THE BUILDING 3 TIMES",
+        "seconds": 3
+       },
+       {
+        "op": "light_shot",
+        "shot": "Building",
+        "color": "#ff1010",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 60
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "BUILDING SPOT",
+        "color": "#ff1010",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "boss",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "boss",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "The biggest"
+       }
+      ],
+      "else": [
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "wave total"
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "WAVE CLEARED",
+        "value": {
+         "k": "var",
+         "name": "wave total"
+        },
+        "sub": "ITS KILLS AGAIN",
+        "seconds": 3
+       },
+       {
+        "op": "clip",
+        "clip": "wave",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "wave",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Wave cleared"
+       },
+       {
+        "op": "shake_game",
+        "shake": "jackpot"
+       },
+       {
+        "op": "set",
+        "var": "wave total",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "kills",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "a ring",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "b ring",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "change",
+        "var": "wave",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "lights",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "wave"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "timer_stop",
+          "timer": "spawn"
+         },
+         {
+          "op": "timer_start",
+          "timer": "wave",
+          "ms": {
+           "k": "num",
+           "v": 3000
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_counter",
+          "counter": 1,
+          "value": {
+           "k": "var",
+           "name": "wave"
+          },
+          "sub": "OF 3"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "wave"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_counter",
+            "counter": 2,
+            "value": {
+             "k": "var",
+             "name": "kills"
+            },
+            "sub": "OF 3"
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "wave"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_counter",
+            "counter": 2,
+            "value": {
+             "k": "var",
+             "name": "kills"
+            },
+            "sub": "OF 4"
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "wave"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "hud_counter",
+            "counter": 2,
+            "value": {
+             "k": "var",
+             "name": "kills"
+            },
+            "sub": "OF 5"
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "timer_start",
+          "timer": "spawn",
+          "ms": {
+           "k": "num",
+           "v": 2500
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "boss"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "boss hits",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "score",
+      "points": {
+       "k": "num",
+       "v": 5000000
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "timer_left",
+        "timer": "boss clock"
+       },
+       "b": {
+        "k": "num",
+        "v": 15000
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "boss clock",
+        "ms": {
+         "k": "num",
+         "v": 15000
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "hud_counter",
+      "counter": 2,
+      "value": {
+       "k": "var",
+       "name": "boss hits"
+      },
+      "sub": null
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 450
+      },
+      "strength": "hard"
+     },
+     {
+      "op": "sound",
+      "sound": "kill",
+      "fallback": ""
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "boss hits"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "kill total"
+        }
+       },
+       {
+        "op": "timer_stop",
+        "timer": "boss clock"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Building"
+       },
+       {
+        "op": "lights_off",
+        "insert": "BUILDING SPOT"
+       },
+       {
+        "op": "hud_award",
+        "text": "SWARM DEFEATED",
+        "value": {
+         "k": "var",
+         "name": "kill total"
+        },
+        "sub": "SUPER JACKPOT",
+        "seconds": 4
+       },
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "won",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Won"
+       },
+       {
+        "op": "shake_game",
+        "shake": "multiball_start"
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 3000
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "boss hits"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SUPER JACKPOT: SHOOT THE BUILDING",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE BUILDING AGAIN",
+          "value": null
+         }
+        ]
+       },
+       {
+        "op": "hud_award",
+        "text": "THE BIG ONE REELS",
+        "value": {
+         "k": "op",
+         "op": "-",
+         "a": {
+          "k": "num",
+          "v": 3
+         },
+         "b": {
+          "k": "var",
+          "name": "boss hits"
+         }
+        },
+        "sub": "MORE AT THE BUILDING",
+        "seconds": 3
+       },
+       {
+        "op": "clip",
+        "clip": "kill",
+        "where": "behind"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "boss clock"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "boss"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Building"
+       },
+       {
+        "op": "lights_off",
+        "insert": "BUILDING SPOT"
+       },
+       {
+        "op": "hud_award",
+        "text": "THE BIG ONE ESCAPES",
+        "value": null,
+        "sub": "THE SWARM WINS",
+        "seconds": 3
+       },
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "lost",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Lost"
+       },
+       {
+        "op": "set",
+        "var": "strikes",
+        "value": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 3000
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "next"
+    },
+    "do": [
+     {
+      "op": "end_mode"
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "boss",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "a ring",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "b ring",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "won"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "KAMACURAS DEFEATED",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "THE SWARM IS GONE",
+        "value": null
+       }
+      ],
+      "else": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "THE MANTISES WIN",
+        "value": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "THE BIGGEST MANTIS GOT AWAY",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "THE SWARM TOOK GODZILLA",
+          "value": null
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "timer_stop",
+      "timer": "spawn"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "lights"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "kill"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "wave"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "boss"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "strike"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "boss clock"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "next"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "strikes"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "lost",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Lost"
+       }
+      ],
+      "else": null
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": [],
+  "beds": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "son67",
+    "from": 1524.95,
+    "length": 3.5,
+    "crop": "fill",
+    "what": "A giant mantis, Kamacuras, glides low over the jungle treetops past the expedition's weather tower, 0:25:25."
+   },
+   "loop": {
+    "film": "son67",
+    "from": 1485.42,
+    "length": 8.0,
+    "crop": "fill",
+    "what": "Kamacuras creeps over the jungle treetops, peering about with its scythe claws raised, in one calm shot, 0:24:45."
+   },
+   "kill": {
+    "film": "son67",
+    "from": 2057.0,
+    "length": 2.9,
+    "crop": "fill",
+    "what": "A run of shots: Godzilla's ray bursts into flames on a Kamacuras, which reels on the plain engulfed in fire, 0:34:17."
+   },
+   "escape": {
+    "film": "son67",
+    "from": 3534.0,
+    "length": 2.15,
+    "crop": "fill",
+    "what": "Kamacuras spreads its wings and flies off over the mountainside, escaping Godzilla's ray, 0:58:54."
+   },
+   "wave": {
+    "film": "son67",
+    "from": 1912.62,
+    "length": 2.95,
+    "crop": "fill",
+    "what": "Three Kamacuras crowd together in close-up before the mountain, their glowing eyes turning, 0:31:53."
+   },
+   "boss": {
+    "film": "son67",
+    "from": 3398.42,
+    "length": 4.35,
+    "crop": "fill",
+    "what": "The last Kamacuras rears up in a low-angle close-up and slashes its scythe claws at the camera, 0:56:38."
+   },
+   "won": {
+    "film": "fw04",
+    "from": 4525.65,
+    "length": 5.95,
+    "crop": "fill",
+    "what": "A run of shots: Kamacuras hangs impaled on a power pylon in close-up, its claws twitching, then its head sags as it dies, 1:15:26."
+   },
+   "lost": {
+    "film": "son67",
+    "from": 3505.95,
+    "length": 3.55,
+    "crop": "fill",
+    "what": "Kamacuras looms over a cornered Minilla with its huge scythe claws raised to strike, 0:58:26."
+   },
+   "swoop": {
+    "film": "fw04",
+    "from": 1383.75,
+    "length": 4.05,
+    "crop": "fill",
+    "what": "Kamacuras swoops down onto the top of the Grande Arche in Paris with its wings buzzing out, then lunges at the camera, 0:23:04."
+   },
+   "lit": {
+    "film": "son67",
+    "from": 3383.26,
+    "length": 2.12,
+    "crop": "fill",
+    "what": "A Kamacuras close-up: the mantis swings its head round from profile to stare at the camera with its glowing orange eyes, 0:56:23."
+   }
+  },
+  "music": {
+   "film": "son67",
+   "from": 173.632,
+   "length": 20.03,
+   "what": "Masaru Sato's main title march from Son of Godzilla, brass and percussion over the opening credits, no effects or dialogue, 0:02:54."
+  },
+  "calls": {
+   "kill": {
+    "film": "son67",
+    "from": 2046.52,
+    "length": 1.42,
+    "priority": 3,
+    "what": "A heavy crash as Godzilla wrestles a Kamacuras over in a cloud of dust, 0:34:07."
+   },
+   "escape": {
+    "film": "son67",
+    "from": 4257.46,
+    "length": 1.4,
+    "priority": 3,
+    "what": "A Kamacuras screeches, a shrill rasping cry, as it rears up with wings spread over the jungle, 1:10:57."
+   },
+   "wave": {
+    "film": "son67",
+    "from": 1535.86,
+    "length": 2.0,
+    "priority": 4,
+    "what": "Kamacuras screech together as the three mantises are seen gathered below the mountain, 0:25:36."
+   },
+   "boss": {
+    "film": "son67",
+    "from": 3384.36,
+    "length": 1.55,
+    "priority": 4,
+    "what": "The last Kamacuras gives a long shrill screech in close-up as it squares up to Minilla, 0:56:24."
+   },
+   "won": {
+    "film": "son67",
+    "from": 2058.95,
+    "length": 2.15,
+    "priority": 4,
+    "what": "A burning Kamacuras gives a falling death screech over the roar of the flames, 0:34:19."
+   },
+   "lost": {
+    "film": "son67",
+    "from": 4731.37,
+    "length": 1.9,
+    "priority": 4,
+    "what": "Godzilla cries out in pain, clutching his eye after a stinger strikes, 1:18:51."
+   },
+   "swoop": {
+    "film": "son67",
+    "from": 3390.97,
+    "length": 1.45,
+    "priority": 3,
+    "what": "A sharp Kamacuras screech as the mantis strides in toward Minilla, 0:56:31."
+   }
+  }
+ }
+}

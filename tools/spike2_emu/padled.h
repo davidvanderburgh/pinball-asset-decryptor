@@ -160,6 +160,22 @@ struct padled_shm {
      * show announcer, `decoded`) reads these frames any differently than it
      * did. Offset for a Python reader: hi 7356. */
     unsigned char hi[PADLED_NODES][4 * PADLED_IDX];
+    /* AFTER VERSION 6 (PAD-658): THE COLOUR A MODE PAINTED ON A ONE-COLOUR INSERT.
+     * WRITTEN BY THE MODE RUNTIME, NOT THE SHIM (pad_mode_runtime.c,
+     * lamp_paint_note): a single-colour insert takes one level - the colour's
+     * brightest part - so the wire carries how bright and not what colour, and
+     * the view drew every one on its orange ramp: a blocks mode's red light show
+     * read yellow, where the Modes tab's preview paints the show's colours. One
+     * 8-byte entry per port lamp (the runtime's lamp index): I/O group, index
+     * (the port's "I/O group G index I"; the reader maps group to node as it
+     * does for the device table), r, g, b, on, 2 spare. An entry counts only
+     * while `on` and paint_magic is 'PINT' (0x544e4950); the view then draws
+     * that insert in that hue at the wire's level. The shim never touches it,
+     * so `version` stays what the shim's mapping holds. Offsets for a Python
+     * reader: paint_magic 13500, paint_gen 13504, paint 13508. */
+    unsigned paint_magic;
+    unsigned paint_gen;
+    unsigned char paint[256][8];
 };
 
 #endif

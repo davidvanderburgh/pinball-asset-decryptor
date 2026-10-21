@@ -136,12 +136,32 @@ def test_the_runtime_never_holds_back_a_display_of_the_games():
 
 def test_a_hold_is_only_noted_and_the_game_is_watched():
     """pm_display_covered still says when a display of the game's has the screen: an effect over the layered
-    display, or any layered foreground (framed ones put their words where a mode's title is)."""
+    display, or any layered foreground (framed ones put their words where a mode's title is). PAD-658: with no
+    hold (a mode not running: its note) it looks now, rather than saying 0."""
     src = RUNTIME.read_text(encoding="utf-8")
-    tick = _lift(src, "static void display_tick(void)\n{")
-    assert "covered = now && now != disp_host();" in tick
-    assert '*(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58))' in tick
-    assert "0x10" not in tick                                               # any foreground, full screen or framed
+    taken = _lift(src, "static int disp_taken(void)")
+    assert "covered = now && now != disp_host();" in taken
+    assert '*(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58))' in taken
+    assert "0x10" not in taken                                              # any foreground, full screen or framed
+    assert "covered = disp_taken();" in _lift(src, "static void display_tick(void)\n{")
+    covered = _lift(src, "int pm_display_covered(void)")
+    assert "if (disp_prio) return disp_covered_now != 0;" in covered
+    assert "pm_in_game() && disp_taken()" in covered
+
+
+def test_the_backdrop_is_its_owners_and_stays_behind_a_held_ending():
+    """PAD-658: a mode not running asks for the backdrop only while none of ours runs (a note); an ending held with
+    pm_end_holding keeps it, the hold's end, a ball's end or another mode's start take it away."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    bd = _lift(src, "int pm_backdrop(const char *name)")
+    assert "if (running && running != current) return 0;" in bd and "bd_owner = current;" in bd
+    assert "bd_reset(\"the mode ended\")" not in _lift(src, "void pm_end(void)")
+    ended = _lift(src, "static void bd_mode_ended(void)" + chr(10) + "{")
+    assert "disp_linger_until && disp_owner == current" in ended and "bd_lingers = 1;" in ended
+    assert "if (bd_lingers && !running) bd_reset(why);" in _lift(src, "static void disp_release(const char *why)")
+    assert "bd_other_began();" in _lift(src, "int pm_begin(void)")
+    assets = (RUNTIME.parent / "pad_mode_assets.h").read_text(encoding="utf-8")
+    assert "pm_backdrop(0)" not in _lift(assets, "static PA_UNUSED void pa_end(struct pa_assets *a)")
     assert "noted only: the game's displays are never made to wait" in _lift(src, "int pm_display_priority(unsigned priority)")
 
 

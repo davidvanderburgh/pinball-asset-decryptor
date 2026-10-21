@@ -183,3 +183,25 @@ def test_before_the_vote_is_in_the_shapes_still_own_the_insert_boards(shim):
     out = _run(shim, *KNOWN, "send", "8", "1", B5_TWO_LAMPS_ON, "val", "8", "23", "fades")
     assert "dialect" not in out
     assert "VAL 8.23=0" in out and "FADES 1 [8:23..36 0->0 r0 f3]" in out
+
+
+#: node 9, a LONG bitmap body (John Wick LE 1.02, PAD-420): lamps 11-13, 37, 65, 74, 76, 77 on, 75 off - the form the
+#: game holds many inserts in at once, as a blocks mode's light show does (PAD-658)
+LONG_NODE9 = "8913b68919f83820023cffffffffffff00ffff018500"
+
+
+def test_a_settled_title_shows_an_insert_board_s_long_frame(shim):
+    # PAD-658: a show painting 83 inserts reached the boards as long frames and never the view
+    out = _run(shim, *KNOWN, *SETTLE_YES, "counts", "send", "9", "1", LONG_NODE9,
+               "val", "9", "11", "val", "9", "37", "val", "9", "75", "val", "9", "77", "fades", "counts")
+    assert "VAL 9.11=255" in out and "VAL 9.37=255" in out and "VAL 9.77=255" in out
+    assert "VAL 9.75=0" in out
+    assert "FADES 0" in out                          # no shape read it as a pulse
+    before, after = re.findall(r"COUNTS decoded=(\d+) skipped=(\d+) wide_decoded=(\d+)", out)
+    assert after[0] == before[0]                     # levels only: `decoded` (the announcer's side) unmoved
+    assert int(after[2]) == int(before[2]) + 1 and after[1] == before[1]
+
+
+def test_before_the_vote_an_insert_board_s_long_frame_is_not_published(shim):
+    out = _run(shim, *KNOWN, "send", "9", "1", LONG_NODE9, "val", "9", "11", "val", "9", "77")
+    assert "VAL 9.11=0" in out and "VAL 9.77=0" in out

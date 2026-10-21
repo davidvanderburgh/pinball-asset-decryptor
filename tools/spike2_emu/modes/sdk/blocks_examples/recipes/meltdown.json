@@ -1,0 +1,193 @@
+{
+ "clips": {
+  "intro": {
+   "film": "des95",
+   "from": 5425.1,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Burning Godzilla in the dark, glowing red, steam pouring off him (one shot)"
+  },
+  "loop": {
+   "film": "des95",
+   "from": 4410.5,
+   "length": 15.9,
+   "crop": "fill",
+   "what": "Night Tokyo: Burning Godzilla glows through steam, then a wide shot of him walking through the dark city, red-orange"
+  },
+  "jackpot": {
+   "film": "des95",
+   "from": 5644.2,
+   "length": 3.0,
+   "crop": "fill",
+   "what": "Godzilla fires the red spiral ray; it tears into Destoroyah's face"
+  },
+  "cool": {
+   "film": "des95",
+   "from": 5791.5,
+   "length": 3.3,
+   "crop": "fill",
+   "what": "The freezing beam hits Godzilla; he disappears in icy blue-white mist (one shot)"
+  },
+  "critical": {
+   "film": "des95",
+   "from": 5734.0,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "Burning Godzilla in profile, red veins glowing, white-hot energy behind him (one shot)"
+  },
+  "meltdown": {
+   "film": "des95",
+   "from": 5863.2,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Godzilla melts down: his body dissolves into glowing red particles (one shot)"
+  },
+  "won": {
+   "film": "des95",
+   "from": 5993.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "In the radiant mist the revived, grown Godzilla Junior rises as a silhouette and roars (one shot)"
+  },
+  "lost": {
+   "film": "des95",
+   "from": 5634.8,
+   "length": 3.0,
+   "crop": "fill",
+   "what": "Night: the city erupts in fireballs and burns (one shot)"
+  },
+  "destoroyah": {
+   "film": "des95",
+   "from": 4719.2,
+   "length": 3.0,
+   "crop": "fill",
+   "what": "Destoroyah's flying form swoops past in the night, its horned red head and fangs filling the frame (one shot, 1:18:39)"
+  },
+  "junior": {
+   "film": "des95",
+   "from": 4438.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Godzilla Junior, lit blue in the night, raises his head and calls (one shot, 1:13:58)"
+  },
+  "super": {
+   "film": "des95",
+   "from": 5506.5,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Burning Godzilla, glowing red through the smoke, turns and roars after his ray strikes (one shot, 1:31:46)"
+  },
+  "blows": {
+   "film": "des95",
+   "from": 5360.5,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Burning Godzilla glowing red as clouds of steam burst from his body (one shot, 1:29:20)"
+  }
+ },
+ "music": {
+  "film": "des95",
+  "from": 6015.56,
+  "length": 19.53,
+  "what": "Akira Ifukube's end-title march under the credits: the driving ostinato of the Godzilla theme (bed finder: final 0.821, loop chroma 0.835, 0 untuned blocks, beat-locked)"
+ },
+ "calls": {
+  "lit": {
+   "film": "des95",
+   "from": 4158.95,
+   "length": 2.9,
+   "what": "Godzilla's roar in close-up, mouth open (1:09:19), ending where the roar ends",
+   "priority": 4
+  },
+  "jackpot": {
+   "film": "des95",
+   "from": 5645.0,
+   "length": 2.15,
+   "what": "the red spiral ray firing at Destoroyah (1:34:05)",
+   "priority": 3
+  },
+  "cool": {
+   "film": "des95",
+   "from": 5795.3,
+   "length": 2.75,
+   "what": "the freezer beams hitting Godzilla, the white cloud bursting (1:36:35); 2.75 s, so MELTDOWN's five long calls each have a carrier as long",
+   "priority": 4
+  },
+  "critical": {
+   "film": "des95",
+   "from": 5146.45,
+   "length": 2.05,
+   "what": "Burning Godzilla roaring through the steam (1:25:46)",
+   "priority": 4
+  },
+  "meltdown": {
+   "film": "des95",
+   "from": 5729.5,
+   "length": 3.0,
+   "what": "the biggest blast of the final battle (1:35:29)",
+   "priority": 4
+  },
+  "won": {
+   "film": "des95",
+   "from": 5997.92,
+   "length": 3.0,
+   "what": "Godzilla Junior's roar as he rises, revived (1:39:58)",
+   "priority": 4
+  },
+  "add": {
+   "film": "des95",
+   "from": 5149.2,
+   "length": 1.3,
+   "what": "a short Burning Godzilla roar (1:25:49)",
+   "priority": 3
+  },
+  "heat": {
+   "film": "des95",
+   "from": 5742.05,
+   "length": 2.73,
+   "what": "the core-temperature monitor beeping as it reads 1191-1192 C (1:35:42), 7 beeps",
+   "priority": 4
+  },
+  "lost": {
+   "film": "des95",
+   "from": 4825.3,
+   "length": 3.0,
+   "what": "Godzilla's grieving cry, head raised, just after Junior dies (1:20:25), cut to end on its dying tail",
+   "priority": 4
+  },
+  "super": {
+   "film": "des95",
+   "from": 5526.6,
+   "length": 2.0,
+   "priority": 3,
+   "what": "Burning Godzilla's pulsing roar as steam pours off him (1:32:06)"
+  },
+  "junior": {
+   "film": "des95",
+   "from": 4442.85,
+   "length": 3.0,
+   "priority": 4,
+   "what": "Godzilla Junior's rising growl out of silence, fading away (1:14:02)"
+  }
+ },
+ "beds": {
+  "destoroyah": {
+   "film": "des95",
+   "from": 5463.809,
+   "length": 12.56,
+   "what": "Akira Ifukube's score in the last battle with Destoroyah, Junior lying still (1:31:04; bed finder loop chroma 0.657, in tune 0.73, 0.08 untuned, seam self-check PASS)"
+  },
+  "junior": {
+   "film": "des95",
+   "from": 3934.841,
+   "length": 10.85,
+   "what": "the score as Junior swims toward Tokyo Bay (1:05:34; bed finder loop chroma 0.723, in tune 0.80, 0 untuned, seam self-check PASS)"
+  },
+  "melt": {
+   "film": "des95",
+   "from": 5802.785,
+   "length": 12.59,
+   "what": "the score as the freezer beams wrap the melting Godzilla in white mist (1:36:42; bed finder loop chroma 0.689, in tune 0.95, 0 untuned, seam self-check PASS)"
+  }
+ }
+}

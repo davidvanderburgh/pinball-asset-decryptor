@@ -18,6 +18,8 @@ code mode, or one of its Examples). What it plays of its own sits beside it, nam
                                      the title's port puts one (James Bond: under the status bar)
       "clip": "clip.mp4",            its start clip ("" = none)
       "music": "music.wav",          its own music bed ("" = none)
+      "beds": {"swamp": "music_swamp.wav"},   PAD-658: more beds by name, which the mode switches to while it runs
+                                     (pa_music_bed: a multiball of its own, a stage)
       "calls": {"sever": "sever.wav", "spike": {"wav": "spike.wav", "priority": 3}},
       "clips": {"intro": "intro.mp4", "loop": "loop.mp4", "sever": "sever.mp4"},
       "hud": {"title": "KING GHIDORAH", "timer": {"label": "GHIDORAH", "icon": "bolt"}, ...},
@@ -69,6 +71,8 @@ RUNTIME_SUFFIX = ".assets"
 MAX_CALLS = 16
 #: pad_mode_assets.h reads at most this many clips (hud-layers)
 MAX_CLIPS = 12
+#: PAD-658: pad_mode_assets.h reads at most this many further music beds (PA_BEDS_MAX)
+MAX_BEDS = 6
 CUE_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
 SECONDS_MAX = 600
 
@@ -98,6 +102,7 @@ class CodeAssets:
     info_layout: dict = field(default_factory=dict)     # PAD-547: where the Scenes editor put that line (LAYOUT_KEYS)
     clip: str = ""
     music: str = ""
+    beds: dict = field(default_factory=dict)      # PAD-658: {name: wav} more music beds it switches to
     calls: dict = field(default_factory=dict)
     clips: dict = field(default_factory=dict)     # hud-layers: {cue: file}
     hud: dict = field(default_factory=dict)       # hud-layers: the HUD at the glass's edges
@@ -252,6 +257,19 @@ def validate(spec, folder=None):
                 out.append("%s: the clip cue %r is 1 to 15 lower-case letters, digits or _." % (spec.name, cue))
             if not f:
                 out.append("%s: the %s clip names no video." % (spec.name, cue))
+    beds = spec.beds if isinstance(spec.beds, dict) else None              # PAD-658
+    if beds is None:
+        out.append("%s: beds maps each bed's name to a WAV." % spec.name)
+        beds = {}
+    if beds and not spec.music:
+        out.append("%s: more music beds need its own music first." % spec.name)
+    if len(beds) > MAX_BEDS:
+        out.append("%s: a code mode carries at most %d more music beds." % (spec.name, MAX_BEDS))
+    for name, wav in beds.items():
+        if not CUE_RE.match(str(name)):
+            out.append("%s: the bed name %r is 1 to 15 lower-case letters, digits or _." % (spec.name, name))
+        if not wav:
+            out.append("%s: the %s bed names no WAV." % (spec.name, name))
     for cue, wav, prio in calls:
         if not CUE_RE.match(cue):
             out.append("%s: the cue %r is 1 to 15 lower-case letters, digits or _." % (spec.name, cue))
@@ -263,6 +281,7 @@ def validate(spec, folder=None):
         named = [("the picture", spec.screen_art), ("the music", spec.music)]
         named += [("the %s clip" % cue, f) for cue, f in (spec.clip_list() if isinstance(spec.clips, dict) else [])]
         named += [("the %s call" % cue, wav) for cue, wav, _p in calls]
+        named += [("the %s music bed" % n, wav) for n, wav in beds.items()]
         for what, name in named:
             if name and not os.path.isfile(os.path.join(folder, name)):
                 out.append("%s: %s file %s is not in the mode's folder." % (spec.name, what, name))
@@ -301,6 +320,20 @@ def call_key(cue):
     return "call:%s" % cue
 
 
+def bed_file(name):
+    """PAD-658: the file a recipe cuts a further music bed into."""
+    return "music_%s.wav" % name
+
+
+def bed_key(name):
+    """PAD-658: the own-sound key one of a code mode's further music beds rides under."""
+    return "music:%s" % name
+
+
+def bed_of(key):
+    return key[6:] if str(key).startswith("music:") else None
+
+
 def cue_of(key):
     return key[5:] if str(key).startswith("call:") else None
 
@@ -314,6 +347,9 @@ def sound_wants(project, code):
         if spec.music:
             out.append({"slug": slug, "name": spec.name, "key": "music", "music": True,
                         "wav": os.path.join(folder, spec.music), "seconds": int(spec.seconds or 0)})
+            for bed, wav in (spec.beds or {}).items():                  # PAD-658: its other beds
+                out.append({"slug": slug, "name": spec.name, "key": bed_key(bed), "music": True,
+                            "wav": os.path.join(folder, wav), "seconds": int(spec.seconds or 0)})
         for cue, wav, prio in spec.call_list():
             out.append({"slug": slug, "name": spec.name, "key": call_key(cue), "music": False,
                         "wav": os.path.join(folder, wav), "priority": prio})
@@ -358,7 +394,12 @@ def runtime_text(slug, spec, prof, own_sounds=(), screen=False, clip=False):
             bed = u.get("bank_sid") or u.get("sid")
             lines.append("music  %d%s" % (int(u["request"]), " %d" % int(bed) if bed else ""))
     for u in mine:
-        if u.get("bank_sid") and u.get("key") != "music":
+        if bed_of(u.get("key")) and (u.get("bank_sid") or u.get("sid")):
+            # PAD-658: a further bed on a sound id of its own (a bed sid, or a sound bank's); a swapped one rides
+            # its "swap ... music:<name>" line below
+            lines.append("bed    %s %d" % (bed_of(u["key"]), int(u.get("bank_sid") or u.get("sid"))))
+    for u in mine:
+        if u.get("bank_sid") and u.get("key") != "music" and not bed_of(u.get("key")):
             # PAD-595: a call in a sound bank of its own: the carrier is pointed at the bank's
             # sound id for that play (whose, as a swap's tag)
             lines.append("sid    %d %d %s" % (int(u["request"]), int(u["bank_sid"]), u["key"]))
@@ -517,6 +558,7 @@ def recipe_films(ex):
     out = []
     r = ex.get("recipe") or {}
     parts = [r.get("clip"), r.get("art"), r.get("music")] + list((r.get("calls") or {}).values())
+    parts += list((r.get("beds") or {}).values())                    # PAD-658
     parts += list((r.get("clips") or {}).values())
     for p in parts:
         if p and p.get("film") not in out:
@@ -636,6 +678,7 @@ def example_spec(ex, cut=False):
             spec.clip = "clip.mp4"
         if r.get("music"):
             spec.music = "music.wav"
+        spec.beds = {name: bed_file(name) for name in (r.get("beds") or {})}     # PAD-658
         spec.calls = {cue: ({"wav": "%s.wav" % cue, "priority": int(c.get("priority", 4))}
                             if int(c.get("priority", 4)) != 4 else "%s.wav" % cue)
                       for cue, c in (r.get("calls") or {}).items()}
@@ -749,6 +792,10 @@ def cut_example(project, slug, ex, dirs, ffmpeg=None, log=None):
         path = film_of(m)
         FC.cut_loop(path, m["from"], m["length"], os.path.join(folder, "music.wav"), ff)
         say("%s: music.wav is a %.2f s loop from %s" % (ex["name"], m["length"], FC.format_time(m["from"])))
+    for name, m in (r.get("beds") or {}).items():                   # PAD-658: its further music beds
+        path = film_of(m)
+        FC.cut_loop(path, m["from"], m["length"], os.path.join(folder, bed_file(name)), ff)
+        say("%s: %s is a %.2f s loop from %s" % (ex["name"], bed_file(name), m["length"], FC.format_time(m["from"])))
     for cue, c in (r.get("calls") or {}).items():
         path = film_of(c)
         FC.cut_sound(path, c["from"], c["length"], os.path.join(folder, "%s.wav" % cue), ff, channels=1)

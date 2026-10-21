@@ -1,0 +1,233 @@
+{
+ "clips": {
+  "intro": {
+   "film": "mg93",
+   "from": 2840.8,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Kyoto: Godzilla faces the camera head and shoulders and roars as debris flies, then black smoke billows up around him (0:47:20.8 to 0:47:25.8, one shot)."
+  },
+  "loop": {
+   "film": "mg93",
+   "from": 2679.0,
+   "length": 15.0,
+   "crop": "fill",
+   "what": "Kyoto: wide shot of Godzilla advancing behind a five-story pagoda past a temple, onlookers in the foreground, small explosions and a helicopter at right (0:44:39.0 to 0:44:54.0, one continuous shot)."
+  },
+  "lock": {
+   "film": "mg93",
+   "from": 2899.4,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "Kyoto: Godzilla roars over the top of a white office block, then tears through it in a burst of debris (0:48:19.4 to 0:48:22.9, a run of two shots)."
+  },
+  "baby": {
+   "film": "mg93",
+   "from": 3613.7,
+   "length": 4.5,
+   "crop": "fill",
+   "what": "Baby Godzilla in his pen at the research facility cries out with his mouth wide open, then turns to the people at the bars (1:00:13.7 to 1:00:18.2, one shot)."
+  },
+  "jackpot": {
+   "film": "mg93",
+   "from": 2223.6,
+   "length": 3.2,
+   "crop": "fill",
+   "what": "First battle: Godzilla fires his blue atomic ray, then from behind him the ray strikes Mechagodzilla in a red burst (0:37:03.6 to 0:37:06.8, a run of two shots)."
+  },
+  "super": {
+   "film": "mg93",
+   "from": 5726.8,
+   "length": 4.3,
+   "crop": "fill",
+   "what": "Climax at Makuhari: Godzilla glows and fires his red spiral ray, the ray streaks across, and Super Mechagodzilla is engulfed in a huge fireball (1:35:26.8 to 1:35:31.1, a run of three shots)."
+  },
+  "won": {
+   "film": "mg93",
+   "from": 6292.0,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Ending: wide night shot of Godzilla wading out to sea with Baby swimming beside him while three people watch from the beach (1:44:52.0 to 1:44:58.0, one shot)."
+  },
+  "lost": {
+   "film": "mg93",
+   "from": 2310.5,
+   "length": 4.9,
+   "crop": "fill",
+   "what": "First battle: Godzilla lies felled in the smoke, then Mechagodzilla hovers over his fallen body (0:38:30.5 to 0:38:35.4, a run of two shots)."
+  },
+  "mb2": {
+   "film": "mg93",
+   "from": 851.2,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "Rodan flies in over the dusk sea off Adonoa Island, wings spread, and dives at the camera until his crested head fills the frame, 0:14:11."
+  },
+  "mb3": {
+   "film": "mg93",
+   "from": 2131.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Mechagodzilla lands in a blaze of backlight and rises into full view as it squares up to Godzilla for their first battle, 0:35:31."
+  },
+  "mb4": {
+   "film": "mg93",
+   "from": 4199.9,
+   "length": 2.8,
+   "crop": "fill",
+   "what": "The Garuda gunship lifts off its launch pad in the G-Force hangar on orange jets and billowing smoke, 1:09:59."
+  },
+  "mb5": {
+   "film": "mg93",
+   "from": 5560.6,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "Fire Rodan, glowing red, glides through white smoke and dives on Super Mechagodzilla over the burning city, 1:32:40."
+  }
+ },
+ "music": {
+  "film": "mg93",
+  "from": 210.15,
+  "length": 13.25,
+  "what": "Opening titles: Akira Ifukube's main title music, rhythmic orchestral brass chords with cymbal and percussion, no dialogue or effects (0:03:30.15 to 0:03:43.40, loops cleanly)."
+ },
+ "calls": {
+  "rage": {
+   "film": "mg93",
+   "from": 6043.28,
+   "length": 1.6,
+   "priority": 3,
+   "what": "Revived Godzilla gives a short isolated roar in close-up at Makuhari (1:40:43.3), silence before and after."
+  },
+  "angry": {
+   "film": "mg93",
+   "from": 6013.2,
+   "length": 3.0,
+   "priority": 4,
+   "what": "Revived Godzilla, a silhouette in fire and smoke, lets out a long full roar out of near silence (1:40:13.2)."
+  },
+  "lock": {
+   "film": "mg93",
+   "from": 2675.35,
+   "length": 1.65,
+   "priority": 3,
+   "what": "Outside Kyoto a shell explodes in the smoke around Godzilla, one heavy blast that decays to quiet (0:44:35.4)."
+  },
+  "baby": {
+   "film": "mg93",
+   "from": 1655.37,
+   "length": 1.6,
+   "priority": 4,
+   "what": "Newly hatched Baby Godzilla gives a short cry in the dark lab (0:27:35.4), silence before and after."
+  },
+  "jackpot": {
+   "film": "mg93",
+   "from": 2223.85,
+   "length": 1.5,
+   "priority": 3,
+   "what": "Godzilla's atomic ray fires at Mechagodzilla, a rushing blast that swells and falls back, score underneath (0:37:03.9)."
+  },
+  "super": {
+   "film": "mg93",
+   "from": 5194.45,
+   "length": 2.25,
+   "priority": 4,
+   "what": "Super Mechagodzilla's salvo fires over burning Makuhari, a huge blast out of silence that rolls off (1:26:34.5)."
+  },
+  "won": {
+   "film": "mg93",
+   "from": 6167.55,
+   "length": 2.5,
+   "priority": 4,
+   "what": "Godzilla calls out to Baby at their night reunion by the bay, soft score underneath (1:42:47.6)."
+  },
+  "lost": {
+   "film": "mg93",
+   "from": 2311.75,
+   "length": 2.2,
+   "priority": 4,
+   "what": "Godzilla, felled by Mechagodzilla, gives a low pained cry from the ground in the smoke (0:38:31.8)."
+  },
+  "mb2": {
+   "film": "mg93",
+   "from": 807.65,
+   "length": 3.25,
+   "priority": 4,
+   "what": "Rodan gives a long rising screech as it circles over the expedition at night on Adonoa Island, 0:13:27."
+  },
+  "mb3": {
+   "film": "mg93",
+   "from": 2015.75,
+   "length": 3.9,
+   "priority": 4,
+   "what": "Mechagodzilla's thrusters roar as it lifts off from its launch tower, 0:33:35."
+  },
+  "mb4": {
+   "film": "mg93",
+   "from": 4219.15,
+   "length": 4.0,
+   "priority": 4,
+   "what": "The Garuda's jets whoosh past the camera as the gunship flies in low and away, 1:10:19."
+  },
+  "mb5": {
+   "film": "mg93",
+   "from": 5526.95,
+   "length": 4.0,
+   "priority": 4,
+   "what": "Fire Rodan gives his long cry as his head rises from the rubble when he is reborn, 1:32:06."
+  },
+  "jp2": {
+   "film": "mg93",
+   "from": 4279.0,
+   "length": 1.8,
+   "priority": 3,
+   "what": "A short Rodan screech as Fire Rodan swoops past the camera over the city at night, 1:11:19."
+  },
+  "jp4": {
+   "film": "mg93",
+   "from": 4467.95,
+   "length": 2.2,
+   "priority": 3,
+   "what": "The Garuda's twin maser cannons crackle as their blue beams fire over the city at night, 1:14:27."
+  },
+  "jp5": {
+   "film": "mg93",
+   "from": 5556.1,
+   "length": 2.1,
+   "priority": 3,
+   "what": "A beam blast bursts into sparks around Fire Rodan as Super Mechagodzilla fires on him, 1:32:36."
+  }
+ },
+ "beds": {
+  "mb2": {
+   "film": "mg93",
+   "from": 871.011,
+   "length": 11.96,
+   "what": "Ifukube's Adonoa Island battle music swells as Godzilla's dorsal plates rise behind the rocks to fight Rodan, 0:14:31."
+  },
+  "mb3": {
+   "film": "mg93",
+   "from": 2084.766,
+   "length": 10.21,
+   "what": "Ifukube's driving flight music pulses as Mechagodzilla flies out over the hills to meet Godzilla in their first battle, 0:34:44."
+  },
+  "mb4": {
+   "film": "mg93",
+   "from": 4166.32,
+   "length": 16.77,
+   "what": "Ifukube's G-Force march plays as the Garuda is readied in its hangar for launch, 1:09:26."
+  },
+  "mb5": {
+   "film": "mg93",
+   "from": 5626.217,
+   "length": 10.17,
+   "what": "Ifukube's solemn rising theme plays as Fire Rodan's dying glow flows into Godzilla before the climax, 1:33:46."
+  },
+  "mb6": {
+   "film": "mg93",
+   "from": 4708.334,
+   "length": 11.97,
+   "what": "Ifukube's full Godzilla theme plays as Godzilla wades through the night sea toward Makuhari for the final battle, 1:18:28."
+  }
+ }
+}

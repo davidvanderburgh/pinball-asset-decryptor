@@ -101,7 +101,7 @@ def test_the_shots_inserts_are_the_ones_in_front_of_them(key):
             assert shot == 1 << 60, name   # switch 34, the Action button's bit
             continue
         assert shot < (1 << 43), name
-    assert lamps["LEFT OUTLANE"][2] == 0x8 and lamps["TOP SPINNER"][2] == 0x1800
+    assert lamps["LEFT OUTLANE"][2] == 0x8 and lamps["TOP SPINNER"][2] == 0x3800   # PAD-658: + the Top spinner shot
 
 
 def test_the_app_reads_the_lamp_lines_and_an_old_port_has_none(tmp_path):

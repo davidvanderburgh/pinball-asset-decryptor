@@ -1932,12 +1932,23 @@ The limits are the runtime's and cannot be raised:
   strength**: on Godzilla 1000 ms at 0 and 1, 5000 ms at 2 and 3; most other titles shake at one strength only,
   0 (`text shake_max_ms`). At least 100 ms.
 - Only while your mode runs, in a game (not attract, not tilted); never while one of the game's own shakes
-  runs, or one of yours; at most 20 shakes and 15 s of shaking in any minute (a game shake of several steps
-  is one shake, all its steps counted).
-- **Stopped** (the game's own stop) when your mode ends, the ball ends, or the game ends or tilts, and on
-  `pm_shake_stop` - unless the game has since asked for a shake of its own, which it leaves to run. A shake
-  marked with `pm_shake_outlast` (the mode's ending one) runs out after the mode's end; a ball end, game end or
-  tilt still stops it.
+  runs; at most **30 s of the motor running the modes' shakes in any minute**, counted as it runs (a shake cut
+  short or taken over counts only what ran).
+- **One of yours at a time, the game's way** (PAD-658): a shake asked for while one of yours runs takes the motor
+  over when it is longer than what is left of the running one (a game shake of several steps is measured by its
+  span), and is skipped (0, and a line in mode.log) when it is not - the game's own call does the same. A take-over
+  whose first step would not outlast the running step stops yours first (the game's own stop) and starts 50 ms
+  later.
+- **Stopped** (the game's own stop) when the ball ends, or the game ends or tilts, and on `pm_shake_stop` -
+  unless the game has since asked for a shake of its own, which it leaves to run. PAD-658: your mode's end leaves
+  its shake to run out (each step is never longer than the game's own longest); `pm_shake_outlast` (the ending
+  one, which always ran out) is kept for modes that call it.
+
+PAD-414 set 20 shakes and 15 s a minute, counted whole and refusing any shake while one of yours ran. Neither was
+measured or the game's: the game's own call has no per-minute limit at all. PAD-658's modes ran into them (a
+finale's shake refused after twenty small ones, a stage-up shake refused while a hit's still ran, the 6.9 s
+multiball start costing half the minute), so the count went, the running time is counted as it runs against 30 s,
+and the longer shake wins as in the game.
 
 `pm_shake` / `pm_shake_game` return 1 when shaking, 0 when refused (the reason is in mode.log) or on a game
 whose port has no shaker lines (`pm_can(PM_CAN_SHAKER)`; a Pro's program has the call too, not yet ported).
@@ -1972,11 +1983,20 @@ and a blocks mode).** Every shake reached the board as `[coildrive] node 1 coil 
 500 ms at 0 as 51/255 for 500 ms; 3000 ms at 0 as 1000 ms (the hard ceiling); 200 ms at 2 as 31/255; the game's
 jackpot shake as 51/255 for 500 ms; the multiball start's first steps 334 and 100 ms at 31/255 on time, the rest
 dropped by `pm_shake_stop`; 5000 ms at 3 as 23/255, and `pm_end` one second in sent the game's OFF (cmd 4d,
-4001 ms of it left); a shake asked for while one ran was refused; the 15 s a minute cap refused the next. A mode
+4001 ms of it left); a shake asked for while one ran was refused; the 15 s a minute cap refused the next. (PAD-414's
+limits; PAD-658 changed them - above - and its run is under "PAD-658" below.) A mode
 file's `shake start 1500 2`, `shake shot game jackpot <left ramp>` and `shake end 1000 3` shook as it started,
 on each left ramp, and as it ended - that one ran its 1000 ms after the END with no OFF. The setting read 4 on
 the stock card; the game itself shook as a game started (334 ms at 0, then 2000-4000 ms at 3). Not yet
 machine-tested (David's Premium has a shaker fitted).
+
+**PAD-658 (emulator, stock Godzilla LE 1.16, `PAD_COIL_PROBE=1`, a blocks mode with 150 ms soft on every shot; run
+`shake_proof_r1`).** 33 soft shakes in about 25 s, every one on the board as 23/255 for 150 ms (PAD-414 refused the
+21st); the Building's 150 then its 800 ms medium in the same ms, the 800 the one sent (31/255 for 800: the longer
+takes over through the game's own call); the game's 3 s rumble taking over the Right ramp's 150, and a Left ramp
+inside it skipped (nothing on the board); the Big loop's multiball start taking over its 150 - the game's OFF, then
+its five steps 50 ms later than its own times (317 ms in: 330, 100, 500, 1000, 5000 ms at 31/255) - and running out
+after the mode's END in the same tick. segv 0, fatal 0.
 ### Every other latest title with a shaker (PAD-474)
 
 Every Spike 2 title but the two Home Editions has a SHAKER MOTOR device (coil 0 of the cabinet board; on most
@@ -4115,7 +4135,8 @@ machine; a title other than Bond (every port with `site proc_sleep` offers it).
 > it to a waiter, never cuts a waiter short and never hides a display's words. It WATCHES instead:
 > `pm_display_covered()` is 1 while a display of the game's has the screen (an effect over the
 > layered display, or any layered foreground), and the examples' HUD keeps its middle words blank
-> until it is gone. What follows is how the game layers its display (still true, and what the
+> until it is gone. PAD-658: with no priority held (a mode not running) it looks at the game's display
+> there and then, so a qualification note waits for the game's words too, its time held. What follows is how the game layers its display (still true, and what the
 > watching reads) and the history of the hold.
 
 A mode's screen and clip share the glass with everything the game shows. Without a priority, the
@@ -4469,6 +4490,13 @@ pm_backdrop("PadMode_meltdown_Loop");       /* loops in the main-play background
 pm_backdrop_once("PadMode_meltdown_Jackpot");   /* once in its place, then the loop again */
 pm_backdrop(0);                              /* the city again (pm_end and a ball end do it too) */
 ```
+
+PAD-658: the backdrop is the mode's that asked for it. A mode that is not running may ask while none of ours runs (a
+qualification note over its loop, as the game's own feedback screens letter their lines over a clip); while another
+of ours runs `pm_backdrop` answers 0 and changes nothing. An ending held with `pm_end_holding` (a TOTAL) keeps the
+loop behind it - on the live city the game's map labels (RAID, BRIDGE, TANKS, POWER) were under the TOTAL's words -
+and it goes when the hold does, at a ball's end, or as another mode begins. `pa_end` no longer asks for the city
+itself: `pm_end` does, at once for an end that holds nothing.
 
 How the game draws a frame (Godzilla Premium 1.16, measured with `display_probe.c`, docs/plans/hud-layers.md):
 the layered display draws its BACKGROUND element first (`BDLBackground::v[8]`): the video bank's player

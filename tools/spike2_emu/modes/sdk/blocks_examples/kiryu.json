@@ -1,0 +1,5400 @@
+{
+ "name": "KIRYU",
+ "slug": "kiryu",
+ "order": 108,
+ "titles": [
+  "godzilla_le",
+  "godzilla_pro"
+ ],
+ "based_on": "kiryu.c",
+ "title_alt": {
+  "godzilla_pro": {
+   "shots": {
+    "Shield ramp spinner": "Right spinner",
+    "Shield target center": null
+   }
+  }
+ },
+ "about": "The C example KIRYU rebuilt in blocks and taken deeper (PAD-658): 60 spins of the Mechagodzilla spinner start it (120 the second time, 180 the third); stage 1 charges the Absolute Zero and fires it at the captive ball, x1 to x4 as the reactor overheats, the multiplier carried up; stage 2 fires the arsenal (masers, missiles, the wrist blade); stage 3 grabs Godzilla at the Mecha lane, carries him out to sea at the Big loop and fires point blank. The pot cashes out at the right scoop after stage 1 or 2. On a Pro the spinner is the Right spinner.",
+ "lost": [
+  "The badge always counts the stage's clock: while the reactor overheats the C counted the overheat's 12 s there instead. The overheat's seconds now ride on the line (OVERHEATING: GODZILLA TARGET IN 18).",
+  "The overheat gives 20 s to fire every time (PAD-658: room to do it), where the C gave 12 s.",
+  "The Action button fires too, lit with the Godzilla target, but the line names only the Godzilla target.",
+  "The counters show bare numbers: CHARGE 109 where the C showed 109%, MULTIPLIER 2 where it showed X2.",
+  "The gauge stays one ice blue labelled CHARGE: the C shaded its ten pips from blue to white and relabelled it OVERHEAT while overheating and FIRED after the shot.",
+  "The spin count note reads SPINS TO KIRYU with the number under it, every 10 spins, where the C said 29 SPINS TO KIRYU at every spin.",
+  "When the clock runs out at 100% or more in stage 1 Kiryu still fires on its own (x1, 10M), but at the end itself: the C played the shot's 4-second moment before KIRYU WINS. The C's quarter of the mode's points on top of the shot is now the pot (10M times the multiplier) cashed or carried on.",
+  "The ending (its title, its line and the total) stays up 3 s, the runtime's: the C kept it 10 s.",
+  "No debounce: the C counted the same target once in 250 ms (a bouncing standup pays once); the blocks count every report.",
+  "A hit no longer answers by itself: the C flashed every charging shot's inserts white and played the game's climbing orchestra hit (PAD-415).",
+  "Its ending call plays after a drain or one of the game's own modes ends it too (the C kept quiet then).",
+  "Its own start and end light shows the C kept for a game without the game's Strobe burst and Blue fade are the mode's own shows here, played beside the game's."
+ ],
+ "program": {
+  "name": "KIRYU",
+  "seconds": 40,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
+  "vars": [
+   {
+    "name": "spins",
+    "reset": "game"
+   },
+   {
+    "name": "plays",
+    "reset": "game"
+   },
+   {
+    "name": "note at",
+    "reset": "game"
+   },
+   {
+    "name": "stage",
+    "reset": "mode"
+   },
+   {
+    "name": "charge",
+    "reset": "mode"
+   },
+   {
+    "name": "pct",
+    "reset": "mode"
+   },
+   {
+    "name": "mult",
+    "reset": "mode"
+   },
+   {
+    "name": "was",
+    "reset": "mode"
+   },
+   {
+    "name": "x",
+    "reset": "mode"
+   },
+   {
+    "name": "heat ms",
+    "reset": "mode"
+   },
+   {
+    "name": "pips",
+    "reset": "mode"
+   },
+   {
+    "name": "pot",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "cashed",
+    "reset": "mode"
+   },
+   {
+    "name": "volleys",
+    "reset": "mode"
+   },
+   {
+    "name": "carries",
+    "reset": "mode"
+   },
+   {
+    "name": "w1",
+    "reset": "mode"
+   },
+   {
+    "name": "w2",
+    "reset": "mode"
+   },
+   {
+    "name": "w3",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "charge"
+   },
+   {
+    "name": "lamps"
+   },
+   {
+    "name": "heat"
+   },
+   {
+    "name": "fire"
+   },
+   {
+    "name": "next"
+   },
+   {
+    "name": "grab"
+   },
+   {
+    "name": "weapon"
+   },
+   {
+    "name": "up"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "CHARGE IT: SHOOT ANY LIT SHOT",
+   "counters": [
+    {
+     "label": "CHARGE",
+     "sub": "PERCENT",
+     "value": null
+    },
+    {
+     "label": "POT",
+     "sub": "CASH AT SCOOP",
+     "value": {
+      "k": "var",
+      "name": "pot"
+     }
+    },
+    {
+     "label": "MULTIPLIER",
+     "sub": "CARRIED UP",
+     "value": {
+      "k": "var",
+      "name": "x"
+     }
+    }
+   ],
+   "timer": {
+    "on": true,
+    "label": "KIRYU",
+    "icon": "snowflake"
+   },
+   "gauge": {
+    "on": true,
+    "label": "CHARGE",
+    "kind": "segment",
+    "count": 10,
+    "color": "#8cdcff",
+    "value": {
+     "k": "var",
+     "name": "pips"
+    },
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "charge",
+    "file": "charge.mp4"
+   },
+   {
+    "name": "ready",
+    "file": "ready.mp4"
+   },
+   {
+    "name": "fire",
+    "file": "fire.mp4"
+   },
+   {
+    "name": "overheat",
+    "file": "overheat.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   },
+   {
+    "name": "arsenal",
+    "file": "arsenal.mp4"
+   },
+   {
+    "name": "volley",
+    "file": "volley.mp4"
+   },
+   {
+    "name": "grapple",
+    "file": "grapple.mp4"
+   },
+   {
+    "name": "cashout",
+    "file": "cashout.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "charge",
+    "file": "charge.wav",
+    "priority": 3
+   },
+   {
+    "name": "ready",
+    "file": "ready.wav",
+    "priority": 4
+   },
+   {
+    "name": "fire",
+    "file": "fire.wav",
+    "priority": 4
+   },
+   {
+    "name": "overheat",
+    "file": "overheat.wav",
+    "priority": 3
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   },
+   {
+    "name": "lost",
+    "file": "lost.wav",
+    "priority": 4
+   },
+   {
+    "name": "volley",
+    "file": "volley.wav",
+    "priority": 3
+   },
+   {
+    "name": "grapple",
+    "file": "grapple.wav",
+    "priority": 4
+   },
+   {
+    "name": "cashout",
+    "file": "cashout.wav",
+    "priority": 3
+   }
+  ],
+  "music": "music.wav",
+  "beds": [
+   {
+    "name": "grapple",
+    "file": "music_grapple.wav"
+   }
+  ],
+  "shows": [
+   {
+    "name": "Online",
+    "steps": [
+     {
+      "fx": "fade_in",
+      "ms": 700,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 282,
+      "y": 393
+     },
+     {
+      "fx": "strobe",
+      "ms": 300,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "xy",
+      "rate": 60,
+      "gi": "dark",
+      "x": 282,
+      "y": 393
+     },
+     {
+      "fx": "sweep_up",
+      "ms": 900,
+      "a": "#8cdcff",
+      "b": "#142846",
+      "at": "flippers",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "spiral_out",
+      "ms": 1100,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 282,
+      "y": 393
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 200
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Charge",
+    "steps": [
+     {
+      "fx": "implode",
+      "ms": 600,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "xy",
+      "rate": 0,
+      "gi": "keep",
+      "x": 89,
+      "y": 260
+     },
+     {
+      "fx": "pulse",
+      "ms": 400,
+      "a": "#8cdcff",
+      "b": "#142846",
+      "at": "xy",
+      "rate": 200,
+      "gi": "keep",
+      "x": 89,
+      "y": 260
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Absolute zero",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "center",
+      "rate": 40,
+      "gi": "flash"
+     },
+     {
+      "fx": "burst",
+      "ms": 900,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "xy",
+      "rate": 0,
+      "gi": "flash",
+      "x": 89,
+      "y": 260
+     },
+     {
+      "fx": "sparkle",
+      "ms": 1500,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 700,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Vent",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 500,
+      "a": "#ff2800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 70,
+      "gi": "flash"
+     },
+     {
+      "fx": "fire",
+      "ms": 800,
+      "a": "#ffc000",
+      "b": "#ff2800",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 89,
+      "y": 260
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#ff2800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Stage up",
+    "steps": [
+     {
+      "fx": "bounce",
+      "ms": 900,
+      "a": "#ffffff",
+      "b": "#142846",
+      "at": "center",
+      "rate": 300,
+      "gi": "dark"
+     },
+     {
+      "fx": "spin",
+      "ms": 900,
+      "a": "#8cdcff",
+      "b": "#142846",
+      "at": "center",
+      "rate": 80,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 150
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Volley",
+    "steps": [
+     {
+      "fx": "sweep_down",
+      "ms": 350,
+      "a": "#ff8000",
+      "b": "#000000",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "burst",
+      "ms": 500,
+      "a": "#ffc000",
+      "b": "#ff1010",
+      "at": "center",
+      "rate": 0,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#ff8000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Grapple",
+    "steps": [
+     {
+      "fx": "implode",
+      "ms": 700,
+      "a": "#ffffff",
+      "b": "#142846",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 282,
+      "y": 393
+     },
+     {
+      "fx": "chase",
+      "ms": 900,
+      "a": "#8cdcff",
+      "b": "#142846",
+      "at": "center",
+      "rate": 70,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Carry",
+    "steps": [
+     {
+      "fx": "sweep_rl",
+      "ms": 500,
+      "a": "#ffc000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "ripple",
+      "ms": 800,
+      "a": "#8cdcff",
+      "b": "#142846",
+      "at": "right",
+      "rate": 300,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Point blank",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 600,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "center",
+      "rate": 45,
+      "gi": "flash"
+     },
+     {
+      "fx": "implode",
+      "ms": 800,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "xy",
+      "rate": 0,
+      "gi": "flash",
+      "x": 89,
+      "y": 260
+     },
+     {
+      "fx": "burst",
+      "ms": 900,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "xy",
+      "rate": 0,
+      "gi": "flash",
+      "x": 89,
+      "y": 260
+     },
+     {
+      "fx": "sparkle",
+      "ms": 2000,
+      "a": "#ffffff",
+      "b": "#8cdcff",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "rainbow",
+      "ms": 1500,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 60,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 900,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 300
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Home",
+    "steps": [
+     {
+      "fx": "solid",
+      "ms": 500,
+      "a": "#ffffff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "spiral_in",
+      "ms": 1200,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 282,
+      "y": 393
+     },
+     {
+      "fx": "fade",
+      "ms": 900,
+      "a": "#8cdcff",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 400,
+      "x": 282,
+      "y": 393
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Down",
+    "steps": [
+     {
+      "fx": "sparkle",
+      "ms": 700,
+      "a": "#ff2800",
+      "b": "#142846",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 1200,
+      "a": "#142846",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 282,
+      "y": 393
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield ramp spinner",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "spins"
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 60
+        },
+        "b": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "var",
+          "name": "plays"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "spins",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "spins"
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 60
+        },
+        "b": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "var",
+          "name": "plays"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "start_mode"
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "spins"
+         },
+         "b": {
+          "k": "var",
+          "name": "note at"
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "SPINS TO KIRYU",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 60
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "plays"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "spins"
+           }
+          },
+          "sub": "SHOOT THE SPINNER",
+          "seconds": 3
+         },
+         {
+          "op": "set",
+          "var": "note at",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "spins"
+           },
+           "b": {
+            "k": "num",
+            "v": 10
+           }
+          }
+         }
+        ],
+        "else": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "spins",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "note at",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "change",
+      "var": "plays",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "stage",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "charge",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "mult",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "was",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "x",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "pips",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "pot",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "cashed",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "volleys",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "carries",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "w1",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "w2",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "w3",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "shield",
+      "where": "toward"
+     },
+     {
+      "op": "game_show",
+      "name": "Strobe burst"
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Online"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 800
+      },
+      "strength": "strong"
+     },
+     {
+      "op": "hud_award",
+      "text": "KIRYU ONLINE",
+      "value": null,
+      "sub": "CHARGE IT: SHOOT ANY LIT SHOT",
+      "seconds": 3
+     },
+     {
+      "op": "hud_counter",
+      "counter": 1,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "PERCENT",
+      "label": "CHARGE"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 2,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "CASH AT SCOOP"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "num",
+       "v": 1
+      },
+      "sub": "CARRIED UP"
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 750000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 15
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 750000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 15
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target left",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 750000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 8
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target center",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 750000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 8
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target right",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 750000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 8
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield ramp spinner",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 10000
+        }
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "charge"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "charge"
+       },
+       "b": {
+        "k": "num",
+        "v": 400
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "charge",
+        "by": {
+         "k": "var",
+         "name": "pct"
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "charge"
+         },
+         "b": {
+          "k": "num",
+          "v": 400
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "charge",
+          "value": {
+           "k": "num",
+           "v": 400
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "set",
+        "var": "mult",
+        "value": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "charge"
+         },
+         "b": {
+          "k": "num",
+          "v": 100
+         }
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "!=",
+         "a": {
+          "k": "var",
+          "name": "mult"
+         },
+         "b": {
+          "k": "var",
+          "name": "was"
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "was",
+          "value": {
+           "k": "var",
+           "name": "mult"
+          }
+         },
+         {
+          "op": "set",
+          "var": "x",
+          "value": {
+           "k": "var",
+           "name": "mult"
+          }
+         },
+         {
+          "op": "hud_counter",
+          "counter": 3,
+          "value": {
+           "k": "var",
+           "name": "x"
+          },
+          "sub": "CARRIED UP"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "mult"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "ABSOLUTE ZERO",
+            "value": null,
+            "sub": "FIRE: SHOOT THE GODZILLA TARGET",
+            "seconds": 3
+           },
+           {
+            "op": "sound",
+            "sound": "ready",
+            "fallback": ""
+           },
+           {
+            "op": "clip",
+            "clip": "ready",
+            "where": "behind"
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "mult"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "X2  -  200%",
+              "value": null,
+              "sub": "OVERHEATING: GODZILLA TARGET IN 20 S",
+              "seconds": 3
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "mult"
+             },
+             "b": {
+              "k": "num",
+              "v": 3
+             }
+            },
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "X3  -  300%",
+              "value": null,
+              "sub": "OVERHEATING: GODZILLA TARGET IN 20 S",
+              "seconds": 3
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "mult"
+             },
+             "b": {
+              "k": "num",
+              "v": 4
+             }
+            },
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "X4  -  400%",
+              "value": null,
+              "sub": "OVERHEATING: GODZILLA TARGET IN 20 S",
+              "seconds": 3
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "sound",
+            "sound": "charge",
+            "fallback": ""
+           },
+           {
+            "op": "clip",
+            "clip": "charge",
+            "where": "behind"
+           }
+          ]
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Charge"
+         },
+         {
+          "op": "shake",
+          "ms": {
+           "k": "num",
+           "v": 300
+          },
+          "strength": "soft"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "charge"
+           },
+           "b": {
+            "k": "num",
+            "v": 200
+           }
+          },
+          "then": [
+           {
+            "op": "timer_start",
+            "timer": "heat",
+            "ms": {
+             "k": "num",
+             "v": 20000
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "mult"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "sound",
+              "sound": "overheat",
+              "fallback": ""
+             },
+             {
+              "op": "clip",
+              "clip": "overheat",
+              "where": "behind"
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": null
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "lamps"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "charge"
+        },
+        "b": {
+         "k": "num",
+         "v": 400
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Left ramp",
+        "color": "#8cdcff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 500
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Right ramp",
+        "color": "#8cdcff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 500
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Building",
+        "color": "#8cdcff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 500
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Big loop",
+        "color": "#8cdcff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 500
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Maser target",
+        "color": "#8cdcff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 500
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Shield target left",
+        "color": "#8cdcff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 500
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Shield target center",
+        "color": "#8cdcff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 500
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Shield target right",
+        "color": "#8cdcff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 500
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Left ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Right ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Building"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Big loop"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Maser target"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Shield target left"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Shield target center"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Shield target right"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "mult"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "heat ms",
+        "value": {
+         "k": "num",
+         "v": 100
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "timer_left",
+          "timer": "heat"
+         },
+         "b": {
+          "k": "num",
+          "v": 3000
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "heat ms",
+          "value": {
+           "k": "num",
+           "v": 200
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "timer_left",
+          "timer": "heat"
+         },
+         "b": {
+          "k": "num",
+          "v": 4000
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "heat ms",
+          "value": {
+           "k": "num",
+           "v": 400
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "timer_left",
+          "timer": "heat"
+         },
+         "b": {
+          "k": "num",
+          "v": 8000
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "heat ms",
+          "value": {
+           "k": "num",
+           "v": 700
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "timer_left",
+          "timer": "heat"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Godzilla target",
+          "color": "#ff2800",
+          "pattern": "blink",
+          "rate": {
+           "k": "var",
+           "name": "heat ms"
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Action button",
+          "color": "#ff2800",
+          "pattern": "blink",
+          "rate": {
+           "k": "var",
+           "name": "heat ms"
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "light_shot",
+          "shot": "Godzilla target",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 120
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Action button",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 120
+          }
+         }
+        ]
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "stage"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": ">=",
+          "a": {
+           "k": "var",
+           "name": "carries"
+          },
+          "b": {
+           "k": "num",
+           "v": 3
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "lights_off",
+          "shot": "Action button"
+         },
+         {
+          "op": "light_shot",
+          "shot": "Godzilla target",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 60
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Godzilla target"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Action button"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "timer_left",
+          "timer": "heat"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "OVERHEATING: GODZILLA TARGET IN",
+          "value": {
+           "k": "op",
+           "op": "/",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "timer_left",
+             "timer": "heat"
+            },
+            "b": {
+             "k": "num",
+             "v": 999
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 1000
+           }
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "mult"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "FIRE: GODZILLA TARGET  -  OR CHARGE ON",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "CHARGE IT: SHOOT ANY LIT SHOT",
+            "value": null
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "var",
+         "name": "charge"
+        },
+        "sub": "PERCENT"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "charge"
+         },
+         "b": {
+          "k": "num",
+          "v": 400
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "pips",
+          "value": {
+           "k": "num",
+           "v": 10
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "set",
+          "var": "pips",
+          "value": {
+           "k": "op",
+           "op": "/",
+           "a": {
+            "k": "op",
+            "op": "-",
+            "a": {
+             "k": "var",
+             "name": "charge"
+            },
+            "b": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "var",
+              "name": "mult"
+             },
+             "b": {
+              "k": "num",
+              "v": 100
+             }
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 10
+           }
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "w1"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Maser target",
+          "color": "#ff1010",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Maser target"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "w2"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#ff8000",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "w3"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Building",
+          "color": "#ffffff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Building"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w1"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w2"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "w3"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT MASER TARGET, BIG LOOP, BUILDING",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w1"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w2"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "w3"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE MASER TARGET OR BIG LOOP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w1"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w2"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "w3"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE MASER TARGET OR BUILDING",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w1"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w2"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "w3"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE MASER TARGET",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w1"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w2"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "w3"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE BIG LOOP OR BUILDING",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w1"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w2"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "w3"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE BIG LOOP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w1"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "w2"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "w3"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE BUILDING",
+          "value": null
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "carries"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "lights_off",
+          "shot": "Mecha exit bottom"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "POINT BLANK: SHOOT THE GODZILLA TARGET",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "timer_left",
+            "timer": "grab"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "lights_off",
+            "shot": "Mecha exit bottom"
+           },
+           {
+            "op": "light_shot",
+            "shot": "Big loop",
+            "color": "#ffc000",
+            "pattern": "chase",
+            "rate": {
+             "k": "num",
+             "v": 80
+            }
+           },
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "CARRY HIM: SHOOT THE BIG LOOP",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "light_shot",
+            "shot": "Mecha exit bottom",
+            "color": "#8cdcff",
+            "pattern": "chase",
+            "rate": {
+             "k": "num",
+             "v": 120
+            }
+           },
+           {
+            "op": "lights_off",
+            "shot": "Big loop"
+           },
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "THE GRAPPLE: SHOOT THE MECHA LANE",
+            "value": null
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">",
+       "a": {
+        "k": "timer_left",
+        "timer": "heat"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "heat"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "charge",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "mult",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "was",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "set",
+        "var": "x",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "num",
+         "v": 1
+        },
+        "sub": "CARRIED UP"
+       },
+       {
+        "op": "hud_award",
+        "text": "KIRYU VENTS",
+        "value": null,
+        "sub": "CHARGE AGAIN: ANY LIT SHOT",
+        "seconds": 3
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Vent"
+       },
+       {
+        "op": "sound",
+        "sound": "overheat",
+        "fallback": ""
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 500
+        },
+        "strength": "medium"
+       },
+       {
+        "op": "clip",
+        "clip": "overheat",
+        "where": "behind"
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Action button",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "mult"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "fire",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Godzilla target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "mult"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "fire",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "carries"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "var",
+           "name": "pot"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 25000000
+          },
+          "b": {
+           "k": "var",
+           "name": "x"
+          }
+         }
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "won",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Point blank"
+       },
+       {
+        "op": "shake_game",
+        "shake": "multiball_start"
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "fire"
+    },
+    "do": [
+     {
+      "op": "score",
+      "points": {
+       "k": "num",
+       "v": 2000000
+      }
+     },
+     {
+      "op": "change",
+      "var": "pot",
+      "by": {
+       "k": "op",
+       "op": "*",
+       "a": {
+        "k": "num",
+        "v": 10000000
+       },
+       "b": {
+        "k": "var",
+        "name": "mult"
+       }
+      }
+     },
+     {
+      "op": "hud_counter",
+      "counter": 2,
+      "value": {
+       "k": "var",
+       "name": "pot"
+      },
+      "sub": "CASH AT SCOOP"
+     },
+     {
+      "op": "set",
+      "var": "x",
+      "value": {
+       "k": "var",
+       "name": "mult"
+      }
+     },
+     {
+      "op": "set",
+      "var": "pips",
+      "value": {
+       "k": "num",
+       "v": 10
+      }
+     },
+     {
+      "op": "timer_stop",
+      "timer": "heat"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "mult"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_award",
+        "text": "ABSOLUTE ZERO X1",
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 10000000
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "sub": "INTO THE POT",
+        "seconds": 4
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "mult"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "hud_award",
+        "text": "ABSOLUTE ZERO X2",
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 10000000
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "sub": "INTO THE POT",
+        "seconds": 4
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "mult"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_award",
+        "text": "ABSOLUTE ZERO X3",
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 10000000
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "sub": "INTO THE POT",
+        "seconds": 4
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "mult"
+       },
+       "b": {
+        "k": "num",
+        "v": 4
+       }
+      },
+      "then": [
+       {
+        "op": "hud_award",
+        "text": "ABSOLUTE ZERO X4",
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 10000000
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "sub": "INTO THE POT",
+        "seconds": 4
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Absolute zero"
+     },
+     {
+      "op": "sound",
+      "sound": "fire",
+      "fallback": ""
+     },
+     {
+      "op": "clip",
+      "clip": "fire",
+      "where": "full"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 600
+      },
+      "strength": "hard"
+     },
+     {
+      "op": "timer_start",
+      "timer": "up",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Maser target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 750000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 10
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "w1"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "w1",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "weapon",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Big loop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 750000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 15
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "w2"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "w2",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "weapon",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "timer_left",
+         "timer": "grab"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_stop",
+        "timer": "grab"
+       },
+       {
+        "op": "timer_start",
+        "timer": "weapon",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 750000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 15
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "charge",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "w3"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "w3",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "pct",
+        "value": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "weapon",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "weapon"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "volleys",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 1000000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "change",
+        "var": "pot",
+        "by": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 5000000
+          },
+          "b": {
+           "k": "var",
+           "name": "x"
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "volleys"
+         }
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "CASH AT SCOOP"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "var",
+         "name": "volleys"
+        },
+        "sub": "OF 3"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "pct"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "MASER CANNONS",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 5000000
+            },
+            "b": {
+             "k": "var",
+             "name": "x"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "volleys"
+           }
+          },
+          "sub": "INTO THE POT",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "pct"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "MISSILE VOLLEY",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 5000000
+            },
+            "b": {
+             "k": "var",
+             "name": "x"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "volleys"
+           }
+          },
+          "sub": "INTO THE POT",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "pct"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "WRIST BLADE",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 5000000
+            },
+            "b": {
+             "k": "var",
+             "name": "x"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "volleys"
+           }
+          },
+          "sub": "INTO THE POT",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "clip",
+        "clip": "volley",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "volley",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Volley"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 300
+        },
+        "strength": "medium"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "volleys"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "timer_start",
+          "timer": "up",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "carries",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 2000000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "change",
+        "var": "pot",
+        "by": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 8000000
+          },
+          "b": {
+           "k": "var",
+           "name": "x"
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "carries"
+         }
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "CASH AT SCOOP"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "var",
+         "name": "carries"
+        },
+        "sub": "OF 3"
+       },
+       {
+        "op": "hud_award",
+        "text": "OUT TO SEA",
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 8000000
+          },
+          "b": {
+           "k": "var",
+           "name": "x"
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "carries"
+         }
+        },
+        "sub": "INTO THE POT",
+        "seconds": 3
+       },
+       {
+        "op": "clip",
+        "clip": "charge",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "fire",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Carry"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 400
+        },
+        "strength": "hard"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Mecha exit bottom",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "var",
+          "name": "carries"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "timer_left",
+         "timer": "grab"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "grab",
+        "ms": {
+         "k": "num",
+         "v": 20000
+        }
+       },
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
+        "op": "hud_award",
+        "text": "KIRYU GRABS HIM",
+        "value": null,
+        "sub": "CARRY HIM: THE BIG LOOP",
+        "seconds": 3
+       },
+       {
+        "op": "clip",
+        "clip": "grapple",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "grapple",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Grapple"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 500
+        },
+        "strength": "strong"
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "grab"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_award",
+        "text": "HE BREAKS FREE",
+        "value": null,
+        "sub": "GRAB HIM AGAIN: THE MECHA LANE",
+        "seconds": 3
+       },
+       {
+        "op": "sound",
+        "sound": "overheat",
+        "fallback": ""
+       },
+       {
+        "op": "timer_start",
+        "timer": "lamps",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "up"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "stage",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 50
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "OF 3",
+        "label": "CARRIES"
+       }
+      ],
+      "else": [
+       {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 40
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "OF 3",
+        "label": "WEAPONS"
+       }
+      ]
+     },
+     {
+      "op": "light_shot",
+      "shot": "Right scoop",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "SELECT CITY",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "SCOOP BB-BATTLE",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "SCOOP BB-GODZILLA PWR UP",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "SCOOP BB-SUMMON ALLY",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "scoop_hold",
+      "ms": {
+       "k": "num",
+       "v": 2500
+      },
+      "which": "next"
+     },
+     {
+      "op": "timer_start",
+      "timer": "lamps",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "next",
+      "ms": {
+       "k": "num",
+       "v": 3000
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "next"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "cashed"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": [
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Stage up"
+       },
+       {
+        "op": "shake_game",
+        "shake": "jackpot"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "volleys"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "THE ARSENAL",
+            "value": null,
+            "sub": "MASER TARGET, BIG LOOP, BUILDING",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "clip",
+          "clip": "arsenal",
+          "where": "behind"
+         },
+         {
+          "op": "sound",
+          "sound": "volley",
+          "fallback": ""
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "carries"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "timer_left",
+             "timer": "grab"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "THE GRAPPLE",
+            "value": null,
+            "sub": "GRAB HIM AT THE MECHA LANE",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "clip",
+          "clip": "grapple",
+          "where": "behind"
+         },
+         {
+          "op": "sound",
+          "sound": "grapple",
+          "fallback": ""
+         },
+         {
+          "op": "music",
+          "bed": "grapple"
+         }
+        ],
+        "else": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right scoop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "cashed",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "pot"
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "CASHED OUT",
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "BACK TO BASE",
+        "seconds": 4
+       },
+       {
+        "op": "clip",
+        "clip": "cashout",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "cashout",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Home"
+       },
+       {
+        "op": "shake_game",
+        "shake": "big_hit"
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 1500
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "seconds_left",
+     "seconds": 10
+    },
+    "do": [
+     {
+      "op": "callout",
+      "role": "ten_seconds"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": ">=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Right scoop",
+        "color": "#ffffff",
+        "pattern": "hurry"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "timer_stop",
+      "timer": "charge"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "lamps"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "heat"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "fire"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "next"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "grab"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "weapon"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "up"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "secs_left"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "var",
+         "name": "mult"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 10000000
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "fire",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "fire",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Absolute zero"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "won"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "KIRYU WINS",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "ABSOLUTE ZERO POINT BLANK",
+        "value": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "won"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "KIRYU FIRES ON ITS OWN",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "ABSOLUTE ZERO X1",
+        "value": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "cashed"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "KIRYU RETURNS TO BASE",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "THE POT IS CASHED OUT",
+        "value": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "KIRYU IS DOWN",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "A QUARTER OF THE POT",
+        "value": null
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "pot"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "lost",
+        "fallback": "time_up"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Down"
+       },
+       {
+        "op": "shake_game",
+        "shake": "rumble"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "set",
+      "var": "stage",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "game_show",
+      "name": "Blue fade"
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "amg02",
+    "from": 3741.25,
+    "length": 4.0,
+    "crop": "fill",
+    "what": "Kiryu's face at night against an orange sky, its eyes light up yellow and the head turns as it comes online, 1:02:21.2."
+   },
+   "loop": {
+    "film": "amg02",
+    "from": 2722.0,
+    "length": 9.0,
+    "crop": "fill",
+    "what": "Kiryu's head in profile against the sunset sky, red eye glowing, almost still, 0:45:22.0."
+   },
+   "charge": {
+    "film": "amg02",
+    "from": 4139.0,
+    "length": 3.7,
+    "crop": "fill",
+    "what": "Kiryu faces the camera in the night city as the Absolute Zero cannon in its chest glows orange then blue white, 1:08:59.0."
+   },
+   "ready": {
+    "film": "amg02",
+    "from": 2472.0,
+    "length": 3.6,
+    "crop": "fill",
+    "what": "Close-up of Kiryu's twin shoulder cannons, the camera rising to its head against a blue sky, 0:41:12.0."
+   },
+   "fire": {
+    "film": "amg02",
+    "from": 4149.95,
+    "length": 3.5,
+    "crop": "fill",
+    "what": "A run of quick shots: the Absolute Zero beam fires and streaks blue white across the night city, 1:09:09.9."
+   },
+   "overheat": {
+    "film": "amg02",
+    "from": 2516.9,
+    "length": 3.6,
+    "crop": "fill",
+    "what": "Kiryu stands engulfed in fireballs and billowing smoke, 0:41:56.9."
+   },
+   "won": {
+    "film": "amg02",
+    "from": 4742.2,
+    "length": 5.8,
+    "crop": "fill",
+    "what": "Wounded Godzilla stands in the frozen sea at dusk as ice falls around him and he roars in pain, 1:19:02.2."
+   },
+   "lost": {
+    "film": "amg02",
+    "from": 2731.0,
+    "length": 4.2,
+    "crop": "fill",
+    "what": "Close on Kiryu's head at sunset as its red eye fades out and the machine goes dead, 0:45:31.0."
+   },
+   "arsenal": {
+    "film": "amg02",
+    "from": 3792.1,
+    "length": 3.1,
+    "crop": "fill",
+    "what": "Kiryu stands in the night city and opens fire, red tracer rounds streaming from its arm guns, one shot, 1:03:12.1."
+   },
+   "volley": {
+    "film": "amg02",
+    "from": 3795.4,
+    "length": 3.0,
+    "crop": "fill",
+    "what": "A run of quick shots: Kiryu's tracers and missiles strike Godzilla in bursts of fire among the buildings, 1:03:15.4."
+   },
+   "grapple": {
+    "film": "amg02",
+    "from": 4679.45,
+    "length": 2.6,
+    "crop": "fill",
+    "what": "A run of two shots: Kiryu clutches Godzilla from behind, then its legs and back thrusters blaze as it lifts him, 1:17:59.4."
+   },
+   "cashout": {
+    "film": "amg02",
+    "from": 4927.5,
+    "length": 4.5,
+    "crop": "fill",
+    "what": "Kiryu stands still against a pink sunset sky, back at rest after the battle, one shot, 1:22:07.5."
+   }
+  },
+  "music": {
+   "film": "amg02",
+   "from": 5067.248,
+   "length": 11.33,
+   "what": "End-credits orchestral score by Michiru Oshima, a repeating phrase over a steady pulse with no dialogue or effects, 1:24:27.2."
+  },
+  "calls": {
+   "charge": {
+    "film": "amg02",
+    "from": 4660.2,
+    "length": 1.95,
+    "what": "A rising rush of energy as Kiryu's chest cannon charges at dusk, peaking and falling away, 1:17:40.2.",
+    "priority": 3
+   },
+   "ready": {
+    "film": "amg02",
+    "from": 3802.4,
+    "length": 2.1,
+    "what": "Kiryu's mechanical blast with a high metallic whine as it squares up to Godzilla at night, 1:03:22.4.",
+    "priority": 4
+   },
+   "fire": {
+    "film": "amg02",
+    "from": 4149.1,
+    "length": 2.75,
+    "what": "The Absolute Zero cannon fires, a hissing blast and a second burst as the beam crosses the city, 1:09:09.1.",
+    "priority": 4
+   },
+   "overheat": {
+    "film": "amg02",
+    "from": 4155.2,
+    "length": 2.15,
+    "what": "Crackling electric discharge with a falling whine after the Absolute Zero shot, 1:09:15.2.",
+    "priority": 3
+   },
+   "won": {
+    "film": "amg02",
+    "from": 4697.4,
+    "length": 2.35,
+    "what": "A rushing whoosh and the huge booming eruption as the Absolute Zero blast freezes the sea, 1:18:17.4.",
+    "priority": 4
+   },
+   "lost": {
+    "film": "amg02",
+    "from": 2398.3,
+    "length": 2.3,
+    "what": "Godzilla's roar, the cry that sends Kiryu out of control, 0:39:58.3.",
+    "priority": 4
+   },
+   "volley": {
+    "film": "amg02",
+    "from": 3788.9,
+    "length": 1.6,
+    "priority": 3,
+    "what": "A burst of gunfire and blasts as Kiryu's rounds hit Godzilla in the smoke, under the score, 1:03:08.9."
+   },
+   "grapple": {
+    "film": "amg02",
+    "from": 4472.15,
+    "length": 2.9,
+    "priority": 4,
+    "what": "Kiryu's long mechanical roar rising out of the smoke, ending before the next line of dialogue, 1:14:32.15."
+   },
+   "cashout": {
+    "film": "amg02",
+    "from": 4683.95,
+    "length": 1.15,
+    "priority": 3,
+    "what": "A rushing roar of Kiryu's thrusters as it carries Godzilla off, ending on the film's own cut, 1:18:03.95."
+   }
+  },
+  "beds": {
+   "grapple": {
+    "film": "amg02",
+    "from": 2708.937,
+    "length": 10.22,
+    "what": "Michiru Oshima's battle score over Kiryu's first sortie at 0:45:08.9, a 10.22 s loop found by the bed finder (seam chroma 0.79, self-check PASS)."
+   }
+  }
+ }
+}

@@ -138,7 +138,7 @@ function useEndScroll(ref, value) {
 // project's own cards back.
 function Which({ s }) {
   const w = s.which;
-  if (!w) return null;
+  if (!w || s.not_card) return null;
   const proj = html`<b>${w.project}</b>`;
   const ours = w.kind === "source" || w.kind === "build";
   let text;
@@ -184,6 +184,9 @@ function CardSource({ s }) {
       <${Button} kind="ghost" onClick=${() => call("emulate.open_cache")}
         title="Shows and manages the card cache: the copies of each card on the WSL disk that later boots start from. Deleting frees the space now; the card re-copies on its next boot.">Cache…<//>
     </div>
+    ${s.not_card ? html`<div class="note emu-which warn" role="alert">
+      <span class="small grow emu-which-t"><span class="emu-which-dot warn-ink">●</span> ${s.not_card}</span>
+    </div>` : null}
     <${Which} s=${s} />
     <div class="grid2 emu-machine">
       <div class="stack emu-lblf"><label class="lbl" for="emu-country">Country (DIP switches)</label>

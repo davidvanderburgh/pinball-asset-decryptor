@@ -43,6 +43,13 @@ def _require_engine():
 _CARD_CLASS = re.compile(r"(?<![\w.\\/-])(8|16|32)G(?![\w\\/-]|\.\w)")
 
 
+def _not_a_card(path, words):
+    """A Detect refusal's words: the plain ones when *path* is a disk tool's
+    backup of a card (a Macrium ``.mrimgx``, PAD-659), else *words*."""
+    from ...core.backup_image import reason
+    return reason(path) or words
+
+
 def card_class_words(text):
     """*text*, a card_size.py or engine sentence about the SD card size a
     build is for, with each card class code ("16G") in the words the Write
@@ -338,12 +345,12 @@ class SternExtractPipeline(BasePipeline):
         self._log("Detecting Stern Spike card...", "info")
         key = detect_game(self.input_path)
         if key is None:
-            raise PipelineError(
-                "Detect",
+            raise PipelineError("Detect", _not_a_card(
+                self.input_path,
                 "Not a recognized Stern Spike card image (need a raw .img/.bin "
                 "with the Spike partition layout).\n\n"
                 "If the file was just copied here, the copy may still have "
-                "been in progress — wait for it to finish, then try again.")
+                "been in progress — wait for it to finish, then try again."))
         self._log(f"Detected: {display_for_key(key, self.input_path)}", "success")
         self._check_cancel()
 
@@ -446,7 +453,8 @@ class SternWritePipeline(BasePipeline):
         self._set_phase(0)  # Detect
         key = detect_game(self.original_path)
         if key is None:
-            raise PipelineError("Detect", "Original is not a Spike card image.")
+            raise PipelineError("Detect", _not_a_card(
+                self.original_path, "Original is not a Spike card image."))
         # A multi-boot original builds a multi-boot card with its FIRST image
         # changed and the rest copied through (PAD-122) — say so in the log
         # the user keeps, not only in the confirm they clicked past.
@@ -769,12 +777,12 @@ class Spike1ExtractPipeline(BasePipeline):
         self._log("Detecting Stern Spike 1 card...", "info")
         key = detect_spike1_game(self.input_path)
         if key is None:
-            raise PipelineError(
-                "Detect",
+            raise PipelineError("Detect", _not_a_card(
+                self.input_path,
                 "Not a recognized Stern Spike 1 card image (need a raw "
                 ".iso/.img with the Spike 1 partition layout).\n\n"
                 "If the file was just copied here, the copy may still have "
-                "been in progress — wait for it to finish, then try again.")
+                "been in progress — wait for it to finish, then try again."))
         self._log("Detected: %s"
                   % spike1_display_for_key(key, self.input_path), "success")
         self._check_cancel()
@@ -841,8 +849,8 @@ class Spike1WritePipeline(BasePipeline):
 
         self._set_phase(0)  # Detect
         if detect_spike1_game(self.original_path) is None:
-            raise PipelineError(
-                "Detect", "Original is not a Spike 1 card image.")
+            raise PipelineError("Detect", _not_a_card(
+                self.original_path, "Original is not a Spike 1 card image."))
         self._check_cancel()
 
         self._set_phase(1)  # Stage (diff vs baseline happens inside)

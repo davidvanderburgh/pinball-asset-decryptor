@@ -1215,6 +1215,57 @@ def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, 
     assert "END lamps held 0, display priority 0" in out
 
 
+def _hud_media_prog():
+    p = _media_prog()
+    p["hud"] = maser_hud()["hud"]
+    p["vars"] = [{"name": "step"}, {"name": "mult"}, {"name": "barrages"}]
+    return p
+
+
+def test_the_loop_stays_behind_the_total_it_holds(tmp_path, monkeypatch):
+    """PAD-658 (run meltdown_r4, md_16_end: MELTDOWN TOTAL over the live city's RAID and TANKS labels): the mode's loop
+    stays behind its TOTAL while the TOTAL holds the screen, and goes with it."""
+    _cc()
+    p = _hud_media_prog()
+    monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
+    out = play(tmp_path, p, "shot", "Building", "secs", 22)
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert 0 <= _at(out, "BACKDROP KEPT behind TEST MODE's ending") - end <= 20
+    off = _at(out, r"BACKDROP OFF \(its ending is over\)")
+    assert 9900 <= off - end <= 10100                    # the won clip full screen: the TOTAL held 7 s more
+    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Hud 0", out, re.M)]
+    assert any(abs(t - off) <= 40 for t in hidden), (off, hidden)
+
+
+def test_a_drain_takes_the_loop_with_its_total(tmp_path, monkeypatch):
+    _cc()
+    p = _hud_media_prog()
+    monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
+    out = play(tmp_path, p, "shot", "Building", "secs", 2, "ball_end", "secs", 8)
+    on = _at(out, "BALL END goes on")
+    assert abs(_at(out, "BACKDROP OFF") - on) <= 40
+
+
+def test_a_note_shows_over_the_modes_loop(tmp_path, monkeypatch):
+    """PAD-658 (run bedfix_pro_r1, bf_ready_c: HE JOINS THE NEXT BATTLE over the live city's TANKS 0/10): a note shows
+    over the mode's own loop, as the game's feedback screens show over a clip of theirs; it goes with the note, and a
+    start on it keeps it as the run's own."""
+    _cc()
+    p = _hud_media_prog()
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "hud_award", "text": "READY", "value": None, "sub": "", "seconds": 2}]})
+    assert "#define NOTE_LOOP \"loop\"" in BM.to_c(p, "blk")
+    assert "note_loop" not in BM.to_c(_media_prog(), "blk")            # no HUD: no note
+    monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
+    out = play(tmp_path, p, "shot", "Big loop", "secs", 4)
+    assert "own clip loop (PadMode_blk_Loop) behind its note" in out
+    assert 1900 <= _at(out, "BACKDROP OFF") - _at(out, "BACKDROP PadMode_blk_Loop") <= 2100
+    # the mode started while its note shows: the loop is its run's now, never taken away between
+    out = play(tmp_path, p, "shot", "Big loop", "secs", 0.5, "shot", "Building", "secs", 3)
+    assert "BACKDROP PadMode_blk_Loop" in out and "BACKDROP OFF" not in out
+    assert "[TEST MODE] START" in out
+
+
 def test_a_hud_mode_that_gives_way_takes_its_hud_down_when_a_game_mode_begins(tmp_path):
     # PAD-373's give_way beside the HUD: one of the game's modes beginning ends it at once, its HUD
     # and display given back in the same tick (the kit's kit_game_began), no TOTAL left over the game's

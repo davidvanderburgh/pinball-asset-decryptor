@@ -52,6 +52,8 @@ static void bd_field(unsigned obj, unsigned v) { printf("FIELD written\n"); }
 static int disp_clip_ours;
 static int bd_v2 = 1;
 static int ck_ours, ck_last_ours;                                /* PAD-530: our own asks of the surface */
+struct pm_mode { const char *name; };
+static const struct pm_mode *running, *current;                 /* PAD-658: whose the backdrop is */
 """
 
 MAIN = r"""
@@ -83,7 +85,8 @@ int main(void)
 
 
 def _bd_struct(src):
-    m = re.search(r"static struct \{\n    char loop\[96\], once\[96\];.*?\} bd;", src, re.S)
+    m = re.search(r"static struct \{\n    char loop\[96\], once\[96\];.*?\} bd;\n(?:static [^\n]*\bbd_(?:owner|lingers);[^\n]*\n)*",
+                  src, re.S)
     assert m
     return m.group(0)
 

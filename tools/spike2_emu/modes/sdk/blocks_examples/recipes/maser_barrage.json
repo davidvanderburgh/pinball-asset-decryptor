@@ -41,6 +41,41 @@
    "length": 5.0,
    "crop": "fill",
    "what": "Tanks blasted by lightning amid a sea of fire (the attacker is Megalon, not Godzilla)"
+  },
+  "crossfire": {
+   "film": "mg93",
+   "from": 2541.0,
+   "length": 5.1,
+   "crop": "fill",
+   "what": "A column of JSDF tanks rolls past through the dust, a Maser tank with its glowing emitter coming through in the middle of the line, at 0:42:21."
+  },
+  "volley": {
+   "film": "gvkg91",
+   "from": 4914.6,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "Run of shots at night: Maser tanks in a city street fire a volley of blue lightning beams, then a Maser dish fires over the soldiers and the beams burst on Godzilla by the burning TV tower, at 1:21:54."
+  },
+  "final": {
+   "film": "mg93",
+   "from": 2671.0,
+   "length": 4.3,
+   "crop": "fill",
+   "what": "Godzilla walks straight toward the camera through billowing smoke above the city, front on and in the sights, at 0:44:31."
+  },
+  "direct": {
+   "film": "sos03",
+   "from": 2229.45,
+   "length": 2.0,
+   "crop": "fill",
+   "what": "Fire bursts on Godzilla's chest, then Maser lightning beams strike him in a cloud of smoke and sparks as he rears up, at 0:37:09."
+  },
+  "cashout": {
+   "film": "des95",
+   "from": 3518.0,
+   "length": 5.5,
+   "crop": "fill",
+   "what": "A column of tanks rolls away down a highway at night as the camera rises over them toward the city lights, at 0:58:38."
   }
  },
  "music": {
@@ -61,6 +96,42 @@
    "from": 2607.4,
    "length": 1.8,
    "what": "Megalon's cry as it shrugs the attack off (harmonic roar cpp 0.34)"
+  },
+  "volley": {
+   "film": "des95",
+   "from": 5701.2,
+   "length": 1.55,
+   "what": "Two crackling, hissing blasts of a Maser cannon firing its blue beam into the night, at 1:35:01.",
+   "priority": 4
+  },
+  "aim": {
+   "film": "bio89",
+   "from": 5062.3,
+   "length": 1.5,
+   "what": "A rising electric whine as a Maser cannon's coils glow orange, charging up in the rain, at 1:24:22.",
+   "priority": 3
+  },
+  "direct": {
+   "film": "mg93",
+   "from": 2650.05,
+   "length": 3.9,
+   "what": "Godzilla roars in close-up as he rears up in the smoke after the barrage hits him, at 0:44:10.",
+   "priority": 4
+  },
+  "cashout": {
+   "film": "des95",
+   "from": 3493.35,
+   "length": 2.1,
+   "what": "The heavy grinding clank of tank treads and engines as the big Maser vehicles roll out, at 0:58:13.",
+   "priority": 4
+  }
+ },
+ "beds": {
+  "final": {
+   "film": "des95",
+   "from": 4605.67,
+   "length": 11.15,
+   "what": "Akira Ifukube's brisk military march as the Super X3 sorties from its hangar, no dialogue, at 1:16:45."
   }
  }
 }

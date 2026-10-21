@@ -1,39 +1,55 @@
-"""KING GHIDORAH (PAD-658): the C example ghidorah_heads.c rebuilt in blocks - a boss battle with health.
+"""KING GHIDORAH (PAD-658): the C example ghidorah_heads.c rebuilt in blocks, then (round 2) three stages deep.
 
-Ghidorah (1964). Each head is two shots with 3 health; only the LIT head takes damage, the lit head turns every
-8 s, and a wounded head left alone grows back. Sever all three and the Maser gets one shot at the body.
+Ghidorah (1964). Each head is two shots with 3 health; only the LIT head takes damage, the lit head turns, and a
+wounded head left alone grows back. Sever all three and Ghidorah takes to the air; ground him by his wings, then the
+Maser gets one shot at the body. Round 2 (David: "multi-stage like what we did here"), after Lyman Sheats: a POT built
+through the stages, cashed out at the right scoop once a stage is done, each start costing more and playing harder,
+and failing still pays a quarter of the pot.
 
-- START: the three powerline targets (any order) in one ball; once a ball, twice a game per player. It waits out
-  one of the game's battles or a multiball: the next powerline hit after it starts it.
-- HEADS: LEFT = Left ramp (2) or Powerline left (1); MIDDLE = Building (2) or Powerline center (1); RIGHT = Right
-  ramp (2) or Powerline right (1). The lit head: 1M a point of damage; another head: a glancing blow, 250K.
-- REGROW: a wounded head that takes no damage for 10 s grows 1 back (and again every 10 s).
-- SEVER: 5M x heads severed so far, +10 s on the clock; the lit head moves on at once.
-- CLOCK: 50 s (+10 s a head). FINAL BLOW: all three severed, the Maser target is lit for 15 s: 20M + 1M a second
-  left. The clock or the final blow running out: GHIDORAH ESCAPES.
-- INSERTS: the lit head's two shots blink gold (slow at 3, faster at 2, fast at 1); a wounded head that is not lit
-  pulses green; MASER and MASER READY flash white in the final blow (faster in its last 5 s).
+- START: powerline hits in one ball: each of the three once the first time (3), twice the second (6), three times
+  the third (9). Once a ball per player. It waits out one of the game's battles or a multiball: the next powerline
+  hit after it starts it.
+- STAGE 1, THE HEADS (the C's battle): LEFT = Left ramp (2) or Powerline left (1); MIDDLE = Building (2) or
+  Powerline center (1); RIGHT = Right ramp (2) or Powerline right (1). The lit head: 1M a point of damage; another
+  head: a glancing blow, 250K. The lit head turns every 8 s (6.5 s the second time, 5 s the third); a wounded head
+  that takes no damage for 10 s (8 s, 6 s) grows 1 back, and again. SEVER: 5M x heads severed so far into the pot
+  (7.5M the second time, 10M the third), +10 s on the clock, the lit head moves on at once. 50 s.
+- STAGE 2, THE WINGS: Ghidorah takes to the air. The Big loop and the Mecha lane are his wings: hit one, then the
+  other (the same one twice does nothing): each wing hit puts 5M x (hits + 1) into the pot (the second-time value
+  likewise). 4 wing hits ground him (5 the second time, 6 the third). 30 s.
+- STAGE 3, THE FINAL BLOW: the Maser target for 15 s (its own music): the SUPER JACKPOT, 20M + 1M a second left,
+  and the pot twice over. The clock running out: GHIDORAH ESCAPES.
+- CASH OUT: once the heads are severed the right scoop chases white: it pays the pot and he flees. The clock or a
+  drain pays a quarter of the pot.
+- INSERTS: stage 1 the C's (the lit head's two shots blink gold, slow at 3, faster at 2, fast at 1; a wounded head
+  that is not lit pulses green); stage 2 the wing to hit chases gold (both at first); stage 3 MASER and MASER READY
+  chase and flash white (faster in its last 5 s).
 """
-from blk import (AND, OR, SECS_LEFT, a_show, add, add_time, award, callout, change, clip, clips, end, eq,
-                 game_show, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, lt, mul, off,
-                 off_insert, on_end, on_shot, on_start, on_timer, score, secs_left, set_, set_time, show, sound,
-                 sounds, start, step, timer_start, timer_stop, var)
+from blk import (AND, OR, SECS_LEFT, a_show, add, add_time, award, beds, callout, change, clip, clips, div, end, eq,
+                 every, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, lt, mul, music,
+                 ne, off, off_insert, on_end, on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake,
+                 shake_game, show, sound, sounds, start, step, sub, timer_start, timer_stop, var)
+import pack
 
 SLUG, NAME = "ghidorah_heads", "KING GHIDORAH"
 GOLD, GREEN, WHITE = "#ffaa00", "#00ff3c", "#ffffff"           # the kit's KIT_GOLD, KIT_GREEN, KIT_WHITE
-GHID_GOLD, GHID_EMBER = "#ffaf00", "#5a1e00"
-#: each head: its name, its big shot (2 damage), its powerline (1), its health, its regrowth timer, its start light
+GHID_GOLD, GHID_EMBER, BOLT = "#ffaf00", "#5a1e00", "#fff0a0"
+#: each head: its name, its big shot (2 damage), its powerline (1), its health, its regrowth timer, its start count
 HEADS = (("LEFT HEAD", "Left ramp", "Powerline left", "hp l", "regrow l", "pl left"),
          ("MIDDLE HEAD", "Building", "Powerline center", "hp m", "regrow m", "pl center"),
          ("RIGHT HEAD", "Right ramp", "Powerline right", "hp r", "regrow r", "pl right"))
+#: stage 2: his wings, (the shot, its words, the insert beside it)
+WINGS = (("Big loop", "THE BIG LOOP", ""), ("Mecha exit bottom", "THE MECHA LANE", "MECHA LANE"))
 FINAL_SHOT, FINAL_INSERT = "Maser target", "MASER READY"
-TIMERS = ("turn", "regrow l", "regrow m", "regrow r", "sever", "glance", "next", "lights")
-POWERLINES = add(add(var("pl left"), var("pl center")), var("pl right"))
+TIMERS = ("turn", "regrow l", "regrow m", "regrow r", "hit", "lights", "next")
+NEED = pack.need(3, "starts")                      # powerline hits: 3, then 6, then 9
+WINGS_NEED = add(3, var("starts"))                 # wing hits: 4, then 5, then 6
 SUPER = add(20000000, mul(1000000, SECS_LEFT))
-BUILDING_XY, MASER_XY = (123, 202), (51, 417)       # the port's lamp places: BUILDING, MASER
+BUILDING_XY, MASER_XY = (123, 202), (51, 417)      # the port's lamp places: BUILDING, MASER
+LOOP_XY, LANE_XY = (195, 251), (282, 393)          # BIG LOOP, MECHA LANE
 
 SHOWS = [
-    # the C's own shows, its fallback where the card has no "Strobe burst" / "Colour fade" (Godzilla has both)
+    # the C's own shows (its fallback where a card has no "Strobe burst" / "Colour fade"), now run for its moments
     a_show("Ghidorah start",
            step("bolts", 1500, GHID_GOLD, "#000000", "center", rate=190, gi="dark"),        # gravity beams strike
            step("strobe", 500, WHITE, GHID_GOLD, "center", rate=60, gi="flash"),
@@ -49,6 +65,35 @@ SHOWS = [
            step("sweep_up", 900, GHID_GOLD, "#000000", "center", gi="dark"),
            step("sparkle", 700, GHID_GOLD, "#000000", "center", gi="dark"),
            step("fade", 400, GHID_EMBER, "#000000", "center")),
+    # round 2: one for every moment
+    a_show("Sever",
+           step("strobe", 250, WHITE, GHID_GOLD, "center", rate=45, gi="flash"),
+           step("implode", 600, GHID_GOLD, GHID_EMBER, "xy", gi="dark", x=BUILDING_XY[0], y=BUILDING_XY[1]),
+           step("burst", 500, WHITE, GHID_GOLD, "xy", gi="dark", x=BUILDING_XY[0], y=BUILDING_XY[1]),
+           step("fade", 300, GHID_GOLD, "#000000", "center")),
+    a_show("Regrow",
+           step("fade_in", 500, GREEN, "#000000", "xy", gi="keep", x=BUILDING_XY[0], y=BUILDING_XY[1]),
+           step("pulse", 700, GREEN, "#002008", "xy", rate=350, gi="keep", x=BUILDING_XY[0], y=BUILDING_XY[1]),
+           step("fade", 300, GREEN, "#000000", "center")),
+    a_show("Wings",
+           step("sweep_lr", 400, GHID_GOLD, "#000000", "top", gi="dark"),
+           step("sweep_rl", 400, GHID_GOLD, "#000000", "top", gi="dark"),
+           step("bounce", 1400, BOLT, GHID_EMBER, "top", gi="dark"),
+           step("spiral_out", 900, GHID_GOLD, GHID_EMBER, "top", gi="dark", blend=150),
+           step("fade", 400, GHID_GOLD, "#000000", "center")),
+    a_show("Wing hit",
+           step("ripple", 600, BOLT, GHID_GOLD, "xy", rate=200, gi="flash", x=LOOP_XY[0], y=LOOP_XY[1]),
+           step("sparkle", 500, GHID_GOLD, "#000000", "xy", gi="dark", x=LANE_XY[0], y=LANE_XY[1]),
+           step("fade", 300, GHID_GOLD, "#000000", "center")),
+    a_show("Final blow",
+           step("sweep_down", 600, GHID_GOLD, GHID_EMBER, "center", gi="dark"),             # he crashes down
+           step("fire", 900, GHID_GOLD, "#ff3000", "flippers", gi="dark"),
+           step("spiral_in", 1200, WHITE, "#0050ff", "xy", gi="dark", x=MASER_XY[0], y=MASER_XY[1]),
+           step("fade", 400, "#0050ff", "#000000", "center", blend=150)),
+    a_show("Cash out",
+           step("solid", 500, GHID_GOLD, "#000000", "right", gi="dark"),
+           step("spin", 1400, GHID_GOLD, GHID_EMBER, "center", rate=120, gi="dark"),
+           step("fade", 900, GHID_GOLD, "#000000", "center", blend=400)),
 ]
 
 
@@ -57,17 +102,21 @@ def by_lit(make):
     return [if_(eq("lit", 1), make(0), [if_(eq("lit", 2), make(1), make(2))])]
 
 
+def pot_up(points):
+    return [change("pot", points)]
+
+
 def head_hit(i, damage):
     """A hit on head ``i`` worth ``damage``: the lit head is hurt (or severed), another one is a glancing blow."""
     name, _big, _small, hp, regrow, _pl = HEADS[i]
-    return [if_(AND(eq("phase", 0), gt(hp, 0)), [
+    return [if_(AND(eq("stage", 1), gt(hp, 0)), [
         if_(eq("lit", i + 1), [
             if_(le(hp, damage), [
-                score(mul(1000000, var(hp))), set_(hp, 0), set_("cut", i + 1), timer_start("sever", 1)],
-                [change(hp, -damage), score(1000000 * damage),
+                score(mul(1000000, var(hp))), set_(hp, 0), set_("cut", i + 1), timer_start("hit", 1)],
+                [change(hp, -damage), score(1000000 * damage), *([shake(300, "soft")] if damage > 1 else []),
                  award("%s -%d" % (name, damage), sub="{:,}".format(1000000 * damage), seconds=1),
-                 timer_start(regrow, 10000), timer_start("lights", 1)]),
-        ], [score(250000), timer_start("glance", 1)]),
+                 timer_start(regrow, var("regrow ms")), timer_start("lights", 1)]),
+        ], [score(250000), award("GLANCING BLOW", sub="HIT THE LIT HEAD", seconds=1)]),
     ])]
 
 
@@ -88,136 +137,207 @@ def head_lights(i):
 
 
 def qualify(i):
-    """A powerline while the battle is not on: one of the three this ball; the third starts it."""
+    """A powerline while the battle is not on: each one counts up to once a start so far, plus one."""
     pl = HEADS[i][5]
-    return on_shot(HEADS[i][2], if_(AND(eq("ran ball", 0), lt("ran game", 2)), [
-        set_(pl, 1),
-        if_(ge(POWERLINES, 3), [start()], [
-            if_(eq(POWERLINES, 2), [award("POWERLINES 2 OF 3", sub=NAME, seconds=2)],
-                [award("POWERLINES 1 OF 3", sub=NAME, seconds=2)])]),
+    return on_shot(HEADS[i][2], if_(eq("ran ball", 0), [
+        if_(le(pl, var("starts")), [change(pl, 1), change("pl hits", 1)]),
+        if_(ge("pl hits", NEED), [start()], [
+            award("POWERLINE HITS", value=sub(NEED, var("pl hits")), sub="TO SUMMON GHIDORAH", seconds=2)]),
     ]), when="idle")
 
 
 def regrowth(i):
     name, _big, _small, hp, regrow, _pl = HEADS[i]
-    return on_timer(regrow, if_(AND(eq("phase", 0), gt(hp, 0), lt(hp, 3)), [
-        change(hp, 1), award("%s REGROWS" % name, sub="FINISH IT BEFORE IT TURNS", seconds=2),
-        sound("regrow"), clip("regrow", "behind"), timer_start(regrow, 10000), timer_start("lights", 1)]))
+    return on_timer(regrow, if_(AND(eq("stage", 1), gt(hp, 0), lt(hp, 3)), [
+        change(hp, 1), award(name, sub="GROWS BACK: FINISH IT", seconds=2),
+        sound("regrow"), clip("regrow", "behind"), show("Regrow"), timer_start(regrow, var("regrow ms")),
+        timer_start("lights", 1)]))
+
+
+def wing(k):
+    """Stage 2: a wing, when the other one was hit last (or none yet)."""
+    shot = WINGS[k][0]
+    return on_shot(shot, if_(AND(eq("stage", 2), ne("wing last", k + 1)), [set_("wing last", k + 1),
+                                                                            timer_start("hit", 1)]))
+
+
+def wing_lights():
+    """The wing to hit chases gold (both before the first); the HUD's line names it."""
+    out = []
+    for k, (shot, words, ins) in enumerate(WINGS):
+        lit = [light(shot, GHID_GOLD, "chase", 90)] + ([light_insert(ins, GHID_GOLD, "chase", 90)] if ins else [])
+        dark = [off(shot)] + ([off_insert(ins)] if ins else [])
+        out.append(if_(eq("wing last", k + 1), dark, lit))
+    out.append(if_(eq("wing last", 1), [hud_line("THE WINGS: NOW THE MECHA LANE")],
+                   [if_(eq("wing last", 2), [hud_line("THE WINGS: NOW THE BIG LOOP")],
+                        [hud_line("THE WINGS: BIG LOOP OR MECHA LANE")])]))
+    return out
 
 
 SCRIPTS = [
-    # ---- the start: three powerlines in one ball ----------------------------------------------------------
+    # ---- the start: powerline hits in one ball (3, then 6, then 9) ------------------------------------------------
     qualify(0), qualify(1), qualify(2),
-    on_start(set_("ran ball", 1), change("ran game", 1), set_("ghidorah played", 1),
-             set_("pl left", 0), set_("pl center", 0), set_("pl right", 0),
-             set_("hp l", 3), set_("hp m", 3), set_("hp r", 3), set_("lit", 1),
-             clip("intro", "full"), clip("loop", "loop"), game_show("Strobe burst"),
+    on_start(set_("ran ball", 1), change("starts", 1), set_("ghidorah played", 1),
+             set_("pl left", 0), set_("pl center", 0), set_("pl right", 0), set_("pl hits", 0),
+             set_("hp l", 3), set_("hp m", 3), set_("hp r", 3), set_("lit", 1), set_("severed", 0),
+             set_("stage", 1), set_("pot", 0), set_("won", 0), set_("cashed", 0), set_("wings", 0),
+             set_("wing last", 0),
+             # harder each time: the lit head turns sooner, a wound grows back sooner; the stages pay more
+             set_("turn ms", sub(9500, mul(1500, var("starts")))), if_(lt("turn ms", 4000), [set_("turn ms", 4000)]),
+             set_("regrow ms", sub(12000, mul(2000, var("starts")))),
+             if_(lt("regrow ms", 4000), [set_("regrow ms", 4000)]),
+             set_("value", add(2500000, mul(2500000, var("starts")))),
+             clip("intro", "full"), clip("loop", "loop"), sound("summon"), show("Ghidorah start"),
+             shake(800, "strong"),
+             *[hud_counter(i + 1, 3, "HEALTH", HEADS[i][0]) for i in range(3)],
              hud_line("SHOOT THE LEFT HEAD"),
              award("GHIDORAH ATTACKS", sub="SEVER ALL THREE HEADS", seconds=3),
-             timer_start("turn", 8000), timer_start("lights", 1)),
+             timer_start("turn", var("turn ms")), timer_start("lights", 1)),
 
-    # ---- the heads -------------------------------------------------------------------------------------------
+    # ---- stage 1: the heads ------------------------------------------------------------------------------------------
     *[on_shot(HEADS[i][1], *head_hit(i, 2)) for i in range(3)],
     *[on_shot(HEADS[i][2], *head_hit(i, 1)) for i in range(3)],
-    on_timer("glance", *by_lit(lambda i: [award("GLANCING BLOW", sub="HIT THE %s" % HEADS[i][0], seconds=1)])),
     *[regrowth(i) for i in range(3)],
-    on_timer("turn", if_(eq("phase", 0), [timer_start("next", 1), timer_start("turn", 8000)])),
     # the lit head moves on to the next living one (left, middle, right, round again)
-    on_timer("next",
-             if_(eq("lit", 1), [if_(gt("hp m", 0), [set_("lit", 2)], [if_(gt("hp r", 0), [set_("lit", 3)])])], [
-                 if_(eq("lit", 2), [if_(gt("hp r", 0), [set_("lit", 3)], [if_(gt("hp l", 0), [set_("lit", 1)])])],
-                     [if_(gt("hp l", 0), [set_("lit", 1)], [if_(gt("hp m", 0), [set_("lit", 2)])])])]),
-             timer_start("lights", 1)),
-    on_timer("lights",
-             if_(eq("phase", 0), by_lit(lambda i: [hud_line("SHOOT THE %s" % HEADS[i][0])])),
-             *[b for i in range(3) for b in head_lights(i)]),
+    on_timer("turn", if_(eq("stage", 1), [
+        if_(eq("lit", 1), [if_(gt("hp m", 0), [set_("lit", 2)], [if_(gt("hp r", 0), [set_("lit", 3)])])], [
+            if_(eq("lit", 2), [if_(gt("hp r", 0), [set_("lit", 3)], [if_(gt("hp l", 0), [set_("lit", 1)])])],
+                [if_(gt("hp l", 0), [set_("lit", 1)], [if_(gt("hp m", 0), [set_("lit", 2)])])])]),
+        timer_start("lights", 1), timer_start("turn", var("turn ms"))])),
+    on_timer("lights", if_(eq("stage", 1), [
+        *by_lit(lambda i: [hud_line("SHOOT THE %s" % HEADS[i][0])]),
+        *[b for i in range(3) for b in head_lights(i)]], [if_(eq("stage", 2), wing_lights())])),
 
-    # ---- a head severed --------------------------------------------------------------------------------------
-    on_timer("sever",
-             change("severed", 1), score(mul(5000000, var("severed"))),
-             sound("sever"), clip("sever", "behind"),
-             if_(ge("severed", 3), [
-                 set_("phase", 1), set_time(15), timer_stop("turn"),
-                 award("ALL HEADS SEVERED", sub="FINAL BLOW: THE MASER", seconds=3),
-                 hud_line("FINAL BLOW: SHOOT THE MASER"),
-                 {"op": "hud_counter", "counter": 2, "value": SUPER, "sub": "MASER TARGET", "label": "SUPER JACKPOT"},
-                 light(FINAL_SHOT, WHITE, "blink", 150), light_insert(FINAL_INSERT, WHITE, "blink", 150),
+    # ---- a head severed (stage 1), a wing hit (stage 2) ----------------------------------------------------------------
+    on_timer("hit",
+             if_(eq("stage", 1), [
+                 change("severed", 1), *pot_up(mul(var("value"), var("severed"))),
+                 sound("sever"), clip("sever", "behind"), show("Sever"), timer_start("lights", 1),
+                 if_(ge("severed", 3), [
+                     timer_stop("turn"), award("ALL HEADS SEVERED", value=var("pot"), sub="POT", seconds=3),
+                     shake_game("big_hit"), timer_start("next", 700),
+                 ], [
+                     add_time(10), shake(600, "hard"), timer_start("turn", 1),
+                     *[if_(eq("cut", i + 1), [award(HEADS[i][0], value=mul(var("value"), var("severed")),
+                                                    sub="SEVERED  +10 SECONDS", seconds=3)]) for i in range(3)],
+                 ]),
              ], [
-                 add_time(10), timer_start("turn", 8000),
-                 *[if_(eq("cut", i + 1), [award("%s SEVERED" % HEADS[i][0], value=mul(5000000, var("severed")),
-                                                sub="+10 SECONDS", seconds=3)]) for i in range(3)],
-                 timer_start("next", 1),
-             ]),
-             timer_start("lights", 1)),
+                 change("wings", 1), score(1000000), *pot_up(mul(var("value"), add(var("wings"), 1))),
+                 hud_counter(1, sub(WINGS_NEED, var("wings")), "TO GO"), hud_counter(2, var("pot"), "CASH AT SCOOP"),
+                 show("Wing hit"), timer_start("lights", 1),
+                 if_(ge("wings", WINGS_NEED), [
+                     award("GHIDORAH FALLS", value=var("pot"), sub="POT", seconds=3), clip("fall", "behind"),
+                     sound("fall"), shake_game("big_hit"), timer_start("next", 700)],
+                     [award("WING HIT", value=mul(var("value"), add(var("wings"), 1)), sub="NOW THE OTHER WING"),
+                      clip("wing", "behind"), sound("wing"), shake(400, "medium")]),
+             ])),
 
-    # ---- the final blow --------------------------------------------------------------------------------------
-    secs_left(5, if_(eq("phase", 1), [light(FINAL_SHOT, WHITE, "blink", 80),
+    # ---- stage 2: the wings ------------------------------------------------------------------------------------------
+    wing(0), wing(1),
+
+    # ---- a stage done: on to the next, or cash out ----------------------------------------------------------------------
+    on_timer("next", if_(OR(eq("cashed", 1), eq("won", 1)), [end()], [
+        # (the heads' turn and regrowth timers do nothing past stage 1, and stop themselves)
+        change("stage", 1), shake_game("jackpot"), off("*"), *pack.cash_out_lit(),
+        if_(eq("stage", 2), [
+            set_time(30), set_("wing last", 0),
+            hud_counter(1, WINGS_NEED, "TO GO", "WING HITS"), hud_counter(2, var("pot"), "CASH AT SCOOP", "POT"),
+            hud_counter(3, 2, "OF 3", "STAGE"), timer_start("lights", 1),
+            award("GHIDORAH FLIES", sub="HIT ONE WING, THEN THE OTHER", seconds=3),
+            clip("wings", "behind"), sound("summon"), show("Wings")],
+            [set_time(15),
+             hud_line("FINAL BLOW: SHOOT THE MASER"),
+             hud_counter(1, var("pot"), "TWICE OVER", "POT"), hud_counter(2, SUPER, "MASER TARGET", "SUPER JACKPOT"),
+             hud_counter(3, 3, "OF 3", "STAGE"),
+             award("THE FINAL BLOW", sub="THE MASER: THE SUPER JACKPOT", seconds=3),
+             light(FINAL_SHOT, WHITE, "chase", 120), light_insert(FINAL_INSERT, WHITE, "blink", 150),
+             clip("final", "behind"), show("Final blow"), music("final")]),
+    ])),
+
+    # ---- stage 3: the final blow ----------------------------------------------------------------------------------------
+    every(1, if_(eq("stage", 3), [hud_counter(2, SUPER, "MASER TARGET")])),
+    secs_left(5, if_(eq("stage", 3), [light(FINAL_SHOT, WHITE, "blink", 80),
                                       light_insert(FINAL_INSERT, WHITE, "blink", 80)])),
-    on_shot(FINAL_SHOT, if_(eq("phase", 1), [
-        score(SUPER), set_("won", 1), set_("ghidorah won", 1), sound("won"), end()])),
-    secs_left(10, callout("ten_seconds")),
+    on_shot(FINAL_SHOT, if_(AND(eq("stage", 3), eq("won", 0), eq("cashed", 0)), [
+        score(add(SUPER, mul(var("pot"), 2))), set_("won", 1), set_("ghidorah won", 1),
+        award("GHIDORAH DEFEATED", value=add(SUPER, mul(var("pot"), 2)), sub="SUPER JACKPOT", seconds=4),
+        clip("won", "full"), sound("won"), show("Ghidorah won"), shake_game("multiball_start"),
+        timer_start("next", 3000)])),
 
-    # ---- the end ---------------------------------------------------------------------------------------------
-    on_end(*[timer_stop(t) for t in TIMERS],
+    # ---- the cash-out ---------------------------------------------------------------------------------------------------
+    on_shot(pack.CASH_SHOT, if_(AND(ge("stage", 2), eq("won", 0), eq("cashed", 0)), [
+        set_("cashed", 1), score(var("pot")), award("CASHED OUT", value=var("pot"), sub="GHIDORAH FLEES", seconds=4),
+        clip("cashout", "full"), sound("cashout"), show("Cash out"), shake(400, "medium"),
+        timer_start("next", 1500)])),
+    secs_left(10, callout("ten_seconds"), if_(ge("stage", 2), [light(pack.CASH_SHOT, pack.WHITE, "hurry")])),
+
+    # ---- the end ---------------------------------------------------------------------------------------------------------
+    on_end(*[timer_stop(t) for t in TIMERS], set_("stage", 0),
            off_insert(FINAL_INSERT),
            if_(AND(eq("won", 0), eq(SECS_LEFT, 0)), [sound("lost", fallback="time_up")]),
-           if_(eq("won", 1), [clip("won", "full"), hud_title("GHIDORAH DEFEATED")],
-               [clip("lost", "full"), hud_title("GHIDORAH ESCAPES")]),
-           game_show("Colour fade")),
+           if_(eq("won", 1), [hud_title("GHIDORAH DEFEATED"), hud_line("THE HEADS, THE WINGS, THE MASER")]),
+           if_(eq("cashed", 1), [hud_title("GHIDORAH FLEES"), hud_line("THE POT IS CASHED OUT")]),
+           if_(AND(eq("won", 0), eq("cashed", 0)), [
+               hud_title("GHIDORAH ESCAPES"), hud_line("A QUARTER OF THE POT"), score(div(var("pot"), 4)),
+               clip("lost", "full"), show("Ghidorah lost")])),
 ]
 
 PROGRAM = {
     "name": NAME, "seconds": 50, "ends_on_drain": True, "screen": False, "game_modes": "block",
     "wait_multiball": True, "priority": 180,
-    "vars": [{"name": n, "reset": "ball"} for n in ("pl left", "pl center", "pl right", "ran ball")] +
-            [{"name": "ran game", "reset": "game"}] +
+    "vars": [{"name": n, "reset": "ball"} for n in ("pl left", "pl center", "pl right", "pl hits", "ran ball")] +
+            [{"name": "starts", "reset": "game"}] +
             [{"name": n, "reset": "game", "shared": True} for n in ("ghidorah played", "ghidorah won")] +
-            [{"name": n, "reset": "mode"} for n in ("hp l", "hp m", "hp r", "lit", "severed", "phase", "won", "cut",
-                                                    "pace")],
+            [{"name": n, "reset": "mode"} for n in ("hp l", "hp m", "hp r", "lit", "severed", "won", "cut", "pace",
+                                                    "stage", "pot", "cashed", "wings", "wing last", "turn ms",
+                                                    "regrow ms", "value")],
     "timers": [{"name": n} for n in TIMERS],
     "hud": hud("SHOOT THE LIT HEAD",
-               counters=[("LEFT HEAD", "HEALTH", var("hp l")),
-                         # the middle one is the super jackpot in the final blow (its health is 0 by then)
-                         ("MIDDLE HEAD", "HEALTH", add(var("hp m"), mul(var("phase"), SUPER))),
-                         ("RIGHT HEAD", "HEALTH", var("hp r"))],
+               counters=[("LEFT HEAD", "HEALTH", None), ("MIDDLE HEAD", "HEALTH", None),
+                         ("RIGHT HEAD", "HEALTH", None)],
                timer=("GHIDORAH", "bolt"),
-               gauge={"label": "SEVERED", "kind": "diamond", "count": 3, "color": "#ffaa00",
-                      "value": var("severed")}),
+               gauge={"label": "STAGE", "kind": "diamond", "count": 3, "color": "#ffaa00", "value": var("stage")}),
     "bar": {"on": False}, "info": {"on": False},
-    "clips": clips("intro", "loop", "sever", "regrow", "won", "lost"),
-    "sounds": sounds({"sever": 3, "regrow": 3, "won": 4, "lost": 4}),
+    "clips": clips("intro", "loop", "sever", "regrow", "won", "lost", "wings", "wing", "fall", "final", "cashout"),
+    "sounds": sounds({"sever": 3, "regrow": 3, "won": 4, "lost": 4, "summon": 4, "wing": 3, "fall": 4,
+                      "cashout": 4}),
     "music": "music.wav",
+    "beds": beds("final"),
     "shows": SHOWS,
     "scripts": None,
 }
 
 EXAMPLE = {
-    "name": NAME, "slug": SLUG, "order": 101, "titles": ["godzilla_le"],
+    "name": NAME, "slug": SLUG, "order": 101, "titles": ["godzilla_le", "godzilla_pro"],
     "based_on": "ghidorah_heads.c",
-    "about": ("The C example KING GHIDORAH rebuilt in blocks: a boss battle with health. The three powerlines in one "
-              "ball start it; only the lit head (two shots each) takes damage, the lit head turns every 8 s, a wounded "
-              "head left alone grows back; sever all three and the Maser lands the super jackpot."),
+    "about": ("The C example KING GHIDORAH rebuilt in blocks, three stages deep. Powerline hits in one ball start it "
+              "(each powerline once, twice the second time, three times the third). THE HEADS is the C's battle: "
+              "only the lit head (two shots each) takes damage, it turns, a wounded head grows back, each sever "
+              "pays into the pot; THE WINGS: hit the Big loop and the Mecha lane in turn to ground him; THE FINAL "
+              "BLOW: the Maser's super jackpot and the pot twice over. Cash the pot at the right scoop once the "
+              "heads are off; failing pays a quarter."),
     "lost": [
         "The heads' shots have no 250 ms debounce: a ball rattling on a target is several hits (the C counted one "
         "hit a quarter second per shot).",
         "A start from the tab's Start mode now counts as the ball's and the game's start too (the C counted only "
         "the three powerlines).",
-        "When a run will not count (it already ran this ball, or twice this game) the powerlines say nothing; the C "
-        "logged why once.",
-        "The HUD shows a severed head's health as 0, where the C showed X; and in the final blow the left and "
-        "right counters stay up (0, SEVERED) beside the SUPER JACKPOT counter, where the C hid them.",
-        "Awards say their numbers after the words: LEFT HEAD SEVERED 5,000,000 / +10 SECONDS, where the C put "
-        "5,000,000   +10 SECONDS under LEFT HEAD SEVERED.",
-        "The ending title (GHIDORAH DEFEATED or GHIDORAH ESCAPES) and its total stay up 3 s, the runtime's: the "
-        "C kept them 10 s.",
-        "The ending has no KING GHIDORAH TOTAL under the total: the C put those words there.",
-        "The lit head moves on its own 8 s timer, and moves a tick after a sever (the C moved it in the same tick); "
+        "When a run will not count (it already ran this ball) the powerlines say nothing; the C logged why once. "
+        "The C ran at most twice a game; the blocks any number of times, each start costing more.",
+        "The HUD shows a severed head's health as 0, where the C showed X; in the final blow the counters are the "
+        "POT, the SUPER JACKPOT and the STAGE, where the C hid all but the super jackpot; and the gauge counts the "
+        "stages, where the C's counted the severed heads.",
+        "Awards say their numbers under the words: LEFT HEAD over 5,000,000  -  SEVERED  +10 SECONDS, where the C "
+        "said LEFT HEAD SEVERED over 5,000,000   +10 SECONDS; a head growing back says LEFT HEAD over GROWS BACK, "
+        "where the C said LEFT HEAD REGROWS. A glancing blow says HIT THE LIT HEAD, where the C named it.",
+        "The ending title (GHIDORAH DEFEATED, GHIDORAH FLEES or GHIDORAH ESCAPES) and its total stay up 3 s, the "
+        "runtime's: the C kept them 10 s, with KING GHIDORAH TOTAL under the total.",
+        "The lit head moves on its own timer, and moves a tick after a sever (the C moved it in the same tick); "
         "its inserts change a tick after a hit too.",
         "The countdown's 5, 4, 3, 2, 1 callouts are gone (the blocks say only ten seconds and time up).",
-        "For Godzilla Premium/LE only: the C also ran on Godzilla Pro, playing its own shows where the game has no "
-        "Strobe burst or Colour fade (a Pro 1.15 has none of the game's shows, nor a MASER READY insert); a blocks "
-        "program cannot ask whether the game has a show. Its own three shows are kept under Light shows (Ghidorah "
-        "start, Ghidorah won, Ghidorah lost), not run, to swap in.",
+        "Godzilla Premium/LE and Pro 1.16 only (a Pro 1.15 has no switch shots): the C also ran on a Pro 1.15. It "
+        "played the game's Strobe burst at the start and Colour fade at the end, with its own shows where the game "
+        "had none; the blocks run its own shows (Ghidorah start, Ghidorah won, Ghidorah lost and six more) on "
+        "every title instead.",
         "The blocks pack keeps its own FINAL WARS ledger in shared variables ('ghidorah played', 'ghidorah won'), "
         "which the blocks FINAL WARS reads: the C FINAL WARS does not read them, and the blocks FINAL WARS does not "
         "read the C's ledger.",
@@ -231,29 +351,50 @@ def build():
     return dict(EXAMPLE, program=p)
 
 
-POWER3 = ["shot", "Powerline left", "ms", 300, "shot", "Powerline center", "ms", 300, "shot", "Powerline right",
-          "secs", 1]
+_PL = ["shot", "Powerline left", "ms", 300, "shot", "Powerline center", "ms", 300, "shot", "Powerline right"]
+POWER3 = _PL + ["secs", 1]
 _START = ["trigger", "ghidorah_heads.start", "secs", 1]
 _SEVER_ALL = ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "ms", 300, "shot", "Powerline left", "secs", 1,
               "shot", "Building", "ms", 300, "shot", "Powerline center", "secs", 1,
               "shot", "Right ramp", "ms", 300, "shot", "Powerline right", "secs", 2]
+_WINGS = ["shot", "Big loop", "ms", 600, "shot", "Mecha exit bottom", "ms", 600] * 2 + ["secs", 1]
 #: the desk scenarios (make_examples.py --desk): what, the harness's commands, lines its output must hold
 DESK = [
-    ("the powerlines start it", ["shot", "Powerline left", "secs", 1] + POWER3 + ["secs", 2],
-     ["Hud_Award: POWERLINES 1 OF 3", "Hud_AwardSub: KING GHIDORAH", "[KING GHIDORAH] START (a block)",
-      "Hud_Award: GHIDORAH ATTACKS", "Hud_Line: SHOOT THE LEFT HEAD", "Hud_C1_Sub: >> LIT <<"]),
-    ("head by head and the super jackpot", POWER3 + _SEVER_ALL + ["shot", "Maser target", "secs", 12],
-     ["SCORE +2000000", "SCORE +250000", "Hud_Award: GLANCING BLOW", "Hud_AwardSub: HIT THE LEFT HEAD",
-      "Hud_Award: LEFT HEAD SEVERED 5,000,000", "Hud_Line: SHOOT THE MIDDLE HEAD",
-      "SCORE +10000000", "SCORE +15000000", "Hud_Award: ALL HEADS SEVERED", "Hud_Line: FINAL BLOW: SHOOT THE MASER", "Hud_C2_Label: SUPER JACKPOT", "Hud_C2_Value: 35.0M",
-      "Hud_C1_Sub: SEVERED", "SCORE +33000000", "END (a block): 11 scores, total 72250000", "Hud_Title: GHIDORAH DEFEATED",
-      "lamps held 0"]),
+    ("the powerlines start it", ["shot", "Powerline left", "secs", 1] + POWER3 + ["secs", 5],
+     ["Hud_Title: POWERLINE HITS", "Hud_Line: 2  -  TO SUMMON GHIDORAH", "Hud_Line: 1  -  TO SUMMON GHIDORAH",
+      "[KING GHIDORAH] START (a block)", "Hud_Award: GHIDORAH ATTACKS", "Hud_Line: SHOOT THE LEFT HEAD",
+      "Hud_C1_Sub: >> LIT <<", "LAMP LEFT RAMP ffaa00 blink 700"]),
+    # the next ball: each powerline once does not start it again this game, twice does
+    ("three hits the first time, six the second", POWER3 + ["trigger", "ghidorah_heads.stop", "secs", 4, "ball_end",
+                                                            "secs", 2] + POWER3 + _PL + ["secs", 2],
+     ["[KING GHIDORAH] START (a block)", "END (trigger file)", "Hud_Line: 3  -  TO SUMMON GHIDORAH",
+      "Hud_Line: 1  -  TO SUMMON GHIDORAH"]),
+    ("the heads, then cash out", POWER3 + _SEVER_ALL + ["secs", 3, "shot", "Right scoop", "secs", 5],
+     ["SCORE +2000000", "SCORE +250000", "Hud_Award: GLANCING BLOW", "Hud_AwardSub: HIT THE LIT HEAD",
+      "Hud_Award: LEFT HEAD", "Hud_AwardSub: 5,000,000  -  SEVERED  +10 SECONDS", "Hud_Line: SHOOT THE MIDDLE HEAD",
+      "Hud_Award: ALL HEADS SEVERED", "Hud_AwardSub: 30,000,000  -  POT", "Hud_Award: GHIDORAH FLIES",
+      "Hud_C1_Label: WING HITS", "LAMP BIG LOOP ffaf00 chase 90", "LAMP SELECT CITY ffffff chase",
+      "Hud_Award: CASHED OUT", "Hud_Title: GHIDORAH FLEES", "END (a block)", "lamps held 0"]),
+    ("all three stages", POWER3 + _SEVER_ALL + ["secs", 3] + _WINGS + ["secs", 3, "shot", "Maser target", "secs", 6],
+     ["Hud_Award: WING HIT", "Hud_Line: THE WINGS: NOW THE MECHA LANE", "Hud_Award: GHIDORAH FALLS",
+      "Hud_Award: THE FINAL BLOW", "Hud_Line: FINAL BLOW: SHOOT THE MASER", "Hud_C2_Label: SUPER JACKPOT",
+      "LAMP MASER READY ffffff blink", "Hud_Award: GHIDORAH DEFEATED", "Hud_Title: GHIDORAH DEFEATED",
+      "END (a block)", "lamps held 0"]),
     ("a head regrows, turns, and Ghidorah escapes", _START + ["shot", "Left ramp", "secs", 12, "secs", 60],
-     ["Hud_Award: LEFT HEAD -2", "Hud_Line: SHOOT THE MIDDLE HEAD", "Hud_Award: LEFT HEAD REGROWS",
-      "LAMP LEFT RAMP 00ff3c pulse 1200", "CALLOUT 1295", "END (time ran out): 1 scores, total 2000000", "Hud_Title: GHIDORAH ESCAPES",
-      "lamps held 0"]),
-    ("the final blow missed", _START + _SEVER_ALL + ["secs", 17],
-     ["Hud_Award: ALL HEADS SEVERED", "END (time ran out)", "lamps held 0"]),
+     ["Hud_Award: LEFT HEAD -2", "Hud_Line: SHOOT THE MIDDLE HEAD", "Hud_AwardSub: GROWS BACK: FINISH IT",
+      "LAMP LEFT RAMP 00ff3c pulse 1200", "CALLOUT 1295", "END (time ran out): 1 scores, total 2000000",
+      "Hud_Title: GHIDORAH ESCAPES", "lamps held 0"]),
+    ("the final blow missed pays a quarter", _START + _SEVER_ALL + ["secs", 3] + _WINGS + ["secs", 20],
+     ["Hud_Award: GHIDORAH FALLS", "END (time ran out)", "Hud_Title: GHIDORAH ESCAPES",
+      "Hud_Line: A QUARTER OF THE POT", "lamps held 0"]),
     ("a drain ends it", _START + ["shot", "Building", "secs", 1, "ball_end", "secs", 8],
      ["SCORE +250000", "Hud_Award: GLANCING BLOW", "END (ball ended)", "lamps held 0"]),
+]
+
+#: the Pro (Godzilla Pro 1.16) has every shot and insert it names (MASER READY too): the same rules, played there
+DESK_PRO = [
+    ("the powerlines start it", POWER3 + ["secs", 5],
+     ["[KING GHIDORAH] START (a block)", "LAMP LEFT RAMP ffaa00 blink 700"]),
+    ("all three stages", POWER3 + _SEVER_ALL + ["secs", 3] + _WINGS + ["secs", 3, "shot", "Maser target", "secs", 6],
+     ["Hud_Award: GHIDORAH FALLS", "LAMP MASER READY ffffff blink", "Hud_Title: GHIDORAH DEFEATED", "lamps held 0"]),
 ]

@@ -998,7 +998,12 @@ def test_start_plays_the_intro_then_asks_for_the_loop_behind_the_hud(harness, du
     over = _at(out, "[%s] %s" % (mode, "the total was shown" if slug == "anguirus_assist" else "END"))
     assert _at(out, "CLIP " + _clip(slug, ending)) == over                    # the ending, full screen
     if "loop" in cues:
-        assert _at(out, "BACKDROP OFF") == over                               # the city again
+        # PAD-658: the loop stays behind the ending the mode holds the screen for (on the live city the game's map
+        # labels were under the TOTAL), then the city again; an ending that holds nothing gives it back at once
+        # (these flows stop a second into the C's 10 s ending)
+        kept, off = _at(out, "BACKDROP KEPT behind"), _at(out, "BACKDROP OFF")
+        assert kept == over or off == over, (kept, off, over)
+        assert off is None or off >= over
 
 
 @pytest.mark.parametrize("slug", MODES)

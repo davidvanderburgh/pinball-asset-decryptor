@@ -796,6 +796,8 @@ static char running_as[40];      /* PAD-363: pm_running_name - the running mode'
 static unsigned begun;           /* PAD-413: pm_begun - how many times one of ours has begun */
 static void disp_linger_other_began(void);
 static void clip_other_began(void);
+static void bd_other_began(void);              /* PAD-658: the backdrop section */
+static void bd_mode_ended(void);
 
 /* the name the runtime's lines give mode m: what pm_running_name said while it runs, else its .name */
 static const char *mode_name(const struct pm_mode *m, const char *none)
@@ -848,6 +850,7 @@ int pm_begin(void)
     lit_hold_until = 0;              /* PAD-503: a lit mode's claimed shot has done its work */
     disp_linger_other_began();
     clip_other_began();
+    bd_other_began();
     return 1;
 }
 
@@ -880,7 +883,7 @@ void pm_end(void)
     if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0, refused_forget();
     if (was_taker) chg_mode_ended(1);   /* PAD-630: a challenge game's mode ended - its ball ends */
-    if (!running) bd_reset("the mode ended");
+    if (!running) bd_mode_ended();
     if (!running) magnet_let_go("the mode ended");
     if (!running) scoop_let_go();
     if (!running) building_let_go("the mode ended");
@@ -2692,6 +2695,8 @@ static struct {
     unsigned long since;              /* pm_ms() of the last play */
     unsigned plays, frames;
 } bd;
+static const struct pm_mode *bd_owner;    /* PAD-658: the mode that asked for it (running, or showing a note) */
+static int bd_lingers;                     /* PAD-658: kept behind its mode's ending (pm_end_holding) */
 static unsigned char *disp_layered_mgr;   /* the layered display's manager (display priority, below) */
 /* PAD-521: THE BACKDROP ON CLIP V2 (James Bond LE). A build whose clips play on the video bank's own surface
  * (clip v2, below) has no background element to take over, and the game keeps its own videos in front of that
@@ -2932,7 +2937,10 @@ int pm_backdrop(const char *name)
 {
     unsigned i;
     if (!(can & PM_CAN_BACKDROP)) return 0;
+    if (running && running != current) return 0;     /* PAD-658: another of ours runs - the backdrop is its */
+    bd_lingers = 0;
     if (!name || !*name) {
+        bd_owner = 0;
         if (!bd_v2 && bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
             ((void (*)(void))(unsigned long)fn("clip_stop"))();
         bd.on = 0;
@@ -2941,6 +2949,7 @@ int pm_backdrop(const char *name)
         bd_release("the mode ended it");
         return 1;
     }
+    bd_owner = current;
     if (bd.on && str_eq(bd.loop, name)) return 1;
     for (i = 0; name[i] && i + 1 < sizeof bd.loop; i++) bd.loop[i] = name[i];
     bd.loop[i] = 0;
@@ -2974,10 +2983,18 @@ static void bd_clip_lost(void)
 /* a ball end or leaving the game: no backdrop outlives the mode that asked for it */
 static void bd_reset(const char *why)
 {
+    bd_owner = 0;
+    bd_lingers = 0;
     if (!bd.on && !bd.obj) return;
     bd.on = 0;
     bd.loop[0] = bd.once[0] = 0;
     bd_release(why);
+}
+
+/* a backdrop another mode asked for (its ending's, its note's) is not the one beginning */
+static void bd_other_began(void)
+{
+    if (bd.on && bd_owner != current) bd_reset("another mode began");
 }
 
 static int have_sites(const char *const *names);
@@ -3231,6 +3248,7 @@ static void disp_release(const char *why)
     disp_linger_until = 0;
     disp_covered_now = 0;
     say("display: priority %u given up (%s)", p, why);
+    if (bd_lingers && !running) bd_reset(why);       /* PAD-658: the loop kept behind the ending goes with it */
 }
 
 int pm_display_priority(unsigned priority)
@@ -3274,6 +3292,19 @@ int pm_display_covered(void)
 {
     if (disp_prio) return disp_covered_now != 0;
     return (can & PM_CAN_DISPLAY_PRIORITY) && pm_in_game() && disp_taken();
+}
+
+/* PAD-658: an ending its mode holds the screen for (pm_end_holding: its TOTAL) keeps the mode's loop behind it. On the
+ * live city the game's map labels (RAID, BRIDGE, TANKS, POWER) sat under the TOTAL's words (run meltdown_r4, md_16_end).
+ * It goes with the hold (disp_release), at the ball's end, or as another mode begins. */
+static void bd_mode_ended(void)
+{
+    if (bd.on && bd_owner == current && disp_linger_until && disp_owner == current) {
+        bd_lingers = 1;
+        say("backdrop: kept behind %s's ending", current && current->name ? current->name : "the mode");
+        return;
+    }
+    bd_reset("the mode ended");
 }
 
 /* an ending kept by pm_end_holding is not the new mode's */

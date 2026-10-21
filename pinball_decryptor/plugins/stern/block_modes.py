@@ -2340,6 +2340,10 @@ def to_c(program, slug):
 
     hud = program["hud"]
     has_hud = hud["on"]
+    # PAD-658: a note shows over the mode's first clip "over and over" (When the mode starts' first, else any script's)
+    loops = [b.get("clip") for s in sorted(program["scripts"], key=lambda s: (s.get("hat") or {}).get("kind") != "mode_start")
+             for b in _walk(s.get("do") or []) if b.get("op") == "clip" and b.get("where") == "loop" and b.get("clip")]
+    note_cue = loops[0] if media and has_hud and loops else None
     # PAD-375: a mode with a HUD or a screen of its own watches the game's displays (the kit's
     # kit_display): its words step aside under one, so it holds a display priority while it runs
     watch = has_hud or program["screen"]
@@ -2485,7 +2489,8 @@ def to_c(program, slug):
     L.append("} run;")
     L.append("static int sec_changed, ending;")
     L.append("UNUSED static int end_clip;                /* PAD-658: When the mode ends played a full-screen clip */")
-    L.append("#define END_CLIP_MS      6000      /* ... its TOTAL stays this much longer: the clip covers it first */")
+    L.append("#define END_CLIP_MS      7000      /* ... its TOTAL stays this much longer: the clip covers it first (it "
+             "starts half a second in and runs up to 6 s: the TOTAL still has its 3 s after it, run godzilla_angry_r4) */")
     L.append("#define ENDING_HOLD_MS   (ENDING_NOW_MS + (end_clip ? END_CLIP_MS : 0))")
     L.append("static unsigned flash_ticks;           /* PAD-521: words alone: how long its words stay up */")
     L.append("static void *screen, *screen_words;")
@@ -2732,6 +2737,11 @@ def to_c(program, slug):
         L.append("    else kit_hud_title(&hud, line, 0);")
         L.append("}")
         L.append("")
+        if note_cue:
+            L.append("UNUSED static void note_loop(void);")
+        else:
+            L.append("#define note_loop() ((void)0)           /* no clip of its own loops behind its HUD: a note shows alone */")
+        L.append("")
         L.append("/* the award line for a moment; on a mode not running, a note shown alone (kit_hud_note: not over")
         L.append(" * another mode's HUD) */")
         L.append("UNUSED static void hud_award(const char *text, long long value, int with_value, const char *sub,")
@@ -2749,7 +2759,7 @@ def to_c(program, slug):
         L.append("        hud_line(line, sizeof line, text, value, with_value);")
         L.append("    }")
         L.append("    if (run.on) kit_hud_award(&hud, ms, line, sub);")
-        L.append("    else kit_hud_note(&hud, ms, line, sub);")
+        L.append("    else if (kit_hud_note(&hud, ms, line, sub)) note_loop();")
         L.append("}")
         L.append("")
         L.append("/* every tick while it runs: the counters that follow a value, the badge, the gauge */")
@@ -2783,6 +2793,8 @@ def to_c(program, slug):
         L.extend(_SHOW_C.split("\n"))
     if media:
         L.extend((_MEDIA_C % {"slug": slug}).split("\n"))
+    if note_cue:
+        L.extend((_NOTE_LOOP_C % {"cue": _c_str(note_cue)}).split("\n"))
     if g.game_show:
         L.extend(_GAME_SHOW_C.split("\n"))
     if g.game_wizard:
@@ -2925,10 +2937,8 @@ def to_c(program, slug):
     L.append("    run.on = 0;")
     if media:
         L.append("    loop_waiting = 0;")
-        L.append("    if (looping) {                    /* the city behind the HUD again */")
-        L.append("        pm_backdrop(0);")
-        L.append("        looping = 0;")
-        L.append("    }")
+        L.append("    looping = 0;                      /* PAD-658: the runtime keeps the loop behind the TOTAL it holds, then")
+        L.append("                                       * the city again (at once for an end that holds nothing) */")
         L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
     if g.shows:
         L.append("    show_last_pass();                 /* PAD-646: a show running until the mode ends finishes its pass */")
@@ -3125,6 +3135,8 @@ def to_c(program, slug):
         L.append("    find_info();")
     if has_hud:
         L.append("    kit_hud_tick(&hud);                /* finds it, expires an award, writes what changed */")
+    if note_cue:
+        L.append("    note_loop_tick();                 /* PAD-658: a note's loop goes with it */")
     if media:
         L.append("    own_tick();                       /* every tick: an end call outlives the mode */")
     if g.shows:
@@ -3270,6 +3282,8 @@ def to_c(program, slug):
     L.append("    if (ENDS_ON_DRAIN) drain_end();")
     if media:
         L.append("    looping = 0;                      /* no backdrop outlives the ball */")
+    if note_cue:
+        L.append("    note_looping = 0;")
     L.append("    {")
     L.append("        unsigned p = P(), v;")
     L.append("        for (v = 0; v < %d; v++) H[v][p] = 0;" % nhits)
@@ -4034,6 +4048,35 @@ def uses_media(program):
 
 
 #: the C of a mode with its own clips and sounds (pad_mode_assets.h); %(slug)s is its folder
+# PAD-658: a note (the mode not running) over the mode's own loop clip, as the game's own feedback screens letter their
+# two lines over a clip of theirs (MASER CANNON CHARGING): on the live city the note's words sat on the game's map labels
+# (run bedfix_pro_r1, bf_ready_c: HE JOINS THE NEXT BATTLE over TANKS 0/10). Its first "over and over" clip.
+_NOTE_LOOP_C = """/* PAD-658: a note shows over the mode's own loop, as the game's feedback screens show over a clip of theirs */
+#define NOTE_LOOP %(cue)s
+static int note_looping;
+UNUSED static void note_loop(void)
+{
+    const char *n;
+    if (note_looping || hud.metering || !own_clip(NOTE_LOOP)) return;
+    n = pa_clip_name(&own, NOTE_LOOP);
+    note_looping = n && pm_backdrop(n);
+    if (note_looping) pm_log("own clip %%s (%%s) behind its note", NOTE_LOOP, n);
+}
+
+static void note_loop_tick(void)
+{
+    if (!note_looping) return;
+    if (run.on) {                     /* its own run's loop now */
+        note_looping = 0;
+        return;
+    }
+    if (hud.up && hud.noting && !hud.metering) return;
+    note_looping = 0;
+    pm_backdrop(0);                   /* (another of ours began: the runtime gave the backdrop to it already) */
+}
+"""
+
+
 _MEDIA_C = """/* ---- its own clips and sounds (PAD-374): what Write carried, named in %(slug)s.assets ---- */
 static struct pa_assets own = { .folder = "%(slug)s" };
 static const char *clip_waiting, *loop_waiting;   /* MODE_SDK.md "Clips race the game's own" */

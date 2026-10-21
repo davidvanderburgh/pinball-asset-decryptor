@@ -1,85 +1,211 @@
-"""GODZILLA ANGRY (PAD-658): the C example godzilla_angry.c (PAD-379, PAD-416) rebuilt in blocks.
+"""GODZILLA ANGRY (PAD-658): the C example godzilla_angry.c (PAD-379, PAD-416) rebuilt in blocks, then (round 2)
+made EHoH's Gappa Angry: how many balls are locked decides WHICH multiball.
 
-Godzilla vs. Mechagodzilla II (1993): G-Force carries Baby Godzilla away as bait; Godzilla comes for him.
+Godzilla vs. Mechagodzilla II (1993): G-Force carries Baby Godzilla away as bait; Godzilla comes for him, past
+Rodan's nest, Mechagodzilla, the Garuda gunship and the reborn Fire Rodan, to Super Mechagodzilla at Makuhari.
 
 - THE RAGE: every shot the program names fills the meter while the mode is not running (through other modes and
-  multiballs too, quietly in a multiball): five stretches of 20, 25, 30, 35, 40 (5 more each after a multiball);
-  a note every quarter of a stretch, RAGE n% at each stretch's end; full, GODZILLA IS ANGRY lights the Building.
-- THE CHASE: five places, each a set of red shots (any order) and then a lock, 30 s each (a lit shot with under 15 s
-  left puts the clock back to 15): ADONOA ISLAND (lock at the captive ball), YOKKAICHI (both ramps, the Maser),
+  multiballs too, quietly in a multiball): five stretches of 20, 25, 30, 35, 40 (150) the first time, TWICE that
+  (300) the second, three times (450) the third (pack.need's rule: each start costs more); a note every quarter of
+  a stretch, RAGE n% at each stretch's end; full, GODZILLA IS ANGRY lights the Building.
+- THE CHASE, five stages, deeper and deeper: five places, each a set of red shots (any order) and then a lock
+  (white, hurrying), 30 s each (25, then 20 once the meter has been spent; a lit shot with under 15 s left puts the
+  clock back to 15): ADONOA ISLAND (the lock at once, at the captive ball), YOKKAICHI (both ramps, the Maser),
   OSAKA (Big loop and Building, the captive ball), KYOTO (ramps, Building, Big loop, the Maser), MAKUHARI (ramps,
   Big loop, Building, center powerline, the captive ball); then BABY at the Building: the SUPER JACKPOT (5M and
-  10,000 a shot through the chase) and a 6-ball multiball.
-  A shot pays 500,000 +500,000 a place +25,000 a shot within it and adds an eighth to the JACKPOT; a lock pays
-  twice that and adds 250,000 a place.
-- FAILING STILL PAYS: a place's clock running out with locks starts a multiball of the locks + 1; with none the trail
-  goes cold. A drain mid-chase keeps the place, its locks, the jackpot and the super for the next start.
-- ANGRY MULTIBALL: the ramps, Building and Big loop orange, BABY green (it moves every 10 s, the badge counting it,
-  and when hit): BABY pays the jackpot times the multiplier, any other lit shot 500,000 and the multiplier +1 (x6).
-  One ball left after 20 s ends it, and the meter starts again.
+  10,000 a shot through the chase). A shot pays 500,000 +500,000 a place +25,000 a shot within it and adds an
+  eighth to the JACKPOT; a lock pays twice that and adds 250,000 a place.
+- THE MULTIBALL THE LOCKS EARNED (Gappa Angry's Pool Party ... Run For Your Life): the place's clock running out
+  with locks, or BABY found, starts the multiball of that many locks, each its own name, clips, music bed, jackpot
+  shots, values, light shows and shakes:
+    1 lock   2-ball RODAN'S NEST         jackpots round the captive ball, the ramps and the Mecha lane, x1
+    2 locks  3-ball MECHAGODZILLA        the ramps, the Mecha lane and the Building, x2
+    3 locks  4-ball GARUDA               the Right ramp, the Mecha lane, the Building and the Big loop, x3
+    4 locks  5-ball FIRE RODAN           the Mecha lane, the Building, the Big loop and the Maser, x4
+    5 locks  6-ball SUPER MECHAGODZILLA  the Building, the Big loop, the Maser and the center powerline, x5
+  The JACKPOT (green, chasing) moves along the kind's four shots every 11 s (7 s in the 6-ball) and when hit, and
+  pays the jackpot times the multiplier; the kind's other three (orange, blinking faster the bigger the kind) pay
+  500,000 a lock and raise the multiplier (up to 5 over the kind's own). The multiplier starts at the kind's number:
+  going deeper is worth more. One ball left after 20 s ends it, and the meter starts again, twice as long.
+- FAILING STILL PAYS: a place's clock with locks still starts their multiball; with none the trail goes cold. A
+  drain mid-chase keeps the place, its locks, the jackpot and the super for the next start.
 """
-from blk import (AND, BALLS, LIT, NOT, OR, SECS_LEFT, a_show, add, award, change, clip, clips, div, end, eq,
-                 every, game_show, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_mode, lt, mul,
-                 multiball, ne, off, on_any_shot, on_end, on_shot, on_start, on_timer, score, secs_left, set_, set_time,
-                 show, sound, sounds, step, sub, timer_start, timer_stop, var)
+from blk import (AND, BALLS, LIT, NOT, OR, SECS_LEFT, a_show, add, award, beds, change, clip, clips, div, end, eq,
+                 every, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, light_mode, lt,
+                 mul, multiball, music, ne, off, on_any_shot, on_end, on_shot, on_start, on_timer, score, secs_left,
+                 set_, set_time, shake, shake_game, show, sound, sounds, step, sub, timer_left, timer_start,
+                 timer_stop, var)
 
 SLUG, NAME = "godzilla_angry", "GODZILLA ANGRY"
 RED, EMBER, BLUE = "#ff0a00", "#500600", "#2878ff"
 WHITE, GREEN, ORANGE = "#ffffff", "#00ff3c", "#ff5000"
+AMBER, STEEL, CYAN, FIRE, GOLD = "#ff9000", "#8090ff", "#40d0ff", "#ff3000", "#ffc000"
 START_SHOT = "Building"
 LR, RR, BL, BD, PC = "Left ramp", "Right ramp", "Big loop", "Building", "Powerline center"
-GT, MT = "Godzilla target", "Maser target"
+GT, MT, ML = "Godzilla target", "Maser target", "Mecha exit bottom"
 #: the chase's shots and the flag each one's "done" is kept in (1 = not lit in this place, or made)
 CHASE = ((LR, "lr done"), (RR, "rr done"), (BL, "bl done"), (BD, "bd done"), (PC, "pc done"))
 #: the places (0-4) and the shots each lights
 PLACES = (("ADONOA ISLAND", ()), ("YOKKAICHI", (LR, RR)), ("OSAKA", (BL, BD)), ("KYOTO", (LR, RR, BD, BL)),
           ("MAKUHARI", (LR, RR, BL, BD, PC)))
-LOCK_AT = {0: GT, 1: MT, 2: GT, 3: MT, 4: GT}
-#: the multiball's jackpot shots, BABY = 1..4 in this order
-JP = ((LR, "LEFT RAMP"), (RR, "RIGHT RAMP"), (BD, "BUILDING"), (BL, "BIG LOOP"))
-BX, BY = 123, 202                 # the Building's place on the playfield picture (KIT_AT_BUILDING)
-MX, MY = 89, 260                  # MAGNA GRAB (KIT_AT_MAGNA): the lock's burst
+#: the multiball's jackpot shots by number: kind k (= its locks, 1-5) plays shots k to k+3
+CODES = ((GT, "CAPTIVE BALL"), (LR, "LEFT RAMP"), (RR, "RIGHT RAMP"), (ML, "MECHA LANE"), (BD, "BUILDING"),
+         (BL, "BIG LOOP"), (MT, "MASER"), (PC, "CENTER POWERLINE"))
+CODE = {s: i for i, (s, _w) in enumerate(CODES, 1)}
+#: the five multiballs: (name, its clip and call at the start, its bed, its jackpot clip and call, the jackpot's
+#: award, its jackpot shake, the ending's title, the line, the insert it lights)
+KINDS = (
+    dict(name="RODAN'S NEST", clip="mb2", call="mb2", bed="mb2", jclip="mb2", jcall="jp2",
+         jword="RODAN JACKPOT", shake=shake(600, "medium"), jshake=shake(300, "medium"), title="RODAN'S NEST TOTAL",
+         insert="RODAN", color=AMBER),
+    dict(name="MECHAGODZILLA", clip="mb3", call="mb3", bed="mb3", jclip="jackpot", jcall="jackpot",
+         jword="MECHA JACKPOT", shake=shake(800, "strong"), jshake=shake(450, "strong"), title="MECHAGODZILLA TOTAL",
+         insert="ATTACK MECHA", color=STEEL),
+    dict(name="GARUDA", clip="mb4", call="mb4", bed="mb4", jclip="mb4", jcall="jp4",
+         jword="GARUDA JACKPOT", shake=shake(1000, "strong"), jshake=shake(600, "strong"), title="GARUDA TOTAL",
+         insert="HEAT RAY", color=CYAN),
+    dict(name="FIRE RODAN", clip="mb5", call="mb5", bed="mb5", jclip="mb5",
+         jcall="jp5", jword="FIRE JACKPOT", shake=shake(1000, "hard"), jshake=shake(800, "hard"), title="FIRE RODAN TOTAL",
+         insert="RODAN", color=FIRE),
+    dict(name="SUPER MECHAGODZILLA", clip="baby", call="baby", bed="mb6", jclip="super", jcall="super",
+         jword="BABY JACKPOT", shake=shake(1000, "hard"), jshake=shake_game("jackpot"), title="SUPER MECHA TOTAL",
+         insert="MECHA WIZ", color=GREEN),
+)
+#: places on the playfield picture (the port's lamp lines): the Building (KIT_AT_BUILDING), MAGNA GRAB (the lock's
+#: burst), RODAN, ATTACK MECHA, HEAT RAY, MECHA LANE
+BX, BY = 123, 202
+MX, MY = 89, 260
+RX, RY = 178, 421
+AX, AY = 200, 381
+HX, HY = 180, 144
+LX, LY = 282, 393
 
+TIMERS = ("enter", "lights", "made", "lock", "jp", "mbstart", "grace")
 
-TIMERS = ("enter", "lights", "made", "lock", "jp", "mbstart")
-
-# ---- the RAGE meter: a fifth of the C's 750 switch hits, as it counts the named shots only ----------------------
+# ---- the RAGE meter: a fifth of the C's 750 switch hits, as it counts the named shots only; x(times spent + 1) ----
 L, PLAYS = var("level"), var("plays")
-#: the stretch now: 20, 25 ... 40, and 5 more each time the meter has been filled
-NEED = add(add(20, mul(5, L)), mul(5, PLAYS))
+TIMES = add(PLAYS, 1)
+#: the stretch now: 20, 25 ... 40 the first time, twice that the second
+NEED = mul(add(20, mul(5, L)), TIMES)
 #: the hits of the stretches done
-CUM = add(add(mul(20, L), div(mul(mul(5, L), sub(L, 1)), 2)), mul(mul(5, PLAYS), L))
-TOTAL_RAGE = add(150, mul(25, PLAYS))
+CUM = mul(add(mul(20, L), div(mul(mul(5, L), sub(L, 1)), 2)), TIMES)
+TOTAL_RAGE = mul(150, TIMES)
 DONE = add(CUM, var("rage"))
 #: the shot's pay in the chase: 500,000 +500,000 a place +25,000 a shot made within it
 VALUE = add(add(500000, mul(500000, var("place"))), mul(25000, var("made")))
 FLAGS = add(add(add(add(var("lr done"), var("rr done")), var("bl done")), var("bd done")), var("pc done"))
+#: the multiball: the jackpot's pay, the kind's last shot, how long the jackpot stays
+JP_VALUE = mul(var("jackpot"), var("mult"))
+LAST = add(var("place"), 3)
+STAY = sub(12, var("place"))
+#: 1 once there is a lock (the trail keeps its jackpot and super), 0 at ADONOA ISLAND (it goes cold)
+KEEP = div(add(var("place"), 4), 5)
+
+
+def _turn(by):
+    """The JACKPOT's place among the kind's four shots, ``by`` along (round again past the last)."""
+    r = add(sub(var("baby"), var("place")), by)
+    return add(var("place"), sub(r, mul(4, div(r, 4))))
+
+
+#: on, as its clock runs out; back one when it is hit (so its four never pay in a row)
+ON, BACK = _turn(1), _turn(3)
+
+
+def _x(fx, ms, a, b, x, y, **kw):
+    return step(fx, ms, a, b, "xy", x=x, y=y, **kw)
 
 
 SHOWS = [
     a_show("Rage level",                                   # a rage stretch: a red throb from the flippers
-           step("sweep_up", 450, RED, EMBER, "center"),
+           step("sweep_up", 450, RED, EMBER, "flippers"),
            step("fade", 300, RED, "#000000", "center")),
     a_show("Angry",                                        # the meter full: the whole playfield throbs
            step("pulse", 900, RED, EMBER, "center", rate=150, gi="dark"),
            step("strobe", 500, WHITE, RED, "center", rate=60, gi="flash"),
-           step("implode", 700, RED, EMBER, "xy", x=BX, y=BY)),
-    a_show("Angry start",
+           _x("implode", 700, RED, EMBER, BX, BY)),
+    a_show("Angry start",                                  # the chase begins: lightning, his ray from the Building
            step("bolts", 900, WHITE, EMBER, "center", rate=140, gi="dark"),
-           step("burst", 800, BLUE, RED, "xy", gi="dark", x=BX, y=BY),
+           _x("burst", 800, BLUE, RED, BX, BY, gi="dark"),
            step("sweep_up", 600, RED, EMBER, "center"),
            step("fade", 300, RED, "#000000", "center")),
-    a_show("Lock",
-           step("burst", 700, WHITE, RED, "xy", gi="flash", x=MX, y=MY),
+    a_show("Chase shot",                                   # a red shot made: a spark at the shot's side
+           step("sparkle", 400, RED, EMBER, "top", gi="keep"),
+           step("fade", 250, RED, "#000000", "top")),
+    a_show("Lock",                                         # a lock: Godzilla smashes through
+           _x("burst", 700, WHITE, RED, MX, MY, gi="flash"),
+           step("strobe", 300, WHITE, RED, "center", rate=50, gi="flash"),
            step("fade", 300, RED, "#000000", "center")),
-    a_show("Baby found",                                   # green, then every colour
-           step("burst", 800, GREEN, WHITE, "xy", gi="flash", x=BX, y=BY),
-           step("rainbow", 1500, "#000000", "#000000", "xy", rate=80, x=BX, y=BY),
+    a_show("Place",                                        # on to the next place: the trail leads up the playfield
+           step("sweep_up", 500, RED, "#000000", "center", gi="dark"),
+           step("chase", 900, RED, EMBER, "center", rate=90, gi="dark"),
+           _x("ripple", 900, ORANGE, EMBER, BX, BY, rate=300, gi="dark"),
+           step("fade", 400, RED, "#000000", "center", blend=150)),
+    a_show("Baby found",                                   # the SUPER: green, then every colour
+           _x("burst", 800, GREEN, WHITE, BX, BY, gi="flash"),
+           _x("rainbow", 1500, "#000000", "#000000", BX, BY, rate=80),
            step("strobe", 500, WHITE, GREEN, "center", rate=50, gi="flash")),
-    a_show("Angry end",
+    a_show("Trail cold",                                   # the chase lost: embers die at the Building
+           _x("implode", 900, EMBER, "#000000", BX, BY, gi="dark"),
+           step("fade", 900, EMBER, "#000000", "center", blend=300)),
+    a_show("Multiplier",                                   # a shot that raises the multiplier
+           step("bounce", 500, ORANGE, "#000000", "center", rate=120, gi="keep"),
+           step("fade", 200, ORANGE, "#000000", "center")),
+    # ---- the five multiballs: a start and a jackpot each -----------------------------------------------------------
+    a_show("Rodan start",                                  # Rodan's wings: amber sweeps from his insert
+           _x("fade_in", 500, AMBER, "#000000", RX, RY, gi="dark"),
+           step("sweep_lr", 400, AMBER, "#000000", "center", gi="dark"),
+           step("sweep_rl", 400, AMBER, "#000000", "center", gi="dark"),
+           _x("spiral_out", 1100, AMBER, "#301000", RX, RY, gi="dark"),
+           step("fade", 400, AMBER, "#000000", "center", blend=150)),
+    a_show("Rodan jackpot",
+           _x("burst", 600, WHITE, AMBER, RX, RY, gi="flash"),
+           step("sweep_down", 400, AMBER, "#000000", "top", gi="dark"),
+           step("fade", 300, AMBER, "#000000", "center")),
+    a_show("Mecha start",                                  # Mechagodzilla powers up: steel blue scan and bolts
+           _x("spin", 1000, STEEL, "#000020", AX, AY, rate=110, gi="dark"),
+           step("bolts", 700, WHITE, STEEL, "center", rate=100, gi="dark"),
+           _x("burst", 700, WHITE, BLUE, AX, AY, gi="flash"),
+           step("fade", 400, BLUE, "#000000", "center", blend=150)),
+    a_show("Mecha jackpot",                                # Godzilla's ray hits it: blue then red
+           step("sweep_rl", 350, BLUE, "#000000", "center", gi="dark"),
+           _x("burst", 500, RED, BLUE, AX, AY, gi="flash"),
+           step("fade", 300, RED, "#000000", "center")),
+    a_show("Garuda start",                                 # the gunship flies over: cyan beams side to side
+           step("sweep_down", 500, CYAN, "#000000", "top", gi="dark"),
+           step("bounce", 1100, WHITE, CYAN, "top", rate=140, gi="dark"),
+           _x("ripple", 900, CYAN, "#001020", HX, HY, rate=280, gi="dark"),
+           step("fade", 400, CYAN, "#000000", "center", blend=150)),
+    a_show("Garuda jackpot",                               # its maser cannon
+           _x("strobe", 300, WHITE, CYAN, HX, HY, rate=45, gi="flash"),
+           step("sweep_down", 400, CYAN, "#000000", "top", gi="dark"),
+           step("fade", 300, CYAN, "#000000", "center")),
+    a_show("Fire start",                                   # Rodan reborn: fire from his insert, then everywhere
+           _x("fade_in", 600, FIRE, "#000000", RX, RY, gi="dark"),
+           _x("fire", 1400, GOLD, FIRE, RX, RY, gi="dark"),
+           _x("spiral_out", 900, GOLD, FIRE, RX, RY, gi="dark"),
+           step("fade", 500, FIRE, "#000000", "center", blend=200)),
+    a_show("Fire jackpot",
+           step("fire", 700, GOLD, FIRE, "center", gi="dark"),
+           _x("burst", 500, WHITE, FIRE, RX, RY, gi="flash"),
+           step("fade", 300, FIRE, "#000000", "center")),
+    a_show("Super start",                                  # the finale: Super Mechagodzilla, Baby's green light
+           step("strobe", 500, WHITE, STEEL, "center", rate=50, gi="flash"),
+           _x("spiral_in", 900, STEEL, "#000020", LX, LY, gi="dark"),
+           _x("spiral_out", 900, GREEN, "#002010", BX, BY, gi="dark"),
+           step("rainbow", 1500, "#000000", "#000000", "center", rate=60),
+           step("fade", 500, GREEN, "#000000", "center", blend=200)),
+    a_show("Super jackpot",                                # his red spiral ray
+           _x("spiral_out", 700, RED, GOLD, BX, BY, gi="dark"),
+           _x("burst", 600, WHITE, RED, LX, LY, gi="flash"),
+           step("strobe", 300, WHITE, RED, "center", rate=45, gi="flash"),
+           step("fade", 400, RED, "#000000", "center", blend=150)),
+    a_show("Angry end",                                    # the multiball over: sparks die out
            step("sparkle", 900, RED, EMBER, "center", gi="dark"),
            step("fade", 1000, EMBER, "#000000", "center")),
 ]
+KIND_SHOWS = (("Rodan start", "Rodan jackpot"), ("Mecha start", "Mecha jackpot"), ("Garuda start", "Garuda jackpot"),
+              ("Fire start", "Fire jackpot"), ("Super start", "Super jackpot"))
 
 
 def angry_now():
@@ -102,7 +228,7 @@ RAGE = on_any_shot(
                                     sound("rage"), show("Rage level")])])],
             # a quarter of a stretch: how far it is (not in a multiball: it counts quietly)
             [if_(AND(lt(BALLS, 2), ne(div(mul(var("rage"), 4), NEED), div(mul(sub(var("rage"), 1), 4), NEED))), [
-                award("MORE TO GODZILLA ANGRY:", value=sub(TOTAL_RAGE, DONE), sub="GODZILLA IS GETTING ANGRY")])]),
+                award("GODZILLA RAGE", value=sub(TOTAL_RAGE, DONE), sub="MORE TO GODZILLA ANGRY")])]),
     ], [
         # full: lit at the Building again after a start or a new ball, and said once a multiball is over
         if_(NOT(LIT), [lit_building()]),
@@ -111,100 +237,119 @@ RAGE = on_any_shot(
 
 
 def enter_place():
-    """A place begins: its shots lit (their flags 0), the lock at once at ADONOA ISLAND, 30 s."""
-    out = [set_("made", 0), set_("lock lit", 0)] + [set_(f, 1) for _s, f in CHASE]
+    """A place begins: its shots lit (their flags 0), the lock at once at ADONOA ISLAND; 30 s (less once the meter
+    has been spent); after a lock the trail's light show (the "made" -1 of a start skips it)."""
+    out = [if_(ge("made", 0), [show("Place")]), set_("made", 0), set_("lock lit", 0)] + [set_(f, 1) for _s, f in CHASE]
     for i, (name, shots) in enumerate(PLACES):
         body = [set_(f, 0) for s, f in CHASE if s in shots]
         if not shots:
             body = [set_("lock lit", 1)]
         out.append(if_(eq("place", i), body + [hud_counter(1, var("place"), name)]))
     out.append(if_(eq("place", 5), [hud_counter(1, var("place"), "BABY")]))
-    return out + [set_time(30), timer_start("lights", 1)]
+    return out + [if_(ge("plays", 2), [set_time(20)], [set_time(sub(30, mul(5, PLAYS)))]), timer_start("lights", 1)]
 
 
 def lights_and_line():
     """The inserts and the instruction line for where it is now."""
-    mb = [if_(eq("baby", i), [light(s, GREEN, "blink", 200), hud_line("BABY IS AT THE " + words)],
-              [light(s, ORANGE, "blink", 500)]) for i, (s, words) in enumerate(JP, 1)]
-    mb += [off(PC), off(GT), off(MT)]
-    chase = [if_(eq(f, 0), [light(s, RED, "blink", 500)], [off(s)]) for s, f in CHASE]
+    mb = []
+    for c, (s, _w) in enumerate(CODES, 1):
+        mb.append(if_(eq("baby", c), [light(s, GREEN, "chase", 90)],
+                      [if_(AND(le("place", c), ge(LAST, c)), [light(s, ORANGE, "blink", sub(560, mul(80, var("place"))))],
+                           [off(s)])]))
+    chase = [if_(eq(f, 0), [light(s, RED, "blink", 500)], [off(s)]) for s, f in CHASE] + [off(ML)]
     chase += [
         if_(AND(eq("lock lit", 1), OR(eq("place", 0), eq("place", 2), eq("place", 4))),
             [light(GT, WHITE, "hurry"), hud_line("LOCK IS LIT AT THE CAPTIVE BALL")], [off(GT)]),
         if_(AND(eq("lock lit", 1), OR(eq("place", 1), eq("place", 3))),
             [light(MT, WHITE, "hurry"), hud_line("LOCK IS LIT AT THE MASER")], [off(MT)]),
         if_(eq("place", 5), [light(BD, GREEN, "hurry"), hud_line("SHOOT THE BUILDING: BABY IS THERE")]),
+        if_(AND(lt("place", 5), eq("lock lit", 0)), [hud_line("SHOOT THE RED SHOTS: TO GO", sub(5, FLAGS))]),
     ]
-    chase += [if_(AND(eq("place", i), eq("lock lit", 0)), [hud_line(name + ": LIT SHOTS TO GO", sub(5, FLAGS))])
-              for i, (name, shots) in enumerate(PLACES) if shots]
     return [if_(gt("mb", 0), mb, chase)]
 
 
 def made_shot():
     """One of the place's red shots made (its flag already set)."""
-    out = [score(VALUE), change("jackpot", div(VALUE, 8))]
+    # (no shake for each red shot: the runtime allows 20 shakes a minute, and the multiball needs its own)
+    out = [score(VALUE), change("jackpot", div(VALUE, 8)), show("Chase shot")]
     out += [if_(eq("place", i), [award(name, value=VALUE, seconds=2)]) for i, (name, shots) in enumerate(PLACES)
             if shots]
     return out + [
         change("made", 1), hud_counter(2, var("jackpot")),
         if_(lt(SECS_LEFT, 15), [set_time(15)]),
-        if_(eq(FLAGS, 5), [set_("lock lit", 1)]),
+        if_(eq(FLAGS, 5), [set_("lock lit", 1), shake(300, "medium")]),
         timer_start("lights", 1)]
 
 
 def lock_made():
-    out = [score(mul(2, VALUE)), change("jackpot", mul(250000, add(var("place"), 1)))]
-    words = ("1 LOCK", "2 LOCKS", "3 LOCKS", "4 LOCKS", "5 LOCKS")
-    out += [if_(eq("place", i), [award(w, value=mul(2, VALUE), sub="HE SMASHES THROUGH", seconds=2)])
-            for i, w in enumerate(words)]
-    return out + [hud_counter(2, var("jackpot")), clip("lock", "behind"), sound("lock"), show("Lock"),
-                  change("place", 1), timer_start("enter", 1)]
-
-
-def jackpot_shot():
-    """A lit shot in the multiball (``hit`` = which): BABY's jackpot, or the multiplier up."""
-    baby_moves = [change("baby", 1), if_(gt("baby", 4), [set_("baby", 1)])]
-    return [
-        if_(eq("hit", var("baby")), [
-            score(mul(var("jackpot"), var("mult"))),
-            award("BABY JACKPOT", value=mul(var("jackpot"), var("mult")), sub="TIMES THE MULTIPLIER", seconds=2),
-            if_(ge("mult", 4), [clip("super", "full"), sound("super")], [clip("jackpot", "behind"), sound("jackpot")]),
-            set_("mult", 1), change("babies", 1), *baby_moves, set_time(10)],
-            [score(500000), if_(lt("mult", 6), [change("mult", 1)]),
-             award("BABY X", value=var("mult"), sub="NOW SHOOT BABY", seconds=1)]),
-        hud_counter(1, var("mult")), hud_counter(3, var("babies")), timer_start("lights", 1)]
+    # the next place ~1 s later (its light show after the lock's; never two shakes at once)
+    return [score(mul(2, VALUE)), change("jackpot", mul(250000, add(var("place"), 1))),
+            award("LOCK", value=add(var("place"), 1), sub="HE SMASHES THROUGH", seconds=2),
+            hud_counter(2, var("jackpot")), clip("lock", "behind"), sound("lock"), show("Lock"),
+            shake(500, "strong"), change("place", 1), set_("lock lit", 0), timer_start("enter", 1200)]
 
 
 def start_multiball():
-    """ANGRY MULTIBALL: 6 balls after BABY FOUND, else the locks + 1 (2 to 6), a 15 s ball save."""
-    balls = [if_(eq("place", n - 1), [multiball(n, 15)]) for n in (3, 4, 5)]
-    return [
-        if_(eq("mb", 2), [multiball(6, 15)], [
-            if_(le("place", 1), [multiball(2, 15)]), *balls, if_(ge("place", 5), [multiball(6, 15)])]),
-        set_("mult", 1), set_("baby", 1), set_("mb secs", 0),
+    """The kind the locks earned (BABY found = the 6-ball): its balls, music, clip, call, light show and words."""
+    out = []
+    for k, d in enumerate(KINDS, 1):
+        out.append(if_(eq("place", k), [
+            multiball(k + 1, 15), music(d["bed"]), clip(d["clip"], "full"), sound(d["call"]),
+            show(KIND_SHOWS[k - 1][0]), hud_title(d["name"]), d["shake"],
+            light_insert(d["insert"], d["color"], "chase", 100)]))
+    return out + [
+        hud_line("SHOOT THE GREEN JACKPOT"),
+        set_("mult", var("place")), set_("baby", var("place")), timer_start("grace", 20000),
         if_(lt("jackpot", 2000000), [set_("jackpot", 2000000)]),
-        set_time(10), hud_title("ANGRY MULTIBALL"),
-        hud_counter(1, var("mult"), "OTHERS RAISE IT", "MULTIPLIER"), hud_counter(2, var("jackpot"), "AT BABY"),
-        hud_counter(3, var("babies"), "AT BABY", "JACKPOTS"),
+        set_time(STAY),
+        hud_counter(1, var("mult"), "ORANGE SHOTS", "MULTIPLIER"), hud_counter(2, var("jackpot"), "GREEN SHOT"),
+        hud_counter(3, var("babies"), "THIS MULTIBALL", "JACKPOTS"),
         timer_start("lights", 1)]
 
 
-def chase_shot(shot, flag, hit):
-    out = [if_(AND(eq("mb", 0), lt("place", 5), eq(flag, 0)), [set_(flag, 1), timer_start("made", 1)])]
-    if hit:
-        out.append(if_(gt("mb", 0), [set_("hit", hit), timer_start("jp", 1)]))
-    return out
+def jackpot_shot():
+    """A shot in the multiball (``hit`` = its number): the kind's green JACKPOT, or one of its other three."""
+    kinds = [if_(eq("place", k), [award(d["jword"], value=JP_VALUE, sub="TIMES THE MULTIPLIER", seconds=2),
+                                  clip(d["jclip"], "behind"), sound(d["jcall"]), show(KIND_SHOWS[k - 1][1]),
+                                  d["jshake"]])
+             for k, d in enumerate(KINDS, 1)]
+    return [
+        if_(eq("hit", var("baby")), [score(JP_VALUE), *kinds,
+                                     set_("mult", var("place")), change("babies", 1), set_("baby", BACK),
+                                     set_time(STAY)],
+            [if_(AND(le("place", var("hit")), ge(LAST, var("hit"))), [
+                score(mul(500000, var("place"))), if_(lt("mult", add(var("place"), 5)), [change("mult", 1)]),
+                award("MULTIPLIER", value=var("mult"), sub="NOW THE GREEN JACKPOT", seconds=1),
+                show("Multiplier")])]),
+        hud_counter(1, var("mult")), hud_counter(3, var("babies")), timer_start("lights", 1)]
 
 
-def ending_words():
-    """The ending's title and line: GODZILLA AND BABY after BABY FOUND; the multiball's BABY jackpots and locks
-    (the number can only come last); the chase's place where the trail waits."""
-    mb = [if_(eq("mb", 2), [hud_title("GODZILLA AND BABY")])]
-    mb += [if_(eq("place", n), [hud_line("%d LOCK%s  -  BABY JACKPOTS" % (n, "" if n == 1 else "S"),
-                                         value=var("babies"))]) for n in range(1, 6)]
-    chase = [if_(eq("place", i), [hud_line("THE TRAIL WAITS AT " + name)]) for i, (name, _s) in enumerate(PLACES)]
-    chase += [if_(eq("place", 5), [hud_line("THE TRAIL WAITS AT BABY")])]
-    return [if_(gt("mb", 0), mb, chase)]
+def chase_shot(flag):
+    return [if_(AND(eq("mb", 0), lt("place", 5), eq(flag, 0)), [set_(flag, 1), timer_start("made", 1)])]
+
+
+def mb_shot(shot):
+    return [if_(gt("mult", 0), [set_("hit", CODE[shot]), timer_start("jp", 1)])]      # mult: it has begun
+
+
+def ending():
+    """The ending's title, line, clip, call and light show: the kind's TOTAL after a multiball (GODZILLA AND BABY
+    after BABY FOUND), the locks the trail keeps after the chase."""
+    titles = [if_(eq("place", k), [hud_title(d["title"])]) for k, d in enumerate(KINDS, 1)]
+    return [if_(gt("mb", 0), [
+        # the meter starts again, twice (three times...) as long; the trail is forgotten
+        set_("ready", 0), set_("level", 0), set_("rage", 0), change("plays", 1),
+        set_("trail place", 0), set_("trail jackpot", 0), set_("trail super", 0),
+        *titles, hud_line("JACKPOTS", value=var("babies")), show("Angry end"),
+        if_(eq("mb", 2), [hud_title("GODZILLA AND BABY"), clip("won", "full"), sound("won"),
+                          shake_game("big_hit")],
+            [clip("lost", "full"), sound("lost", fallback="time_up")])],
+        [
+        # the chase: a drain keeps the trail for the next start; at ADONOA ISLAND it goes cold
+        set_("trail place", var("place")), set_("trail jackpot", mul(var("jackpot"), KEEP)),
+        set_("trail super", mul(var("super"), KEEP)),
+        hud_line("LOCKS KEPT FOR THE TRAIL", value=var("place")), show("Trail cold"), shake(400, "medium"),
+        clip("lost", "full"), sound("lost", fallback="time_up"), lit_building()])]
 
 
 SCRIPTS = [
@@ -212,59 +357,47 @@ SCRIPTS = [
     # ---- the chase -----------------------------------------------------------------------------------------------
     on_start(set_("place", var("trail place")), set_("jackpot", var("trail jackpot")),
              set_("super", var("trail super")), if_(eq("super", 0), [set_("super", 5000000)]),
-             set_("mb", 0), set_("mult", 1), set_("mb secs", 0),
-             clip("intro", "full"), clip("loop", "loop"), game_show("Insert chase"), hud_title("GODZILLA ANGRY!"),
-             hud_counter(2, var("jackpot"), "BUILT BY SHOTS"), hud_counter(3, var("super"), "FED BY SWITCHES"),
+             set_("mb", 0), set_("made", -1),
+             clip("intro", "full"), clip("loop", "loop"), show("Angry start"), shake(700, "strong"),
+             hud_title("GODZILLA ANGRY!"),
+             hud_counter(2, var("jackpot"), "BUILT BY SHOTS"), hud_counter(3, var("super"), "FED BY SHOTS"),
              if_(eq("place", 0), [award("GODZILLA ANGRY!", sub="THEY TOOK BABY GODZILLA", seconds=3)],
                  [award("THE TRAIL AGAIN", value=var("place"), sub="LOCKS KEPT", seconds=3)]),
              timer_start("enter", 1)),
     on_timer("enter", *enter_place()),
     on_timer("lights", *lights_and_line()),
     on_any_shot(if_(eq("mb", 0), [change("super", 10000), hud_counter(3, var("super"))])),   # every shot feeds the SUPER
-    on_shot(LR, *chase_shot(LR, "lr done", 1)),
-    on_shot(RR, *chase_shot(RR, "rr done", 2)),
-    on_shot(BL, *chase_shot(BL, "bl done", 4)),
-    on_shot(BD, *chase_shot(BD, "bd done", 3),
-            if_(AND(eq("mb", 0), eq("place", 5)), [               # BABY FOUND: the super and six balls
+    on_shot(LR, *chase_shot("lr done"), *mb_shot(LR)),
+    on_shot(RR, *chase_shot("rr done"), *mb_shot(RR)),
+    on_shot(BL, *chase_shot("bl done"), *mb_shot(BL)),
+    on_shot(BD, *chase_shot("bd done"), *mb_shot(BD),
+            if_(AND(eq("mb", 0), eq("place", 5)), [               # BABY FOUND: the super, then the six balls
                 score(var("super")),
-                award("SUPER JACKPOT", value=var("super"), sub="BABY FOUND", seconds=4),
-                show("Baby found"), clip("baby", "full"), sound("baby"),
-                set_("mb", 2), timer_start("mbstart", 1)])),
-    on_shot(PC, *chase_shot(PC, "pc done", 0)),
+                award("SUPER JACKPOT", value=var("super"), sub="BABY FOUND", seconds=3),
+                show("Baby found"), sound("angry"), shake(1000, "hard"),
+                set_("mb", 2), set_time(10), timer_start("mbstart", 2000)])),
+    on_shot(PC, *chase_shot("pc done"), *mb_shot(PC)),
+    on_shot(ML, *mb_shot(ML)),
     on_timer("made", *made_shot()),
     on_shot(GT, if_(AND(eq("mb", 0), eq("lock lit", 1), OR(eq("place", 0), eq("place", 2), eq("place", 4))),
-                    [timer_start("lock", 1)])),
+                    [timer_start("lock", 1)]), *mb_shot(GT)),
     on_shot(MT, if_(AND(eq("mb", 0), eq("lock lit", 1), OR(eq("place", 1), eq("place", 3))),
-                    [timer_start("lock", 1)])),
+                    [timer_start("lock", 1)]), *mb_shot(MT)),
     on_timer("lock", *lock_made()),
-    # the place's clock: with locks they break loose as a multiball; with none it runs out (the trail goes cold).
-    # In the multiball the clock counts BABY's next move.
+    # the place's clock: with locks they break loose as their multiball; with none it runs out (the trail goes
+    # cold). In the multiball the clock counts the JACKPOT's next move.
     secs_left(1,
-              if_(gt("mb", 0), [change("baby", 1), if_(gt("baby", 4), [set_("baby", 1)]), set_time(10),
-                                timer_start("lights", 1)],
+              if_(gt("mb", 0), [set_("baby", ON), set_time(STAY), timer_start("lights", 1)],
                   [if_(gt("place", 0), [
-                      set_("mb", 1), award("THE LOCKS BREAK LOOSE", sub="ANGRY MULTIBALL", seconds=3),
-                      sound("lock"), clip("lock", "behind"), timer_start("mbstart", 1)])])),
+                      set_("mb", 1), set_time(10), award("LOCKS BREAK LOOSE", value=var("place"), sub="LOCKS",
+                                                         seconds=2),
+                      timer_start("mbstart", 1500)])])),
     # ---- the multiball -----------------------------------------------------------------------------------------
     on_timer("mbstart", *start_multiball()),
     on_timer("jp", *jackpot_shot()),
-    every(1, if_(gt("mb", 0), [change("mb secs", 1),
-                               if_(AND(ge("mb secs", 20), lt(BALLS, 2)), [end()])])),
+    every(1, if_(AND(gt("mult", 0), eq(timer_left("grace"), 0), lt(BALLS, 2)), [end()])),   # mult: it has begun
     # ---- the end -----------------------------------------------------------------------------------------------
-    on_end(*[timer_stop(t) for t in TIMERS], game_show("Ember fade"),
-           if_(gt("mb", 0), [
-               # the meter starts again, each stretch 5 more; the trail is forgotten
-               set_("ready", 0), set_("level", 0), set_("rage", 0), change("plays", 1),
-               set_("trail place", 0), set_("trail jackpot", 0), set_("trail super", 0),
-               if_(eq("mb", 2), [clip("won", "full"), sound("won")],
-                   [clip("lost", "full"), sound("lost", fallback="time_up")])],
-               [
-               # the chase: a drain keeps the trail for the next start; at ADONOA ISLAND it goes cold
-               if_(gt("place", 0), [set_("trail place", var("place")), set_("trail jackpot", var("jackpot")),
-                                    set_("trail super", var("super"))],
-                   [set_("trail place", 0), set_("trail jackpot", 0), set_("trail super", 0)]),
-               clip("lost", "full"), sound("lost", fallback="time_up"), lit_building()]),
-           *ending_words()),
+    on_end(*[timer_stop(t) for t in TIMERS], *ending()),
 ]
 
 
@@ -274,25 +407,29 @@ PROGRAM = {
     "vars": [{"name": n, "reset": "game"} for n in ("rage", "level", "ready", "plays", "owed", "trail place",
                                                      "trail jackpot", "trail super")] +
             [{"name": n, "reset": "mode"} for n in ("place", "mb", "lock lit", "made", "jackpot", "super", "mult",
-                                                     "baby", "babies", "hit", "mb secs")] +
+                                                     "baby", "babies", "hit")] +
             [{"name": f, "reset": "mode"} for _s, f in CHASE],
     "timers": [{"name": n} for n in TIMERS],
     "hud": hud("LOCK IS LIT AT THE CAPTIVE BALL",
                counters=[("LOCKS", "ADONOA ISLAND", None), ("JACKPOT", "BUILT BY SHOTS", None),
-                         ("SUPER", "FED BY SWITCHES", None)],
+                         ("SUPER", "FED BY SHOTS", None)],
                timer=("ANGRY", "rage")),
     "bar": {"on": False}, "info": {"on": False},
-    "clips": clips("intro", "loop", "lock", "baby", "jackpot", "super", "won", "lost"),
-    "sounds": sounds({"rage": 3, "angry": 4, "lock": 3, "baby": 4, "jackpot": 3, "super": 4, "won": 4, "lost": 4}),
+    "clips": clips("intro", "loop", "lock", "baby", "jackpot", "super", "won", "lost",
+                   "mb2", "mb3", "mb4", "mb5"),
+    "sounds": sounds({"rage": 3, "angry": 4, "lock": 3, "baby": 4, "jackpot": 3, "super": 4, "won": 4, "lost": 4,
+                      "mb2": 4, "mb3": 4, "mb4": 4, "mb5": 4, "jp2": 3, "jp4": 3, "jp5": 3}),
     "music": "music.wav",
+    "beds": beds("mb2", "mb3", "mb4", "mb5", "mb6"),
     "shows": SHOWS,
 }
 
 LOST = [
     "The RAGE meter counts only the shots this program names (the ramps, Big loop, Building, center powerline, "
-    "captive ball and Maser): the blocks never see a switch's own hit, where the C counts every playfield switch. "
-    "So the meter is a fifth as long (stretches of 20, 25, 30, 35, 40 hits, 5 more each after a multiball, where the "
-    "C has 100 to 200 and 25 more), and the SUPER JACKPOT grows 10,000 a named shot rather than a switch.",
+    "captive ball, Maser and Mecha lane): the blocks never see a switch's own hit, where the C counts every "
+    "playfield switch. So the meter is a fifth as long (stretches of 20, 25, 30, 35, 40 hits the first time, twice "
+    "that the second, where the C has 100 to 200 and 25 more), and the SUPER JACKPOT grows 10,000 a named shot "
+    "rather than a switch.",
     "No points while the mode is not running: the C pays 1,000,000 (+500,000 a stretch) at each RAGE stretch's end; "
     "the blocks' Score only scores while the mode runs, so a stretch is a note, a roar and a light show only.",
     "The RAGE meter is not on the glass: the C draws it as a bar with GODZILLA RAGE and its percent at the top right "
@@ -301,32 +438,44 @@ LOST = [
     "No ball save: the C gives a 5 s ball save at the start and keeps one running from the first lock, so a drain "
     "with locks sends the locked balls straight into the multiball. In blocks a drain ends the chase; the place, its "
     "locks, the jackpot and the super wait for the next start at the Building (as the C does for a drain with no lock).",
-    "No randomness: BABY starts at the Left ramp and moves to the next shot in turn (Left ramp, Right ramp, Building, "
-    "Big loop) every 10 s and when hit, where the C picks another at random.",
-    "The ending's line after a multiball puts the BABY jackpots last (5 LOCKS  -  BABY JACKPOTS 2) where the C said "
-    "2 BABY JACKPOTS  -  5 LOCKS, and says JACKPOTS for one too.",
-    "The ending stays up 3 s, the runtime's: the C kept it 10 s.",
-    "The instruction line counts the place's shots still to make (\"KYOTO: LIT SHOTS TO GO 3\") where the C names "
-    "them while they fit (\"OSAKA: BIG LOOP, BUILDING\"); the award for a shot says the place and the points, and a "
-    "start on the trail says THE TRAIL AGAIN with its locks, not the place's name.",
-    "The badge counts the place's 30 s in the chase and BABY's next move (10 s) in the multiball, where the C hides "
+    "No randomness: each multiball's JACKPOT starts on its kind's first shot, moves on to the next of its four as "
+    "its clock runs out and back one when it is hit, where the C's BABY jumped to another of four shots at random.",
+    "The multiballs are this blocks version's own (Gappa Angry's kinds, PAD-658 round 2): the C has ONE ANGRY "
+    "MULTIBALL of the locks + 1 balls, BABY on the ramps, Building and Big loop, x1 to x6.",
+    "A blocks mode holds 12 clips: each kind has its own start clip, and RODAN'S NEST, GARUDA and FIRE RODAN replay "
+    "it behind the HUD at their jackpots (MECHAGODZILLA has the ray-at-Mechagodzilla clip, the 6-ball the red "
+    "spiral ray); the four smaller kinds share the lost clip at their end (the 6-ball after BABY FOUND has won).",
+    "The ending's line says JACKPOTS and the count (the C said 2 BABY JACKPOTS  -  5 LOCKS); after the chase it "
+    "says LOCKS KEPT FOR THE TRAIL and the count (the C named the place the trail waits at).",
+    "The ending's TOTAL is the runtime's (up 3 s, or until 9 s after the end behind a full-screen ending clip): "
+    "the C kept it 10 s.",
+    "The instruction line counts the place's red shots still to make (\"SHOOT THE RED SHOTS: TO GO 3\", the place "
+    "under the LOCKS counter) where the C names them while they fit (\"OSAKA: BIG LOOP, BUILDING\"); a start on the "
+    "trail says THE TRAIL AGAIN with its locks, not the place's name.",
+    "The badge counts the place's clock in the chase and the JACKPOT's next move in the multiball, where the C hides "
     "it in the multiball; a place's clock with locks turns into the multiball with a second left, not at 0.",
     "One display priority, 180, throughout: the C takes 190 (a wizard's) for the multiball.",
-    "For Godzilla Premium/LE only: the C also ran on Godzilla Pro, playing its own start and end shows where the "
-    "game has no Insert chase or Ember fade; a blocks program cannot ask whether the game has a show. Its own two "
-    "are kept under Light shows (Angry start, Angry end), not run, to swap in.",
+    "Its own light shows replace the game's Insert chase and Ember fade that the C played on a Premium/LE (and its "
+    "own on a Pro), so every title sees the same shows.",
+    "Not on Godzilla Pro 1.15 (the C ran there): that older build names no switch shots (the Mecha lane, a "
+    "jackpot shot of four of the five multiballs) and has no shaker steps.",
     "No tilt rule of its own: the C stops the meter after a tilt until the next ball; here the tilted ball's shots "
     "still count.",
     "Another mode of ours ending on the Building does not keep it from starting this one on that same shot (the C "
     "waits 300 ms after another of ours ends).",
+    "A start on the trail after a drain costs no meter (the Building stays lit until the multiball is played), as "
+    "in the C; only the meter itself grows each time it is spent.",
 ]
 
 EXAMPLE = {
-    "name": NAME, "slug": SLUG, "order": 107, "titles": ["godzilla_le"],
+    "name": NAME, "slug": SLUG, "order": 107, "titles": ["godzilla_le", "godzilla_pro"],
     "based_on": "godzilla_angry.c",
-    "about": ("The C example GODZILLA ANGRY rebuilt in blocks: shots fill the RAGE meter, which lights the Building; "
-              "a chase through five places, each with lit shots and a lock, to BABY at the Building and a six-ball "
-              "multiball with BABY's jackpot moving round the ramps, Building and Big loop."),
+    "about": ("The C example GODZILLA ANGRY rebuilt in blocks and made Elvira's Gappa Angry: 150 named shots fill "
+              "the RAGE meter (300 the second time, 450 the third) and light the Building; a chase through five "
+              "places, each with its red shots and a lock, to BABY at the Building; how many balls are locked picks "
+              "the multiball: RODAN'S NEST (2 balls), MECHAGODZILLA (3), GARUDA (4), FIRE RODAN (5) or SUPER "
+              "MECHAGODZILLA (6, after BABY FOUND's super jackpot), each with its own clips, music, jackpot shots, "
+              "multiplier, light shows and shakes."),
     "lost": LOST,
 }
 
@@ -345,34 +494,90 @@ def _shots(*names, gap=300):
 
 
 _START = ["trigger", "godzilla_angry.start", "secs", 1]
-_CHASE = (_shots(GT) + _shots(LR, RR, MT) + _shots(BL, BD, GT) + _shots(LR, RR, BD, BL, MT) +
-          _shots(LR, RR, BL, BD, PC, GT) + ["secs", 1])
+#: each place's shots and lock (a second between, for the place's light show)
+_PLACE = [_shots(GT), _shots(LR, RR, MT), _shots(BL, BD, GT), _shots(LR, RR, BD, BL, MT),
+          _shots(LR, RR, BL, BD, PC, GT)]
+
+
+def _locks(n):
+    out = []
+    for p in _PLACE[:n]:
+        out += p + ["secs", 2]
+    return out
+
+
 #: 150 named shots fill the meter (the Big loop's: no other example here counts it while it is not lit)
 _FILL = _shots(*([BL] * 150), gap=60) + ["secs", 1]
+_END = ["secs", 20, "balls", 1, "secs", 8]
+NL = chr(10)                            # a shake's line ending there: it was not refused
+_MB = ["secs", 33]                     # the place's clock runs out, the kind starts, its shake runs out
 DESK = [
     ("the rage lights the building", _FILL + ["shot", BD, "secs", 2],
-     ["Hud_Award: MORE TO GODZILLA ANGRY: 145", "Hud_Award: RAGE 13", "Hud_Award: GODZILLA IS ANGRY!",
-      "[GODZILLA ANGRY] START (its lit shot)", "Hud_Award: GODZILLA ANGRY!"]),
-    ("five places then baby and the multiball",
-     _START + _CHASE + _shots(BD) + ["secs", 3] + _shots(RR, BD, BL, LR) + ["secs", 20, "balls", 1, "secs", 8],
-     ["Hud_Award: 1 LOCK 1,000,000", "Hud_Award: YOKKAICHI 1,000,000", "Hud_Award: YOKKAICHI 1,025,000",
-      "Hud_Award: 2 LOCKS 2,100,000", "Hud_Line: OSAKA: LIT SHOTS TO GO 2", "Hud_Award: MAKUHARI 2,600,000",
-      "Hud_Award: 5 LOCKS", "Hud_Line: SHOOT THE BUILDING: BABY IS THERE", "Hud_Award: SUPER JACKPOT",
-      "MULTIBALL 6 balls, save 15 s", "Hud_Title: ANGRY MULTIBALL", "Hud_C1_Label: MULTIPLIER", "Hud_C3_Label: JACKPOTS", "Hud_Award: BABY X 2",
-      "Hud_Award: BABY X 4", "Hud_Award: BABY JACKPOT 27,975,000", "own clip super", "own clip won", "Hud_Title: GODZILLA AND BABY",
-      "Hud_Line: 5 LOCKS  -  BABY JACKPOTS 1",
+     ["GODZILLA RAGE", "145  -  MORE TO GODZILLA ANGRY", "10  -  MORE TO GODZILLA ANGRY", "13  -  PERCENT", "show Rage level",
+      "[GODZILLA ANGRY] lit at Building", "show Angry:", "[GODZILLA ANGRY] START (its lit shot)",
+      "Hud_AwardSub: THEY TOOK BABY GODZILLA"]),
+    ("one lock: rodan's nest, 2 balls",
+     _START + _locks(1) + _MB + _shots(GT, LR, ML) + _END,
+     ["Hud_Award: LOCKS BREAK LOOSE", "Hud_AwardSub: 1  -  LOCKS", "MULTIBALL 2 balls, save 15 s",
+      "Hud_Title: RODAN'S NEST", "own clip mb2", "own sound mb2", "show Rodan start",
+      "SHAKE 600 ms at 2", "Hud_Line: SHOOT THE GREEN JACKPOT", "Hud_C1_Label: MULTIPLIER",
+      "Hud_Award: RODAN JACKPOT", "Hud_AwardSub: 2,000,000  -  TIMES THE MULTIPLIER", "own sound jp2",
+      "show Rodan jackpot", "SHAKE 300 ms at 2" + NL, "Hud_Award: MULTIPLIER", "Hud_AwardSub: 2  -  NOW THE GREEN",
+      "Hud_AwardSub: 4,000,000  -  TIMES", "Hud_Title: RODAN'S NEST TOTAL", "Hud_Line: JACKPOTS 2",
       "END (a block)", "lamps held 0"]),
-    ("the clock turns the locks into a multiball",
-     _START + _shots(GT) + ["secs", 32, "balls", 1, "secs", 25],
-     ["Hud_Award: THE LOCKS BREAK LOOSE", "MULTIBALL 2 balls, save 15 s", "Hud_Title: GODZILLA ANGRY TOTAL",
-      "Hud_Line: 1 LOCK  -  BABY JACKPOTS 0",
+    ("two locks: mechagodzilla, 3 balls",
+     _START + _locks(2) + _MB + _shots(LR, RR, BD) + _END,
+     ["MULTIBALL 3 balls, save 15 s", "Hud_Title: MECHAGODZILLA", "own clip mb3", "show Mecha start",
+      "Hud_Award: MECHA JACKPOT", "own clip jackpot", "show Mecha jackpot", "Hud_AwardSub: 3  -  NOW THE GREEN",
+      "Hud_Title: MECHAGODZILLA TOTAL", "Hud_Line: JACKPOTS 2", "END (a block)", "lamps held 0"]),
+    ("three locks: garuda, 4 balls",
+     _START + _locks(3) + _MB + _shots(RR, ML, BL) + _END,
+     ["MULTIBALL 4 balls, save 15 s", "Hud_Title: GARUDA", "own clip mb4", "show Garuda start",
+      "Hud_Award: GARUDA JACKPOT", "own sound jp4", "show Garuda jackpot", "Hud_AwardSub: 4  -  NOW THE GREEN",
+      "Hud_Title: GARUDA TOTAL", "Hud_Line: JACKPOTS 2", "END (a block)", "lamps held 0"]),
+    ("four locks: fire rodan, 5 balls",
+     _START + _locks(4) + _MB + _shots(ML, BD, MT) + _END,
+     ["MULTIBALL 5 balls, save 15 s", "Hud_Title: FIRE RODAN", "own clip mb5", "show Fire start",
+      "Hud_Award: FIRE JACKPOT", "own sound jp5", "show Fire jackpot", "SHAKE 800 ms at 0" + NL,
+      "Hud_AwardSub: 5  -  NOW THE GREEN", "Hud_Title: FIRE RODAN TOTAL", "Hud_Line: JACKPOTS 2", "END (a block)",
+      "lamps held 0"]),
+    ("five places then baby and the six-ball",
+     _START + _locks(5) + _shots(BD) + ["secs", 4] + _shots(BL, MT, BD, PC) + _END,
+     ["Hud_Award: LOCK", "Hud_AwardSub: 1  -  HE SMASHES THROUGH", "Hud_Award: YOKKAICHI",
+      "Hud_AwardSub: 1,000,000", "Hud_AwardSub: 1,025,000", "Hud_AwardSub: 2  -  HE SMASHES THROUGH",
+      "Hud_Line: SHOOT THE RED SHOTS: TO GO 2", "Hud_Award: MAKUHARI", "Hud_AwardSub: 2,500,000",
+      "Hud_AwardSub: 5  -  HE SMASHES THROUGH", "Hud_Line: SHOOT THE BUILDING: BABY IS THERE",
+      "Hud_Award: SUPER JACKPOT", "  -  BABY FOUND", "SHAKE 1000 ms at 0", "show Baby found",
+      "MULTIBALL 6 balls, save 15 s", "Hud_Title: SUPER MECHAGODZILLA", "own clip baby", "show Super start", "SHAKE 1000 ms at 0",
+      "Hud_C1_Label: MULTIPLIER", "Hud_C3_Label: JACKPOTS", "Hud_AwardSub: 6  -  NOW THE GREEN",
+      "Hud_AwardSub: 7  -  NOW THE GREEN", "Hud_Award: BABY JACKPOT", "own clip super", "show Super jackpot",
+      "SHAKE the game's jackpot" + NL, "own clip won", "Hud_Title: GODZILLA AND BABY", "Hud_Line: JACKPOTS 2",
       "END (a block)", "lamps held 0"]),
-    ("a drain keeps the trail", _START + _shots(GT, LR, RR, MT) + ["ball_end", "secs", 8] + _START,
-     ["END (ball ended)", "Hud_Award: THE TRAIL AGAIN 2", "Hud_Line: OSAKA: LIT SHOTS TO GO 2",
-      "END lamps held 2"]),                   # running again at OSAKA: the Big loop and the Building lit
-    ("with no lock the trail goes cold", _FILL + ["shot", BD, "secs", 32] + _shots(BD) + ["secs", 2],
-     ["END (time ran out)", "Hud_Title: GODZILLA ANGRY TOTAL", "Hud_Line: THE TRAIL WAITS AT ADONOA ISLAND",
-      "Hud_Line: LOCK IS LIT AT THE CAPTIVE BALL", "END lamps held 1"]),    # running again: the lock lit
-    ("a lit shot puts the clock back to fifteen", _START + _shots(GT) + ["secs", 20] + _shots(LR) + ["secs", 1],
-     ["Hud_Award: YOKKAICHI 1,000,000"]),
+    ("a drain keeps the trail", _START + _shots(GT) + ["secs", 2] + _shots(LR, RR, MT) + ["ball_end", "secs", 8]
+     + _START + ["secs", 3],
+     ["END (ball ended)", "Hud_Line: LOCKS KEPT FOR THE TRAIL 2", "Hud_Award: THE TRAIL AGAIN",
+      "Hud_AwardSub: 2  -  LOCKS KEPT", "Hud_Line: SHOOT THE RED SHOTS: TO GO 2", "END lamps held 2"]),
+    ("with no lock the trail goes cold", _FILL + ["shot", BD, "secs", 32] + _shots(BD) + ["secs", 4],
+     ["END (time ran out)", "Hud_Title: GODZILLA ANGRY TOTAL", "Hud_Line: LOCKS KEPT FOR THE TRAIL 0",
+      "show Trail cold", "Hud_Line: LOCK IS LIT AT THE CAPTIVE BALL", "END lamps held 1"]),   # again: the lock lit
+    ("a lit shot puts the clock back to fifteen", _START + _shots(GT) + ["secs", 21] + _shots(LR) + ["secs", 1],
+     ["Hud_Award: YOKKAICHI", "Hud_AwardSub: 1,000,000"]),
+    # David: each start costs more. 150 shots light it the first time; after its multiball 150 are only half
+    ("the second time the meter is twice as long",
+     _START + _locks(1) + _MB + _END + _FILL + ["shot", BD, "secs", 2] + _shots(*([BL] * 150), gap=60)
+     + ["secs", 1, "shot", BD, "secs", 2],
+     ["Hud_Title: RODAN'S NEST TOTAL", "290  -  MORE TO GODZILLA ANGRY", "132  -  MORE TO GODZILLA ANGRY",
+      "[GODZILLA ANGRY] lit at Building", "[GODZILLA ANGRY] START (its lit shot)"]),
+]
+
+
+#: PAD-658: as a Godzilla Pro 1.16 gets it - every shot, lock, place and insert it names is on the Pro too (its
+#: fixed shields and missing mechanisms play no part), so the rules are the same
+DESK_PRO = [
+    ("one lock on the Pro: rodan's nest", _START + _locks(1) + _MB + _shots(GT, LR, ML) + _END,
+     ["MULTIBALL 2 balls, save 15 s", "Hud_Title: RODAN'S NEST", "Hud_Award: RODAN JACKPOT",
+      "Hud_Title: RODAN'S NEST TOTAL", "Hud_Line: JACKPOTS 2", "END (a block)", "lamps held 0"]),
+    ("five places then baby on the Pro", _START + _locks(5) + _shots(BD) + ["secs", 4] + _shots(BL, MT, BD, PC) + _END,
+     ["Hud_Award: SUPER JACKPOT", "MULTIBALL 6 balls, save 15 s", "Hud_Title: SUPER MECHAGODZILLA",
+      "Hud_Award: BABY JACKPOT", "Hud_Title: GODZILLA AND BABY", "END (a block)", "lamps held 0"]),
 ]

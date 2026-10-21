@@ -4431,6 +4431,13 @@ pm_backdrop_once("PadMode_meltdown_Jackpot");   /* once in its place, then the l
 pm_backdrop(0);                              /* the city again (pm_end and a ball end do it too) */
 ```
 
+PAD-658: the backdrop is the mode's that asked for it. A mode that is not running may ask while none of ours runs (a
+qualification note over its loop, as the game's own feedback screens letter their lines over a clip); while another
+of ours runs `pm_backdrop` answers 0 and changes nothing. An ending held with `pm_end_holding` (a TOTAL) keeps the
+loop behind it - on the live city the game's map labels (RAID, BRIDGE, TANKS, POWER) were under the TOTAL's words -
+and it goes when the hold does, at a ball's end, or as another mode begins. `pa_end` no longer asks for the city
+itself: `pm_end` does, at once for an end that holds nothing.
+
 How the game draws a frame (Godzilla Premium 1.16, measured with `display_probe.c`, docs/plans/hud-layers.md):
 the layered display draws its BACKGROUND element first (`BDLBackground::v[8]`): the video bank's player
 when the background object has a clip (its video field, +0x54), then the element's own scene; the HUD

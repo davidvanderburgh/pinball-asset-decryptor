@@ -774,7 +774,8 @@ static PA_UNUSED void pa_end(struct pa_assets *a)
         pm_log("own clip %s dropped before it played: the mode ended first", a->clip_start);
         a->clip_due = 0;
     }
-    if (pa_clip_name(a, "loop")) pm_backdrop(0);        /* hud-layers: the city again */
+    /* hud-layers: the city again - the runtime takes the loop away at pm_end, or (PAD-658) once the ending it holds
+     * the screen for is over: the loop stays behind its TOTAL, where the game's live map labels were */
     pa_music_finish(a);
 }
 

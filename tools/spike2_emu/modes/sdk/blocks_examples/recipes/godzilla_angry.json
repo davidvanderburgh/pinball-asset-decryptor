@@ -55,6 +55,34 @@
    "length": 4.9,
    "crop": "fill",
    "what": "First battle: Godzilla lies felled in the smoke, then Mechagodzilla hovers over his fallen body (0:38:30.5 to 0:38:35.4, a run of two shots)."
+  },
+  "mb2": {
+   "film": "mg93",
+   "from": 851.2,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "Rodan flies in over the dusk sea off Adonoa Island, wings spread, and dives at the camera until his crested head fills the frame, 0:14:11."
+  },
+  "mb3": {
+   "film": "mg93",
+   "from": 2131.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Mechagodzilla lands in a blaze of backlight and rises into full view as it squares up to Godzilla for their first battle, 0:35:31."
+  },
+  "mb4": {
+   "film": "mg93",
+   "from": 4199.9,
+   "length": 2.8,
+   "crop": "fill",
+   "what": "The Garuda gunship lifts off its launch pad in the G-Force hangar on orange jets and billowing smoke, 1:09:59."
+  },
+  "mb5": {
+   "film": "mg93",
+   "from": 5560.6,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "Fire Rodan, glowing red, glides through white smoke and dives on Super Mechagodzilla over the burning city, 1:32:40."
   }
  },
  "music": {
@@ -119,6 +147,87 @@
    "length": 2.2,
    "priority": 4,
    "what": "Godzilla, felled by Mechagodzilla, gives a low pained cry from the ground in the smoke (0:38:31.8)."
+  },
+  "mb2": {
+   "film": "mg93",
+   "from": 807.65,
+   "length": 3.25,
+   "priority": 4,
+   "what": "Rodan gives a long rising screech as it circles over the expedition at night on Adonoa Island, 0:13:27."
+  },
+  "mb3": {
+   "film": "mg93",
+   "from": 2015.75,
+   "length": 3.9,
+   "priority": 4,
+   "what": "Mechagodzilla's thrusters roar as it lifts off from its launch tower, 0:33:35."
+  },
+  "mb4": {
+   "film": "mg93",
+   "from": 4219.15,
+   "length": 4.0,
+   "priority": 4,
+   "what": "The Garuda's jets whoosh past the camera as the gunship flies in low and away, 1:10:19."
+  },
+  "mb5": {
+   "film": "mg93",
+   "from": 5526.95,
+   "length": 4.0,
+   "priority": 4,
+   "what": "Fire Rodan gives his long cry as his head rises from the rubble when he is reborn, 1:32:06."
+  },
+  "jp2": {
+   "film": "mg93",
+   "from": 4279.0,
+   "length": 1.8,
+   "priority": 3,
+   "what": "A short Rodan screech as Fire Rodan swoops past the camera over the city at night, 1:11:19."
+  },
+  "jp4": {
+   "film": "mg93",
+   "from": 4467.95,
+   "length": 2.2,
+   "priority": 3,
+   "what": "The Garuda's twin maser cannons crackle as their blue beams fire over the city at night, 1:14:27."
+  },
+  "jp5": {
+   "film": "mg93",
+   "from": 5556.1,
+   "length": 2.1,
+   "priority": 3,
+   "what": "A beam blast bursts into sparks around Fire Rodan as Super Mechagodzilla fires on him, 1:32:36."
+  }
+ },
+ "beds": {
+  "mb2": {
+   "film": "mg93",
+   "from": 871.011,
+   "length": 11.96,
+   "what": "Ifukube's Adonoa Island battle music swells as Godzilla's dorsal plates rise behind the rocks to fight Rodan, 0:14:31."
+  },
+  "mb3": {
+   "film": "mg93",
+   "from": 2084.766,
+   "length": 10.21,
+   "what": "Ifukube's driving flight music pulses as Mechagodzilla flies out over the hills to meet Godzilla in their first battle, 0:34:44."
+  },
+  "mb4": {
+   "film": "mg93",
+   "from": 4166.32,
+   "length": 16.77,
+   "what": "Ifukube's G-Force march plays as the Garuda is readied in its hangar for launch, 1:09:26."
+  },
+  "mb5": {
+   "film": "mg93",
+   "from": 5626.217,
+   "length": 10.17,
+   "what": "Ifukube's solemn rising theme plays as Fire Rodan's dying glow flows into Godzilla before the climax, 1:33:46."
+  },
+  "mb6": {
+   "film": "mg93",
+   "from": 4708.334,
+   "length": 11.97,
+   "what": "Ifukube's full Godzilla theme plays as Godzilla wades through the night sea toward Makuhari for the final battle, 1:18:28."
   }
  }
 }

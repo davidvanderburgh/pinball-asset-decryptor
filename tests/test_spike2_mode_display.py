@@ -147,6 +147,21 @@ def test_a_hold_is_only_noted_and_the_game_is_watched():
     covered = _lift(src, "int pm_display_covered(void)")
     assert "if (disp_prio) return disp_covered_now != 0;" in covered
     assert "pm_in_game() && disp_taken()" in covered
+
+
+def test_the_backdrop_is_its_owners_and_stays_behind_a_held_ending():
+    """PAD-658: a mode not running asks for the backdrop only while none of ours runs (a note); an ending held with
+    pm_end_holding keeps it, the hold's end, a ball's end or another mode's start take it away."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    bd = _lift(src, "int pm_backdrop(const char *name)")
+    assert "if (running && running != current) return 0;" in bd and "bd_owner = current;" in bd
+    assert "bd_reset(\"the mode ended\")" not in _lift(src, "void pm_end(void)")
+    ended = _lift(src, "static void bd_mode_ended(void)" + chr(10) + "{")
+    assert "disp_linger_until && disp_owner == current" in ended and "bd_lingers = 1;" in ended
+    assert "if (bd_lingers && !running) bd_reset(why);" in _lift(src, "static void disp_release(const char *why)")
+    assert "bd_other_began();" in _lift(src, "int pm_begin(void)")
+    assets = (RUNTIME.parent / "pad_mode_assets.h").read_text(encoding="utf-8")
+    assert "pm_backdrop(0)" not in _lift(assets, "static PA_UNUSED void pa_end(struct pa_assets *a)")
     assert "noted only: the game's displays are never made to wait" in _lift(src, "int pm_display_priority(unsigned priority)")
 
 

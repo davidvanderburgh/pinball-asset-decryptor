@@ -1229,6 +1229,66 @@ def test_runtime_notice_only_when_stale(tmp_path):
         assert "will not touch it" in w.state(NS)["rt_msg"]
 
 
+def test_runtime_offered_when_own_wsl_logs_in_as_root(tmp_path, monkeypatch):
+    """PAD-659: the app's installer leaves Ubuntu logging in as root, and the
+    game window is black there.  With no runtime yet, the tab offers the
+    app's own Linux (an ordinary user) as one button - whichever of the
+    status poll and the setup facts arrives first."""
+    from pinball_decryptor.webui import emulate_rig as rig
+    monkeypatch.setattr(rig._runtime_ui, "can_install", lambda: True)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        w.run(svc._runtime_apply, ("absent", ""))
+        assert w.state(NS)["rt_msg"] == ""          # facts not in yet
+        w.run(svc._setup_apply, {"user": "root"})
+        s = w.state(NS)
+        assert "set up with an ordinary user account" in s["rt_msg"]
+        assert "Your own WSL distro is not changed" in s["rt_msg"]
+        from pinball_decryptor.core import runtime
+        assert "about %d MB" % round(runtime.IMAGE.size / 1e6) in s["rt_msg"]
+        assert s["rt_btn"] is True
+        assert s["rt_label"] == "Install emulator Linux…"
+        assert sum("its own Linux for the emulator" in ln
+                   for ln in _lines(w)) == 1
+        # the poll repeats; the log line does not
+        w.run(svc._runtime_apply, ("absent", ""))
+        assert sum("its own Linux for the emulator" in ln
+                   for ln in _lines(w)) == 1
+        # once installed (or for an ordinary user) the offer goes away
+        w.run(svc._runtime_apply, ("ready", ""))
+        assert w.state(NS)["rt_msg"] == "" and w.state(NS)["rt_btn"] is False
+        w.run(svc._setup_apply, {"user": "dave"})
+        w.run(svc._runtime_apply, ("absent", ""))
+        assert w.state(NS)["rt_msg"] == ""
+        # a stale runtime keeps its own wording and button label
+        w.run(svc._runtime_apply, ("stale", "old"))
+        assert w.state(NS)["rt_label"] == "Update emulator Linux…"
+
+
+def test_runtime_install_rechecks_setup(tmp_path, monkeypatch):
+    """After the install the setup facts are asked again, in the Linux the
+    emulator now runs in, so the root warning does not linger."""
+    from pinball_decryptor.webui import emulate_rig as rig
+    from pinball_decryptor.webui.tabs import emulate as emod
+    monkeypatch.setattr(rig._runtime_ui, "can_install", lambda: True)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        w.run(svc._setup_apply, {"user": "root"})
+        w.run(svc._runtime_apply, ("absent", ""))
+        monkeypatch.setattr(rig._runtime_ui, "ensure",
+                            lambda say, **k: "ready")
+        monkeypatch.setattr(svc, "_ensure_data_disk", lambda: None)
+        rechecked = []
+        monkeypatch.setattr(svc, "_setup_recheck",
+                            lambda: rechecked.append(1))
+        with monkeypatch.context() as m:
+            m.setattr(emod, "no_rig", lambda: False)
+            assert w.call(NS + ".runtime_fix") is True
+            assert w.state(NS)["rt_label"] == "Installing…"
+            _wait(w, lambda: w.state(NS)["rt_enabled"] is True)
+            _wait(w, lambda: rechecked == [1])
+
+
 def test_runtime_replace_asks_the_one_consent(tmp_path, monkeypatch):
     """Replacing the emulator's Linux deletes save states: the question is
     ``_runtime_ui.ask_before_replacing``'s own (one wording), on the page."""

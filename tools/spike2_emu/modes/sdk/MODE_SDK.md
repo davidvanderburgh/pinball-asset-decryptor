@@ -4052,6 +4052,14 @@ follow the last challenge champion's in its slot of the list (the game's other p
 and only while the game shows its champions at all (its record must check; the champions adjustment). A port
 without the lines keeps the mode's champion and does not show it.
 
+Proven (emulator, 2026-10-21, hidden, muted): Bond LE 1.06 stock - a mode's own challenge (`BOND VS SUMO`) picked on
+the start menu, its game's 6,216,920 entered as `BOND VS SUMO`'s new high score, then the attract mode's champion pages:
+the game's five as before (`HMSS CHALLENGE` still 25,000,000 GG, the game's records unchanged all run), then `BOND VS
+SUMO CHALLENGE` / `CHAMPION` / `A` / `6,216,920`, then the attract mode went on. Stranger Things LE 1.13 stock - a mode
+in Final Showdown's place, its record seeded: `FINAL SHOWDOWN CHALLENGE` BRE 25,000,000, then `SUMO TEST CHALLENGE` /
+`DAV` / `12,345,670`. The first Bond run put the record back at ANY yield: the mode's record showed under
+`HMSS CHALLENGE` - hence the page's own. The control on the released runtime: no page of the mode's.
+
 ## Holding the end of a ball (PAD-622)
 
 James Bond's own mini-wizards end on a drain with their TOTAL: the mode's last clip, then its TOTAL under the bar,

@@ -4010,7 +4010,7 @@ While that function runs for a challenge game whose pick a mode took, the runtim
 record of the mode's own and its title at the mode's name, and puts all three back when it returns. The modes'
 records live in `/dump/pad_challenge_scores` (one line each: the record's 96 bytes in hex, a space, the name), a
 mode's first one the entry's default initials and a score of 0 (so the mode's first scoring game is its champion).
-Two modes under one name share one. The game's attract-mode high score pages show the game's own champions only. A
+Two modes under one name share one; the attract mode shows each mode's champion (below, PAD-660). A
 port without the lines files the score under the game's challenge, as before, and logs nothing new.
 
 Proven (emulator, 2026-10-20, Bond LE 1.06 stock card, hidden, muted; a blocks mode `challenge new` picked on the
@@ -4019,6 +4019,38 @@ start menu, two challenge games in a row): the first, 14,708,650 points, came to
 second read it back and the same score left it standing. The game's own `CHAOS CHALLENGE` record (`0x812ed8`: 25,000,000,
 MXV) read the same before, between and after both games. The control on the released runtime: the game's own
 `CHAOS CHALLENGE` initials entry, as reported.
+
+**In the attract mode (PAD-660).** The attract mode shows the game's champions one page each (`CHAOS AT CRAB KEY
+CHALLENGE` / `CHAMPION` / the initials / the score, ... `HMSS CHALLENGE`); a mode's champion was kept but never shown.
+The attract mode runs a list of pages, each a process of the game's own (Bond LE's list `0x7a6864`: `{shown?, page}`
+pairs); a champion page reads its champion ONCE, before its first frame - the record (`(category, 0)`'s, with its
+check), the entry's score text, and its title, a message (`HMSS CHALLENGE` is message `0xf70`) - and then only draws
+frames, yielding between them, until its time is up. `portchallenge.page_lines` finds the LAST challenge's page
+(`push {r4-fp,lr}; mov r0,#<cat>; ...; bl <record>; ...; mov r0,#<cat>; bl <entry lookup>`), the message lookup its
+title calls (two or three calls with one id) and the yield its frame loop calls (`movw/movt r3 <proc list>; add
+r1,r3,#12`):
+
+```
+site  challenge_page        0x001d6358 0xe92d4ff0 0xe3a0000e    # HMSS's champion page (wrapped, hook_wrap)
+site  challenge_page_text   0x0038c6cc 0xe92d4008 0xe3083474    # the message text lookup (wrapped: the title)
+site  challenge_page_yield  0x002fd144 0xe3063df8 0xe3403082    # the frame yield (hooked: the record put back)
+value challenge_page_cat    14
+value challenge_page_title  3952                                # Stranger Things: FINAL SHOWDOWN CHALLENGE, cat 12
+```
+
+The wrapped page runs the game's own first, as it was; then, in the same process, the game's page again for each
+mode now on the challenge list (one that took a challenge's place, under its menu name, or one of the modes' own)
+whose record in `/dump/pad_challenge_scores` has a score: the category's entry points at a copy of the mode's record
+and the title message says `<NAME> CHALLENGE` (the name alone when that is longer than the game's longest title, 27
+letters, or already ends in CHALLENGE) - until the page's first yield, where the game's record is put back: the
+page's OWN yield (the game's current process, the yield's list head + 4, is the page's), since the game's other
+processes run on threads of their own and yield meanwhile (the first rig run, putting back at any yield, showed the
+mode's record under HMSS CHALLENGE). The page reads nothing of the record after its first frame,
+so the game's record is never read or written for a mode's page; a page cut short (a flipper button, a game start) is
+cut at a yield, when it is already back, and the end-of-game high scores put it back first too. The modes' pages
+follow the last challenge champion's in its slot of the list (the game's other pages and their order are unchanged),
+and only while the game shows its champions at all (its record must check; the champions adjustment). A port
+without the lines keeps the mode's champion and does not show it.
 
 ## Holding the end of a ball (PAD-622)
 

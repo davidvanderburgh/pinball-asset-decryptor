@@ -479,6 +479,12 @@ value challenge_scores_cat_1  10
 value challenge_scores_cat_2  11
 # CHALLENGE CHAMPION
 value challenge_scores_cat_3  12
+# PAD-660: the attract mode's last challenge champion page; a mode's challenge champion is shown after it, in the same page
+site  challenge_page        0x0019dc0c 0xe92d4ff0 0xe3a0000c
+site  challenge_page_text   0x0048b7a4 0xe92d4008 0xe3053dfc
+site  challenge_page_yield  0x002c7eec 0xe3063c10 0xe3403082
+value challenge_page_cat    12
+value challenge_page_title  3609
 
 # ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
 site  ball_launch         0x00432c28 0xe92d4010 0xe3004bd4

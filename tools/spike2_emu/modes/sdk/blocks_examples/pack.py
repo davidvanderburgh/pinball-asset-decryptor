@@ -7,11 +7,12 @@
   lights), and the mode's POT is paid there. The ball that lands there is held for the cash-out clip, and the mode
   ends 1.5 s after it (its "next" timer, with "cashed" set), so the game handling that same scoop with the mode
   still running gives no award of its own over the clip (emulator run a2: an ADVANCE TANKS took the glass).
+- EACH START COSTS MORE: twice the first count the second time, three times the third (need()).
 - THE QUALIFYING NOTE. A mode's count toward its start shows as a note on the HUD every few hits ("12 MORE TO WAKE
   KING CAESAR"), and nothing counts while a multiball runs (David's rule for PAD-379's meter, applied to all).
 """
-from blk import (AND, BALLS, NOT, LIT, add, award, change, eq, ge, if_, light, light_insert, light_mode, lt, off,
-                 off_insert, on_any_shot, scoop_hold, set_, sub, var)
+from blk import (AND, BALLS, NOT, LIT, add, award, change, eq, ge, if_, light, light_insert, light_mode, lt, mul,
+                 off, off_insert, on_any_shot, scoop_hold, set_, sub, var)
 
 CASH_SHOT = "Right scoop"
 CASH_INSERTS = ("SELECT CITY", "SCOOP BB-BATTLE", "SCOOP BB-GODZILLA PWR UP", "SCOOP BB-SUMMON ALLY")
@@ -53,6 +54,13 @@ def count_up(count, by, need, ready, note_at, start_shot, color, inserts, lit_wo
             ]),
         ]),
     ])]
+
+
+def need(base, times):
+    """What it takes to light a mode again (David, PAD-658: "hitting the major target three times for the first
+    activation but an additional six for the next"): ``base`` the first time, twice that the second, three times
+    the third... ``times`` is the variable counting its starts this game."""
+    return mul(base, add(var(times), 1))
 
 
 def pack_vars():

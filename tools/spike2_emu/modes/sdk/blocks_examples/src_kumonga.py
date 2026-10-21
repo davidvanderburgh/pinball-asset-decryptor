@@ -8,7 +8,7 @@ After Lyman Sheats: a meter that costs more each time (Metallica's Sparky), stag
 regrowth that pushes back (KING GHIDORAH's heads, TWD's walkers), a hurry-up (EHoH's), a pot to cash out or risk
 (Metallica's Crank It Up), and failing still pays a quarter of it.
 
-- SPIN THE WEB: every spin of the Shield ramp spinner counts; 40 lights the Big loop (20 more each time).
+- SPIN THE WEB: every spin of the Shield ramp spinner counts; 40 lights the Big loop (80 the second time, 120 the third).
 - STAGE 1, THE WEB: the shields turn toward the player (Premium/LE); the two outer Shield targets, the centre
   Powerline and both ramps are webbed (purple).
   Each one torn pays 2M and 1M more for each torn before it, to the pot; Kumonga webs one again every 10 s (7 s,
@@ -32,7 +32,7 @@ SPIN, START_SHOT = "Shield ramp spinner", "Big loop"
 WEBS = (("web l", "Shield target left"), ("web c", "Powerline center"), ("web r", "Shield target right"),
         ("web lr", "Left ramp"), ("web rr", "Right ramp"))
 SPINNERS = ("Left spinner", "Top spinner", "Shield ramp spinner")
-NEED = add(40, mul(20, var("fought")))
+NEED = pack.need(40, "fought")  # 40 spins, then 80, then 120
 TIMERS = ("tear", "regrow", "next", "burn", "fire")
 KX, KY = 251, 302              # her art on the playfield picture, above the scoop
 

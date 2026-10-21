@@ -9,7 +9,7 @@ After Lyman Sheats: a meter that costs more each time (Metallica's Sparky), stag
 cash the super or take +1x), and failing still pays (a quarter of the pot).
 
 - THE PRAYER: every Pop bumper sings 1, the Right return lane 2, the Mecha lane (Mecha exit bottom) 3; 25 lights
-  the Mecha lane (15 more each time he has woken). Nothing counts in a multiball.
+  the Mecha lane (50 the second time he wakes, 75 the third). Nothing counts in a multiball.
 - STAGE 1, AWAKENING: the Pop bumper, the Right ramp and the Mecha lane each crack the shrine once (3M to the pot
   each; 4.5M from the second time he wakes).
 - STAGE 2, REFLECT: Mechagodzilla's beam moves across the Left ramp, Big loop, Right ramp and Building (faster
@@ -34,7 +34,7 @@ START_INSERTS = "MECHA LANE,POP BUMPER"
 BEAM = ("Left ramp", "Big loop", "Right ramp", "Building")
 KC_X, KC_Y = 262, 405
 #: the prayer it takes: 25, and 15 more each time he has woken
-NEED = add(25, mul(15, var("woken")))          # King Caesar's art beside the pop bumper (the port's lamp places: POP BUMPER 251,413)
+NEED = pack.need(25, "woken")   # the prayer: 25, then 50, then 75 (each start costs more)
 
 
 def stage_line(n, words):

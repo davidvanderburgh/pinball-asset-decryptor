@@ -7,7 +7,7 @@ pays its kills again, a boss at the end), re-themed for Kamacuras, whose art is 
 David, PAD-658: "modify the Kamacuras mode to require more to start it and make its shots more obvious."
 
 - TO START IT (was: 30 Top spinner spins, 10 more each time, and it started at once): 50 spins of the Top spinner
-  (20 more each time) light the RIGHT SCOOP, its own corner; the scoop starts it. Nothing counts in a multiball.
+  (100 the second time, 150 the third) light the RIGHT SCOOP, its own corner; the scoop starts it. Nothing counts in a multiball.
 - THE MANTISES are far more obvious: a mantis's shot CHASES fast in its ring's colour (far green, near yellow, close
   red, the closer the faster), the flasher over it blinks, the HUD's line names where every mantis is
   ("MANTIS AT THE LEFT RAMP"), and each one swoops in with its own clip, screech and a ripple light show centred on
@@ -31,7 +31,7 @@ SLUG, NAME = "kamacuras", "KAMACURAS"
 GREEN, YELLOW, RED, WHITE, DARK = "#20ff40", "#d0ff00", "#ff1010", "#ffffff", "#002008"
 SPIN, START_SHOT = "Top spinner", pack.CASH_SHOT
 START_INSERTS = ",".join(pack.CASH_INSERTS)
-NEED = add(50, mul(20, var("fought")))
+NEED = pack.need(50, "fought")  # 50 spins, then 100, then 150
 #: the rings, far to close: (shot, the words that name it on the HUD, the flasher or insert beside it)
 RINGS = (
     (("Powerline left", "THE LEFT POWERLINE"), ("Powerline center", "THE CENTER POWERLINE"),

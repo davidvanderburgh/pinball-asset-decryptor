@@ -9,7 +9,7 @@ After Lyman Sheats: a start that costs more each time (Metallica's Sparky), stag
 a hurry-up (EHoH's), a boss that heals when left alone (KING GHIDORAH's heads), a multiball finale whose jackpots
 pay the history back (Batman '66's supers), a pot to cash out or risk, and failing still pays a quarter.
 
-- DAD'S CALL: Godzilla target hits; 3 light the top of the Mecha lane (2 more each time he has grown up).
+- DAD'S CALL: Godzilla target hits; 3 light the top of the Mecha lane (6 the second time, 9 the third).
 - STAGE 1, SMOKE RINGS: the ramps, the Big loop and the Building glow cyan; each one is a ring, bigger than the last:
   1M, 2M, 4M, 8M to the pot (twice that from his second time).
 - STAGE 2, TAIL STOMP: the Godzilla target stomps his tail, then a 12 s hurry-up at the Building from 25M (1M a
@@ -32,7 +32,7 @@ CYAN, GREEN, BLUE, AMBER, RED, WHITE = "#40e0ff", "#40ff60", "#3080ff", "#ffb000
 TOP = "Mecha exit top"
 RINGS = (("ring lr", "Left ramp"), ("ring rr", "Right ramp"), ("ring bl", "Big loop"), ("ring b", "Building"))
 GABARA = ("Left ramp", "Big loop", "Right ramp")
-NEED = add(3, mul(2, var("grown")))
+NEED = pack.need(3, "grown")    # Godzilla target: 3 hits, then 6, then 9 (David's example)
 TIMERS = ("ring", "ray", "gabara", "heal", "hit", "next", "dad", "son")
 MX, MY = 247, 265               # his art beside Mechagodzilla, top right of the playfield picture
 
@@ -264,7 +264,12 @@ _STAGE2 = ["shot", "Godzilla target", "secs", 3, "shot", "Building", "secs", 1]
 _STAGE3 = ["shot", "Left ramp", "ms", 300] * 5 + ["secs", 1]
 _STAGE4 = ["balls", 2, "secs", 2, "shot", "Godzilla target", "ms", 400, "shot", "Mecha exit top", "ms", 400,
            "shot", "Building", "ms", 400, "shot", "Right ramp", "ms", 400, "balls", 1, "secs", 2]
+_GZ = ["shot", "Godzilla target", "ms", 400]
 DESK = [
+    ("three hits the first time, six the second", _GZ * 3 + ["shot", "Mecha exit top", "secs", 2, "trigger", "minilla.stop",
+                                                              "secs", 4] + _GZ * 5 + ["secs", 3] + _GZ + ["secs", 2],
+     ["[MINILLA] START (its lit shot)", "END (trigger file)", "Hud_AwardSub: 1  -  MORE TO WAKE MINILLA",
+      "Hud_Award: MINILLA IS LIT"]),
     ("dad's call lights it", ["shot", "Godzilla target", "ms", 400] * 3 + ["shot", "Mecha exit top", "secs", 2],
      ["Hud_Award: MINILLA IS LIT", "[MINILLA] START (its lit shot)", "LAMP MECHA LANE 40ff60 chase"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 + _STAGE4 + ["secs", 6],

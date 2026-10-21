@@ -84,6 +84,24 @@ one ball, the pot and 20M a hug.
 - Its film picks: the earlier recipe kept where right, its boss/won/lost clips that showed Kumonga replaced with
   Kamacuras (Final Wars' pylon death, the last mantis rearing), and the new swoop and lit cues.
 
+## Each mode's own sound (David: "unique soundtracks and sound effects for the modes too")
+
+Every mode has a music bed and calls of its own, none shared with another mode of the pack (checked across all 15
+recipes): KING CAESAR the 1974 film's main title (Masaru Sato), KAMACURAS Son of Godzilla's main title march, KUMONGA
+Destroy All Monsters' main title march (Akira Ifukube), MINILLA Son of Godzilla's snowy father-and-son ending theme;
+each with 7 or 8 calls cut from its own scenes (King Caesar's cry, the beam reflected, Kumonga's whirr and web hiss,
+Minilla's chirps and smoke-ring puffs, the mantis screeches). The rebuilt C modes keep their C recipes' own. On the
+rig each mode played its own bed (KING CAESAR sound id 105, KUMONGA 576: run a3).
+
+## David's own project in blocks
+
+`C:\Users\david\OneDrive\Desktop\heisei modes\proj blocks (PAD-658)` (written by `C:\tmp\PAD-658\deliver.py`; his
+`proj` is untouched): his ten re-themed C modes as their blocks rebuilds with his words (JET JAGUAR, KING KONG, SHIN
+GODZILLA, EBIRAH, SUPER X2, ZILLA, MELTDOWN's NUCLEAR GODZILLA, GODZILLA ANGRY's Godzilla chase) and the clips and
+calls his project already cut; his KAMACURAS (DESTOROYAH re-worded) replaced by the reworked KAMACURAS; KING CAESAR,
+KUMONGA and MINILLA added with their clips cut from his films; jjhj and his form modes copied as they are. Every mode
+checks clean against Godzilla Premium/LE 1.16 with its folder. Point Write's assets at it to build it.
+
 ## The films (scoped)
 
 Searched by four scouts with the film toolkit (contact sheets at 10-20 s, then 0.5-1 s, the audio's roar/blast

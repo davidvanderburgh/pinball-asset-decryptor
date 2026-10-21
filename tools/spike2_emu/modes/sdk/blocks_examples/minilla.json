@@ -3926,7 +3926,7 @@
    "stomp": {
     "film": "son67",
     "from": 3100.9,
-    "length": 2.0,
+    "length": 1.5,
     "crop": "fill",
     "what": "A run of shots: Minilla strains beside Godzilla, then Godzilla's foot comes down on Minilla's tail, 0:51:41."
    },
@@ -3982,9 +3982,9 @@
   },
   "music": {
    "film": "son67",
-   "from": 173.632,
-   "length": 20.03,
-   "what": "The jaunty main title theme from the opening credits, loop found by the bed finder, 0:02:54."
+   "from": 5112.294,
+   "length": 17.65,
+   "what": "The gentle father-and-son theme over the snowy ending of Son of Godzilla, a clean loop with no effects, 1:25:12."
   },
   "calls": {
    "cry": {

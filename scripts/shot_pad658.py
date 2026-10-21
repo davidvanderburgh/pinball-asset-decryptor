@@ -79,6 +79,10 @@ def main():
             time.sleep(1)
             page.locator('.nmw-tile[data-kind="blocks"]').first.click()
             time.sleep(0.8)
+            ex = page.locator(".nmw-ex", has_text="DESTOROYAH")
+            if ex.count():                         # its tooltip: what the blocks lost
+                ex.first.hover()
+                time.sleep(1.2)
             shot(page, "new_blocks")
             page.locator(".nmw button", has_text="Cancel").first.click()
             time.sleep(0.5)
@@ -89,6 +93,11 @@ def main():
                     continue
                 row.first.click()
                 time.sleep(2.5)
+                if slug in NEW:                    # the new ones as their rules read: the Rule cards view
+                    tab = page.locator("button, [role=tab]", has_text="Rule cards")
+                    if tab.count():
+                        tab.first.click()
+                        time.sleep(1.5)
                 shot(page, slug)
         S._shoot(url, go, height=1100)
     finally:

@@ -16,6 +16,10 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 SDK = REPO / "tools" / "spike2_emu" / "modes" / "sdk"
 GODZILLA = ("godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16")
 BUTTONS = {34: "Action button", 60: "Left flipper button", 59: "Right flipper button"}
+#: PAD-658: playfield switches the rules never send, named as shots of their own on the 1.16 builds
+PLAYFIELD = {53: "Right scoop", 50: "Mecha exit top"}
+SWITCH_SHOTS = {"godzilla_pro-1.15": BUTTONS, "godzilla_pro-1.16": {**BUTTONS, **PLAYFIELD},
+                "godzilla_le-1.16": {**BUTTONS, **PLAYFIELD}}
 
 #: Godzilla Pro 1.15 as a proven multiball build would see it
 CAN = replace(MP.GODZILLA_PRO_1_15, key="godzilla_pro_1_15_btntest",
@@ -43,9 +47,9 @@ def test_the_buttons_are_switch_shots_on_bits_no_shot_uses(name):
     assert {"switch_records", "switch_count", "mode_mask"} <= set(port["data"])
     internal = {n.strip() for n in port["text"].get("internal_shots", "").split(",") if n.strip()}
     mapped = {sw: (mask, n) for sw, mask, n in port["switch"] if n not in internal}
-    assert {sw: n for sw, (_m, n) in mapped.items()} == BUTTONS
+    assert {sw: n for sw, (_m, n) in mapped.items()} == SWITCH_SHOTS[name]
     masks = [m for m, _n in mapped.values()]
-    assert all(m and not m & (m - 1) for m in masks) and len(set(masks)) == 3
+    assert all(m and not m & (m - 1) for m in masks) and len(set(masks)) == len(SWITCH_SHOTS[name])
     shot_bits = 0
     for _n, m in port["shot"]:
         shot_bits |= m
@@ -53,7 +57,7 @@ def test_the_buttons_are_switch_shots_on_bits_no_shot_uses(name):
     # the tab offers them, and says so until the build is proven
     p = MP.profile_from_port(str(SDK / "ports" / (name + ".port")))
     assert set(BUTTONS.values()) <= {n for n, _m in p.shots}
-    assert set(p.switch_shots) == set(BUTTONS.values())
+    assert set(p.switch_shots) == set(SWITCH_SHOTS[name].values())
     assert not internal & {n for n, _m in p.shots}                      # PAD-416: the trough is code's, not the tab's
     assert bool(p.switch_shots_note) == (name not in MP.SWITCH_EDGE_PROVEN)
 

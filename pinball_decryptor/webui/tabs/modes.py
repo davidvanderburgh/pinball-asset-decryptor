@@ -718,6 +718,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                               "code": True, "disabled": False})
         game_dir = str(getattr(p, "game_dir", "") or "") if p is not None else ""
         blocks = [{"name": name, "about": BM.example(name).get("about", ""),            # PAD-658: made of blocks
+                   "lost": [str(t) for t in BM.example(name).get("lost") or ()],   # what a rebuild lost against its C
                    "based_on": bool(BM.example(name).get("based_on"))}
                   for name in (BM.example_names(game_dir) if game_dir else ())
                   if BM.fits(BM.example(name), p)]                       # only what builds on this card

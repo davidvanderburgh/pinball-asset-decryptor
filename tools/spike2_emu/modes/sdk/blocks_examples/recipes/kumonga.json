@@ -72,10 +72,10 @@
   }
  },
  "music": {
-  "film": "son67",
-  "from": 173.632,
-  "length": 20.03,
-  "what": "Masaru Sato's opening title music, a pulsing driving loop with no dialogue, 0:02:53."
+  "film": "dam68",
+  "from": 148.92,
+  "length": 17.32,
+  "what": "Akira Ifukube's heavy, pulsing main title march under the opening credits of Destroy All Monsters, 0:02:28."
  },
  "calls": {
   "chitter": {
@@ -129,10 +129,10 @@
   },
   "cashout": {
    "film": "son67",
-   "from": 4915.3,
-   "length": 1.5,
-   "what": "Minilla's soft calls in the snow after the battle, 1:21:55.",
-   "priority": 4
+   "from": 4704.2,
+   "length": 3.4,
+   "priority": 4,
+   "what": "Godzilla stands with his mouth open and gives a long, calm roar that fades away, 1:18:24."
   }
  }
 }

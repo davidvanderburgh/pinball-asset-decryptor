@@ -130,7 +130,8 @@ function BlocksExamples({ s, onExample }) {
   const group = (title, list) => list.length ? html`<div class="stack">
       <div class="nmw-sub">${title}</div>
       <div class="nmw-exlist">${list.map((x) => html`<button type="button" key=${x.name} class="nmw-ex"
-          onClick=${() => onExample(x.name)} ...${tip(x.about || x.name)}><${Icon} name="blocks" /><span class="ellip">${x.name}</span><${Icon} name="right" /></button>`)}</div>
+          onClick=${() => onExample(x.name)} ...${tip({ head: x.about || x.name, lines: (x.lost || []).length
+            ? ["What the blocks lost against its C:", ...x.lost.map((l) => "- " + l)] : [] })}><${Icon} name="blocks" /><span class="ellip">${x.name}</span><${Icon} name="right" /></button>`)}</div>
     </div>` : null;
   return html`<div class="nmw-cols">
     <div class="stack nmw-col">${group("Or start from a new mode in blocks", all.filter((x) => !x.based_on))}</div>

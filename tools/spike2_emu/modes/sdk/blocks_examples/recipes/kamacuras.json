@@ -1,0 +1,131 @@
+{
+ "clips": {
+  "intro": {
+   "film": "son67",
+   "from": 1524.95,
+   "length": 3.5,
+   "crop": "fill",
+   "what": "A giant mantis, Kamacuras, glides low over the jungle treetops past the expedition's weather tower, 0:25:25."
+  },
+  "loop": {
+   "film": "son67",
+   "from": 1485.42,
+   "length": 8.0,
+   "crop": "fill",
+   "what": "Kamacuras creeps over the jungle treetops, peering about with its scythe claws raised, in one calm shot, 0:24:45."
+  },
+  "kill": {
+   "film": "son67",
+   "from": 2057.0,
+   "length": 2.9,
+   "crop": "fill",
+   "what": "A run of shots: Godzilla's ray bursts into flames on a Kamacuras, which reels on the plain engulfed in fire, 0:34:17."
+  },
+  "escape": {
+   "film": "son67",
+   "from": 3534.0,
+   "length": 2.15,
+   "crop": "fill",
+   "what": "Kamacuras spreads its wings and flies off over the mountainside, escaping Godzilla's ray, 0:58:54."
+  },
+  "wave": {
+   "film": "son67",
+   "from": 1912.62,
+   "length": 2.95,
+   "crop": "fill",
+   "what": "Three Kamacuras crowd together in close-up before the mountain, their glowing eyes turning, 0:31:53."
+  },
+  "boss": {
+   "film": "son67",
+   "from": 3398.42,
+   "length": 4.35,
+   "crop": "fill",
+   "what": "The last Kamacuras rears up in a low-angle close-up and slashes its scythe claws at the camera, 0:56:38."
+  },
+  "won": {
+   "film": "fw04",
+   "from": 4525.65,
+   "length": 5.95,
+   "crop": "fill",
+   "what": "A run of shots: Kamacuras hangs impaled on a power pylon in close-up, its claws twitching, then its head sags as it dies, 1:15:26."
+  },
+  "lost": {
+   "film": "son67",
+   "from": 3505.95,
+   "length": 3.55,
+   "crop": "fill",
+   "what": "Kamacuras looms over a cornered Minilla with its huge scythe claws raised to strike, 0:58:26."
+  },
+  "swoop": {
+   "film": "fw04",
+   "from": 1383.75,
+   "length": 4.05,
+   "crop": "fill",
+   "what": "Kamacuras swoops down onto the top of the Grande Arche in Paris with its wings buzzing out, then lunges at the camera, 0:23:04."
+  },
+  "lit": {
+   "film": "son67",
+   "from": 3383.26,
+   "length": 2.12,
+   "crop": "fill",
+   "what": "A Kamacuras close-up: the mantis swings its head round from profile to stare at the camera with its glowing orange eyes, 0:56:23."
+  }
+ },
+ "music": {
+  "film": "son67",
+  "from": 173.632,
+  "length": 20.03,
+  "what": "Masaru Sato's main title march from Son of Godzilla, brass and percussion over the opening credits, no effects or dialogue, 0:02:54."
+ },
+ "calls": {
+  "kill": {
+   "film": "son67",
+   "from": 2046.52,
+   "length": 1.42,
+   "priority": 3,
+   "what": "A heavy crash as Godzilla wrestles a Kamacuras over in a cloud of dust, 0:34:07."
+  },
+  "escape": {
+   "film": "son67",
+   "from": 4257.46,
+   "length": 1.4,
+   "priority": 3,
+   "what": "A Kamacuras screeches, a shrill rasping cry, as it rears up with wings spread over the jungle, 1:10:57."
+  },
+  "wave": {
+   "film": "son67",
+   "from": 1535.86,
+   "length": 2.0,
+   "priority": 4,
+   "what": "Kamacuras screech together as the three mantises are seen gathered below the mountain, 0:25:36."
+  },
+  "boss": {
+   "film": "son67",
+   "from": 3384.36,
+   "length": 1.55,
+   "priority": 4,
+   "what": "The last Kamacuras gives a long shrill screech in close-up as it squares up to Minilla, 0:56:24."
+  },
+  "won": {
+   "film": "son67",
+   "from": 2058.95,
+   "length": 2.15,
+   "priority": 4,
+   "what": "A burning Kamacuras gives a falling death screech over the roar of the flames, 0:34:19."
+  },
+  "lost": {
+   "film": "son67",
+   "from": 4731.37,
+   "length": 1.9,
+   "priority": 4,
+   "what": "Godzilla cries out in pain, clutching his eye after a stinger strikes, 1:18:51."
+  },
+  "swoop": {
+   "film": "son67",
+   "from": 3390.97,
+   "length": 1.45,
+   "priority": 3,
+   "what": "A sharp Kamacuras screech as the mantis strides in toward Minilla, 0:56:31."
+  }
+ }
+}

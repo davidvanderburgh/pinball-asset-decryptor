@@ -1,0 +1,3833 @@
+{
+ "name": "KING CAESAR",
+ "slug": "king_caesar",
+ "order": 1,
+ "titles": [
+  "godzilla_le"
+ ],
+ "based_on": "",
+ "about": "New (PAD-658). The prayer at his pop bumper wakes him at the Mecha lane; four stages, each with its own shots (crack the shrine, absorb and reflect the beam, tag team with Godzilla, the final blow); cash the pot out at the right scoop after any stage. Godzilla vs. Mechagodzilla (1974).",
+ "lost": [],
+ "program": {
+  "name": "KING CAESAR",
+  "seconds": 45,
+  "ends_on_drain": true,
+  "screen": false,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
+  "vars": [
+   {
+    "name": "prayer",
+    "reset": "game"
+   },
+   {
+    "name": "ready",
+    "reset": "game"
+   },
+   {
+    "name": "note at",
+    "reset": "game"
+   },
+   {
+    "name": "woken",
+    "reset": "game"
+   },
+   {
+    "name": "stage",
+    "reset": "mode"
+   },
+   {
+    "name": "pot",
+    "reset": "mode"
+   },
+   {
+    "name": "cracks",
+    "reset": "mode"
+   },
+   {
+    "name": "crack pop",
+    "reset": "mode"
+   },
+   {
+    "name": "crack ramp",
+    "reset": "mode"
+   },
+   {
+    "name": "crack lane",
+    "reset": "mode"
+   },
+   {
+    "name": "crack value",
+    "reset": "mode"
+   },
+   {
+    "name": "beam",
+    "reset": "mode"
+   },
+   {
+    "name": "beam ms",
+    "reset": "mode"
+   },
+   {
+    "name": "charge",
+    "reset": "mode"
+   },
+   {
+    "name": "reflects",
+    "reset": "mode"
+   },
+   {
+    "name": "combos",
+    "reset": "mode"
+   },
+   {
+    "name": "head",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "cashed",
+    "reset": "mode"
+   }
+  ],
+  "timers": [
+   {
+    "name": "crack"
+   },
+   {
+    "name": "beam"
+   },
+   {
+    "name": "absorb"
+   },
+   {
+    "name": "reflect"
+   },
+   {
+    "name": "combo"
+   },
+   {
+    "name": "caesar"
+   },
+   {
+    "name": "blow"
+   },
+   {
+    "name": "next"
+   }
+  ],
+  "hud": {
+   "on": true,
+   "line": "AWAKENING: CRACK THE SHRINE",
+   "counters": [
+    {
+     "label": "STAGE",
+     "sub": "OF 4",
+     "value": null
+    },
+    {
+     "label": "POT",
+     "sub": "CASH AT SCOOP",
+     "value": null
+    },
+    {
+     "label": "CRACKS",
+     "sub": "OF 3",
+     "value": null
+    }
+   ],
+   "timer": {
+    "on": true,
+    "label": "CAESAR",
+    "icon": "crystal"
+   },
+   "gauge": {
+    "on": false,
+    "label": "",
+    "kind": "diamond",
+    "count": 3,
+    "color": "#ff7800",
+    "value": null
+   }
+  },
+  "bar": {
+   "on": false,
+   "color": "#00c040"
+  },
+  "info": {
+   "on": false,
+   "text": "",
+   "value": null
+  },
+  "clips": [
+   {
+    "name": "intro",
+    "file": "intro.mp4"
+   },
+   {
+    "name": "loop",
+    "file": "loop.mp4"
+   },
+   {
+    "name": "crack",
+    "file": "crack.mp4"
+   },
+   {
+    "name": "awake",
+    "file": "awake.mp4"
+   },
+   {
+    "name": "absorb",
+    "file": "absorb.mp4"
+   },
+   {
+    "name": "reflect",
+    "file": "reflect.mp4"
+   },
+   {
+    "name": "tagteam",
+    "file": "tagteam.mp4"
+   },
+   {
+    "name": "won",
+    "file": "won.mp4"
+   },
+   {
+    "name": "lost",
+    "file": "lost.mp4"
+   },
+   {
+    "name": "cashout",
+    "file": "cashout.mp4"
+   }
+  ],
+  "sounds": [
+   {
+    "name": "roar",
+    "file": "roar.wav",
+    "priority": 4
+   },
+   {
+    "name": "crack",
+    "file": "crack.wav",
+    "priority": 3
+   },
+   {
+    "name": "absorb",
+    "file": "absorb.wav",
+    "priority": 3
+   },
+   {
+    "name": "reflect",
+    "file": "reflect.wav",
+    "priority": 3
+   },
+   {
+    "name": "tagteam",
+    "file": "tagteam.wav",
+    "priority": 4
+   },
+   {
+    "name": "won",
+    "file": "won.wav",
+    "priority": 4
+   },
+   {
+    "name": "lost",
+    "file": "lost.wav",
+    "priority": 4
+   },
+   {
+    "name": "cashout",
+    "file": "cashout.wav",
+    "priority": 4
+   }
+  ],
+  "music": "music.wav",
+  "shows": [
+   {
+    "name": "Awakening",
+    "steps": [
+     {
+      "fx": "fade_in",
+      "ms": 900,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 262,
+      "y": 405
+     },
+     {
+      "fx": "ripple",
+      "ms": 1400,
+      "a": "#ffb000",
+      "b": "#301000",
+      "at": "xy",
+      "rate": 450,
+      "gi": "dark",
+      "x": 262,
+      "y": 405
+     },
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#ffb000",
+      "at": "center",
+      "rate": 55,
+      "gi": "flash"
+     },
+     {
+      "fx": "burst",
+      "ms": 800,
+      "a": "#ffffff",
+      "b": "#ffb000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 262,
+      "y": 405
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 200
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Crack",
+    "steps": [
+     {
+      "fx": "bolts",
+      "ms": 700,
+      "a": "#ffffff",
+      "b": "#ffb000",
+      "at": "xy",
+      "rate": 120,
+      "gi": "flash",
+      "x": 262,
+      "y": 405
+     },
+     {
+      "fx": "burst",
+      "ms": 500,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 262,
+      "y": 405
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Absorb",
+    "steps": [
+     {
+      "fx": "implode",
+      "ms": 700,
+      "a": "#ff0000",
+      "b": "#ffb000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 262,
+      "y": 405
+     },
+     {
+      "fx": "pulse",
+      "ms": 500,
+      "a": "#ffb000",
+      "b": "#301000",
+      "at": "xy",
+      "rate": 250,
+      "gi": "dark",
+      "x": 262,
+      "y": 405
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Reflect",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 300,
+      "a": "#ffffff",
+      "b": "#ffb000",
+      "at": "center",
+      "rate": 50,
+      "gi": "flash"
+     },
+     {
+      "fx": "sweep_rl",
+      "ms": 600,
+      "a": "#ffffff",
+      "b": "#ffb000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "burst",
+      "ms": 700,
+      "a": "#ffb000",
+      "b": "#ff0000",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#ff0000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 150
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Tag team",
+    "steps": [
+     {
+      "fx": "sweep_lr",
+      "ms": 450,
+      "a": "#3080ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_rl",
+      "ms": 450,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "spin",
+      "ms": 900,
+      "a": "#ffffff",
+      "b": "#3080ff",
+      "at": "center",
+      "rate": 90,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Stage up",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#ffb000",
+      "at": "center",
+      "rate": 55,
+      "gi": "flash"
+     },
+     {
+      "fx": "spiral_out",
+      "ms": 1200,
+      "a": "#ffb000",
+      "b": "#200800",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "rainbow",
+      "ms": 1200,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 60,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 200
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Final blow",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 600,
+      "a": "#ffffff",
+      "b": "#ff0000",
+      "at": "center",
+      "rate": 45,
+      "gi": "flash"
+     },
+     {
+      "fx": "fire",
+      "ms": 1400,
+      "a": "#ffc000",
+      "b": "#ff0000",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "burst",
+      "ms": 900,
+      "a": "#ffffff",
+      "b": "#ffb000",
+      "at": "top",
+      "rate": 0,
+      "gi": "flash"
+     },
+     {
+      "fx": "rainbow",
+      "ms": 2000,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 50,
+      "gi": "keep"
+     },
+     {
+      "fx": "fade",
+      "ms": 700,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 300
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Back to sleep",
+    "steps": [
+     {
+      "fx": "solid",
+      "ms": 600,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "implode",
+      "ms": 1200,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 262,
+      "y": 405
+     },
+     {
+      "fx": "fade",
+      "ms": 900,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 400,
+      "x": 262,
+      "y": 405
+     }
+    ],
+    "repeat": 1
+   }
+  ],
+  "scripts": [
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Pop bumper",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "prayer",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "prayer"
+         },
+         "b": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "num",
+           "v": 25
+          },
+          "b": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 15
+           },
+           "b": {
+            "k": "var",
+            "name": "woken"
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ready",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "light_mode",
+          "shot": "Mecha exit bottom",
+          "color": "#ffb000",
+          "pattern": "chase",
+          "insert": "MECHA LANE,POP BUMPER"
+         },
+         {
+          "op": "hud_award",
+          "text": "KING CAESAR IS LIT",
+          "value": null,
+          "sub": "SHOOT THE MECHA LANE",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "prayer"
+           },
+           "b": {
+            "k": "var",
+            "name": "note at"
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "THE PRAYER",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 25
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 15
+               },
+               "b": {
+                "k": "var",
+                "name": "woken"
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "prayer"
+             }
+            },
+            "sub": "MORE TO WAKE KING CAESAR",
+            "seconds": 2
+           },
+           {
+            "op": "set",
+            "var": "note at",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "prayer"
+             },
+             "b": {
+              "k": "num",
+              "v": 5
+             }
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right return lane",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "prayer",
+        "by": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "prayer"
+         },
+         "b": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "num",
+           "v": 25
+          },
+          "b": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 15
+           },
+           "b": {
+            "k": "var",
+            "name": "woken"
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ready",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "light_mode",
+          "shot": "Mecha exit bottom",
+          "color": "#ffb000",
+          "pattern": "chase",
+          "insert": "MECHA LANE,POP BUMPER"
+         },
+         {
+          "op": "hud_award",
+          "text": "KING CAESAR IS LIT",
+          "value": null,
+          "sub": "SHOOT THE MECHA LANE",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "prayer"
+           },
+           "b": {
+            "k": "var",
+            "name": "note at"
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "THE PRAYER",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 25
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 15
+               },
+               "b": {
+                "k": "var",
+                "name": "woken"
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "prayer"
+             }
+            },
+            "sub": "MORE TO WAKE KING CAESAR",
+            "seconds": 2
+           },
+           {
+            "op": "set",
+            "var": "note at",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "prayer"
+             },
+             "b": {
+              "k": "num",
+              "v": 5
+             }
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Mecha exit bottom",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "prayer",
+        "by": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "prayer"
+         },
+         "b": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "num",
+           "v": 25
+          },
+          "b": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "num",
+            "v": 15
+           },
+           "b": {
+            "k": "var",
+            "name": "woken"
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ready",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "light_mode",
+          "shot": "Mecha exit bottom",
+          "color": "#ffb000",
+          "pattern": "chase",
+          "insert": "MECHA LANE,POP BUMPER"
+         },
+         {
+          "op": "hud_award",
+          "text": "KING CAESAR IS LIT",
+          "value": null,
+          "sub": "SHOOT THE MECHA LANE",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "prayer"
+           },
+           "b": {
+            "k": "var",
+            "name": "note at"
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "THE PRAYER",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "num",
+               "v": 25
+              },
+              "b": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 15
+               },
+               "b": {
+                "k": "var",
+                "name": "woken"
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "prayer"
+             }
+            },
+            "sub": "MORE TO WAKE KING CAESAR",
+            "seconds": 2
+           },
+           {
+            "op": "set",
+            "var": "note at",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "prayer"
+             },
+             "b": {
+              "k": "num",
+              "v": 5
+             }
+            }
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "any_shot",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "not",
+        "a": {
+         "k": "lit"
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "light_mode",
+        "shot": "Mecha exit bottom",
+        "color": "#ffb000",
+        "pattern": "chase",
+        "insert": "MECHA LANE,POP BUMPER"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_start"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "ready",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "prayer",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "change",
+      "var": "woken",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "note at",
+      "value": {
+       "k": "num",
+       "v": 5
+      }
+     },
+     {
+      "op": "set",
+      "var": "stage",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "pot",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "cracks",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "cashed",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "crack pop",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "crack ramp",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "crack lane",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "reflects",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "combos",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "head",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "crack value",
+      "value": {
+       "k": "op",
+       "op": "+",
+       "a": {
+        "k": "num",
+        "v": 3000000
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 1500000
+        },
+        "b": {
+         "k": "op",
+         "op": "-",
+         "a": {
+          "k": "var",
+          "name": "woken"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "op": "set",
+      "var": "beam ms",
+      "value": {
+       "k": "num",
+       "v": 3600
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "woken"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "beam ms",
+        "value": {
+         "k": "num",
+         "v": 2600
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "woken"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "beam ms",
+        "value": {
+         "k": "num",
+         "v": 1900
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "clip",
+      "clip": "intro",
+      "where": "full"
+     },
+     {
+      "op": "clip",
+      "clip": "loop",
+      "where": "loop"
+     },
+     {
+      "op": "sound",
+      "sound": "roar",
+      "fallback": ""
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Awakening"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 700
+      },
+      "strength": "strong"
+     },
+     {
+      "op": "hud_text",
+      "which": "line",
+      "text": "AWAKENING: CRACK THE SHRINE",
+      "value": null
+     },
+     {
+      "op": "hud_counter",
+      "counter": 1,
+      "value": {
+       "k": "num",
+       "v": 1
+      },
+      "sub": "OF 4"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 2,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "CASH AT SCOOP"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "CRACKS"
+     },
+     {
+      "op": "light_shot",
+      "shot": "Pop bumper",
+      "color": "#ffb000",
+      "pattern": "blink",
+      "rate": {
+       "k": "num",
+       "v": 250
+      }
+     },
+     {
+      "op": "light_shot",
+      "shot": "Right ramp",
+      "color": "#ffb000",
+      "pattern": "blink",
+      "rate": {
+       "k": "num",
+       "v": 250
+      }
+     },
+     {
+      "op": "light_shot",
+      "shot": "Mecha exit bottom",
+      "color": "#ffb000",
+      "pattern": "blink",
+      "rate": {
+       "k": "num",
+       "v": 250
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "MECHA LANE",
+      "color": "#ffb000",
+      "pattern": "blink",
+      "rate": {
+       "k": "num",
+       "v": 250
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Pop bumper",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "crack pop"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "crack pop",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Pop bumper"
+       },
+       {
+        "op": "change",
+        "var": "cracks",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "crack",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "caesar",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "crack ramp"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "crack ramp",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Right ramp"
+       },
+       {
+        "op": "change",
+        "var": "cracks",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "crack",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Mecha exit bottom",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "crack lane"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "crack lane",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Mecha exit bottom"
+       },
+       {
+        "op": "lights_off",
+        "insert": "MECHA LANE"
+       },
+       {
+        "op": "change",
+        "var": "cracks",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "crack",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "reflect",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "caesar",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "crack"
+    },
+    "do": [
+     {
+      "op": "score",
+      "points": {
+       "k": "num",
+       "v": 1000000
+      }
+     },
+     {
+      "op": "change",
+      "var": "pot",
+      "by": {
+       "k": "var",
+       "name": "crack value"
+      }
+     },
+     {
+      "op": "hud_counter",
+      "counter": 2,
+      "value": {
+       "k": "var",
+       "name": "pot"
+      },
+      "sub": "CASH AT SCOOP"
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "var",
+       "name": "cracks"
+      },
+      "sub": "CRACKS"
+     },
+     {
+      "op": "clip",
+      "clip": "crack",
+      "where": "behind"
+     },
+     {
+      "op": "sound",
+      "sound": "crack",
+      "fallback": ""
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Crack"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 300
+      },
+      "strength": "medium"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "cracks"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_award",
+        "text": "KING CAESAR AWAKENS",
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "POT",
+        "seconds": 2
+       },
+       {
+        "op": "clip",
+        "clip": "awake",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "roar",
+        "fallback": ""
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "hud_award",
+        "text": "THE SHRINE CRACKS",
+        "value": {
+         "k": "var",
+         "name": "cracks"
+        },
+        "sub": "OF 3",
+        "seconds": 2
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "beam"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "beam",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "beam",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Left ramp",
+          "color": "#ff0000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Left ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#ff0000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Right ramp",
+          "color": "#ff0000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Right ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Building",
+          "color": "#ff0000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Building"
+         }
+        ]
+       },
+       {
+        "op": "timer_start",
+        "timer": "beam",
+        "ms": {
+         "k": "var",
+         "name": "beam ms"
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "beam"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "absorb",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Big loop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "beam"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "absorb",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "beam"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "absorb",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "beam"
+        },
+        "b": {
+         "k": "num",
+         "v": 4
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "absorb",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 4
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "blow",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "absorb"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "charge"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "charge",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 1000000
+        }
+       },
+       {
+        "op": "add_time",
+        "seconds": {
+         "k": "num",
+         "v": 5
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "absorb",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "absorb",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Absorb"
+       },
+       {
+        "op": "hud_award",
+        "text": "ABSORBED",
+        "value": {
+         "k": "var",
+         "name": "charge"
+        },
+        "sub": "FIRE IT BACK AT THE MECHA LANE",
+        "seconds": 2
+       },
+       {
+        "op": "light_shot",
+        "shot": "Mecha exit bottom",
+        "color": "#ffb000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "MECHA LANE",
+        "color": "#ffb000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "reflect"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">",
+       "a": {
+        "k": "var",
+        "name": "charge"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "pot",
+        "by": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 5000000
+         },
+         "b": {
+          "k": "var",
+          "name": "charge"
+         }
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "CASH AT SCOOP"
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 2000000
+        }
+       },
+       {
+        "op": "change",
+        "var": "reflects",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "charge",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "var",
+         "name": "reflects"
+        },
+        "sub": "REFLECTED"
+       },
+       {
+        "op": "clip",
+        "clip": "reflect",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "reflect",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Reflect"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 400
+        },
+        "strength": "hard"
+       },
+       {
+        "op": "light_shot",
+        "shot": "Mecha exit bottom",
+        "color": "#ffb000",
+        "pattern": "pulse"
+       },
+       {
+        "op": "light_shot",
+        "insert": "MECHA LANE",
+        "color": "#ffb000",
+        "pattern": "pulse"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "reflects"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "MECHAGODZILLA REELS",
+          "value": {
+           "k": "var",
+           "name": "pot"
+          },
+          "sub": "POT",
+          "seconds": 2
+         },
+         {
+          "op": "timer_start",
+          "timer": "next",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "REFLECTED",
+          "value": {
+           "k": "var",
+           "name": "reflects"
+          },
+          "sub": "OF 3",
+          "seconds": 2
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Godzilla target",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "combo",
+        "ms": {
+         "k": "num",
+         "v": 6000
+        }
+       },
+       {
+        "op": "sound",
+        "sound": "tagteam",
+        "fallback": ""
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 500000
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Pop bumper",
+        "color": "#ffb000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 100
+        }
+       },
+       {
+        "op": "light_shot",
+        "shot": "Mecha exit bottom",
+        "color": "#ffb000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 100
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "MECHA LANE",
+        "color": "#ffb000",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 100
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "GODZILLA ATTACKS",
+        "value": null,
+        "sub": "NOW CAESAR: POP BUMPER OR MECHA LANE",
+        "seconds": 2
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "caesar"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">",
+       "a": {
+        "k": "timer_left",
+        "timer": "combo"
+       },
+       "b": {
+        "k": "num",
+        "v": 0
+       }
+      },
+      "then": [
+       {
+        "op": "timer_stop",
+        "timer": "combo"
+       },
+       {
+        "op": "change",
+        "var": "combos",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "change",
+        "var": "pot",
+        "by": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "num",
+          "v": 8000000
+         },
+         "b": {
+          "k": "var",
+          "name": "combos"
+         }
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "CASH AT SCOOP"
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "num",
+         "v": 2000000
+        }
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "var",
+         "name": "combos"
+        },
+        "sub": "COMBOS"
+       },
+       {
+        "op": "add_time",
+        "seconds": {
+         "k": "num",
+         "v": 5
+        }
+       },
+       {
+        "op": "clip",
+        "clip": "tagteam",
+        "where": "behind"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Tag team"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 350
+        },
+        "strength": "strong"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Pop bumper"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Mecha exit bottom"
+       },
+       {
+        "op": "lights_off",
+        "insert": "MECHA LANE"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "combos"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "THE TAG TEAM",
+          "value": {
+           "k": "var",
+           "name": "pot"
+          },
+          "sub": "POT",
+          "seconds": 2
+         },
+         {
+          "op": "timer_start",
+          "timer": "next",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "TAG TEAM COMBO",
+          "value": {
+           "k": "var",
+           "name": "combos"
+          },
+          "sub": "OF 3",
+          "seconds": 2
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "combo"
+    },
+    "do": [
+     {
+      "op": "lights_off",
+      "shot": "Pop bumper"
+     },
+     {
+      "op": "lights_off",
+      "shot": "Mecha exit bottom"
+     },
+     {
+      "op": "lights_off",
+      "insert": "MECHA LANE"
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "blow"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "head",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "op",
+       "op": "-",
+       "a": {
+        "k": "num",
+        "v": 3
+       },
+       "b": {
+        "k": "var",
+        "name": "head"
+       }
+      },
+      "sub": "HITS LEFT"
+     },
+     {
+      "op": "score",
+      "points": {
+       "k": "num",
+       "v": 3000000
+      }
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 500
+      },
+      "strength": "hard"
+     },
+     {
+      "op": "sound",
+      "sound": "reflect",
+      "fallback": ""
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "head"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "var",
+           "name": "pot"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 25000000
+         }
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "MECHAGODZILLA'S HEAD IS OFF",
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "var",
+           "name": "pot"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 25000000
+         }
+        },
+        "sub": "SUPER JACKPOT",
+        "seconds": 4
+       },
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "won",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Final blow"
+       },
+       {
+        "op": "shake_game",
+        "shake": "multiball_start"
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": [
+       {
+        "op": "clip",
+        "clip": "absorb",
+        "where": "behind"
+       },
+       {
+        "op": "hud_award",
+        "text": "THE HEAD CRACKS",
+        "value": {
+         "k": "var",
+         "name": "head"
+        },
+        "sub": "OF 3",
+        "seconds": 2
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "next"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "stage",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set_time",
+      "seconds": {
+       "k": "num",
+       "v": 45
+      }
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Stage up"
+     },
+     {
+      "op": "shake_game",
+      "shake": "jackpot"
+     },
+     {
+      "op": "light_shot",
+      "shot": "Right scoop",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "SELECT CITY",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "SCOOP BB-BATTLE",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "SCOOP BB-GODZILLA PWR UP",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "light_shot",
+      "insert": "SCOOP BB-SUMMON ALLY",
+      "color": "#ffffff",
+      "pattern": "chase",
+      "rate": {
+       "k": "num",
+       "v": 120
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "REFLECT: ABSORB THE BEAM",
+        "value": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 2
+        },
+        "sub": "OF 4"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "REFLECTED"
+       },
+       {
+        "op": "set",
+        "var": "beam",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "set",
+        "var": "charge",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "beam",
+        "ms": {
+         "k": "var",
+         "name": "beam ms"
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Left ramp",
+          "color": "#ff0000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Left ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#ff0000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Right ramp",
+          "color": "#ff0000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Right ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "beam"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Building",
+          "color": "#ff0000",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Building"
+         }
+        ]
+       },
+       {
+        "op": "light_shot",
+        "shot": "Mecha exit bottom",
+        "color": "#ffb000",
+        "pattern": "pulse"
+       },
+       {
+        "op": "light_shot",
+        "insert": "MECHA LANE",
+        "color": "#ffb000",
+        "pattern": "pulse"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "TAG TEAM: GODZILLA, THEN CAESAR",
+        "value": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 3
+        },
+        "sub": "OF 4"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "num",
+         "v": 0
+        },
+        "sub": "COMBOS"
+       },
+       {
+        "op": "timer_stop",
+        "timer": "beam"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Left ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Big loop"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Right ramp"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Building"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Mecha exit bottom"
+       },
+       {
+        "op": "lights_off",
+        "insert": "MECHA LANE"
+       },
+       {
+        "op": "light_shot",
+        "shot": "Godzilla target",
+        "color": "#3080ff",
+        "pattern": "blink",
+        "rate": {
+         "k": "num",
+         "v": 300
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 4
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "THE FINAL BLOW: SHOOT THE BUILDING",
+        "value": null
+       },
+       {
+        "op": "hud_counter",
+        "counter": 1,
+        "value": {
+         "k": "num",
+         "v": 4
+        },
+        "sub": "OF 4"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "num",
+         "v": 3
+        },
+        "sub": "HITS LEFT"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Godzilla target"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Pop bumper"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Mecha exit bottom"
+       },
+       {
+        "op": "lights_off",
+        "insert": "MECHA LANE"
+       },
+       {
+        "op": "light_shot",
+        "shot": "Building",
+        "color": "#ff0000",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 100
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right scoop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": ">=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "cashed",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "pot"
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "CASHED OUT",
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "KING CAESAR SLEEPS",
+        "seconds": 4
+       },
+       {
+        "op": "clip",
+        "clip": "cashout",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "cashout",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Back to sleep"
+       },
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "seconds_left",
+     "seconds": 10
+    },
+    "do": [
+     {
+      "op": "callout",
+      "role": "ten_seconds"
+     },
+     {
+      "op": "light_shot",
+      "shot": "Right scoop",
+      "color": "#ffffff",
+      "pattern": "hurry"
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "mode_end"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "stage",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "timer_stop",
+      "timer": "crack"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "beam"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "absorb"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "reflect"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "combo"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "caesar"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "blow"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "next"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "pot"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        }
+       },
+       {
+        "op": "hud_award",
+        "text": "KING CAESAR FALLS",
+        "value": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "pot"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "sub": "A QUARTER OF THE POT",
+        "seconds": 3
+       },
+       {
+        "op": "clip",
+        "clip": "lost",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "lost",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Back to sleep"
+       }
+      ],
+      "else": null
+     }
+    ]
+   }
+  ],
+  "format": 1,
+  "screen_style": "panel",
+  "keep_rules": [],
+  "block_modes": []
+ },
+ "recipe": {
+  "clips": {
+   "intro": {
+    "film": "mg74",
+    "from": 4080.4,
+    "length": 6.0,
+    "crop": "fill",
+    "what": "King Caesar rises out of the smoke and rubble of the burst mountainside, arms raised, as the dust clears around him, at 1:08:00."
+   },
+   "loop": {
+    "film": "mg74",
+    "from": 3913.4,
+    "length": 11.8,
+    "crop": "fill",
+    "what": "A calm wide shot of the Okinawa beach and blue sea with the tiny figure of the priestess praying at the water's edge, at 1:05:13."
+   },
+   "crack": {
+    "film": "mg74",
+    "from": 3791.4,
+    "length": 4.5,
+    "crop": "fill",
+    "what": "The beam from the statue strikes the seaside cliff, a starburst flares on the rock and the stone bursts open with flying debris, at 1:03:11."
+   },
+   "awake": {
+    "film": "mg74",
+    "from": 4092.3,
+    "length": 5.2,
+    "crop": "fill",
+    "what": "Close-up of the fully awake King Caesar roaring with glowing red eyes, his golden ears flaring up like flames, at 1:08:12."
+   },
+   "absorb": {
+    "film": "mg74",
+    "from": 4129.6,
+    "length": 2.2,
+    "crop": "fill",
+    "what": "Mechagodzilla fires its rainbow eye beam and the beam pours straight into King Caesar's glowing eye, at 1:08:49."
+   },
+   "reflect": {
+    "film": "mg74",
+    "from": 4121.5,
+    "length": 3.1,
+    "crop": "fill",
+    "what": "King Caesar's eye fires the rainbow beam back and it hits Mechagodzilla, who bursts in a blaze of sparks and smoke, at 1:08:41."
+   },
+   "tagteam": {
+    "film": "mg74",
+    "from": 4778.6,
+    "length": 5.2,
+    "crop": "fill",
+    "what": "Wide shot of King Caesar and Godzilla attacking Mechagodzilla together from both sides on the hilltop, at 1:19:38."
+   },
+   "won": {
+    "film": "mg74",
+    "from": 4812.5,
+    "length": 5.8,
+    "crop": "fill",
+    "what": "Godzilla wrenches Mechagodzilla's head, twists it off in a shower of sparks and the headless robot smokes, at 1:20:12."
+   },
+   "lost": {
+    "film": "mg74",
+    "from": 4409.0,
+    "length": 5.2,
+    "crop": "fill",
+    "what": "A dazed King Caesar staggers among the dark rocks after the missile barrage and topples over, at 1:13:29."
+   },
+   "cashout": {
+    "film": "mg74",
+    "from": 4961.0,
+    "length": 4.0,
+    "crop": "fill",
+    "what": "King Caesar lies back down in his mountain shrine, resting in the rock as the mist drifts past, at 1:22:41."
+   }
+  },
+  "music": {
+   "film": "mg74",
+   "from": 91.295,
+   "length": 20.21,
+   "what": "The film's brassy main title theme by Masaru Sato under the opening credits, no dialogue, at 0:01:31."
+  },
+  "calls": {
+   "roar": {
+    "film": "mg74",
+    "from": 4094.35,
+    "length": 1.35,
+    "what": "King Caesar's shrill cry as he roars in close-up after waking, at 1:08:14.",
+    "priority": 3
+   },
+   "crack": {
+    "film": "mg74",
+    "from": 3791.6,
+    "length": 3.8,
+    "what": "A rumbling blast as the beam cracks the seaside cliff and the stone breaks apart, at 1:03:11.",
+    "priority": 4
+   },
+   "absorb": {
+    "film": "mg74",
+    "from": 4130.0,
+    "length": 1.0,
+    "what": "Mechagodzilla's warbling eye beam sound as it streams into King Caesar's eye, at 1:08:50.",
+    "priority": 3
+   },
+   "reflect": {
+    "film": "mg74",
+    "from": 4122.2,
+    "length": 2.4,
+    "what": "The warbling beam fired back out of King Caesar's eye into a crackling impact on Mechagodzilla, at 1:08:42.",
+    "priority": 4
+   },
+   "tagteam": {
+    "film": "mg74",
+    "from": 4453.98,
+    "length": 2.6,
+    "what": "Godzilla's falling roar in close-up as he squares up to Mechagodzilla, at 1:14:13.",
+    "priority": 4
+   },
+   "won": {
+    "film": "mg74",
+    "from": 4886.15,
+    "length": 2.9,
+    "what": "A big rolling explosion as the alien base on the hilltop blows up, at 1:21:26.",
+    "priority": 4
+   },
+   "lost": {
+    "film": "mg74",
+    "from": 4411.4,
+    "length": 1.3,
+    "what": "A pained low cry and thud as the dazed King Caesar reels among the rocks, at 1:13:31.",
+    "priority": 3
+   },
+   "cashout": {
+    "film": "mg74",
+    "from": 3775.2,
+    "length": 4.0,
+    "what": "A single deep gong stroke ringing out and fading as the shrine statue on the roof begins to stir, at 1:02:55.",
+    "priority": 4
+   }
+  }
+ }
+}

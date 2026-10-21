@@ -1,0 +1,138 @@
+{
+ "clips": {
+  "intro": {
+   "film": "mg74",
+   "from": 4080.4,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "King Caesar rises out of the smoke and rubble of the burst mountainside, arms raised, as the dust clears around him, at 1:08:00."
+  },
+  "loop": {
+   "film": "mg74",
+   "from": 3913.4,
+   "length": 11.8,
+   "crop": "fill",
+   "what": "A calm wide shot of the Okinawa beach and blue sea with the tiny figure of the priestess praying at the water's edge, at 1:05:13."
+  },
+  "crack": {
+   "film": "mg74",
+   "from": 3791.4,
+   "length": 4.5,
+   "crop": "fill",
+   "what": "The beam from the statue strikes the seaside cliff, a starburst flares on the rock and the stone bursts open with flying debris, at 1:03:11."
+  },
+  "awake": {
+   "film": "mg74",
+   "from": 4092.3,
+   "length": 5.2,
+   "crop": "fill",
+   "what": "Close-up of the fully awake King Caesar roaring with glowing red eyes, his golden ears flaring up like flames, at 1:08:12."
+  },
+  "absorb": {
+   "film": "mg74",
+   "from": 4129.6,
+   "length": 2.2,
+   "crop": "fill",
+   "what": "Mechagodzilla fires its rainbow eye beam and the beam pours straight into King Caesar's glowing eye, at 1:08:49."
+  },
+  "reflect": {
+   "film": "mg74",
+   "from": 4121.5,
+   "length": 3.1,
+   "crop": "fill",
+   "what": "King Caesar's eye fires the rainbow beam back and it hits Mechagodzilla, who bursts in a blaze of sparks and smoke, at 1:08:41."
+  },
+  "tagteam": {
+   "film": "mg74",
+   "from": 4778.6,
+   "length": 5.2,
+   "crop": "fill",
+   "what": "Wide shot of King Caesar and Godzilla attacking Mechagodzilla together from both sides on the hilltop, at 1:19:38."
+  },
+  "won": {
+   "film": "mg74",
+   "from": 4812.5,
+   "length": 5.8,
+   "crop": "fill",
+   "what": "Godzilla wrenches Mechagodzilla's head, twists it off in a shower of sparks and the headless robot smokes, at 1:20:12."
+  },
+  "lost": {
+   "film": "mg74",
+   "from": 4409.0,
+   "length": 5.2,
+   "crop": "fill",
+   "what": "A dazed King Caesar staggers among the dark rocks after the missile barrage and topples over, at 1:13:29."
+  },
+  "cashout": {
+   "film": "mg74",
+   "from": 4961.0,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "King Caesar lies back down in his mountain shrine, resting in the rock as the mist drifts past, at 1:22:41."
+  }
+ },
+ "music": {
+  "film": "mg74",
+  "from": 91.295,
+  "length": 20.21,
+  "what": "The film's brassy main title theme by Masaru Sato under the opening credits, no dialogue, at 0:01:31."
+ },
+ "calls": {
+  "roar": {
+   "film": "mg74",
+   "from": 4094.35,
+   "length": 1.35,
+   "what": "King Caesar's shrill cry as he roars in close-up after waking, at 1:08:14.",
+   "priority": 3
+  },
+  "crack": {
+   "film": "mg74",
+   "from": 3791.6,
+   "length": 3.8,
+   "what": "A rumbling blast as the beam cracks the seaside cliff and the stone breaks apart, at 1:03:11.",
+   "priority": 4
+  },
+  "absorb": {
+   "film": "mg74",
+   "from": 4130.0,
+   "length": 1.0,
+   "what": "Mechagodzilla's warbling eye beam sound as it streams into King Caesar's eye, at 1:08:50.",
+   "priority": 3
+  },
+  "reflect": {
+   "film": "mg74",
+   "from": 4122.2,
+   "length": 2.4,
+   "what": "The warbling beam fired back out of King Caesar's eye into a crackling impact on Mechagodzilla, at 1:08:42.",
+   "priority": 4
+  },
+  "tagteam": {
+   "film": "mg74",
+   "from": 4453.98,
+   "length": 2.6,
+   "what": "Godzilla's falling roar in close-up as he squares up to Mechagodzilla, at 1:14:13.",
+   "priority": 4
+  },
+  "won": {
+   "film": "mg74",
+   "from": 4886.15,
+   "length": 2.9,
+   "what": "A big rolling explosion as the alien base on the hilltop blows up, at 1:21:26.",
+   "priority": 4
+  },
+  "lost": {
+   "film": "mg74",
+   "from": 4411.4,
+   "length": 1.3,
+   "what": "A pained low cry and thud as the dazed King Caesar reels among the rocks, at 1:13:31.",
+   "priority": 3
+  },
+  "cashout": {
+   "film": "mg74",
+   "from": 3775.2,
+   "length": 4.0,
+   "what": "A single deep gong stroke ringing out and fading as the shrine statue on the roof begins to stir, at 1:02:55.",
+   "priority": 4
+  }
+ }
+}

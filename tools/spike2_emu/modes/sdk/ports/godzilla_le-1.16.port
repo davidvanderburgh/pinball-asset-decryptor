@@ -717,6 +717,11 @@ value switch_polarity_at    28
 switch 34   0x1000000000000000 Action button
 switch 60   0x2000000000000000 Left flipper button
 switch 59   0x4000000000000000 Right flipper button
+# PAD-658: two playfield switches the game's shot dispatch never names (MODE_API.md: the scoop and Mecha Exit Top
+# send only 0x1), as shots of their own: the right scoop (King Caesar's and Kamacuras's corner, the pack's cash-out
+# shot) and the top of the Mecha lane, beside Mechagodzilla (Minilla's)
+switch 53   0x0100000000000000 Right scoop
+switch 50   0x0200000000000000 Mecha exit top
 # PAD-416: the trough's six positions as one shot, "Trough". A ball draining home closes one of them (and the stack
 # rolling down after an eject closes the next), so a mode that keeps a ball save of its own knows the moment its ball
 # drained - the framework's count of the balls in play does not move while the save serves it back (measured: it

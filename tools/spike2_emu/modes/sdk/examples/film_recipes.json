@@ -15,7 +15,10 @@
   "mg93": "Godzilla.VS.Mechagodzilla.II.1993.JAPANESE.1080p.BluRay.H264.AC3.DD5.1.mp4",
   "sg94": "Godzilla.VS.Spacegodzilla.1994.JAPANESE.1080p.BluRay.H264.AC3.DD5.1.mp4",
   "amg02": "Godzilla.Against.Mechagodzilla.2002.JAPANESE.1080p.BluRay.H264.AC3.DD5.1.mp4",
-  "bio89": "Godzilla.VS.Biollante.1989.JAPANESE.1080p.BluRay.H264.AC3.DD5.1.mp4"
+  "bio89": "Godzilla.VS.Biollante.1989.JAPANESE.1080p.BluRay.H264.AC3.DD5.1.mp4",
+  "son67": "Son.of.Godzilla.1967.1080p.H264.AC3.DD5.1.mp4",
+  "mg74": "Godzilla.vs.Mechagodzilla.1974.H264.AC3.DD2.0.mp4",
+  "ama69": "All Monsters Attack (1969) 1080p H264 AC3 DD2.0.mp4"
  },
  "titles": {
   "ghi64": "Ghidorah, the Three-Headed Monster (1964)",
@@ -32,7 +35,10 @@
   "mg93": "Godzilla vs. Mechagodzilla II (1993)",
   "sg94": "Godzilla vs. SpaceGodzilla (1994)",
   "amg02": "Godzilla Against Mechagodzilla (2002)",
-  "bio89": "Godzilla vs. Biollante (1989)"
+  "bio89": "Godzilla vs. Biollante (1989)",
+  "son67": "Son of Godzilla (1967)",
+  "mg74": "Godzilla vs. Mechagodzilla (1974)",
+  "ama69": "All Monsters Attack (1969)"
  },
  "examples": [
   {

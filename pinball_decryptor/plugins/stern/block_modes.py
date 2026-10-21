@@ -282,7 +282,9 @@ BUILDING_FLOOR = {"1": "floor 1", "2": "floor 2", "3": "floor 3", "0": "back whe
 SHAKE_STRENGTH = {v: k for k, v in MP.SHAKE_STRENGTHS.items()}
 SHAKE_MIN_MS, SHAKE_MAX_MS = MP.SHAKE_MIN_MS, 5000
 #: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
-HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus")
+HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus",
+             # PAD-658: the badges PAD-379's modes drew (mode_hud.py), so their blocks keep them
+             "rage", "crystal", "snowflake", "rose", "claw")
 GAUGE_KINDS = ("diamond", "segment", "spike")
 GAUGE_MAX = 12                   # intricate_kit.h's KIT_HUD_PIPS
 HUD_TEXT_MAX = 40                # a title or line (the kit's KIT_HUD_WORDS is 48, with its number)
@@ -845,6 +847,143 @@ def new_blocks_mode(project, name, shots=(), example=None):
     os.makedirs(MP.mode_folder(project, slug))
     path = save(project, slug, starter(name, shots))
     return slug, path
+
+
+# ---- the blocks examples (PAD-658) ---------------------------------------------------------------
+#: Whole modes made of blocks, offered by the wizard's Blocks step on the titles each names: the SDK's C examples
+#: rebuilt in blocks (what each lost is in its ``lost``) and new ones. One JSON file each in the SDK's
+#: ``blocks_examples`` folder: {"name", "slug", "order", "titles" (game_dir prefixes), "about", "based_on" (the C
+#: example it was rebuilt from, or ""), "lost" [sentences], "program" (blocks.json; its clips, sounds and music
+#: are files named after their cue: <cue>.mp4, <cue>.wav, music.wav), "recipe" (film_recipes.json's shape: where
+#: each is cut from)}. ``make_examples.py`` beside them writes the files from their Python.
+EXAMPLES_DIRNAME = "blocks_examples"
+
+
+def examples_dir():
+    from . import mode_runtime as MR
+    return os.path.join(MR.sdk_dir(), EXAMPLES_DIRNAME)
+
+
+def _load_examples():
+    out = []
+    folder = examples_dir()
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".json"))
+    except OSError:
+        return out
+    for n in names:
+        try:
+            with open(os.path.join(folder, n), "r", encoding="utf-8") as f:
+                ex = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(ex, dict) and ex.get("name") and SLUG_RE.match(str(ex.get("slug") or "")) \
+                and isinstance(ex.get("program"), dict):
+            out.append(ex)
+    out.sort(key=lambda e: (int(e.get("order", 999)), e["name"]))
+    return out
+
+
+EXAMPLES = _load_examples()
+
+
+def example_names(game_dir=None):
+    """The blocks examples' names, in the order the wizard lists them; with ``game_dir`` only the ones made for
+    that title (its port's game directory, "godzilla_le" ...)."""
+    return [e["name"] for e in EXAMPLES
+            if game_dir is None or any(str(game_dir).startswith(t) for t in e.get("titles") or ())]
+
+
+def example(name):
+    for e in EXAMPLES:
+        if e["name"] == name:
+            return e
+    return None
+
+
+def example_films(ex):
+    """The film keys an example's recipe cuts from, in the order first used."""
+    from . import code_modes as CM
+    return CM.recipe_films(ex)
+
+
+def without_media(program):
+    """``program`` with none of its own clips, sounds or music: a clip block goes, a sound block becomes its
+    fallback callout (or goes). What a blocks example plays until its films are found."""
+    out = copy.deepcopy(program)
+    out["clips"], out["sounds"], out["music"] = [], [], ""
+
+    def strip(stack):
+        kept = []
+        for b in stack or []:
+            if not isinstance(b, dict):
+                continue
+            if b.get("op") == "clip":
+                continue
+            if b.get("op") == "sound":
+                fb = b.get("fallback")
+                if fb in CALLOUT_ROLES:
+                    kept.append({"op": "callout", "role": fb})
+                elif _int_ok(fb, 1, 65535):
+                    kept.append({"op": "callout", "id": int(fb)})
+                continue
+            if b.get("op") == "if":
+                b = dict(b, then=strip(b.get("then")), **({"else": strip(b.get("else"))} if b.get("else") else {}))
+            kept.append(b)
+        return kept
+
+    for s in out.get("scripts") or []:
+        s["do"] = strip(s.get("do"))
+    return out
+
+
+def add_example(project, name, dirs=(), ffmpeg=None, log=None):
+    """Put blocks example ``name`` in the project as ``modes/<slug>/``: its blocks, the C they make, and its own
+    clips, sounds and music cut from the films in ``dirs`` (the C examples' cutter, :func:`.code_modes.cut_example`).
+    Returns ``(slug, missing)``: ``missing`` the film keys not found, when the mode is added without its own media
+    (:func:`without_media`). Refuses a folder that is already there."""
+    from . import code_modes as CM
+    ex = example(name)
+    if ex is None:
+        raise BlocksError("there is no blocks example called %s" % name)
+    if not project or not os.path.isdir(project):
+        raise BlocksError(MP.NO_PROJECT_HELP)
+    slug = ex["slug"]
+    folder = MP.mode_folder(project, slug)
+    if os.path.exists(folder):
+        raise BlocksError("%s is already in this project (modes/%s)." % (ex["name"], slug))
+    program = copy.deepcopy(ex["program"])
+    missing = [k for k in example_films(ex) if not CM.find_film(k, dirs)]
+    os.makedirs(folder)
+    if ex.get("recipe") and not missing:
+        CM.cut_example(project, slug, dict(ex, hud=True), dirs, ffmpeg=ffmpeg, log=log)
+    elif ex.get("recipe"):
+        program = without_media(program)
+    save(project, slug, program)
+    return slug, missing
+
+
+def card_checks(p):
+    """The keyword arguments :func:`problems` takes for title profile ``p`` (the card's shots, events, mechanisms,
+    shaker, the game's own light shows, mini-wizards, inserts, building, challenges and coil limits), as the
+    Modes tab checks a program."""
+    if p is None:
+        return {}
+    return {
+        "shots": [n for n, _m in p.shots],
+        "events": list(p.events or ()),
+        "mechs": ({"magnet": "magnet"} if p.can("magnet") else {}) | (dict(p.held_coils) if p.can("coils") else {}),
+        "scoop": p.can("scoop"),
+        "shield": getattr(p, "shield_rule", "") if p.can("shield") else False,
+        "game_shows": [n for n, _k, _s in getattr(p, "game_shows", ())],
+        "shaker": {"shakes": [n for n, _l in p.shakes], "max": list(p.shake_max_ms)} if p.can("shaker") else False,
+        "game_wizards": [n for n, _f in getattr(p, "game_wizards", ())] if p.can("wizard") else [],
+        "inserts": list(getattr(p, "inserts", ()) or ()),
+        "building": getattr(p, "building_rule", "") if p.can("building") else False,
+        "challenges": list(getattr(p, "challenges", ()) or ()) + ([CHALLENGE_NEW] if getattr(p, "challenge_menu", 0)
+                                                                   else []),
+        "hold_caps": {n: ms for n, ms in getattr(p, "coil_caps", ()) or ()},
+    }
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
@@ -3056,6 +3195,7 @@ UNUSED static void lamp_send(int i)
 UNUSED static void light(int i, unsigned rgb, int pattern, long long ms, int hurry)
 {
     if (i < 0 || i >= N_LIGHTS) return;
+    if (!run.on && !ending) return;   /* PAD-658: after the end (a timer still counting) it would be held for good */
     if (pattern == PM_LAMP_SOLID || hurry) ms = 0;
     else if (ms < RATE_MIN) ms = RATE_MIN;
     else if (ms > RATE_MAX) ms = RATE_MAX;

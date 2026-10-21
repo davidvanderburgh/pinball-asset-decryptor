@@ -68,6 +68,8 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Left return lane", 0x4ull }, { "Right return lane", 0x10ull }, { "Pop bumper", 0x40ull },
     { "Mecha exit bottom", 0x10000000000ull }, { "Left spinner", 0x200ull },
     { "Top spinner", 0x2000ull }, { "Shield ramp spinner", 0x20000ull },
+    { "Right scoop", 0x0100000000000000ull },           /* PAD-658: `switch` lines of the port, the scoop */
+    { "Mecha exit top", 0x0200000000000000ull },        /* and the top of the Mecha lane */
     { "Action button", 0x1000000000000000ull },         /* a `switch` line of the port (PAD-228) */
     { "Trough", 0x8000000000000000ull },                /* the trough's switches (PAD-416): a drain */
 };
@@ -720,6 +722,14 @@ static const struct { const char *name; uint64_t shot; int x, y; } LAMPS[] = {  
     { "TOP SPINNER", 0x1800ull, 165, 207 },
     { "POP BUMPER", 0x40ull, 251, 413 }, { "TANK 2", 0, 76, 287 }, { "HEAT RAY", 0, 180, 144 },
     { "LOWER PLAYFIELD GI-WHT(X9)", 0, 0, 0 }, { "UPPER PLAYFIELD GI-WHT(X12)", 0, 0, 0 },
+    /* PAD-658: the right side's inserts the pack lights by name, and the flashers */
+    { "LEFT SPINNER", 0x800000000ull, 55, 373 }, { "SELECT CITY", 0x2000000000ull, 236, 380 },
+    { "MECHA LANE", 0x4000000000ull, 282, 393 }, { "ATTACK MECHA", 0, 200, 381 }, { "TANK 6", 0, 227, 394 },
+    { "SCOOP BB-BATTLE", 0, 254, 346 }, { "SCOOP BB-GODZILLA PWR UP", 0, 254, 346 },
+    { "SCOOP BB-SUMMON ALLY", 0, 254, 346 }, { "SCOOP BB MECHA SPOT", 0, 259, 337 },
+    { "TAIL WHIP", 0, 176, 297 }, { "DESTRUCTION JACKPOT", 0, 170, 273 }, { "KAIJU", 0, 127, 392 },
+    { "GODZILLA SPOT", 0, 33, 205 }, { "GLOBE FLASH", 0, 287, 206 }, { "TOP SPINNER FLASH", 0x2000ull, 172, 100 },
+    { "RIGHT RETURN LANE", 0x10ull, 242, 472 }, { "MASER FLASH", 0x200ull, 30, 388 },
 };
 #define N_LAMPS (int)(sizeof LAMPS / sizeof LAMPS[0])
 static const char *const PATTERN[] = { "solid", "blink", "pulse", "chase" };

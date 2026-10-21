@@ -112,6 +112,28 @@ def notice(state, detail) -> str:
     return ""
 
 
+#: The button that installs the runtime where there is none yet.
+INSTALL_LABEL = "Install emulator Linux…"
+
+
+def root_notice() -> str:
+    """The offer to a machine whose own WSL logs in as root (PAD-659).
+
+    THE ONE CASE WHERE ``absent`` IS WORTH A NOTICE.  The app's own installer
+    sets Ubuntu up with ``--no-launch``, which skips the first-boot "create a
+    UNIX user" step, so the distro it leaves behind logs in as root - and as
+    root the game window stays black.  The cure the tab gave was three
+    commands typed into a Windows terminal.  The runtime carries an ordinary
+    user (``pad``, tools/runtime/Dockerfile) and is one button, and installing
+    it leaves the user's own distro exactly as it is.
+    """
+    return ("This app can bring its own Linux for the emulator, set up with "
+            "an ordinary user account, so the game window shows its picture. "
+            "Press “%s” to install it (a one-time download of about %d MB). "
+            "Your own WSL distro is not changed."
+            % (INSTALL_LABEL, round(runtime.IMAGE.size / 1e6)))
+
+
 def ensure(say, progress=None, ask=None, on_blocked=None):
     """status -> install -> (consent) -> replace.  Returns the state after.
 

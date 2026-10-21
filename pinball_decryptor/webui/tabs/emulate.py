@@ -224,6 +224,7 @@ class EmulateTab(TabService):
         self._docker_engine = None
         self._docker_report_next = False
         self._setup = None
+        self._rt_last = None         # the last runtime.status() the poll read
         self._setup_busy = False
         self._setup_fixing = False
         self._setup_restart_check = False
@@ -1307,6 +1308,9 @@ class EmulateTab(TabService):
                          "registered again — press “Set up emulator…” above, "
                          "which does that and makes it survive the next "
                          "restart.")
+        # the root offer (PAD-659) waits on these facts; the runtime state
+        # usually came first, with the status poll
+        self._runtime_apply(self._rt_last)
         if rig.setup_settled(facts):
             self.set(setup_btn=False, setup_msg="")
             return
@@ -1434,14 +1438,26 @@ class EmulateTab(TabService):
     def _runtime_apply(self, rt):
         if rt is None:
             return
+        self._rt_last = rt
         state, detail = rt
-        if state not in rig._runtime_ui.UNPROMPTED and state != "foreign":
+        ui = rig._runtime_ui
+        if (state == "absent" and ui.can_install()
+                and (self._setup or {}).get("user") == "root"):
+            # PAD-659: this PC's own WSL logs in as root (the app's own
+            # installer leaves Ubuntu that way), so its game window is
+            # black; the app's Linux has an ordinary user and is one button.
+            text = ui.root_notice()
+            self.set(rt_msg=text, rt_btn=True, rt_label=ui.INSTALL_LABEL)
+            if not self._rt_noted:
+                self._rt_noted = True
+                self.log("[emulate] " + " ".join(text.split()))
+            return
+        if state not in ui.UNPROMPTED and state != "foreign":
             self.set(rt_btn=False, rt_msg="")
             return
-        text = rig._runtime_ui.notice(state, detail)
-        self.set(rt_msg=text,
-                 rt_btn=bool(state in rig._runtime_ui.UNPROMPTED
-                             and rig._runtime_ui.can_install()))
+        text = ui.notice(state, detail)
+        self.set(rt_msg=text, rt_label="Update emulator Linux…",
+                 rt_btn=bool(state in ui.UNPROMPTED and ui.can_install()))
         if not self._rt_noted:
             self._rt_noted = True
             self.log("[emulate] " + " ".join(text.split()))
@@ -1455,7 +1471,9 @@ class EmulateTab(TabService):
         if no_rig():
             self.log("[emulate] " + NO_RIG_TEXT)
             return False
-        self.set(rt_enabled=False, rt_label="Updating…")
+        self.set(rt_enabled=False, rt_label=(
+            "Installing…" if self.get("rt_label") == rig._runtime_ui.INSTALL_LABEL
+            else "Updating…"))
         self._rt_pct = -10
         say = lambda m: self._log("[emulate] %s" % m)       # noqa: E731
 
@@ -1472,13 +1490,15 @@ class EmulateTab(TabService):
                         self._offer_from_file, exc))
                 if state == "ready":
                     self._ensure_data_disk()
+                    # the setup facts were the old distro's (a root login,
+                    # PAD-659): ask the one the emulator runs in now
+                    self._post(self._setup_recheck)
             except Exception as exc:                     # noqa: BLE001
                 self._log("[emulate] %s" % exc)
             finally:
                 self._rt_noted = False
                 runtime.invalidate()
-                self._post(lambda: self.set(rt_enabled=True,
-                                            rt_label="Update emulator Linux…"))
+                self._post(lambda: self.set(rt_enabled=True))
 
         self._thread(work)
         return True

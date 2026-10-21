@@ -10,7 +10,8 @@
 
 Each ``src_<slug>.py`` has ``build()`` -> the example (``title_alt``: its Pro alternates, BM.adapt), optionally
 ``DESK_PRO`` (scenarios played on the program as a Pro gets it), (blk.py's words; block_modes.py's "the blocks examples" says
-the shape) and, optionally, ``DESK``: [(what, [harness args], [lines the output must hold])]. The film recipe of
+the shape) and, optionally, ``DESK``: [(what, [harness args], [lines the output must hold])] (a 4th item, a set of slugs: played only when those
+modes are built into the same harness). The film recipe of
 its own clips, sounds and music is ``recipes/<slug>.json`` (film_recipes.json's shape), when there is one.
 
 The check: the program normalises to itself, block_modes.problems() finds nothing on Godzilla Premium/LE 1.16
@@ -135,11 +136,14 @@ def desk(slugs, examples):
         print(r.stderr)
         return 1
     bad = 0
+    built = {ex["slug"] for ex in examples}
     for ex in examples:
         if slugs and ex["slug"] not in slugs:
             continue
         mod = importlib.import_module("src_" + ex["slug"])
-        for what, args, want in getattr(mod, "DESK", ()):
+        for what, args, want, *needs in getattr(mod, "DESK", ()):
+            if needs and not needs[0] <= built:         # a scenario that needs other modes built in beside it
+                continue
             r = subprocess.run([exe, "new_game"] + [str(a) for a in args], capture_output=True, text=True, timeout=120)
             log = os.path.join(work, "%s_%s.txt" % (ex["slug"], what.replace(" ", "_")))
             with open(log, "w") as f:

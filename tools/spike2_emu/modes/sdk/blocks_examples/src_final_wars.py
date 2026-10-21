@@ -485,15 +485,14 @@ def _played(slug):
 
 _ROUND = _played("ghidorah_heads") + _played("oxygen_destroyer") + _played("maser_barrage") + ["secs", 3, "shot",
                                                                                                "Left ramp", "secs", 5]
-#: the lighting rule needs the three ledger modes beside it in the desk harness: played when they are built in
-#: (make_examples.py --desk with no slugs, or with these four named)
-_named = [a for a in __import__("sys").argv[1:] if not a.startswith("-")]
-if not _named or {"ghidorah_heads", "oxygen_destroyer", "maser_barrage"} <= set(_named):
-    DESK.append(("one round lights it, two the second time",
-                 _ROUND + ["shot", "Building", "secs", 2, "trigger", "final_wars.stop", "secs", 5] + _ROUND +
-                 ["shot", "Building", "secs", 2] + _ROUND + ["shot", "Building", "secs", 2],
-                 ["Hud_Title: FINAL WARS IS LIT", "Hud_Line: SHOOT THE BUILDING", "[FINAL WARS] START (its lit shot)",
-                  "END (trigger file)", "Hud_Line: 1  -  MORE ROUNDS TO LIGHT IT"]))
+#: the lighting rule needs the three ledger modes beside it in the desk harness: the desk plays it only when they
+#: are built in (make_examples.py --desk with no slugs, or with these four named; PAD-671: a 4th item, not argv)
+DESK.append(("one round lights it, two the second time",
+             _ROUND + ["shot", "Building", "secs", 2, "trigger", "final_wars.stop", "secs", 5] + _ROUND +
+             ["shot", "Building", "secs", 2] + _ROUND + ["shot", "Building", "secs", 2],
+             ["Hud_Title: FINAL WARS IS LIT", "Hud_Line: SHOOT THE BUILDING", "[FINAL WARS] START (its lit shot)",
+              "END (trigger file)", "Hud_Line: 1  -  MORE ROUNDS TO LIGHT IT"],
+             {"ghidorah_heads", "oxygen_destroyer", "maser_barrage"}))
 #: the same mode as a Godzilla Pro 1.16 gets it: two shields add the time
 DESK_PRO = [
     ("the Pro's two shields add time", _START + ["shot", "Shield target left", "ms", 300,

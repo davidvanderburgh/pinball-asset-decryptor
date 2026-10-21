@@ -3174,7 +3174,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert [t for t, _b in sections] == [
         "What it's for", HD.MODES_LIMITS_TITLE, "Which games", "Making a mode", "Try it",
         "Several modes", "Modes made of blocks", "Modes written in C", "The game's own modes",
-        "Cut from a video", "Copy and share", "Five things people ask for",
+        "Cut from a video", "Copy and share", "The rules sheet", "Five things people ask for",
         "Why your mode always gives way", "Sizes", "Before you flash a real machine",
         "A preview feature"]
     bodies = {t: TR.plain(TR.render(b)) for t, b in sections}

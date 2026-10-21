@@ -20,6 +20,7 @@ import { PlayfieldView } from "./modes_playfield.js";
 import { LightShowsView } from "./modes_lightshows.js";
 import { RuleCardsView, StoryView, ShotTableView, TimelineView, NodeGraphView } from "./modes_rules.js";
 import { ScriptView, CodeView, CEditor } from "./modes_script.js";
+import { RulesSheetDialog } from "./modes_sheet.js";
 
 export const css = true;
 
@@ -231,7 +232,7 @@ function ListRow({ r, i, selIdx, isSel }) {
 // GAME_FOLD_AT of them (a person's choice to open or fold them is kept in this browser).
 const GAME_FOLD_AT = 6;
 
-function ModeList({ s, onNew, onAllNumbers }) {
+function ModeList({ s, onNew, onAllNumbers, onSheet }) {
   const [fold, setFold] = useStored("pad.modes.game_fold2", "auto");
   const sel = s.sel || {};
   const allGame = s.game_rows || [];
@@ -313,6 +314,8 @@ function ModeList({ s, onNew, onAllNumbers }) {
               title: "The modes on a card the app wrote modes onto, in one .zip file to keep or load into another project",
               onClick: () => call("modes.save_card") },
           ])}>Save / load<//>
+        <${Button} size="sm" icon="file" disabled=${!s.project || !own.length} onClick=${onSheet}
+          title="The printable rules sheet of this project's modes, made from the mode files: how each starts, its stages and its cash out. Save it as a PDF or a web page.">Rules sheet…<//>
         <${Button} size="sm" kind="ghost" icon="trash" disabled=${!s.del_ok} onClick=${() => call("modes.delete")}>Delete<//>
       </div>
     </div>
@@ -1276,6 +1279,7 @@ export default function ModesTab() {
   const s = useNs("modes");
   if (s.spin) SPIN = s.spin;
   const [stock, setStock] = useState(false);
+  const [sheet, setSheet] = useState(false);        // PAD-664: the rules sheet dialog
   const [newMode, setNewMode] = useState(null);      // the wizard: { kind: "" | "blocks" | "c" | "form" }
   const [clip, setClip] = useState(null);
   const showClip = (path, title) => setClip({ path, title });
@@ -1288,7 +1292,8 @@ export default function ModesTab() {
     <${CheckNote} s=${s} />
     ${s.insider_note ? html`<div class="modes-note"><${Note} kind="info">${s.insider_note}<//></div>` : null}
     <div class="modes-body">
-      <${ModeList} s=${s} onNew=${(k) => setNewMode({ kind: k })} onAllNumbers=${() => setStock(true)} />
+      <${ModeList} s=${s} onNew=${(k) => setNewMode({ kind: k })} onAllNumbers=${() => setStock(true)}
+        onSheet=${() => { setSheet(true); call("modes.sheet_open"); }} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`
         : s.code && s.code.blocks ? html`<${BlocksPane} s=${withClip} />`
         : s.code ? html`<${CodePane} s=${withClip} />`
@@ -1302,6 +1307,7 @@ export default function ModesTab() {
     </div>
     <${TryFooter} s=${s} />
     ${stock ? html`<${StockDialog} s=${s} onClose=${() => setStock(false)} />` : null}
+    ${sheet && s.sheet ? html`<${RulesSheetDialog} s=${s} onClose=${() => setSheet(false)} />` : null}
     ${s.film ? html`<${FilmDialog} film=${s.film} key=${s.film.seq} />` : null}
     ${newMode ? html`<${NewModeWizard} s=${s} start=${newMode.kind} onClose=${() => setNewMode(null)} />` : null}
     ${clip ? html`<${ClipDialog} path=${clip.path} title=${clip.title} onClose=${() => setClip(null)} />` : null}

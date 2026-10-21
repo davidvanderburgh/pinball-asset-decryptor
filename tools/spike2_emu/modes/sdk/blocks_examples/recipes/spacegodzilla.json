@@ -48,6 +48,34 @@
    "length": 4.4,
    "crop": "fill",
    "what": "At 0:40:14 after SpaceGodzilla's corona beam hits him on Birth Island, Godzilla topples backwards into the smoke and lies on the ground (run of three shots, cuts at 0:40:16.8 and 0:40:17.9)."
+  },
+  "moguera": {
+   "film": "sg94",
+   "from": 4804.2,
+   "length": 4.3,
+   "crop": "fill",
+   "what": "At 1:20:04 M.O.G.U.E.R.A. separates in close up, its head section lifting away from the body with its orange eyes lit, in the night sky (one shot)."
+  },
+  "grenade": {
+   "film": "sg94",
+   "from": 5224.35,
+   "length": 3.6,
+   "crop": "fill",
+   "what": "At 1:27:04 M.O.G.U.E.R.A. fires its beam across the night city and it bursts in pink sparks on SpaceGodzilla among his crystal towers (run of quick shots)."
+  },
+  "beast": {
+   "film": "sg94",
+   "from": 4556.5,
+   "length": 2.3,
+   "crop": "fill",
+   "what": "At 1:15:56.5 SpaceGodzilla's huge shoulder crystals blaze white as green lightning pours from him, then the lightning crackles round a Fukuoka tower block (run of two shots)."
+  },
+  "shatter": {
+   "film": "sg94",
+   "from": 5703.9,
+   "length": 3.7,
+   "crop": "fill",
+   "what": "At 1:35:03.9 SpaceGodzilla's head and shoulders in close up as red fire flickers across him after Godzilla's ray strikes (one shot)."
   }
  },
  "music": {
@@ -112,6 +140,35 @@
    "length": 2.2,
    "priority": 4,
    "what": "At 1:15:24.27 Godzilla roars in pain as SpaceGodzilla's blue lightning strikes him."
+  },
+  "moguera": {
+   "film": "sg94",
+   "from": 4805.45,
+   "length": 2.9,
+   "priority": 4,
+   "what": "At 1:20:05.45 the rushing mechanical roar of M.O.G.U.E.R.A. separating, falling away to quiet."
+  },
+  "beast": {
+   "film": "sg94",
+   "from": 5258.0,
+   "length": 2.85,
+   "priority": 4,
+   "what": "At 1:27:38 SpaceGodzilla's harmonic cry in close up among the crystals."
+  },
+  "shatter": {
+   "film": "sg94",
+   "from": 5704.38,
+   "length": 1.8,
+   "priority": 3,
+   "what": "At 1:35:04.38 a deep burst of flame on SpaceGodzilla as Godzilla's ray strikes, decaying away."
+  }
+ },
+ "beds": {
+  "beast": {
+   "film": "sg94",
+   "from": 3861.728,
+   "length": 16.08,
+   "what": "Takayuki Hattori's battle score as Godzilla advances on Kagoshima at 1:04:21.7, orchestral, a 16.08 s loop found by the bed finder (seam chroma 0.585, self-check PASS)."
   }
  }
 }

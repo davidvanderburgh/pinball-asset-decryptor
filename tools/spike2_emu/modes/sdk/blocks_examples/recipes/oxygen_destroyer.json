@@ -34,6 +34,48 @@
    "length": 4.5,
    "crop": "fill",
    "what": "Godzilla surges up out of the sea, roaring (one shot)"
+  },
+  "dive": {
+   "film": "g54",
+   "from": 5278.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "A diver in a brass helmet climbs down the ship's ladder and sinks into the sea in a ring of bubbles (one shot), 1:27:58."
+  },
+  "deep": {
+   "film": "g54",
+   "from": 5296.0,
+   "length": 5.5,
+   "crop": "fill",
+   "what": "Two divers sink past the rocks into the grey depths, the Oxygen Destroyer canister glinting as it is carried down (one shot), 1:28:16."
+  },
+  "canister": {
+   "film": "g54",
+   "from": 5374.2,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "On the sea bed a diver reaches out across the rocks and draws the gleaming Oxygen Destroyer canister in beside him (one shot), 1:29:34."
+  },
+  "found": {
+   "film": "g54",
+   "from": 5490.0,
+   "length": 2.1,
+   "crop": "fill",
+   "what": "Godzilla's huge dark shape looms through the murky water on the sea bed, an arm raised (one shot), 1:31:30."
+  },
+  "choice": {
+   "film": "g54",
+   "from": 5555.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Dr. Serizawa's face behind the porthole of his diving helmet, still and resolved, as he makes his choice (one shot), 1:32:35."
+  },
+  "surface": {
+   "film": "g54",
+   "from": 5477.5,
+   "length": 3.4,
+   "crop": "fill",
+   "what": "A diver bursts up beside the ship's ladder in a ring of white foam (one shot), 1:31:17."
   }
  },
  "music": {
@@ -60,6 +102,35 @@
    "from": 3391.9,
    "length": 3.0,
    "what": "Godzilla's roar in the Tokyo rampage (the game's own 1954 roar matches 0.86)"
+  },
+  "dive": {
+   "film": "g54",
+   "from": 5274.9,
+   "length": 2.6,
+   "what": "Water rushing and bubbling as a diver goes over the side, from its onset to where it falls away, 1:27:55.",
+   "priority": 4
+  },
+  "surface": {
+   "film": "g54",
+   "from": 5478.7,
+   "length": 1.8,
+   "what": "The splash of a diver breaking the surface beside the ship, decaying under the score, 1:31:19.",
+   "priority": 3
+  },
+  "found": {
+   "film": "g54",
+   "from": 3831.0,
+   "length": 2.4,
+   "what": "Godzilla's wavering harmonic roar over the night city, from its onset to the next blast, 1:03:51.",
+   "priority": 4
+  }
+ },
+ "beds": {
+  "finale": {
+   "film": "g54",
+   "from": 4044.8,
+   "length": 18.52,
+   "what": "Akira Ifukube's frigate march as the jets and the fleet go after Godzilla, orchestra only, no dialogue (bed finder: seam chroma 0.893, onset 0.443, untuned 0.21, no onsets or bursts, self-check pass), 1:07:25."
   }
  }
 }

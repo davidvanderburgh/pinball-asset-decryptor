@@ -301,8 +301,8 @@ _STAGE3 = ["shot", "Godzilla target", "ms", 500, "shot", "Pop bumper", "ms", 500
 DESK = [
     ("the prayer lights it", _shots("Pop bumper", 24) + ["secs", 1] + _shots("Pop bumper", 1) +
      ["shot", "Mecha exit bottom", "secs", 2],
-     ["WORDS PadMode_king_caesar_Hud_Award: KING CAESAR IS LIT", "[KING CAESAR] START (its lit shot)",
-      "Hud_AwardSub: 24  -  TO WAKE HIM"]),
+     ["WORDS PadMode_king_caesar_Hud_Title: KING CAESAR IS LIT", "[KING CAESAR] START (its lit shot)",
+      "Hud_Line: 24  -  TO WAKE HIM"]),
     ("stage one then cash out", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
      ["Hud_Title: KING CAESAR SLEEPS", "Hud_Award: CAESAR AWAKENS", "Hud_Line: REFLECT: ABSORB THE BEAM", "SCORE +9000000",
       "END (a block): 4 scores, total 12000000", "lamps held 0"]),

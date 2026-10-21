@@ -258,7 +258,7 @@ _STAGE3 = ["secs", 4, "shot", "Big loop", "secs", 1]
 _STAGE4 = ["shot", "Building", "ms", 500, "shot", "Right ramp", "ms", 500] * 3 + ["secs", 6]
 DESK = [
     ("spinning lights it", _shots(SPIN, 40) + ["shot", "Big loop", "secs", 2],
-     ["Hud_Award: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)", "SHIELD toward"]),
+     ["Hud_Title: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)", "SHIELD toward"]),
     ("the web grows back", _START + ["shot", "Left ramp", "secs", 11],
      ["Hud_Award: KUMONGA WEBS AGAIN", "LAMP LEFT RAMP b040ff chase"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 + _STAGE4,
@@ -278,7 +278,7 @@ def build():
 #: PAD-658: as a Pro gets it - the spinner on the shield ramp is the Pro's Right spinner, and its shields are fixed
 DESK_PRO = [
     ("spinning the Right spinner lights it", _shots("Right spinner", 40) + ["shot", "Big loop", "secs", 2],
-     ["Hud_Award: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)"]),
+     ["Hud_Title: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)"]),
     ("the web on the fixed shields", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
      ["Hud_Title: KUMONGA RETREATS", "SCORE +20000000"]),
 ]

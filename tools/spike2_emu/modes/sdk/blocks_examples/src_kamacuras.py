@@ -247,7 +247,7 @@ _START = ["trigger", "kamacuras.start", "secs", 2]
 DESK = [
     ("fifty spins then the scoop", _spins(30) + ["shot", "Right scoop", "secs", 1] + _spins(20) +
      ["shot", "Right scoop", "secs", 3],
-     ["Hud_Award: KAMACURAS IS LIT", "[KAMACURAS] START (its lit shot)", "LAMP SELECT CITY 20ff40 chase"]),
+     ["Hud_Title: KAMACURAS IS LIT", "[KAMACURAS] START (its lit shot)", "LAMP SELECT CITY 20ff40 chase"]),
     ("a mantis is obvious, a near kill pays 2x", _START + ["secs", 9, "shot", "Left ramp", "secs", 1],
      ["Hud_Line: MANTIS AT THE LEFT POWERLINE", "LAMP POWERLINE LEFT 20ff40 chase 160",
       "Hud_Line: MANTIS AT THE LEFT RAMP", "LAMP LEFT RAMP d0ff00 chase 110", "SCORE +2000000"]),

@@ -1,34 +1,56 @@
-"""OXYGEN DESTROYER (PAD-658): the C example oxygen_destroyer.c rebuilt in blocks - a hurry-up with a super jackpot.
+"""OXYGEN DESTROYER (PAD-658): the C example oxygen_destroyer.c rebuilt in blocks, then (round 2) taken deeper -
+Dr. Serizawa's dive in four stages, a pot cashed out at the right scoop, and the super jackpot at the end.
 
-Dr. Serizawa's weapon (Godzilla, 1954). Its value drains away in real time: collect it before it is gone, then
-deliver it for double.
+Godzilla (1954): the hurry-up is the C's own rule (stage 1); then the divers go over the side, find Godzilla by
+sonar, lower the device to the sea bed, and Serizawa makes his choice.
 
-- START: 25 Left spinner spins in one ball; up to 3 times a game per player, and not again for 15 s after it
-  ends (25 fresh spins every time). It waits out a multiball: the next spin after it starts it.
-- HURRY-UP: 20,000,000 falling 800,000 a second (0 at 25 s), kept by a 25 s timer. The LEFT RAMP collects it; the
-  Godzilla target holds it off: each hit puts 2 s (1,600,000) back, up to 20,000,000, three times at most.
-- SUPER: collecting lights the RIGHT RAMP for 12 s: double what was collected. Missed, it ends with what was
-  collected; the value reaching 0 first is LOST (nothing).
-- INSERTS: the Left ramp blinks green, yellow, then red as the value falls, faster as the clock runs down; the
-  Godzilla target's insert pulses white while a hold-off is left; the super jackpot: the Right ramp flashes white
-  (faster in its last 3 s).
+- START: Left spinner spins in one ball: 25 the first time, 50 the second, 75 the third (pack.need); up to 3 times a
+  game per player, and not again for 15 s after it ends. It waits out a multiball: the next spin after it starts it.
+- STAGE 1, THE HURRY-UP (the C's): 20,000,000 falling 800,000 a second (0 at 25 s). The LEFT RAMP collects it into
+  the POT (and 1M now); the Godzilla target holds it off: each hit puts 2 s (1,600,000) back, up to 20,000,000, three
+  hold-offs the first time, two the second, one the third. The value reaching 0 first is THE OXYGEN IS GONE.
+- STAGE 2, THE DIVE (30 s): the sonar ping moves among the three powerlines and the Big loop (every 3 s; 2.3 s the
+  second time, 1.6 s the third); hit the ping 3 times: 4M, 8M, 12M to the pot (+2M a contact for each earlier start).
+- STAGE 3, THE DESCENT (30 s): the Left spinner lowers the device: 20 spins (30, 40 on later starts), each 500,000 to
+  the pot; the Left ramp is a shortcut of 5. On the sea bed: 15M more (+5M a start).
+- STAGE 4, SERIZAWA'S CHOICE (15 s, its own march): the RIGHT RAMP sets it off: the SUPER JACKPOT, the pot twice
+  over and 25M (+10M a start). GODZILLA IS GONE.
+- CASH OUT: after any stage the right scoop chases white: it pays the pot and the divers surface. The clock or a
+  drain pays a quarter of it (half in stage 4), never less than 1,000,000.
+- The ledger for FINAL WARS: "oxygen played" when it starts, "oxygen won" at the super jackpot.
 """
-from blk import (AND, OR, SECS_LEFT, a_show, add, award, callout, change, clip, clips, div, end, eq, every,
-                 game_show, ge, gt, hud, hud_counter, hud_line, hud_title, if_, light, lt, mul, off, on_end, on_shot, on_start,
-                 on_timer, score, secs_left, set_, set_time, sound, sounds, start, step, sub, timer_left, timer_start,
-                 timer_stop, var)
+from blk import (AND, OR, SECS_LEFT, a_show, add, add_time, award, callout, change, clip, clips, div, end, eq,
+                 every, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, lt, mul, music, off, on_end,
+                 on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game, show, sound, sounds,
+                 start, step, sub, timer_left, timer_start, timer_stop, var, beds)
+import pack
 
 SLUG, NAME = "oxygen_destroyer", "OXYGEN DESTROYER"
 GREEN, YELLOW, RED, WHITE = "#00ff3c", "#ffc800", "#ff0000", "#ffffff"    # the kit's colours
-OXY_DEEP, OXY_AQUA = "#001446", "#3cdcff"
-MAGNA_XY = (89, 260)                       # the port's lamp place: MAGNA GRAB (the Godzilla target's insert)
+OXY_DEEP, OXY_AQUA, SONAR = "#001446", "#3cdcff", "#00ffc8"
+# the port's lamp places: MAGNA GRAB (the Godzilla target's insert), the ramps, the Left spinner, the sea bed
+MAGNA_XY, LRAMP_XY, RRAMP_XY, LSPIN_XY = (89, 260), (69, 272), (199, 189), (55, 373)
 SPIN, HOLD, COLLECT, SUPER_SHOT = "Left spinner", "Godzilla target", "Left ramp", "Right ramp"
+PINGS = ("Powerline left", "Powerline center", "Powerline right", "Big loop")
+NEED = pack.need(25, "ran game")            # 25 spins, then 50, then 75
 #: the value now: 800 points a millisecond left on the oxygen timer, in tens of thousands (as the C shows and pays it)
 VALUE = mul(div(mul(timer_left("oxygen"), 2), 25), 10000)
-TIMERS = ("oxygen", "cool")
+#: deeper each start: "ran game" is 1 on the first run (counted up as it starts)
+MORE = sub(var("ran game"), 1)
+HOLDS = sub(4, var("ran game"))             # hold-offs: 3, 2, 1
+CONTACT = mul(add(4000000, mul(2000000, MORE)), var("pings"))
+FATHOMS = add(20, mul(10, MORE))
+SEA_BED = add(15000000, mul(5000000, MORE))
+SUPER = add(mul(var("pot"), 2), add(25000000, mul(10000000, MORE)))
+TIMERS = ("oxygen", "cool", "next", "ping", "contact")
+
+
+def xy(fx, ms, a, b, p, rate=0, gi="keep", blend=0):
+    return step(fx, ms, a, b, "xy", rate=rate, gi=gi, blend=blend, x=p[0], y=p[1])
+
 
 SHOWS = [
-    # the C's own shows, its fallback where the card has no "Playfield wave" / "Blue fade" (Godzilla has both)
+    # the C's own three (its fallback where the card has no "Playfield wave" / "Blue fade"), run now on every title
     a_show("Oxygen start",
            step("sparkle", 900, OXY_AQUA, OXY_DEEP, "center", gi="dark"),                    # the sea bed
            step("sweep_up", 900, WHITE, OXY_DEEP, "center", gi="dark"),                      # bubbles rise
@@ -36,76 +58,182 @@ SHOWS = [
            step("pulse", 900, OXY_AQUA, OXY_DEEP, "center", rate=220)),
     a_show("Oxygen won",
            step("strobe", 400, WHITE, "#000000", "center", rate=60, gi="flash"),             # the device fires
-           step("burst", 900, WHITE, OXY_AQUA, "xy", gi="dark", x=MAGNA_XY[0], y=MAGNA_XY[1]),
+           xy("burst", 900, WHITE, OXY_AQUA, RRAMP_XY, gi="dark"),
            step("sparkle", 1200, WHITE, OXY_DEEP, "center", gi="dark"),                      # he dissolves
-           step("fade", 900, OXY_AQUA, "#000000", "center")),
+           step("rainbow", 1200, "#000000", "#000000", "center", rate=70),
+           step("fade", 900, OXY_AQUA, "#000000", "center", blend=300)),
     a_show("Oxygen lost",
            step("sweep_down", 900, OXY_AQUA, OXY_DEEP, "center", gi="dark"),                 # the oxygen drains
            step("pulse", 900, RED, "#000000", "center", rate=300, gi="dark"),
            step("fade", 600, OXY_DEEP, "#000000", "center")),
+    a_show("Held off",
+           xy("implode", 500, WHITE, OXY_AQUA, MAGNA_XY, gi="keep"),
+           xy("fade", 300, OXY_AQUA, "#000000", MAGNA_XY)),
+    a_show("Collected",
+           xy("burst", 600, WHITE, OXY_AQUA, LRAMP_XY, gi="flash"),
+           step("sweep_up", 700, OXY_AQUA, OXY_DEEP, "left", gi="dark"),
+           step("fade", 400, OXY_AQUA, "#000000", "center")),
+    a_show("Deeper",
+           step("strobe", 300, WHITE, OXY_AQUA, "center", rate=55, gi="flash"),
+           step("spiral_in", 1100, OXY_AQUA, OXY_DEEP, "center", gi="dark"),
+           step("sweep_down", 800, WHITE, OXY_DEEP, "center", gi="dark"),
+           step("fade", 500, OXY_AQUA, "#000000", "center", blend=200)),
+    a_show("Sonar",
+           step("ripple", 900, SONAR, OXY_DEEP, "top", rate=300, gi="dark"),
+           step("fade", 300, SONAR, "#000000", "top")),
+    a_show("Found him",
+           step("bolts", 700, WHITE, SONAR, "top", rate=110, gi="flash"),
+           step("spiral_out", 900, SONAR, OXY_DEEP, "top", gi="dark"),
+           step("fade", 400, SONAR, "#000000", "center")),
+    a_show("Sea bed",
+           xy("fade_in", 600, OXY_AQUA, "#000000", LSPIN_XY, gi="dark"),
+           xy("spin", 1000, WHITE, OXY_AQUA, LSPIN_XY, rate=80, gi="dark"),
+           step("sweep_down", 700, OXY_AQUA, OXY_DEEP, "center", gi="dark"),
+           step("solid", 500, OXY_DEEP, "#000000", "center", gi="dark"),
+           step("fade", 400, OXY_AQUA, "#000000", "center")),
+    a_show("The choice",
+           step("solid", 700, OXY_DEEP, "#000000", "center", gi="dark"),
+           xy("pulse", 1200, WHITE, OXY_DEEP, RRAMP_XY, rate=400, gi="dark"),
+           step("bounce", 1000, OXY_AQUA, OXY_DEEP, "center", rate=300, gi="dark"),
+           step("fade", 400, OXY_AQUA, "#000000", "center")),
+    a_show("Surface",
+           step("sweep_up", 700, OXY_AQUA, OXY_DEEP, "flippers", gi="keep"),
+           step("sweep_up", 700, WHITE, OXY_AQUA, "flippers", gi="keep"),
+           step("burst", 600, WHITE, "#000000", "right", gi="flash"),
+           step("fade", 500, WHITE, "#000000", "center", blend=200)),
 ]
 
 
-def holds_left():
-    """The HURRY-UP counter's words: the hold-offs left."""
-    return [if_(eq("holds", 0), [hud_counter(2, VALUE, "3 HOLD-OFFS LEFT")], [
-        if_(eq("holds", 1), [hud_counter(2, VALUE, "2 HOLD-OFFS LEFT")], [
-            if_(eq("holds", 2), [hud_counter(2, VALUE, "1 HOLD-OFF LEFT")], [hud_counter(2, VALUE, "0 HOLD-OFFS LEFT")])])])]
+def ping_lights():
+    """The sonar ping: its shot chases sea-green fast, the other three dark."""
+    return [if_(eq("ping", i), [light(s, SONAR, "chase", 90)], [off(s)]) for i, s in enumerate(PINGS, 1)]
+
+
+def setup_stage():
+    """What each stage lights and says as it begins (the "next" timer, once the stage before is done)."""
+    return [
+        if_(eq("stage", 2), [
+            set_time(30), set_("deep", 1), set_("ping", 1), set_("pings", 0),
+            hud_line("SONAR: HIT THE PING"), hud_counter(3, 0, "OF 3", "CONTACTS"),
+            award("THE DIVE", sub="STAGE 2: FIND GODZILLA BY SONAR", seconds=3),
+            clip("dive", "behind"), sound("dive"), *ping_lights(),
+            timer_start("ping", sub(3000, mul(700, MORE)))]),
+        if_(eq("stage", 3), [
+            set_time(30), timer_stop("ping"), *[off(s) for s in PINGS],
+            set_("fathoms", FATHOMS), hud_line("LOWER IT: THE LEFT SPINNER"),
+            hud_counter(3, var("fathoms"), "TO GO", "FATHOMS"),
+            award("THE DESCENT", sub="STAGE 3: LOWER THE DEVICE", seconds=3),
+            clip("canister", "behind"), light(SPIN, OXY_AQUA, "chase", 110), light(COLLECT, OXY_AQUA, "pulse", 900)]),
+        if_(eq("stage", 4), [
+            set_time(15), off(SPIN), off(COLLECT), music("finale"),
+            hud_line("THE DEVICE: SHOOT THE RIGHT RAMP"), hud_counter(3, SUPER, "RIGHT RAMP", "SUPER"),
+            award("SERIZAWA'S CHOICE", sub="STAGE 4: SET IT OFF AT THE RIGHT RAMP", seconds=3),
+            clip("choice", "behind"), light(SUPER_SHOT, WHITE, "blink", 150)]),
+    ]
 
 
 SCRIPTS = [
-    # ---- the start: 25 spins of the Left spinner ----------------------------------------------------------
+    # ---- the start: 25 spins of the Left spinner (50, 75) --------------------------------------------------------
     on_shot(SPIN, if_(AND(lt("ran game", 3), eq("cooling", 0)), [
-        if_(lt("spins", 25), [change("spins", 1)]),
-        if_(ge("spins", 25), [start()], [
-            if_(eq("spins", 24), [award("1 SPIN TO GO", sub=NAME, seconds=2)],
-                [award("SPINS TO GO", value=sub(25, var("spins")), sub=NAME, seconds=2)])]),
+        if_(lt("spins", NEED), [change("spins", 1)]),
+        if_(ge("spins", NEED), [start()], [
+            if_(eq(sub(NEED, var("spins")), 1), [award("1 SPIN TO GO", sub=NAME, seconds=2)],
+                [award("SPINS TO GO", value=sub(NEED, var("spins")), sub=NAME, seconds=2)])]),
     ]), when="idle"),
-    on_start(set_("spins", 0), change("ran game", 1), set_("oxygen played", 1),
+    on_start(*pack.begin(SLUG), set_("spins", 0), change("ran game", 1), set_("oxygen played", 1),
+             set_("stage", 1), set_("pot", 0), set_("holds", 0), set_("won", 0), set_("gone", 0), set_("cashed", 0),
+             set_("deep", 0), set_("pings", 0), set_("fathoms", 0),
              timer_start("oxygen", 25000),
-             clip("intro", "full"), clip("loop", "loop"), game_show("Playfield wave"),
+             clip("intro", "full"), clip("loop", "loop"), show("Oxygen start"), shake_game("rumble"),
              award(NAME, sub="COLLECT IT BEFORE IT IS GONE", seconds=3),
-             hud_line("LEFT RAMP COLLECTS - CAPTIVE BALL HOLDS"), *holds_left(),
+             hud_line("LEFT RAMP COLLECTS - CAPTIVE BALL HOLDS"), hud_counter(3, HOLDS, "LEFT", "HOLD-OFFS"),
              light(COLLECT, GREEN, "hurry"), light(HOLD, WHITE, "pulse", 1000)),
 
-    # ---- the hurry-up ----------------------------------------------------------------------------------------
+    # ---- stage 1: the hurry-up ---------------------------------------------------------------------------------------
     # the Left ramp's colour by the value left: green over two thirds, yellow over one, then red
-    every(1, if_(eq("phase", 0), [
+    every(1, if_(eq("stage", 1), [
         if_(gt(mul(VALUE, 3), 40000000), [light(COLLECT, GREEN, "hurry")], [
             if_(gt(mul(VALUE, 3), 20000000), [light(COLLECT, YELLOW, "hurry")], [light(COLLECT, RED, "hurry")])])])),
-    on_shot(HOLD, if_(AND(eq("phase", 0), lt("holds", 3)), [
+    on_shot(HOLD, if_(AND(eq("stage", 1), lt("holds", HOLDS)), [
         change("holds", 1),
         set_("t", add(timer_left("oxygen"), 2000)), if_(gt("t", 25000), [set_("t", 25000)]),
         timer_start("oxygen", var("t")), set_time(div(add(var("t"), 999), 1000)),
-        award("HELD OFF", sub="+2 SECONDS", seconds=1), *holds_left(),
-        if_(ge("holds", 3), [off(HOLD), hud_line("SHOOT THE LEFT RAMP")]),
+        award("HELD OFF", sub="+2 SECONDS", seconds=1), hud_counter(3, sub(HOLDS, var("holds")), "LEFT"),
+        show("Held off"), shake(250, "soft"),
+        if_(ge("holds", HOLDS), [off(HOLD), hud_line("SHOOT THE LEFT RAMP")]),
     ])),
-    on_shot(COLLECT, if_(AND(eq("phase", 0), gt(VALUE, 0)), [
-        set_("collected", VALUE), score(var("collected")),
-        set_("phase", 1), timer_stop("oxygen"), set_time(12),
-        off(COLLECT), off(HOLD), light(SUPER_SHOT, WHITE, "blink", 150),
-        hud_line("SUPER JACKPOT: SHOOT THE RIGHT RAMP"),
-        {"op": "hud_counter", "counter": 2, "value": mul(var("collected"), 2), "sub": "RIGHT RAMP",
-         "label": "SUPER JACKPOT"},
-        award("COLLECTED", value=var("collected"), sub="DOUBLE IT AT THE RIGHT RAMP", seconds=3),
-        sound("collect"), clip("collect", "behind"),
-    ])),
-    on_timer("oxygen", if_(eq("phase", 0), [set_("gone", 1), end()])),
+    on_shot(COLLECT,
+            if_(AND(eq("stage", 1), gt(VALUE, 0)), [
+                set_("t", VALUE), change("pot", var("t")), score(1000000), timer_stop("oxygen"),
+                off(COLLECT), off(HOLD), hud_counter(2, var("pot"), "CASH AT SCOOP", "POT"),
+                award("COLLECTED", value=var("t"), sub="INTO THE POT", seconds=3),
+                sound("collect"), clip("collect", "behind"), show("Collected"), shake(400, "strong"),
+                timer_start("next", 700)]),
+            if_(AND(eq("stage", 3), gt("fathoms", 0)), [change("fathoms", -4), timer_start("contact", 1)])),
+    on_timer("oxygen", if_(eq("stage", 1), [set_("gone", 1), end()])),
 
-    # ---- the super jackpot -----------------------------------------------------------------------------------
-    on_shot(SUPER_SHOT, if_(eq("phase", 1), [
-        score(mul(var("collected"), 2)), set_("won", 1), set_("oxygen won", 1), sound("won"), end()])),
-    secs_left(3, if_(eq("phase", 1), [light(SUPER_SHOT, WHITE, "blink", 80)])),
-    secs_left(10, callout("ten_seconds")),
+    # ---- stage 2: the dive, by sonar ---------------------------------------------------------------------------------
+    on_timer("ping", if_(eq("stage", 2), [
+        change("ping", 1), if_(gt("ping", 4), [set_("ping", 1)]), *ping_lights(), show("Sonar"),
+        timer_start("ping", sub(3000, mul(700, MORE)))])),
+    *[on_shot(s, if_(AND(eq("stage", 2), eq("ping", i), lt("pings", 3)), [timer_start("contact", 1)]))
+      for i, s in enumerate(PINGS, 1)],
 
-    # ---- the end, and 15 s before the spins count again ------------------------------------------------------
-    on_end(*[timer_stop(t) for t in TIMERS],
-           if_(AND(eq("won", 0), OR(eq("gone", 1), eq(SECS_LEFT, 0))), [sound("lost", fallback="time_up")]),
-           if_(eq("won", 1), [clip("won", "full"), hud_title("GODZILLA IS GONE")], [
-               clip("lost", "full"),
-               if_(gt("collected", 0), [hud_title("OXYGEN DESTROYER")], [hud_title("THE OXYGEN IS GONE")])]),
-           game_show("Blue fade"),
-           set_("cooling", 1), timer_start("cool", 15000)),
+    # ---- stage 2's contact and stage 3's fathoms (one "subroutine") --------------------------------------------------
+    on_timer("contact",
+             if_(eq("stage", 2), [
+                 change("pings", 1), change("pot", CONTACT), score(1000000), hud_counter(3, var("pings"), "OF 3"),
+                 shake(300, "medium"),
+                 if_(ge("pings", 3), [
+                     timer_stop("ping"), *[off(s) for s in PINGS], clip("found", "behind"), sound("found"),
+                     show("Found him"), award("GODZILLA FOUND", value=var("pot"), sub="POT"), timer_start("next", 700)],
+                     [clip("deep", "behind"), show("Sonar"), award("SONAR CONTACT", value=var("pings"), sub="OF 3"),
+                      change("ping", 1), if_(gt("ping", 4), [set_("ping", 1)]), *ping_lights(),
+                      timer_start("ping", sub(3000, mul(700, MORE)))])]),
+             if_(eq("stage", 3), [
+                 change("fathoms", -1), change("pot", 500000), score(100000),
+                 if_(le("fathoms", 0), [
+                     hud_counter(3, 0, "TO GO"), change("pot", SEA_BED), off(SPIN), off(COLLECT),
+                     award("ON THE SEA BED", value=var("pot"), sub="POT"), show("Sea bed"), shake(500, "strong"),
+                     timer_start("next", 700)],
+                     [hud_counter(3, var("fathoms"), "TO GO")])])),
+
+    # ---- stage 3: the descent ----------------------------------------------------------------------------------------
+    on_shot(SPIN, if_(AND(eq("stage", 3), gt("fathoms", 0)), [timer_start("contact", 1)])),
+
+    # ---- stage 4: Serizawa's choice ----------------------------------------------------------------------------------
+    on_shot(SUPER_SHOT, if_(AND(eq("stage", 4), eq("won", 0), eq("cashed", 0)), [
+        set_("won", 1), set_("oxygen won", 1), score(SUPER),
+        award("SUPER JACKPOT", value=SUPER, sub="GODZILLA IS GONE", seconds=4),
+        sound("won"), clip("collect", "behind"), show("Oxygen won"), shake(1000, "hard"),
+        timer_start("next", 1500)])),
+    secs_left(3, if_(eq("stage", 4), [light(SUPER_SHOT, WHITE, "blink", 80)])),
+    secs_left(10, callout("ten_seconds"), if_(ge("stage", 2), [light(pack.CASH_SHOT, pack.WHITE, "hurry")])),
+
+    # ---- a stage done: on to the next, or cash out ------------------------------------------------------------------
+    on_timer("next", if_(OR(eq("cashed", 1), eq("won", 1)), [end()], [
+        change("stage", 1), if_(lt("stage", 4), [show("Deeper")], [show("The choice")]), shake_game("jackpot"),
+        *pack.cash_out_lit(), *setup_stage()])),
+    on_shot(pack.CASH_SHOT, if_(AND(ge("stage", 2), eq("won", 0), eq("cashed", 0)), [
+        set_("cashed", 1), score(var("pot")),
+        award("CASHED OUT", value=var("pot"), sub="THE DIVERS SURFACE", seconds=4),
+        clip("surface", "full"), sound("surface"), show("Surface"), shake(500, "medium"), timer_start("next", 1500)])),
+
+    # ---- the end, and 15 s before the spins count again ---------------------------------------------------------------
+    on_end(*pack.finish(), *[timer_stop(t) for t in TIMERS if t != "cool"],
+           if_(AND(eq("won", 0), eq("cashed", 0)), [
+               set_("t", div(var("pot"), 4)), if_(ge("stage", 4), [set_("t", div(var("pot"), 2))]),
+               if_(lt("t", 1000000), [set_("t", 1000000)]), score(var("t")),
+               if_(OR(eq("gone", 1), eq(SECS_LEFT, 0)), [sound("lost", fallback="time_up")]),
+               clip("lost", "full"), show("Oxygen lost"), shake(600, "medium"),
+               if_(eq("stage", 1), [hud_title("THE OXYGEN IS GONE"), hud_line("A BREATH OF AIR"),
+                                    award("THE OXYGEN IS GONE", value=var("t"), sub="A BREATH OF AIR", seconds=3)],
+                   [hud_title("GODZILLA ESCAPES"),
+                    if_(ge("stage", 4), [hud_line("HALF THE POT")], [hud_line("A QUARTER OF THE POT")]),
+                    award("GODZILLA ESCAPES", value=var("t"), sub="FOR THE DIVE", seconds=3)])]),
+           if_(eq("won", 1), [clip("won", "full"), hud_title("GODZILLA IS GONE"), hud_line("THE SUPER JACKPOT")]),
+           if_(eq("cashed", 1), [hud_title("THE DIVERS SURFACE"), hud_line("THE POT IS CASHED OUT")]),
+           set_("stage", 0), set_("cooling", 1), timer_start("cool", 15000)),
     on_timer("cool", set_("cooling", 0)),
 ]
 
@@ -115,51 +243,58 @@ PROGRAM = {
     "vars": [{"name": n, "reset": "ball"} for n in ("spins", "cooling")] +
             [{"name": "ran game", "reset": "game"}] +
             [{"name": n, "reset": "game", "shared": True} for n in ("oxygen played", "oxygen won")] +
-            [{"name": n, "reset": "mode"} for n in ("phase", "holds", "collected", "won", "gone", "t")],
+            [{"name": n, "reset": "mode"} for n in ("stage", "pot", "holds", "won", "gone", "t", "cashed", "deep",
+                                                    "ping", "pings", "fathoms")],
     "timers": [{"name": n} for n in TIMERS],
-    # the big counter follows the value while it falls (the oxygen timer stopped reads 0), then the super jackpot
+    # the middle counter follows the value while it falls (the oxygen timer stopped reads 0), then the pot
     "hud": hud("SHOOT THE LEFT RAMP",
-               counters=[("", "", None), ("HURRY-UP", "LEFT RAMP", add(VALUE, mul(var("collected"), 2))),
-                         ("", "", None)],
+               counters=[("STAGE", "OF 4", var("stage")), ("HURRY-UP", "LEFT RAMP", add(VALUE, var("pot"))),
+                         ("HOLD-OFFS", "LEFT", None)],
                timer=("OXYGEN", "oxygen"),
+               # the oxygen in stage 1, then the divers' air: the stage's clock, a pip for each 3 s
                gauge={"label": "OXYGEN", "kind": "segment", "count": 10, "color": "#00aaff",
-                      "value": add(div(add(timer_left("oxygen"), 2499), 2500), mul(var("phase"), 10))}),
+                      "value": add(div(add(timer_left("oxygen"), 2499), 2500),
+                                   mul(var("deep"), div(add(SECS_LEFT, 2), 3)))}),
     "bar": {"on": False}, "info": {"on": False},
-    "clips": clips("intro", "loop", "collect", "won", "lost"),
-    "sounds": sounds({"collect": 3, "won": 4, "lost": 4}),
+    "clips": clips("intro", "loop", "collect", "won", "lost", "dive", "deep", "found", "canister", "choice",
+                   "surface"),
+    "sounds": sounds({"collect": 3, "won": 4, "lost": 4, "dive": 4, "surface": 3, "found": 4}),
     "music": "music.wav",
+    "beds": beds("finale"),
     "shows": SHOWS,
     "scripts": None,
 }
 
 EXAMPLE = {
-    "name": NAME, "slug": SLUG, "order": 102, "titles": ["godzilla_le"],
+    "name": NAME, "slug": SLUG, "order": 102, "titles": ["godzilla_le", "godzilla_pro"],
     "based_on": "oxygen_destroyer.c",
-    "about": ("The C example OXYGEN DESTROYER rebuilt in blocks: a hurry-up with a super jackpot. 25 Left spinner "
-              "spins start it; 20,000,000 drains away over 25 s, the Left ramp collects it, the Godzilla target holds "
-              "it off, and the Right ramp delivers it for double."),
+    # every shot, show and insert it names is on a Pro 1.16 too (its own shows, not the game's): nothing to swap
+    "title_alt": {"godzilla_pro": {}},
+    "about": ("The C example OXYGEN DESTROYER rebuilt in blocks and taken deeper (PAD-658): 25 Left spinner spins "
+              "start it (50 the second time, 75 the third). Four stages: the C's hurry-up (20,000,000 draining over "
+              "25 s, the Left ramp collects it into the pot, the Godzilla target holds it off), the dive (hit the "
+              "moving sonar ping 3 times), the descent (spin the Left spinner 20 times to lower the device), and "
+              "Serizawa's choice (the Right ramp in 15 s: the pot twice over and 25M). Cash the pot out at the right "
+              "scoop after any stage; the clock or a drain pays a quarter of it."),
     "lost": [
         "The value falls on a timer the blocks keep in milliseconds, but the clock the HUD badge shows is whole "
         "seconds: a hold-off puts the clock to the next whole second above the value's time (the C counted both "
         "from one drain, and a stalled frame drained at most 100 ms).",
         "The Godzilla target has no 250 ms debounce: a ball rattling on the captive ball can use up two hold-offs "
-        "(the C counted one hit a quarter second).",
+        "(the C counted one hit a quarter second); a spinner's spins count each one, as the C's did.",
         "The Left ramp blinks faster as the mode's clock runs down (the blocks' Hurry pattern) and changes colour "
         "once a second; the C's blink followed the value itself, every tick, with a flicker in the last 3 s.",
-        "The HUD keeps one counter: HURRY-UP, then SUPER JACKPOT; the C showed a COLLECTED counter beside it in "
-        "the super jackpot (a counter the HUD does not have from the start cannot appear later). Its gauge is one blue, where the "
-        "C's ten segments went from deep to pale blue, and a note says SPINS TO GO 24 where the C said 24 SPINS "
-        "TO GO.",
-        "The ending title (GODZILLA IS GONE, OXYGEN DESTROYER or THE OXYGEN IS GONE) and its total stay up 3 s, "
-        "the runtime's: the C kept them 10 s.",
-        "The ending has no OXYGEN DESTROYER TOTAL under the total: the C put those words there.",
+        "No random numbers in blocks: the sonar ping moves in turn (Powerline left, center, right, the Big loop).",
+        "The middle counter is the HURRY-UP, then the POT; the C showed a COLLECTED counter beside the super "
+        "jackpot. Its gauge is one blue, where the C's ten segments went from deep to pale blue, and a note says "
+        "SPINS TO GO with the number under it where the C said 24 SPINS TO GO.",
+        "The ending title (GODZILLA IS GONE, THE DIVERS SURFACE, GODZILLA ESCAPES or THE OXYGEN IS GONE) and its "
+        "total stay up 3 s, the runtime's: the C kept them 10 s, with OXYGEN DESTROYER TOTAL under the total.",
         "The cooldown is 15 s on a timer that a new ball clears (the C kept each player's own across balls), and "
         "a start from the tab's Start mode now counts toward the 3 a game.",
         "The countdown's 5, 4, 3, 2, 1 callouts are gone (the blocks say only ten seconds and time up).",
-        "For Godzilla Premium/LE only: the C also ran on Godzilla Pro, playing its own shows where the game has no "
-        "Playfield wave or Blue fade (a Pro 1.15 has none of the game's shows, a Pro 1.16 no Playfield wave); a "
-        "blocks program cannot ask whether the game has a show. Its own three shows are kept under Light shows "
-        "(Oxygen start, Oxygen won, Oxygen lost), not run, to swap in.",
+        "It plays its own light shows (Oxygen start, Oxygen won, Oxygen lost: the C's fallback shows) on every "
+        "title, where the C played the game's Playfield wave and Blue fade when the game had them.",
         "The blocks pack keeps its own FINAL WARS ledger in shared variables ('oxygen played', 'oxygen won'), "
         "which the blocks FINAL WARS reads: the C FINAL WARS does not read them, and the blocks FINAL WARS does not "
         "read the C's ledger.",
@@ -182,23 +317,42 @@ def _spins(n):
 
 _START = ["trigger", "oxygen_destroyer.start", "secs", 1]
 _GT = ["shot", HOLD, "ms", 300]
+_S1 = ["shot", COLLECT, "secs", 2]
+_S2 = ["shot", "Powerline left", "ms", 400, "shot", "Powerline center", "ms", 400, "shot", "Powerline right",
+       "secs", 2]
+_S3 = _spins(20) + ["secs", 2]
 #: the desk scenarios (make_examples.py --desk): what, the harness's commands, lines its output must hold
 DESK = [
-    ("25 spins start it", _GT * 3 + ["secs", 3] + _spins(24) + ["secs", 1] + _spins(1) + ["secs", 2],
-     ["Hud_Award: SPINS TO GO 24", "Hud_Award: 1 SPIN TO GO", "Hud_AwardSub: OXYGEN DESTROYER",
-      "[OXYGEN DESTROYER] START (a block)", "Hud_Line: LEFT RAMP COLLECTS - CAPTIVE BALL HOLDS",
-      "Hud_C2_Value: 20.0M", "LAMP LEFT RAMP 00ff3c blink", "LAMP MAGNA GRAB ffffff pulse 1000"]),
-    ("held off, collected, delivered double", _START + ["secs", 4] + _GT + ["secs", 2, "shot", COLLECT, "secs", 3,
-                                                                         "shot", SUPER_SHOT, "secs", 11],
-     ["Hud_Award: HELD OFF", "Hud_C2_Sub: 2 HOLD-OFFS LEFT", "Hud_Award: COLLECTED", "SCORE +15640000",
-      "Hud_Line: SUPER JACKPOT: SHOOT THE RIGHT RAMP", "Hud_C2_Label: SUPER JACKPOT", "Hud_C2_Value: 31.2M", "LAMP RIGHT RAMP ffffff blink 150", "SCORE +31280000",
-      "END (a block): 2 scores, total 46920000", "Hud_Title: GODZILLA IS GONE", "lamps held 0"]),
+    ("25 spins start it, 50 the second time",
+     _GT * 3 + ["secs", 3] + _spins(24) + ["secs", 1] + _spins(1) + ["secs", 5, "trigger", "oxygen_destroyer.stop",
+                                                                    "secs", 17] + _spins(25) + ["secs", 2],
+     ["Hud_Line: 24  -  OXYGEN DESTROYER", "Hud_Title: 1 SPIN TO GO", "[OXYGEN DESTROYER] START (a block)",
+      "Hud_Line: LEFT RAMP COLLECTS - CAPTIVE BALL HOLDS", "Hud_C2_Value: 20.0M", "LAMP LEFT RAMP 00ff3c blink",
+      "LAMP MAGNA GRAB ffffff pulse 1000", "END (trigger file)", "Hud_Line: 25  -  OXYGEN DESTROYER"]),
+    ("held off, collected, then cash out", _START + ["secs", 4] + _GT + ["secs", 2] + _S1 + ["secs", 3, "shot", "Right scoop",
+                                                                                          "secs", 5],
+     ["Hud_Award: HELD OFF", "Hud_C3_Value: 2", "Hud_Award: COLLECTED", "Hud_AwardSub: 15,640,000  -  INTO THE POT",
+      "Hud_Line: SONAR: HIT THE PING", "Hud_C2_Label: POT", "LAMP SELECT CITY ffffff chase",
+      "Hud_Title: THE DIVERS SURFACE", "SCORE +15640000", "END (a block): 2 scores, total 16640000", "lamps held 0"]),
+    ("all four stages and the super jackpot", _START + _S1 + _S2 + _S3 + ["shot", SUPER_SHOT, "secs", 4],
+     ["Hud_Award: SONAR CONTACT", "Hud_Award: GODZILLA FOUND", "Hud_Line: LOWER IT: THE LEFT SPINNER",
+      "Hud_C3_Label: FATHOMS", "Hud_Award: ON THE SEA BED", "Hud_Line: THE DEVICE: SHOOT THE RIGHT RAMP",
+      "own clip choice", "Hud_Award: SUPER JACKPOT", "Hud_Title: GODZILLA IS GONE", "own clip won", "lamps held 0"]),
+    ("the sonar ping moves", _START + _S1 + ["secs", 3.5, "lamps"],
+     ["LAMP POWERLINE LEFT 00ffc8 chase 90", "LAMP POWERLINE CENTER 00ffc8 chase 90", "own clip dive"]),
     ("the value runs out", _START + ["secs", 27] + _spins(4) + ["secs", 1],
-     ["LAMP LEFT RAMP ffc800 blink", "LAMP LEFT RAMP ff0000 blink", "CALLOUT 1291", "CALLOUT 1295",
-      "0 scores, total 0", "Hud_Title: THE OXYGEN IS GONE", "lamps held 0"]),
-    ("the super jackpot missed", _START + ["shot", COLLECT, "secs", 13],
-     ["Hud_Award: COLLECTED", "LAMP RIGHT RAMP ffffff blink 80", "END (time ran out): 1 scores",
-      "Hud_Title: OXYGEN DESTROYER", "lamps held 0"]),
-    ("a drain ends it", _START + ["secs", 2, "ball_end", "secs", 8],
-     ["END (ball ended): 0 scores", "lamps held 0"]),
+     ["LAMP LEFT RAMP ffc800 blink", "LAMP LEFT RAMP ff0000 blink", "CALLOUT 1291", "SCORE +1000000",
+      "Hud_Title: THE OXYGEN IS GONE", "lamps held 0"]),
+    ("the super missed pays half", _START + _S1 + _S2 + _S3 + ["secs", 17],
+     ["Hud_Line: THE DEVICE: SHOOT THE RIGHT RAMP", "LAMP RIGHT RAMP ffffff blink 80", "END (time ran out)",
+      "Hud_Title: GODZILLA ESCAPES", "Hud_Line: HALF THE POT", "lamps held 0"]),
+    ("a drain pays a quarter", _START + _S1 + ["secs", 2, "ball_end", "secs", 8],
+     ["END (ball ended): 2 scores, total 5780000", "BALL END HOLD", "lamps held 0"]),
+]
+#: the same mode as a Godzilla Pro 1.16 gets it (nothing differs: the scenarios prove it builds and plays there)
+DESK_PRO = [
+    ("25 spins start it on the Pro", _spins(25) + ["secs", 2] + _S1,
+     ["[OXYGEN DESTROYER] START (a block)", "Hud_Award: COLLECTED", "Hud_Line: SONAR: HIT THE PING"]),
+    ("all four stages on the Pro", _START + _S1 + _S2 + _S3 + ["shot", SUPER_SHOT, "secs", 4],
+     ["Hud_Award: GODZILLA FOUND", "Hud_Award: ON THE SEA BED", "Hud_Title: GODZILLA IS GONE", "lamps held 0"]),
 ]

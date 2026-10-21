@@ -48,6 +48,41 @@
    "length": 5.0,
    "crop": "fill",
    "what": "Keizer Ghidorah's golden gravity beams pour into Godzilla, draining him"
+  },
+  "keizer": {
+   "film": "fw04",
+   "from": 6649.0,
+   "length": 3.8,
+   "crop": "fill",
+   "what": "Keizer Ghidorah's three heads rear up over the burning city, glow gold and fire their gravity beams into the sky (one shot), 1:50:49."
+  },
+  "power": {
+   "film": "fw04",
+   "from": 6792.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Ozaki's Kaiser power pours into Godzilla as a blue beam, then washes over his back in a cyan glow (a run of two shots), 1:53:12."
+  },
+  "rises": {
+   "film": "fw04",
+   "from": 6798.0,
+   "length": 4.0,
+   "crop": "fill",
+   "what": "Godzilla, shining pale blue with the new power, turns and roars at Keizer Ghidorah (one shot), 1:53:18."
+  },
+  "jackpot": {
+   "film": "fw04",
+   "from": 6807.4,
+   "length": 2.6,
+   "crop": "fill",
+   "what": "Godzilla seizes Keizer Ghidorah's head and blasts it point blank with his ray in a burst of sparks (a run of quick shots), 1:53:27."
+  },
+  "super": {
+   "film": "fw04",
+   "from": 6880.8,
+   "length": 2.4,
+   "crop": "fill",
+   "what": "Keizer Ghidorah bursts apart in red and gold fire, ending in a white-orange fireball (one shot), 1:54:41."
   }
  },
  "music": {
@@ -80,6 +115,35 @@
    "from": 6604.0,
    "length": 2.0,
    "what": "Keizer Ghidorah's three heads rising and roaring as Monster X becomes it"
+  },
+  "beam": {
+   "film": "fw04",
+   "from": 6651.0,
+   "length": 2.0,
+   "what": "Keizer Ghidorah's gravity beams crackling out of its three heads over the battle's score and din, 1:50:51.",
+   "priority": 3
+  },
+  "jackpot": {
+   "film": "fw04",
+   "from": 6809.6,
+   "length": 1.4,
+   "what": "The blast of Godzilla's ray striking Keizer Ghidorah point blank, 1:53:30.",
+   "priority": 3
+  },
+  "super": {
+   "film": "fw04",
+   "from": 6854.6,
+   "length": 1.6,
+   "what": "A heavy explosion rising out of the battle's din as Keizer Ghidorah is struck, 1:54:15.",
+   "priority": 3
+  }
+ },
+ "beds": {
+  "rises": {
+   "film": "fw04",
+   "from": 226.13,
+   "length": 12.0,
+   "what": "Keith Emerson's driving main title theme (audio only; the credits are on screen), 0:03:46 (bed finder: seam chroma 0.904, onset 0.39, untuned 0.04, no onsets or bursts, self-check pass)."
   }
  }
 }

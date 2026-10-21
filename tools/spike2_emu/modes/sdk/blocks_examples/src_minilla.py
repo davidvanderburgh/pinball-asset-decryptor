@@ -268,10 +268,10 @@ _GZ = ["shot", "Godzilla target", "ms", 400]
 DESK = [
     ("three hits the first time, six the second", _GZ * 3 + ["shot", "Mecha exit top", "secs", 2, "trigger", "minilla.stop",
                                                               "secs", 4] + _GZ * 5 + ["secs", 3] + _GZ + ["secs", 2],
-     ["[MINILLA] START (its lit shot)", "END (trigger file)", "Hud_AwardSub: 1  -  MORE TO WAKE MINILLA",
-      "Hud_Award: MINILLA IS LIT"]),
+     ["[MINILLA] START (its lit shot)", "END (trigger file)", "Hud_Line: 1  -  MORE TO WAKE MINILLA",
+      "Hud_Title: MINILLA IS LIT"]),
     ("dad's call lights it", ["shot", "Godzilla target", "ms", 400] * 3 + ["shot", "Mecha exit top", "secs", 2],
-     ["Hud_Award: MINILLA IS LIT", "[MINILLA] START (its lit shot)", "LAMP MECHA LANE 40ff60 chase"]),
+     ["Hud_Title: MINILLA IS LIT", "[MINILLA] START (its lit shot)", "LAMP MECHA LANE 40ff60 chase"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 + _STAGE4 + ["secs", 6],
      ["Hud_Title: FATHER AND SON", "Hud_Award: SMOKE RING", "Hud_Award: MINILLA'S FIRST RAY", "Hud_Award: GABARA IS BEATEN", "MULTIBALL 2",
       "Hud_Award: FATHER AND SON", "END (a block)", "lamps held 0"]),

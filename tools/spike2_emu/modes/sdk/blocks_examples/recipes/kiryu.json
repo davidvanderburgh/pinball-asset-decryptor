@@ -55,6 +55,34 @@
    "length": 4.2,
    "crop": "fill",
    "what": "Close on Kiryu's head at sunset as its red eye fades out and the machine goes dead, 0:45:31.0."
+  },
+  "arsenal": {
+   "film": "amg02",
+   "from": 3792.1,
+   "length": 3.1,
+   "crop": "fill",
+   "what": "Kiryu stands in the night city and opens fire, red tracer rounds streaming from its arm guns, one shot, 1:03:12.1."
+  },
+  "volley": {
+   "film": "amg02",
+   "from": 3795.4,
+   "length": 3.0,
+   "crop": "fill",
+   "what": "A run of quick shots: Kiryu's tracers and missiles strike Godzilla in bursts of fire among the buildings, 1:03:15.4."
+  },
+  "grapple": {
+   "film": "amg02",
+   "from": 4679.45,
+   "length": 2.6,
+   "crop": "fill",
+   "what": "A run of two shots: Kiryu clutches Godzilla from behind, then its legs and back thrusters blaze as it lifts him, 1:17:59.4."
+  },
+  "cashout": {
+   "film": "amg02",
+   "from": 4927.5,
+   "length": 4.5,
+   "crop": "fill",
+   "what": "Kiryu stands still against a pink sunset sky, back at rest after the battle, one shot, 1:22:07.5."
   }
  },
  "music": {
@@ -105,6 +133,35 @@
    "length": 2.3,
    "what": "Godzilla's roar, the cry that sends Kiryu out of control, 0:39:58.3.",
    "priority": 4
+  },
+  "volley": {
+   "film": "amg02",
+   "from": 3788.9,
+   "length": 1.6,
+   "priority": 3,
+   "what": "A burst of gunfire and blasts as Kiryu's rounds hit Godzilla in the smoke, under the score, 1:03:08.9."
+  },
+  "grapple": {
+   "film": "amg02",
+   "from": 4472.15,
+   "length": 2.9,
+   "priority": 4,
+   "what": "Kiryu's long mechanical roar rising out of the smoke, ending before the next line of dialogue, 1:14:32.15."
+  },
+  "cashout": {
+   "film": "amg02",
+   "from": 4683.95,
+   "length": 1.15,
+   "priority": 3,
+   "what": "A rushing roar of Kiryu's thrusters as it carries Godzilla off, ending on the film's own cut, 1:18:03.95."
+  }
+ },
+ "beds": {
+  "grapple": {
+   "film": "amg02",
+   "from": 2708.937,
+   "length": 10.22,
+   "what": "Michiru Oshima's battle score over Kiryu's first sortie at 0:45:08.9, a 10.22 s loop found by the bed finder (seam chroma 0.79, self-check PASS)."
   }
  }
 }

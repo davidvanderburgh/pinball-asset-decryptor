@@ -91,3 +91,15 @@ extra Start began a new game and the attract page never came). The Pin's flipper
 (FL=58 FR=57). While the game enters initials the host entry reads the mode's record; it is put back when the call
 returns (a game-records snapshot inside that call is not a change).
 
+Found by the final sweep (fixed): The Beatles 1.29 and Star Wars ELG 1.10 keep a shorter champion record - a u32
+score at +80 and the check (~ the byte sum of what is before it) at +84; every other build a u64 at +72 and the check
+at +88. A mode's record in the long layout failed the game's check, the game took HIGHEST SCORES as damaged and reset
+it for the call: no initials, no champion. portchallenge reads the layout off HIGHEST SCORES' own compare (category
+1's +0x10) and names it where it is not the default (`value challenge_record_check_at / _score_at / _score_size`).
+
+More job notes (kit/job663e.sh, jobpicke.sh, jobgze.sh, proof663b.sh, rig/rec663b.c): the game records' last read
+is taken in play (a page's entry points at the mode's record while the page shows - a snapshot inside that call is
+not a change; the runtime puts every entry back as a game starts); a game the last initials' Start began is drained
+to its end; points are added in the challenge ball (John Wick's switch names are not the job's, its player scored 0
+and a 0 never beats a fresh record); Godzilla LE takes the pick at the next ball's start, so its first ball is drained.
+

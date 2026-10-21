@@ -121,13 +121,13 @@ SCRIPTS = [
     # ---- the prayer: lit at the Mecha lane --------------------------------------------------------------------
     on_shot("Pop bumper", *pack.count_up("prayer", 1, NEED, "ready", "note at", LANE, GOLD, START_INSERTS,
                                          "KING CAESAR IS LIT", "SHOOT THE MECHA LANE", "THE PRAYER",
-                                         "MORE TO WAKE KING CAESAR"), when="idle"),
+                                         "TO WAKE HIM"), when="idle"),
     on_shot("Right return lane", *pack.count_up("prayer", 2, NEED, "ready", "note at", LANE, GOLD, START_INSERTS,
                                                 "KING CAESAR IS LIT", "SHOOT THE MECHA LANE", "THE PRAYER",
-                                                "MORE TO WAKE KING CAESAR"), when="idle"),
+                                                "TO WAKE HIM"), when="idle"),
     on_shot(LANE, *pack.count_up("prayer", 3, NEED, "ready", "note at", LANE, GOLD, START_INSERTS,
                                  "KING CAESAR IS LIT", "SHOOT THE MECHA LANE", "THE PRAYER",
-                                 "MORE TO WAKE KING CAESAR"), when="idle"),
+                                 "TO WAKE HIM"), when="idle"),
     pack.relight("ready", LANE, GOLD, START_INSERTS),
 
     # ---- he wakes ---------------------------------------------------------------------------------------------
@@ -164,7 +164,7 @@ SCRIPTS = [
     on_timer("crack",
              score(1000000), *pot_up(var("crack value")), hud_counter(3, var("cracks"), "OF 3"),
              clip("crack", "behind"), sound("crack"), show("Crack"), shake(300, "medium"),
-             if_(ge("cracks", 3), [award("KING CAESAR AWAKENS", value=var("pot"), sub="POT"), clip("awake", "behind"),
+             if_(ge("cracks", 3), [award("CAESAR AWAKENS", value=var("pot"), sub="POT"), clip("awake", "behind"),
                                    sound("roar"), timer_start("next", 700)],
                  [award("THE SHRINE CRACKS", value=var("cracks"), sub="OF 3", seconds=2)])),
 
@@ -184,7 +184,7 @@ SCRIPTS = [
              if_(lt("charge", 3), [
                  change("charge", 1), score(1000000), add_time(5),
                  clip("absorb", "behind"), sound("absorb"), show("Absorb"),
-                 award("ABSORBED", value=var("charge"), sub="FIRE IT BACK AT THE MECHA LANE"),
+                 award("ABSORBED", value=var("charge"), sub="FIRE AT THE MECHA LANE"),
                  light(LANE, GOLD, "blink", 120), light_insert("MECHA LANE", GOLD, "blink", 120)])),
     on_timer("reflect",
              if_(gt("charge", 0), [
@@ -192,7 +192,7 @@ SCRIPTS = [
                  change("reflects", 1), set_("charge", 0), hud_counter(3, var("reflects"), "OF 3"),
                  clip("reflect", "behind"), sound("reflect"), show("Reflect"), shake(400, "hard"),
                  light(LANE, GOLD, "pulse"), light_insert("MECHA LANE", GOLD, "pulse"),
-                 if_(ge("reflects", 3), [award("MECHAGODZILLA REELS", value=var("pot"), sub="POT"),
+                 if_(ge("reflects", 3), [award("MECHA REELS", value=var("pot"), sub="POT"),
                                          timer_start("next", 700)],
                      [award("REFLECTED", value=var("reflects"), sub="OF 3")])])),
 
@@ -202,7 +202,7 @@ SCRIPTS = [
                 timer_start("combo", 6000), sound("tagteam"), score(500000),
                 light("Pop bumper", GOLD, "blink", 100), light(LANE, GOLD, "blink", 100),
                 light_insert("MECHA LANE", GOLD, "blink", 100),
-                award("GODZILLA ATTACKS", sub="NOW CAESAR: POP BUMPER OR MECHA LANE")])),
+                award("GODZILLA ATTACKS", sub="NOW POP BUMPER OR MECHA LANE")])),
     on_timer("caesar",
              if_(gt(timer_left("combo"), 0), [
                  timer_stop("combo"), change("combos", 1), *pot_up(mul(8000000, var("combos"))), score(2000000),
@@ -219,7 +219,7 @@ SCRIPTS = [
              shake(500, "hard"), sound("reflect"),
              if_(ge("head", 3), [
                  set_("won", 1), score(add(mul(var("pot"), 2), 25000000)),
-                 award("MECHAGODZILLA'S HEAD IS OFF", value=add(mul(var("pot"), 2), 25000000), sub="SUPER JACKPOT",
+                 award("HEAD TORN OFF", value=add(mul(var("pot"), 2), 25000000), sub="SUPER JACKPOT",
                        seconds=4),
                  clip("won", "full"), sound("won"), show("Final blow"), shake_game("multiball_start"),
                  end()],
@@ -302,13 +302,13 @@ DESK = [
     ("the prayer lights it", _shots("Pop bumper", 24) + ["secs", 1] + _shots("Pop bumper", 1) +
      ["shot", "Mecha exit bottom", "secs", 2],
      ["WORDS PadMode_king_caesar_Hud_Award: KING CAESAR IS LIT", "[KING CAESAR] START (its lit shot)",
-      "Hud_AwardSub: MORE TO WAKE KING CAESAR"]),
+      "Hud_AwardSub: 24  -  TO WAKE HIM"]),
     ("stage one then cash out", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
-     ["Hud_Title: KING CAESAR SLEEPS", "Hud_Award: KING CAESAR AWAKENS", "Hud_Line: REFLECT: ABSORB THE BEAM", "SCORE +9000000",
+     ["Hud_Title: KING CAESAR SLEEPS", "Hud_Award: CAESAR AWAKENS", "Hud_Line: REFLECT: ABSORB THE BEAM", "SCORE +9000000",
       "END (a block): 4 scores, total 12000000", "lamps held 0"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 +
      ["shot", "Building", "ms", 500, "shot", "Building", "ms", 500, "shot", "Building", "secs", 6],
-     ["Hud_Title: MECHAGODZILLA DEFEATED", "Hud_Award: MECHAGODZILLA REELS", "Hud_Award: THE TAG TEAM", "Hud_Line: THE FINAL BLOW: SHOOT THE BUILDING",
+     ["Hud_Title: MECHAGODZILLA DEFEATED", "Hud_Award: MECHA REELS", "Hud_Award: THE TAG TEAM", "Hud_Line: THE FINAL BLOW: SHOOT THE BUILDING",
       "SCORE +169000000", "END (a block)"]),    # (its Godzilla target hits lit MINILLA too: built in beside it)
     ("the clock pays a quarter", _START + _STAGE1 + ["secs", 50],
      ["Hud_Title: KING CAESAR FALLS", "END (time ran out)", "SCORE +2250000", "lamps held 0"]),

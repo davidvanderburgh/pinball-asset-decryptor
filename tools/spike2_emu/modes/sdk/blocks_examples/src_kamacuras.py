@@ -131,7 +131,7 @@ SCRIPTS = [
     # ---- to start it: the spins, then its scoop ------------------------------------------------------------------
     on_shot(SPIN, *pack.count_up("spins", 1, NEED, "ready", "note at", START_SHOT, GREEN, START_INSERTS,
                                  "KAMACURAS IS LIT", "SHOOT THE RIGHT SCOOP", "THE MANTISES",
-                                 "MORE SPINS TO LIGHT KAMACURAS", step=10), when="idle"),
+                                 "SPINS TO LIGHT IT", step=10), when="idle"),
     pack.relight("ready", START_SHOT, GREEN, START_INSERTS),
 
     on_start(*pack.begin(SLUG),
@@ -168,7 +168,7 @@ SCRIPTS = [
     on_timer("strike",
              change("strikes", 1), hud_counter(3, sub(3, var("strikes")), "STRIKES LEFT"),
              clip("escape", "behind"), sound("escape"), show("Strike"), shake(400, "hard"),
-             award("A MANTIS STRIKES GODZILLA", value=sub(3, var("strikes")), sub="STRIKES LEFT"),
+             award("MANTIS STRIKE", value=sub(3, var("strikes")), sub="STRIKES LEFT"),
              if_(ge("strikes", 3), [clip("lost", "full"), sound("lost"), show("Lost"), end()],
                  [timer_start("spawn", 1200)])),
 
@@ -193,13 +193,13 @@ SCRIPTS = [
              shake(450, "hard"), sound("kill"),
              if_(ge("boss hits", 3), [
                  set_("won", 1), score(var("kill total")),
-                 award("KAMACURAS DEFEATED", value=var("kill total"), sub="SUPER JACKPOT", seconds=4),
+                 award("SWARM DEFEATED", value=var("kill total"), sub="SUPER JACKPOT", seconds=4),
                  clip("won", "full"), sound("won"), show("Won"), shake_game("multiball_start"), end()],
                  [award("THE BIG ONE REELS", value=var("boss hits"), sub="OF 3"), clip("kill", "behind")])),
 
     every(1, if_(eq("boss", 1), [hud_counter(1, div(add(timer_left("boss clock"), 999), 1000), "TO HIT IT")])),
     on_timer("boss clock", if_(AND(eq("boss", 1), eq("won", 0)), [
-        award("THE BIGGEST MANTIS ESCAPES", sub="THE SWARM WINS"), clip("lost", "full"), sound("lost"), show("Lost"),
+        award("THE BIG ONE ESCAPES", sub="THE SWARM WINS"), clip("lost", "full"), sound("lost"), show("Lost"),
         set_("strikes", 3), end()])),
     on_end(*pack.finish(), set_("boss", 0), set_("a ring", 0), set_("b ring", 0),
            if_(eq("won", 1), [hud_title("KAMACURAS DEFEATED"), hud_line("THE SWARM IS GONE")],
@@ -259,7 +259,7 @@ DESK = [
      ["Hud_Title: KAMACURAS DEFEATED", "Hud_Award: WAVE CLEARED", "Hud_Line: THE BIGGEST MANTIS: SHOOT THE BUILDING", "LAMP BUILDING ff1010 chase 60",
       "END (a block)", "lamps held 0"]),
     ("three strikes and the swarm wins", _START + ["secs", 80],
-     ["Hud_Title: THE MANTISES WIN", "Hud_Award: A MANTIS STRIKES GODZILLA", "END (a block)", "lamps held 0"]),
+     ["Hud_Title: THE MANTISES WIN", "Hud_Award: MANTIS STRIKE", "END (a block)", "lamps held 0"]),
 ]
 
 

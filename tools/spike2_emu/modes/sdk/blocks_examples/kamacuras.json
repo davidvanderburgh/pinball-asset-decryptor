@@ -650,7 +650,7 @@
               "name": "spins"
              }
             },
-            "sub": "MORE SPINS TO LIGHT KAMACURAS",
+            "sub": "SPINS TO LIGHT IT",
             "seconds": 2
            },
            {
@@ -5419,7 +5419,7 @@
      },
      {
       "op": "hud_award",
-      "text": "A MANTIS STRIKES GODZILLA",
+      "text": "MANTIS STRIKE",
       "value": {
        "k": "op",
        "op": "-",
@@ -5867,7 +5867,7 @@
        },
        {
         "op": "hud_award",
-        "text": "KAMACURAS DEFEATED",
+        "text": "SWARM DEFEATED",
         "value": {
          "k": "var",
          "name": "kill total"
@@ -6007,7 +6007,7 @@
       "then": [
        {
         "op": "hud_award",
-        "text": "THE BIGGEST MANTIS ESCAPES",
+        "text": "THE BIG ONE ESCAPES",
         "value": null,
         "sub": "THE SWARM WINS",
         "seconds": 2

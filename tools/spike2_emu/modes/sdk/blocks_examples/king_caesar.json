@@ -747,7 +747,7 @@
               "name": "prayer"
              }
             },
-            "sub": "MORE TO WAKE KING CAESAR",
+            "sub": "TO WAKE HIM",
             "seconds": 2
            },
            {
@@ -921,7 +921,7 @@
               "name": "prayer"
              }
             },
-            "sub": "MORE TO WAKE KING CAESAR",
+            "sub": "TO WAKE HIM",
             "seconds": 2
            },
            {
@@ -1095,7 +1095,7 @@
               "name": "prayer"
              }
             },
-            "sub": "MORE TO WAKE KING CAESAR",
+            "sub": "TO WAKE HIM",
             "seconds": 2
            },
            {
@@ -1858,7 +1858,7 @@
       "then": [
        {
         "op": "hud_award",
-        "text": "KING CAESAR AWAKENS",
+        "text": "CAESAR AWAKENS",
         "value": {
          "k": "var",
          "name": "pot"
@@ -2391,7 +2391,7 @@
          "k": "var",
          "name": "charge"
         },
-        "sub": "FIRE IT BACK AT THE MECHA LANE",
+        "sub": "FIRE AT THE MECHA LANE",
         "seconds": 2
        },
        {
@@ -2549,7 +2549,7 @@
         "then": [
          {
           "op": "hud_award",
-          "text": "MECHAGODZILLA REELS",
+          "text": "MECHA REELS",
           "value": {
            "k": "var",
            "name": "pot"
@@ -2660,7 +2660,7 @@
         "op": "hud_award",
         "text": "GODZILLA ATTACKS",
         "value": null,
-        "sub": "NOW CAESAR: POP BUMPER OR MECHA LANE",
+        "sub": "NOW POP BUMPER OR MECHA LANE",
         "seconds": 2
        }
       ],
@@ -2950,7 +2950,7 @@
        },
        {
         "op": "hud_award",
-        "text": "MECHAGODZILLA'S HEAD IS OFF",
+        "text": "HEAD TORN OFF",
         "value": {
          "k": "op",
          "op": "+",

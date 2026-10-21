@@ -658,12 +658,25 @@ static int hook_veto_bl(unsigned addr, veto_n_fn logger, unsigned n, unsigned re
  *   0,1 the original two words   2 ldr pc,[pc,#-4]   3 addr + 8      14,15 the moved words again
  * The trampoline is not the logger shape (t[0] is not push {r0-r3,ip,lr}), so words_match() in
  * another object stops at our jump and refuses the site rather than reading a wrong pair. */
+static void *hook_wrap_at(unsigned addr, void *wrapper, int opens_with_push);
+
 static void *hook_wrap(unsigned addr, void *wrapper)
+{
+    return hook_wrap_at(addr, wrapper, 1);
+}
+
+/* PAD-663: a function may open with two words before its push (Avengers LE 1.10's champion page: `movw ip ; movt ip`):
+ * opens_with_push 0 takes those as well - the pc checks below still hold for both words */
+static void *hook_wrap_at(unsigned addr, void *wrapper, int opens_with_push)
 {
     unsigned *p = (unsigned *)(unsigned long)addr, *t;
     int i;
     if (!addr || !wrapper || (tramp_used + 1) * 16 > TRAMP_WORDS) return 0;
-    if ((p[0] & 0xFFFF4000u) != 0xE92D4000u) return 0;                  /* push {.., lr} */
+    if ((p[0] & 0xFFFF4000u) == 0xE92D4000u) opens_with_push = 1;          /* push {.., lr}: hook_wrap's own case */
+    if (opens_with_push && (p[0] & 0xFFFF4000u) != 0xE92D4000u) return 0;
+    for (i = 0; i < 2 && !opens_with_push; i++)                             /* plain movw / movt / push only */
+        if ((p[i] & 0xFFF00000u) != 0xE3000000u && (p[i] & 0xFFF00000u) != 0xE3400000u
+            && (p[i] & 0xFFFF0000u) != 0xE92D0000u) return 0;
     for (i = 0; i < 2; i++) {
         unsigned w = p[i];
         if ((w & 0x0C000000u) == 0x04000000u && ((w >> 16) & 0xF) == 15) return 0;   /* ldr/str [pc, ..] */
@@ -686,6 +699,44 @@ static void *hook_wrap(unsigned addr, void *wrapper)
     p[0] = 0xe51ff004u;                       /* ldr pc, [pc, #-4] */
     __builtin___clear_cache((char *)p, (char *)(p + 2));
     return t;
+}
+
+/* PAD-663: a CALL wrapped where it is made - `bl <target>` and the plain word after it (`cmp r0, #0`) - so one call
+ * of a function the game makes from many places (its bus dispatch) is ours to answer. `wrapper` is called as the
+ * target would be, with the caller's r0-r3 and stack, and returns what the call returns; the target's address, for
+ * the wrapper to call itself, comes back (0 when refused: the first word is not an unconditional bl, or the second
+ * reads or writes pc). Six words:
+ *   0 ldr ip,[pc,#12] -> t[5]   1 blx ip   2 the second word   3 ldr pc,[pc,#-4] -> t[4]   4 addr + 8   5 wrapper
+ * ip is the call's to lose (a veneer may change it at any bl). (tests read the constants) */
+static unsigned hook_call(unsigned addr, void *wrapper)
+{
+    unsigned *p = (unsigned *)(unsigned long)addr, *t, w1, target;
+    int i;
+    if (!addr || !wrapper || (tramp_used + 1) * 16 > TRAMP_WORDS) return 0;
+    if ((p[0] & 0xFF000000u) != 0xEB000000u) return 0;                 /* bl, always */
+    w1 = p[1];
+    if ((w1 & 0x0C000000u) == 0x04000000u && ((w1 >> 16) & 0xF) == 15) return 0;
+    if ((w1 & 0x0C000000u) == 0x00000000u && (((w1 >> 16) & 0xF) == 15 || (!(w1 & 0x02000000u) && (w1 & 0xF) == 15)))
+        return 0;
+    if (((w1 >> 12) & 0xF) == 15 || (w1 & 0x0E000000u) == 0x0A000000u) return 0;   /* writes pc, or a branch */
+    target = addr + 8 + (unsigned)(((int)(p[0] << 8)) >> 6);
+    t = tramp + tramp_used++ * 16;
+    for (i = 0; i < 16; i++) t[i] = 0;
+    t[0] = 0xe59fc00cu;                       /* ldr ip, [pc, #12] -> t[5] */
+    t[1] = 0xe12fff3cu;                       /* blx ip */
+    t[2] = w1;                                /* the word after the call, as it was */
+    t[3] = 0xe51ff004u;                       /* ldr pc, [pc, #-4] -> t[4] */
+    t[4] = addr + 8u;
+    t[5] = (unsigned)(unsigned long)wrapper;
+    t[14] = p[0];
+    t[15] = p[1];
+    mprotect(tramp, sizeof tramp, 7);
+    mprotect((void *)(unsigned long)(addr & ~0xfffu), 0x2000, 7);
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    p[1] = (unsigned)(unsigned long)t;
+    p[0] = 0xe51ff004u;                       /* ldr pc, [pc, #-4] */
+    __builtin___clear_cache((char *)p, (char *)(p + 2));
+    return target;
 }
 
 /* ---- the game, right now ------------------------------------------------------------- */
@@ -8662,6 +8713,7 @@ static void stock_tick(void);             /* item 160 */
 static void magnet_tick(void);            /* PAD-381 */
 static void scoop_tick(void);             /* PAD-381 */
 static void launch_tick(void);            /* PAD-643 */
+static void chg_pages_tick(void);         /* PAD-663 */
 
 static void on_tick(unsigned *r)
 {
@@ -8692,6 +8744,7 @@ static void on_tick(unsigned *r)
     shows_tick();                             /* PAD-411: no show of ours past its 20 s */
     wizards_tick();                           /* PAD-436: a mini-wizard's refused start, kept lit */
     launch_tick();                            /* PAD-643: a mode's challenge ball launched for the player */
+    chg_pages_tick();                         /* PAD-663: a champion page cut short gives its entry back */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
@@ -9137,6 +9190,7 @@ static int chg_state(void)
 static void launch_picked(unsigned slot);   /* PAD-643: below */
 static void launch_began(void);
 static void chg_scores_picked(unsigned slot, const char *name, const struct pm_mode *by);   /* PAD-640, below */
+static void chg_scores_began(void);                                                          /* PAD-663, below */
 
 /* slot: the game's challenge the game thinks it plays (an own challenge plays as challenge 0's); name: the menu's */
 static void chg_picked(const struct pm_mode *by, unsigned slot, const char *name)
@@ -9167,6 +9221,7 @@ static void chg_began(void)
     if (chg.state == 1 && current == chg.by && pm_player()) {
         chg.game = chg_game_now();
         chg.state = 2;
+        chg_scores_began();          /* PAD-663: its high score belongs to this game too */
         launch_began();              /* PAD-643: its ball launched for the player */
     }
 }
@@ -9374,7 +9429,9 @@ static int challenge_veto(unsigned *r, unsigned n)
 #define CHG_REC_SIZE 96
 #define CHG_SCORES_MAX 4096
 static const char CHG_SCORES[] = "/dump/pad_challenge_scores";
-static struct { int slot; unsigned game; char name[40]; } chg_hs = { -1, 0, "" };
+/* on: a mode took this game's pick; slot: the game's challenge it plays as (~0u, PAD-663: none - a menu entry of a
+ * mode's own on a build with no challenge of the game's behind it) */
+static struct { int on; unsigned slot; unsigned game; char name[40]; } chg_hs = { 0, 0, 0, "" };
 static unsigned char chg_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
 static const char *chg_rec_titles[8];
 static unsigned (*chg_scores_game)(unsigned, unsigned, unsigned, unsigned);
@@ -9458,40 +9515,139 @@ static long chg_rec_put(const char *b, long n, const char *name, const unsigned 
     return o;
 }
 
-static void chg_scores_picked(unsigned slot, const char *name, const struct pm_mode *by)
+/* PAD-663: the game the mode's high score belongs to, stamped again as the mode that took the pick begins - Avengers
+ * LE 1.10 starts the ball (where the pick is taken) before it counts the game's start, so the end of THIS game found
+ * the pick stamped with the last one and filed the score under the game's own (BATTLE ROYALE CHALLENGE SCORE #3) */
+static void chg_scores_began(void)
+{
+    if (chg_hs.on) chg_hs.game = chg_game_now();
+}
+
+/* PAD-663: challenge n's category - its own (`challenge_scores_cat_<n>`, Bond, Stranger Things), else the port's one
+ * for every challenge game (`challenge_scores_cat`: HIGHEST SCORES, whose first entry is the grand champion); 0: none */
+static long chg_scores_cat(unsigned slot)
 {
     char key[32];
-    chg_hs.slot = -1;
-    if (!chg_scores_game) return;
+    long c;
     pm_snprintf(key, sizeof key, "challenge_scores_cat_%u", slot);
-    if (pm_port_value(key, 0) <= 0) return;
+    c = pm_port_value(key, 0);
+    return c > 0 ? c : pm_port_value("challenge_scores_cat", 0);
+}
+
+static void chg_scores_picked(unsigned slot, const char *name, const struct pm_mode *by)
+{
+    chg_hs.on = 0;
+    if (!chg_scores_game) return;
+    if (chg_scores_cat(slot) <= 0) return;
     challenge_words(chg_hs.name, name && *name ? name : by && by->name ? by->name : "");
     if (!chg_hs.name[0]) return;
-    chg_hs.slot = (int)slot;
+    chg_hs.slot = slot;
+    chg_hs.on = 1;
     chg_hs.game = chg_game_now();
+    say("challenge scores: %s's game goes in as its own high score (category %ld's place)", chg_hs.name,
+        chg_scores_cat(slot));
+}
+
+/* ---- PAD-663: only the mode's record, in a mode's challenge game -----------------------------------------------
+ * Every Spike 2 build keeps its champions in the same framework (69 of 69: one category table, one entry lookup, one
+ * end-of-game function), but most keep no champion per challenge: a mode's challenge game's score went in under the
+ * game's own HIGHEST SCORES, a challenge of the game's, or the one CHALLENGE CHAMPION (Mandalorian, Venom). Before
+ * the end-of-game function files a player under a category's entry it asks the bus (`mov r0, #0x5b ; add r1, sp, #X
+ * ; bl <dispatch> ; cmp r0, #0` - {u8 player, u16 category at +2, int entry at +4} at sp + X, the same on every
+ * build) whether this game may; the game's own rules say no to what does not belong to the kind of game played. The
+ * port names that call (`site challenge_scores_gate`, `value challenge_scores_gate_id` its bus id, `_cat_at` /
+ * `_entry_at` the fields' offsets): while the end-of-game function runs for a mode's challenge game, the call is
+ * wrapped (hook_call) and answers yes only for the one entry pointed at the mode's record (the category's first) and
+ * no for every other - so the game's own champions and high scores are not touched by that game at all, and the
+ * mode's champion is the one record it can go in. For a category's entry the call is the game's own, its answer
+ * replaced. Outside such a game the call is the game's, untouched. */
+static unsigned (*chg_gate_game)(unsigned, unsigned, unsigned, unsigned);
+static volatile int chg_gate_cat = -1;               /* the category whose first entry is the mode's, while it runs */
+static volatile int chg_scores_running;              /* the game's end-of-game high scores run (any game's) */
+
+/* the gate's answer for {category, entry} while a mode's challenge game is filed: 1 only for its entry (tests lift it) */
+static int chg_gate_lets(int cat, int host, int entry)
+{
+    return host > 0 && cat == host && entry == 0;
+}
+
+static unsigned chg_gate_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    int host = chg_gate_cat;
+    unsigned cat_at = (unsigned)pm_port_value("challenge_scores_gate_cat_at", 2);
+    unsigned ent_at = (unsigned)pm_port_value("challenge_scores_gate_entry_at", 4);
+    static int said;
+    int cat, entry;
+    /* the question's fields are in the caller's frame, just above ours on this thread's stack (a thread's stack is not
+     * in the maps the runtime read at its start) */
+    if (host <= 0 || r0 != (unsigned)pm_port_value("challenge_scores_gate_id", -1)
+        || r1 <= (unsigned)(unsigned long)&cat || r1 - (unsigned)(unsigned long)&cat > 0x10000u)
+        return chg_gate_game(r0, r1, r2, r3);
+    cat = *(const unsigned short *)(unsigned long)(r1 + cat_at);
+    entry = *(const int *)(unsigned long)(r1 + ent_at);
+    if (!chg_gate_lets(cat, host, entry)) {
+        if (said < 8) { said++; say("challenge scores: category %d entry %d is the game's - not in a mode's challenge game", cat, entry); }
+        return 0;
+    }
+    chg_gate_game(r0, r1, r2, r3);                               /* the game's own handlers hear it */
+    return 1;
 }
 
 static void chg_page_back(void);                                 /* PAD-660, below */
+static void chg_pages_back(void);                                /* PAD-663, below */
+
+/* PAD-663: HIGHEST SCORES has five entries (GRAND CHAMPION, HIGH SCORE #1-#4), and a score that beats entry n moves
+ * n.. down one before it goes in (the category's insert, +0x14, walks its entry list, +28): with the mode's record in
+ * the first entry's place, a new mode champion moved the GAME'S grand champion into #1 and dropped #4 (Avengers LE
+ * 1.10, the first rig run). For the call the category's list is its first entry alone - a list of our own, {that
+ * entry, 0} - so nothing is moved; the game's list comes back after. The table is the port's `data
+ * challenge_scores_table`. Returns the list's word to put back (0: the category has one entry already, or no table). */
+static unsigned *chg_scores_one_entry(long cat, unsigned *was)
+{
+    static unsigned short one[2];
+    unsigned table = data("challenge_scores_table"), *desc;
+    const unsigned short *l;
+    if (!table || cat <= 0 || cat > 63) return 0;
+    desc = (unsigned *)(unsigned long)(table + 36u * (unsigned)cat);
+    if (!maps_has((unsigned long)desc, 36, MAP_R) || !maps_has(desc[7], 4, MAP_R)) return 0;
+    l = (const unsigned short *)(unsigned long)desc[7];
+    if (!l[0] || !l[1]) return 0;                                /* one entry: nothing to move */
+    one[0] = l[0];
+    one[1] = 0;
+    *was = desc[7];
+    mprotect((void *)((unsigned long)&desc[7] & ~0xfffUL), 0x1000, 7);   /* as the hooks do: the page may hold code */
+    desc[7] = (unsigned)(unsigned long)one;
+    return &desc[7];
+}
 
 /* the end-of-game high scores, wrapped: in a mode's challenge game its challenge's entry is the mode's for the call */
 static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     static char b[CHG_SCORES_MAX], out[CHG_SCORES_MAX + 2 * CHG_REC_SIZE + 48];
-    char key[32];
-    unsigned *ent = 0, was[3], ret, k;
+    unsigned *ent = 0, was[3], ret, k, *list, list_was = 0;
+    unsigned short award = 0;
     unsigned char before[CHG_REC_SIZE];
-    long n, m;
-    int slot = chg_hs.slot, changed = 0;
-    chg_hs.slot = -1;                                            /* one game's, once */
+    long n, m, cat = 0;
+    int on = chg_hs.on, changed = 0;
+    unsigned slot = chg_hs.slot;
+    chg_hs.on = 0;                                               /* one game's, once */
+    chg_scores_running = 1;
     chg_page_back();                                             /* PAD-660: never an attract page's record here */
-    if (slot >= 0 && chg_hs.game == chg_game_now()) {
-        pm_snprintf(key, sizeof key, "challenge_scores_cat_%d", slot);
-        ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))(
-            (unsigned)pm_port_value(key, 0), 0);
-        if (ent && !maps_has((unsigned long)ent, 28, MAP_R)) ent = 0;
-        if (!ent) say("challenge scores: no entry for challenge %d - the game files this one under its own", slot);
+    chg_pages_back();                                            /* PAD-663: nor the champion page's */
+    if (on && chg_hs.game != chg_game_now())
+        say("challenge scores: %s's pick was another game's (%u, now %u) - this one is the game's own", chg_hs.name,
+            chg_hs.game, chg_game_now());
+    if (on && chg_hs.game == chg_game_now()) {
+        cat = chg_scores_cat(slot);
+        ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))((unsigned)cat, 0);
+        if (ent && !maps_has((unsigned long)ent, 36, MAP_R)) ent = 0;
+        if (!ent) say("challenge scores: no entry in category %ld - the game files this one under its own", cat);
     }
-    if (!ent) return chg_scores_game(r0, r1, r2, r3);
+    if (!ent) {
+        ret = chg_scores_game(r0, r1, r2, r3);
+        chg_scores_running = 0;
+        return ret;
+    }
     n = pm_read_file(CHG_SCORES, b, sizeof b);
     if (n < 0) n = 0;
     if (!chg_rec_find(b, n, chg_hs.name, chg_rec))
@@ -9500,14 +9656,23 @@ static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
     for (k = 0; k + 1 < sizeof chg_rec_titles / sizeof chg_rec_titles[0]; k++) chg_rec_titles[k] = chg_hs.name;
     chg_rec_titles[k] = 0;
     was[0] = ent[0]; was[1] = ent[5]; was[2] = ent[6];
+    award = *(unsigned short *)(ent + 8);                        /* PAD-663: what beating the entry awards (+0x20) */
     ent[0] = (unsigned)(unsigned long)chg_rec;
     ent[5] = (unsigned)(unsigned long)chg_hs.name;
     ent[6] = (unsigned)(unsigned long)chg_rec_titles;
-    say("challenge scores: %s's own high score (%llu, %s) in challenge %d's place for the game's end",
-        chg_hs.name, (unsigned long long)*(uint64_t *)(chg_rec + 72), (const char *)chg_rec + 32, slot);
+    *(unsigned short *)(ent + 8) = 0;                            /* a mode's champion wins no credit of the game's */
+    say("challenge scores: %s's own high score (%llu, %s) in category %ld's place for the game's end%s",
+        chg_hs.name, (unsigned long long)*(uint64_t *)(chg_rec + 72), (const char *)chg_rec + 32, cat,
+        chg_gate_game ? " - the game's own records are shut for it" : "");
+    if (chg_gate_game) chg_gate_cat = (int)cat;                  /* PAD-663: only that entry takes this game */
+    list = chg_scores_one_entry(cat, &list_was);
     ret = chg_scores_game(r0, r1, r2, r3);
+    if (list) *list = list_was;
+    chg_gate_cat = -1;
     ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];
+    *(unsigned short *)(ent + 8) = award;
     for (k = 0; k < CHG_REC_SIZE; k++) changed |= chg_rec[k] != before[k];
+    chg_scores_running = 0;
     if (!changed) {
         say("challenge scores: %s's high score stands", chg_hs.name);
         return ret;
@@ -9685,6 +9850,175 @@ static void chg_page_arm(void)
         pm_port_value("challenge_page_cat", 0));
 }
 
+/* ---- PAD-663: the modes' champions on the game's own champion page ----------------------------------------------
+ * PAD-660's page above is the shape of Bond 1.06 and Stranger Things (one page process per category). Most Spike 2
+ * builds show every champion through ONE page function instead, called by the attract mode once per category it
+ * shows and returning when the page's time is up: page(object, category, n, frames, ..) (Avengers LE 1.10 0x214d8,
+ * Deadpool 0x2375c, Godzilla 0x23b78, Batman 66 page(category, n) 0x2492c, ...). It reads the category's entry n
+ * through the entry lookup and takes from it the record (initials, score) and its title (the entry's titles list,
+ * +0x18 - the field PAD-640 points at a mode's name for the initials entry). The port names it (portchallenge.
+ * pages_lines):
+ *   site  challenge_pages_<k>   the page function (wrapped: hook_wrap_at; it may open with movw/movt ip)
+ * The wrapped page runs the game's own call first, as it was, noting (by the entry lookup, logged on the same
+ * thread) which category it showed. After the call for the lowest category the attract mode shows - its cycle's
+ * first page (the grand champion's where it has one) - the page is called again with the same arguments (four
+ * stack words included) once per mode with a champion in CHG_SCORES, the category's first entry pointed at a copy
+ * of the mode's record and titled "<NAME> CHAMPION", and put back as each call returns. Outside the attract mode
+ * (a game in play) nothing is repeated. A page cut short (a game starting) never returns: the tick puts the entry
+ * back then, and the end-of-game wrap before anything else. */
+#define CHG_PAGES_SITES 4
+typedef unsigned (*chg_pages_fn)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
+static chg_pages_fn chg_pages_game[CHG_PAGES_SITES];
+static volatile long chg_pages_tid;              /* the thread inside a wrapped page call of the game's, 0: none */
+static volatile int chg_pages_cat = -1;          /* the category and entry of that call's last entry read */
+static volatile int chg_pages_n = -1;
+static int chg_pages_first = 1 << 30;            /* the lowest category a page showed: the cycle's first */
+static volatile int chg_pages_in;                /* a mode's page runs */
+static unsigned *volatile chg_pages_ent;         /* the entry pointed at a mode's record, until its call returns */
+static unsigned chg_pages_was[3];
+static unsigned long chg_pages_ms;
+static unsigned char chg_pages_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
+static char chg_pages_title[48];
+static const char *chg_pages_titles[8];
+
+/* the entry lookup's logger: which category the game's page call read first */
+static void chg_lookup_seen(unsigned *r)
+{
+    if (chg_pages_tid && syscall(SYS_GETTID) == chg_pages_tid) {
+        chg_pages_cat = (int)r[0];
+        chg_pages_n = (int)r[1];
+    }
+}
+
+/* the game's record back in the entry */
+static void chg_pages_back(void)
+{
+    unsigned *ent = chg_pages_ent;
+    if (!ent) return;
+    ent[0] = chg_pages_was[0]; ent[5] = chg_pages_was[1]; ent[6] = chg_pages_was[2];
+    chg_pages_ent = 0;
+}
+
+/* a mode's page title: "<NAME> CHAMPION", the name alone where that would not fit the game's longest (27) or it says
+ * CHAMPION itself (tests lift it verbatim) */
+static void chg_champion_title(char *out, unsigned cap, const char *name)
+{
+    static const char tail[] = " CHAMPION";
+    unsigned n = 0, t = sizeof tail - 1, k;
+    while (name[n]) n++;
+    for (k = 0; k < n && k + 1 < cap; k++) out[k] = name[k];
+    out[k] = 0;
+    if (n + t > 27 || n + t + 1 > cap) return;
+    if (n >= t - 1) {
+        for (k = 0; k + 1 < t && name[n - (t - 1) + k] == tail[k + 1]; k++) ;
+        if (k + 1 == t) return;
+    }
+    for (k = 0; k < t; k++) out[n + k] = tail[k];
+    out[n + t] = 0;
+}
+
+/* whether the modes' pages follow the game's call that showed category cat: its lowest, the cycle's first (tests
+ * lift it verbatim) */
+static int chg_pages_follow(int cat, int *first)
+{
+    if (cat <= 0 || cat > *first) return 0;
+    *first = cat;
+    return 1;
+}
+
+static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,
+                              unsigned s0, unsigned s1, unsigned s2, unsigned s3)
+{
+    static char b[CHG_SCORES_MAX];
+    static char names[CHG_PAGES_MAX][40];
+    static int said;
+    unsigned ret, *ent;
+    long n, me = syscall(SYS_GETTID);
+    int cat, i, m, j;
+    if (chg_pages_in || chg_pages_tid) return chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);
+    chg_pages_cat = chg_pages_n = -1;
+    chg_pages_tid = me;
+    ret = chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);    /* the game's own page, as it was */
+    cat = chg_pages_cat;
+    chg_pages_tid = 0;
+    /* a category's first entry only (the GRAND CHAMPION's page, not HIGH SCORE #1's: Avengers calls one page per entry),
+     * never while the end-of-game high scores run (a page function the game's end calls: the attract mode's only) */
+    if (pm_in_game() || chg_scores_running || chg_pages_n != 0 || !chg_pages_follow(cat, &chg_pages_first)) return ret;
+    n = pm_read_file(CHG_SCORES, b, sizeof b);
+    if (n <= 0) return ret;
+    m = chg_page_names(names, CHG_PAGES_MAX);
+    for (i = 0; i < m && !pm_in_game(); i++) {
+        if (!chg_rec_find(b, n, names[i], chg_pages_rec) || !*(uint64_t *)(chg_pages_rec + 72)) continue;
+        ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))((unsigned)cat, 0);
+        if (!ent || !maps_has((unsigned long)ent, 28, MAP_R)) return ret;
+        chg_champion_title(chg_pages_title, sizeof chg_pages_title, names[i]);
+        for (j = 0; j + 1 < (int)(sizeof chg_pages_titles / sizeof chg_pages_titles[0]); j++)
+            chg_pages_titles[j] = chg_pages_title;
+        chg_pages_titles[j] = 0;
+        if (said < 2 * CHG_PAGES_MAX) {
+            said++;
+            say("challenge scores: the attract mode shows %s's champion (%llu, %s) under \"%s\", after category %d's page",
+                names[i], (unsigned long long)*(uint64_t *)(chg_pages_rec + 72), (const char *)chg_pages_rec + 32,
+                chg_pages_title, cat);
+        }
+        chg_pages_was[0] = ent[0]; chg_pages_was[1] = ent[5]; chg_pages_was[2] = ent[6];
+        chg_pages_ms = pm_ms();
+        chg_pages_ent = ent;
+        ent[0] = (unsigned)(unsigned long)chg_pages_rec;
+        ent[5] = (unsigned)(unsigned long)chg_pages_title;
+        ent[6] = (unsigned)(unsigned long)chg_pages_titles;
+        chg_pages_in = 1;
+        chg_pages_tid = me;                                      /* its reads are not a call of the game's */
+        chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);
+        chg_pages_tid = 0;
+        chg_pages_in = 0;
+        chg_pages_back();
+    }
+    return ret;
+}
+
+#define CHG_PAGES_WRAP(k) static unsigned chg_pages_wrap##k(unsigned a0, unsigned a1, unsigned a2, unsigned a3, \
+    unsigned s0, unsigned s1, unsigned s2, unsigned s3) { return chg_pages_run(k, a0, a1, a2, a3, s0, s1, s2, s3); }
+CHG_PAGES_WRAP(0) CHG_PAGES_WRAP(1) CHG_PAGES_WRAP(2) CHG_PAGES_WRAP(3)
+static void *const chg_pages_wraps[CHG_PAGES_SITES] = {
+    (void *)chg_pages_wrap0, (void *)chg_pages_wrap1, (void *)chg_pages_wrap2, (void *)chg_pages_wrap3,
+};
+
+/* the tick: a page cut short (a game started while a mode's page ran: its process is gone) gives the entry back */
+static void chg_pages_tick(void)
+{
+    if (chg_pages_ent && (pm_in_game() || pm_ms() - chg_pages_ms > 60000)) {
+        chg_pages_back();
+        chg_pages_in = 0;
+    }
+}
+
+static void chg_pages_arm(void)
+{
+    char key[32];
+    int k, n = 0;
+    for (k = 0; k < CHG_PAGES_SITES; k++) {
+        pm_snprintf(key, sizeof key, "challenge_pages_%d", k);
+        n += site(key) != 0;
+    }
+    if (!n) return;                                              /* a port without them: silent */
+    if (!fn("challenge_score_entry") || !hook(fn("challenge_score_entry"), chg_lookup_seen)) {
+        say("challenge scores: the entry lookup could not be hooked - a mode's champion is kept, not shown");
+        return;
+    }
+    for (n = 0, k = 0; k < CHG_PAGES_SITES; k++) {               /* the lookup's logger first: no page without it */
+        pm_snprintf(key, sizeof key, "challenge_pages_%d", k);
+        if (!site(key)) continue;
+        if (!fn(key) || !(chg_pages_game[k] = (chg_pages_fn)hook_wrap_at(fn(key), chg_pages_wraps[k], 0))) {
+            say("challenge scores: the champion page %s could not be wrapped", key);
+            continue;
+        }
+        n++;
+    }
+    if (n) say("challenge scores: the attract mode shows a mode's challenge champion after its first champion page "
+               "(%d page function%s)", n, n == 1 ? "" : "s");
+}
+
 static void chg_scores_arm(void)
 {
     if (!site("challenge_scores") || !site("challenge_score_entry")) return;
@@ -9694,8 +10028,14 @@ static void chg_scores_arm(void)
         say("challenge scores: the game's end-of-game high scores could not be wrapped - a mode's challenge game files its score under the game's challenge");
         return;
     }
+    if (site("challenge_scores_gate")
+        && (!fn("challenge_scores_gate") || pm_port_value("challenge_scores_gate_id", -1) < 0
+            || !(chg_gate_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)hook_call(
+                     fn("challenge_scores_gate"), (void *)chg_gate_wrap))))
+        say("challenge scores: the end-of-game gate could not be wrapped - a mode's challenge game may also file under the game's");
     say("challenge scores: a mode's challenge game keeps its own high score (%s)", CHG_SCORES);
     chg_page_arm();                                              /* PAD-660 */
+    chg_pages_arm();                                             /* PAD-663 */
 }
 
 /* ---- round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract; Bond LE/Pro 1.06)
@@ -10144,9 +10484,9 @@ static void challenges_arm(void)
         can |= PM_CAN_CHALLENGE;
         say("challenges: %d of the game's a mode may take the place of (flag %ld for a challenge game)", challenges_n,
             pm_port_value("challenge_on_flag", 0));
-
-        chg_scores_arm();                                /* PAD-640 */
     }
+    /* PAD-640; PAD-663: a menu of challenges of the modes' own (Foo Fighters, Mandalorian) keeps their champions too */
+    if (challenges_n || site("challenge_menu")) chg_scores_arm();
     if (site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
         && pm_port_value("challenge_menu_list_at", 0) > 0
         && (pm_port_value("challenge_menu_count_at", 0) > 0 || pm_port_value("challenge_menu_count_reg", -1) >= 4)

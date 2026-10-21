@@ -188,10 +188,10 @@ def test_the_wrap_points_the_entry_at_the_modes_record_and_puts_it_back():
     src = RUNTIME.read_text(encoding="utf-8")
     body = _host()._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     swap = body.index("ent[0] = (unsigned)(unsigned long)chg_rec;")
-    call = body.index("ret = chg_scores_game(r0, r1, r2, r3);")
+    call = body.index("ret = chg_scores_game(r0, r1, r2, r3);", swap)        # PAD-663: an early return calls it too
     back = body.index("ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];")
     assert swap < call < back                          # the game's own record is pointed back to before anything else
-    assert "chg_hs.slot = -1;" in body.split("if (slot >= 0", 1)[0]   # one game's, once
+    assert "chg_hs.on = 0;" in body.split("if (on && ", 1)[0]       # one game's, once (PAD-663: a flag, not slot -1)
     arm = _host()._lift(src, "static void chg_scores_arm(void)")
     assert "hook_wrap(fn(\"challenge_scores\")" in arm
     assert "chg_picked(own_challenge[k].by, 0, own_challenge[k].name);" in src      # an own one plays as challenge 0's

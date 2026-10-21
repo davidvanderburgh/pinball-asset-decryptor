@@ -327,7 +327,7 @@ lamp 307          0              ANGUIRUS  # lamp 118, I/O group 6 index 47, at 
 lamp 308,309,310  0              TOP SAUCER  # lamp 119, I/O group 6 index 28, at 209,410
 lamp 311,312,313  0              BOTTOM SAUCER  # lamp 120, I/O group 6 index 17, at 215,436
 lamp 314          0              SAUCER  # lamp 121, I/O group 6 index 8, at 225,450
-lamp 315          0              ATTACK MECHA  # lamp 122, I/O group 6 index 23, at 200,381
+lamp 315          0x20000        ATTACK MECHA  # PAD-669: + the shield ramp spinner shot (0x20000), the insert the game's Ebirah battle names for it; lamp 122, I/O group 6 index 23, at 200,381
 lamp 316          0              TANK 6  # lamp 123, I/O group 6 index 22, at 227,394
 lamp 317          0x2000000000   SELECT CITY  # lamp 124, I/O group 6 index 21, at 236,380
 lamp 318,319,320  0x14000000000  MECHA LANE  # PAD-658: + the Mecha exit bottom shot (0x10000000000); lamp 125, I/O group 6 index 24, at 282,393

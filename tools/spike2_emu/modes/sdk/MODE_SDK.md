@@ -359,13 +359,19 @@ picture** (Pro 1.15: 585, 260, 86); 24 lines carry a shot. The inserts of the sh
 | Left / right return lane | LEFT / RIGHT RETURN LANE | | the outlanes (0x8, 0x20) | LEFT / RIGHT OUTLANE |
 | the left spinner (0x800000000) | LEFT SPINNER (RGB) | | the top spinner (0x800, 0x1000) | TOP SPINNER (RGB) |
 | 0x2000000000 | SELECT CITY | | 0x4000000000 | MECHA LANE (RGB) |
+| the shield ramp spinner (0x20000; a Pro's right spinner) | ATTACK MECHA | | | |
+
+PAD-658 and PAD-669 added ties the game's shot table lacks: the Left spinner's, Top spinner's and Mecha exit
+bottom's switch shots (0x200, 0x2000, 0x10000000000) to LEFT SPINNER, TOP SPINNER and MECHA LANE, and the shield
+ramp spinner's (0x20000) to ATTACK MECHA - the insert in front of it, the one the game's own Ebirah battle lights
+for that spinner (`ebirah_stage_lamp_shield`).
 
 The rest are named but tied to no shot by the game: the feature inserts in front of each ramp
 (TANK 2, ADV TRAIN, MAGNA GRAB, TANK 3, ATTACK BRIDGE before the left ramp; TANK 5, HEAT RAY L1-L3,
 HEAT RAY before the right; LITE DESTRUCTION JACKPOT, TANK 4, TESLA STRIKE, BUILDING FIRE LEFT/RIGHT
 1-3 at the building; DESTRUCTION JACKPOT, TAIL WHIP inside the big loop), the scoop's SCOOP BB-BATTLE
 / -GODZILLA PWR UP / -SUMMON ALLY (the scoop dispatches only 0x1), the saucers and allies (TOP /
-BOTTOM SAUCER, SAUCER, MOTHRA, RODAN, ANGUIRUS, ATTACK MECHA, TANK 6), the cities and wizard modes
+BOTTOM SAUCER, SAUCER, MOTHRA, RODAN, ANGUIRUS, TANK 6), the cities and wizard modes
 (NY, LONDON, PARIS, TOKYO, PLANET X, KAIJU, BRIDGE, POWER, TANKS, the three WIZ), the fighters, lanes
 and SHOOT AGAIN, and the GI strings and flashers (their lines carry one light each). The
 port's lines say where each is (`# lamp N, I/O group G index I, at x,y` on the playfield picture).

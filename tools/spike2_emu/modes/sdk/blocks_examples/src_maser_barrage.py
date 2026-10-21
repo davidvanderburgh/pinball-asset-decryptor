@@ -8,7 +8,8 @@ quarter of it.
 
 - START: the Maser target 3 times in one ball (PAD-371: never the skill shot); 6 the second time this game, 9 the
   third (each start costs more); every hit a note says how many more (MASER TARGET, 2  -  MORE TO OPEN FIRE). Once a
-  ball per player. It waits out a multiball: the next Maser hit after it starts it.
+  ball per player. No hit counts in a multiball (PAD-669); counted out while one runs, the next Maser hit after
+  it starts it.
 - STAGE 1, OPEN FIRE (the C's chain): LEFT RAMP, then RIGHT RAMP, then the BUILDING; only the next shot counts (and
   only it is lit): 1,000,000 x the multiplier. After a step the next must come within the window (pack.WINDOW_S, 20 s,
   every time; the line counts it down: SHOOT THE RIGHT RAMP IN 18), or the CHAIN BREAKS: back to x1, from the Left
@@ -37,7 +38,7 @@ import itertools
 from blk import (AND, OR, SECS_LEFT, a_show, add, add_time, award, callout, change, clip, clips, div, end, eq, every,
                  ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, lt, mul, music, off,
                  off_insert, on_end, on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game,
-                 show, sound, sounds, start, step, sub, timer_left, timer_start, timer_stop, var, hits, beds)
+                 show, sound, sounds, start, step, sub, timer_left, timer_start, timer_stop, var, beds)
 import pack
 
 SLUG, NAME = "maser_barrage", "MASER BARRAGE"
@@ -186,9 +187,13 @@ def hurry_pace():
 
 SCRIPTS = [
     # ---- the start: the Maser target three times in one ball (six the second time, nine the third) -------------------
+    # (PAD-669: its own count, so no hit counts in a multiball - the game's hit count counts them all; one counted
+    # out but held off starts it on the next hit)
     on_shot(START_SHOT, if_(eq("ran ball", 0), [
-        if_(ge(hits(START_SHOT), NEED), [start()], [
-            award("MASER TARGET", value=sub(NEED, hits(START_SHOT)), sub="MORE TO OPEN FIRE", seconds=pack.NOTE_S)]),
+        if_(ge("masers", NEED), [start()], [if_(pack.ONE_BALL, [
+            change("masers", 1),
+            if_(ge("masers", NEED), [start()], [
+                award("MASER TARGET", value=sub(NEED, var("masers")), sub="MORE TO OPEN FIRE", seconds=pack.NOTE_S)])])]),
     ]), when="idle"),
     on_start(set_("ran ball", 1), change("fired", 1), set_("maser played", 1),
              set_("stage", 1), set_("pot", 0), set_("cashed", 0), set_("won", 0), set_("step", 0),
@@ -306,7 +311,7 @@ SCRIPTS = [
 PROGRAM = {
     "name": NAME, "seconds": pack.STAGE_S, "ends_on_drain": True, "screen": False, "game_modes": "block",
     "wait_multiball": True, "priority": 180,
-    "vars": [{"name": "ran ball", "reset": "ball"}, {"name": "fired", "reset": "game"}] +
+    "vars": [{"name": n, "reset": "ball"} for n in ("ran ball", "masers")] + [{"name": "fired", "reset": "game"}] +
             [{"name": n, "reset": "game", "shared": True} for n in ("maser played", "maser won")] +
             [{"name": n, "reset": "mode"} for n in ("step", "mult", "best", "barrages", "breaks", "pace", "stage",
                                                     "pot", "cashed", "won", "volleys", "aimed", "hit value")] +
@@ -381,6 +386,9 @@ _STAGE2 = (_LINE + ["shot", START_SHOT, "ms", 500]) * 2 + ["secs", 1]
 _SHOT3 = ["shot", AIM, "secs", 2, "shot", TARGET, "secs", 2]
 #: the desk scenarios (make_examples.py --desk): what, the harness's commands, lines its output must hold
 DESK = [
+    # PAD-669: a multiball's Maser hits count for nothing: back to one ball, 1 more says 2 to go, no start
+    ("no hit counts in a multiball", ["balls", 2] + MASER3 + ["balls", 1, "secs", 1] + _M + ["secs", 2],
+     ["Hud_Line: 2  -  MORE TO OPEN FIRE", "![MASER BARRAGE] START (a block)"]),
     ("three Maser hits start it", _M * 2 + ["shot", START_SHOT, "secs", 5],
      ["Hud_Title: MASER TARGET", "Hud_Line: 2  -  MORE TO OPEN FIRE", "Hud_Line: 1  -  MORE TO OPEN FIRE",
       "[MASER BARRAGE] START (a block)", "Hud_Line: SHOOT THE LEFT RAMP", "LAMP LEFT RAMP 005aff blink 500",

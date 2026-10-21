@@ -7,9 +7,9 @@ through the stages, cashed out at the right scoop once a stage is done, each sta
 and failing still pays a quarter of the pot.
 
 - START: powerline hits in one ball: each of the three once the first time (3), twice the second (6), three times
-  the third (9). Once a ball per player. It waits out one of the game's battles or a multiball: the next powerline
-  hit after it starts it. Every hit says how many are left (POWERLINE HITS, 2 TO SUMMON GHIDORAH); a powerline that
-  has counted all it may says ANOTHER POWERLINE.
+  the third (9). Once a ball per player. No hit counts in a multiball (PAD-669). It waits out one of the game's
+  battles or a multiball: the next powerline hit after it starts it. Every hit says how many are left (POWERLINE
+  HITS, 2 TO SUMMON GHIDORAH); a powerline that has counted all it may says ANOTHER POWERLINE.
 - STAGE 1, THE HEADS (the C's battle): LEFT = Left ramp (2) or Powerline left (1); MIDDLE = Building (2) or
   Powerline center (1); RIGHT = Right ramp (2) or Powerline right (1). The lit head: 1M a point of damage; another
   head: a glancing blow, 250K. The lit head turns every 14 s (12 s the second time, 10 s the third: a moving target
@@ -158,12 +158,12 @@ def qualify(i):
     left = sub(NEED, var("pl hits"))
     # (counted out but held off by one of the game's battles: any powerline starts it once it may)
     return on_shot(HEADS[i][2], if_(eq("ran ball", 0), [
-        if_(ge("pl hits", NEED), [start()], [
+        if_(ge("pl hits", NEED), [start()], [if_(pack.ONE_BALL, [      # PAD-669: none counts in a multiball
             if_(le(pl, var("starts")), [
                 change(pl, 1), change("pl hits", 1),
                 if_(ge("pl hits", NEED), [start()], [
                     award("POWERLINE HITS", value=left, sub="TO SUMMON GHIDORAH", seconds=pack.NOTE_S)]),
-            ], [award("ANOTHER POWERLINE", value=left, sub="TO SUMMON GHIDORAH", seconds=pack.NOTE_S)])]),
+            ], [award("ANOTHER POWERLINE", value=left, sub="TO SUMMON GHIDORAH", seconds=pack.NOTE_S)])])]),
     ]), when="idle")
 
 
@@ -400,6 +400,9 @@ _SEVER_ALL = ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "ms", 300, "
 _WINGS = ["shot", "Big loop", "ms", 600, "shot", "Mecha exit bottom", "ms", 600] * 2 + ["secs", 1]
 #: the desk scenarios (make_examples.py --desk): what, the harness's commands, lines its output must hold
 DESK = [
+    # PAD-669: a multiball's powerline hits count for nothing: back to one ball, 1 more says 2 to go, no start
+    ("no hit counts in a multiball", ["balls", 2] + POWER3 + ["balls", 1, "secs", 1] + ["shot", "Powerline left"] + ["secs", 2],
+     ["Hud_Line: 2  -  TO SUMMON GHIDORAH", "![KING GHIDORAH] START (a block)"]),
     ("the powerlines start it", ["shot", "Powerline left", "secs", 1] + POWER3 + ["secs", 5],
      ["Hud_Title: POWERLINE HITS", "Hud_Line: 2  -  TO SUMMON GHIDORAH", "Hud_Title: ANOTHER POWERLINE",
       "Hud_Line: 1  -  TO SUMMON GHIDORAH",

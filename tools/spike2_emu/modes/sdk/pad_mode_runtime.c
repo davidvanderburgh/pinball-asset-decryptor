@@ -6307,8 +6307,14 @@ static void building_arm(void)
  *      at least SHAKE_MIN_MS.
  *   4. PAD-658: one of ours at a time, as the game's own call has it: a new one longer than what is left of
  *      the one running takes the motor over, a shorter one is skipped (the 20 a minute PAD-414 set is gone).
- *   5. PAD-658: SHAKE_ON_MS of the motor RUNNING ours in any 60 s - counted as it runs, so a shake cut short
- *      or taken over counts only what ran (PAD-414 counted every shake whole, against 15 s).
+ *   5. PAD-658: SHAKE_ON_MS of the motor RUNNING in any 60 s - counted as it runs, so a shake cut short
+ *      or taken over counts only what ran (PAD-414 counted every shake whole, against 15 s). PAD-670: the
+ *      game's own shakes count too (read off the drive's time left each tick): the motor heats the same
+ *      whoever asked. Measured, not picked: the stock Godzilla LE 1.16 in 6.7 min of hard play (rig, real time,
+ *      the setting at its default Maximal Use) ran its motor 13.5 s in its busiest minute, 42 s in all, 5.1 s
+ *      at most unbroken; Stern's own Cycling Coil Test 1 s a pass; the game's call has no limit a minute and
+ *      no motor rating is published. 30 s is that busiest minute twice over, and keeps the motor off at least
+ *      half of every minute.
  *   6. Stopped (the game's own stop) when the ball ends, or the game ends or tilts - unless the game has since
  *      asked for a longer shake of its own, which then has the motor. PAD-658: a mode's end leaves its shake
  *      to run out (the board ends each step; a game shake's steps still to come are the port's own).
@@ -6329,9 +6335,10 @@ static void building_arm(void)
  * coil_fire on the drive (what `site shake_stop` sends on the first). */
 #define SHAKE_MIN_MS        100u
 #define SHAKE_STRENGTHS       4u
-#define SHAKE_ON_MS       30000u   /* PAD-658: the motor's running time the modes may use in any 60 s (what ran) */
+#define SHAKE_ON_MS       30000u   /* PAD-658/670: the motor's running time (the game's and ours) in any 60 s */
 #define SHAKE_HANDOVER_MS    50u   /* PAD-658: a shake taking over starts this long after ours is stopped */
 #define SHAKE_RETRY_MS      150u   /* ... and a step is sent again this long while the motor still runs */
+#define SHAKE_SEEN_MS       150u   /* PAD-670: a step sent is on the drive by then (the game's coil service sends it) */
 #define SHAKE_STEPS           8u
 #define SHAKE_CALL_STRENGTH   0    /* PAD-474: shake(ms, strength, force) */
 #define SHAKE_CALL_MS         1    /* "ms force": shake(ms, force) */
@@ -6348,6 +6355,7 @@ static struct {
     unsigned long sent_until;               /* pm_ms() the step we sent last runs to: the motor is ours till then */
     unsigned long sent_from;                /* PAD-658: pm_ms() that step began */
     unsigned long counted_to;               /* PAD-658: the motor's running time counted up to here */
+    unsigned long game_until;               /* PAD-670: pm_ms() the game's own shake runs to, as the drive read */
     unsigned long run_sec[60];              /* PAD-658: the second (+1) each bucket counts, 0 = none */
     unsigned run_ms[60];                    /* ... and how long the motor ran ours in it */
     struct shake_step step[SHAKE_STEPS];    /* a game shake under way: its steps after the first */
@@ -6382,8 +6390,8 @@ static unsigned shake_parse(const char *t, const unsigned max_ms[SHAKE_STRENGTHS
     return n;
 }
 
-/* Why a shake of `ms` (all its steps) may not start now, or 0; `ran_ms` is what the motor ran ours in the last 60 s.
- * (tests lift it verbatim) */
+/* Why a shake of `ms` (all its steps) may not start now, or 0; `ran_ms` is what the motor ran in the last 60 s (the
+ * game's shakes and ours). (tests lift it verbatim) */
 static const char *shake_refusal(int running_mode, int in_game, unsigned setting, int game_shaking, unsigned ran_ms,
                                  unsigned ms)
 {
@@ -6391,16 +6399,15 @@ static const char *shake_refusal(int running_mode, int in_game, unsigned setting
     if (!in_game) return "no game is being played (attract or a tilt)";
     if (!setting) return "the operator has the shaker switched off (or none is fitted)";
     if (game_shaking) return "one of the game's own shakes is running";
-    if (ran_ms + ms > SHAKE_ON_MS) return "the modes have run the shaker for 30 s in the last minute already";
+    if (ran_ms + ms > SHAKE_ON_MS) return "the shaker has run 30 s in the last minute already (the game's and ours)";
     return 0;
 }
 
-/* PAD-658: the motor's running time for the modes' shakes, counted as it runs (from the step sent last, to now or its
- * end) in a bucket a second; a shake cut short or taken over counts only what ran. (tests lift both verbatim) */
-static void shake_count(unsigned long now)
+/* PAD-658: the motor's running time, counted as it runs in a bucket a second: ours from the step sent last, to now or
+ * its end; PAD-670: the game's own to now or the end the drive read last (shake_watch). A shake cut short or taken
+ * over counts only what ran. (tests lift these three verbatim) */
+static void shake_add(unsigned long t, unsigned long end)
 {
-    unsigned long t = shk.counted_to > shk.sent_from ? shk.counted_to : shk.sent_from;
-    unsigned long end = shk.sent_until < now ? shk.sent_until : now;
     while (t < end) {
         unsigned long sec = t / 1000ul, stop = (sec + 1ul) * 1000ul;
         unsigned b = (unsigned)(sec % 60ul);
@@ -6409,10 +6416,34 @@ static void shake_count(unsigned long now)
         shk.run_ms[b] += (unsigned)(stop - t);
         t = stop;
     }
+}
+
+static void shake_count(unsigned long now)
+{
+    unsigned long from = shk.counted_to;
+    shake_add(from > shk.sent_from ? from : shk.sent_from, shk.sent_until < now ? shk.sent_until : now);
+    shake_add(from, shk.game_until < now ? shk.game_until : now);
     if (now > shk.counted_to) shk.counted_to = now;
 }
 
-static unsigned shake_ran(unsigned long now)       /* what the motor ran ours in the last 60 s */
+/* PAD-670: the drive's time left, read each tick: more than what is left of ours (or ours not running) is one of the
+ * game's own on the motor - counted as it runs from here, and ours, when the game took it over, no longer. Nothing
+ * left once ours has had SHAKE_SEEN_MS to reach the drive is ours stopped - the game's own stop cuts it at its own
+ * events (emulator, stock LE 1.16: three of six 5 s shakes cut 3.5, 4.0 and 0.5 s short) - counted no longer either */
+static void shake_watch(unsigned long now, unsigned left)
+{
+    int ours = shk.sent_until > now && left <= shk.sent_until - now + 50ul;
+    shake_count(now);
+    if (!left && ours && now - shk.sent_from >= SHAKE_SEEN_MS) shk.sent_until = now;
+    if (left && !ours) {
+        if (shk.sent_until > now) shk.sent_until = now;
+        shk.game_until = now + left;
+    } else if (shk.game_until > now) {
+        shk.game_until = now;                 /* the game's ended, was stopped, or ours took the motor */
+    }
+}
+
+static unsigned shake_ran(unsigned long now)       /* what the motor ran in the last 60 s (the game's and ours) */
 {
     unsigned long sec = now / 1000ul + 1ul;
     unsigned b, sum = 0;
@@ -6479,6 +6510,7 @@ static unsigned shake_send(unsigned ms, unsigned strength)
         r = ((unsigned (*)(unsigned, unsigned, unsigned))(unsigned long)fn("shake"))(ms, strength, 0) & 0xffu;
     if (!r) return 0;
     if (ms > cap) ms = cap;
+    if (shk.game_until > now) shk.game_until = now;     /* PAD-670: ours has the motor now, not counted twice */
     shk.sent_from = now;
     shk.sent_until = now + ms;
     if (shk.sent_until > shk.until) shk.until = shk.sent_until;
@@ -6633,7 +6665,8 @@ static void shake_mode_ended(void)
 static void shake_tick(void)
 {
     struct shake_step *s;
-    shake_count(pm_ms());                    /* PAD-658: the running time, as it runs */
+    if (!(can & PM_CAN_SHAKER)) return;
+    shake_watch(pm_ms(), shake_left());      /* PAD-658/670: the motor's running time, the game's and ours, as it runs */
     if (!shk.until) return;
     if (!pm_in_game()) { shake_let_go("the game ended or tilted"); return; }
     if (!running && !shk.outlast) { shake_let_go("no mode is running"); return; }
@@ -6687,8 +6720,8 @@ static void shake_arm(void)
     }
     can |= PM_CAN_SHAKER;
     say("shaker: a mode may shake the cabinet through %s 0x%08x (drive %ld, setting %ld); at most "
-        "%u/%u/%u/%u ms at strength 0..3, one at a time (the longer takes over), %u s of shaking a minute, run out "
-        "at the mode's end", how[shk.call], fn("shake"), pm_port_value("shake_drive", 0), pm_port_value("shake_adj", 0),
+        "%u/%u/%u/%u ms at strength 0..3, one at a time (the longer takes over), %u s of the motor running a minute "
+        "(the game's shakes too), run out at the mode's end", how[shk.call], fn("shake"), pm_port_value("shake_drive", 0), pm_port_value("shake_adj", 0),
         shk.max_ms[0], shk.max_ms[1], shk.max_ms[2], shk.max_ms[3], SHAKE_ON_MS / 1000);
 }
 

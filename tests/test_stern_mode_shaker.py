@@ -6,7 +6,8 @@ What is worth failing on:
   * ONLY THROUGH THE GAME'S OWN SHAKE: the operator's SHAKER MOTOR setting always applies (off = nothing), the
     runtime never forces it, and the stop is the game's own.
   * THE LIMITS ARE THE RUNTIME'S: the running mode, in a game, the setting on, not over the game's own shake,
-    30 s of the motor running ours a minute (counted as it runs) - in that order of reasons; never longer than the
+    30 s of the motor running a minute (counted as it runs; PAD-670: the game's own shakes too) - in that order of
+    reasons; never longer than the
     game's own longest shake at that strength. PAD-658: one of ours at a time as the game's own call has it - the
     longer one takes the motor over, a shorter one is skipped (PAD-414's 20 a minute and 15 s counted whole are gone).
   * A BALL END, GAME END OR TILT STOPS IT; PAD-658: the mode's end leaves it to run out (PAD-414 kept only the
@@ -93,7 +94,7 @@ int main(void)
     assert rows["no_game"].startswith("no game is being played")
     assert rows["setting_off"].startswith("the operator has the shaker switched off")
     assert rows["theirs"].startswith("one of the game's own shakes is running")
-    assert rows["on_time_full"].startswith("the modes have run the shaker for 30 s")
+    assert rows["on_time_full"].startswith("the shaker has run 30 s in the last minute already")
     assert rows["on_time_fits"] == "-"
     assert rows["many_short_ones"] == "-"
     assert "SHAKE_PER_MIN" not in src and "#define SHAKE_ON_MS       30000u" in src
@@ -104,8 +105,9 @@ def test_the_running_time_is_counted_as_it_runs(tmp_path):
     """PAD-658: what the motor ran ours, a bucket a second - a shake cut short counts what ran, a minute ago drops out."""
     src = _rt()
     code = "#include <stdio.h>\n" + r"""
-static struct { unsigned long sent_until, sent_from, counted_to, run_sec[60]; unsigned run_ms[60]; } shk;
-""" + _lift(src, "static void shake_count(") + "\n" + _lift(src, "static unsigned shake_ran(") + r"""
+static struct { unsigned long sent_until, sent_from, counted_to, game_until, run_sec[60]; unsigned run_ms[60]; } shk;
+""" + _lift(src, "static void shake_add(") + "\n" + _lift(src, "static void shake_count(") + "\n" + \
+        _lift(src, "static unsigned shake_ran(") + r"""
 int main(void)
 {
     shk.sent_from = 10500, shk.sent_until = 12000;      /* 1.5 s from 10.5 s */
@@ -121,6 +123,64 @@ int main(void)
 """
     rows = dict(line.split("|", 1) for line in _compile_run(tmp_path, code).strip().splitlines())
     assert rows == {"half": "500", "whole": "1500", "cut": "2700", "later": "1200", "gone": "0"}
+
+
+@needs_cc
+def test_the_games_own_shakes_count_too(tmp_path):
+    """PAD-670: the motor heats the same whoever asked - the game's own shakes, read off the drive's time left each
+    tick, count against the same 30 s; one of the game's taking ours over ends ours' count, ours taking the motor (or
+    the game's own stop) ends the game's, and nothing is counted twice. The game's own stop cutting ours short ends
+    ours' count too (the emulator: three of six 5 s shakes cut by the game's OFF were counted whole)."""
+    src = _rt()
+    code = "#include <stdio.h>\n" + r"""
+static struct { unsigned long sent_until, sent_from, counted_to, game_until, run_sec[60]; unsigned run_ms[60]; } shk;
+""" + _lift(src, "static void shake_add(") + "\n" + _lift(src, "static void shake_count(") + "\n" + \
+        _lift(src, "static void shake_watch(") + "\n" + _lift(src, "static unsigned shake_ran(") + r"""
+static void ticks(unsigned long from, unsigned long to, unsigned long drive_until)   /* a tick every 10 ms */
+{
+    unsigned long t;
+    for (t = from; t <= to; t += 10) shake_watch(t, drive_until > t ? (unsigned)(drive_until - t) : 0u);
+}
+int main(void)
+{
+    ticks(1000, 3000, 0);                               /* nothing on the motor */
+    printf("idle|%u\n", shake_ran(3000));
+    ticks(3010, 6000, 5010);                            /* the game's own 2 s rumble from 3.01 s */
+    printf("game|%u\n", shake_ran(6000));
+    shk.sent_from = 10000, shk.sent_until = 11000;      /* ours, 1 s from 10 s, the drive reading it */
+    ticks(10000, 12000, 11000);
+    printf("ours_too|%u\n", shake_ran(12000));
+    shk.sent_from = 20000, shk.sent_until = 25000;      /* ours, 5 s ... */
+    ticks(20000, 20990, 25000);
+    ticks(21000, 23000, 26000);                         /* ... the game's longer one takes the motor at 21 s, to 26 s */
+    printf("taken_over|%u|%lu\n", shake_ran(23000), shk.sent_until);
+    ticks(23010, 23500, 0);                             /* the game's own stop, seen a tick later */
+    printf("game_stopped|%u|%lu\n", shake_ran(23500), shk.game_until);
+    printf("a_minute_on|%u\n", shake_ran(81500));      /* only the take-over's tail still inside the minute */
+    before = shake_ran(30000);
+    shk.sent_from = 30000, shk.sent_until = 35000;      /* ours, 5 s ... */
+    ticks(30000, 31490, 35000);
+    ticks(31500, 36000, 0);                             /* ... the game's own stop cuts it at 1.5 s */
+    printf("cut|%u|%lu\n", shake_ran(36000) - before, shk.sent_until);
+    before = shake_ran(40000);
+    shk.sent_from = 40000, shk.sent_until = 41000;      /* ours, 1 s: the drive reads 0 for 40 ms, till the game */
+    ticks(40000, 40040, 0);                             /* sends it */
+    ticks(40050, 42000, 41000);
+    printf("not_yet_sent|%u\n", shake_ran(42000) - before);
+    return 0;
+}
+"""
+    code = code.replace("int main(void)\n{", "int main(void)\n{\n    unsigned before;", 1)
+    code = "\n".join(re.findall(r"^#define SHAKE_\w+ .*$", src, re.M)) + "\n" + code
+    rows = dict(line.split("|", 1) for line in _compile_run(tmp_path, code).strip().splitlines())
+    assert rows["idle"] == "0"
+    assert rows["game"] == "2000"                       # the game's own counted as it ran
+    assert rows["ours_too"] == "3000"                   # ours once, not twice with the drive reading it
+    assert rows["taken_over"] == "6000|21000"           # ours 1 s, then the game's 2 s; ours' count ended at 21 s
+    assert rows["game_stopped"] == "6010|23010"         # nothing after the tick that saw the stop
+    assert rows["a_minute_on"] == "1010"                # 22 s on: the take-over's tail
+    assert rows["cut"] == "1500|31500"                  # what ran, not the 5 s asked for
+    assert rows["not_yet_sent"] == "1000"               # the drive's moment at 0 straight after a send is no stop
 
 @needs_cc
 def test_a_game_shake_is_read_in_order_and_clamped_to_the_games_own_longest(tmp_path):

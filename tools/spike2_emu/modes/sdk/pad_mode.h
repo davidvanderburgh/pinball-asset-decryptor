@@ -609,8 +609,9 @@ int pm_game_shows(void);
  *   - `ms` is at least 100 and never longer than the game's own longest shake at that strength (Godzilla:
  *     1000 ms at 0 and 1, 5000 ms at 2 and 3; the port's `text shake_max_ms`).
  *   - only while your mode runs, in a game (not attract, not tilted); never with the shaker set to off (or
- *     none fitted), or while one of the game's own shakes runs; at most 30 s of the motor running the modes'
- *     shakes in any minute (counted as it runs: a shake cut short counts what ran). PAD-658: one of yours at a
+ *     none fitted), or while one of the game's own shakes runs; at most 30 s of the motor running in any minute
+ *     (counted as it runs: a shake cut short counts what ran; PAD-670: the game's own shakes count too - the
+ *     ceiling is the motor's, measured against the game's busiest minute, MODE_SDK.md). PAD-658: one of yours at a
  *     time, as the game's own call has it - a longer one takes the motor over, a shorter one is skipped (0).
  *   - the runtime stops your shake when the ball ends, or the game ends or tilts (and on pm_shake_stop) -
  *     unless the game has since asked for a shake of its own, which it leaves to run. PAD-658: your mode's end

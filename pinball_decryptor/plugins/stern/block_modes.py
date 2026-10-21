@@ -2340,10 +2340,14 @@ def to_c(program, slug):
 
     hud = program["hud"]
     has_hud = hud["on"]
-    # PAD-658: a note shows over the mode's first clip "over and over" (When the mode starts' first, else any script's)
-    loops = [b.get("clip") for s in sorted(program["scripts"], key=lambda s: (s.get("hat") or {}).get("kind") != "mode_start")
-             for b in _walk(s.get("do") or []) if b.get("op") == "clip" and b.get("where") == "loop" and b.get("clip")]
-    note_cue = loops[0] if media and has_hud and loops else None
+    # PAD-658: the clip a note, and a TOTAL with nothing looping, show over: the mode's first clip "over and over"
+    # (When the mode starts' first, else any script's), else the first clip When the mode starts plays (ANGUIRUS: his
+    # entrance), else its first clip
+    in_order = [b for s in sorted(program["scripts"], key=lambda s: (s.get("hat") or {}).get("kind") != "mode_start")
+                for b in _walk(s.get("do") or []) if b.get("op") == "clip" and b.get("clip")]
+    covers = [b["clip"] for b in in_order if b.get("where") == "loop"] + [b["clip"] for b in in_order] + \
+        [c["name"] for c in program.get("clips") or []]
+    note_cue = covers[0] if media and has_hud and covers else None
     # PAD-375: a mode with a HUD or a screen of its own watches the game's displays (the kit's
     # kit_display): its words step aside under one, so it holds a display priority while it runs
     watch = has_hud or program["screen"]
@@ -2937,6 +2941,8 @@ def to_c(program, slug):
     L.append("    run.on = 0;")
     if media:
         L.append("    loop_waiting = 0;")
+        if note_cue:
+            L.append("    if (!looping) cover_total();       /* PAD-658: nothing loops: its cover clip behind the TOTAL */")
         L.append("    looping = 0;                      /* PAD-658: the runtime keeps the loop behind the TOTAL it holds, then")
         L.append("                                       * the city again (at once for an end that holds nothing) */")
         L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
@@ -4051,16 +4057,23 @@ def uses_media(program):
 # PAD-658: a note (the mode not running) over the mode's own loop clip, as the game's own feedback screens letter their
 # two lines over a clip of theirs (MASER CANNON CHARGING): on the live city the note's words sat on the game's map labels
 # (run bedfix_pro_r1, bf_ready_c: HE JOINS THE NEXT BATTLE over TANKS 0/10). Its first "over and over" clip.
-_NOTE_LOOP_C = """/* PAD-658: a note shows over the mode's own loop, as the game's feedback screens show over a clip of theirs */
-#define NOTE_LOOP %(cue)s
+_NOTE_LOOP_C = """/* PAD-658: a note shows over the mode's own loop (its cover clip), as the game's feedback screens show over a clip
+ * of theirs; a TOTAL too when nothing loops as it ends */
+#define COVER_CLIP %(cue)s
 static int note_looping;
 UNUSED static void note_loop(void)
 {
     const char *n;
-    if (note_looping || hud.metering || !own_clip(NOTE_LOOP)) return;
-    n = pa_clip_name(&own, NOTE_LOOP);
+    if (note_looping || hud.metering || !own_clip(COVER_CLIP)) return;
+    n = pa_clip_name(&own, COVER_CLIP);
     note_looping = n && pm_backdrop(n);
-    if (note_looping) pm_log("own clip %%s (%%s) behind its note", NOTE_LOOP, n);
+    if (note_looping) pm_log("own clip %%s (%%s) behind its note", COVER_CLIP, n);
+}
+
+static void cover_total(void)
+{
+    const char *n = pa_clip_name(&own, COVER_CLIP);
+    if (n && pm_backdrop(n)) pm_log("own clip %%s (%%s) behind its TOTAL", COVER_CLIP, n);
 }
 
 static void note_loop_tick(void)

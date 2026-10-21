@@ -1254,7 +1254,7 @@ def test_a_note_shows_over_the_modes_loop(tmp_path, monkeypatch):
     p = _hud_media_prog()
     p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
         {"op": "hud_award", "text": "READY", "value": None, "sub": "", "seconds": 2}]})
-    assert "#define NOTE_LOOP \"loop\"" in BM.to_c(p, "blk")
+    assert "#define COVER_CLIP \"loop\"" in BM.to_c(p, "blk")
     assert "note_loop" not in BM.to_c(_media_prog(), "blk")            # no HUD: no note
     monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
     out = play(tmp_path, p, "shot", "Big loop", "secs", 4)
@@ -1264,6 +1264,23 @@ def test_a_note_shows_over_the_modes_loop(tmp_path, monkeypatch):
     out = play(tmp_path, p, "shot", "Big loop", "secs", 0.5, "shot", "Building", "secs", 3)
     assert "BACKDROP PadMode_blk_Loop" in out and "BACKDROP OFF" not in out
     assert "[TEST MODE] START" in out
+
+
+def test_with_no_loop_its_start_clip_covers_its_note_and_its_total(tmp_path, monkeypatch):
+    """PAD-658 (run loopfix_r1, lf_an_note_b: ANGUIRUS IS READY over TANKS - he has no loop of his own): a mode with no
+    clip over and over shows its notes and its TOTAL over the first clip it starts with."""
+    _cc()
+    p = _hud_media_prog()
+    p["scripts"][1]["do"] = p["scripts"][1]["do"][:1]                   # its intro, and no loop
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "hud_award", "text": "READY", "value": None, "sub": "", "seconds": 2}]})
+    assert "#define COVER_CLIP \"intro\"" in BM.to_c(p, "blk")
+    monkeypatch.setenv("HARNESS_DUMP", _assets(tmp_path, "blk", p, []))
+    out = play(tmp_path, p, "shot", "Big loop", "secs", 3, "shot", "Building", "secs", 14)
+    assert "own clip intro (PadMode_blk_Intro) behind its note" in out
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert "own clip intro (PadMode_blk_Intro) behind its TOTAL" in out
+    assert 0 <= _at(out, "BACKDROP KEPT behind TEST MODE's ending") - end <= 20
 
 
 def test_a_hud_mode_that_gives_way_takes_its_hud_down_when_a_game_mode_begins(tmp_path):

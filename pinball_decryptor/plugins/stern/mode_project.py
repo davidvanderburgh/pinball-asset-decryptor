@@ -3372,15 +3372,55 @@ def _switch_off_what_it_cannot(spec, p):
     return spec
 
 
-def blank_spec(p, name="NEW MODE"):
+def start_shots_taken(project):
+    """PAD-666: the shots the project's modes already start on, as a set: a form mode's start shot and the shots
+    counted with it (``start_or``, ``start_also``, ``start_sequence``), and the shots a blocks mode watches while
+    it is not running or lights itself at. A new mode starts on a shot of none of these when the game has one."""
+    taken = set()
+    for _slug, spec in list_modes(project)[0] if project else ():
+        if starts_on_event(spec) or starts_on_battle(spec) or starts_on_challenge(spec):
+            continue
+        shots = (spec.start_sequence if starts_on_sequence(spec) else start_shots(spec)) or []
+        taken.update(s for s in shots if isinstance(s, str) and s)
+        taken.update(s for s, _n in _also_rows(spec) or () if isinstance(s, str) and s)
+    from . import block_modes as BM
+    try:
+        slugs = sorted(os.listdir(modes_dir(project))) if project else []
+    except OSError:
+        slugs = []
+    for slug in slugs:
+        if not BM.is_blocks(project, slug):
+            continue
+        try:
+            program = BM.load(project, slug)
+        except (OSError, BM.BlocksError):
+            continue
+        for script in program.get("scripts") or ():
+            hat = script.get("hat") or {}
+            if hat.get("kind") == "shot" and hat.get("when") == "idle" and hat.get("shot"):
+                taken.add(hat["shot"])
+            for b in BM._walk(script.get("do") or []):
+                if b.get("op") == "light_mode" and b.get("shot"):
+                    taken.add(b["shot"])
+    return taken
+
+
+def blank_spec(p, name="NEW MODE", taken=()):
     """A new mode for title ``p``, valid as it stands. On Godzilla Pro 1.15 it is exactly
     ``ModeSpec(name=name)``; elsewhere the port's example start shot starts it, two of its
-    ramps (or its first shots) score, and the parts the title cannot do are off."""
+    ramps (or its first shots) score, and the parts the title cannot do are off.
+    ``taken`` (PAD-666): shots other modes of the project start on (:func:`start_shots_taken`);
+    when the start shot is one, the first playfield shot of none of them that is not a ramp
+    (the ramps score) starts it instead, else the first free one at all."""
     spec = ModeSpec(name=name, title=p.key)
     names = [n for n, _m in p.shots]
     if spec.start_shot not in names:
         spec.start_shot = p.example_start_shot if p.example_start_shot in names else names[0]
-    if not all(s in names for s in spec.scoring_shots):
+    if spec.start_shot in taken:
+        free = [n for n in playfield_shots(p) if n not in taken]
+        spec.start_shot = next((n for n in free if not n.lower().endswith("ramp")),
+                               free[0] if free else spec.start_shot)
+    if not all(s in names for s in spec.scoring_shots) or spec.start_shot in spec.scoring_shots:
         ramps = [n for n in names if n.lower().endswith("ramp") and n != spec.start_shot]
         others = [n for n in names if n not in ramps and n != spec.start_shot]
         spec.scoring_shots = (ramps + others)[:2]

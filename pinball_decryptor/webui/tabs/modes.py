@@ -1693,7 +1693,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         card, or a card whose build has no port) the refusal says why."""
         if self._profile is None or self._no_port:
             raise MP.ModeProjectError(self._no_port or MP.NO_CARD_HELP)
-        return MP.blank_spec(self._profile)
+        return MP.blank_spec(self._profile, taken=MP.start_shots_taken(self.project()))  # PAD-666
 
     # ------------------------------------------------------------------
     # the title: which card, which port (item 148)
@@ -3015,6 +3015,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._save_if_edited()
         p = self._shown or self._profile
         shots = [n for n, _m in p.shots] if p is not None else list(self._shot_names)
+        taken = MP.start_shots_taken(self.project())        # PAD-666: start on a shot no other mode starts on
+        shots = [n for n in shots if n not in taken] + [n for n in shots if n in taken]
         try:
             slug, _path = BM.new_blocks_mode(self.project(), str(name).strip(), shots=shots)
         except (MT.TryItError, OSError) as e:

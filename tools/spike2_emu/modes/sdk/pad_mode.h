@@ -400,6 +400,15 @@ int pm_display_priority(unsigned priority);
  * layered foreground: your screen is under it); 0 otherwise. With no priority held (your mode
  * is not running: a qualification note) it looks at the game's display now (PAD-658). */
 int pm_display_covered(void);
+/* PAD-662: 1 while a screen of the game's own is on the glass under the HUD - a background of its layered display
+ * other than the main play (Godzilla's city): a mode of the game's, a multiball, a qualifying screen like
+ * Mechagodzilla's DEFENSE NEO BARRIER, any of them, listed or not. Its scene letters the game's words where a mode's
+ * are (a title above the score panel, an instruction line under it, counters along the top), so a mode's words step
+ * aside while it is up: the kit HUD moves its lines into the award line and hides its counters, a qualification note
+ * goes into the award line, a mode's own screen is hidden. 0 when the game's own words are not up - the main play, a
+ * mode's clip drawn in that screen's place (its words are not drawn then) - outside a game, or on a port without the
+ * backdrop lines. Watched as drawn; cheap to call every tick. Unlike pm_aside it never ends or refuses a mode. */
+int pm_game_words(void);
 /* Your mode is over (as pm_end: another may begin at once) but its ENDING - a full-screen clip, its
  * total - should keep the screen: the display priority it holds stays for `ms` more, so an award of
  * the game's that waited through the mode does not take the one video surface from the ending clip.

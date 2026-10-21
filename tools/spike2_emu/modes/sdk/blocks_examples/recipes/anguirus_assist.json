@@ -34,6 +34,27 @@
    "length": 5.0,
    "crop": "fill",
    "what": "Anguirus, Rodan and King Caesar lie in a smoking heap, then Godzilla stands triumphant before Mt Fuji"
+  },
+  "bite": {
+   "film": "dam68",
+   "from": 4701.0,
+   "length": 3.2,
+   "crop": "fill",
+   "what": "Anguirus charges out of the dust at Mt. Fuji and clamps his jaws on King Ghidorah's neck, spikes filling the frame (a run of two shots, 1:18:21)"
+  },
+  "allies": {
+   "film": "dam68",
+   "from": 4751.0,
+   "length": 3.8,
+   "crop": "fill",
+   "what": "Anguirus in front and Godzilla behind pin King Ghidorah's necks to the ground together (one shot, 1:19:11)"
+  },
+  "cashout": {
+   "film": "dam68",
+   "from": 5247.2,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Home on Monsterland, Anguirus walks out of the brush, rears up and roars (one shot, 1:27:27)"
   }
  },
  "music": {
@@ -62,6 +83,21 @@
    "from": 2751.0,
    "length": 1.8,
    "what": "Anguirus's roar in the castle fight (the game's own Anguirus roar matches 0.88)"
+  },
+  "cashout": {
+   "film": "dam68",
+   "from": 5247.9,
+   "length": 3.0,
+   "priority": 4,
+   "what": "Anguirus's roar on Monsterland over Ifukube's score, rising and falling away (1:27:28)"
+  }
+ },
+ "beds": {
+  "allies": {
+   "film": "dam68",
+   "from": 352.903,
+   "length": 11.95,
+   "what": "Akira Ifukube's Monsterland theme as Rodan flies over the monsters' island (0:05:52; bed finder loop chroma 0.830, onset 0.429, in tune 0.77, 0 untuned blocks, seam self-check PASS; not the main title march KUMONGA uses, chroma corr -0.32)"
   }
  }
 }

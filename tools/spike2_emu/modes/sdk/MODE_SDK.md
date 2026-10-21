@@ -4075,7 +4075,8 @@ machine; a title other than Bond (every port with `site proc_sleep` offers it).
 > it to a waiter, never cuts a waiter short and never hides a display's words. It WATCHES instead:
 > `pm_display_covered()` is 1 while a display of the game's has the screen (an effect over the
 > layered display, or any layered foreground), and the examples' HUD keeps its middle words blank
-> until it is gone. What follows is how the game layers its display (still true, and what the
+> until it is gone. PAD-658: with no priority held (a mode not running) it looks at the game's display
+> there and then, so a qualification note waits for the game's words too, its time held. What follows is how the game layers its display (still true, and what the
 > watching reads) and the history of the hold.
 
 A mode's screen and clip share the glass with everything the game shows. Without a priority, the

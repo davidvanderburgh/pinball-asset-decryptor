@@ -1318,6 +1318,10 @@ def notes(program):
     if "behind" in wheres and "loop" not in wheres:
         out.append("A clip behind the HUD, once, plays in the place of the mode's loop: start a "
                    "clip over and over behind the HUD first (When the mode starts is the place).")
+    ends = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") == "mode_end"]
+    if any(b.get("op") == "clip" and b.get("where") == "behind" for s in ends for b in _walk(s.get("do") or [])):
+        out.append("A clip behind the HUD in When the mode ends plays full screen: the mode's loop ends with it, "   # PAD-658
+                   "so there is nothing left to play behind. Its TOTAL shows after the clip.")
     return out
 
 
@@ -4061,8 +4065,8 @@ UNUSED static void clip_loop(const char *cue)
 {
     const char *n;
     if (!own_clip(cue)) return;
-    if (!run.on) {
-        pm_log("own clip %%s: not looped behind the HUD - the mode is not running", cue);
+    if (!run.on || ending) {
+        pm_log("own clip %%s: not looped behind the HUD - the mode is %%s", cue, ending ? "ending" : "not running");
         return;
     }
     if (clip_waiting) {
@@ -4075,9 +4079,15 @@ UNUSED static void clip_loop(const char *cue)
            looping ? "asked" : "this port has no backdrop");
 }
 
-/* behind the HUD once, in the loop's place, then the loop again */
+/* behind the HUD once, in the loop's place, then the loop again. In When the mode ends there is no loop left to
+ * play in (PAD-658, run meltdown_r4: the game's screen showed, not the clip): full screen, the TOTAL after it */
 UNUSED static void clip_behind(const char *cue)
 {
+    if (ending) {
+        pm_log("own clip %%s: the mode is ending - played full screen, not behind the HUD", cue);
+        clip_full(cue);
+        return;
+    }
     if (!own_clip(cue)) return;
     if (!run.on || !looping || !pa_clip_event(&own, cue))
         pm_log("own clip %%s: not played behind the HUD - %%s", cue,

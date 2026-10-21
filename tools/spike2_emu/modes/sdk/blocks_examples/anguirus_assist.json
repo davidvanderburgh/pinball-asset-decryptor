@@ -3,20 +3,27 @@
  "slug": "anguirus_assist",
  "order": 105,
  "titles": [
-  "godzilla_le"
+  "godzilla_le",
+  "godzilla_pro"
  ],
  "based_on": "anguirus_assist.c",
- "about": "The C example ANGUIRUS rebuilt in blocks: he joins the game's own battle and leaves with it; the three shields charge his spikes, then the Big loop is a rolling attack that doubles to 16M.",
+ "title_alt": {
+  "godzilla_pro": {
+   "shots": {
+    "Shield target center": "Maser target"
+   }
+  }
+ },
+ "about": "The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (3, then 6, then 9) and he joins the game's own battle; four stages (charge the spikes at the shields, three rolling attacks at the Big loop, three bites at the chasing ramp, the allies' hurry-up at the Building); cash the pot out at the right scoop after any stage. Destroy All Monsters (1968) and Final Wars (2004).",
  "lost": [
   "He joins on the first shot after one of the game's own modes begins (blocks only look at a shot), where the C looked twice a second; and blocks cannot tell a battle from the game's other modes: he joins any of its modes while one ball is in play (its multiballs are left out), where the C joined only kaiju battles.",
-  "He leaves within a second of the game's mode ending (an Every second check) and his total shows at once for 3 s; the C waited for the battle's own total screen first, then kept his 4 s in view.",
-  "As he leaves with the battle, ANGUIRUS TOTAL is the title over his total: the C put it under the total, with no title.",
-  "Ended while the battle still runs (a stop, another of our modes), his total shows alone: the C put ANGUIRUS RETREATS under it. His HUD's title and line are the battle's while it runs, so a title block cannot say it.",
+  "He leaves within a second of the game's mode ending (an Every second check) and his award shows at once; the C waited for the battle's own total screen first, then kept his 4 s in view.",
+  "Ended while the battle still runs (a stop, another of our modes), his total shows under the runtime's ANGUIRUS TOTAL: the C put ANGUIRUS RETREATS under it. His HUD's title and line are the battle's while it runs, so the stage is said by his awards, not by a line or a counter.",
   "His screen is not shared in moments: with the HUD on he holds display priority 180 the whole time he runs, where the C held it only for each moment (entrance, a spike, the roll, a rolling attack) and gave the battle its own displays between them.",
   "His entrance (clip, music, words) comes a fixed 2 s after he joins; the C waited until the battle's start screen had gone (up to 12 s). His music starts as he joins, not with the entrance.",
-  "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls.",
-  "The Big loop's blink quickens once a second (400, 200, 100 ms), where the C stepped it every tick.",
-  "Godzilla LE only: the program names the center shield target; the C charged with two spikes on Godzilla Pro 1.15/1.16's two shields.",
+  "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls; from THE BITE on it stays full.",
+  "The Big loop's chase turns to a fast blink in the window's last 2 s (looked at once a second), where the C stepped its blink every tick.",
+  "On Godzilla Pro 1.16 the Maser target stands in for the center shield (a third spike to charge): the C charged with two spikes on the Pro's two shields.",
   "The C's total gave way at once when another of our modes asked to start; the blocks' runtime TOTAL runs its 3 s."
  ],
  "program": {
@@ -33,6 +40,26 @@
     "reset": "game"
    },
    {
+    "name": "ready",
+    "reset": "game"
+   },
+   {
+    "name": "calls",
+    "reset": "game"
+   },
+   {
+    "name": "joins",
+    "reset": "game"
+   },
+   {
+    "name": "stage",
+    "reset": "mode"
+   },
+   {
+    "name": "pot",
+    "reset": "mode"
+   },
+   {
     "name": "rolling",
     "reset": "mode"
    },
@@ -46,6 +73,38 @@
    },
    {
     "name": "entered",
+    "reset": "mode"
+   },
+   {
+    "name": "bites",
+    "reset": "mode"
+   },
+   {
+    "name": "bite at",
+    "reset": "mode"
+   },
+   {
+    "name": "hurry",
+    "reset": "mode"
+   },
+   {
+    "name": "won",
+    "reset": "mode"
+   },
+   {
+    "name": "cashed",
+    "reset": "mode"
+   },
+   {
+    "name": "left",
+    "reset": "mode"
+   },
+   {
+    "name": "roll ms",
+    "reset": "mode"
+   },
+   {
+    "name": "grip ms",
     "reset": "mode"
    },
    {
@@ -70,6 +129,15 @@
    },
    {
     "name": "charged"
+   },
+   {
+    "name": "next"
+   },
+   {
+    "name": "grip"
+   },
+   {
+    "name": "bite"
    }
   ],
   "hud": {
@@ -154,6 +222,18 @@
    {
     "name": "lost",
     "file": "lost.mp4"
+   },
+   {
+    "name": "bite",
+    "file": "bite.mp4"
+   },
+   {
+    "name": "allies",
+    "file": "allies.mp4"
+   },
+   {
+    "name": "cashout",
+    "file": "cashout.mp4"
    }
   ],
   "sounds": [
@@ -171,13 +251,35 @@
     "name": "won",
     "file": "won.wav",
     "priority": 4
+   },
+   {
+    "name": "cashout",
+    "file": "cashout.wav",
+    "priority": 4
    }
   ],
   "music": "music.wav",
+  "beds": [
+   {
+    "name": "allies",
+    "file": "music_allies.wav"
+   }
+  ],
   "shows": [
    {
     "name": "He enters",
     "steps": [
+     {
+      "fx": "fade_in",
+      "ms": 600,
+      "a": "#ff6e00",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 186,
+      "y": 439
+     },
      {
       "fx": "burst",
       "ms": 700,
@@ -186,8 +288,8 @@
       "at": "xy",
       "rate": 0,
       "gi": "flash",
-      "x": 199,
-      "y": 346
+      "x": 186,
+      "y": 439
      },
      {
       "fx": "spin",
@@ -213,6 +315,79 @@
     "repeat": 1
    },
    {
+    "name": "Spike",
+    "steps": [
+     {
+      "fx": "implode",
+      "ms": 500,
+      "a": "#ff5000",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 199,
+      "y": 346
+     },
+     {
+      "fx": "pulse",
+      "ms": 400,
+      "a": "#ff5000",
+      "b": "#501900",
+      "at": "xy",
+      "rate": 200,
+      "gi": "keep",
+      "x": 199,
+      "y": 346
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Charged",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 300,
+      "a": "#ffffff",
+      "b": "#ff5000",
+      "at": "center",
+      "rate": 55,
+      "gi": "flash"
+     },
+     {
+      "fx": "spiral_out",
+      "ms": 1100,
+      "a": "#ff5000",
+      "b": "#501900",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 199,
+      "y": 346
+     },
+     {
+      "fx": "sweep_up",
+      "ms": 600,
+      "a": "#00e6ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#00e6ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 150
+     }
+    ],
+    "repeat": 1
+   },
+   {
     "name": "Rolling attack",
     "steps": [
      {
@@ -223,6 +398,15 @@
       "at": "center",
       "rate": 40,
       "gi": "keep"
+     },
+     {
+      "fx": "bounce",
+      "ms": 700,
+      "a": "#ffffff",
+      "b": "#00e6ff",
+      "at": "center",
+      "rate": 120,
+      "gi": "dark"
      },
      {
       "fx": "burst",
@@ -237,36 +421,200 @@
     "repeat": 1
    },
    {
-    "name": "He rolled",
+    "name": "The bite",
+    "steps": [
+     {
+      "fx": "sweep_lr",
+      "ms": 400,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "bolts",
+      "ms": 600,
+      "a": "#ffffff",
+      "b": "#ffb000",
+      "at": "top",
+      "rate": 110,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#ffb000",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Shaken off",
+    "steps": [
+     {
+      "fx": "sweep_down",
+      "ms": 600,
+      "a": "#501900",
+      "b": "#000000",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#501900",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Allies attack",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#ff1400",
+      "at": "center",
+      "rate": 50,
+      "gi": "flash"
+     },
+     {
+      "fx": "ripple",
+      "ms": 1200,
+      "a": "#ff1400",
+      "b": "#ff6e00",
+      "at": "xy",
+      "rate": 350,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "spiral_in",
+      "ms": 900,
+      "a": "#ff6e00",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "fire",
+      "ms": 900,
+      "a": "#ffb000",
+      "b": "#ff1400",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Triumph",
     "steps": [
      {
       "fx": "burst",
       "ms": 800,
       "a": "#ffffff",
       "b": "#ff6e00",
-      "at": "center",
+      "at": "xy",
       "rate": 0,
-      "gi": "flash"
+      "gi": "flash",
+      "x": 123,
+      "y": 202
      },
      {
       "fx": "rainbow",
-      "ms": 1600,
+      "ms": 1800,
       "a": "#000000",
       "b": "#000000",
       "at": "xy",
       "rate": 60,
       "gi": "keep",
-      "x": 199,
-      "y": 346
+      "x": 186,
+      "y": 439
+     },
+     {
+      "fx": "sparkle",
+      "ms": 1200,
+      "a": "#ffb000",
+      "b": "#501900",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
      },
      {
       "fx": "fade",
-      "ms": 500,
+      "ms": 600,
       "a": "#ff6e00",
       "b": "#000000",
       "at": "center",
       "rate": 0,
-      "gi": "keep"
+      "gi": "keep",
+      "blend": 300
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Going home",
+    "steps": [
+     {
+      "fx": "solid",
+      "ms": 500,
+      "a": "#ff6e00",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 186,
+      "y": 439
+     },
+     {
+      "fx": "sweep_rl",
+      "ms": 700,
+      "a": "#ff6e00",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "implode",
+      "ms": 1100,
+      "a": "#ff6e00",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 186,
+      "y": 439
+     },
+     {
+      "fx": "fade",
+      "ms": 800,
+      "a": "#ff6e00",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 400,
+      "x": 186,
+      "y": 439
      }
     ],
     "repeat": 1
@@ -299,6 +647,405 @@
   "scripts": [
    {
     "hat": {
+     "kind": "shot",
+     "shot": "Shield target left",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "calls",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "calls"
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 3
+          },
+          "b": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "joins"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ready",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "hud_award",
+          "text": "ANGUIRUS IS READY",
+          "value": null,
+          "sub": "HE JOINS THE NEXT BATTLE",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "SHIELD HITS",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 3
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "joins"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "calls"
+           }
+          },
+          "sub": "MORE TO CALL ANGUIRUS",
+          "seconds": 2
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target center",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "calls",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "calls"
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 3
+          },
+          "b": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "joins"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ready",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "hud_award",
+          "text": "ANGUIRUS IS READY",
+          "value": null,
+          "sub": "HE JOINS THE NEXT BATTLE",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "SHIELD HITS",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 3
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "joins"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "calls"
+           }
+          },
+          "sub": "MORE TO CALL ANGUIRUS",
+          "seconds": 2
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield target right",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "calls",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "calls"
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 3
+          },
+          "b": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "joins"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ready",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "hud_award",
+          "text": "ANGUIRUS IS READY",
+          "value": null,
+          "sub": "HE JOINS THE NEXT BATTLE",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "SHIELD HITS",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 3
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "joins"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "calls"
+           }
+          },
+          "sub": "MORE TO CALL ANGUIRUS",
+          "seconds": 2
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
      "kind": "any_shot",
      "when": "idle"
     },
@@ -326,15 +1073,30 @@
        {
         "op": "if",
         "cond": {
-         "k": "cmp",
-         "op": "=",
+         "k": "and",
          "a": {
-          "k": "var",
-          "name": "joined"
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "joined"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
+          }
          },
          "b": {
-          "k": "num",
-          "v": 0
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "ready"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
          }
         },
         "then": [
@@ -381,6 +1143,46 @@
      },
      {
       "op": "set",
+      "var": "ready",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "calls",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "change",
+      "var": "joins",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "stage",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "set",
+      "var": "pot",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
       "var": "rolling",
       "value": {
        "k": "num",
@@ -398,6 +1200,38 @@
      {
       "op": "set",
       "var": "entered",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "bites",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "won",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "cashed",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "left",
       "value": {
        "k": "num",
        "v": 0
@@ -426,6 +1260,106 @@
        "k": "num",
        "v": 0
       }
+     },
+     {
+      "op": "set",
+      "var": "roll ms",
+      "value": {
+       "k": "op",
+       "op": "-",
+       "a": {
+        "k": "num",
+        "v": 7000
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 1000
+        },
+        "b": {
+         "k": "var",
+         "name": "joins"
+        }
+       }
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "roll ms"
+       },
+       "b": {
+        "k": "num",
+        "v": 4000
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "roll ms",
+        "value": {
+         "k": "num",
+         "v": 4000
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "set",
+      "var": "grip ms",
+      "value": {
+       "k": "op",
+       "op": "-",
+       "a": {
+        "k": "num",
+        "v": 14000
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 2000
+        },
+        "b": {
+         "k": "var",
+         "name": "joins"
+        }
+       }
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "grip ms"
+       },
+       "b": {
+        "k": "num",
+        "v": 8000
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "grip ms",
+        "value": {
+         "k": "num",
+         "v": 8000
+        }
+       }
+      ],
+      "else": null
      },
      {
       "op": "if",
@@ -533,6 +1467,16 @@
       ]
      },
      {
+      "op": "light_shot",
+      "insert": "ANGUIRUS",
+      "color": "#ff6e00",
+      "pattern": "pulse",
+      "rate": {
+       "k": "num",
+       "v": 700
+      }
+     },
+     {
       "op": "timer_start",
       "timer": "enter",
       "ms": {
@@ -573,6 +1517,14 @@
         "name": "He enters"
        },
        {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 600
+        },
+        "strength": "strong"
+       },
+       {
         "op": "hud_award",
         "text": "ANGUIRUS JOINS",
         "value": null,
@@ -596,15 +1548,30 @@
       "cond": {
        "k": "and",
        "a": {
-        "k": "cmp",
-        "op": "=",
+        "k": "and",
         "a": {
-         "k": "var",
-         "name": "rolling"
+         "k": "cmp",
+         "op": "<=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
         },
         "b": {
-         "k": "num",
-         "v": 0
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "rolling"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
         }
        },
        "b": {
@@ -637,6 +1604,14 @@
         }
        },
        {
+        "op": "change",
+        "var": "pot",
+        "by": {
+         "k": "num",
+         "v": 1000000
+        }
+       },
+       {
         "op": "sound",
         "sound": "spike",
         "fallback": ""
@@ -646,6 +1621,19 @@
         "shot": "Shield target left",
         "color": "#ff5000",
         "pattern": "solid"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Spike"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 200
+        },
+        "strength": "soft"
        },
        {
         "op": "timer_start",
@@ -672,15 +1660,30 @@
       "cond": {
        "k": "and",
        "a": {
-        "k": "cmp",
-        "op": "=",
+        "k": "and",
         "a": {
-         "k": "var",
-         "name": "rolling"
+         "k": "cmp",
+         "op": "<=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
         },
         "b": {
-         "k": "num",
-         "v": 0
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "rolling"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
         }
        },
        "b": {
@@ -713,6 +1716,14 @@
         }
        },
        {
+        "op": "change",
+        "var": "pot",
+        "by": {
+         "k": "num",
+         "v": 1000000
+        }
+       },
+       {
         "op": "sound",
         "sound": "spike",
         "fallback": ""
@@ -722,6 +1733,19 @@
         "shot": "Shield target center",
         "color": "#ff5000",
         "pattern": "solid"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Spike"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 200
+        },
+        "strength": "soft"
        },
        {
         "op": "timer_start",
@@ -748,15 +1772,30 @@
       "cond": {
        "k": "and",
        "a": {
-        "k": "cmp",
-        "op": "=",
+        "k": "and",
         "a": {
-         "k": "var",
-         "name": "rolling"
+         "k": "cmp",
+         "op": "<=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
         },
         "b": {
-         "k": "num",
-         "v": 0
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "rolling"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
         }
        },
        "b": {
@@ -789,6 +1828,14 @@
         }
        },
        {
+        "op": "change",
+        "var": "pot",
+        "by": {
+         "k": "num",
+         "v": 1000000
+        }
+       },
+       {
         "op": "sound",
         "sound": "spike",
         "fallback": ""
@@ -798,6 +1845,19 @@
         "shot": "Shield target right",
         "color": "#ff5000",
         "pattern": "solid"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Spike"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 200
+        },
+        "strength": "soft"
        },
        {
         "op": "timer_start",
@@ -850,50 +1910,87 @@
       },
       "then": [
        {
-        "op": "set",
-        "var": "rolling",
-        "value": {
-         "k": "num",
-         "v": 1
-        }
-       },
-       {
-        "op": "set",
-        "var": "roll value",
-        "value": {
-         "k": "num",
-         "v": 4000000
-        }
-       },
-       {
-        "op": "timer_start",
-        "timer": "roll",
-        "ms": {
-         "k": "num",
-         "v": 6000
-        }
-       },
-       {
-        "op": "light_shot",
-        "shot": "Big loop",
-        "color": "#00e6ff",
-        "pattern": "blink",
-        "rate": {
-         "k": "num",
-         "v": 400
-        }
-       },
-       {
-        "op": "clip",
-        "clip": "spike",
-        "where": "full"
-       },
-       {
-        "op": "hud_award",
-        "text": "ROLLING ATTACK LIT",
-        "value": null,
-        "sub": "SHOOT THE BIG LOOP",
-        "seconds": 3
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "SPIKES CHARGED",
+          "value": {
+           "k": "var",
+           "name": "pot"
+          },
+          "sub": "THE POT",
+          "seconds": 2
+         },
+         {
+          "op": "timer_start",
+          "timer": "next",
+          "ms": {
+           "k": "num",
+           "v": 700
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "set",
+          "var": "rolling",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "roll value",
+          "value": {
+           "k": "num",
+           "v": 4000000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "roll",
+          "ms": {
+           "k": "var",
+           "name": "roll ms"
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#00e6ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         },
+         {
+          "op": "clip",
+          "clip": "spike",
+          "where": "full"
+         },
+         {
+          "op": "hud_award",
+          "text": "ROLLING ATTACK LIT",
+          "value": null,
+          "sub": "SHOOT THE BIG LOOP",
+          "seconds": 3
+         }
+        ]
        }
       ],
       "else": [
@@ -914,7 +2011,7 @@
         "then": [
          {
           "op": "hud_award",
-          "text": "SPIKE",
+          "text": "SPIKE CHARGED",
           "value": {
            "k": "op",
            "op": "+",
@@ -935,7 +2032,7 @@
             "name": "spike r"
            }
           },
-          "sub": "OF 3 CHARGED",
+          "sub": "OF 3",
           "seconds": 2
          }
         ],
@@ -955,21 +2052,44 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "rolling"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
        },
        "b": {
-        "k": "num",
-        "v": 1
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "rolling"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        }
       },
       "then": [
        {
         "op": "score",
         "points": {
+         "k": "var",
+         "name": "roll value"
+        }
+       },
+       {
+        "op": "change",
+        "var": "pot",
+        "by": {
          "k": "var",
          "name": "roll value"
         }
@@ -998,74 +2118,135 @@
         "name": "Rolling attack"
        },
        {
-        "op": "hud_award",
-        "text": "ROLLING ATTACK",
-        "value": {
-         "k": "var",
-         "name": "roll value"
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 400
         },
-        "sub": "AGAIN WITHIN 6 S TO DOUBLE",
-        "seconds": 3
-       },
-       {
-        "op": "set",
-        "var": "roll value",
-        "value": {
-         "k": "op",
-         "op": "*",
-         "a": {
-          "k": "var",
-          "name": "roll value"
-         },
-         "b": {
-          "k": "num",
-          "v": 2
-         }
-        }
+        "strength": "hard"
        },
        {
         "op": "if",
         "cond": {
          "k": "cmp",
-         "op": ">",
+         "op": ">=",
          "a": {
           "k": "var",
-          "name": "roll value"
+          "name": "rolls"
          },
          "b": {
           "k": "num",
-          "v": 16000000
+          "v": 3
          }
         },
         "then": [
          {
+          "op": "hud_award",
+          "text": "THREE ROLLS",
+          "value": {
+           "k": "var",
+           "name": "pot"
+          },
+          "sub": "THE POT",
+          "seconds": 2
+         },
+         {
+          "op": "timer_stop",
+          "timer": "roll"
+         },
+         {
           "op": "set",
-          "var": "roll value",
+          "var": "rolling",
           "value": {
            "k": "num",
-           "v": 16000000
+           "v": 0
+          }
+         },
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         },
+         {
+          "op": "timer_start",
+          "timer": "next",
+          "ms": {
+           "k": "num",
+           "v": 700
           }
          }
         ],
-        "else": null
-       },
-       {
-        "op": "timer_start",
-        "timer": "roll",
-        "ms": {
-         "k": "num",
-         "v": 6000
-        }
-       },
-       {
-        "op": "light_shot",
-        "shot": "Big loop",
-        "color": "#00e6ff",
-        "pattern": "blink",
-        "rate": {
-         "k": "num",
-         "v": 400
-        }
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "ROLLING ATTACK",
+          "value": {
+           "k": "var",
+           "name": "roll value"
+          },
+          "sub": "AGAIN TO DOUBLE",
+          "seconds": 3
+         },
+         {
+          "op": "set",
+          "var": "roll value",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "var",
+            "name": "roll value"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">",
+           "a": {
+            "k": "var",
+            "name": "roll value"
+           },
+           "b": {
+            "k": "num",
+            "v": 16000000
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "roll value",
+            "value": {
+             "k": "num",
+             "v": 16000000
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "timer_start",
+          "timer": "roll",
+          "ms": {
+           "k": "var",
+           "name": "roll ms"
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#00e6ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         }
+        ]
        }
       ],
       "else": null
@@ -1081,15 +2262,30 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "rolling"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
        },
        "b": {
-        "k": "num",
-        "v": 1
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "rolling"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        }
       },
       "then": [
@@ -1248,8 +2444,335 @@
    },
    {
     "hat": {
-     "kind": "every",
-     "seconds": 1
+     "kind": "shot",
+     "shot": "Left ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "bite at"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "bite",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right ramp",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "bite at"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "bite",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "bite"
+    },
+    "do": [
+     {
+      "op": "change",
+      "var": "bites",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "score",
+      "points": {
+       "k": "num",
+       "v": 2000000
+      }
+     },
+     {
+      "op": "change",
+      "var": "pot",
+      "by": {
+       "k": "op",
+       "op": "+",
+       "a": {
+        "k": "num",
+        "v": 4000000
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 4000000
+        },
+        "b": {
+         "k": "var",
+         "name": "bites"
+        }
+       }
+      }
+     },
+     {
+      "op": "set",
+      "var": "bite at",
+      "value": {
+       "k": "op",
+       "op": "-",
+       "a": {
+        "k": "num",
+        "v": 3
+       },
+       "b": {
+        "k": "var",
+        "name": "bite at"
+       }
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "bite at"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Left ramp",
+        "color": "#ffb000",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 90
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Left ramp"
+       }
+      ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "bite at"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Right ramp",
+        "color": "#ffb000",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 90
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "lights_off",
+        "shot": "Right ramp"
+       }
+      ]
+     },
+     {
+      "op": "timer_start",
+      "timer": "grip",
+      "ms": {
+       "k": "var",
+       "name": "grip ms"
+      }
+     },
+     {
+      "op": "clip",
+      "clip": "bite",
+      "where": "full"
+     },
+     {
+      "op": "sound",
+      "sound": "roll",
+      "fallback": ""
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "The bite"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 350
+      },
+      "strength": "strong"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "bites"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "hud_award",
+        "text": "THE NECK IS PINNED",
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "THE POT",
+        "seconds": 2
+       },
+       {
+        "op": "timer_stop",
+        "timer": "grip"
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 700
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "hud_award",
+        "text": "BITE",
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 4000000
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 4000000
+          },
+          "b": {
+           "k": "var",
+           "name": "bites"
+          }
+         }
+        },
+        "sub": "NOW THE OTHER RAMP",
+        "seconds": 2
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "grip"
     },
     "do": [
      {
@@ -1259,11 +2782,797 @@
        "op": "=",
        "a": {
         "k": "var",
-        "name": "rolling"
+        "name": "stage"
        },
        "b": {
         "k": "num",
-        "v": 1
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "bites"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "change",
+          "var": "bites",
+          "by": {
+           "k": "num",
+           "v": -1
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "sound",
+        "sound": "spike",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Shaken off"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 300
+        },
+        "strength": "medium"
+       },
+       {
+        "op": "hud_award",
+        "text": "SHAKEN OFF",
+        "value": {
+         "k": "var",
+         "name": "bites"
+        },
+        "sub": "BITES HELD",
+        "seconds": 2
+       },
+       {
+        "op": "timer_start",
+        "timer": "grip",
+        "ms": {
+         "k": "var",
+         "name": "grip ms"
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Building",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 4
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "won",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "var",
+           "name": "pot"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "hurry"
+         }
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Building"
+       },
+       {
+        "op": "hud_award",
+        "text": "ANGUIRUS TRIUMPHS",
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "var",
+           "name": "pot"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "hurry"
+         }
+        },
+        "sub": "THE POT TWICE",
+        "seconds": 4
+       },
+       {
+        "op": "sound",
+        "sound": "won",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Triumph"
+       },
+       {
+        "op": "shake_game",
+        "shake": "multiball_start"
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 2500
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "next"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "or",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "end_mode"
+       }
+      ],
+      "else": [
+       {
+        "op": "change",
+        "var": "stage",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "shake_game",
+        "shake": "jackpot"
+       },
+       {
+        "op": "light_shot",
+        "shot": "Right scoop",
+        "color": "#ffffff",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "SELECT CITY",
+        "color": "#ffffff",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "SCOOP BB-BATTLE",
+        "color": "#ffffff",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "SCOOP BB-GODZILLA PWR UP",
+        "color": "#ffffff",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       },
+       {
+        "op": "light_shot",
+        "insert": "SCOOP BB-SUMMON ALLY",
+        "color": "#ffffff",
+        "pattern": "chase",
+        "rate": {
+         "k": "num",
+         "v": 120
+        }
+       },
+       {
+        "op": "scoop_hold",
+        "ms": {
+         "k": "num",
+         "v": 2500
+        },
+        "which": "next"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "rolling",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "roll value",
+          "value": {
+           "k": "num",
+           "v": 4000000
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "roll",
+          "ms": {
+           "k": "var",
+           "name": "roll ms"
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#00e6ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 90
+          }
+         },
+         {
+          "op": "clip",
+          "clip": "spike",
+          "where": "full"
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Charged"
+         },
+         {
+          "op": "hud_award",
+          "text": "ROLLING ATTACK LIT",
+          "value": null,
+          "sub": "SHOOT THE BIG LOOP",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "rolling",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "timer_stop",
+          "timer": "roll"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         },
+         {
+          "op": "set",
+          "var": "bite at",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "spike l",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "spike c",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "set",
+          "var": "spike r",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "lights_off",
+          "shot": "Shield target left"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Shield target center"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Shield target right"
+         },
+         {
+          "op": "timer_start",
+          "timer": "grip",
+          "ms": {
+           "k": "var",
+           "name": "grip ms"
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "bite at"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Left ramp",
+            "color": "#ffb000",
+            "pattern": "chase",
+            "rate": {
+             "k": "num",
+             "v": 90
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "lights_off",
+            "shot": "Left ramp"
+           }
+          ]
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "bite at"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Right ramp",
+            "color": "#ffb000",
+            "pattern": "chase",
+            "rate": {
+             "k": "num",
+             "v": 90
+            }
+           }
+          ],
+          "else": [
+           {
+            "op": "lights_off",
+            "shot": "Right ramp"
+           }
+          ]
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "The bite"
+         },
+         {
+          "op": "hud_award",
+          "text": "THE BITE",
+          "value": null,
+          "sub": "SHOOT THE AMBER RAMP",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "timer_stop",
+          "timer": "grip"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Left ramp"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Right ramp"
+         },
+         {
+          "op": "set",
+          "var": "hurry",
+          "value": {
+           "k": "num",
+           "v": 30000000
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Building",
+          "color": "#ff1400",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 70
+          }
+         },
+         {
+          "op": "clip",
+          "clip": "allies",
+          "where": "full"
+         },
+         {
+          "op": "sound",
+          "sound": "won",
+          "fallback": ""
+         },
+         {
+          "op": "music",
+          "bed": "allies"
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Allies attack"
+         },
+         {
+          "op": "hud_award",
+          "text": "ALLIES ATTACK",
+          "value": {
+           "k": "var",
+           "name": "hurry"
+          },
+          "sub": "SHOOT THE BUILDING",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Right scoop",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "cashed",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "score",
+        "points": {
+         "k": "var",
+         "name": "pot"
+        }
+       },
+       {
+        "op": "lights_off",
+        "shot": "Right scoop"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SELECT CITY"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-BATTLE"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-GODZILLA PWR UP"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-SUMMON ALLY"
+       },
+       {
+        "op": "hud_award",
+        "text": "ANGUIRUS GOES HOME",
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "CASHED OUT",
+        "seconds": 4
+       },
+       {
+        "op": "clip",
+        "clip": "cashout",
+        "where": "full"
+       },
+       {
+        "op": "sound",
+        "sound": "cashout",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Going home"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 600
+        },
+        "strength": "medium"
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 1500
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "every",
+     "seconds": 1
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "rolling"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        }
       },
       "then": [
@@ -1293,36 +3602,76 @@
           }
          }
         ],
-        "else": [
-         {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "<=",
-           "a": {
-            "k": "timer_left",
-            "timer": "roll"
-           },
-           "b": {
-            "k": "num",
-            "v": 4000
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Big loop",
-            "color": "#00e6ff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 200
-            }
-           }
-          ],
-          "else": null
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 4
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "var",
+          "name": "hurry"
+         },
+         "b": {
+          "k": "num",
+          "v": 10000000
          }
-        ]
+        },
+        "then": [
+         {
+          "op": "change",
+          "var": "hurry",
+          "by": {
+           "k": "num",
+           "v": -1000000
+          }
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "hud_award",
+        "text": "ALLIES ATTACK",
+        "value": {
+         "k": "var",
+         "name": "hurry"
+        },
+        "sub": "SHOOT THE BUILDING",
+        "seconds": 2
        }
       ],
       "else": null
@@ -1336,6 +3685,14 @@
        }
       },
       "then": [
+       {
+        "op": "set",
+        "var": "left",
+        "value": {
+         "k": "num",
+         "v": 1
+        }
+       },
        {
         "op": "end_mode"
        }
@@ -1362,8 +3719,28 @@
       "timer": "charged"
      },
      {
+      "op": "timer_stop",
+      "timer": "next"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "grip"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "bite"
+     },
+     {
       "op": "set",
       "var": "rolling",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
+     },
+     {
+      "op": "set",
+      "var": "stage",
       "value": {
        "k": "num",
        "v": 0
@@ -1373,34 +3750,224 @@
       "op": "if",
       "cond": {
        "k": "cmp",
-       "op": ">",
+       "op": "=",
        "a": {
         "k": "var",
-        "name": "rolls"
+        "name": "won"
        },
        "b": {
         "k": "num",
-        "v": 0
+        "v": 1
        }
       },
       "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "ANGUIRUS TRIUMPHS",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "THE POT TWICE AND THE HURRY-UP",
+        "value": null
+       },
+       {
+        "op": "clip",
+        "clip": "won",
+        "where": "full"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "cashed"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "ANGUIRUS GOES HOME",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "THE POT IS CASHED OUT",
+        "value": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "cashed"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "left"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "pot"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        }
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "HE LEAVES WITH IT",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "HALF THE POT",
+        "value": null
+       },
        {
         "op": "clip",
         "clip": "won",
         "where": "full"
        },
        {
-        "op": "sound",
-        "sound": "won",
-        "fallback": ""
-       },
-       {
         "op": "show",
         "show": "mine",
-        "name": "He rolled"
+        "name": "Going home"
        }
       ],
-      "else": [
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "won"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "cashed"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "left"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "pot"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        }
+       },
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "ANGUIRUS FALLS",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "A QUARTER OF THE POT",
+        "value": null
+       },
        {
         "op": "clip",
         "clip": "lost",
@@ -1410,8 +3977,17 @@
         "op": "show",
         "show": "mine",
         "name": "Embers"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 800
+        },
+        "strength": "soft"
        }
-      ]
+      ],
+      "else": null
      }
     ]
    }
@@ -1419,8 +3995,7 @@
   "format": 1,
   "screen_style": "panel",
   "keep_rules": [],
-  "block_modes": [],
-  "beds": []
+  "block_modes": []
  },
  "recipe": {
   "clips": {
@@ -1458,6 +4033,27 @@
     "length": 5.0,
     "crop": "fill",
     "what": "Anguirus, Rodan and King Caesar lie in a smoking heap, then Godzilla stands triumphant before Mt Fuji"
+   },
+   "bite": {
+    "film": "dam68",
+    "from": 4701.0,
+    "length": 3.2,
+    "crop": "fill",
+    "what": "Anguirus charges out of the dust at Mt. Fuji and clamps his jaws on King Ghidorah's neck, spikes filling the frame (a run of two shots, 1:18:21)"
+   },
+   "allies": {
+    "film": "dam68",
+    "from": 4751.0,
+    "length": 3.8,
+    "crop": "fill",
+    "what": "Anguirus in front and Godzilla behind pin King Ghidorah's necks to the ground together (one shot, 1:19:11)"
+   },
+   "cashout": {
+    "film": "dam68",
+    "from": 5247.2,
+    "length": 6.0,
+    "crop": "fill",
+    "what": "Home on Monsterland, Anguirus walks out of the brush, rears up and roars (one shot, 1:27:27)"
    }
   },
   "music": {
@@ -1486,6 +4082,21 @@
     "from": 2751.0,
     "length": 1.8,
     "what": "Anguirus's roar in the castle fight (the game's own Anguirus roar matches 0.88)"
+   },
+   "cashout": {
+    "film": "dam68",
+    "from": 5247.9,
+    "length": 3.0,
+    "priority": 4,
+    "what": "Anguirus's roar on Monsterland over Ifukube's score, rising and falling away (1:27:28)"
+   }
+  },
+  "beds": {
+   "allies": {
+    "film": "dam68",
+    "from": 352.903,
+    "length": 11.95,
+    "what": "Akira Ifukube's Monsterland theme as Rodan flies over the monsters' island (0:05:52; bed finder loop chroma 0.830, onset 0.429, in tune 0.77, 0 untuned blocks, seam self-check PASS; not the main title march KUMONGA uses, chroma corr -0.32)"
    }
   }
  }

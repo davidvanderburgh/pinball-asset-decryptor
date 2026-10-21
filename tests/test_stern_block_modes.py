@@ -1155,6 +1155,40 @@ def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
     assert "Hud_Award:  " in note                  # the award line stays clear
 
 
+def test_a_note_waits_out_a_display_of_the_games(tmp_path):
+    """PAD-658 (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER CANNON CHARGING): with no mode running a note
+    still keeps off a display of the game's, and shows its whole time once that is gone."""
+    p = maser_hud()
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "hud_award", "text": "MASER", "value": {"k": "hits", "shot": "Big loop"}, "sub": "",
+         "seconds": 2}]})
+    out = play(tmp_path, p, "covered", 1, "shot", "Big loop", "secs", 4, "covered", 0, "secs", 3, slug="maser")
+    under = out[out.index(">> shot Big loop"):out.index(">> covered 0")]
+    assert "its words wait while a display of the game's has the screen" in under
+    assert "Hud_Title: MASER" not in under and "SHOW PadMode_maser_Hud 0" not in under   # held, not timed out
+    after = out[out.index(">> covered 0"):]
+    assert "its words are back" in after and "Hud_Title: MASER" in after
+    back = _at(out, ">> covered 0")
+    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_maser_Hud 0", after, re.M)]
+    assert hidden and 1900 <= hidden[0] - back <= 2100, (back, hidden)
+
+
+def test_a_clip_behind_the_hud_as_the_mode_ends_plays_full_screen(tmp_path, monkeypatch):
+    """PAD-658 (run meltdown_r4: the game's screen showed, not the clip): the loop ends with the mode, so a clip
+    behind the HUD in When the mode ends plays full screen."""
+    _cc()
+    p = _media_prog()
+    p["scripts"][3]["do"][1]["where"] = "behind"
+    assert any(t.startswith("A clip behind the HUD in When the mode ends plays full screen") for t in BM.notes(p))
+    dump = _assets(tmp_path, "blk", p, [])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Building", "secs", 12)
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert "own clip won: the mode is ending - played full screen, not behind the HUD" in out
+    assert "BACKDROP ONCE PadMode_blk_Won" not in out
+    assert 500 <= _at(out, "CLIP PadMode_blk_Won") - end <= 600
+
+
 def test_the_hud_with_a_light_show_and_its_own_clips_builds_and_plays(tmp_path, monkeypatch):
     # PAD-375 beside PAD-374 and PAD-376: the HUD's kit, the light-show engine and the assets header
     # in one mode's C, without a name meeting another

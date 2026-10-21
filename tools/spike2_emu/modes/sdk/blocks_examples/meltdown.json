@@ -3,21 +3,28 @@
  "slug": "meltdown",
  "order": 106,
  "titles": [
-  "godzilla_le"
+  "godzilla_le",
+  "godzilla_pro"
  ],
  "based_on": "meltdown.c",
- "about": "The C example MELTDOWN rebuilt in blocks: ten captive ball hits light a 3-ball multiball where the core heats by itself and with every jackpot (x1 to x5), the shields cool it, and at 100% the Building is a super jackpot worth twice the jackpots paid.",
+ "title_alt": {
+  "godzilla_pro": {
+   "shots": {
+    "Shield target center": null
+   }
+  }
+ },
+ "about": "The C example MELTDOWN rebuilt in blocks and taken deeper: captive ball hits (10, then 20, then 30) light a 3-ball multiball where the core heats by itself and with every jackpot (x1 to x5) and the shields cool it; three stages with their own jackpot shots and music (BURNING GODZILLA's four red shots and the moving heart, DESTOROYAH's spiral ray at the lit ramp, JUNIOR at the Big loop and the Mecha lane), each meltdown's super at the Building worth the jackpots paid x2, x3, x4 and taking it a stage further.",
  "lost": [
   "No randomness in blocks: the HEART starts at the Left ramp and moves in turn (Left ramp, Right ramp, Building, Big loop) every 8 s and when hit, where the C picked another shot at random.",
   "The core is looked at once a second (an Every second script), so it rises a whole 1% or 2% each second and the MELTDOWN blink quickens on the second, where the C stepped them every tick.",
-  "No timer badge: the MELTDOWN 20 s is a timer the line counts (SUPER JACKPOT AT THE BUILDING: 17), where the C counted it on the MELTDOWN badge (a blocks badge counts only the mode's own clock, and this mode has none).",
-  "The HUD shows the core as a number (25), not 25%; the JACKPOTS counter has no SUPER value under it; the CORE gauge is one colour (the C's ran yellow to white-hot); the lines lost their double spaces to fit the 40 letters a blocks HUD line holds.",
+  "No timer badge: the MELTDOWN window is a timer the line counts (SUPER JACKPOT AT THE BUILDING: 17), where the C counted it on the MELTDOWN badge (a blocks badge counts only the mode's own clock, and this mode has none).",
+  "The HUD shows the core as a number (25), not 25%; the third counter has no SUPER value under it; the CORE gauge is one colour (the C's ran yellow to white-hot); the lines lost their double spaces to fit the 40 letters a blocks HUD line holds.",
   "The ending's line under MELTDOWN TOTAL puts the jackpots last (1 MELTDOWN SURVIVED  -  JACKPOTS 6) where the C said 6 JACKPOTS  -  1 MELTDOWN SURVIVED, says JACKPOTS for one too, and past 3 meltdowns says only the jackpots.",
   "The ending stays up 3 s, the runtime's: the C kept it 10 s.",
-  "The captive ball counts toward lighting it while another of our modes runs, where the C left the shot to that mode.",
   "The ready light is the runtime's lit mode (held ball after ball), where the C pulsed MAGNA GRAB only while nothing else owned the playfield.",
   "One ball left is checked once a second after 18 s (two looks in a row), the C's 2 s after the 15 s ball save and 3 s grace; and the C noted whether a second ball was ever served.",
-  "Godzilla LE only: the program names the center shield target (Godzilla Pro has two shields)."
+  "On Godzilla Pro 1.16 the two shields (left, right) cool the core and stay where they are (the Pro's do not turn); the C on a Pro cooled with the same two."
  ],
  "program": {
   "name": "MELTDOWN",
@@ -35,6 +42,14 @@
    {
     "name": "ready",
     "reset": "game"
+   },
+   {
+    "name": "starts",
+    "reset": "game"
+   },
+   {
+    "name": "stage",
+    "reset": "mode"
    },
    {
     "name": "phase",
@@ -99,6 +114,14 @@
    {
     "name": "one ball",
     "reset": "mode"
+   },
+   {
+    "name": "melt ms",
+    "reset": "mode"
+   },
+   {
+    "name": "ray at",
+    "reset": "mode"
    }
   ],
   "timers": [
@@ -113,11 +136,14 @@
    },
    {
     "name": "lights"
+   },
+   {
+    "name": "next"
    }
   ],
   "hud": {
    "on": true,
-   "line": "SHOOT RED SHOTS - SHIELDS COOL THE CORE",
+   "line": "SHOOT RED SHOTS - THE HEART PAYS DOUBLE",
    "counters": [
     {
      "label": "CORE",
@@ -130,8 +156,8 @@
      "value": null
     },
     {
-     "label": "JACKPOTS",
-     "sub": "",
+     "label": "BURNING",
+     "sub": "JACKPOTS",
      "value": null
     }
    ],
@@ -209,6 +235,22 @@
    {
     "name": "lost",
     "file": "lost.mp4"
+   },
+   {
+    "name": "destoroyah",
+    "file": "destoroyah.mp4"
+   },
+   {
+    "name": "junior",
+    "file": "junior.mp4"
+   },
+   {
+    "name": "super",
+    "file": "super.mp4"
+   },
+   {
+    "name": "blows",
+    "file": "blows.mp4"
    }
   ],
   "sounds": [
@@ -256,10 +298,80 @@
     "name": "lost",
     "file": "lost.wav",
     "priority": 4
+   },
+   {
+    "name": "super",
+    "file": "super.wav",
+    "priority": 3
+   },
+   {
+    "name": "junior",
+    "file": "junior.wav",
+    "priority": 4
    }
   ],
   "music": "music.wav",
+  "beds": [
+   {
+    "name": "destoroyah",
+    "file": "music_destoroyah.wav"
+   },
+   {
+    "name": "junior",
+    "file": "music_junior.wav"
+   },
+   {
+    "name": "melt",
+    "file": "music_melt.wav"
+   }
+  ],
   "shows": [
+   {
+    "name": "Reactor",
+    "steps": [
+     {
+      "fx": "fade_in",
+      "ms": 700,
+      "a": "#ff1400",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "ripple",
+      "ms": 1200,
+      "a": "#ff5a00",
+      "b": "#460800",
+      "at": "xy",
+      "rate": 350,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "strobe",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#ff1400",
+      "at": "center",
+      "rate": 55,
+      "gi": "flash"
+     },
+     {
+      "fx": "fire",
+      "ms": 1100,
+      "a": "#ffd200",
+      "b": "#ff1400",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     }
+    ],
+    "repeat": 1
+   },
    {
     "name": "Meltdown",
     "steps": [
@@ -296,6 +408,53 @@
     "repeat": 1
    },
    {
+    "name": "Super",
+    "steps": [
+     {
+      "fx": "burst",
+      "ms": 700,
+      "a": "#ffffff",
+      "b": "#ff1400",
+      "at": "xy",
+      "rate": 0,
+      "gi": "flash",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "spiral_out",
+      "ms": 1100,
+      "a": "#ff1400",
+      "b": "#460800",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 123,
+      "y": 202
+     },
+     {
+      "fx": "bolts",
+      "ms": 700,
+      "a": "#ffffff",
+      "b": "#ff5a00",
+      "at": "top",
+      "rate": 100,
+      "gi": "flash"
+     },
+     {
+      "fx": "fade",
+      "ms": 500,
+      "a": "#ff1400",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 200
+     }
+    ],
+    "repeat": 1
+   },
+   {
     "name": "Junior",
     "steps": [
      {
@@ -319,13 +478,25 @@
       "gi": "keep"
      },
      {
+      "fx": "rainbow",
+      "ms": 1600,
+      "a": "#000000",
+      "b": "#000000",
+      "at": "xy",
+      "rate": 60,
+      "gi": "keep",
+      "x": 282,
+      "y": 393
+     },
+     {
       "fx": "fade",
-      "ms": 500,
+      "ms": 600,
       "a": "#78d2ff",
       "b": "#000000",
       "at": "center",
       "rate": 0,
-      "gi": "keep"
+      "gi": "keep",
+      "blend": 300
      }
     ],
     "repeat": 1
@@ -343,6 +514,197 @@
       "gi": "keep",
       "x": 199,
       "y": 346
+     },
+     {
+      "fx": "fade",
+      "ms": 300,
+      "a": "#78d2ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Destoroyah",
+    "steps": [
+     {
+      "fx": "sweep_down",
+      "ms": 600,
+      "a": "#c020ff",
+      "b": "#000000",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "bolts",
+      "ms": 900,
+      "a": "#c020ff",
+      "b": "#ff1400",
+      "at": "center",
+      "rate": 120,
+      "gi": "dark"
+     },
+     {
+      "fx": "bounce",
+      "ms": 900,
+      "a": "#ff1400",
+      "b": "#c020ff",
+      "at": "center",
+      "rate": 150,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#c020ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 150
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Spiral ray",
+    "steps": [
+     {
+      "fx": "spin",
+      "ms": 600,
+      "a": "#ff1400",
+      "b": "#000000",
+      "at": "top",
+      "rate": 70,
+      "gi": "dark"
+     },
+     {
+      "fx": "sweep_lr",
+      "ms": 400,
+      "a": "#ffffff",
+      "b": "#ff1400",
+      "at": "top",
+      "rate": 0,
+      "gi": "dark"
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Junior comes",
+    "steps": [
+     {
+      "fx": "spiral_in",
+      "ms": 1000,
+      "a": "#78d2ff",
+      "b": "#000020",
+      "at": "xy",
+      "rate": 0,
+      "gi": "dark",
+      "x": 282,
+      "y": 393
+     },
+     {
+      "fx": "pulse",
+      "ms": 900,
+      "a": "#78d2ff",
+      "b": "#001e50",
+      "at": "xy",
+      "rate": 300,
+      "gi": "dark",
+      "x": 282,
+      "y": 393
+     },
+     {
+      "fx": "sweep_up",
+      "ms": 600,
+      "a": "#ffd200",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 400,
+      "a": "#78d2ff",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 150
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Core blows",
+    "steps": [
+     {
+      "fx": "strobe",
+      "ms": 300,
+      "a": "#ffffff",
+      "b": "#ff5a00",
+      "at": "center",
+      "rate": 60,
+      "gi": "flash"
+     },
+     {
+      "fx": "burst",
+      "ms": 800,
+      "a": "#ff5a00",
+      "b": "#ff1400",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "sparkle",
+      "ms": 1000,
+      "a": "#ff5a00",
+      "b": "#460800",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 600,
+      "a": "#460800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 200
+     }
+    ],
+    "repeat": 1
+   },
+   {
+    "name": "Embers",
+    "steps": [
+     {
+      "fx": "solid",
+      "ms": 500,
+      "a": "#460800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "dark"
+     },
+     {
+      "fx": "fade",
+      "ms": 1400,
+      "a": "#460800",
+      "b": "#000000",
+      "at": "center",
+      "rate": 0,
+      "gi": "keep",
+      "blend": 400
      }
     ],
     "repeat": 1
@@ -359,15 +721,29 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "ready"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
        },
        "b": {
-        "k": "num",
-        "v": 0
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
        }
       },
       "then": [
@@ -389,8 +765,24 @@
           "name": "hits"
          },
          "b": {
-          "k": "num",
-          "v": 10
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 10
+          },
+          "b": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "starts"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
          }
         },
         "then": [
@@ -430,8 +822,24 @@
            "k": "op",
            "op": "-",
            "a": {
-            "k": "num",
-            "v": 10
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 10
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "starts"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
            },
            "b": {
             "k": "var",
@@ -512,6 +920,14 @@
       }
      },
      {
+      "op": "change",
+      "var": "starts",
+      "by": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
       "op": "multiball",
       "balls": 3,
       "save": 15
@@ -522,7 +938,7 @@
      },
      {
       "op": "set",
-      "var": "phase",
+      "var": "stage",
       "value": {
        "k": "num",
        "v": 1
@@ -530,10 +946,10 @@
      },
      {
       "op": "set",
-      "var": "core",
+      "var": "phase",
       "value": {
        "k": "num",
-       "v": 25
+       "v": 1
       }
      },
      {
@@ -559,6 +975,106 @@
        "k": "num",
        "v": 1
       }
+     },
+     {
+      "op": "set",
+      "var": "core",
+      "value": {
+       "k": "op",
+       "op": "+",
+       "a": {
+        "k": "num",
+        "v": 20
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 5
+        },
+        "b": {
+         "k": "var",
+         "name": "starts"
+        }
+       }
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">",
+       "a": {
+        "k": "var",
+        "name": "core"
+       },
+       "b": {
+        "k": "num",
+        "v": 40
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "core",
+        "value": {
+         "k": "num",
+         "v": 40
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "set",
+      "var": "melt ms",
+      "value": {
+       "k": "op",
+       "op": "-",
+       "a": {
+        "k": "num",
+        "v": 24000
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 4000
+        },
+        "b": {
+         "k": "var",
+         "name": "starts"
+        }
+       }
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
+        "name": "melt ms"
+       },
+       "b": {
+        "k": "num",
+        "v": 10000
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "melt ms",
+        "value": {
+         "k": "num",
+         "v": 10000
+        }
+       }
+      ],
+      "else": null
      },
      {
       "op": "set",
@@ -633,6 +1149,14 @@
       }
      },
      {
+      "op": "set",
+      "var": "ray at",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
       "op": "game_show",
       "name": "Strobe storm"
      },
@@ -647,10 +1171,29 @@
       "where": "loop"
      },
      {
+      "op": "show",
+      "show": "mine",
+      "name": "Reactor"
+     },
+     {
+      "op": "shake_game",
+      "shake": "multiball_start"
+     },
+     {
       "op": "hud_text",
       "which": "title",
       "text": "BURNING GODZILLA",
       "value": null
+     },
+     {
+      "op": "hud_counter",
+      "counter": 3,
+      "value": {
+       "k": "num",
+       "v": 0
+      },
+      "sub": "JACKPOTS",
+      "label": "BURNING"
      },
      {
       "op": "hud_award",
@@ -793,21 +1336,29 @@
         "op": "timer_start",
         "timer": "melt",
         "ms": {
-         "k": "num",
-         "v": 20000
+         "k": "var",
+         "name": "melt ms"
         }
        },
        {
         "op": "hud_award",
         "text": "MELTDOWN!",
         "value": null,
-        "sub": "20 SECONDS: SHOOT THE BUILDING",
+        "sub": "SHOOT THE BUILDING",
         "seconds": 3
        },
        {
         "op": "show",
         "show": "mine",
         "name": "Meltdown"
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 400
+        }
        },
        {
         "op": "sound",
@@ -817,7 +1368,11 @@
        {
         "op": "clip",
         "clip": "meltdown",
-        "where": "full"
+        "where": "behind"
+       },
+       {
+        "op": "music",
+        "bed": "melt"
        },
        {
         "op": "hud_text",
@@ -839,6 +1394,31 @@
          "v": 100
         },
         "sub": "MELTDOWN"
+       },
+       {
+        "op": "hud_counter",
+        "counter": 2,
+        "value": {
+         "k": "op",
+         "op": "*",
+         "a": {
+          "k": "var",
+          "name": "paid"
+         },
+         "b": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "var",
+           "name": "stage"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "sub": "SUPER JACKPOT"
        }
       ],
       "else": [
@@ -967,12 +1547,20 @@
            "k": "op",
            "op": "*",
            "a": {
-            "k": "var",
-            "name": "base"
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "var",
+             "name": "base"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
            },
            "b": {
-            "k": "num",
-            "v": 1
+            "k": "var",
+            "name": "stage"
            }
           },
           "sub": "X1 HEAT"
@@ -1019,12 +1607,20 @@
            "k": "op",
            "op": "*",
            "a": {
-            "k": "var",
-            "name": "base"
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "var",
+             "name": "base"
+            },
+            "b": {
+             "k": "num",
+             "v": 2
+            }
            },
            "b": {
-            "k": "num",
-            "v": 2
+            "k": "var",
+            "name": "stage"
            }
           },
           "sub": "X2 HEAT"
@@ -1071,12 +1667,20 @@
            "k": "op",
            "op": "*",
            "a": {
-            "k": "var",
-            "name": "base"
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "var",
+             "name": "base"
+            },
+            "b": {
+             "k": "num",
+             "v": 3
+            }
            },
            "b": {
-            "k": "num",
-            "v": 3
+            "k": "var",
+            "name": "stage"
            }
           },
           "sub": "X3 HEAT"
@@ -1123,12 +1727,20 @@
            "k": "op",
            "op": "*",
            "a": {
-            "k": "var",
-            "name": "base"
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "var",
+             "name": "base"
+            },
+            "b": {
+             "k": "num",
+             "v": 5
+            }
            },
            "b": {
-            "k": "num",
-            "v": 5
+            "k": "var",
+            "name": "stage"
            }
           },
           "sub": "X5 HEAT"
@@ -1297,181 +1909,7 @@
          "op": "=",
          "a": {
           "k": "var",
-          "name": "level"
-         },
-         "b": {
-          "k": "num",
-          "v": 0
-         }
-        },
-        "then": [
-         {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 1
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Left ramp",
-            "color": "#ffd200",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 250
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Left ramp",
-            "color": "#ffd200",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
-         },
-         {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 2
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Right ramp",
-            "color": "#ffd200",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 250
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Right ramp",
-            "color": "#ffd200",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
-         },
-         {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 3
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Building",
-            "color": "#ffd200",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 250
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Building",
-            "color": "#ffd200",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
-         },
-         {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 4
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Big loop",
-            "color": "#ffd200",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 250
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Big loop",
-            "color": "#ffd200",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
-         }
-        ],
-        "else": null
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "level"
+          "name": "stage"
          },
          "b": {
           "k": "num",
@@ -1486,7 +1924,65 @@
            "op": "=",
            "a": {
             "k": "var",
-            "name": "heart"
+            "name": "level"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Left ramp",
+            "color": "#ffd200",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Right ramp",
+            "color": "#ffd200",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Building",
+            "color": "#ffd200",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Big loop",
+            "color": "#ffd200",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "level"
            },
            "b": {
             "k": "num",
@@ -1501,14 +1997,32 @@
             "pattern": "blink",
             "rate": {
              "k": "num",
-             "v": 250
+             "v": 500
             }
-           }
-          ],
-          "else": [
+           },
            {
             "op": "light_shot",
-            "shot": "Left ramp",
+            "shot": "Right ramp",
+            "color": "#ff6e00",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Building",
+            "color": "#ff6e00",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Big loop",
             "color": "#ff6e00",
             "pattern": "blink",
             "rate": {
@@ -1516,7 +2030,152 @@
              "v": 500
             }
            }
-          ]
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "level"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Left ramp",
+            "color": "#ff1400",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Right ramp",
+            "color": "#ff1400",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Building",
+            "color": "#ff1400",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Big loop",
+            "color": "#ff1400",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 500
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "level"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Left ramp",
+            "color": "#ffffff",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 150
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Right ramp",
+            "color": "#ffffff",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 150
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Building",
+            "color": "#ffffff",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 150
+            }
+           },
+           {
+            "op": "light_shot",
+            "shot": "Big loop",
+            "color": "#ffffff",
+            "pattern": "blink",
+            "rate": {
+             "k": "num",
+             "v": 150
+            }
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "light_shot",
+            "shot": "Left ramp",
+            "color": "#ffffff",
+            "pattern": "chase",
+            "rate": {
+             "k": "num",
+             "v": 90
+            }
+           }
+          ],
+          "else": null
          },
          {
           "op": "if",
@@ -1536,26 +2195,15 @@
            {
             "op": "light_shot",
             "shot": "Right ramp",
-            "color": "#ff6e00",
-            "pattern": "blink",
+            "color": "#ffffff",
+            "pattern": "chase",
             "rate": {
              "k": "num",
-             "v": 250
+             "v": 90
             }
            }
           ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Right ramp",
-            "color": "#ff6e00",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
+          "else": null
          },
          {
           "op": "if",
@@ -1575,26 +2223,15 @@
            {
             "op": "light_shot",
             "shot": "Building",
-            "color": "#ff6e00",
-            "pattern": "blink",
+            "color": "#ffffff",
+            "pattern": "chase",
             "rate": {
              "k": "num",
-             "v": 250
+             "v": 90
             }
            }
           ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Building",
-            "color": "#ff6e00",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
+          "else": null
          },
          {
           "op": "if",
@@ -1614,26 +2251,15 @@
            {
             "op": "light_shot",
             "shot": "Big loop",
-            "color": "#ff6e00",
-            "pattern": "blink",
+            "color": "#ffffff",
+            "pattern": "chase",
             "rate": {
              "k": "num",
-             "v": 250
+             "v": 90
             }
            }
           ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Big loop",
-            "color": "#ff6e00",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
+          "else": null
          }
         ],
         "else": null
@@ -1645,7 +2271,7 @@
          "op": "=",
          "a": {
           "k": "var",
-          "name": "level"
+          "name": "stage"
          },
          "b": {
           "k": "num",
@@ -1654,13 +2280,21 @@
         },
         "then": [
          {
+          "op": "lights_off",
+          "shot": "Building"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         },
+         {
           "op": "if",
           "cond": {
            "k": "cmp",
            "op": "=",
            "a": {
             "k": "var",
-            "name": "heart"
+            "name": "ray at"
            },
            "b": {
             "k": "num",
@@ -1672,23 +2306,17 @@
             "op": "light_shot",
             "shot": "Left ramp",
             "color": "#ff1400",
-            "pattern": "blink",
+            "pattern": "chase",
             "rate": {
              "k": "num",
-             "v": 100
+             "v": 80
             }
            }
           ],
           "else": [
            {
-            "op": "light_shot",
-            "shot": "Left ramp",
-            "color": "#ff1400",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
+            "op": "lights_off",
+            "shot": "Left ramp"
            }
           ]
          },
@@ -1699,7 +2327,7 @@
            "op": "=",
            "a": {
             "k": "var",
-            "name": "heart"
+            "name": "ray at"
            },
            "b": {
             "k": "num",
@@ -1711,101 +2339,17 @@
             "op": "light_shot",
             "shot": "Right ramp",
             "color": "#ff1400",
-            "pattern": "blink",
+            "pattern": "chase",
             "rate": {
              "k": "num",
-             "v": 100
+             "v": 80
             }
            }
           ],
           "else": [
            {
-            "op": "light_shot",
-            "shot": "Right ramp",
-            "color": "#ff1400",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
-         },
-         {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 3
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Building",
-            "color": "#ff1400",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 100
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Building",
-            "color": "#ff1400",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
-           }
-          ]
-         },
-         {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 4
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Big loop",
-            "color": "#ff1400",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 100
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Big loop",
-            "color": "#ff1400",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 500
-            }
+            "op": "lights_off",
+            "shot": "Right ramp"
            }
           ]
          }
@@ -1819,7 +2363,7 @@
          "op": "=",
          "a": {
           "k": "var",
-          "name": "level"
+          "name": "stage"
          },
          "b": {
           "k": "num",
@@ -1828,160 +2372,46 @@
         },
         "then": [
          {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 1
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Left ramp",
-            "color": "#ffffff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 100
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Left ramp",
-            "color": "#ffffff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 150
-            }
-           }
-          ]
+          "op": "lights_off",
+          "shot": "Building"
          },
          {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 2
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Right ramp",
-            "color": "#ffffff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 100
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Right ramp",
-            "color": "#ffffff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 150
-            }
-           }
-          ]
+          "op": "lights_off",
+          "shot": "Left ramp"
          },
          {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 3
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Building",
-            "color": "#ffffff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 100
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Building",
-            "color": "#ffffff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 150
-            }
-           }
-          ]
+          "op": "lights_off",
+          "shot": "Right ramp"
          },
          {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": "=",
-           "a": {
-            "k": "var",
-            "name": "heart"
-           },
-           "b": {
-            "k": "num",
-            "v": 4
-           }
-          },
-          "then": [
-           {
-            "op": "light_shot",
-            "shot": "Big loop",
-            "color": "#ffffff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 100
-            }
-           }
-          ],
-          "else": [
-           {
-            "op": "light_shot",
-            "shot": "Big loop",
-            "color": "#ffffff",
-            "pattern": "blink",
-            "rate": {
-             "k": "num",
-             "v": 150
-            }
-           }
-          ]
+          "op": "light_shot",
+          "shot": "Big loop",
+          "color": "#78d2ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 100
+          }
+         },
+         {
+          "op": "light_shot",
+          "shot": "Mecha exit bottom",
+          "color": "#78d2ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 100
+          }
+         },
+         {
+          "op": "light_shot",
+          "insert": "MECHA LANE",
+          "color": "#78d2ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 100
+          }
          }
         ],
         "else": null
@@ -2098,15 +2528,30 @@
        {
         "op": "if",
         "cond": {
-         "k": "cmp",
-         "op": ">=",
+         "k": "and",
          "a": {
-          "k": "var",
-          "name": "level"
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "stage"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
          },
          "b": {
-          "k": "num",
-          "v": 2
+          "k": "cmp",
+          "op": ">=",
+          "a": {
+           "k": "var",
+           "name": "level"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
          }
         },
         "then": [
@@ -2119,29 +2564,62 @@
         ],
         "else": [
          {
-          "op": "hud_text",
-          "which": "line",
-          "text": "SHOOT RED SHOTS - THE HEART PAYS DOUBLE",
-          "value": null
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "stage"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT RED SHOTS - THE HEART PAYS DOUBLE",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "stage"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "THE SPIRAL RAY: SHOOT THE LIT RAMP",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "JUNIOR: THE BIG LOOP AND MECHA LANE",
+              "value": null
+             }
+            ]
+           }
+          ]
          }
         ]
-       },
-       {
-        "op": "hud_counter",
-        "counter": 2,
-        "value": {
-         "k": "op",
-         "op": "*",
-         "a": {
-          "k": "var",
-          "name": "base"
-         },
-         "b": {
-          "k": "var",
-          "name": "mult"
-         }
-        },
-        "sub": null
        }
       ],
       "else": [
@@ -2156,6 +2634,10 @@
        {
         "op": "lights_off",
         "shot": "Big loop"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Mecha exit bottom"
        },
        {
         "op": "lights_off",
@@ -2174,6 +2656,10 @@
         "shot": "Godzilla target"
        },
        {
+        "op": "lights_off",
+        "insert": "MECHA LANE"
+       },
+       {
         "op": "light_shot",
         "shot": "Building",
         "color": "#ffffff",
@@ -2182,23 +2668,6 @@
          "k": "num",
          "v": 120
         }
-       },
-       {
-        "op": "hud_counter",
-        "counter": 2,
-        "value": {
-         "k": "op",
-         "op": "*",
-         "a": {
-          "k": "var",
-          "name": "paid"
-         },
-         "b": {
-          "k": "num",
-          "v": 2
-         }
-        },
-        "sub": "SUPER JACKPOT"
        }
       ]
      }
@@ -2279,15 +2748,30 @@
        {
         "op": "if",
         "cond": {
-         "k": "cmp",
-         "op": ">=",
+         "k": "and",
          "a": {
-          "k": "var",
-          "name": "heart secs"
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "stage"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
          },
          "b": {
-          "k": "num",
-          "v": 8
+          "k": "cmp",
+          "op": ">=",
+          "a": {
+           "k": "var",
+           "name": "heart secs"
+          },
+          "b": {
+           "k": "num",
+           "v": 8
+          }
          }
         },
         "then": [
@@ -2491,20 +2975,87 @@
       },
       "then": [
        {
-        "op": "set",
-        "var": "jp",
-        "value": {
-         "k": "num",
-         "v": 1
-        }
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "jp",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "jackpot",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
        },
        {
-        "op": "timer_start",
-        "timer": "jackpot",
-        "ms": {
-         "k": "num",
-         "v": 1
-        }
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "stage"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "ray at"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "jp",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "jackpot",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
        }
       ],
       "else": null
@@ -2534,20 +3085,87 @@
       },
       "then": [
        {
-        "op": "set",
-        "var": "jp",
-        "value": {
-         "k": "num",
-         "v": 2
-        }
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "jp",
+          "value": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "jackpot",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
        },
        {
-        "op": "timer_start",
-        "timer": "jackpot",
-        "ms": {
-         "k": "num",
-         "v": 1
-        }
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "stage"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "ray at"
+          },
+          "b": {
+           "k": "num",
+           "v": 2
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "jp",
+          "value": {
+           "k": "num",
+           "v": 2
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "jackpot",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ],
+        "else": null
        }
       ],
       "else": null
@@ -2564,15 +3182,45 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "phase"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        },
        "b": {
-        "k": "num",
-        "v": 1
+        "k": "or",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        }
        }
       },
       "then": [
@@ -2600,6 +3248,64 @@
    {
     "hat": {
      "kind": "shot",
+     "shot": "Mecha exit bottom",
+     "when": "running"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "jp",
+        "value": {
+         "k": "num",
+         "v": 5
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "jackpot",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
      "shot": "Building",
      "when": "running"
     },
@@ -2607,15 +3313,30 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "phase"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        },
        "b": {
-        "k": "num",
-        "v": 1
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        }
       },
       "then": [
@@ -2636,7 +3357,23 @@
         }
        }
       ],
-      "else": [
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
        {
         "op": "set",
         "var": "got",
@@ -2648,8 +3385,16 @@
           "name": "paid"
          },
          "b": {
-          "k": "num",
-          "v": 2
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "var",
+           "name": "stage"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
          }
         }
        },
@@ -2688,6 +3433,40 @@
         "else": null
        },
        {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "got",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "got"
+           },
+           "b": {
+            "k": "num",
+            "v": 25000000
+           }
+          }
+         }
+        ],
+        "else": null
+       },
+       {
         "op": "score",
         "points": {
          "k": "var",
@@ -2711,29 +3490,93 @@
         }
        },
        {
-        "op": "hud_award",
-        "text": "MELTDOWN SUPER JACKPOT",
-        "value": {
-         "k": "var",
-         "name": "got"
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 600
         },
-        "sub": "THE CORE BACK TO 25%",
-        "seconds": 4
+        "strength": "hard"
        },
        {
-        "op": "show",
-        "show": "mine",
-        "name": "Junior"
-       },
-       {
-        "op": "sound",
-        "sound": "won",
-        "fallback": ""
-       },
-       {
-        "op": "clip",
-        "clip": "won",
-        "where": "full"
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "FINAL MELTDOWN",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "JUNIOR RISES",
+          "seconds": 4
+         },
+         {
+          "op": "clip",
+          "clip": "won",
+          "where": "behind"
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Junior"
+         },
+         {
+          "op": "sound",
+          "sound": "won",
+          "fallback": ""
+         },
+         {
+          "op": "music",
+          "bed": "junior"
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "SUPER JACKPOT",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "THE CORE BACK TO 25%",
+          "seconds": 4
+         },
+         {
+          "op": "clip",
+          "clip": "super",
+          "where": "behind"
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Super"
+         },
+         {
+          "op": "sound",
+          "sound": "super",
+          "fallback": ""
+         },
+         {
+          "op": "timer_start",
+          "timer": "next",
+          "ms": {
+           "k": "num",
+           "v": 1200
+          }
+         }
+        ]
        },
        {
         "op": "set",
@@ -2772,10 +3615,60 @@
         "timer": "melt"
        },
        {
-        "op": "hud_text",
-        "which": "title",
-        "text": "BURNING GODZILLA",
-        "value": null
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "BURNING GODZILLA",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "stage"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "DESTOROYAH",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "GODZILLA JUNIOR",
+            "value": null
+           }
+          ]
+         }
+        ]
        },
        {
         "op": "timer_start",
@@ -2785,7 +3678,8 @@
          "v": 1
         }
        }
-      ]
+      ],
+      "else": null
      }
     ]
    },
@@ -2799,38 +3693,53 @@
       "op": "set",
       "var": "got",
       "value": {
-       "k": "var",
-       "name": "base"
-      }
-     },
-     {
-      "op": "set",
-      "var": "got",
-      "value": {
        "k": "op",
        "op": "*",
        "a": {
-        "k": "var",
-        "name": "got"
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "var",
+         "name": "base"
+        },
+        "b": {
+         "k": "var",
+         "name": "mult"
+        }
        },
        "b": {
         "k": "var",
-        "name": "mult"
+        "name": "stage"
        }
       }
      },
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "jp"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        },
        "b": {
-        "k": "var",
-        "name": "heart"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "jp"
+        },
+        "b": {
+         "k": "var",
+         "name": "heart"
+        }
        }
       },
       "then": [
@@ -2883,7 +3792,7 @@
        "k": "var",
        "name": "jackpots"
       },
-      "sub": " "
+      "sub": "JACKPOTS"
      },
      {
       "op": "sound",
@@ -2896,17 +3805,56 @@
       "where": "behind"
      },
      {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "=",
+      "op": "change",
+      "var": "core",
+      "by": {
+       "k": "op",
+       "op": "+",
        "a": {
-        "k": "var",
-        "name": "jp"
+        "k": "num",
+        "v": 2
        },
        "b": {
-        "k": "var",
-        "name": "heart"
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 2
+        },
+        "b": {
+         "k": "var",
+         "name": "stage"
+        }
+       }
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "jp"
+        },
+        "b": {
+         "k": "var",
+         "name": "heart"
+        }
        }
       },
       "then": [
@@ -2925,7 +3873,7 @@
         "var": "core",
         "by": {
          "k": "num",
-         "v": 8
+         "v": 4
         }
        },
        {
@@ -2969,6 +3917,14 @@
          "k": "num",
          "v": 0
         }
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 300
+        },
+        "strength": "strong"
        }
       ],
       "else": [
@@ -2981,16 +3937,47 @@
         },
         "sub": "",
         "seconds": 2
-       },
-       {
-        "op": "change",
-        "var": "core",
-        "by": {
-         "k": "num",
-         "v": 4
-        }
        }
       ]
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "ray at",
+        "value": {
+         "k": "op",
+         "op": "-",
+         "a": {
+          "k": "num",
+          "v": 3
+         },
+         "b": {
+          "k": "var",
+          "name": "ray at"
+         }
+        }
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Spiral ray"
+       }
+      ],
+      "else": null
      },
      {
       "op": "timer_start",
@@ -2999,6 +3986,268 @@
        "k": "num",
        "v": 1
       }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "next"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "phase"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 800
+        },
+        "strength": "strong"
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "change",
+          "var": "stage",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "shake_game",
+          "shake": "jackpot"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "stage"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "music",
+            "bed": ""
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "stage"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "music",
+              "bed": "destoroyah"
+             }
+            ],
+            "else": [
+             {
+              "op": "music",
+              "bed": "junior"
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "stage"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "BURNING GODZILLA",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "stage"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "DESTOROYAH",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "title",
+              "text": "GODZILLA JUNIOR",
+              "value": null
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "timer_start",
+          "timer": "lights",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "stage"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "DESTOROYAH",
+            "value": null,
+            "sub": "THE SPIRAL RAY: THE LIT RAMP",
+            "seconds": 3
+           },
+           {
+            "op": "clip",
+            "clip": "destoroyah",
+            "where": "behind"
+           },
+           {
+            "op": "sound",
+            "sound": "jackpot",
+            "fallback": ""
+           },
+           {
+            "op": "show",
+            "show": "mine",
+            "name": "Destoroyah"
+           },
+           {
+            "op": "hud_counter",
+            "counter": 3,
+            "value": {
+             "k": "var",
+             "name": "jackpots"
+            },
+            "sub": "JACKPOTS",
+            "label": "DESTOROYAH"
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "JUNIOR COMES",
+            "value": null,
+            "sub": "THE BIG LOOP AND MECHA LANE",
+            "seconds": 3
+           },
+           {
+            "op": "clip",
+            "clip": "junior",
+            "where": "behind"
+           },
+           {
+            "op": "sound",
+            "sound": "junior",
+            "fallback": ""
+           },
+           {
+            "op": "show",
+            "show": "mine",
+            "name": "Junior comes"
+           },
+           {
+            "op": "hud_counter",
+            "counter": 3,
+            "value": {
+             "k": "var",
+             "name": "jackpots"
+            },
+            "sub": "JACKPOTS",
+            "label": "JUNIOR"
+           }
+          ]
+         }
+        ],
+        "else": null
+       }
+      ]
      }
     ]
    },
@@ -3053,6 +4302,14 @@
         "op": "clip",
         "clip": "cool",
         "where": "behind"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 250
+        },
+        "strength": "soft"
        },
        {
         "op": "timer_start",
@@ -3120,6 +4377,14 @@
         "where": "behind"
        },
        {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 250
+        },
+        "strength": "soft"
+       },
+       {
         "op": "timer_start",
         "timer": "core",
         "ms": {
@@ -3183,6 +4448,14 @@
         "op": "clip",
         "clip": "cool",
         "where": "behind"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 250
+        },
+        "strength": "soft"
        },
        {
         "op": "timer_start",
@@ -3361,6 +4634,10 @@
         "fallback": ""
        },
        {
+        "op": "shake_game",
+        "shake": "big_hit"
+       },
+       {
         "op": "timer_start",
         "timer": "lights",
         "ms": {
@@ -3395,16 +4672,110 @@
       },
       "then": [
        {
+        "op": "score",
+        "points": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "paid"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        }
+       },
+       {
         "op": "hud_award",
         "text": "THE CORE BLOWS",
-        "value": null,
-        "sub": "THE JACKPOTS START AGAIN",
+        "value": {
+         "k": "op",
+         "op": "/",
+         "a": {
+          "k": "var",
+          "name": "paid"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "sub": "A QUARTER BACK",
         "seconds": 3
        },
        {
         "op": "sound",
         "sound": "lost",
         "fallback": "time_up"
+       },
+       {
+        "op": "clip",
+        "clip": "blows",
+        "where": "behind"
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Core blows"
+       },
+       {
+        "op": "shake",
+        "ms": {
+         "k": "num",
+         "v": 900
+        },
+        "strength": "hard"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "music",
+          "bed": ""
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "stage"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "music",
+            "bed": "destoroyah"
+           }
+          ],
+          "else": [
+           {
+            "op": "music",
+            "bed": "junior"
+           }
+          ]
+         }
+        ]
        },
        {
         "op": "set",
@@ -3451,10 +4822,60 @@
         "timer": "melt"
        },
        {
-        "op": "hud_text",
-        "which": "title",
-        "text": "BURNING GODZILLA",
-        "value": null
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "BURNING GODZILLA",
+          "value": null
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "stage"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "DESTOROYAH",
+            "value": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "title",
+            "text": "GODZILLA JUNIOR",
+            "value": null
+           }
+          ]
+         }
+        ]
        },
        {
         "op": "timer_start",
@@ -3491,6 +4912,10 @@
       "timer": "lights"
      },
      {
+      "op": "timer_stop",
+      "timer": "next"
+     },
+     {
       "op": "set",
       "var": "phase",
       "value": {
@@ -3501,6 +4926,11 @@
      {
       "op": "game_show",
       "name": "Ember fade"
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "Embers"
      },
      {
       "op": "if",
@@ -3672,8 +5102,7 @@
   "format": 1,
   "screen_style": "panel",
   "keep_rules": [],
-  "block_modes": [],
-  "beds": []
+  "block_modes": []
  },
  "recipe": {
   "clips": {
@@ -3732,6 +5161,34 @@
     "length": 3.0,
     "crop": "fill",
     "what": "Night: the city erupts in fireballs and burns (one shot)"
+   },
+   "destoroyah": {
+    "film": "des95",
+    "from": 4719.2,
+    "length": 3.0,
+    "crop": "fill",
+    "what": "Destoroyah's flying form swoops past in the night, its horned red head and fangs filling the frame (one shot, 1:18:39)"
+   },
+   "junior": {
+    "film": "des95",
+    "from": 4438.0,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Godzilla Junior, lit blue in the night, raises his head and calls (one shot, 1:13:58)"
+   },
+   "super": {
+    "film": "des95",
+    "from": 5506.5,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Burning Godzilla, glowing red through the smoke, turns and roars after his ray strikes (one shot, 1:31:46)"
+   },
+   "blows": {
+    "film": "des95",
+    "from": 5360.5,
+    "length": 5.0,
+    "crop": "fill",
+    "what": "Burning Godzilla glowing red as clouds of steam burst from his body (one shot, 1:29:20)"
    }
   },
   "music": {
@@ -3803,6 +5260,40 @@
     "length": 3.0,
     "what": "Godzilla's grieving cry, head raised, just after Junior dies (1:20:25), cut to end on its dying tail",
     "priority": 4
+   },
+   "super": {
+    "film": "des95",
+    "from": 5526.6,
+    "length": 2.0,
+    "priority": 3,
+    "what": "Burning Godzilla's pulsing roar as steam pours off him (1:32:06)"
+   },
+   "junior": {
+    "film": "des95",
+    "from": 4442.85,
+    "length": 3.0,
+    "priority": 4,
+    "what": "Godzilla Junior's rising growl out of silence, fading away (1:14:02)"
+   }
+  },
+  "beds": {
+   "destoroyah": {
+    "film": "des95",
+    "from": 5463.809,
+    "length": 12.56,
+    "what": "Akira Ifukube's score in the last battle with Destoroyah, Junior lying still (1:31:04; bed finder loop chroma 0.657, in tune 0.73, 0.08 untuned, seam self-check PASS)"
+   },
+   "junior": {
+    "film": "des95",
+    "from": 3934.841,
+    "length": 10.85,
+    "what": "the score as Junior swims toward Tokyo Bay (1:05:34; bed finder loop chroma 0.723, in tune 0.80, 0 untuned, seam self-check PASS)"
+   },
+   "melt": {
+    "film": "des95",
+    "from": 5802.785,
+    "length": 12.59,
+    "what": "the score as the freezer beams wrap the melting Godzilla in white mist (1:36:42; bed finder loop chroma 0.689, in tune 0.95, 0 untuned, seam self-check PASS)"
    }
   }
  }

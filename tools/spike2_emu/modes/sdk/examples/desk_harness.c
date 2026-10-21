@@ -26,7 +26,7 @@
  *   game_over           pm_in_game() falls
  *   new_game            a new game: player 1, every score 0, pm_in_game() 1
  *   trigger <file>      /dump/<file> appears (a mode's test trigger), with optional text: trigger f=text
- *   covered <0|1>       a display of the game's that beats the held display priority has the screen
+ *   covered <0|1>       a display of the game's has the screen (a mode's words, or a note, wait for it)
  *   rescene             the game makes its HUD scene again (PAD-390): every node found so far is an old copy,
  *                       renamed "STALE:<name>", and the next lookups find fresh ones
  *   lamps               print every insert held now: "HELD <name> <rrggbb> <pattern> <ms> <mode>"
@@ -920,7 +920,7 @@ int pm_display_priority(unsigned p)
     printf("%6lu DISPLAY %u %s\n", now_ms, disp_prio, mode_name(current));
     return 1;
 }
-int pm_display_covered(void) { return disp_prio && covered; }
+int pm_display_covered(void) { return covered; }      /* PAD-658: held or not (a note looks too) */
 int pm_end_holding(unsigned ms)
 {
     if (!running || running != current) return 0;

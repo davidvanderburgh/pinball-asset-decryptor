@@ -48,6 +48,34 @@
    "length": 4.3,
    "crop": "fill",
    "what": "1:33:55, a run of two shots: Biollante's beast jaws close on Godzilla's head, then a close-up of the jaws clamped on him."
+  },
+  "ablaze": {
+   "film": "bio89",
+   "from": 3352.25,
+   "length": 5.4,
+   "crop": "fill",
+   "what": "A run of three shots: Godzilla's ray strikes Biollante's rose-form stalk in fiery orange bursts, smoke rolls over the lake, then his blue ray pours into the blazing rose, at 0:55:52."
+  },
+  "burn": {
+   "film": "bio89",
+   "from": 3361.7,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "Close on Biollante's red rose head engulfed in roaring orange flames, the petals showing through the fire, at 0:56:02."
+  },
+  "grab": {
+   "film": "bio89",
+   "from": 3174.15,
+   "length": 2.7,
+   "crop": "fill",
+   "what": "At night on Lake Ashi Biollante's vines whip across and coil round the head of a roaring Godzilla, at 0:52:54."
+  },
+  "cashout": {
+   "film": "bio89",
+   "from": 3403.5,
+   "length": 6.0,
+   "crop": "fill",
+   "what": "A column of glittering golden spores rises from the burnt rose into the dark sky as the last flames flicker, at 0:56:43."
   }
  },
  "music": {
@@ -91,6 +119,35 @@
    "length": 3.0,
    "priority": 4,
    "what": "1:32:49, Godzilla's pained roar as Biollante's vine mouths bite into his hands, ending as it falls away."
+  },
+  "ablaze": {
+   "film": "bio89",
+   "from": 3327.6,
+   "length": 2.8,
+   "priority": 4,
+   "what": "Godzilla's ray fires with a sudden roaring hiss and blasts into Biollante across the lake, ending where the shot cuts away, at 0:55:27.6."
+  },
+  "grab": {
+   "film": "bio89",
+   "from": 5508.58,
+   "length": 1.5,
+   "priority": 3,
+   "what": "Biollante's eerie whistling cry, a high glide that falls away, as a vine mouth lunges at Godzilla, at 1:31:48.6."
+  },
+  "cashout": {
+   "film": "bio89",
+   "from": 5771.2,
+   "length": 1.75,
+   "priority": 3,
+   "what": "A soft, eerie wail from Biollante as her shape melts into the glowing pink spore cloud, fading to quiet, at 1:36:11.2."
+  }
+ },
+ "beds": {
+  "beast": {
+   "film": "bio89",
+   "from": 5034.79,
+   "length": 19.65,
+   "what": "The film's own driving military battle march, steady brass chords over a pulsing orchestra, under the wireframe battle-plan display before the final battle, at 1:23:54.8."
   }
  }
 }

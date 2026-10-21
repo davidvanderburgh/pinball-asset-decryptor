@@ -1,24 +1,45 @@
-"""ANGUIRUS (PAD-658): the SDK's C example anguirus_assist.c rebuilt in blocks - a mode that STACKS with the game's
-own battle on purpose: Godzilla's oldest ally joins it, charges his spikes, then rolls.
+"""ANGUIRUS (PAD-658): the SDK's C example anguirus_assist.c rebuilt in blocks and taken deeper - a mode that STACKS
+with the game's own battle on purpose: Godzilla's oldest ally joins it, charges his spikes, rolls, bites, and calls
+the allies in; or he goes home with the pot.
 
-- START: by itself, when one of the game's own modes is running and one ball is in play (the C: a kaiju battle),
-  on the next shot; once per battle (a shot with none running gets it ready for the next one).
-- CHARGE: each Shield target (left, center, right) charges one spike: 500,000. A charged spike does not charge again.
-  The shields are the meter: a spike to charge blinks orange, a charged one is solid orange.
-- ROLL: three spikes: the Big loop blinks cyan for a ROLLING ATTACK: 4,000,000; each Big loop within 6 s of the last
-  doubles it (8M, then 16M, the most). 6 s without a loop: the roll is over, charge the spikes again.
-- ENDS: when the game's mode is over (looked at every second), a drain, a tilt. The game's battle is never touched.
+Destroy All Monsters (1968): at Mt. Fuji Anguirus charges King Ghidorah, clamps his jaws on a neck, and with Godzilla
+and the others pins the three heads down; afterwards he is home on Monsterland. Godzilla: Final Wars (2004): he rolls
+into battle as a ball of spikes. On the playfield he is the ANGUIRUS insert, among the allies the scoop summons.
+
+After Lyman Sheats: a call that costs more each time (Metallica's Sparky), stages with their own shots, a grip that
+slips when left alone (KING GHIDORAH's heads), a hurry-up finale, a pot you cash out or put at risk.
+
+- THE CALL: Shield target hits while he is away call him: 3 the first time, 6 the second, 9 the third (a note says
+  how many are left). Ready, he JOINS one of the game's own modes (the C: a kaiju battle) while one ball is in play,
+  on its next shot; once per battle (a shot with none running gets him ready for the next one).
+- STAGE 1, SPIKES: each Shield target (left, center, right) charges one spike: 500,000, and 1M to the pot. The
+  shields are the meter: a spike to charge blinks orange, a charged one is solid.
+- STAGE 2, ROLLING ATTACK: the Big loop chases cyan: 4,000,000 (and as much to the pot); each Big loop within 6 s of
+  the last doubles it (8M, then 16M, the most). The window runs out: charge the spikes again. Three rolls.
+- STAGE 3, THE BITE: one ramp chases amber: a bite, 2M and 8M, 12M, 16M to the pot; the other ramp is next. Left
+  alone 12 s he is shaken off: one bite lost. Three bites.
+- STAGE 4, ALLIES ATTACK: the Building, a hurry-up from 30M down 1M a second to 10M: the pot twice over and the
+  hurry-up. He has won.
+- CASH OUT: after any stage the right scoop chases white: the pot, and he goes home. The game's mode ending pays half
+  the pot; a drain a quarter. Each time he joins, the window is 1 s shorter and the grip slips 2 s sooner.
 """
-from blk import (AND, BALLS, NOT, RUNNING, STOCK, a_show, start, add, award, change, clip, clips, end, eq, every, ge,
-                 gt, hud, if_, le, light, lt, mul, off, on_any_shot, on_end, on_shot, on_start, on_timer,
-                 score, set_, show, sound, sounds, step, timer_left, timer_start, timer_stop, var)
+from blk import (AND, OR, BALLS, LIT, NOT, RUNNING, STOCK, a_show, add, award, change, clip, clips, div, end, eq, every,
+                 ge, gt, hud, hud_gauge, hud_line, hud_title, if_, le, light, light_insert, lt, mul, off, off_insert, on_any_shot, on_end,
+                 on_shot, on_start, on_timer, score, set_, shake, shake_game, show, sound, sounds, start, step, sub,
+                 timer_left, timer_start, timer_stop, var, beds, music)
+import pack
 
 SLUG, NAME = "anguirus_assist", "ANGUIRUS"
-AMBER, EMBER, ORANGE, CYAN, WHITE = "#ff6e00", "#501900", "#ff5000", "#00e6ff", "#ffffff"
+AMBER, EMBER, ORANGE, CYAN, WHITE, RED, GOLD = "#ff6e00", "#501900", "#ff5000", "#00e6ff", "#ffffff", "#ff1400", "#ffb000"
 ROLL_SHOT = "Big loop"
 SPIKES = (("spike l", "Shield target left"), ("spike c", "Shield target center"), ("spike r", "Shield target right"))
+RAMPS = ("Left ramp", "Right ramp")
+AX, AY = 186, 439                     # the ANGUIRUS insert (the allies the scoop summons): his place on the playfield
 SX, SY = 199, 346                     # the SHIELD CENTER insert's place: the C's KIT_AT_SHIELDS
-TIMERS = ("enter", "roll", "charged")
+BX, BY = 123, 202                     # the BUILDING
+TIMERS = ("enter", "roll", "charged", "next", "grip", "bite")
+#: the call: 3 shield hits the first time, 6 the second, 9 the third
+NEED = pack.need(3, "joins")
 
 
 def charged():
@@ -27,16 +48,44 @@ def charged():
 
 SHOWS = [
     a_show("He enters",
-           step("burst", 700, WHITE, AMBER, "xy", gi="flash", x=SX, y=SY),
+           step("fade_in", 600, AMBER, "#000000", "xy", gi="dark", x=AX, y=AY),
+           step("burst", 700, WHITE, AMBER, "xy", gi="flash", x=AX, y=AY),
            step("spin", 1400, AMBER, EMBER, "xy", rate=90, x=SX, y=SY),
            step("fade", 400, AMBER, "#000000", "center")),
+    a_show("Spike",
+           step("implode", 500, ORANGE, "#000000", "xy", gi="dark", x=SX, y=SY),
+           step("pulse", 400, ORANGE, EMBER, "xy", rate=200, x=SX, y=SY)),
+    a_show("Charged",
+           step("strobe", 300, WHITE, ORANGE, "center", rate=55, gi="flash"),
+           step("spiral_out", 1100, ORANGE, EMBER, "xy", gi="dark", x=SX, y=SY),
+           step("sweep_up", 600, CYAN, "#000000", "center", gi="dark"),
+           step("fade", 400, CYAN, "#000000", "center", blend=150)),
     a_show("Rolling attack",
            step("chase", 900, CYAN, "#000000", "center", rate=40),
+           step("bounce", 700, WHITE, CYAN, "center", rate=120, gi="dark"),
            step("burst", 500, WHITE, CYAN, "top", gi="flash")),
-    a_show("He rolled",
-           step("burst", 800, WHITE, AMBER, "center", gi="flash"),
-           step("rainbow", 1600, "#000000", "#000000", "xy", rate=60, x=SX, y=SY),
-           step("fade", 500, AMBER, "#000000", "center")),
+    a_show("The bite",
+           step("sweep_lr", 400, GOLD, "#000000", "top", gi="dark"),
+           step("bolts", 600, WHITE, GOLD, "top", rate=110, gi="flash"),
+           step("fade", 300, GOLD, "#000000", "center")),
+    a_show("Shaken off",
+           step("sweep_down", 600, EMBER, "#000000", "top", gi="dark"),
+           step("fade", 400, EMBER, "#000000", "center")),
+    a_show("Allies attack",
+           step("strobe", 400, WHITE, RED, "center", rate=50, gi="flash"),
+           step("ripple", 1200, RED, AMBER, "xy", rate=350, gi="dark", x=BX, y=BY),
+           step("spiral_in", 900, AMBER, "#000000", "xy", gi="dark", x=BX, y=BY),
+           step("fire", 900, GOLD, RED, "top", gi="dark")),
+    a_show("Triumph",
+           step("burst", 800, WHITE, AMBER, "xy", gi="flash", x=BX, y=BY),
+           step("rainbow", 1800, "#000000", "#000000", "xy", rate=60, x=AX, y=AY),
+           step("sparkle", 1200, GOLD, EMBER, "center"),
+           step("fade", 600, AMBER, "#000000", "center", blend=300)),
+    a_show("Going home",
+           step("solid", 500, AMBER, "#000000", "xy", gi="dark", x=AX, y=AY),
+           step("sweep_rl", 700, AMBER, "#000000", "center", gi="dark"),
+           step("implode", 1100, AMBER, "#000000", "xy", gi="dark", x=AX, y=AY),
+           step("fade", 800, AMBER, "#000000", "xy", gi="keep", blend=400, x=AX, y=AY)),
     a_show("Embers",
            step("sparkle", 900, AMBER, EMBER, "center", gi="dark"),
            step("fade", 800, EMBER, "#000000", "center")),
@@ -44,98 +93,198 @@ SHOWS = [
 
 
 def shield_lights():
-    """The charge meter: a spike to charge blinks orange, a charged one (or all while he rolls) is solid."""
+    """The charge meter: a spike to charge blinks orange, a charged one is solid."""
     return [if_(eq(v, 1), [light(s, ORANGE, "solid")], [light(s, ORANGE, "blink", 400)]) for v, s in SPIKES]
 
 
+def pot_up(points):
+    return [change("pot", points)]
+
+
+def bite_lights():
+    """The ramp to bite chases amber; the other one is the game's."""
+    return [if_(eq("bite at", i), [light(s, GOLD, "chase", 90)], [off(s)]) for i, s in enumerate(RAMPS, 1)]
+
+
+def setup_stage():
+    """What each stage lights and says as it begins (the "next" timer, once the stage before is done)."""
+    return [
+        if_(eq("stage", 2), [
+            set_("rolling", 1), set_("roll value", 4000000), timer_start("roll", var("roll ms")),
+            light(ROLL_SHOT, CYAN, "chase", 90), clip("spike", "full"), show("Charged"),
+            award("ROLLING ATTACK LIT", sub="SHOOT THE BIG LOOP", seconds=3)]),
+        if_(eq("stage", 3), [
+            set_("rolling", 0), timer_stop("roll"), off(ROLL_SHOT), set_("bite at", 1),
+            *[set_(v, 1) for v, _s in SPIKES], *[off(s) for _v, s in SPIKES],
+            timer_start("grip", var("grip ms")), *bite_lights(), show("The bite"),
+            award("THE BITE", sub="SHOOT THE AMBER RAMP", seconds=3)]),
+        if_(eq("stage", 4), [
+            timer_stop("grip"), *[off(s) for s in RAMPS], set_("hurry", 30000000),
+            light("Building", RED, "chase", 70), clip("allies", "full"), sound("won"), music("allies"),
+            show("Allies attack"),
+            award("ALLIES ATTACK", value=var("hurry"), sub="SHOOT THE BUILDING", seconds=3)]),
+    ]
+
+
 SCRIPTS = [
-    # ---- he joins the game's own mode ------------------------------------------------------------------------
+    # ---- the call: shield hits while he is away; ready, he joins the game's own mode ---------------------------------
+    *[on_shot(s, if_(AND(lt(BALLS, 2), eq("ready", 0)), [
+        change("calls", 1),
+        if_(ge("calls", NEED), [
+            set_("ready", 1),
+            award("ANGUIRUS IS READY", sub="HE JOINS THE NEXT BATTLE", seconds=3)], [
+            award("SHIELD HITS", value=sub(NEED, var("calls")), sub="MORE TO CALL ANGUIRUS", seconds=2)])]),
+        when="idle") for _v, s in SPIKES],
     on_any_shot(if_(AND(STOCK, lt(BALLS, 2)), [
-        if_(eq("joined", 0), [set_("joined", 1), start()])], [set_("joined", 0)]),
+        if_(AND(eq("joined", 0), eq("ready", 1)), [set_("joined", 1), start()])], [set_("joined", 0)]),
         when="idle"),
-    on_start(set_("joined", 1), set_("rolling", 0), set_("rolls", 0), set_("entered", 0),
+
+    # ---- he joins: values and pace for this time ------------------------------------------------------------------------
+    on_start(set_("joined", 1), set_("ready", 0), set_("calls", 0), change("joins", 1),
+             set_("stage", 1), set_("pot", 0), set_("rolling", 0), set_("rolls", 0), set_("entered", 0),
+             set_("bites", 0), set_("won", 0), set_("cashed", 0), set_("left", 0),
              *[set_(v, 0) for v, _s in SPIKES],
-             *shield_lights(),
+             # each time he joins: the roll's window 1 s shorter (6, 5, 4 s), his grip slips 2 s sooner (12, 10, 8 s)
+             set_("roll ms", sub(7000, mul(1000, var("joins")))), if_(lt("roll ms", 4000), [set_("roll ms", 4000)]),
+             set_("grip ms", sub(14000, mul(2000, var("joins")))), if_(lt("grip ms", 8000), [set_("grip ms", 8000)]),
+             *shield_lights(), light_insert("ANGUIRUS", AMBER, "pulse", 700),
              timer_start("enter", 2000)),
     # his entrance, once the game's own start screen has had its moment
     on_timer("enter", if_(RUNNING, [
-        set_("entered", 1), clip("intro", "full"), show("He enters"),
+        set_("entered", 1), clip("intro", "full"), show("He enters"), shake(600, "strong"),
         award("ANGUIRUS JOINS", sub="SHIELDS CHARGE HIS SPIKES", seconds=3)])),
 
-    # ---- charge the spikes --------------------------------------------------------------------------------------
-    *[on_shot(s, if_(AND(eq("rolling", 0), eq(v, 0)), [
-        set_(v, 1), score(500000), sound("spike"), light(s, ORANGE, "solid"), timer_start("charged", 1)]))
+    # ---- stage 1 (and the recharge in stage 2): the spikes ---------------------------------------------------------------
+    *[on_shot(s, if_(AND(le("stage", 2), eq("rolling", 0), eq(v, 0)), [
+        set_(v, 1), score(500000), *pot_up(1000000), sound("spike"), light(s, ORANGE, "solid"), show("Spike"),
+        shake(200, "soft"), timer_start("charged", 1)]))
       for v, s in SPIKES],
     on_timer("charged",
              if_(ge(charged(), 3), [
-                 set_("rolling", 1), set_("roll value", 4000000), timer_start("roll", 6000),
-                 light(ROLL_SHOT, CYAN, "blink", 400), clip("spike", "full"),
-                 award("ROLLING ATTACK LIT", sub="SHOOT THE BIG LOOP", seconds=3)], [
-                 if_(eq("entered", 1), [award("SPIKE", value=charged(), sub="OF 3 CHARGED", seconds=2)])])),
+                 if_(eq("stage", 1), [award("SPIKES CHARGED", value=var("pot"), sub="THE POT", seconds=2),
+                                      timer_start("next", 700)], [
+                     # stage 2: charged again, he rolls again
+                     set_("rolling", 1), set_("roll value", 4000000), timer_start("roll", var("roll ms")),
+                     light(ROLL_SHOT, CYAN, "chase", 90), clip("spike", "full"),
+                     award("ROLLING ATTACK LIT", sub="SHOOT THE BIG LOOP", seconds=3)])], [
+                 if_(eq("entered", 1), [award("SPIKE CHARGED", value=charged(), sub="OF 3", seconds=2)])])),
 
-    # ---- roll -----------------------------------------------------------------------------------------------------
-    on_shot(ROLL_SHOT, if_(eq("rolling", 1), [
-        score(var("roll value")), change("rolls", 1), sound("roll"), clip("roll", "full"), show("Rolling attack"),
-        award("ROLLING ATTACK", value=var("roll value"), sub="AGAIN WITHIN 6 S TO DOUBLE", seconds=3),
-        set_("roll value", mul(var("roll value"), 2)),
-        if_(gt("roll value", 16000000), [set_("roll value", 16000000)]),
-        timer_start("roll", 6000), light(ROLL_SHOT, CYAN, "blink", 400)])),
-    on_timer("roll", if_(eq("rolling", 1), [
+    # ---- stage 2: roll ---------------------------------------------------------------------------------------------------
+    on_shot(ROLL_SHOT, if_(AND(eq("stage", 2), eq("rolling", 1)), [
+        score(var("roll value")), *pot_up(var("roll value")), change("rolls", 1), sound("roll"), clip("roll", "full"),
+        show("Rolling attack"), shake(400, "hard"),
+        if_(ge("rolls", 3), [
+            award("THREE ROLLS", value=var("pot"), sub="THE POT", seconds=2), timer_stop("roll"),
+            set_("rolling", 0), off(ROLL_SHOT), timer_start("next", 700)], [
+            award("ROLLING ATTACK", value=var("roll value"), sub="AGAIN TO DOUBLE", seconds=3),
+            set_("roll value", mul(var("roll value"), 2)),
+            if_(gt("roll value", 16000000), [set_("roll value", 16000000)]),
+            timer_start("roll", var("roll ms")), light(ROLL_SHOT, CYAN, "chase", 90)])])),
+    on_timer("roll", if_(AND(eq("stage", 2), eq("rolling", 1)), [
         set_("rolling", 0), *[set_(v, 0) for v, _s in SPIKES], off(ROLL_SHOT), *shield_lights(),
         award("CHARGE THE SPIKES", sub="HIT THE SHIELDS", seconds=2)])),
 
-    # ---- every second: the roll's blink quickens; the game's mode over, he leaves with it ---------------------------
-    every(1,
-          if_(eq("rolling", 1), [
-              if_(le(timer_left("roll"), 2000), [light(ROLL_SHOT, CYAN, "blink", 100)], [
-                  if_(le(timer_left("roll"), 4000), [light(ROLL_SHOT, CYAN, "blink", 200)])])]),
-          if_(NOT(STOCK), [end()])),
+    # ---- stage 3: the bite --------------------------------------------------------------------------------------------------
+    on_shot("Left ramp", if_(AND(eq("stage", 3), eq("bite at", 1)), [timer_start("bite", 1)])),
+    on_shot("Right ramp", if_(AND(eq("stage", 3), eq("bite at", 2)), [timer_start("bite", 1)])),
+    on_timer("bite",
+             change("bites", 1), score(2000000), *pot_up(add(4000000, mul(4000000, var("bites")))),
+             set_("bite at", sub(3, var("bite at"))), *bite_lights(), timer_start("grip", var("grip ms")),
+             clip("bite", "full"), sound("roll"), show("The bite"), shake(350, "strong"),
+             if_(ge("bites", 3), [award("THE NECK IS PINNED", value=var("pot"), sub="THE POT", seconds=2),
+                                  timer_stop("grip"), timer_start("next", 700)],
+                 [award("BITE", value=add(4000000, mul(4000000, var("bites"))), sub="NOW THE OTHER RAMP")])),
+    on_timer("grip", if_(eq("stage", 3), [
+        if_(gt("bites", 0), [change("bites", -1)]), sound("spike"), show("Shaken off"), shake(300, "medium"),
+        award("SHAKEN OFF", value=var("bites"), sub="BITES HELD", seconds=2), timer_start("grip", var("grip ms"))])),
 
-    on_end(*[timer_stop(t) for t in TIMERS], set_("rolling", 0),
-           if_(gt("rolls", 0), [clip("won", "full"), sound("won"), show("He rolled")],
-               [clip("lost", "full"), show("Embers")])),
+    # ---- stage 4: allies attack, a hurry-up at the Building ---------------------------------------------------------------
+    on_shot("Building", if_(AND(eq("stage", 4), eq("won", 0)), [
+        set_("won", 1), score(add(mul(var("pot"), 2), var("hurry"))), off("Building"),
+        award("ANGUIRUS TRIUMPHS", value=add(mul(var("pot"), 2), var("hurry")), sub="THE POT TWICE", seconds=4),
+        sound("won"), show("Triumph"), shake_game("multiball_start"), timer_start("next", 2500)])),
+
+    # ---- a stage done: on to the next ------------------------------------------------------------------------------------------
+    # (his awards stay up a moment before the end: while the battle runs the runtime's TOTAL is his only title)
+    on_timer("next", if_(OR(eq("cashed", 1), eq("won", 1)), [end()], [
+        change("stage", 1), shake_game("jackpot"), *pack.cash_out_lit(), *setup_stage()])),
+    on_shot(pack.CASH_SHOT, if_(AND(ge("stage", 2), eq("won", 0), eq("cashed", 0)), [
+        set_("cashed", 1), score(var("pot")), *pack.cash_out_off(),
+        award("ANGUIRUS GOES HOME", value=var("pot"), sub="CASHED OUT", seconds=4),
+        clip("cashout", "full"), sound("cashout"), show("Going home"), shake(600, "medium"),
+        timer_start("next", 1500)])),
+
+    # ---- every second: the roll's chase quickens, the hurry-up falls; the game's mode over, he leaves with it ------------------
+    every(1,
+          if_(AND(eq("stage", 2), eq("rolling", 1)), [
+              if_(le(timer_left("roll"), 2000), [light(ROLL_SHOT, CYAN, "blink", 100)])]),
+          if_(AND(eq("stage", 4), eq("won", 0)), [
+              if_(gt("hurry", 10000000), [change("hurry", -1000000)]),
+              award("ALLIES ATTACK", value=var("hurry"), sub="SHOOT THE BUILDING", seconds=2)]),
+          if_(NOT(STOCK), [set_("left", 1), end()])),
+
+    # the ending: the runtime's TOTAL shows his points under the title that says how it ended
+    on_end(*[timer_stop(t) for t in TIMERS], set_("rolling", 0), set_("stage", 0),
+           if_(eq("won", 1), [hud_title("ANGUIRUS TRIUMPHS"), hud_line("THE POT TWICE AND THE HURRY-UP"),
+                              clip("won", "full")]),
+           if_(eq("cashed", 1), [hud_title("ANGUIRUS GOES HOME"), hud_line("THE POT IS CASHED OUT")]),
+           if_(AND(eq("won", 0), eq("cashed", 0), eq("left", 1)), [
+               score(div(var("pot"), 2)), hud_title("HE LEAVES WITH IT"), hud_line("HALF THE POT"),
+               clip("won", "full"), show("Going home")]),
+           if_(AND(eq("won", 0), eq("cashed", 0), eq("left", 0)), [
+               score(div(var("pot"), 4)), hud_title("ANGUIRUS FALLS"), hud_line("A QUARTER OF THE POT"),
+               clip("lost", "full"), show("Embers"), shake(800, "soft")])),
 ]
 
 PROGRAM = {
     "name": NAME, "seconds": 0, "ends_on_drain": True, "screen": False, "game_modes": "stack",
     "wait_multiball": False, "priority": 0,
-    "vars": [{"name": "joined", "reset": "game"}] + [
-        {"name": n, "reset": "mode"} for n in ("rolling", "roll value", "rolls", "entered")] + [
+    "vars": [{"name": n, "reset": "game"} for n in ("joined", "ready", "calls", "joins")] + [
+        {"name": n, "reset": "mode"} for n in ("stage", "pot", "rolling", "roll value", "rolls", "entered", "bites",
+                                                "bite at", "hurry", "won", "cashed", "left", "roll ms", "grip ms")] + [
         {"name": v, "reset": "mode"} for v, _s in SPIKES],
     "timers": [{"name": n} for n in TIMERS],
     "hud": hud(" ", counters=[], timer=None,
                gauge={"label": "SPIKES", "kind": "spike", "count": 3, "color": "#ff7800", "value": charged()}),
     "bar": {"on": False}, "info": {"on": False},
-    "clips": clips("intro", "spike", "roll", "won", "lost"),
-    "sounds": sounds({"spike": 3, "roll": 3, "won": 4}),
+    "clips": clips("intro", "spike", "roll", "won", "lost", "bite", "allies", "cashout"),
+    "sounds": sounds({"spike": 3, "roll": 3, "won": 4, "cashout": 4}),
     "music": "music.wav",
+    "beds": beds("allies"),
     "shows": SHOWS,
 }
 
 EXAMPLE = {
-    "name": NAME, "slug": SLUG, "order": 105, "titles": ["godzilla_le"], "based_on": "anguirus_assist.c",
-    "about": ("The C example ANGUIRUS rebuilt in blocks: he joins the game's own battle and leaves with it; the "
-              "three shields charge his spikes, then the Big loop is a rolling attack that doubles to 16M."),
+    "name": NAME, "slug": SLUG, "order": 105, "titles": ["godzilla_le", "godzilla_pro"],
+    "based_on": "anguirus_assist.c",
+    # the Pro has two shields (left, right): its Maser target is the third spike, so the call and the charge play the
+    # same (three different targets to charge, all on the way up the left and right)
+    "title_alt": {"godzilla_pro": {"shots": {"Shield target center": "Maser target"}}},
+    "about": ("The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (3, then 6, then 9) and "
+              "he joins the game's own battle; four stages (charge the spikes at the shields, three rolling attacks "
+              "at the Big loop, three bites at the chasing ramp, the allies' hurry-up at the Building); cash the pot "
+              "out at the right scoop after any stage. Destroy All Monsters (1968) and Final Wars (2004)."),
     "lost": [
         "He joins on the first shot after one of the game's own modes begins (blocks only look at a shot), where "
         "the C looked twice a second; and blocks cannot tell a battle from the game's other modes: he joins any "
         "of its modes while one ball is in play (its multiballs are left out), where the C joined only kaiju "
         "battles.",
-        "He leaves within a second of the game's mode ending (an Every second check) and his total shows at once "
-        "for 3 s; the C waited for the battle's own total screen first, then kept his 4 s in view.",
-        "As he leaves with the battle, ANGUIRUS TOTAL is the title over his total: the C put it under the total, "
-        "with no title.",
-        "Ended while the battle still runs (a stop, another of our modes), his total shows alone: the C put ANGUIRUS "
-        "RETREATS under it. His HUD's title and line are the battle's while it runs, so a title block cannot say it.",
+        "He leaves within a second of the game's mode ending (an Every second check) and his award shows at once; "
+        "the C waited for the battle's own total screen first, then kept his 4 s in view.",
+        "Ended while the battle still runs (a stop, another of our modes), his total shows under the runtime's "
+        "ANGUIRUS TOTAL: the C put ANGUIRUS RETREATS under it. His HUD's title and line are the battle's while it "
+        "runs, so the stage is said by his awards, not by a line or a counter.",
         "His screen is not shared in moments: with the HUD on he holds display priority 180 the whole time he runs, "
         "where the C held it only for each moment (entrance, a spike, the roll, a rolling attack) and gave the "
         "battle its own displays between them.",
         "His entrance (clip, music, words) comes a fixed 2 s after he joins; the C waited until the battle's start "
         "screen had gone (up to 12 s). His music starts as he joins, not with the entrance.",
-        "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls.",
-        "The Big loop's blink quickens once a second (400, 200, 100 ms), where the C stepped it every tick.",
-        "Godzilla LE only: the program names the center shield target; the C charged with two spikes on Godzilla "
-        "Pro 1.15/1.16's two shields.",
+        "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls; from THE BITE on it stays "
+        "full.",
+        "The Big loop's chase turns to a fast blink in the window's last 2 s (looked at once a second), where the C "
+        "stepped its blink every tick.",
+        "On Godzilla Pro 1.16 the Maser target stands in for the center shield (a third spike to charge): the C "
+        "charged with two spikes on the Pro's two shields.",
         "The C's total gave way at once when another of our modes asked to start; the blocks' runtime TOTAL runs "
         "its 3 s.",
     ],
@@ -148,23 +297,52 @@ def build():
     return dict(EXAMPLE, program=p)
 
 
+_SH = ["shot", "Shield target left", "ms", 400]
+_CALL3 = _SH * 3 + ["secs", 1]
 _JOIN = ["battle", 1, "secs", 1, "shot", "Slingshot", "secs", 3]
 _CHARGE = ["shot", "Shield target left", "ms", 400, "shot", "Shield target center", "ms", 400,
-           "shot", "Shield target right", "secs", 1]
+           "shot", "Shield target right", "secs", 2]
+_ROLLS = ["shot", "Big loop", "secs", 2] * 3 + ["secs", 1]
+_BITES = ["shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Left ramp", "secs", 2]
 DESK = [
-    ("joins the battle charges rolls and leaves", _JOIN + _CHARGE + ["shot", "Big loop", "secs", 2, "shot", "Big loop",
-                                                                     "secs", 2, "shot", "Big loop", "secs", 2,
-                                                                     "shot", "Big loop", "secs", 2,
-                                                                     "battle", 0, "secs", 6],
-     ["[ANGUIRUS] START", "Hud_Award: ANGUIRUS JOINS", "LAMP SHIELD LEFT ff5000 blink 400",
-      "LAMP SHIELD LEFT ff5000 solid", "Hud_Award: ROLLING ATTACK LIT", "SCORE +500000", "SCORE +4000000",
-      "SCORE +8000000", "SCORE +16000000", "LAMP BIG LOOP 00e6ff blink 400", "own sound won", "END (a block)",
-      "Hud_Title: ANGUIRUS TOTAL", "lamps held 0"]),
-    ("the roll runs out", _JOIN + _CHARGE + ["secs", 4, "lamps", "secs", 3, "lamps"],
-     ["LAMP BIG LOOP 00e6ff blink 200", "Hud_Award: CHARGE THE SPIKES", "LAMP OFF BIG LOOP"]),
-    ("no battle no join", ["shot", "Slingshot", "secs", 2, "battle", 1, "secs", 1, "shot", "Slingshot", "secs", 1],
+    ("three shield hits call him, six the second time",
+     _CALL3 + _JOIN + ["battle", 0, "secs", 6, "shot", "Slingshot", "secs", 1] + _SH * 5 + ["secs", 1, "battle", 1,
+                                                                                          "secs", 1, "shot",
+                                                                                          "Slingshot", "secs", 2]
+     + _SH + ["secs", 1, "shot", "Slingshot", "secs", 3],
+     ["Hud_Title: ANGUIRUS IS READY", "[ANGUIRUS] START", "END (a block)", "Hud_Line: 1  -  MORE TO CALL ANGUIRUS",
+      "Hud_Line: 5  -  MORE TO CALL ANGUIRUS"]),
+    ("all four stages and the allies win", _CALL3 + _JOIN + _CHARGE + ["secs", 2, "lamps"] + _ROLLS + _BITES +
+     ["secs", 4, "shot", "Building", "secs", 6],
+     ["Hud_Award: ANGUIRUS JOINS", "HELD SHIELD LEFT ff5000 solid", "Hud_Award: SPIKES CHARGED",
+      "Hud_Award: ROLLING ATTACK LIT", "SCORE +4000000", "SCORE +8000000", "SCORE +16000000",
+      "Hud_Award: THE BITE", "LAMP LEFT RAMP ffb000 chase 90", "Hud_Award: THE NECK IS PINNED",
+      "Hud_Award: ALLIES ATTACK", "Hud_AwardSub: 26,000,000  -  SHOOT THE BUILDING",
+      "Hud_Award: ANGUIRUS TRIUMPHS", "SCORE +158000000", "own clip won", "END (a block)", "lamps held 0"]),
+    ("the roll runs out, then cash out", _CALL3 + _JOIN + _CHARGE + ["secs", 3, "lamps", "secs", 3, "lamps",
+                                                                     "shot", "Right scoop", "secs", 4],
+     ["LAMP BIG LOOP 00e6ff blink 100", "Hud_Award: CHARGE THE SPIKES", "LAMP OFF BIG LOOP",
+      "LAMP SELECT CITY ffffff chase", "Hud_Award: ANGUIRUS GOES HOME", "SCORE +3000000", "own clip cashout",
+      "END (a block)", "lamps held 0"]),
+    ("shaken off in the bite", _CALL3 + _JOIN + _CHARGE + _ROLLS + ["shot", "Left ramp", "secs", 14],
+     ["Hud_Award: BITE", "Hud_Award: SHAKEN OFF", "Hud_AwardSub: 0  -  BITES HELD"]),
+    ("the battle ends: half the pot", _CALL3 + _JOIN + _CHARGE + ["battle", 0, "secs", 6],
+     ["Hud_Title: HE LEAVES WITH IT", "SCORE +1500000", "END (a block)", "lamps held 0"]),
+    ("no battle no join", _CALL3 + ["shot", "Slingshot", "secs", 2, "battle", 1, "secs", 1, "shot", "Slingshot",
+                                    "secs", 1],
      ["[ANGUIRUS] START"]),
-    ("a drain mid battle", _JOIN + ["shot", "Shield target left", "secs", 1, "ball_end", "secs", 7,
-                                    "shot", "Slingshot", "secs", 1],
-     ["END (ball ended)", "own clip lost", "lamps held 0"]),
+    ("a drain mid battle", _CALL3 + _JOIN + ["shot", "Shield target left", "secs", 1, "ball_end", "secs", 7,
+                                             "shot", "Slingshot", "secs", 1],
+     ["END (ball ended)", "own clip lost", "SCORE +250000", "lamps held 0"]),
+]
+
+#: PAD-658: as a Pro gets it - two shields and the Maser target are the three spikes
+_PRO_CHARGE = ["shot", "Shield target left", "ms", 400, "shot", "Maser target", "ms", 400,
+               "shot", "Shield target right", "secs", 2]
+DESK_PRO = [
+    ("the pro's maser is the third spike", _CALL3 + _JOIN + _PRO_CHARGE + ["secs", 2, "lamps"] + _ROLLS,
+     ["[ANGUIRUS] START", "Hud_Award: SPIKES CHARGED", "Hud_Award: ROLLING ATTACK LIT", "SCORE +16000000",
+      "Hud_Award: THE BITE"]),
+    ("the pro calls him with the maser too", ["shot", "Maser target", "ms", 400] * 3 + ["secs", 1] + _JOIN,
+     ["Hud_Title: ANGUIRUS IS READY", "[ANGUIRUS] START"]),
 ]

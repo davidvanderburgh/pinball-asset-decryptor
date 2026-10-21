@@ -3252,7 +3252,29 @@ int pm_display_priority(unsigned priority)
     return 1;
 }
 
-int pm_display_covered(void) { return disp_prio && disp_covered_now; }
+/* the display of the game's that has the screen now: 1 an effect over the layered display, 2 a layered foreground (any,
+ * full screen or framed: framed ones put their words where a mode's title is), 0 none */
+static int disp_taken(void)
+{
+    unsigned char *m = disp_manager();
+    unsigned now;
+    int covered;
+    if (!m) return 0;
+    now = disp_now(m);
+    covered = now && now != disp_host();
+    if (!covered && disp_layered_mgr && now == disp_host() &&
+        *(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58)))
+        covered = 2;
+    return covered;
+}
+
+/* PAD-658: with no hold (a mode that is not running: its qualification note) it looks now, so a note keeps off the
+ * game's words too (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER CANNON CHARGING) */
+int pm_display_covered(void)
+{
+    if (disp_prio) return disp_covered_now != 0;
+    return (can & PM_CAN_DISPLAY_PRIORITY) && pm_in_game() && disp_taken();
+}
 
 /* an ending kept by pm_end_holding is not the new mode's */
 static void disp_linger_other_began(void)
@@ -3289,10 +3311,7 @@ static void display_tick(void)
     m = disp_manager();
     if (!m) return;
     now = disp_now(m);
-    covered = now && now != disp_host();
-    if (!covered && disp_layered_mgr && now == disp_host() &&
-        *(unsigned *)(disp_layered_mgr + pm_port_value("layered_fg_at", 0x58)))
-        covered = 2;
+    covered = disp_taken();
     if (!covered != !disp_covered_now) {
         if (covered == 1) say("display: the game's effect %u (priority %u) has the screen", now, disp_level_now(m));
         else if (covered) say("display: a layered display of the game's has the screen");

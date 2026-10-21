@@ -55,6 +55,34 @@
    "length": 3.0,
    "crop": "fill",
    "what": "Night: the city erupts in fireballs and burns (one shot)"
+  },
+  "destoroyah": {
+   "film": "des95",
+   "from": 4719.2,
+   "length": 3.0,
+   "crop": "fill",
+   "what": "Destoroyah's flying form swoops past in the night, its horned red head and fangs filling the frame (one shot, 1:18:39)"
+  },
+  "junior": {
+   "film": "des95",
+   "from": 4438.0,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Godzilla Junior, lit blue in the night, raises his head and calls (one shot, 1:13:58)"
+  },
+  "super": {
+   "film": "des95",
+   "from": 5506.5,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Burning Godzilla, glowing red through the smoke, turns and roars after his ray strikes (one shot, 1:31:46)"
+  },
+  "blows": {
+   "film": "des95",
+   "from": 5360.5,
+   "length": 5.0,
+   "crop": "fill",
+   "what": "Burning Godzilla glowing red as clouds of steam burst from his body (one shot, 1:29:20)"
   }
  },
  "music": {
@@ -126,6 +154,40 @@
    "length": 3.0,
    "what": "Godzilla's grieving cry, head raised, just after Junior dies (1:20:25), cut to end on its dying tail",
    "priority": 4
+  },
+  "super": {
+   "film": "des95",
+   "from": 5526.6,
+   "length": 2.0,
+   "priority": 3,
+   "what": "Burning Godzilla's pulsing roar as steam pours off him (1:32:06)"
+  },
+  "junior": {
+   "film": "des95",
+   "from": 4442.85,
+   "length": 3.0,
+   "priority": 4,
+   "what": "Godzilla Junior's rising growl out of silence, fading away (1:14:02)"
+  }
+ },
+ "beds": {
+  "destoroyah": {
+   "film": "des95",
+   "from": 5463.809,
+   "length": 12.56,
+   "what": "Akira Ifukube's score in the last battle with Destoroyah, Junior lying still (1:31:04; bed finder loop chroma 0.657, in tune 0.73, 0.08 untuned, seam self-check PASS)"
+  },
+  "junior": {
+   "film": "des95",
+   "from": 3934.841,
+   "length": 10.85,
+   "what": "the score as Junior swims toward Tokyo Bay (1:05:34; bed finder loop chroma 0.723, in tune 0.80, 0 untuned, seam self-check PASS)"
+  },
+  "melt": {
+   "film": "des95",
+   "from": 5802.785,
+   "length": 12.59,
+   "what": "the score as the freezer beams wrap the melting Godzilla in white mist (1:36:42; bed finder loop chroma 0.689, in tune 0.95, 0 untuned, seam self-check PASS)"
   }
  }
 }

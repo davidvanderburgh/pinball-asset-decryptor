@@ -396,8 +396,9 @@ int pm_roster_callout(unsigned slot, unsigned id);
  * mode is not the one running. */
 #define PM_CAN_DISPLAY_PRIORITY 0x4000u   /* pm_display_priority (0x0100 is the roster's) */
 int pm_display_priority(unsigned priority);
-/* 1 while a display of the game's that beat your priority has the screen (your screen is
- * under it); 0 otherwise, and with no priority held. */
+/* 1 while a display of the game's has the screen (an effect over the layered display, or a
+ * layered foreground: your screen is under it); 0 otherwise. With no priority held (your mode
+ * is not running: a qualification note) it looks at the game's display now (PAD-658). */
 int pm_display_covered(void);
 /* Your mode is over (as pm_end: another may begin at once) but its ENDING - a full-screen clip, its
  * total - should keep the screen: the display priority it holds stays for `ms` more, so an award of

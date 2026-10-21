@@ -507,9 +507,6 @@ LOST = [
     "rather than a switch.",
     "No points while the mode is not running: the C pays 1,000,000 (+500,000 a stretch) at each RAGE stretch's end; "
     "the blocks' Score only scores while the mode runs, so a stretch is a note, a roar and a light show only.",
-    "The RAGE meter is not on the glass: the C draws it as a bar with GODZILLA RAGE and its percent at the top right "
-    "all game; a blocks HUD shows only while the mode runs, so the meter is the notes alone (every quarter of a "
-    "stretch, and RAGE n PERCENT at its end).",
     "No ball save: the C gives a 5 s ball save at the start and keeps one running from the first lock, so a drain "
     "with locks sends the locked balls straight into the multiball. In blocks a drain ends the chase; the place, its "
     "locks, the jackpot and the super wait for the next start at the Building (as the C does for a drain with no lock).",

@@ -75,3 +75,19 @@ Found on the way (fixed):
 - A mode's challenge game played to its end, initials entered, the page in attract after, the game's own records
   logged throughout and unchanged (kit/job663.sh on start-menu builds; kit/jobpick.sh on the nine with no start menu,
   the pick made as the game's own selector makes it).
+
+Found by the game sweep (fixed):
+- The challenge's "end this ball now" was made from the tick, where there is no current process; The Beatles 1.29
+  asks the current process's id while its processes are killed and crashed (null read at 0x6dd2c) as a mode's
+  challenge ended. It is now owed to the game's next bus call (a handler of the game's, as the game's own challenge
+  endings are), from the tick only when none comes within a second.
+- A game started while the game's own champion page was showing left the page marked as running and every later page
+  went straight to the game (Batman 66, Godzilla, John Wick: no mode champion after a game). Cleared once a game is in
+  play, or after a minute.
+
+Job notes (C:/tmp/PAD-663/kit, job663d.sh / jobpickd.sh): Metallica and Mando file the end-of-game scores at or before
+the game's game_over event, so the job waits for either and presses Start only while our record is being entered (an
+extra Start began a new game and the attract page never came). The Pin's flipper buttons are "L/R FLIPPER BUTTON"
+(FL=58 FR=57). While the game enters initials the host entry reads the mode's record; it is put back when the call
+returns (a game-records snapshot inside that call is not a change).
+

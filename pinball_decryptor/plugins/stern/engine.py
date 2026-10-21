@@ -388,7 +388,19 @@ def _sounds_unread_why(missing, job="extract"):
     the codec locator (:func:`.spike2.locate.missing`) found no sound decoder
     it knows in the game program.  Every Stern Spike 2 build the developer
     has, newest and older, locates (PAD-657), so this names what wasn't found
-    for the developer rather than guessing at a codec."""
+    for the developer rather than guessing at a codec.
+
+    ``["BOARD_KEY"]`` (PAD-674) is an early build whose sound key comes from
+    the machine's CPU board (:func:`.spike2.locate._board_keyed`): the card
+    can't stand in for the board, so this says so instead of asking for the
+    program."""
+    if list(missing) == ["BOARD_KEY"]:
+        return ("%s: it's an early version of the game code, which gets the "
+                "key to its sounds from the machine's CPU board instead of "
+                "carrying it. The key isn't anywhere on the card, so these "
+                "sounds can't be read off it. Later versions of the game "
+                "carry their key, and their sounds extract normally."
+                % _SOUNDS_UNREAD[job])
     return ("%s: its game program isn't one this version of the app can find "
             "the sound decoder in (for the developer: %s not found). That "
             "usually means the game program was changed outside the app, or "
@@ -2791,10 +2803,14 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             # PAD-657: every Stern build the library holds locates, so a card
             # that doesn't is a program nobody here has seen: keep it for the
             # developer, as the boot-failure path below does
-            saved = _save_firmware_for_support(gr_path, output_dir, log)
+            # (PAD-674: not when the key is on the CPU board -- no update
+            # can read those sounds, so there is nothing to send)
+            gone = audio_decode_missing(gr_path)
+            saved = (None if gone == ["BOARD_KEY"]
+                     else _save_firmware_for_support(gr_path, output_dir, log))
             done = [w for w, on in (("video", do_video), ("images", do_images),
                                     ("text", do_text)) if on]
-            log(_sounds_unread_why(audio_decode_missing(gr_path))
+            log(_sounds_unread_why(gone)
                 + ((" The %s extracted normally."
                     % " and ".join([", ".join(done[:-1])] + done[-1:]
                                    if len(done) > 1 else done))

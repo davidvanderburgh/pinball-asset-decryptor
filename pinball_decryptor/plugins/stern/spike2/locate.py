@@ -788,9 +788,82 @@ def missing(game_real_path=None, raw=None):
     return _locate(raw)[1]
 
 
+def _asks_bus_master(fw, fn, span=0x100):
+    """True if *fn* builds a ``0d 05`` node-bus frame on its stack: the
+    request that has the CPU board's bus master compute a 4-byte answer
+    (``mov rX,#0xd ; strb rX,[sp,#n]`` and ``mov rY,#5 ; strb rY,[sp,#n+1]``,
+    JP 1.13's 0x46474c).  PAD-603 met it in Venom LE 0.95."""
+    regs = {}; stores = {}
+    t = fw.secs[".text"]
+    hi = min(fn + span, t["addr"] + (t["size"] & ~3))
+    if not t["addr"] <= fn < hi:
+        return False
+    for va in range(fn + 4, hi, 4):                 # up to the next push {..,lr}
+        w = _u32(fw.raw, t["off"] + (va - t["addr"]))
+        if (w & 0xFFFF0000) == 0xE92D0000 and (w & 0x4000):
+            hi = va
+            break
+    ins = list(_disasm(fw, fn, hi))
+    for x in ins:
+        ops = [o.strip() for o in x.op_str.split(",")]
+        if x.mnemonic == "mov" and len(ops) == 2 and ops[1].startswith("#"):
+            try:
+                regs[ops[0]] = int(ops[1][1:], 0)
+            except ValueError:
+                regs.pop(ops[0], None)
+        elif x.mnemonic == "strb" and len(ops) == 3 and ops[1] == "[sp" \
+                and ops[2].startswith("#") and ops[0] in regs:
+            stores[int(ops[2][1:].rstrip("]"), 0)] = regs[ops[0]]
+        elif ops and ops[0] in regs and x.mnemonic not in ("strb", "str", "cmp", "tst"):
+            regs.pop(ops[0], None)
+    return any(v == 0xd and stores.get(o + 1) == 5 for o, v in stores.items())
+
+
+def _board_keyed(fw):
+    """True if this program builds its sound key from the CPU board's
+    answers (PAD-674): the boot that first calls the master-directory decoder
+    calls, before that, a key builder that asks the bus master (:func:`_asks_bus_master`)
+    instead of seeding from constants.  Every released build in the library
+    seeds from constants; early ones (Jurassic Park 1.13, Venom LE 0.95)
+    ask the board, and since every build's sound bank is keyed to its own
+    program, nothing on the card can stand in for the board's answers."""
+    md = _find_masterdir_decode(fw)
+    if md is None:
+        return False
+    t = fw.secs[".text"]
+    for site, tgt in _bl_sites(fw, t["addr"], t["addr"] + (t["size"] & ~3)):
+        if tgt != md:
+            continue
+        boot = _func_start(fw, site)
+        if boot is None:
+            continue
+        for _s, fn in _bl_sites(fw, boot, site):
+            if fn == md:
+                break
+            if _asks_bus_master(fw, fn):
+                return True
+            for _s2, fn2 in _bl_sites(fw, fn, _func_end(fw, fn)):
+                if _asks_bus_master(fw, fn2):
+                    return True
+    return False
+
+
 def _locate(raw):
     """``(addresses or None, [what is missing])`` for :func:`locate_all` and
-    :func:`missing`."""
+    :func:`missing`; ``["BOARD_KEY"]`` when the program's sound key comes
+    from the CPU board (:func:`_board_keyed`), which no locator fix can
+    change."""
+    res, gone = _locate_parts(raw)
+    if gone and not gone[0].startswith("ELF"):
+        try:
+            if _board_keyed(_FwView(raw)):
+                return None, ["BOARD_KEY"]
+        except Exception:
+            pass
+    return res, gone
+
+
+def _locate_parts(raw):
     step = "ELF"
     try:
         fw = _FwView(raw)

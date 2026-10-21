@@ -14,7 +14,7 @@
 // It is a tab over the one program (modes_blocks.js useModeProgram): an edit here is a step of the mode's one
 // history and is saved to the same blocks.json; the Blocks tab's Run the light show block lists the shows made here.
 
-import { html, useEffect, useRef, useState, Button, Field, Select, Note, tip, cx, openMenu } from "../core/ui.js";
+import { html, useEffect, useRef, useState, Button, Field, Select, Note, tip, cx, openMenu, call } from "../core/ui.js";
 import { loadPlayfield } from "./modes_playfield.js";
 import { hatWords } from "./modes_views.js";
 
@@ -45,6 +45,10 @@ const TIP = {
   runWhen: "Put a Run the light show block for this show at the end of a rule, or in a new one.",
   noArt: "The game's own playfield picture could not be read from the card, so the inserts are drawn on an outline.",
   legacy: "A Run the light show block with steps of its own, made in the Blocks tab before this page: bring it in here as one of the mode's shows, to preview and change.",
+  real: "As the machine plays it: an RGB insert in the show's colour; a single-colour insert only gets brighter or dimmer and glows in its own colour (Insert colours; white = not set).",
+  rgb: "As if every insert were RGB: every insert in the show's colour. The machine cannot show that on its single-colour inserts.",
+  lens: "The game's single-colour inserts: the show only sets how bright they are, and each glows in its own colour. Give each its colour here; the emulator's playfield window uses the same colours.",
+  lensX: "Back to white (not set)",
 };
 const WORDS = { xy: "a point of its own" };
 const SWATCHES = ["#ffffff", "#ffd000", "#ffb000", "#ff7800", "#ff3000", "#ff0000", "#ff40a0", "#a040ff", "#4000a0",
@@ -212,6 +216,14 @@ export function showAt(steps, repeat, t) {
   return { step: i, t: u, prev, pass, passes, n };
 }
 const css = (c) => "#" + (c >>> 0).toString(16).padStart(6, "0");
+// PAD-668: what a single-colour insert shows for color c on the machine - one level, the color's brightest part
+// (pad_mode_runtime.c lamp_write), in the insert's own color (`lens`, "#rrggbb"; white until the user sets it)
+export function monoColour(c, lens) {
+  const lv = Math.max((c >>> 16) & 255, (c >>> 8) & 255, c & 255);
+  const own = /^#[0-9a-fA-F]{6}$/.test(lens || "") ? parseInt(lens.slice(1), 16) : 0xffffff;
+  const at = (sh) => i32((((own >>> sh) & 255) * lv + 127) / 255) << sh;
+  return (at(16) | at(8) | at(0)) >>> 0;
+}
 
 // ------------------------------------------------------------------ the program's shows
 function walkBlocks(list, fn) {
@@ -263,7 +275,7 @@ function usePlayfield(slug) {
   return pf;
 }
 
-function Preview({ pf, show, light, t, onPick, picking, centre }) {
+function Preview({ pf, show, light, t, onPick, picking, centre, look, lens, marked }) {
   const ins = pf.inserts || [];
   const w = pf.w || Math.max(300, ...ins.map((i) => i.x + 24));
   const h = pf.h || Math.max(600, ...ins.map((i) => i.y + 40));
@@ -285,13 +297,46 @@ function Preview({ pf, show, light, t, onPick, picking, centre }) {
     ${pf.art ? html`<image class="pf-art" href=${pf.art} x="0" y="0" width=${w} height=${h} />`
       : html`<rect class="pf-outline" x="3" y="3" width=${w - 6} height=${h - 6} rx="48" />`}
     ${ins.map((i, k) => {
-      const c = st ? fxBlend(st, at.prev, i.x, i.y, k, at.t, S) : 0;
+      let c = st ? fxBlend(st, at.prev, i.x, i.y, k, at.t, S) : 0;
+      if (c && i.mono && look !== "rgb") c = monoColour(c, (lens || {})[i.name]);
       return html`<circle key=${i.name + i.x} class=${cx("ls-ins", c && "lit")} cx=${i.x} cy=${i.y} r="6"
         style=${c ? { fill: css(c), color: css(c) } : null} ...${tip({ head: i.name, lines: [i.shots.length ? "Shot: " + i.shots.join(", ") : "Not a shot's light"] })} />`;
     })}
+    ${marked ? ins.filter((i) => i.name === marked).map((i) => html`<circle key=${"m" + i.name + i.x} class="ls-mark" cx=${i.x} cy=${i.y} r="11" />`) : null}
     ${centre ? html`<g class="ls-centre" transform=${`translate(${centre[0]} ${centre[1]})`}>
       <circle r="11" /><line x1="-16" x2="16" y1="0" y2="0" /><line x1="0" x2="0" y1="-16" y2="16" /></g>` : null}
   </svg>`;
+}
+
+// PAD-668: Real LEDs / All RGB, and the single-colour inserts' own colours - one table with the emulator's playfield
+// window (insert_colours.py), so a color set here shows there too
+function InsertLook({ look, setLook }) {
+  return html`<div class="ls-look" role="group" aria-label="How the inserts show the colors">
+    ${[["real", "Real LEDs"], ["rgb", "All RGB"]].map(([k, label]) => html`<button type="button" key=${k}
+      class=${cx("ls-look-b", look === k && "on")} aria-pressed=${look === k} ...${tip(TIP[k])}
+      onClick=${() => { if (look !== k) setLook(k); }}>${label}</button>`)}
+  </div>`;
+}
+
+function InsertColours({ pf, lens, setColour, setMarked }) {
+  const [open, setOpen] = useState(false);
+  const names = [...new Set((pf.inserts || []).filter((i) => i.mono).map((i) => i.name))].sort();
+  if (!names.length) return null;
+  const n = names.filter((x) => lens[x]).length;
+  return html`<div class="ls-lens">
+    <button type="button" class="ls-lens-hd" aria-expanded=${open} ...${tip(TIP.lens)} onClick=${() => setOpen(!open)}>
+      <span class=${cx("ls-caret", open && "open")}></span><span>Insert colours</span><span class="sp"></span>
+      <span class="small muted">${n} of ${names.length} set</span></button>
+    ${open ? html`<div class="ls-lens-list" onMouseLeave=${() => setMarked(null)}>
+      ${names.map((name) => html`<div key=${name} class=${cx("ls-lens-row", lens[name] && "set")} onMouseEnter=${() => setMarked(name)}>
+        <input type="color" value=${lens[name] || "#ffffff"} aria-label=${name + " color"}
+          onChange=${(e) => setColour(name, e.target.value)} />
+        <span class="ellip">${name}</span>
+        <button type="button" class="ls-lens-x" style=${{ visibility: lens[name] ? "" : "hidden" }} ...${tip(TIP.lensX)}
+          onClick=${() => setColour(name, null)}>×</button>
+      </div>`)}
+    </div>` : null}
+  </div>`;
 }
 
 // Play / pause, stop, the loop tick and the scrubber: the show's clock in ms, run by the frames
@@ -411,6 +456,19 @@ export function LightShowsView({ c, pg }) {
   const [loop, setLoop] = useState(true);
   const [picking, setPicking] = useState(false);
   const pf = usePlayfield(c.slug);
+  const [look, setLookState] = useState(null);
+  const [lens, setLens] = useState(null);
+  const [marked, setMarked] = useState(null);
+  const curLook = look || (pf && pf.look) || "real";
+  const curLens = lens || (pf && pf.lens) || {};
+  const setLook = (k) => { setLookState(k); if (pf) pf.look = k; call("modes.blocks_insert_look", k); };
+  const setColour = (name, colour) => {
+    const next = { ...curLens };
+    if (colour) next[name] = colour; else delete next[name];
+    setLens(next);
+    if (pf) pf.lens = next;
+    call("modes.blocks_insert_colour", pf ? pf.game : "", name, colour);
+  };
   const pass = show ? lengthOf(show) : 0;
   const total = show ? pass * (show.repeat > 0 ? show.repeat : 1) : 0;
   const player = usePlayer(total, loop || (show && !show.repeat));
@@ -490,6 +548,7 @@ export function LightShowsView({ c, pg }) {
     </div>
     <div class="ls-field">
       ${pf ? html`<${Preview} pf=${pf} show=${show || { steps: [], repeat: 1 }} light=${light} t=${player.t} picking=${picking} centre=${centre}
+          look=${curLook} lens=${curLens} marked=${marked}
           onPick=${(x, y) => { edit((d) => { const s = d.shows[si].steps[stepI]; s.at = "xy"; s.x = x; s.y = y; }); setPicking(false); }} />`
         : html`<div class="small muted">Reading the playfield…</div>`}
       ${pf && !pf.art ? html`<div class="small muted pf-why">${pf.why || TIP.noArt}</div>` : null}
@@ -502,6 +561,7 @@ export function LightShowsView({ c, pg }) {
       </div>
       <input type="range" class="ls-scrub" min="0" max=${total || 1} value=${Math.round(player.t)} disabled=${!total} ...${tip(TIP.scrub)}
         onInput=${(e) => { player.pause(); player.seek(Number(e.target.value)); }} />
+      ${pf ? html`<${InsertLook} look=${curLook} setLook=${setLook} />` : null}
     </div>
     <div class="ls-side">
       ${show ? html`
@@ -526,6 +586,7 @@ export function LightShowsView({ c, pg }) {
             : html`<div class="small muted">No rule runs this show yet: press Run it when… to put it in one.</div>`}
         </div>`
         : html`<div class="small muted">Pick a show, or press New.</div>`}
+      ${pf ? html`<${InsertColours} pf=${pf} lens=${curLens} setColour=${setColour} setMarked=${setMarked} />` : null}
     </div>
   </div>`;
 }

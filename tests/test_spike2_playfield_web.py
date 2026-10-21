@@ -276,6 +276,17 @@ def test_all_rgb_draws_a_mode_s_colour_on_a_one_colour_insert_and_real_leds_does
     assert ctl.api_insert_look("nonsense") == "real"
 
 
+def test_the_ball_controls_are_never_over_the_playfield():
+    """PAD-668 (David: "we should never show those over the playfield"): before the key panel comes, the trough and
+    the actions are a BALLS box in the side panel, in both views - no overlay on the picture, no bar of their own."""
+    js = open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf-8").read()
+    css = open(os.path.join(RIG, "pfpage", "pf.css"), encoding="utf-8").read()
+    assert "pf-overlay" not in js and "pf-overlay" not in css and "pf-acts" not in js
+    assert js.count("const balls = ballsBox(V, D);") == 2                       # the field and the schematic view
+    assert js.count("side: balls ? balls.el : null,") == 2
+    assert 'h.append(el("span", "kp-group", "BALLS"));' in js
+
+
 def test_the_page_has_the_insert_colours_table():
     js = open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf-8").read()
     assert 'function lensPanel(rows)' in js and 'api("lens", name, pick.value)' in js

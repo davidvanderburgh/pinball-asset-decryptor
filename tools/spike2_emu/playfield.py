@@ -1025,15 +1025,39 @@ def save_lens_colour(name, colour, title=None):
 
 
 _LENS = None
+_STATE_SEEN = [None, 0.0]       # the state file's mtime when last read, the time it was last looked at
 
 
 def lens_of(name):
     """One insert's colour from the user's table (read once, re-read after a
-    save), or None for the default."""
+    save or when the file changes - state_changed), or None for the default."""
     global _LENS
     if _LENS is None:
         _LENS = lens_colours()
     return _LENS.get(name)
+
+
+def state_changed(every=1.0):
+    """True when the state file changed since it was last looked at - at most
+    once every ``every`` s. The Modes tab's Light shows writes the same
+    INSERT COLOURS table and Real LEDs / All RGB switch (PAD-668:
+    pinball_decryptor/plugins/stern/insert_colours.py), so a colour set there
+    reaches an open window within a second. Drops the table's cache."""
+    global _LENS
+    now = time.monotonic()
+    if now - _STATE_SEEN[1] < every:
+        return False
+    _STATE_SEEN[1] = now
+    try:
+        mt = os.stat(STATE).st_mtime
+    except OSError:
+        mt = None
+    if mt == _STATE_SEEN[0]:
+        return False
+    first = _STATE_SEEN[0] is None and mt is not None and _LENS is None
+    _STATE_SEEN[0] = mt
+    _LENS = None
+    return not first
 
 
 def cabinet_names(boards=None, expression=True):
@@ -3943,6 +3967,10 @@ class Field(LedRing):
         decoded state moves - the honest picture rate - not tween frames."""
         lit = 0
         changed = 0
+        if state_changed():
+            # the Modes tab changed a colour or the switch (PAD-668)
+            self.insert_look = insert_look()
+            self.lens_changed(None)
         tints = (coilmap.paint_tints(d, GROUP_NODE)
                  if self.insert_look == "rgb" else None)
         for F in self.fixtures:

@@ -302,28 +302,33 @@ function startMain() {
     else v = waitingView(main);
     let panel = null;
     if (S.panel) { panel = keyPanel(S.panel); body.append(panel.el); }
+    // before padbinds brings the key panel, the side panel is the window's own:
+    // the ball controls (PAD-668: never over the playfield) under the info
+    let side = panel ? panel.el : null;
+    if (!side && ((S.view && S.view.info) || v.side)) { side = el("aside", "pf-panel"); body.append(side); }
     // the extra information (PAD-238) sits at the head of the side panel,
-    // folded away, never over the playfield; before padbinds brings the key
-    // panel the side panel holds only this
+    // folded away, never over the playfield
     let info = null;
     if (S.view && S.view.info) {
       info = infoPanel(S.view.info, S.live || []);
-      if (panel) panel.el.prepend(info.el);
-      else { const side = el("aside", "pf-panel"); side.append(info.el); body.append(side); }
+      side.prepend(info.el);
     }
+    // the ball controls right under it, where the key panel's BALLS section sits
+    if (v.side) { if (info) info.el.after(v.side); else side.prepend(v.side); }
+    const top = v.side && info ? { el: v.side } : info;
     // the cabinet's shaker motor (PAD-424): open under the info, because it
     // is the one coil the artwork has no place for
     let shaker = null;
     if (info && S.view.shaker) {
       shaker = shakerPanel(S.view.shaker, (S.dyn || {}).shaker);
-      info.el.after(shaker.el);
+      top.el.after(shaker.el);
     }
     // the cabinet's own lighting (PAD-500): what the column holds, and the
     // "Expression lights" tick box on a title that has blades or speakers
     let cabp = null;
-    if (info && S.view.cab_panel) { cabp = cabPanel(S.view.cab_panel); (shaker || info).el.after(cabp.el); }
+    if (info && S.view.cab_panel) { cabp = cabPanel(S.view.cab_panel); (shaker || top).el.after(cabp.el); }
     // the single-colour inserts' colours (PAD-668), last in the column
-    if (info && S.view.lens && S.view.lens.length) (cabp || shaker || info).el.after(lensPanel(S.view.lens).el);
+    if (info && S.view.lens && S.view.lens.length) (cabp || shaker || top).el.after(lensPanel(S.view.lens).el);
     app.append(body, status);
     view = {
       frame(f) {
@@ -432,11 +437,26 @@ function startMain() {
   }
 
   // ---- the action row (only without a key panel: PAD-134) ---------------------
-  function actionRow() {
-    if (!S.acts || !S.acts.length) return null;
-    const row = el("div", "pf-acts");
-    for (const [i, label] of S.acts) row.append(btn(label, () => api("action", i)));
-    return row;
+  // ---- the ball controls before the key panel comes (PAD-668) ---------------
+  // Until the game's key bindings arrive (the first seconds of a run, or never
+  // on a replay) the window still offers the trough and the actions - in the
+  // side panel, where the key panel's BALLS section puts them once it comes,
+  // never over the playfield picture. null when there is nothing to offer.
+  function ballsBox(V, D) {
+    const acts = S.acts && S.acts.length ? S.acts : [];
+    if (!V.trough && !acts.length) return null;
+    const sec = el("div", "kp-sec pf-balls");
+    const h = el("div", "kp-head");
+    h.append(el("span", "kp-group", "BALLS"));
+    sec.append(h);
+    let trough = null;
+    if (V.trough) { trough = troughStrip(V.trough, D.trough); sec.append(trough.el); }
+    if (acts.length) {
+      const bs = el("div", "kp-btns");
+      for (const [i, label] of acts) bs.append(btn(label, () => api("action", i)));
+      sec.append(bs);
+    }
+    return { el: sec, trough };
   }
 
   // ---- a trough strip that IS the control (the fallback) ----------------------
@@ -525,12 +545,10 @@ function startMain() {
     stage.append(cv);
     if (lookBox) stage.append(lookBox);
     stage.append(insBox);
-    const overlay = el("div", "pf-overlay");
-    let trough = null;
-    if (V.trough) { trough = troughStrip(V.trough, D.trough); overlay.append(trough.el); }
-    const acts = actionRow();
-    if (acts) overlay.append(acts);
-    stage.append(overlay);
+    // the ball controls before the key panel comes: in the side panel, never
+    // over the picture (PAD-668)
+    const balls = ballsBox(V, D);
+    const trough = balls ? balls.trough : null;
     // the cabinet column (PAD-500), left of the artwork at its scale
     const cab = V.cab ? cabColumn(V.cab, D.cab) : null;
     if (cab) wrap.append(cab.el);
@@ -706,6 +724,7 @@ function startMain() {
         if (f.sw) { Object.assign(made, f.sw); dirty = true; }
         if (f.trough && trough) trough.update(f.trough);
       },
+      side: balls ? balls.el : null,
     };
   }
 
@@ -894,16 +913,9 @@ function startMain() {
     const V = S.view, D = S.dyn || {};
     const bar = el("div", "pf-bar");
     bar.append(el("div", "txt", V.bar));
-    const acts = actionRow();
-    if (acts) bar.append(acts);
     main.append(bar);
-    let trough = null;
-    if (V.trough) {
-      const strip = el("div", "pf-strip");
-      trough = troughStrip(V.trough, D.trough);
-      strip.append(trough.el);
-      main.append(strip);
-    }
+    const balls = ballsBox(V, D);
+    const trough = balls ? balls.trough : null;
     const body = el("div", "pf-schem");
     const grid = el("div", "pf-grid");
     const rows = el("div", "pf-rows");
@@ -990,6 +1002,7 @@ function startMain() {
         if (f.grid) { for (const k in f.grid) { gridData[k] = f.grid[k]; paintCell(k); } }
         if (f.trough && trough) trough.update(f.trough);
       },
+      side: balls ? balls.el : null,
     };
   }
 

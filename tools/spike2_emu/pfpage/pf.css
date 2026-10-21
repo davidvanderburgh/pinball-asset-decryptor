@@ -169,7 +169,7 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .kp-btns .btn:disabled { background: #2a2e35; border-color: #2a2e35; color: #6b7280; opacity: 1; }
 .kp-wide { width: 100%; background: #33507a; border-color: #456ba1; color: #eaf2ff; }
 .kp-wide:hover:not(:disabled) { background: #456ba1 !important; }
-.kp-note { font: 11px/1.45 var(--mono); color: #8a93a2; min-height: calc(3 * 1.45em); }
+.kp-note { font: 11px/1.45 var(--mono); color: #8a93a2; }
 .kp-note .m { display: block; }
 .kp-note .m.cut { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 

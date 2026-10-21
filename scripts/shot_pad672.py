@@ -1,7 +1,7 @@
 """PAD-672 capture: the virtual playfield window's side panel, as first opened.
 
     python scripts/shot_pad672.py --tables <dir holding godzilla_le/> --out <dir>
-        [--prefix after_] [--repo <checkout>]
+        [--prefix after_] [--repo <checkout>] [--no-padball]
 
 Serves Godzilla LE's playfield page over a FAKE dump (scripts/shot_pad450.py's
 rig: nothing reaches wsl.exe or a rig) in a 1100x900 window and shoots it
@@ -30,6 +30,8 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--prefix", default="")
     ap.add_argument("--repo", default=os.path.dirname(HERE))
+    ap.add_argument("--no-padball", action="store_true",
+                    help="no feeder status: the BALLS note is empty")
     a = ap.parse_args(argv)
     rig = os.path.join(a.repo, "tools", "spike2_emu")
     os.makedirs(a.out, exist_ok=True)
@@ -42,7 +44,7 @@ def main(argv=None):
     # the key panel arrives with padbinds (playfield.attach_key_panel): the
     # rig's own, written by padglhost for this title, beside --tables
     # and the ball feeder's status lines (padball), so the BALLS note is real
-    for name in ("padbinds", "padball"):
+    for name in ("padbinds",) + (() if a.no_padball else ("padball",)):
         shutil.copy(os.path.join(os.path.dirname(os.path.normpath(a.tables)),
                                  name), os.path.join(dump, name))
     os.environ.update(PAD_ROOT=os.path.join(root, "root"), PAD_TABLES=tables,

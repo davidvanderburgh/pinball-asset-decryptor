@@ -612,3 +612,34 @@ html.light .ls-svg .pf-art { filter: none; }
 html.bp-1100 .ls-list { flex-basis: 200px; }
 html.bp-860 .ls-view { flex-direction: column; }
 html.bp-860 .ls-list, html.bp-860 .ls-field { border-right: 0; border-bottom: 1px solid var(--line); height: auto; }
+
+/* PAD-664: Rules sheet… - the modes' words on the left, the sheet as it prints on the right */
+.modal.rs-modal { width: min(1340px, 100%); }
+.rs-about { margin-bottom: 8px; }
+.rs-busy { display: flex; align-items: center; gap: 10px; padding: 40px 12px; color: var(--ink-2); }
+.rs-body { display: flex; gap: 16px; align-items: flex-start; min-height: 0; }
+.rs-side { flex: 0 0 400px; max-height: min(66vh, 620px); overflow: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
+.rs-sheet-fields, .rs-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: start; }
+.rs-sheet-fields .lbl, .rs-fields .lbl { padding-top: 5px; }
+.rs-fields { padding: 8px 4px 4px 28px; }
+.rs-fields .row { grid-column: 1 / -1; }
+.rs-words { width: 100%; box-sizing: border-box; background: var(--panel); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px;
+  padding: 4px 7px; font: 12.5px/1.35 var(--sans); resize: vertical; }
+.rs-words::placeholder { color: var(--ink-3); opacity: 1; }
+.rs-words:focus { outline: none; border-color: var(--accent); }
+.rs-modes { display: flex; flex-direction: column; gap: 2px; }
+.rs-mode { border: 1px solid var(--line); border-radius: 8px; padding: 2px 4px 2px 8px; background: var(--panel-2); }
+.rs-mode.off .rs-name { opacity: .5; }
+.rs-mode.open { border-color: var(--line-2); }
+.rs-mode-hd { display: flex; align-items: center; gap: 4px; }
+.rs-name { background: none; border: 0; color: var(--ink); padding: 3px 2px; cursor: pointer; text-align: left; font: inherit; font-size: 13px; }
+.rs-tag { font-size: 10.5px; color: var(--ink-3); letter-spacing: .04em; }
+.rs-left { padding: 6px 4px; }
+.rs-preview { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+/* the page at 96 px an inch (Letter 11 x 8.5 in, A4 297 x 210 mm), drawn at 62% */
+.rs-page { width: 655px; height: 506px; overflow: auto; border-radius: 4px; box-shadow: 0 2px 10px rgba(0,0,0,.45); background: #fff; }
+.rs-frame { width: 1056px; height: 816px; border: 0; transform: scale(.62); transform-origin: 0 0; background: #fff; }
+.rs-frame.a4 { width: 1123px; height: 794px; transform: scale(.583); }
+.rs-count { display: flex; align-items: center; gap: 6px; }
+html.bp-1100 .rs-body { flex-direction: column; }
+html.bp-1100 .rs-side { flex-basis: auto; width: 100%; max-height: 40vh; }

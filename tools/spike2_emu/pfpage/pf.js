@@ -13,6 +13,8 @@
 const Q = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
 const TOKEN = Q.get("t") || "";
 const PAGE = Q.get("page") || "main";
+// PAD-668: rings inserts on the field view's picture (set by fieldView)
+let markInserts = null;
 
 // ---------------------------------------------------------------- transport
 function api(m, ...a) {
@@ -318,7 +320,10 @@ function startMain() {
     }
     // the cabinet's own lighting (PAD-500): what the column holds, and the
     // "Expression lights" tick box on a title that has blades or speakers
-    if (info && S.view.cab_panel) (shaker || info).el.after(cabPanel(S.view.cab_panel).el);
+    let cabp = null;
+    if (info && S.view.cab_panel) { cabp = cabPanel(S.view.cab_panel); (shaker || info).el.after(cabp.el); }
+    // the single-colour inserts' colours (PAD-668), last in the column
+    if (info && S.view.lens && S.view.lens.length) (cabp || shaker || info).el.after(lensPanel(S.view.lens).el);
     app.append(body, status);
     view = {
       frame(f) {
@@ -517,6 +522,9 @@ function startMain() {
     let ripping = null;
     let shakeLvl = D.shaker ? D.shaker[0] : 0, jiggled = false;
     let scale = 1, dirty = true;
+    // PAD-668: the inserts the INSERT COLOURS row under the mouse names
+    let marked = null;
+    markInserts = (fids) => { marked = fids && fids.length ? fids : null; dirty = true; };
 
     function fit() {
       const r = wrap.getBoundingClientRect();
@@ -578,6 +586,15 @@ function startMain() {
           g.restore();
           g.lineWidth = 1; g.strokeStyle = "rgba(0,0,0,.4)"; g.stroke();
         }
+      }
+      if (marked) {
+        g.save();
+        g.lineWidth = 2; g.strokeStyle = "#ffd400"; g.setLineDash([3, 2]);
+        for (const [fid, x, y] of V.fixtures) {
+          if (!marked.includes(fid)) continue;
+          g.beginPath(); g.arc(x * scale, y * scale, LED_R + 6, 0, Math.PI * 2); g.stroke();
+        }
+        g.restore();
       }
       for (const [k, x, y, key] of V.coils) {
         const cx = x * scale, cy = y * scale, h = 7;
@@ -788,6 +805,62 @@ function startMain() {
       opt.title = "Untick to leave the cabinet's expression lighting - the light blades and the "
         + "speaker lights - out of this window. Only what this window shows: the game is not changed.";
       box.append(opt);
+    }
+    return { el: acc };
+  }
+
+  // The side panel's INSERT COLOURS table (PAD-668). A single-colour insert
+  // has one brightness and no colour on the wire: on the machine it glows in
+  // its own LED's and lens's colour, which no table in the game names. So it
+  // is drawn white until the user gives it its colour here; playfield.py
+  // keeps the table per title, for the next run. Hovering a row rings that
+  // insert on the picture.
+  function lensPanel(rows) {
+    const acc = el("details", "kp-acc pf-lens");
+    try { acc.open = localStorage.getItem("pf-acc-lens") === "1"; } catch (e) { /* no storage */ }
+    const sum = el("summary", null, "INSERT COLOURS");
+    const cnt = el("span", "cnt", "");
+    sum.append(cnt);
+    // never keep the keyboard: a focused summary would eat the space bar
+    sum.tabIndex = -1;
+    sum.addEventListener("mousedown", (ev) => ev.preventDefault());
+    acc.addEventListener("toggle", () => {
+      try { localStorage.setItem("pf-acc-lens", acc.open ? "1" : "0"); } catch (e) { /* no storage */ }
+    });
+    const box = el("div", "body");
+    box.append(el("div", "note", "One-colour inserts: the game sets only how bright they are, and each glows "
+      + "in its own colour. White = not set. Give each its colour here; kept for this title."));
+    const list = el("div", "list");
+    box.append(list);
+    acc.append(sum, box);
+    const count = () => {
+      const n = rows.filter((r) => r[1]).length;
+      cnt.textContent = `${n} of ${rows.length} set`;
+    };
+    for (const r of rows) {
+      const [name, hex, fids] = r;
+      const row = el("div", "r");
+      const pick = el("input");
+      pick.type = "color";
+      pick.value = hex || "#ffffff";
+      pick.title = "The colour this insert glows on the machine";
+      const lab = el("span", "k", name);
+      const clr = btn("\u00d7", () => {
+        api("lens", name, null).then((v) => { r[1] = v || ""; pick.value = "#ffffff"; show(); });
+      }, "x");
+      clr.title = "Back to white (not set)";
+      clr.tabIndex = -1;
+      function show() { clr.style.visibility = r[1] ? "" : "hidden"; row.classList.toggle("set", !!r[1]); count(); }
+      pick.addEventListener("change", () => {
+        api("lens", name, pick.value).then((v) => { r[1] = v || ""; show(); });
+        // never keep the keyboard: a focused picker would eat the flipper keys
+        pick.blur();
+      });
+      row.addEventListener("pointerenter", () => { if (markInserts) markInserts(fids); });
+      row.addEventListener("pointerleave", () => { if (markInserts) markInserts(null); });
+      row.append(pick, lab, clr);
+      list.append(row);
+      show();
     }
     return { el: acc };
   }

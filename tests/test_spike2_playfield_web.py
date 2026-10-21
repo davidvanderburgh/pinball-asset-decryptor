@@ -145,7 +145,7 @@ def test_a_frame_carries_only_what_changed(pf, monkeypatch, tmp_path):
     with open(pf.LED_PATH, "wb") as f:
         f.write(_led_block(pf, {(8, 3): 255}))
     frame = view.tick(0.0)
-    assert frame["fx"][0][:3] == [255, 251, 0]      # the orange ramp at full
+    assert frame["fx"][0][:3] == [255, 255, 255]    # one colour, not set: white (PAD-668)
     assert frame["fx"][1] == 0                      # painted dark, once
     # nothing moved: nothing painted again
     frame = view.tick(0.0)
@@ -167,13 +167,10 @@ def test_a_frame_carries_only_what_changed(pf, monkeypatch, tmp_path):
     assert gone is None
 
 
-def test_a_mode_s_colour_on_a_one_colour_insert_is_named_not_drawn(pf, monkeypatch):
-    """PAD-668: a mode's light show paints a one-colour insert red; the board gets one level, and on the machine
-    the insert glows in its lens's colour. The view draws it as the game's own lighting (the orange ramp at the
-    wire's level) and names the colour the mode asked for in its tooltip - PAD-658 had drawn it red."""
-    import coilmap
+def _one_colour_field(pf, monkeypatch):
     fixtures = [dict(name="MASER", channels={"W": (8, 3)}, x=10, y=20, group=6),
-                dict(name="SHIELD", channels={"R": (9, 0), "G": (9, 1), "B": (9, 2)}, x=30, y=40, group=7)]
+                dict(name="SHIELD", channels={"R": (9, 0), "G": (9, 1), "B": (9, 2)}, x=30, y=40, group=7),
+                dict(name="BRIDGE", channels={"W": (8, 4)}, x=50, y=60, group=6)]
     monkeypatch.setattr(pf, "layout_is_usable", lambda: True)
     monkeypatch.setattr(pf, "load_switches", lambda: [])
     monkeypatch.setattr(pf, "load_switch_list", lambda: [])
@@ -184,7 +181,17 @@ def test_a_mode_s_colour_on_a_one_colour_insert_is_named_not_drawn(pf, monkeypat
     monkeypatch.setattr(pf, "layout_extent", lambda pad=14: (100, 200))
     monkeypatch.setattr(pf, "FADE_MS", 0.0)
     monkeypatch.setattr(pf, "GROUP_NODE", {6: 8, 7: 9})
-    view = pf.Playfield().view
+    monkeypatch.setattr(pf, "GAME", "godzilla_le")
+    monkeypatch.setattr(pf, "_LENS", None)
+    return pf.Playfield()
+
+
+def test_a_mode_s_colour_on_a_one_colour_insert_is_named_not_drawn(pf, monkeypatch):
+    """PAD-668: a mode's light show paints a one-colour insert red; the board gets one level, and on the machine
+    the insert glows in its own colour. The view draws it white (not set) at the wire's level and names the colour
+    the mode asked for in its tooltip - PAD-658 had drawn it red."""
+    import coilmap
+    view = _one_colour_field(pf, monkeypatch).view
     b = bytearray(16384)
     b[:pf.PADLED_READ] = _led_block(pf, {(8, 3): 128})
     struct.pack_into("<I", b, coilmap.PAINT_OFF, coilmap.PAINT_MAGIC)
@@ -192,14 +199,59 @@ def test_a_mode_s_colour_on_a_one_colour_insert_is_named_not_drawn(pf, monkeypat
     with open(pf.LED_PATH, "wb") as f:
         f.write(bytes(b))
     frame = view.tick(0.0)
-    assert frame["fx"][0][:3] == list(pf.fixture_color({"W": 128})[0])                # the ramp, not red
+    r, g, bl = frame["fx"][0][:3]
+    assert r == g == bl and r > 128                                                   # white, lifted; not red
     tip = view.describe("led", 0)
     assert "MASER   (one colour)" in tip and "value 128" in tip
-    assert "a mode asks for #ff0000" in tip and "lens's colour" in tip
+    assert "drawn white: set its colour under INSERT COLOURS" in tip
+    assert "a mode asks for #ff0000" in tip and "glows in its own colour" in tip
     with open(pf.LED_PATH, "wb") as f:
         f.write(_led_block(pf, {(8, 3): 128}))                                         # no mode holds it
     view.tick(0.0)
     assert "mode" not in view.describe("led", 0)
+
+
+def test_a_one_colour_insert_is_white_until_given_its_colour():
+    """PAD-668: the default is white ("not known"), at the wire's level; a colour from the table is drawn instead.
+    An RGB insert's colour stays the wire's own."""
+    import playfield
+    assert playfield.fixture_color({"W": 255}) == ((255, 255, 255), 1.0)
+    assert playfield.fixture_color({"W": 0}) == (None, 0.0)
+    assert playfield.fixture_color({"W": 255}, (0, 64, 255)) == ((0, 64, 255), 1.0)
+    col, level = playfield.fixture_color({"W": 64}, (255, 0, 0))
+    assert col[1:] == (0, 0) and 100 < col[0] < 255 and level == 64 / 255.0          # dim red keeps its hue
+    assert playfield.fixture_color({"R": 255, "G": 0, "B": 0}, (0, 0, 255))[0] == (255, 0, 0)
+
+
+def test_the_insert_colours_table_is_edited_from_the_page_and_kept_per_title(pf, monkeypatch):
+    """PAD-668: the side panel's INSERT COLOURS lists the one-colour inserts by name (RGB ones are not in it);
+    a colour picked there is drawn at once, kept in the state file under the title for the next run, and x puts it
+    back to white."""
+    ctl = _one_colour_field(pf, monkeypatch)
+    view = ctl.view
+    spec = ctl.state("main")["view"]
+    assert spec["lens"] == [["BRIDGE", "", [2]], ["MASER", "", [0]]]
+    with open(pf.LED_PATH, "wb") as f:
+        f.write(_led_block(pf, {(8, 3): 255}))
+    assert view.tick(0.0)["fx"][0][:3] == [255, 255, 255]
+    assert ctl.api_lens("MASER", "#FF2000") == "#ff2000"
+    assert view.tick(0.0)["fx"][0][:3] == [255, 32, 0]                                # redrawn at once
+    assert "drawn #ff2000, as set under INSERT COLOURS" in view.describe("led", 0)
+    st = pf.load_state()
+    assert st["lens_colours"] == {"godzilla_le": {"MASER": "#ff2000"}}
+    assert pf.lens_colours("godzilla_pro") == {}                                      # another title: its own
+    monkeypatch.setattr(pf, "_LENS", None)                                           # the next run reads it back
+    assert pf.Playfield().state("main")["view"]["lens"][1] == ["MASER", "#ff2000", [0]]
+    assert ctl.api_lens("MASER", None) == ""                                          # x: back to white
+    assert view.tick(0.0)["fx"][0][:3] == [255, 255, 255]
+    assert pf.load_state()["lens_colours"] == {"godzilla_le": {}}
+    assert ctl.api_lens("MASER", "not a colour") == ""
+
+
+def test_the_page_has_the_insert_colours_table():
+    js = open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf-8").read()
+    assert 'function lensPanel(rows)' in js and 'api("lens", name, pick.value)' in js
+    assert 'api("lens", name, null)' in js and "markInserts(fids)" in js
 
 
 def test_the_page_script_parses():

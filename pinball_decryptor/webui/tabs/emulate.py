@@ -248,6 +248,12 @@ class EmulateTab(TabService):
         self._spike3 = None
         self._spike3_why = ""
         self._spike3_probed = None
+        #: PAD-659: the picked file is a disk tool's backup of a card (a
+        #: Macrium .mrimgx), not a card image: what to say about it, "" when
+        #: it is not one.  Read off the loop at pick time; ``start()``
+        #: refuses with it instead of the rig's "no MBR signature".
+        self._backup = ""
+        self._backup_probed = None
         self._mains_note = ""       # PAD-173: what this game does about 50 Hz
         self._mains_key = None
         # PAD-519: the editions the picked card's game takes, read off its binary
@@ -306,7 +312,7 @@ class EmulateTab(TabService):
             slots_sum=("The slots appear with the next status poll."
                        if sys.platform == "win32" else
                        "Slot management is available on Windows (WSL)."),
-            game=None, which=None, mains_note="",
+            game=None, which=None, mains_note="", not_card="",
             assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
             cache=None, rename=None)
         self._run_label(False, False)
@@ -421,6 +427,7 @@ class EmulateTab(TabService):
         self._bind_assets()
         self._select_probe_kick()
         self._spike3_kick()
+        self._backup_kick()
         if no_rig() or self._stopped:
             return
         if sys.platform == "darwin":
@@ -485,6 +492,7 @@ class EmulateTab(TabService):
     def _on_card_changed(self, *_a):
         self.set(game=self._card_game())
         self._slots_paint()
+        self._backup_kick()
         self._spike3_kick()
         self._precache_kick()
         self._select_probe_kick()
@@ -578,6 +586,40 @@ class EmulateTab(TabService):
             self._post(self._spike3_apply, path, is3, why)
 
         self._thread(run)
+
+    # -- is the picked file a backup of a card, not one? (PAD-659) -------
+    def _backup_kick(self):
+        """Read, off the loop, whether the picked file is a disk tool's
+        backup of a card (Macrium, Acronis, a zip...) rather than the card's
+        bytes.  Said on the card panel the moment it is picked: the rig only
+        found out at Start, as "no MBR signature" deep in its log."""
+        path = self._card()
+        if path == self._backup_probed:
+            return
+        self._backup_probed = path
+        self._backup = ""
+        self.set(not_card="")
+        if not path:
+            return
+
+        def run():
+            from ...core.backup_image import reason
+            try:
+                why = reason(path)
+            except Exception:                            # noqa: BLE001
+                why = ""
+            if why:
+                self._post(self._backup_apply, path, why)
+
+        self._thread(run)
+
+    def _backup_apply(self, path, why):
+        if path != self._backup_probed:
+            return
+        self._backup = why
+        # the chip read a "title" off the backup's file name: there is none
+        self.set(not_card=why, game=None)
+        self._log("[emulate] " + why)
 
     def _spike3_apply(self, path, is3, why):
         if path != self._spike3_probed:
@@ -2559,6 +2601,9 @@ class EmulateTab(TabService):
             # be a second launcher (must survive #0)
             self._refuse_start("the emulator is already running: stop it "
                                "first, then try again.")
+            return
+        if self._backup and self._backup_probed == self._card():
+            self._refuse_start(self._backup)
             return
         if not rig.rig_available():
             self._refuse_start("the emulator is not set up on this PC; use "

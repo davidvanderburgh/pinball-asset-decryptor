@@ -585,6 +585,9 @@ class ExtractTab(TabService):
                 names = ", ".join(m.display for m, _ in others)
                 badge = {"text": f"Matches multiple manufacturers: {names}",
                          "kind": "warn", "switch": False}
+            elif res.get("backup"):
+                badge = {"text": res["backup"], "kind": "warn",
+                         "switch": False}
             else:
                 badge = {"text": f"Not recognized as {mfr.display}",
                          "kind": "warn", "switch": False}

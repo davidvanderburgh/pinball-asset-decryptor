@@ -11,19 +11,29 @@
   "godzilla_pro": {
    "shots": {
     "Shield target center": "Maser target"
+   },
+   "words": {
+    "HIT THE CENTER SHIELD": "HIT THE MASER TARGET",
+    "HIT THE LEFT AND CENTER SHIELDS": "HIT THE LEFT SHIELD AND MASER TARGET",
+    "HIT THE CENTER AND RIGHT SHIELDS": "HIT THE MASER TARGET AND RIGHT SHIELD",
+    "HIT THE LEFT, CENTER AND RIGHT SHIELDS": "HIT THE SHIELDS AND THE MASER TARGET",
+    "SHIELD HITS": "SHIELD OR MASER HITS",
+    "SHIELDS CHARGE HIS SPIKES": "SHIELDS AND MASER CHARGE HIS SPIKES"
    }
   }
  },
- "about": "The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (3, then 6, then 9) and he joins the game's own battle; four stages (charge the spikes at the shields, three rolling attacks at the Big loop, three bites at the chasing ramp, the allies' hurry-up at the Building); cash the pot out at the right scoop after any stage. Destroy All Monsters (1968) and Final Wars (2004).",
+ "about": "The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (3, then 6, then 9) and he joins the game's own battle; four stages (charge the spikes at the shields, three rolling attacks at the Big loop, 20 s apart at most, three bites at the chasing ramp, the allies' hurry-up at the Building), his title saying what is left and his line the shot; cash the pot out at the right scoop after any stage. Destroy All Monsters (1968) and Final Wars (2004).",
  "lost": [
   "He joins on the first shot after one of the game's own modes begins (blocks only look at a shot), where the C looked twice a second; and blocks cannot tell a battle from the game's other modes: he joins any of its modes while one ball is in play (its multiballs are left out), where the C joined only kaiju battles.",
   "He leaves within a second of the game's mode ending (an Every second check) and his award shows at once; the C waited for the battle's own total screen first, then kept his 4 s in view.",
-  "Ended while the battle still runs (a stop, another of our modes), his total shows under the runtime's ANGUIRUS TOTAL: the C put ANGUIRUS RETREATS under it. His HUD's title and line are the battle's while it runs, so the stage is said by his awards, not by a line or a counter.",
+  "Ended while the battle still runs (a stop, another of our modes), his total shows under the runtime's ANGUIRUS TOTAL: the C put ANGUIRUS RETREATS under it.",
+  "While the battle runs his counters are hidden (the battle's own are in their places), so his title says what is left of the stage (3 ROLLS TO GO) and his line the shot (SHOOT THE BIG LOOP), in the award line between his awards: the C said the stage with its awards alone.",
   "His screen is not shared in moments: with the HUD on he holds display priority 180 the whole time he runs, where the C held it only for each moment (entrance, a spike, the roll, a rolling attack) and gave the battle its own displays between them.",
   "His entrance (clip, music, words) comes a fixed 2 s after he joins; the C waited until the battle's start screen had gone (up to 12 s). His music starts as he joins, not with the entrance.",
-  "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls; from THE BITE on it stays full.",
-  "The Big loop's chase turns to a fast blink in the window's last 2 s (looked at once a second), where the C stepped its blink every tick.",
-  "On Godzilla Pro 1.16 the Maser target stands in for the center shield (a third spike to charge): the C charged with two spikes on the Pro's two shields.",
+  "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls; from THE BITE on it stays full. A charged spike's shield goes dark (it no longer counts; the gauge shows the charge), where the C lit it solid.",
+  "The roll's window is 20 s, the same each time he joins (PAD-658: a window inside a stage is 20 s at least), where the C's was 6 s.",
+  "The Big loop's chase turns to a fast blink in the window's last 5 s (looked at once a second), where the C stepped its blink every tick.",
+  "On Godzilla Pro 1.16 the Maser target stands in for the center shield (a third spike to charge): the C charged with two spikes on the Pro's two shields; its lines name the Maser target there (title_alt words).",
   "The C's total gave way at once when another of our modes asked to start; the blocks' runtime TOTAL runs its 3 s."
  ],
  "program": {
@@ -100,14 +110,6 @@
     "reset": "mode"
    },
    {
-    "name": "roll ms",
-    "reset": "mode"
-   },
-   {
-    "name": "grip ms",
-    "reset": "mode"
-   },
-   {
     "name": "spike l",
     "reset": "mode"
    },
@@ -138,6 +140,9 @@
    },
    {
     "name": "bite"
+   },
+   {
+    "name": "say"
    }
   ],
   "hud": {
@@ -190,7 +195,11 @@
       "k": "var",
       "name": "spike r"
      }
-    }
+    },
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
    }
   },
   "bar": {
@@ -769,7 +778,7 @@
            }
           },
           "sub": "MORE TO CALL ANGUIRUS",
-          "seconds": 2
+          "seconds": 3
          }
         ]
        }
@@ -902,7 +911,7 @@
            }
           },
           "sub": "MORE TO CALL ANGUIRUS",
-          "seconds": 2
+          "seconds": 3
          }
         ]
        }
@@ -1035,7 +1044,7 @@
            }
           },
           "sub": "MORE TO CALL ANGUIRUS",
-          "seconds": 2
+          "seconds": 3
          }
         ]
        }
@@ -1262,106 +1271,6 @@
       }
      },
      {
-      "op": "set",
-      "var": "roll ms",
-      "value": {
-       "k": "op",
-       "op": "-",
-       "a": {
-        "k": "num",
-        "v": 7000
-       },
-       "b": {
-        "k": "op",
-        "op": "*",
-        "a": {
-         "k": "num",
-         "v": 1000
-        },
-        "b": {
-         "k": "var",
-         "name": "joins"
-        }
-       }
-      }
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "<",
-       "a": {
-        "k": "var",
-        "name": "roll ms"
-       },
-       "b": {
-        "k": "num",
-        "v": 4000
-       }
-      },
-      "then": [
-       {
-        "op": "set",
-        "var": "roll ms",
-        "value": {
-         "k": "num",
-         "v": 4000
-        }
-       }
-      ],
-      "else": null
-     },
-     {
-      "op": "set",
-      "var": "grip ms",
-      "value": {
-       "k": "op",
-       "op": "-",
-       "a": {
-        "k": "num",
-        "v": 14000
-       },
-       "b": {
-        "k": "op",
-        "op": "*",
-        "a": {
-         "k": "num",
-         "v": 2000
-        },
-        "b": {
-         "k": "var",
-         "name": "joins"
-        }
-       }
-      }
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "<",
-       "a": {
-        "k": "var",
-        "name": "grip ms"
-       },
-       "b": {
-        "k": "num",
-        "v": 8000
-       }
-      },
-      "then": [
-       {
-        "op": "set",
-        "var": "grip ms",
-        "value": {
-         "k": "num",
-         "v": 8000
-        }
-       }
-      ],
-      "else": null
-     },
-     {
       "op": "if",
       "cond": {
        "k": "cmp",
@@ -1377,10 +1286,8 @@
       },
       "then": [
        {
-        "op": "light_shot",
-        "shot": "Shield target left",
-        "color": "#ff5000",
-        "pattern": "solid"
+        "op": "lights_off",
+        "shot": "Shield target left"
        }
       ],
       "else": [
@@ -1412,10 +1319,8 @@
       },
       "then": [
        {
-        "op": "light_shot",
-        "shot": "Shield target center",
-        "color": "#ff5000",
-        "pattern": "solid"
+        "op": "lights_off",
+        "shot": "Shield target center"
        }
       ],
       "else": [
@@ -1447,10 +1352,8 @@
       },
       "then": [
        {
-        "op": "light_shot",
-        "shot": "Shield target right",
-        "color": "#ff5000",
-        "pattern": "solid"
+        "op": "lights_off",
+        "shot": "Shield target right"
        }
       ],
       "else": [
@@ -1482,6 +1385,14 @@
       "ms": {
        "k": "num",
        "v": 2000
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "say",
+      "ms": {
+       "k": "num",
+       "v": 1
       }
      }
     ]
@@ -1530,6 +1441,545 @@
         "value": null,
         "sub": "SHIELDS CHARGE HIS SPIKES",
         "seconds": 3
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "say"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "CHARGE HIS SPIKES",
+        "value": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "or",
+       "a": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       "b": {
+        "k": "and",
+        "a": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "rolling"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "spike l"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "spike c"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "spike r"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "HIT THE LEFT, CENTER AND RIGHT SHIELDS",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "HIT THE LEFT AND CENTER SHIELDS",
+              "value": null
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "spike r"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "HIT THE LEFT AND RIGHT SHIELDS",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "HIT THE LEFT SHIELD",
+              "value": null
+             }
+            ]
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "spike c"
+           },
+           "b": {
+            "k": "num",
+            "v": 0
+           }
+          },
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "spike r"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "HIT THE CENTER AND RIGHT SHIELDS",
+              "value": null
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "HIT THE CENTER SHIELD",
+              "value": null
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "spike r"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "HIT THE RIGHT SHIELD",
+              "value": null
+             }
+            ],
+            "else": null
+           }
+          ]
+         }
+        ]
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "rolls"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "3 ROLLS TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "rolls"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "2 ROLLS TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "rolls"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "1 ROLL TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "rolling"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE BIG LOOP",
+          "value": null
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bites"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "3 BITES TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bites"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "2 BITES TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bites"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "1 BITE TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bite at"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bite at"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE RIGHT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 4
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "title",
+        "text": "ALLIES ATTACK",
+        "value": null
+       },
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "SHOOT THE BUILDING:",
+        "value": {
+         "k": "var",
+         "name": "hurry"
+        }
        }
       ],
       "else": null
@@ -1617,10 +2067,8 @@
         "fallback": ""
        },
        {
-        "op": "light_shot",
-        "shot": "Shield target left",
-        "color": "#ff5000",
-        "pattern": "solid"
+        "op": "lights_off",
+        "shot": "Shield target left"
        },
        {
         "op": "show",
@@ -1729,10 +2177,8 @@
         "fallback": ""
        },
        {
-        "op": "light_shot",
-        "shot": "Shield target center",
-        "color": "#ff5000",
-        "pattern": "solid"
+        "op": "lights_off",
+        "shot": "Shield target center"
        },
        {
         "op": "show",
@@ -1841,10 +2287,8 @@
         "fallback": ""
        },
        {
-        "op": "light_shot",
-        "shot": "Shield target right",
-        "color": "#ff5000",
-        "pattern": "solid"
+        "op": "lights_off",
+        "shot": "Shield target right"
        },
        {
         "op": "show",
@@ -1932,14 +2376,14 @@
            "name": "pot"
           },
           "sub": "THE POT",
-          "seconds": 2
+          "seconds": 4
          },
          {
           "op": "timer_start",
           "timer": "next",
           "ms": {
            "k": "num",
-           "v": 700
+           "v": 3000
           }
          }
         ],
@@ -1964,8 +2408,8 @@
           "op": "timer_start",
           "timer": "roll",
           "ms": {
-           "k": "var",
-           "name": "roll ms"
+           "k": "num",
+           "v": 20000
           }
          },
          {
@@ -2010,35 +2454,240 @@
         },
         "then": [
          {
-          "op": "hud_award",
-          "text": "SPIKE CHARGED",
-          "value": {
-           "k": "op",
-           "op": "+",
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
            "a": {
-            "k": "op",
-            "op": "+",
-            "a": {
-             "k": "var",
-             "name": "spike l"
-            },
-            "b": {
-             "k": "var",
-             "name": "spike c"
-            }
+            "k": "var",
+            "name": "spike l"
            },
            "b": {
-            "k": "var",
-            "name": "spike r"
+            "k": "num",
+            "v": 0
            }
           },
-          "sub": "OF 3",
-          "seconds": 2
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "spike c"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": "=",
+               "a": {
+                "k": "var",
+                "name": "spike r"
+               },
+               "b": {
+                "k": "num",
+                "v": 0
+               }
+              },
+              "then": [
+               {
+                "op": "hud_text",
+                "which": "line",
+                "text": "HIT THE LEFT, CENTER AND RIGHT SHIELDS",
+                "value": null
+               },
+               {
+                "op": "hud_award",
+                "text": "SPIKE CHARGED",
+                "value": null,
+                "sub": "HIT THE LEFT, CENTER AND RIGHT SHIELDS",
+                "seconds": 3
+               }
+              ],
+              "else": [
+               {
+                "op": "hud_text",
+                "which": "line",
+                "text": "HIT THE LEFT AND CENTER SHIELDS",
+                "value": null
+               },
+               {
+                "op": "hud_award",
+                "text": "SPIKE CHARGED",
+                "value": null,
+                "sub": "HIT THE LEFT AND CENTER SHIELDS",
+                "seconds": 3
+               }
+              ]
+             }
+            ],
+            "else": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": "=",
+               "a": {
+                "k": "var",
+                "name": "spike r"
+               },
+               "b": {
+                "k": "num",
+                "v": 0
+               }
+              },
+              "then": [
+               {
+                "op": "hud_text",
+                "which": "line",
+                "text": "HIT THE LEFT AND RIGHT SHIELDS",
+                "value": null
+               },
+               {
+                "op": "hud_award",
+                "text": "SPIKE CHARGED",
+                "value": null,
+                "sub": "HIT THE LEFT AND RIGHT SHIELDS",
+                "seconds": 3
+               }
+              ],
+              "else": [
+               {
+                "op": "hud_text",
+                "which": "line",
+                "text": "HIT THE LEFT SHIELD",
+                "value": null
+               },
+               {
+                "op": "hud_award",
+                "text": "SPIKE CHARGED",
+                "value": null,
+                "sub": "HIT THE LEFT SHIELD",
+                "seconds": 3
+               }
+              ]
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "spike c"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "then": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": "=",
+               "a": {
+                "k": "var",
+                "name": "spike r"
+               },
+               "b": {
+                "k": "num",
+                "v": 0
+               }
+              },
+              "then": [
+               {
+                "op": "hud_text",
+                "which": "line",
+                "text": "HIT THE CENTER AND RIGHT SHIELDS",
+                "value": null
+               },
+               {
+                "op": "hud_award",
+                "text": "SPIKE CHARGED",
+                "value": null,
+                "sub": "HIT THE CENTER AND RIGHT SHIELDS",
+                "seconds": 3
+               }
+              ],
+              "else": [
+               {
+                "op": "hud_text",
+                "which": "line",
+                "text": "HIT THE CENTER SHIELD",
+                "value": null
+               },
+               {
+                "op": "hud_award",
+                "text": "SPIKE CHARGED",
+                "value": null,
+                "sub": "HIT THE CENTER SHIELD",
+                "seconds": 3
+               }
+              ]
+             }
+            ],
+            "else": [
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": "=",
+               "a": {
+                "k": "var",
+                "name": "spike r"
+               },
+               "b": {
+                "k": "num",
+                "v": 0
+               }
+              },
+              "then": [
+               {
+                "op": "hud_text",
+                "which": "line",
+                "text": "HIT THE RIGHT SHIELD",
+                "value": null
+               },
+               {
+                "op": "hud_award",
+                "text": "SPIKE CHARGED",
+                "value": null,
+                "sub": "HIT THE RIGHT SHIELD",
+                "seconds": 3
+               }
+              ],
+              "else": null
+             }
+            ]
+           }
+          ]
          }
         ],
         "else": null
        }
       ]
+     },
+     {
+      "op": "timer_start",
+      "timer": "say",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
      }
     ]
    },
@@ -2148,7 +2797,7 @@
            "name": "pot"
           },
           "sub": "THE POT",
-          "seconds": 2
+          "seconds": 4
          },
          {
           "op": "timer_stop",
@@ -2171,7 +2820,7 @@
           "timer": "next",
           "ms": {
            "k": "num",
-           "v": 700
+           "v": 3000
           }
          }
         ],
@@ -2183,7 +2832,7 @@
            "k": "var",
            "name": "roll value"
           },
-          "sub": "AGAIN TO DOUBLE",
+          "sub": "BIG LOOP AGAIN TO DOUBLE",
           "seconds": 3
          },
          {
@@ -2232,8 +2881,8 @@
           "op": "timer_start",
           "timer": "roll",
           "ms": {
-           "k": "var",
-           "name": "roll ms"
+           "k": "num",
+           "v": 20000
           }
          },
          {
@@ -2247,6 +2896,14 @@
           }
          }
         ]
+       },
+       {
+        "op": "timer_start",
+        "timer": "say",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
        }
       ],
       "else": null
@@ -2341,10 +2998,8 @@
         },
         "then": [
          {
-          "op": "light_shot",
-          "shot": "Shield target left",
-          "color": "#ff5000",
-          "pattern": "solid"
+          "op": "lights_off",
+          "shot": "Shield target left"
          }
         ],
         "else": [
@@ -2376,10 +3031,8 @@
         },
         "then": [
          {
-          "op": "light_shot",
-          "shot": "Shield target center",
-          "color": "#ff5000",
-          "pattern": "solid"
+          "op": "lights_off",
+          "shot": "Shield target center"
          }
         ],
         "else": [
@@ -2411,10 +3064,8 @@
         },
         "then": [
          {
-          "op": "light_shot",
-          "shot": "Shield target right",
-          "color": "#ff5000",
-          "pattern": "solid"
+          "op": "lights_off",
+          "shot": "Shield target right"
          }
         ],
         "else": [
@@ -2434,8 +3085,16 @@
         "op": "hud_award",
         "text": "CHARGE THE SPIKES",
         "value": null,
-        "sub": "HIT THE SHIELDS",
-        "seconds": 2
+        "sub": "HIT THE LEFT, CENTER AND RIGHT SHIELDS",
+        "seconds": 3
+       },
+       {
+        "op": "timer_start",
+        "timer": "say",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
        }
       ],
       "else": null
@@ -2604,6 +3263,174 @@
       }
      },
      {
+      "op": "timer_start",
+      "timer": "grip",
+      "ms": {
+       "k": "num",
+       "v": 20000
+      }
+     },
+     {
+      "op": "clip",
+      "clip": "bite",
+      "where": "full"
+     },
+     {
+      "op": "sound",
+      "sound": "roll",
+      "fallback": ""
+     },
+     {
+      "op": "show",
+      "show": "mine",
+      "name": "The bite"
+     },
+     {
+      "op": "shake",
+      "ms": {
+       "k": "num",
+       "v": 350
+      },
+      "strength": "strong"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "bites"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "bite at",
+        "value": {
+         "k": "num",
+         "v": 0
+        }
+       },
+       {
+        "op": "timer_stop",
+        "timer": "grip"
+       },
+       {
+        "op": "hud_award",
+        "text": "THE NECK IS PINNED",
+        "value": {
+         "k": "var",
+         "name": "pot"
+        },
+        "sub": "THE POT",
+        "seconds": 4
+       },
+       {
+        "op": "timer_start",
+        "timer": "next",
+        "ms": {
+         "k": "num",
+         "v": 3000
+        }
+       }
+      ],
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bite at"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "BITE",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "num",
+            "v": 4000000
+           },
+           "b": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 4000000
+            },
+            "b": {
+             "k": "var",
+             "name": "bites"
+            }
+           }
+          },
+          "sub": "NOW THE LEFT RAMP",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "bite at"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "BITE",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "num",
+            "v": 4000000
+           },
+           "b": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 4000000
+            },
+            "b": {
+             "k": "var",
+             "name": "bites"
+            }
+           }
+          },
+          "sub": "NOW THE RIGHT RAMP",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       }
+      ]
+     },
+     {
       "op": "if",
       "cond": {
        "k": "cmp",
@@ -2671,101 +3498,11 @@
      },
      {
       "op": "timer_start",
-      "timer": "grip",
-      "ms": {
-       "k": "var",
-       "name": "grip ms"
-      }
-     },
-     {
-      "op": "clip",
-      "clip": "bite",
-      "where": "full"
-     },
-     {
-      "op": "sound",
-      "sound": "roll",
-      "fallback": ""
-     },
-     {
-      "op": "show",
-      "show": "mine",
-      "name": "The bite"
-     },
-     {
-      "op": "shake",
+      "timer": "say",
       "ms": {
        "k": "num",
-       "v": 350
-      },
-      "strength": "strong"
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": ">=",
-       "a": {
-        "k": "var",
-        "name": "bites"
-       },
-       "b": {
-        "k": "num",
-        "v": 3
-       }
-      },
-      "then": [
-       {
-        "op": "hud_award",
-        "text": "THE NECK IS PINNED",
-        "value": {
-         "k": "var",
-         "name": "pot"
-        },
-        "sub": "THE POT",
-        "seconds": 2
-       },
-       {
-        "op": "timer_stop",
-        "timer": "grip"
-       },
-       {
-        "op": "timer_start",
-        "timer": "next",
-        "ms": {
-         "k": "num",
-         "v": 700
-        }
-       }
-      ],
-      "else": [
-       {
-        "op": "hud_award",
-        "text": "BITE",
-        "value": {
-         "k": "op",
-         "op": "+",
-         "a": {
-          "k": "num",
-          "v": 4000000
-         },
-         "b": {
-          "k": "op",
-          "op": "*",
-          "a": {
-           "k": "num",
-           "v": 4000000
-          },
-          "b": {
-           "k": "var",
-           "name": "bites"
-          }
-         }
-        },
-        "sub": "NOW THE OTHER RAMP",
-        "seconds": 2
-       }
-      ]
+       "v": 1
+      }
      }
     ]
    },
@@ -2842,14 +3579,22 @@
          "name": "bites"
         },
         "sub": "BITES HELD",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "timer_start",
         "timer": "grip",
         "ms": {
-         "k": "var",
-         "name": "grip ms"
+         "k": "num",
+         "v": 20000
+        }
+       },
+       {
+        "op": "timer_start",
+        "timer": "say",
+        "ms": {
+         "k": "num",
+         "v": 1
         }
        }
       ],
@@ -2928,6 +3673,26 @@
        {
         "op": "lights_off",
         "shot": "Building"
+       },
+       {
+        "op": "lights_off",
+        "shot": "Right scoop"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SELECT CITY"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-BATTLE"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-GODZILLA PWR UP"
+       },
+       {
+        "op": "lights_off",
+        "insert": "SCOOP BB-SUMMON ALLY"
        },
        {
         "op": "hud_award",
@@ -3128,8 +3893,8 @@
           "op": "timer_start",
           "timer": "roll",
           "ms": {
-           "k": "var",
-           "name": "roll ms"
+           "k": "num",
+           "v": 20000
           }
          },
          {
@@ -3148,16 +3913,16 @@
           "where": "full"
          },
          {
-          "op": "show",
-          "show": "mine",
-          "name": "Charged"
-         },
-         {
           "op": "hud_award",
           "text": "ROLLING ATTACK LIT",
           "value": null,
           "sub": "SHOOT THE BIG LOOP",
           "seconds": 3
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Charged"
          }
         ],
         "else": null
@@ -3241,8 +4006,8 @@
           "op": "timer_start",
           "timer": "grip",
           "ms": {
-           "k": "var",
-           "name": "grip ms"
+           "k": "num",
+           "v": 20000
           }
          },
          {
@@ -3320,7 +4085,7 @@
           "op": "hud_award",
           "text": "THE BITE",
           "value": null,
-          "sub": "SHOOT THE AMBER RAMP",
+          "sub": "SHOOT THE LEFT RAMP",
           "seconds": 3
          }
         ],
@@ -3402,6 +4167,14 @@
          }
         ],
         "else": null
+       },
+       {
+        "op": "timer_start",
+        "timer": "say",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
        }
       ]
      }
@@ -3587,7 +4360,7 @@
          },
          "b": {
           "k": "num",
-          "v": 2000
+          "v": 5000
          }
         },
         "then": [
@@ -3664,14 +4437,12 @@
         "else": null
        },
        {
-        "op": "hud_award",
-        "text": "ALLIES ATTACK",
-        "value": {
-         "k": "var",
-         "name": "hurry"
-        },
-        "sub": "SHOOT THE BUILDING",
-        "seconds": 2
+        "op": "timer_start",
+        "timer": "say",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
        }
       ],
       "else": null
@@ -3729,6 +4500,10 @@
      {
       "op": "timer_stop",
       "timer": "bite"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "say"
      },
      {
       "op": "set",

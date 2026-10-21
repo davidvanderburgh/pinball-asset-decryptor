@@ -6,18 +6,30 @@ frenzies (The Walking Dead's Blood Bath: every switch scores into a jackpot the 
 (a lit shot under 15 s puts it back to 15), his walkers that come back (TWD), stages with their own shots (EHoH's
 House) and a pot to cash out or put at risk (Metallica's Crank It Up).
 
-- LIGHT IT: 6 ramp shots (either ramp) in a game start it at once; 12 the second time, 18 the third (pack.need).
+- LIGHT IT: 4 Left ramp shots in a game start it at once; 8 the second time, 12 the third (pack.need). PAD-658: the
+  Left ramp alone, so no two modes share a start (the Right ramp lays ZILLA's eggs). Each ramp's note: RAMPS TO
+  BIOLLANTE / 3 - SHOOT THE LEFT RAMP, 3 s.
 - EVERY SHOT feeds the SAP: it scores the switch value (100,000, +25,000 a bank cut) and adds it to the SAP JACKPOT.
-- STAGE 1, THE ROSE: the three Shield targets and the three Powerline targets are two banks of vines. A whole bank cut
-  COLLECTS the sap jackpot times the banks cut so far (x1, x2) into the POT (and scores it). Two banks: the rose is cut.
+- EVERY STAGE'S CLOCK is pack.STAGE_S (40 s), the beast's too (round 3: it was 20 s; "deeper = more shots, not less
+  time"). A new stage is named by the HUD's title (ROSE ABLAZE, REGROWTH, BIOLLANTE BEAST) and its line names the
+  shots; the note the stage before ended on stays its 3 s and says what comes next.
+- STAGE 1, THE ROSE: the three Shield targets and the three Powerline targets are two banks of vines (blinking green;
+  a cut one goes dark). The line counts each bank: SHIELDS: 2 TO GO  POWERLINES: 3 TO GO. A whole bank cut COLLECTS
+  the sap jackpot times the banks cut so far (x1, x2) into the POT (and scores it), and that bank stands again. Two
+  banks: the rose is cut.
 - STAGE 2, ROSE ABLAZE: Godzilla's ray moves across her petals (the Left ramp, the Big loop, the Right ramp in turn,
-  chasing orange): the lit petal burns for 5M, 10M, 15M (+2.5M a petal each time she has come back) and the sap,
-  into the pot; the Building's fire lights climb with each.
-- STAGE 3, REGROWTH: all six vines stand again, chasing green: cut every one (2M, 3M ... 7M into the pot); left alone
-  6 s (5 s, 4 s the more she has been fought) she grows one back.
-- STAGE 4, BEAST FORM: 20 s, her own battle music: the Building is the FINAL BLOW, the pot twice over and 20M.
-- CASH OUT at the right scoop after stages 1 to 3 (it chases white): the pot, and she retreats. The clock (40 s a
-  stage, a vine cut puts it back to 15, a Pop bumper adds a second) or a drain pays a quarter of the pot.
+  chasing orange; the line: SHOOT THE BIG LOOP): the lit petal burns for 5M, 10M, 15M (+2.5M a petal each time she
+  has come back) and the sap, into the pot; the Building's fire lights climb with each.
+- STAGE 3, REGROWTH: all six vines stand again, chasing green (the line counts each bank, as in the rose): cut every
+  one (2M, 3M ... 7M into the pot); left alone pack.WINDOW_S (20) s she grows one back (round 3: it was 6 s, 5 s,
+  4 s the more she had been fought).
+- STAGE 4, BEAST FORM: her own battle music: the Building (hurrying gold) is the FINAL BLOW, the pot twice over and
+  20M (the line: FINAL BLOW: SHOOT THE BUILDING). Every light goes out at it, its note stays 3 s, then the end.
+- CASH OUT at the right scoop after stages 1 to 3 (it chases white; the POT counter: AT RIGHT SCOOP): the pot, and
+  she retreats. The clock (a vine cut puts it back to 15, a Pop bumper adds a second) or a drain pays a quarter of
+  the pot.
+- Godzilla Pro: the shield bank is the left shield, the Godzilla target and the right shield (title_alt); its line
+  says so (title_alt's words: SHIELDS+GODZILLA: 2  POWERLINES: 3 TO GO).
 """
 from blk import (AND, NOT, OR, RUNNING, SECS_LEFT, a_show, add, add_time, award, beds, callout, change, clip, clips, div, end, eq,
                  every, game_show, ge, gt, hud, hud_counter, hud_line, hud_title, if_, light, light_insert, lt, mul,
@@ -29,7 +41,7 @@ import pack
 SLUG, NAME = "biollante", "BIOLLANTE"
 ROSE, VINE, DEEP, SPORE, GOLD, FIRE, WHITE = ("#ff1446", "#14c828", "#00280a", "#ffe678", "#ffaa00", "#ff5a00",
                                               "#ffffff")
-RAMPS = ("Left ramp", "Right ramp")
+START_RAMP = "Left ramp"
 BANKS = ((("l1", "Shield target left"), ("l2", "Shield target center"), ("l3", "Shield target right")),
          (("p1", "Powerline left"), ("p2", "Powerline center"), ("p3", "Powerline right")))
 VINES = [(v, s) for bank in BANKS for v, s in bank]
@@ -38,18 +50,24 @@ FIRE_INSERTS = (("BUILDING FIRE LEFT 1", "BUILDING FIRE RIGHT 1"), ("BUILDING FI
                 ("BUILDING FIRE LEFT 3", "BUILDING FIRE RIGHT 3"))
 FINAL = "Building"
 SWITCH_VALUE, SWITCH_STEP = 100000, 25000
-RUN_SECONDS, BEAST_SECONDS, FLOOR = 40, 20, 15
+RUN_SECONDS = pack.STAGE_S                      # every stage's clock, the beast's too
 #: the port's lamp places on the playfield picture
 BUILDING = dict(x=123, y=202)
 SHIELDS = dict(x=199, y=346)
 POWERLINES = dict(x=144, y=216)
 TIMERS = ("ramp", "cut", "lamps", "burn", "grow", "next")
-NEED = pack.need(6, "plays")                    # 6 ramps, then 12, then 18
+NEED = pack.need(4, "plays")                    # 4 Left ramps, then 8, then 12
+SW = pack.SHOT_WORDS
 #: a petal burns for 5M times the petals burnt (+2.5M a petal each time she has come back), and the sap
 PETAL = add(5000000, mul(2500000, sub(var("plays"), 1)))
-#: left alone 6 s she grows a vine back, a second sooner each time she has come back
-REGROW = sub(7000, mul(1000, var("plays")))
+#: left alone pack.WINDOW_S seconds she grows a vine back (a window inside the stage: the brief's rule 5)
+REGROW = pack.WINDOW_S * 1000
 FINAL_BLOW = add(mul(var("pot"), 2), 20000000)
+
+
+def note(text, value=None, sub="", seconds=pack.NOTE_S):
+    """An award that stays pack.NOTE_S seconds at least (the brief's rule 3)."""
+    return award(text, value=value, sub=sub, seconds=max(seconds, pack.NOTE_S))
 
 
 SHOWS = [
@@ -108,12 +126,13 @@ SHOWS = [
 ]
 
 
-def stage_line(n, words):
-    return [hud_line(words), hud_counter(1, n, "OF 4")]
+def stage_line(n, title):
+    """A new stage: its title names it (the note the stage before ended on keeps the middle), counter 1 its number."""
+    return [hud_title(title), hud_counter(1, n, "OF 4")]
 
 
 def pot_up(points):
-    return [change("pot", points), hud_counter(2, var("pot"), "CASH AT SCOOP")]
+    return [change("pot", points), hud_counter(2, var("pot"), "AT RIGHT SCOOP")]
 
 
 def bank_sum(b):
@@ -121,15 +140,49 @@ def bank_sum(b):
     return add(add(var(v1), var(v2)), var(v3))
 
 
+def bank_words(shields, powerlines):
+    """The line in the rose and the regrowth: how many of each vine bank still stand, by the playfield's names."""
+    if shields and powerlines:
+        return "SHIELDS: %d TO GO  POWERLINES: %d TO GO" % (shields, powerlines)
+    if shields:
+        return "HIT THE SHIELDS: %d TO GO" % shields
+    if powerlines:
+        return "HIT THE POWERLINES: %d TO GO" % powerlines
+    return None
+
+
+def pro_bank_words(shields, powerlines):
+    """The same line on Godzilla Pro, where the shield bank is the two shields and the Godzilla target between them."""
+    if shields and powerlines:
+        return "SHIELDS+GODZILLA: %d  POWERLINES: %d TO GO" % (shields, powerlines)
+    if shields:
+        return "HIT SHIELDS+GODZILLA TARGET: %d TO GO" % shields
+    return bank_words(shields, powerlines)
+
+
+#: title_alt's words for the Pro: each bank line as the Pro's shots say it
+PRO_WORDS = {bank_words(a, b): pro_bank_words(a, b) for a in range(4) for b in range(4)
+             if bank_words(a, b) and bank_words(a, b) != pro_bank_words(a, b)}
+
+
+def bank_line():
+    """One line per (shields cut, powerlines cut)."""
+    return [if_(eq(bank_sum(0), a), [if_(eq(bank_sum(1), b), [hud_line(bank_words(3 - a, 3 - b))])
+                                      for b in range(4) if bank_words(3 - a, 3 - b)])
+            for a in range(4)]
+
+
 def lamps():
-    """Every light and the stage's counter, after anything changes: the vines standing (blinking green in the rose,
-    chasing in the regrowth), the lit petal chasing orange, the beast's Building hurrying gold."""
+    """Every light, the line and the stage's counter, after anything changes: the vines standing (blinking green in
+    the rose, chasing in the regrowth; a cut one dark at once), the lit petal chasing orange (the line follows it)."""
     vines = OR(eq("stage", 1), eq("stage", 3))
     return [
         *[if_(AND(vines, eq(v, 0)), [if_(eq("stage", 3), [light(s, VINE, "chase", 90)], [light(s, VINE, "blink", 500)])],
               [off(s)]) for v, s in VINES],
         *[if_(AND(eq("stage", 2), eq("burns", i)), [light(s, FIRE, "chase", 70)], [off(s)])
           for i, s in enumerate(PETALS)],
+        if_(vines, bank_line()),
+        if_(eq("stage", 2), pack.line_follows("burns", PETALS, first=0)),
         if_(eq("stage", 1), [if_(eq("collects", 0), [hud_counter(3, var("sap"), "X1 AT A BANK")],
                                  [hud_counter(3, var("sap"), "X2 AT A BANK")])]),
         if_(eq("stage", 3), [hud_counter(3, var("cut"), "OF 6")]),
@@ -144,28 +197,27 @@ def collect():
         set_("switch", add(SWITCH_VALUE, mul(SWITCH_STEP, var("collects")))),
         show("Collect"), sound("collect"), clip("collect", "behind"), shake(400, "medium"),
         if_(eq("bank", 1), [set_(v, 0) for v, _s in BANKS[0]], [set_(v, 0) for v, _s in BANKS[1]]),
-        if_(ge("collects", 2), [award("THE ROSE IS CUT", value=var("got"), sub="SAP JACKPOT X2", seconds=3),
+        if_(ge("collects", 2), [note("THE ROSE IS CUT", value=var("got"), sub="NOW THE LEFT RAMP"),
                                 timer_start("next", 700)],
-            [award("SAP JACKPOT X1", value=var("got"), sub="INTO THE POT", seconds=2)]),
+            [note("SAP JACKPOT X1", value=var("got"), sub="INTO THE POT")]),
     ]
 
 
 def setup_stage():
     """What each stage lights and says as it begins (run by the "next" timer once the stage before is done)."""
     return [
-        if_(eq("stage", 2), stage_line(2, "ROSE ABLAZE: BURN THE LIT PETAL") + [
+        if_(eq("stage", 2), stage_line(2, "ROSE ABLAZE") + [
             hud_counter(3, 0, "OF 3", "PETALS"), set_("burns", 0),
             clip("ablaze", "behind"), sound("ablaze"), show("Ablaze")]),
-        if_(eq("stage", 3), stage_line(3, "REGROWTH: CUT ALL SIX VINES") + [
+        if_(eq("stage", 3), stage_line(3, "REGROWTH") + [
             hud_counter(3, 0, "OF 6", "VINES"), set_("cut", 0), *[set_(v, 0) for v, _s in VINES],
             *[off_insert(n) for pair in FIRE_INSERTS for n in pair],
             timer_start("grow", REGROW), clip("grab", "behind"), sound("grab"), show("Regrowth")]),
-        if_(eq("stage", 4), stage_line(4, "FINAL BLOW: SHOOT THE BUILDING") + [
-            set_time(BEAST_SECONDS), timer_stop("grow"), *pack.cash_out_off(), music("beast"),
-            hud_title("BIOLLANTE BEAST"), hud_counter(2, FINAL_BLOW, "AT THE BUILDING", "FINAL BLOW"),
+        if_(eq("stage", 4), stage_line(4, "BIOLLANTE BEAST") + [
+            timer_stop("grow"), *pack.cash_out_off(), music("beast"), hud_line("FINAL BLOW: SHOOT THE BUILDING"),
+            hud_counter(2, FINAL_BLOW, "AT THE BUILDING", "FINAL BLOW"),
             hud_counter(3, var("switches"), "FED HER", "SWITCHES"),
             light(FINAL, GOLD, "hurry"), light_insert("BUILDING SPOT", GOLD, "blink", 120),
-            award("BEAST FORM!", sub="20 SECONDS TO STOP HER", seconds=3),
             show("Beast"), sound("beast"), clip("beast", "full")]),
     ]
 
@@ -179,12 +231,12 @@ def regrow():
 
 
 SCRIPTS = [
-    # ---- light it: ramp shots -----------------------------------------------------------------------------------
-    *[on_shot(r, timer_start("ramp", 1), when="idle") for r in RAMPS],
+    # ---- light it: Left ramp shots (a note on every one: the count is small) --------------------------------------
+    on_shot(START_RAMP, timer_start("ramp", 1), when="idle"),
     on_timer("ramp", if_(NOT(RUNNING), [
         if_(lt("ramps", NEED), [change("ramps", 1)]),
         if_(ge("ramps", NEED), [start()],
-            [award("RAMPS TO BIOLLANTE", value=sub(NEED, var("ramps")), sub="THE ROSE IS GROWING")])])),
+            [note("RAMPS TO BIOLLANTE", value=sub(NEED, var("ramps")), sub="SHOOT THE LEFT RAMP")])])),
 
     # ---- the rose ---------------------------------------------------------------------------------------------------
     on_start(*pack.begin(SLUG),
@@ -194,57 +246,60 @@ SCRIPTS = [
              set_("switch", SWITCH_VALUE), *[set_(v, 0) for v, _s in VINES],
              shield("toward"), game_show("Playfield wave"), clip("intro", "full"), clip("loop", "loop"),
              show("Rose blooms"), shake(800, "strong"),
-             award("BIOLLANTE", sub="EVERY SWITCH FEEDS HER SAP", seconds=3),
-             *stage_line(1, "THE ROSE: CUT A VINE BANK"), hud_counter(2, 0, "CASH AT SCOOP"),
+             note("BIOLLANTE", sub="EVERY SWITCH FEEDS HER SAP"),
+             hud_counter(1, 1, "OF 4"), hud_counter(2, 0, "AT RIGHT SCOOP"),
              light("Pop bumper", ROSE, "pulse", 1200),
              timer_start("lamps", 1)),
 
     # ---- every switch feeds the sap ------------------------------------------------------------------------------
     on_any_shot(score(var("switch")), change("switches", 1),
                 if_(lt("stage", 4), [change("sap", var("switch"))]), timer_start("lamps", 1)),
-    on_shot("Pop bumper", if_(OR(AND(lt("stage", 4), lt(SECS_LEFT, RUN_SECONDS)),
-                                 AND(eq("stage", 4), lt(SECS_LEFT, BEAST_SECONDS))), [add_time(1)])),
+    on_shot("Pop bumper", if_(AND(lt(SECS_LEFT, RUN_SECONDS), eq("won", 0)), [add_time(1)])),
 
     # ---- the vines (stages 1 and 3) -------------------------------------------------------------------------------------
     *[on_shot(s, if_(AND(OR(eq("stage", 1), eq("stage", 3)), eq(v, 0)),
                      [set_(v, 1), set_("bank", b + 1), timer_start("cut", 1)]))
       for b, bank in enumerate(BANKS) for v, s in bank],
     on_timer("cut",
-             change("cut", 1), if_(lt(SECS_LEFT, FLOOR), [set_time(FLOOR)]),
+             change("cut", 1), pack.clock_floor(),
              if_(eq("stage", 1), [
                  if_(OR(AND(eq("bank", 1), eq(bank_sum(0), 3)), AND(eq("bank", 2), eq(bank_sum(1), 3))), collect(),
                      [sound("cut"), show("Vine cut"), shake(150, "soft"),
                       if_(eq("clip ok", 1), [clip("cut", "behind"), set_("clip ok", 0)])])],
                  [*pot_up(add(1000000, mul(1000000, var("cut")))), score(500000), timer_start("grow", REGROW),
                   sound("cut"), show("Vine cut"),
-                  if_(ge("cut", 6), [timer_stop("grow"), award("THE VINES ARE DOWN", value=var("pot"), sub="POT"),
+                  if_(ge("cut", 6), [timer_stop("grow"),
+                                     note("THE VINES ARE DOWN", value=var("pot"), sub="NOW THE BUILDING"),
                                      clip("collect", "behind"), shake(400, "medium"), timer_start("next", 700)],
-                      [award("VINE CUT", value=sub(6, var("cut")), sub="VINES TO GO"), shake(150, "soft"),
+                      [note("VINE CUT", value=sub(6, var("cut")), sub="VINES TO GO"), shake(150, "soft"),
                        if_(eq("clip ok", 1), [clip("cut", "behind"), set_("clip ok", 0)])])]),
              timer_start("lamps", 1)),
     every(4, set_("clip ok", 1)),                       # a vine's clip every few seconds at most
     on_timer("grow", if_(AND(eq("stage", 3), gt("cut", 0)), [
-        *regrow(), change("cut", -1), award("A VINE GROWS BACK", value=sub(6, var("cut")), sub="VINES TO GO"),
+        *regrow(), change("cut", -1), note("A VINE GROWS BACK", value=sub(6, var("cut")), sub="VINES TO GO"),
         sound("grab"), show("Grows back"), shake(300, "soft"), timer_start("lamps", 1)]),
         if_(eq("stage", 3), [timer_start("grow", REGROW)])),
 
-    # ---- stage 2: rose ablaze --------------------------------------------------------------------------------------------
+    # ---- stage 2: rose ablaze (the lit petal moves on as one burns: the line with it) --------------------------------
     *[on_shot(s, if_(AND(eq("stage", 2), eq("burns", i)), [timer_start("burn", 1)])) for i, s in enumerate(PETALS)],
     on_timer("burn",
              change("burns", 1), set_("got", add(mul(PETAL, var("burns")), var("sap"))), *pot_up(var("got")),
-             set_("sap", 0), score(1000000), hud_counter(3, var("burns"), "OF 3"),
+             set_("sap", 0), score(1000000), pack.clock_floor(), hud_counter(3, var("burns"), "OF 3"),
              *[if_(ge("burns", i + 1), [light_insert(n, FIRE, "blink", 90) for n in pair])
                for i, pair in enumerate(FIRE_INSERTS)],
              clip("burn", "behind"), sound("ablaze"), show("Petal burns"), shake(500, "hard"),
-             if_(ge("burns", 3), [award("THE ROSE IS ABLAZE", value=var("got"), sub="INTO THE POT", seconds=3),
+             if_(ge("burns", 3), [note("THE ROSE IS ABLAZE", value=var("got"), sub="NOW ALL SIX VINES"),
                                   timer_start("next", 700)],
-                 [award("A PETAL BURNS", value=var("got"), sub="THE FIRE MOVES ON")]),
+                 [*[if_(eq("burns", i), [note("A PETAL BURNS", value=var("got"), sub="NOW THE " + SW[s])])
+                    for i, s in enumerate(PETALS) if i]]),
              timer_start("lamps", 1)),
 
-    # ---- the beast: the final blow -------------------------------------------------------------------------------------
+    # ---- the beast: the final blow (every light out, its note up 3 s, then the end) -------------------------------------
     on_shot(FINAL, if_(AND(eq("stage", 4), eq("won", 0)), [
-        set_("won", 1), score(FINAL_BLOW), award("FINAL BLOW", value=FINAL_BLOW, sub="THE POT TWICE AND 20M", seconds=4),
-        clip("won", "full"), sound("won"), show("Final blow"), shake_game("big_hit"), timer_start("next", 1500)])),
+        set_("won", 1), score(FINAL_BLOW), off("*"),
+        note("FINAL BLOW", value=FINAL_BLOW, sub="THE POT TWICE AND 20M", seconds=4),
+        clip("won", "full"), sound("won"), show("Final blow"), shake_game("big_hit"),
+        timer_start("next", pack.NOTE_S * 1000)])),
     on_timer("lamps", *lamps()),
 
     # ---- a stage done: on to the next, or cash out --------------------------------------------------------------
@@ -256,11 +311,11 @@ SCRIPTS = [
     on_shot(pack.CASH_SHOT,
             if_(AND(ge("stage", 2), lt("stage", 4), eq("won", 0), eq("cashed", 0)), [
                 set_("cashed", 1), score(var("pot")),
-                award("CASHED OUT", value=var("pot"), sub="BIOLLANTE RETREATS", seconds=4),
+                note("CASHED OUT", value=var("pot"), sub="BIOLLANTE RETREATS", seconds=4),
                 clip("cashout", "full"), sound("cashout"), show("Spores"), shake(600, "medium"),
                 timer_start("next", 1500)])),
-    secs_left(10, callout("ten_seconds"),
-              if_(AND(ge("stage", 2), lt("stage", 4)), [light(pack.CASH_SHOT, pack.WHITE, "hurry")])),
+    secs_left(10, if_(AND(eq("won", 0), eq("cashed", 0)), [
+        callout("ten_seconds"), if_(AND(ge("stage", 2), lt("stage", 4)), [light(pack.CASH_SHOT, pack.WHITE, "hurry")])])),
 
     # ---- the end ------------------------------------------------------------------------------------------------------
     on_end(*pack.finish(), *[timer_stop(t) for t in TIMERS], set_("stage", 0),
@@ -282,8 +337,8 @@ PROGRAM = {
                                                 "switches", "cut", "bank", "burns", "clip ok")] + [
         {"name": v, "reset": "mode"} for v, _s in VINES],
     "timers": [{"name": n} for n in TIMERS],
-    "hud": hud("THE ROSE: CUT A VINE BANK",
-               counters=[("STAGE", "OF 4", None), ("POT", "CASH AT SCOOP", None), ("SAP", "X1 AT A BANK", None)],
+    "hud": hud("SHIELDS: 3 TO GO  POWERLINES: 3 TO GO",
+               counters=[("STAGE", "OF 4", None), ("POT", "AT RIGHT SCOOP", None), ("SAP", "X1 AT A BANK", None)],
                timer=("BIOLLANTE", "rose")),
     "bar": {"on": False}, "info": {"on": False},
     "clips": clips("intro", "loop", "cut", "collect", "ablaze", "burn", "grab", "beast", "won", "lost", "cashout"),
@@ -299,15 +354,23 @@ EXAMPLE = {
     #: the Pro (two fixed shields, no platform, no Playfield wave): the shield bank's middle vine is the Godzilla
     #: target (the captive ball between them), the start's show the Pro's Wide yellow and white strobe
     "title_alt": {"godzilla_pro": {"shots": {"Shield target center": "Godzilla target"},
-                                   "shows": {"Playfield wave": "Wide yellow and white strobe"}}},
-    "about": ("The C example BIOLLANTE rebuilt in blocks and taken deeper (PAD-658): six ramps start her (12 the "
-              "second time, 18 the third) and every shot feeds the SAP JACKPOT. Four stages: THE ROSE (cut the "
+                                   "shows": {"Playfield wave": "Wide yellow and white strobe"},
+                                   "words": PRO_WORDS}},
+    "about": ("The C example BIOLLANTE rebuilt in blocks and taken deeper (PAD-658): four Left ramps start her (8 the "
+              "second time, 12 the third) and every shot feeds the SAP JACKPOT. Four stages: THE ROSE (cut the "
               "Shield and Powerline vine banks to collect the sap x1, x2 into the pot), ROSE ABLAZE (burn the lit "
               "petal as Godzilla's ray moves across the ramps and the Big loop), REGROWTH (cut all six vines while "
-              "she grows them back), then her BEAST form: 20 s to land the final blow at the Building, the pot "
-              "twice over. Cash the pot out at the right scoop after any stage; the clock or a drain pays a "
-              "quarter."),
+              "she grows them back), then her BEAST form: the final blow at the Building, the pot twice over. 40 s "
+              "a stage; the line names the shots (SHIELDS: 2 TO GO  POWERLINES: 3 TO GO, SHOOT THE BIG LOOP). Cash "
+              "the pot out at the right scoop after any stage; the clock or a drain pays a quarter."),
     "lost": [
+        "Every stage has 40 s, the beast's too (PAD-658's round 3: time to do it): round 2 gave the beast 20 s, and "
+        "she grew a vine back after 6 s alone (5 s, 4 s the more she had been fought), now after 20 s.",
+        "A new stage is named by the HUD's title (ROSE ABLAZE, REGROWTH, BIOLLANTE BEAST), not by a note over the "
+        "one the stage before ended on (THE ROSE IS CUT, THE ROSE IS ABLAZE, THE VINES ARE DOWN): that note stays "
+        "its 3 s and says what comes next; the beast's BEAST FORM! note is gone.",
+        "On Godzilla Pro the line names the shield bank SHIELDS+GODZILLA (its two shields and the Godzilla target "
+        "between them: title_alt's words).",
         "Only the port's named shots feed the sap: the C scored every playfield switch (its 0x1 switch dispatch), "
         "rollovers and other unnamed switches included.",
         "The counters show bare numbers: SAP 500,000 over X1 AT A BANK, where the C showed the bank count as 2/3 "
@@ -315,7 +378,7 @@ EXAMPLE = {
         "No VINES gauge: on the glass its pips sat over the game's own POWER widget at the right edge, so the vines "
         "are counted on the third counter in the regrowth (the C showed six pips shaded green to rose, BEAST in the "
         "beast form).",
-        "The ramp count note reads RAMPS TO BIOLLANTE over 5  -  THE ROSE IS GROWING (the number under the words) "
+        "The ramp count note reads RAMPS TO BIOLLANTE over 3  -  SHOOT THE LEFT RAMP (the number under the words) "
         "where the C said 5 RAMPS TO BIOLLANTE.",
         "The shield vines light at once: the C lit them only once the shield platform had turned to face the "
         "player.",
@@ -324,8 +387,8 @@ EXAMPLE = {
         "No randomness in blocks: Godzilla's ray burns her petals in a fixed order (Left ramp, Big loop, Right "
         "ramp) and she grows back the first vine cut in a fixed order (the shields left to right, then the "
         "powerlines).",
-        "The beast's Building blink quickens against the mode's 40 s clock (slow, then fast in its last 13 s), "
-        "where the C quickened it across the beast's own 20 s.",
+        "The beast's Building blink quickens against its 40 s clock (slow, then fast in its last 13 s), where the "
+        "C quickened it across the beast's own 20 s.",
         "The ending (BIOLLANTE IS FREE, BIOLLANTE RETREATS or BIOLLANTE WITHERS, its line and the total) stays up "
         "3 s, the runtime's: the C kept it 10 s; its SWITCHES are the named shots made (the C counted every "
         "switch).",
@@ -367,25 +430,32 @@ _STAGE1 = _shots("Slingshot", 2) + _SHIELDS + _POWER + ["secs", 1]
 _STAGE2 = ["shot", "Left ramp", "ms", 500, "shot", "Big loop", "ms", 500, "shot", "Right ramp", "secs", 2]
 _STAGE3 = _SHIELDS + _POWER + ["secs", 2]
 DESK = [
-    ("six ramps the first time, twelve the second",
-     _shots("Left ramp", 6) + ["secs", 1, "trigger", "biollante.stop", "secs", 4] +
-     _shots("Right ramp", 11) + ["secs", 2] + _shots("Right ramp", 1) + ["secs", 2],
-     ["Hud_Title: RAMPS TO BIOLLANTE", "Hud_Line: 5  -  THE ROSE IS GROWING", "[BIOLLANTE] START (a block)",
-      "Hud_Line: 11  -  THE ROSE IS GROWING", "Hud_Line: 1  -  THE ROSE IS GROWING", "SHIELD toward"]),
+    ("four Left ramps the first time, eight the second",
+     _shots("Left ramp", 4) + ["secs", 1, "trigger", "biollante.stop", "secs", 4] +
+     _shots("Left ramp", 7) + ["secs", 2] + _shots("Left ramp", 1) + ["secs", 2],
+     ["Hud_Title: RAMPS TO BIOLLANTE", "Hud_Line: 3  -  SHOOT THE LEFT RAMP", "[BIOLLANTE] START (a block)",
+      "Hud_Line: 7  -  SHOOT THE LEFT RAMP", "Hud_Line: 1  -  SHOOT THE LEFT RAMP", "SHIELD toward"]),
     ("stage one then cash out", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
-     ["Hud_Award: SAP JACKPOT X1", "Hud_AwardSub: 500,000  -  INTO THE POT", "Hud_Award: THE ROSE IS CUT",
-      "Hud_Line: ROSE ABLAZE: BURN THE LIT PETAL", "Hud_Award: CASHED OUT",
+     ["Hud_Line: SHIELDS: 3 TO GO  POWERLINES: 3 TO GO", "Hud_Line: SHIELDS: 2 TO GO  POWERLINES: 3 TO GO",
+      "Hud_Line: SHIELDS: 1 TO GO  POWERLINES: 3 TO GO", "Hud_Award: SAP JACKPOT X1",
+      "Hud_AwardSub: 500,000  -  INTO THE POT", "Hud_Line: SHIELDS: 3 TO GO  POWERLINES: 1 TO GO",
+      "Hud_Award: THE ROSE IS CUT", "Hud_AwardSub: 750,000  -  NOW THE LEFT RAMP", "Hud_Title: ROSE ABLAZE",
+      "Hud_Line: SHOOT THE LEFT RAMP", "Hud_C2_Sub: AT RIGHT SCOOP", "Hud_Award: CASHED OUT",
       "SCORE +1250000", "Hud_Title: BIOLLANTE RETREATS", "lamps held 0"]),
     ("all four stages and the final blow", _START + _STAGE1 + _STAGE2 + _STAGE3 + ["secs", 2, "shot", "Building", "secs", 6],
-     ["Hud_AwardSub: 5,150,000  -  THE FIRE MOVES ON", "Hud_AwardSub: 10,150,000  -  THE FIRE MOVES ON",
-      "Hud_Award: THE ROSE IS ABLAZE", "Hud_Line: REGROWTH: CUT ALL SIX VINES", "LAMP POWERLINE LEFT 14c828 chase 90",
-      "Hud_Award: VINE CUT", "Hud_Award: THE VINES ARE DOWN", "Hud_Title: BIOLLANTE BEAST",
-      "Hud_C2_Label: FINAL BLOW", "Hud_Award: BEAST FORM!", "LAMP BUILDING ffaa00 blink", "Hud_Award: FINAL BLOW",
-      "Hud_AwardSub: 137,400,000  -  THE POT TWICE AND 20M", "SHAKE the game's big_hit", "SHAKE the game's rumble",
-      "END (a block)", "Hud_Title: BIOLLANTE IS FREE", "lamps held 0"]),
-    ("a vine grows back in the regrowth", _START + _STAGE1 + _STAGE2 + ["shot", "Shield target left", "secs", 7],
-     ["Hud_Award: A VINE GROWS BACK", "Hud_AwardSub: 6  -  VINES TO GO"]),
-    ("the beast's clock runs out", _START + _STAGE1 + _STAGE2 + _STAGE3 + ["secs", 22],
+     ["Hud_AwardSub: 5,150,000  -  NOW THE BIG LOOP", "Hud_Line: SHOOT THE BIG LOOP",
+      "Hud_AwardSub: 10,150,000  -  NOW THE RIGHT RAMP", "Hud_Line: SHOOT THE RIGHT RAMP",
+      "Hud_Award: THE ROSE IS ABLAZE", "Hud_Title: REGROWTH", "Hud_Line: SHIELDS: 3 TO GO  POWERLINES: 3 TO GO",
+      "Hud_Line: HIT THE POWERLINES: 3 TO GO", "Hud_Line: HIT THE POWERLINES: 1 TO GO",
+      "LAMP POWERLINE LEFT 14c828 chase 90", "Hud_Award: VINE CUT", "Hud_Award: THE VINES ARE DOWN",
+      "Hud_Title: BIOLLANTE BEAST", "Hud_Line: FINAL BLOW: SHOOT THE BUILDING", "Hud_C2_Label: FINAL BLOW",
+      "LAMP BUILDING ffaa00 blink", "Hud_Award: FINAL BLOW", "Hud_AwardSub: 137,400,000  -  THE POT TWICE AND 20M",
+      "SHAKE the game's big_hit", "SHAKE the game's rumble", "END (a block)", "Hud_Title: BIOLLANTE IS FREE",
+      "lamps held 0"]),
+    ("a vine grows back in the regrowth", _START + _STAGE1 + _STAGE2 + ["shot", "Shield target left", "secs", 21],
+     ["Hud_Line: SHIELDS: 2 TO GO  POWERLINES: 3 TO GO", "Hud_Award: A VINE GROWS BACK",
+      "Hud_AwardSub: 6  -  VINES TO GO"]),
+    ("the beast's clock runs out", _START + _STAGE1 + _STAGE2 + _STAGE3 + ["secs", 42],
      ["Hud_Line: FINAL BLOW: SHOOT THE BUILDING", "END (time ran out)", "Hud_Title: BIOLLANTE WITHERS",
       "SCORE +14675000", "lamps held 0"]),
     ("she withers on the clock", _START + ["shot", "Shield target left", "secs", 45],
@@ -400,11 +470,12 @@ DESK = [
 ]
 #: the same mode as a Pro gets it (title_alt): the Godzilla target is the shield bank's middle vine
 DESK_PRO = [
-    ("six ramps and the Pro's shield bank, then cash out",
-     _shots("Left ramp", 6) + ["secs", 1] + _shots("Slingshot", 2) + _PRO_SHIELDS + _POWER +
+    ("four Left ramps and the Pro's shield bank, then cash out",
+     _shots("Left ramp", 4) + ["secs", 1] + _shots("Slingshot", 2) + _PRO_SHIELDS + _POWER +
      ["secs", 1, "shot", "Right scoop", "secs", 5],
-     ["[BIOLLANTE] START (a block)", "Hud_Award: SAP JACKPOT X1", "Hud_AwardSub: 500,000  -  INTO THE POT",
-      "Hud_Award: THE ROSE IS CUT", "Hud_Title: BIOLLANTE RETREATS", "SCORE +1250000", "lamps held 0"]),
+     ["[BIOLLANTE] START (a block)", "Hud_Line: SHIELDS+GODZILLA: 1  POWERLINES: 3 TO GO", "Hud_Award: SAP JACKPOT X1",
+      "Hud_AwardSub: 500,000  -  INTO THE POT", "Hud_Award: THE ROSE IS CUT", "Hud_Title: BIOLLANTE RETREATS",
+      "SCORE +1250000", "lamps held 0"]),
     ("the Pro's regrowth and the final blow", _START + _shots("Slingshot", 2) + _PRO_SHIELDS + _POWER + ["secs", 1] +
      _STAGE2 + _PRO_SHIELDS + _POWER + ["secs", 4, "shot", "Building", "secs", 6],
      ["Hud_Award: THE VINES ARE DOWN", "Hud_Title: BIOLLANTE BEAST", "Hud_Award: FINAL BLOW",

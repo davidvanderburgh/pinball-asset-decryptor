@@ -49,6 +49,7 @@ static void say(const char *f, ...) {}
 static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
 static unsigned bd_surface_state(void) { return state; }
 static void bd_field(unsigned obj, unsigned v) { printf("FIELD written\n"); }
+static struct { int ours, due; } gbg;              /* PAD-658: Godzilla's route (the game's own background clip back) */
 static int disp_clip_ours;
 static int bd_v2 = 1;
 static int ck_ours, ck_last_ours;                                /* PAD-530: our own asks of the surface */

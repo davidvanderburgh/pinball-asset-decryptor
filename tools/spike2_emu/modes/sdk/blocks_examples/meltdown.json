@@ -14,9 +14,11 @@
    }
   }
  },
- "about": "The C example MELTDOWN rebuilt in blocks and taken deeper: captive ball hits (10, then 20, then 30) light a 3-ball multiball where the core heats by itself and with every jackpot (x1 to x5) and the shields cool it; three stages with their own jackpot shots and music (BURNING GODZILLA's four red shots and the moving heart, DESTOROYAH's spiral ray at the lit ramp, JUNIOR at the Big loop and the Mecha lane), each meltdown's super at the Building worth the jackpots paid x2, x3, x4 and taking it a stage further.",
+ "about": "The C example MELTDOWN rebuilt in blocks and taken deeper: captive ball hits (10, then 20, then 30) light a 3-ball multiball where the core heats by itself and with every jackpot (x1 to x5) and the shields cool it; three stages with their own jackpot shots and music (BURNING GODZILLA's four jackpot shots and the moving heart that pays double, DESTOROYAH's spiral ray at one ramp then the other, JUNIOR at the Big loop and the Mecha lane), the line naming the shots and moving with them; each meltdown's super at the Building worth the jackpots paid x2, x3, x4 and taking it a stage further.",
  "lost": [
-  "No randomness in blocks: the HEART starts at the Left ramp and moves in turn (Left ramp, Right ramp, Building, Big loop) every 8 s and when hit, where the C picked another shot at random.",
+  "No randomness in blocks: the HEART starts at the Left ramp and moves in turn (Left ramp, Right ramp, Building, Big loop) every 10 s and when hit, where the C picked another shot at random every 8 s (PAD-658: a moving target stays 10 s at least).",
+  "The HUD's line names the shots (RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP, moving with the heart), where the C said SHOOT RED SHOTS  -  THE HEART PAYS DOUBLE, and from CRITICAL SHIELDS COOL THE CORE  -  OR RIDE THE HEAT (the HOT and CRITICAL notes say the shields cool it, where the C's said JACKPOTS ARE WORTH MORE); the heart chases white, where the C blinked it faster in the heat's colour. Every note stays 3 s at least (the C's level notes 1.8 s, cadmium 1.5 s, the add-a-ball 2 s), a jackpot's naming the next shot (2X AT THE RIGHT RAMP); the captive ball's note says GODZILLA TARGET, where the C's said CAPTIVE BALL.",
+  "A shield cools the core only from 40%, while it is lit (what is lit counts, and only that), where the C's cooled it at any heat.",
   "The core is looked at once a second (an Every second script), so it rises a whole 1% or 2% each second and the MELTDOWN blink quickens on the second, where the C stepped them every tick.",
   "No timer badge: the MELTDOWN window is a timer the line counts (SUPER JACKPOT AT THE BUILDING: 17), where the C counted it on the MELTDOWN badge (a blocks badge counts only the mode's own clock, and this mode has none).",
   "The HUD shows the core as a number (25), not 25%; the third counter has no SUPER value under it; the CORE gauge is one colour (the C's ran yellow to white-hot); the lines lost their double spaces to fit the 40 letters a blocks HUD line holds.",
@@ -116,10 +118,6 @@
     "reset": "mode"
    },
    {
-    "name": "melt ms",
-    "reset": "mode"
-   },
-   {
     "name": "ray at",
     "reset": "mode"
    }
@@ -143,7 +141,7 @@
   ],
   "hud": {
    "on": true,
-   "line": "SHOOT RED SHOTS - THE HEART PAYS DOUBLE",
+   "line": "RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP",
    "counters": [
     {
      "label": "CORE",
@@ -191,7 +189,11 @@
       "k": "num",
       "v": 10
      }
-    }
+    },
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
    }
   },
   "bar": {
@@ -810,44 +812,180 @@
           "op": "hud_award",
           "text": "MELTDOWN IS READY",
           "value": null,
-          "sub": "HIT THE CAPTIVE BALL",
+          "sub": "HIT THE GODZILLA TARGET",
           "seconds": 3
          }
         ],
         "else": [
          {
-          "op": "hud_award",
-          "text": "CAPTIVE BALL",
-          "value": {
-           "k": "op",
-           "op": "-",
+          "op": "if",
+          "cond": {
+           "k": "or",
            "a": {
-            "k": "op",
-            "op": "*",
+            "k": "or",
             "a": {
-             "k": "num",
-             "v": 10
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
+             "k": "cmp",
+             "op": "=",
              "a": {
               "k": "var",
               "name": "starts"
              },
              "b": {
               "k": "num",
-              "v": 1
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "<=",
+             "a": {
+              "k": "op",
+              "op": "-",
+              "a": {
+               "k": "op",
+               "op": "*",
+               "a": {
+                "k": "num",
+                "v": 10
+               },
+               "b": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "var",
+                 "name": "starts"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "hits"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 5
              }
             }
            },
            "b": {
-            "k": "var",
-            "name": "hits"
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "op",
+              "op": "/",
+              "a": {
+               "k": "op",
+               "op": "-",
+               "a": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 10
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "starts"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "hits"
+               }
+              },
+              "b": {
+               "k": "num",
+               "v": 5
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 5
+             }
+            },
+            "b": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 10
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "hits"
+             }
+            }
            }
           },
-          "sub": "MORE FOR MELTDOWN",
-          "seconds": 2
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "GODZILLA TARGET",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 10
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "hits"
+             }
+            },
+            "sub": "MORE FOR MELTDOWN",
+            "seconds": 3
+           }
+          ],
+          "else": null
          }
         ]
        }
@@ -1021,56 +1159,6 @@
         "value": {
          "k": "num",
          "v": 40
-        }
-       }
-      ],
-      "else": null
-     },
-     {
-      "op": "set",
-      "var": "melt ms",
-      "value": {
-       "k": "op",
-       "op": "-",
-       "a": {
-        "k": "num",
-        "v": 24000
-       },
-       "b": {
-        "k": "op",
-        "op": "*",
-        "a": {
-         "k": "num",
-         "v": 4000
-        },
-        "b": {
-         "k": "var",
-         "name": "starts"
-        }
-       }
-      }
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "<",
-       "a": {
-        "k": "var",
-        "name": "melt ms"
-       },
-       "b": {
-        "k": "num",
-        "v": 10000
-       }
-      },
-      "then": [
-       {
-        "op": "set",
-        "var": "melt ms",
-        "value": {
-         "k": "num",
-         "v": 10000
         }
        }
       ],
@@ -1336,8 +1424,8 @@
         "op": "timer_start",
         "timer": "melt",
         "ms": {
-         "k": "var",
-         "name": "melt ms"
+         "k": "num",
+         "v": 20000
         }
        },
        {
@@ -1782,8 +1870,8 @@
             "op": "hud_award",
             "text": "HOT",
             "value": null,
-            "sub": "JACKPOTS ARE WORTH MORE",
-            "seconds": 2
+            "sub": "JACKPOTS X2 - SHIELDS COOL THE CORE",
+            "seconds": 3
            },
            {
             "op": "sound",
@@ -1820,8 +1908,8 @@
             "op": "hud_award",
             "text": "CRITICAL",
             "value": null,
-            "sub": "JACKPOTS ARE WORTH MORE",
-            "seconds": 2
+            "sub": "JACKPOTS X3 - SHIELDS COOL THE CORE",
+            "seconds": 3
            },
            {
             "op": "sound",
@@ -1864,7 +1952,7 @@
             "text": "MELTDOWN IMMINENT",
             "value": null,
             "sub": "SHOOT THE SHIELDS TO COOL HIM",
-            "seconds": 2
+            "seconds": 3
            },
            {
             "op": "sound",
@@ -2552,38 +2640,113 @@
        {
         "op": "if",
         "cond": {
-         "k": "and",
+         "k": "cmp",
+         "op": "=",
          "a": {
-          "k": "cmp",
-          "op": "=",
-          "a": {
-           "k": "var",
-           "name": "stage"
-          },
-          "b": {
-           "k": "num",
-           "v": 1
-          }
+          "k": "var",
+          "name": "stage"
          },
          "b": {
-          "k": "cmp",
-          "op": ">=",
-          "a": {
-           "k": "var",
-           "name": "level"
-          },
-          "b": {
-           "k": "num",
-           "v": 2
-          }
+          "k": "num",
+          "v": 1
          }
         },
         "then": [
          {
-          "op": "hud_text",
-          "which": "line",
-          "text": "SHIELDS COOL THE CORE - OR RIDE THE HEAT",
-          "value": null
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "RAMPS, BIG LOOP, BUILDING: 2X RIGHT RAMP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "RAMPS, BIG LOOP, BUILDING: 2X BUILDING",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "RAMPS, BIG LOOP, BUILDING: 2X BIG LOOP",
+            "value": null
+           }
+          ],
+          "else": null
          }
         ],
         "else": [
@@ -2598,18 +2761,10 @@
            },
            "b": {
             "k": "num",
-            "v": 1
+            "v": 2
            }
           },
           "then": [
-           {
-            "op": "hud_text",
-            "which": "line",
-            "text": "SHOOT RED SHOTS - THE HEART PAYS DOUBLE",
-            "value": null
-           }
-          ],
-          "else": [
            {
             "op": "if",
             "cond": {
@@ -2617,7 +2772,31 @@
              "op": "=",
              "a": {
               "k": "var",
-              "name": "stage"
+              "name": "ray at"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            },
+            "then": [
+             {
+              "op": "hud_text",
+              "which": "line",
+              "text": "JACKPOT: LEFT RAMP",
+              "value": null
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "ray at"
              },
              "b": {
               "k": "num",
@@ -2628,18 +2807,19 @@
              {
               "op": "hud_text",
               "which": "line",
-              "text": "THE SPIRAL RAY: SHOOT THE LIT RAMP",
+              "text": "JACKPOT: RIGHT RAMP",
               "value": null
              }
             ],
-            "else": [
-             {
-              "op": "hud_text",
-              "which": "line",
-              "text": "JUNIOR: THE BIG LOOP AND MECHA LANE",
-              "value": null
-             }
-            ]
+            "else": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "JACKPOT: BIG LOOP OR MECHA LANE",
+            "value": null
            }
           ]
          }
@@ -2794,7 +2974,7 @@
           },
           "b": {
            "k": "num",
-           "v": 8
+           "v": 10
           }
          }
         },
@@ -3597,7 +3777,7 @@
           "timer": "next",
           "ms": {
            "k": "num",
-           "v": 1200
+           "v": 4000
           }
          }
         ]
@@ -3883,16 +4063,6 @@
       },
       "then": [
        {
-        "op": "hud_award",
-        "text": "HEART JACKPOT",
-        "value": {
-         "k": "var",
-         "name": "got"
-        },
-        "sub": "",
-        "seconds": 2
-       },
-       {
         "op": "change",
         "var": "core",
         "by": {
@@ -3949,19 +4119,121 @@
          "v": 300
         },
         "strength": "strong"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "heart"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "HEART JACKPOT",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "2X NOW: LEFT RAMP",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "heart"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "HEART JACKPOT",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "2X NOW: RIGHT RAMP",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "heart"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "HEART JACKPOT",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "2X NOW: BUILDING",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "heart"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "HEART JACKPOT",
+          "value": {
+           "k": "var",
+           "name": "got"
+          },
+          "sub": "2X NOW: BIG LOOP",
+          "seconds": 3
+         }
+        ],
+        "else": null
        }
       ],
       "else": [
-       {
-        "op": "hud_award",
-        "text": "JACKPOT",
-        "value": {
-         "k": "var",
-         "name": "got"
-        },
-        "sub": "",
-        "seconds": 2
-       },
        {
         "op": "shake",
         "ms": {
@@ -3969,44 +4241,300 @@
          "v": 250
         },
         "strength": "medium"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ray at",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "num",
+            "v": 3
+           },
+           "b": {
+            "k": "var",
+            "name": "ray at"
+           }
+          }
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Spiral ray"
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "JACKPOT",
+            "value": {
+             "k": "var",
+             "name": "got"
+            },
+            "sub": "2X AT THE LEFT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "JACKPOT",
+            "value": {
+             "k": "var",
+             "name": "got"
+            },
+            "sub": "2X AT THE RIGHT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "JACKPOT",
+            "value": {
+             "k": "var",
+             "name": "got"
+            },
+            "sub": "2X AT THE BUILDING",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "heart"
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "JACKPOT",
+            "value": {
+             "k": "var",
+             "name": "got"
+            },
+            "sub": "2X AT THE BIG LOOP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "stage"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "ray at"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            },
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "JACKPOT",
+              "value": {
+               "k": "var",
+               "name": "got"
+              },
+              "sub": "NOW THE LEFT RAMP",
+              "seconds": 3
+             }
+            ],
+            "else": null
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "ray at"
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "JACKPOT",
+              "value": {
+               "k": "var",
+               "name": "got"
+              },
+              "sub": "NOW THE RIGHT RAMP",
+              "seconds": 3
+             }
+            ],
+            "else": null
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "JACKPOT",
+            "value": {
+             "k": "var",
+             "name": "got"
+            },
+            "sub": "BIG LOOP OR MECHA LANE",
+            "seconds": 3
+           }
+          ]
+         }
+        ]
        }
       ]
      },
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "stage"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "jackpots"
+        },
+        "b": {
+         "k": "num",
+         "v": 4
+        }
        },
        "b": {
-        "k": "num",
-        "v": 2
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "add used"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
        }
       },
       "then": [
        {
-        "op": "set",
-        "var": "ray at",
-        "value": {
-         "k": "op",
-         "op": "-",
-         "a": {
-          "k": "num",
-          "v": 3
-         },
-         "b": {
-          "k": "var",
-          "name": "ray at"
-         }
-        }
-       },
-       {
-        "op": "show",
-        "show": "mine",
-        "name": "Spiral ray"
+        "op": "hud_award",
+        "text": "ADD-A-BALL IS LIT",
+        "value": null,
+        "sub": "HIT THE GODZILLA TARGET",
+        "seconds": 3
        }
       ],
       "else": null
@@ -4212,7 +4740,7 @@
             "op": "hud_award",
             "text": "DESTOROYAH",
             "value": null,
-            "sub": "THE SPIRAL RAY: THE LIT RAMP",
+            "sub": "THE LEFT RAMP, THEN THE RIGHT",
             "seconds": 3
            },
            {
@@ -4246,7 +4774,7 @@
             "op": "hud_award",
             "text": "JUNIOR COMES",
             "value": null,
-            "sub": "THE BIG LOOP AND MECHA LANE",
+            "sub": "SHOOT THE BIG LOOP OR MECHA LANE",
             "seconds": 3
            },
            {
@@ -4293,15 +4821,30 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "phase"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        },
        "b": {
-        "k": "num",
-        "v": 1
+        "k": "cmp",
+        "op": ">=",
+        "a": {
+         "k": "var",
+         "name": "core"
+        },
+        "b": {
+         "k": "num",
+         "v": 40
+        }
        }
       },
       "then": [
@@ -4318,7 +4861,7 @@
         "text": "CADMIUM MISSILE",
         "value": null,
         "sub": "THE CORE COOLS",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "show",
@@ -4366,15 +4909,30 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "phase"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        },
        "b": {
-        "k": "num",
-        "v": 1
+        "k": "cmp",
+        "op": ">=",
+        "a": {
+         "k": "var",
+         "name": "core"
+        },
+        "b": {
+         "k": "num",
+         "v": 40
+        }
        }
       },
       "then": [
@@ -4391,7 +4949,7 @@
         "text": "CADMIUM MISSILE",
         "value": null,
         "sub": "THE CORE COOLS",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "show",
@@ -4439,15 +4997,30 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "phase"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "phase"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        },
        "b": {
-        "k": "num",
-        "v": 1
+        "k": "cmp",
+        "op": ">=",
+        "a": {
+         "k": "var",
+         "name": "core"
+        },
+        "b": {
+         "k": "num",
+         "v": 40
+        }
        }
       },
       "then": [
@@ -4464,7 +5037,7 @@
         "text": "CADMIUM MISSILE",
         "value": null,
         "sub": "THE CORE COOLS",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "show",
@@ -4658,7 +5231,7 @@
         "text": "ADD-A-BALL",
         "value": null,
         "sub": "ANOTHER BALL IN PLAY",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "sound",

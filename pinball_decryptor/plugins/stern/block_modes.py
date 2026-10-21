@@ -213,7 +213,7 @@ BLOCKS_FILE = "blocks.json"
 FORMAT = 1
 SECONDS_MAX = 600
 MAX_SCRIPTS = 48
-MAX_BLOCKS = 400
+MAX_BLOCKS = 600                    # PAD-658: 400 held the bigger examples back once their lines named every shot
 MAX_DEPTH = 10
 MAX_VARS = 24
 MAX_TIMERS = 8
@@ -288,8 +288,10 @@ SHAKE_MIN_MS, SHAKE_MAX_MS = MP.SHAKE_MIN_MS, 5000
 HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus",
              # PAD-658: the badges PAD-379's modes drew (mode_hud.py), so their blocks keep them
              "rage", "crystal", "snowflake", "rose", "claw")
-GAUGE_KINDS = ("diamond", "segment", "spike")
-GAUGE_MAX = 12                   # intricate_kit.h's KIT_HUD_PIPS
+GAUGE_KINDS = ("diamond", "segment", "spike",
+               "bar")            # PAD-658: PAD-416's POWERUP-style meter at the top-right corner; its value a percent
+GAUGE_MAX = 12                   # a pip gauge's pips
+BAR_MAX = 40                     # a bar's slices (intricate_kit.h's KIT_HUD_PIPS, mode_hud.BAR_SLICES_MAX)
 HUD_TEXT_MAX = 40                # a title or line (the kit's KIT_HUD_WORDS is 48, with its number)
 COUNTER_MAX = 16                 # a counter's label or sub-label (the kit holds 23)
 BADGE_MAX = 12                   # the badge's label, lettered on the stock BATTLE panel
@@ -606,19 +608,29 @@ def _norm_hud(h):
                          "value": value(c.get("value"))})
     t = h.get("timer") if isinstance(h.get("timer"), dict) else {}
     g = h.get("gauge") if isinstance(h.get("gauge"), dict) else {}
+    kind = g.get("kind") if g.get("kind") in GAUGE_KINDS else GAUGE_KINDS[0]
+    bar = kind == "bar"
     try:
-        count = max(1, min(GAUGE_MAX, int(g.get("count", 3))))
+        count = max(1, min(BAR_MAX if bar else GAUGE_MAX, int(g.get("count", 20 if bar else 3))))
     except (TypeError, ValueError):
-        count = 3
+        count = 20 if bar else 3
+    words = [text(w, COUNTER_MAX) for w in (g.get("words") if isinstance(g.get("words"), list) else [])][:2]
     return {"on": bool(h.get("on", False)), "line": text(h.get("line"), HUD_TEXT_MAX),
             "counters": counters,
             "timer": {"on": bool(t.get("on", True)), "label": text(t.get("label"), BADGE_MAX),
                       "icon": t.get("icon") if t.get("icon") in HUD_ICONS else HUD_ICONS[0]},
             "gauge": {"on": bool(g.get("on", False)), "label": text(g.get("label"), COUNTER_MAX),
-                      "kind": g.get("kind") if g.get("kind") in GAUGE_KINDS else GAUGE_KINDS[0],
+                      "kind": kind,
                       "count": count,
                       "color": g.get("color") if COLOR_RE.match(str(g.get("color") or "")) else "#ff7800",
-                      "value": value(g.get("value"))}}
+                      "value": value(g.get("value")),
+                      # PAD-658: shown while the mode is not running too - a meter toward its start (David: "it
+                      # should always be shown (whenever the HUD is shown)")
+                      "meter": bool(g.get("meter", False)),
+                      # a bar's two lines of words beside it (the stock meter's GODZILLA / POWERUP), the word its
+                      # label says when full (else 100%), its icon
+                      "words": [w for w in words if w], "full": text(g.get("full"), COUNTER_MAX),
+                      "icon": g.get("icon") if g.get("icon") in HUD_ICONS else "rage"}}
 
 
 def hud_spec(program, slug=""):
@@ -636,7 +648,11 @@ def hud_spec(program, slug=""):
     out = {"title": title, "line": h["line"] or " ", "counters": counters}
     if h["timer"]["on"]:
         out["timer"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
-    if h["gauge"]["on"]:
+    if h["gauge"]["on"] and h["gauge"]["kind"] == "bar":        # PAD-658: the corner meter, in the stock's fire
+        gg = h["gauge"]
+        out["gauge"] = {"label": " ", "kind": "bar", "count": gg["count"], "icon": gg["icon"],
+                        "words": gg["words"] or [gg["label"] or title[:COUNTER_MAX]]}
+    elif h["gauge"]["on"]:
         rgb = int(h["gauge"]["color"][1:], 16)
         out["gauge"] = {"label": h["gauge"]["label"] or " ", "kind": h["gauge"]["kind"],
                         "count": h["gauge"]["count"],
@@ -967,10 +983,12 @@ def adapt(ex, profile):
     alternate rules where the Pro's layout and mechanisms differ).
 
     ``title_alt`` (``{game_dir prefix: {"shots": {name: name or None}, "shows": {name: name or None},
-    "inserts": {name: name or None}}}``) names the title's alternates: a shot it calls otherwise or replaces with
+    "inserts": {name: name or None}, "words": {words: words}}}``) names the title's alternates: a shot it calls otherwise or replaces with
     another (Premium's "Shield ramp spinner" is a Pro's "Right spinner"; its "Shield target center" a Pro has not),
     the game's own light show it plays instead, the insert it lights instead. None takes the shot (its scripts and
-    lights), show or insert out. ``title_shots`` (round 1's) is the same as ``title_alt``'s "shots".
+    lights), show or insert out. ``title_shots`` (round 1's) is the same as ``title_alt``'s "shots". "words"
+    (PAD-658) swaps whole strings the HUD shows (a line, an award, a counter's words), so a line names the shot the
+    title has instead ("SHOOT THE CENTER SHIELD" -> "SHOOT THE MASER TARGET").
 
     Then what the card's game cannot do at all is left out, as a person would take the block away: turning the
     shield platform (a Pro's shields are fixed, facing the player), moving the building, holding a mechanism the
@@ -979,7 +997,7 @@ def adapt(ex, profile):
     if profile is None:
         return program
     game_dir = str(getattr(profile, "game_dir", "") or "")
-    alt = {"shots": {}, "shows": {}, "inserts": {}}
+    alt = {"shots": {}, "shows": {}, "inserts": {}, "words": {}}
     for prefix, m in (ex.get("title_shots") or {}).items():
         if game_dir.startswith(prefix):
             alt["shots"].update(m)
@@ -998,6 +1016,21 @@ def adapt(ex, profile):
     def shot_ok(name):
         return name not in gone_shots
 
+    words = alt["words"]
+
+    def reword(b):
+        for k in ("text", "sub", "label"):
+            if isinstance(b.get(k), str) and b[k] in words:
+                b[k] = words[b[k]]
+
+    if words and isinstance(program.get("hud"), dict):
+        h = program["hud"]
+        if h.get("line") in words:
+            h["line"] = words[h["line"]]
+        for c in h.get("counters") or []:
+            if isinstance(c, dict):
+                reword(c)
+
     def keep(stack):
         out = []
         for b in stack or []:
@@ -1005,6 +1038,8 @@ def adapt(ex, profile):
                 continue
             b = copy.deepcopy(b)
             op = b.get("op")
+            if words and op in ("hud_text", "hud_award", "hud_counter"):
+                reword(b)
             if op == "shield" and card.get("shield") is False:
                 continue
             if op == "building" and card.get("building") is False:
@@ -1286,6 +1321,9 @@ def notes(program):
                            "give it one under Its HUD." % k)
         if "hud_gauge" in ops and not hud["gauge"]["on"]:
             out.append("A block fills the HUD's gauge, which is switched off: tick Gauge under Its HUD.")
+        if hud["gauge"]["on"] and hud["gauge"]["meter"] and hud["gauge"]["value"] is None:
+            out.append("The HUD's gauge shows while the mode is not running, and follows nothing: give it a value "
+                       "to follow (lit to).")
         if hud["timer"]["on"] and not program["seconds"]:
             out.append("The HUD's timer badge counts the mode's clock, and it has none: it is not shown.")
     if any((s.get("hat") or {}).get("kind") == "challenge"
@@ -2080,6 +2118,9 @@ class _Gen:
                         self.shows.append({"key": key, "steps": steps, "name": name, "repeat": show_repeat(b, self.p)})
                         i = len(self.shows) - 1
                     out.append(pad + "show_start(SHOW_%d, %d, %s, %d);" % (i, len(steps), _c_str(name), self.shows[i]["repeat"]))
+            elif op == "set_time" and b.get("at_least"):     # PAD-658: Keep at least N seconds on the clock
+                n = self.num(b.get("seconds"))
+                out.append(pad + "if (run.on && RUN_SECONDS && secs_left() < (%s)) set_time(%s);" % (n, n))
             elif op in ("add_time", "set_time"):
                 out.append(pad + "%s(%s);" % (op, self.num(b.get("seconds"))))
             elif op == "multiball":
@@ -2522,20 +2563,27 @@ def to_c(program, slug):
         L.append("/* ---- the HUD at the glass's edges (PAD-375): the build's PadMode_%s_Hud group, driven by" % slug)
         L.append(" * the kit's struct kit_hud as the examples drive theirs - blank under a display of the game's,")
         L.append(" * aside while one of the game's modes runs. No HUD on the card: nothing shows, the mode runs. */")
-        L.append('static struct kit_hud hud = { .slug = "%s" };' % slug)
+        gg = hud["gauge"]
+        bar = gg["on"] and gg["kind"] == "bar"
+        meter = gg["on"] and gg["meter"] and gg["value"] is not None
+        # PAD-658: a corner bar shown while it is not running stands BESIDE another mode's HUD (the kit's beside)
+        L.append('static struct kit_hud hud = { .slug = "%s"%s };' % (slug, ", .beside = 1" if bar and meter else ""))
         L.append("#define HUD_LINE   %s" % _c_str(hud["line"]))
         L.append("#define HUD_TIMER  %d          /* the badge counts the clock */" % (
             1 if hud["timer"]["on"] and program["seconds"] else 0))
         L.append("#define HUD_GAUGE  %d          /* pips of the gauge; 0 = no gauge */" % (
             hud["gauge"]["count"] if hud["gauge"]["on"] else 0))
         L.append("#define HUD_GAUGE_LABEL %s" % _c_str(hud["gauge"]["label"]))
+        L.append("#define HUD_GAUGE_BAR %d       /* PAD-658: 1 = the corner bar, its value a percent */" % bar)
+        L.append("#define HUD_GAUGE_FULL %s" % _c_str(gg["full"]))
+        L.append("#define HUD_METER  %d          /* PAD-658: 1 = the gauge shows while it is not running too */" % meter)
         L.append("UNUSED static const char *const HUD_LABEL[3] = {%s};" % ", ".join(
             _c_str(c["label"]) for c in hud["counters"]))
         L.append("UNUSED static const char *const HUD_SUB[3] = {%s};" % ", ".join(
             _c_str(c["sub"]) for c in hud["counters"]))
         L.append("static char hud_val[3][24], hud_sub[3][24];   /* each counter's value and sub-label now */")
         L.append("static char hud_lab[3][24];                     /* PAD-658: and its label now (a block may change it) */")
-        L.append("UNUSED static long long hud_level;          /* the gauge's pips lit */")
+        L.append("UNUSED static long long hud_level;          /* the gauge's pips lit (a bar: its percent) */")
     L.append("")
     L.append("static unsigned P(void)")
     L.append("{")
@@ -2766,6 +2814,29 @@ def to_c(program, slug):
         L.append("    else if (kit_hud_note(&hud, ms, line, sub)) note_loop();")
         L.append("}")
         L.append("")
+        L.append("/* PAD-658: the gauge at `v`: a bar's slices lit in proportion to a percent, the percent its label (its full")
+        L.append(" * word at 100); a pip gauge's pips. As a meter (`idle`) while the mode is not running. */")
+        L.append("UNUSED static void gauge_now(long long v, int idle)")
+        L.append("{")
+        L.append("    char label[24];")
+        L.append("    int lit;")
+        L.append("    if (HUD_GAUGE_BAR) {")
+        L.append("        v = v < 0 ? 0 : v > 100 ? 100 : v;")
+        L.append("        lit = (int)(v * HUD_GAUGE / 100);")
+        L.append("        if (v >= 100 && HUD_GAUGE_FULL[0]) kit_copy(label, sizeof label, HUD_GAUGE_FULL);")
+        L.append('        else pm_snprintf(label, sizeof label, "%d%%", (int)v);')
+        L.append("    } else {")
+        L.append("        lit = v < 0 ? 0 : v > HUD_GAUGE ? HUD_GAUGE : (int)v;")
+        L.append("        kit_copy(label, sizeof label, HUD_GAUGE_LABEL);")
+        L.append("    }")
+        L.append("    if (!idle) {")
+        L.append("        kit_hud_gauge(&hud, lit, label);")
+        L.append("        return;")
+        L.append("    }")
+        L.append("    kit_hud_pips(&hud, HUD_GAUGE);      /* the build's count, as at a start */")
+        L.append("    kit_hud_meter(&hud, lit, label);")
+        L.append("}")
+        L.append("")
         L.append("/* every tick while it runs: the counters that follow a value, the badge, the gauge */")
         L.append("static void hud_show(void)")
         L.append("{")
@@ -2777,9 +2848,7 @@ def to_c(program, slug):
         L.append("    for (k = 0; k < 3; k++)")
         L.append("        if (HUD_LABEL[k][0]) kit_hud_counter(&hud, k, hud_lab[k], hud_val[k], hud_sub[k]);")
         L.append("    kit_hud_timer(&hud, HUD_TIMER ? (int)secs_left() : -1);")
-        L.append("    if (HUD_GAUGE)")
-        L.append("        kit_hud_gauge(&hud, hud_level < 0 ? 0 : hud_level > HUD_GAUGE ? HUD_GAUGE : (int)hud_level,")
-        L.append("                      HUD_GAUGE_LABEL);")
+        L.append("    if (HUD_GAUGE) gauge_now(hud_level, 0);")
         L.append("}")
         L.append("")
     if g.shows:
@@ -2974,7 +3043,7 @@ def to_c(program, slug):
         L.append("        end_title[0] = end_line[0] = 0;")
         L.append("        for (k = 0; k < 3; k++) kit_hud_counter(&hud, k, 0, 0, 0);")
         L.append("        kit_hud_timer(&hud, -1);")
-        L.append("        kit_hud_gauge(&hud, -1, 0);")
+        L.append("        if (!HUD_METER) kit_hud_gauge(&hud, -1, 0);   /* PAD-658: a meter stays, following on */")
         L.append('        kit_hud_award(&hud, ENDING_HOLD_MS, kit_num(n, sizeof n, run.total), " ");')
         L.append("        kit_hud_hide_in(&hud, ENDING_HOLD_MS);")
         L.append("    }")
@@ -3208,6 +3277,13 @@ def to_c(program, slug):
         L.append("            if (due[t]) T[t] = 0;")
         L.append("        }")
         L.extend("    " + line if line else line for code in timer_scripts for line in code.split("\n"))
+        L.append("    }")
+    if has_hud and gauge_live is not None and hud["gauge"]["meter"]:
+        L.append("    if (!run.on) {                    /* PAD-658: the gauge as a meter while it is not running */")
+        L.append("        if (in_game) {")
+        L.append("            hud_level = %s;" % gauge_live)
+        L.append("            gauge_now(hud_level, 1);")
+        L.append("        } else kit_hud_meter(&hud, -1, 0);")
         L.append("    }")
     L.append("    sec_changed = 0;")
     L.append("    if (!run.on) return;")

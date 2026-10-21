@@ -10,19 +10,26 @@ quarter of what it held).
 
 - LIGHT IT: captive ball hits (the Godzilla target, MAGNA GRAB): 10 the first time, 20 the second, 30 the third;
   then it pulses red and the next hit starts it (not beside the game's own battle or multiball: it waits, ready).
+  The note (GODZILLA TARGET, 9 MORE FOR MELTDOWN) comes every hit the first time, then at every 5 left and the last 5.
 - START: a 3-ball multiball with a 15 s ball save; the shields turn toward the player.
 - THE CORE starts at 25% (30%, 35% the more he has melted) and rises 1% a second (2% from 70%); a jackpot heats it
   4% in stage 1, 6% in stage 2, 8% in stage 3 (the HEART 4% more). STABLE under 40% x1, HOT x2, CRITICAL (70%) x3,
-  MELTDOWN IMMINENT (90%) x5. CADMIUM: each Shield target cools it 12%.
+  MELTDOWN IMMINENT (90%) x5. CADMIUM: from 40%, each Shield target cools it 12% (they light at 40% and count only
+  while lit; the HOT and CRITICAL notes say so).
 - STAGE 1, BURNING GODZILLA: the Left ramp, Right ramp, Building and Big loop: 2,000,000 x the heat; one of them is
-  the HEART (double): it moves every 8 s and when hit (in turn here).
-- STAGE 2, DESTOROYAH: the red spiral ray: one ramp at a time, 2x the base x the heat; the other ramp is next.
-- STAGE 3, JUNIOR: the Big loop and the Mecha lane (Mecha exit bottom), 3x the base x the heat.
-- MELTDOWN at 100%: the Building is the SUPER JACKPOT for 20 s (16, then 12 the more he has melted): the jackpots
-  paid since the last super, times the stage and one more (x2, x3, x4); the core back to 25%, the base up 500,000,
-  and the next stage. In stage 3 it is the FINAL MELTDOWN (+25M) and Junior rises; stage 3 goes on. Missed, the core
-  blows: a quarter of those jackpots paid, the core back to 50%, the base back to 2,000,000.
-- ADD-A-BALL: after 4 jackpots the captive ball adds a ball, once.
+  the HEART (double, chasing white): it moves every 10 s (a moving target stays 10 s at least) and when hit (in turn
+  here). The line: RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP, moving with the heart.
+- STAGE 2, DESTOROYAH: the red spiral ray: one ramp at a time, 2x the base x the heat; the other ramp is next. The
+  line: JACKPOT: LEFT RAMP (then RIGHT RAMP).
+- STAGE 3, JUNIOR: the Big loop and the Mecha lane (Mecha exit bottom), 3x the base x the heat. The line: JACKPOT:
+  BIG LOOP OR MECHA LANE.
+- MELTDOWN at 100%: the Building is the SUPER JACKPOT for 20 s (WINDOW_S: no shorter the more he has melted): the
+  jackpots paid since the last super, times the stage and one more (x2, x3, x4); the core back to 25%, the base up
+  500,000, and the next stage 4 s on (the super's note shows its 4 s first). In stage 3 it is the FINAL MELTDOWN
+  (+25M) and Junior rises; stage 3 goes on. Missed, the core blows: a quarter of those jackpots paid, the core back
+  to 50%, the base back to 2,000,000.
+- ADD-A-BALL: after 4 jackpots the captive ball adds a ball, once (a note says it is lit).
+- NOTES: every one 3 s at least (NOTE_S); a jackpot's names what is next (2X AT THE RIGHT RAMP, NOW THE LEFT RAMP).
 - ENDS: one ball left after the ball save and 3 s more (for 2 s), the last drain, a tilt.
 """
 from blk import (AND, BALLS, LIT, NOT, OR, a_show, add, award, beds, change, clip, clips, div, end, eq, every,
@@ -48,10 +55,13 @@ JX, JY = 282, 393                                                  # MECHA LANE:
 TIMERS = ("core", "jackpot", "melt", "lights", "next")
 STAGE_NAME = ("BURNING", "DESTOROYAH", "JUNIOR")
 STAGE_TITLE = ("BURNING GODZILLA", "DESTOROYAH", "GODZILLA JUNIOR")
-STAGE_LINE = ("SHOOT RED SHOTS - THE HEART PAYS DOUBLE", "THE SPIRAL RAY: SHOOT THE LIT RAMP",
-              "JUNIOR: THE BIG LOOP AND MECHA LANE")
+#: the HUD's line, by stage: what to shoot now by the playfield's names (stage 1 moves with the heart, 2 with the ray)
+HEART_LINE = "RAMPS, BIG LOOP, BUILDING: 2X"                  # + the heart's shot: ... 2X LEFT RAMP
+RAY_LINE = "JACKPOT:"                                           # + the ray's ramp: JACKPOT: LEFT RAMP
+JUNIOR_LINE = "JACKPOT: " + " OR ".join(pack.SHOT_WORDS[s] for s in JUNIOR)
 #: the start: 10 captive ball hits the first time, 20 the second, 30 the third
 NEED = pack.need(10, "starts")
+MOVE_S = 10                                                     # the heart stays this long at least before it moves
 
 SHOWS = [
     a_show("Reactor",
@@ -120,8 +130,7 @@ def lights():
             if_(ge("core", 40), [light(s, ICE, "pulse", 900) for s in SHIELDS], [off(s) for s in SHIELDS]),
             if_(AND(eq("add used", 0), ge("jackpots", 4)), [light(LIGHT_SHOT, GREEN, "blink", 300)],
                 [off(LIGHT_SHOT)]),
-            if_(AND(eq("stage", 1), ge("level", 2)), [hud_line("SHIELDS COOL THE CORE - OR RIDE THE HEAT")],
-                [stage_lines()]),
+            stage_lines(),
         ], [
             *[off(s) for s in ("Left ramp", "Right ramp", "Big loop", "Mecha exit bottom")],
             *[off(s) for s in SHIELDS], off(LIGHT_SHOT), off_insert("MECHA LANE"),
@@ -131,9 +140,10 @@ def lights():
 
 
 def stage_lines():
-    """The HUD line for the stage it is in (one block: the three are an if-chain)."""
-    return if_(eq("stage", 1), [hud_line(STAGE_LINE[0])], [
-        if_(eq("stage", 2), [hud_line(STAGE_LINE[1])], [hud_line(STAGE_LINE[2])])])
+    """The HUD line for the stage it is in, naming its shots (one block: the three are an if-chain): stage 1's
+    moves with the heart, stage 2's with the ray."""
+    return if_(eq("stage", 1), pack.line_follows("heart", JP, verb=HEART_LINE), [
+        if_(eq("stage", 2), pack.line_follows("ray at", RAMPS, verb=RAY_LINE), [hud_line(JUNIOR_LINE)])])
 
 
 def core_sub():
@@ -142,7 +152,7 @@ def core_sub():
         if_(gt("core", 100), [set_("core", 100)]), if_(lt("core", 0), [set_("core", 0)]),
         if_(AND(eq("phase", 1), ge("core", 100)), [
             set_("phase", 2), set_("level", 3), set_("was level", 3), set_("mult", 5),
-            timer_start("melt", var("melt ms")),
+            timer_start("melt", pack.WINDOW_S * 1000),
             award("MELTDOWN!", sub="SHOOT THE BUILDING", seconds=3), show("Meltdown"), timer_start("next", 400),
             sound("meltdown"), clip("meltdown", "behind"), music("melt"),
             hud_title("MELTDOWN!"), hud_line("SHOOT THE BUILDING: SUPER JACKPOT"), hud_counter(1, 100, "MELTDOWN"),
@@ -154,12 +164,14 @@ def core_sub():
                                     hud_counter(2, mul(mul(var("base"), MULT[lv]), var("stage")),
                                                 "X%d HEAT" % MULT[lv])])
               for lv in range(4)],
+            # a hotter level says what it pays and what the shields (lit from 40%) do
             if_(gt("level", "was level"), [
-                if_(eq("level", 1), [award("HOT", sub="JACKPOTS ARE WORTH MORE"), sound("heat"), shake(300, "soft")]),
-                if_(eq("level", 2), [award("CRITICAL", sub="JACKPOTS ARE WORTH MORE"), sound("critical"),
-                                     clip("critical", "behind"), shake(500, "medium")]),
-                if_(eq("level", 3), [award("MELTDOWN IMMINENT", sub="SHOOT THE SHIELDS TO COOL HIM"),
-                                     sound("heat"), shake(800, "medium")]),
+                if_(eq("level", 1), [award("HOT", sub="JACKPOTS X2 - SHIELDS COOL THE CORE", seconds=pack.NOTE_S),
+                                     sound("heat"), shake(300, "soft")]),
+                if_(eq("level", 2), [award("CRITICAL", sub="JACKPOTS X3 - SHIELDS COOL THE CORE", seconds=pack.NOTE_S),
+                                     sound("critical"), clip("critical", "behind"), shake(500, "medium")]),
+                if_(eq("level", 3), [award("MELTDOWN IMMINENT", sub="SHOOT THE SHIELDS TO COOL HIM",
+                                           seconds=pack.NOTE_S), sound("heat"), shake(800, "medium")]),
             ]),
             set_("was level", var("level")),
         ]),
@@ -189,20 +201,23 @@ def back_to_burn(core):
 
 SCRIPTS = [
     # ---- light it: captive ball hits (10, then 20, then 30) ----------------------------------------------------------
+    # the note names the shot: every hit the first time (10), then at every 5 left and the last 5 (20, 30)
     on_shot(LIGHT_SHOT, if_(AND(eq("ready", 0), lt(BALLS, 2)), [
         change("hits", 1),
         if_(ge("hits", NEED), [
             set_("ready", 1), light_mode(LIGHT_SHOT, RED, "pulse"), sound("lit"),
-            award("MELTDOWN IS READY", sub="HIT THE CAPTIVE BALL", seconds=3)], [
-            award("CAPTIVE BALL", value=sub(NEED, var("hits")), sub="MORE FOR MELTDOWN", seconds=2)])]), when="idle"),
+            award("MELTDOWN IS READY", sub=pack.shoot(LIGHT_SHOT, verb="HIT THE"), seconds=pack.NOTE_S)], [
+            if_(OR(eq("starts", 0), le(sub(NEED, var("hits")), 5),
+                   eq(mul(div(sub(NEED, var("hits")), 5), 5), sub(NEED, var("hits")))), [
+                award(pack.SHOT_WORDS[LIGHT_SHOT], value=sub(NEED, var("hits")), sub="MORE FOR MELTDOWN",
+                      seconds=pack.NOTE_S)])])]), when="idle"),
     on_any_shot(if_(AND(eq("ready", 1), NOT(LIT)), [light_mode(LIGHT_SHOT, RED, "pulse")]), when="idle"),
 
     # ---- the multiball ---------------------------------------------------------------------------------------------------
     on_start(set_("ready", 0), set_("hits", 0), change("starts", 1), multiball(3, 15), shield("toward"),
              set_("stage", 1), set_("phase", 1), set_("level", 0), set_("was level", 0), set_("mult", 1),
-             # each time he melts it starts hotter and the super's window is shorter (20, 16, 12 s)
+             # each time he melts it starts hotter (the super's window stays WINDOW_S)
              set_("core", add(20, mul(5, var("starts")))), if_(gt("core", 40), [set_("core", 40)]),
-             set_("melt ms", sub(24000, mul(4000, var("starts")))), if_(lt("melt ms", 10000), [set_("melt ms", 10000)]),
              set_("base", 2000000), set_("heart", 1), set_("heart secs", 0), set_("jackpots", 0), set_("paid", 0),
              set_("meltdowns", 0), set_("add used", 0), set_("secs", 0), set_("one ball", 0), set_("ray at", 1),
              game_show("Strobe storm"), clip("intro", "full"), clip("loop", "loop"), show("Reactor"),
@@ -218,7 +233,7 @@ SCRIPTS = [
           change("secs", 1),
           if_(eq("phase", 1), [
               if_(ge("core", 70), [change("core", 2)], [change("core", 1)]),
-              change("heart secs", 1), if_(AND(eq("stage", 1), ge("heart secs", 8)), heart_moves()),
+              change("heart secs", 1), if_(AND(eq("stage", 1), ge("heart secs", MOVE_S)), heart_moves()),
               timer_start("core", 1)], [
               hud_line("SUPER JACKPOT AT THE BUILDING:", value=div(timer_left("melt"), 1000)),
               if_(le(timer_left("melt"), 5000), [light("Building", WHITE, "blink", 60)])]),
@@ -246,7 +261,7 @@ SCRIPTS = [
                 if_(eq("stage", 3), [award("FINAL MELTDOWN", value=var("got"), sub="JUNIOR RISES", seconds=4),
                                      clip("won", "behind"), show("Junior"), sound("won"), music("junior")],
                     [award("SUPER JACKPOT", value=var("got"), sub="THE CORE BACK TO 25%", seconds=4),
-                     clip("super", "behind"), show("Super"), sound("super"), timer_start("next", 1200)]),
+                     clip("super", "behind"), show("Super"), sound("super"), timer_start("next", 4000)]),
                 *back_to_burn(25)])),
     on_timer("jackpot",
              set_("got", mul(mul(var("base"), var("mult")), var("stage"))),
@@ -254,26 +269,40 @@ SCRIPTS = [
              score(var("got")), change("paid", var("got")), change("jackpots", 1),
              hud_counter(3, var("jackpots"), "JACKPOTS"),
              sound("jackpot"), clip("jackpot", "behind"), change("core", add(2, mul(2, var("stage")))),
+             # the heart moves (or the ray turns) first, so the note names where the next jackpot is
              if_(AND(eq("stage", 1), eq("jp", "heart")), [
-                 award("HEART JACKPOT", value=var("got"), seconds=2), change("core", 4), *heart_moves(),
-                 shake(300, "strong")], [
-                 award("JACKPOT", value=var("got"), seconds=2), shake(250, "medium")]),
-             if_(eq("stage", 2), [set_("ray at", sub(3, var("ray at"))), show("Spiral ray")]),
+                 change("core", 4), *heart_moves(), shake(300, "strong"),
+                 *[if_(eq("heart", i), [award("HEART JACKPOT", value=var("got"), sub="2X NOW: " + pack.SHOT_WORDS[s],
+                                              seconds=pack.NOTE_S)]) for i, s in enumerate(JP, 1)]], [
+                 shake(250, "medium"),
+                 if_(eq("stage", 2), [set_("ray at", sub(3, var("ray at"))), show("Spiral ray")]),
+                 if_(eq("stage", 1), [
+                     if_(eq("heart", i), [award("JACKPOT", value=var("got"), sub="2X AT THE " + pack.SHOT_WORDS[s],
+                                                seconds=pack.NOTE_S)]) for i, s in enumerate(JP, 1)], [
+                     if_(eq("stage", 2), [
+                         if_(eq("ray at", i), [award("JACKPOT", value=var("got"), sub="NOW THE " + pack.SHOT_WORDS[s],
+                                                     seconds=pack.NOTE_S)]) for i, s in enumerate(RAMPS, 1)],
+                         [award("JACKPOT", value=var("got"), sub=" OR ".join(pack.SHOT_WORDS[s] for s in JUNIOR),
+                                seconds=pack.NOTE_S)])])]),
+             # the add-a-ball lights with the fourth: say where
+             if_(AND(eq("jackpots", 4), eq("add used", 0)), [
+                 award("ADD-A-BALL IS LIT", sub=pack.shoot(LIGHT_SHOT, verb="HIT THE"), seconds=pack.NOTE_S)]),
              timer_start("core", 1)),
 
-    # ---- the next stage, 1.2 s after the super (its own shake first) -------------------------------------------------------
+    # ---- the next stage, 4 s after the super (its note has its 4 s; its own shake first) -----------------------------------
     # (and MELTDOWN's strong shake, 0.4 s after the jackpot that set it off and its own shake)
     on_timer("next", if_(eq("phase", 2), [shake(800, "strong")], [if_(lt("stage", 3), [
         change("stage", 1), shake_game("jackpot"), stage_bed(), stage_title(), timer_start("lights", 1),
-        if_(eq("stage", 2), [award("DESTOROYAH", sub="THE SPIRAL RAY: THE LIT RAMP", seconds=3),
+        if_(eq("stage", 2), [award("DESTOROYAH", sub="THE LEFT RAMP, THEN THE RIGHT", seconds=pack.NOTE_S),
                              clip("destoroyah", "behind"), sound("jackpot"), show("Destoroyah"),
                              hud_counter(3, var("jackpots"), "JACKPOTS", STAGE_NAME[1])],
-            [award("JUNIOR COMES", sub="THE BIG LOOP AND MECHA LANE", seconds=3), clip("junior", "behind"),
+            [award("JUNIOR COMES", sub=pack.shoot(*JUNIOR), seconds=pack.NOTE_S), clip("junior", "behind"),
              sound("junior"), show("Junior comes"), hud_counter(3, var("jackpots"), "JACKPOTS", STAGE_NAME[2])])])])),
 
     # ---- cadmium at the shields ---------------------------------------------------------------------------------------------
-    *[on_shot(s, if_(eq("phase", 1), [
-        change("core", -12), award("CADMIUM MISSILE", sub="THE CORE COOLS", seconds=2), show("Cadmium"),
+    # (from 40%, while they are lit: a shield that is dark does nothing - lit = counts)
+    *[on_shot(s, if_(AND(eq("phase", 1), ge("core", 40)), [
+        change("core", -12), award("CADMIUM MISSILE", sub="THE CORE COOLS", seconds=pack.NOTE_S), show("Cadmium"),
         sound("cool"), clip("cool", "behind"), shake(250, "soft"), timer_start("core", 1)])) for s in SHIELDS],
 
     # ---- add-a-ball at the captive ball ----------------------------------------------------------------------------------
@@ -281,7 +310,7 @@ SCRIPTS = [
         set_("add used", 1),
         if_(eq(BALLS, 1), [multiball(2, 10)], [if_(eq(BALLS, 2), [multiball(3, 10)], [
             if_(eq(BALLS, 3), [multiball(4, 10)], [if_(eq(BALLS, 4), [multiball(5, 10)])])])]),
-        award("ADD-A-BALL", sub="ANOTHER BALL IN PLAY", seconds=2), sound("add"), shake_game("big_hit"),
+        award("ADD-A-BALL", sub="ANOTHER BALL IN PLAY", seconds=pack.NOTE_S), sound("add"), shake_game("big_hit"),
         timer_start("lights", 1)])),
 
     # ---- MELTDOWN missed: the core blows, a quarter of what it held ---------------------------------------------------------
@@ -305,9 +334,9 @@ PROGRAM = {
     "vars": [{"name": n, "reset": "game"} for n in ("hits", "ready", "starts")] + [
         {"name": n, "reset": "mode"} for n in ("stage", "phase", "core", "level", "was level", "mult", "base", "heart",
                                                 "heart secs", "jp", "got", "jackpots", "paid", "meltdowns",
-                                                "add used", "secs", "one ball", "melt ms", "ray at")],
+                                                "add used", "secs", "one ball", "ray at")],
     "timers": [{"name": n} for n in TIMERS],
-    "hud": hud(STAGE_LINE[0],
+    "hud": hud("%s %s" % (HEART_LINE, pack.SHOT_WORDS[JP[0]]),
                counters=[("CORE", "STABLE", None), ("JACKPOT", "X1 HEAT", None), (STAGE_NAME[0], "JACKPOTS", None)],
                timer=None,
                gauge={"label": "CORE", "kind": "segment", "count": 10, "color": ORANGE,
@@ -328,13 +357,23 @@ EXAMPLE = {
     "title_alt": {"godzilla_pro": {"shots": {"Shield target center": None}}},
     "about": ("The C example MELTDOWN rebuilt in blocks and taken deeper: captive ball hits (10, then 20, then 30) "
               "light a 3-ball multiball where the core heats by itself and with every jackpot (x1 to x5) and the "
-              "shields cool it; three stages with their own jackpot shots and music (BURNING GODZILLA's four red "
-              "shots and the moving heart, DESTOROYAH's spiral ray at the lit ramp, JUNIOR at the Big loop and the "
-              "Mecha lane), each meltdown's super at the Building worth the jackpots paid x2, x3, x4 and taking it "
-              "a stage further."),
+              "shields cool it; three stages with their own jackpot shots and music (BURNING GODZILLA's four "
+              "jackpot shots and the moving heart that pays double, DESTOROYAH's spiral ray at one ramp then the "
+              "other, JUNIOR at the Big loop and the Mecha lane), the line naming the shots and moving with them; "
+              "each meltdown's super at the Building worth the jackpots paid x2, x3, x4 and taking it a stage "
+              "further."),
     "lost": [
         "No randomness in blocks: the HEART starts at the Left ramp and moves in turn (Left ramp, Right ramp, "
-        "Building, Big loop) every 8 s and when hit, where the C picked another shot at random.",
+        "Building, Big loop) every 10 s and when hit, where the C picked another shot at random every 8 s "
+        "(PAD-658: a moving target stays 10 s at least).",
+        "The HUD's line names the shots (RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP, moving with the heart), where the "
+        "C said SHOOT RED SHOTS  -  THE HEART PAYS DOUBLE, and from CRITICAL SHIELDS COOL THE CORE  -  OR RIDE THE "
+        "HEAT (the HOT and CRITICAL notes say the shields cool it, where the C's said JACKPOTS ARE WORTH MORE); "
+        "the heart chases white, where the C blinked it faster in the heat's colour. Every note stays 3 s at "
+        "least (the C's level notes 1.8 s, cadmium 1.5 s, the add-a-ball 2 s), a jackpot's naming the next shot "
+        "(2X AT THE RIGHT RAMP); the captive ball's note says GODZILLA TARGET, where the C's said CAPTIVE BALL.",
+        "A shield cools the core only from 40%, while it is lit (what is lit counts, and only that), where the C's "
+        "cooled it at any heat.",
         "The core is looked at once a second (an Every second script), so it rises a whole 1% or 2% each second "
         "and the MELTDOWN blink quickens on the second, where the C stepped them every tick.",
         "No timer badge: the MELTDOWN window is a timer the line counts (SUPER JACKPOT AT THE BUILDING: 17), where "
@@ -383,30 +422,41 @@ _JUNIOR = ["shot", "Big loop", "ms", 300, "shot", "Mecha exit bottom", "ms", 300
 DESK = [
     ("ten hits light it and the next starts it", _shots(LIGHT_SHOT, 10, 300) + ["secs", 1, "lamps"] +
      ["shot", LIGHT_SHOT, "secs", 2],
-     ["Hud_Line: 9  -  MORE FOR MELTDOWN", "Hud_Title: MELTDOWN IS READY", "LAMP MAGNA GRAB ff1400 pulse",
+     ["Hud_Title: GODZILLA TARGET", "Hud_Line: 9  -  MORE FOR MELTDOWN", "Hud_Line: 6  -  MORE FOR MELTDOWN",
+      "Hud_Title: MELTDOWN IS READY", "Hud_Line: HIT THE GODZILLA TARGET", "LAMP MAGNA GRAB ff1400 pulse",
       "[MELTDOWN] START (its lit shot)", "MULTIBALL 3 balls, save 15 s", "SHIELD toward",
-      "Hud_Award: MELTDOWN MULTIBALL"]),
+      "Hud_Award: MELTDOWN MULTIBALL", "Hud_Line: RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP"]),
+    # the second time (20): the note at 15, 10 and the last 5
     ("ten the first time, twenty the second", _shots(LIGHT_SHOT, 10, 300) + ["secs", 1, "shot", LIGHT_SHOT, "secs", 2,
                                                                               "trigger", "meltdown.stop", "secs", 5]
      + ["balls", 1, "secs", 1] + _shots(LIGHT_SHOT, 19, 300) + ["secs", 1, "lamps", "shot", LIGHT_SHOT, "secs", 1,
                                                                  "lamps"],
-     ["[MELTDOWN] START (its lit shot)", "END (trigger file)", "Hud_Line: 19  -  MORE FOR MELTDOWN",
+     ["[MELTDOWN] START (its lit shot)", "END (trigger file)", "Hud_Line: 15  -  MORE FOR MELTDOWN",
+      "Hud_Line: 10  -  MORE FOR MELTDOWN", "Hud_Line: 4  -  MORE FOR MELTDOWN",
       "Hud_Line: 1  -  MORE FOR MELTDOWN", "Hud_Title: MELTDOWN IS READY"]),
     ("jackpots heat the core and cadmium cools it", _START + _HEARTS + ["shot", "Left ramp", "ms", 300] +
      ["secs", 1, "shot", "Shield target left", "secs", 1, "lamps"],
-     ["SCORE +4000000", "Hud_Award: HEART JACKPOT", "Hud_AwardSub: 4,000,000", "Hud_Award: HOT", "SCORE +8000000",
+     ["SCORE +4000000", "Hud_Award: HEART JACKPOT", "Hud_AwardSub: 4,000,000  -  2X NOW: RIGHT RAMP",
+      "Hud_Award: HOT", "Hud_AwardSub: JACKPOTS X2 - SHIELDS COOL THE CORE", "SCORE +8000000",
+      "Hud_Line: RAMPS, BIG LOOP, BUILDING: 2X BIG LOOP", "Hud_Award: ADD-A-BALL IS LIT",
       "HELD SHIELD LEFT 78d2ff pulse 900", "HELD MAGNA GRAB 00ff3c blink 300", "Hud_Award: CADMIUM MISSILE"]),
-    ("three stages: destoroyah, junior, the final meltdown", _START + _TO_MELTDOWN + ["shot", "Building", "secs", 5, "lamps"] +
-     _RAYS + ["shot", "Building", "secs", 5, "lamps"] + _JUNIOR + ["shot", "Building", "secs", 3,
+    ("the heart moves after 10 s", _START + ["shot", "Right ramp", "secs", 11, "lamps"],
+     ["Hud_Award: JACKPOT", "Hud_AwardSub: 2,000,000  -  2X AT THE LEFT RAMP",
+      "Hud_Line: RAMPS, BIG LOOP, BUILDING: 2X RIGHT RAMP", "HELD RIGHT RAMP ffffff chase 90"]),
+    ("three stages: destoroyah, junior, the final meltdown", _START + _TO_MELTDOWN + ["shot", "Building", "secs", 8, "lamps"] +
+     _RAYS + ["shot", "Building", "secs", 8, "lamps"] + _JUNIOR + ["shot", "Building", "secs", 3,
                                                           "trigger", "meltdown.stop", "secs", 2],
      ["Hud_Award: MELTDOWN!", "LAMP BUILDING ffffff blink 120", "Hud_Award: SUPER JACKPOT",
-      "Hud_Award: DESTOROYAH", "HELD LEFT RAMP ff1400 chase 80",
-      "Hud_Line: THE SPIRAL RAY: SHOOT THE LIT RAMP", "WORDS PadMode_meltdown_Hud_C3_Label: DESTOROYAH",
-      "Hud_Award: JUNIOR COMES", "HELD MECHA LANE 78d2ff chase 100", "Hud_Award: FINAL MELTDOWN",
+      "Hud_Award: DESTOROYAH", "Hud_AwardSub: THE LEFT RAMP, THEN THE RIGHT", "HELD LEFT RAMP ff1400 chase 80",
+      "Hud_Line: JACKPOT: LEFT RAMP", "Hud_Line: JACKPOT: RIGHT RAMP", "  -  NOW THE RIGHT RAMP", "  -  NOW THE LEFT RAMP",
+      "WORDS PadMode_meltdown_Hud_C3_Label: DESTOROYAH",
+      "Hud_Award: JUNIOR COMES", "Hud_AwardSub: SHOOT THE BIG LOOP OR MECHA LANE",
+      "Hud_Line: JACKPOT: BIG LOOP OR MECHA LANE", "HELD MECHA LANE 78d2ff chase 100", "Hud_Award: FINAL MELTDOWN",
       "  -  JUNIOR RISES", "SHAKE 800 ms at 1", "Hud_Title: DESTOROYAH", "Hud_Title: GODZILLA JUNIOR",
       "END (trigger file)", "Hud_Line: 3 MELTDOWNS SURVIVED  -  JACKPOTS"]),
-    ("meltdown missed the core blows", _START + _TO_MELTDOWN + ["secs", 15, "lamps", "secs", 5],
-     ["Hud_Award: MELTDOWN!", "Hud_Line: SUPER JACKPOT AT THE BUILDING: 5", "LAMP BUILDING ffffff blink 60",
+    ("meltdown missed the core blows", _START + _TO_MELTDOWN + ["secs", 15, "lamps", "secs", 7],
+     ["Hud_Award: MELTDOWN!", "Hud_Line: SUPER JACKPOT AT THE BUILDING: 5",
+      "LAMP BUILDING ffffff blink 60",
       "Hud_Award: THE CORE BLOWS", "own sound lost", "own clip blows", "WORDS PadMode_meltdown_Hud_C1_Value: 50"]),
     ("one ball left ends it", _START + ["secs", 5, "balls", 1, "secs", 18],
      ["END (a block)", "own clip lost", "Hud_Title: MELTDOWN TOTAL",
@@ -422,6 +472,7 @@ DESK_PRO = [
      ["Hud_Award: CADMIUM MISSILE", "HELD SHIELD RIGHT 78d2ff pulse 900", "MULTIBALL 3 balls, save 15 s"]),
     ("the pro lights it and reaches destoroyah", _shots(LIGHT_SHOT, 10, 300) + ["secs", 1, "shot", LIGHT_SHOT,
                                                                                  "secs", 2] + _TO_MELTDOWN +
-     ["shot", "Building", "secs", 3],
-     ["[MELTDOWN] START (its lit shot)", "Hud_Award: SUPER JACKPOT", "Hud_Award: DESTOROYAH"]),
+     ["shot", "Building", "secs", 6],
+     ["[MELTDOWN] START (its lit shot)", "Hud_Award: SUPER JACKPOT", "Hud_Award: DESTOROYAH",
+      "Hud_Line: JACKPOT: LEFT RAMP"]),
 ]

@@ -498,6 +498,7 @@ def play_many(tmp_path, programs, *args):
         srcs.append(str(src))
     exe = tmp_path / "harness"
     r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", SDK,
+                        "-I", os.path.join(SDK, "examples"),           # PAD-658: modes with a HUD (the kit)
                         "-o", str(exe), os.path.join(SDK, "examples", "desk_harness.c")] + srcs,
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -1153,6 +1154,21 @@ def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
     assert "Hud_Title: MASER" in note and "Hud_Line: 1  -  TEST MODE" in note
     assert "SHOW PadMode_maser_Hud 1" in note and "SHOW PadMode_maser_Hud 0" in note
     assert "Hud_Award:  " in note                  # the award line stays clear
+
+
+def test_keep_at_least_puts_the_clock_up_only_when_it_is_under(tmp_path):
+    """PAD-658 (David: "successful shots reset the countdown timer to 15 seconds (if it's below 15)"): Keep at least N
+    seconds on the clock - one block, the clock up to N when under it, left alone when over it."""
+    p = maser_hud()                                     # its clock: 20 s
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "running"}, "do": [
+        {"op": "set_time", "seconds": num(15), "at_least": True}]})
+    src = BM.to_c(p, "maser")
+    assert "if (run.on && RUN_SECONDS && secs_left() < ((15LL))) set_time((15LL));" in src
+    out = play(tmp_path, p, "shot", "Maser target", "secs", 2, "shot", "Big loop", "secs", 8, "shot", "Big loop",
+               "secs", 1, slug="maser")
+    first = _hud_words(out[out.index(">> shot Big loop"):], "Timer_Num")[0]
+    assert first in ("18", "17")                            # 18 s left: left alone
+    assert _hud_words(out[out.rindex(">> shot Big loop"):], "Timer_Num")[0] == "15"   # 10 s left: up to 15
 
 
 def test_a_note_waits_out_a_display_of_the_games(tmp_path):
@@ -2145,3 +2161,45 @@ def test_a_light_held_by_name_comes_back_after_a_light_show_and_goes_at_the_end_
     sent = re.findall(r"^\s*\d+ LAMP HEAT RAY ff2000 blink (\d+)", out, re.M)
     assert len(sent) == 2 and sent[0] == sent[1]                        # lit, then again once the show is over
     assert "END lamps held 0" in out
+
+
+def rage_meter():
+    """PAD-658: GODZILLA ANGRY's RAGE meter in blocks (David: "we somehow lost our godzilla rage meter in the top right
+    of the HUD. it should always be shown (whenever the HUD is shown)"): a corner bar that follows a percent, shown
+    while the mode is not running too."""
+    return prog([
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [
+            {"op": "change", "var": "rage", "by": num(25)}]},
+        {"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+    ], vars=[{"name": "rage", "reset": "game"}], seconds=5,
+        hud={"on": True, "line": "SHOOT THE BUILDING", "counters": [{"label": "RAGE", "value": var("rage")}],
+             "timer": {"on": False},
+             "gauge": {"on": True, "kind": "bar", "count": 20, "words": ["GODZILLA", "RAGE"], "full": "ANGRY!",
+                       "meter": True, "value": var("rage")}})
+
+
+def test_a_corner_meter_shows_before_its_mode_starts_and_beside_another_modes_hud(tmp_path):
+    p = rage_meter()
+    assert BM.problems(p, SHOTS) == []
+    assert BM.hud_spec(p, "rage")["gauge"] == {"label": " ", "kind": "bar", "count": 20, "icon": "rage",
+                                               "words": ["GODZILLA", "RAGE"]}
+    src = BM.to_c(p, "rage")
+    assert '.slug = "rage", .beside = 1' in src and "#define HUD_METER  1" in src
+    other = maser_hud()
+    out = play_many(tmp_path, {"rage": p, "maser": other},
+                    "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Left ramp", "secs", 1,
+                    "shot", "Maser target", "secs", 2,                         # the other mode runs: its HUD up
+                    "shot", "Left ramp", "secs", 1, "shot", "Left ramp", "secs", 22,   # it times out
+                    "shot", "Building", "secs", 7)                             # the rage mode itself
+    # in a game, before anything: the bar at 0%, then 25%, 50%
+    assert _hud_words(out, "Gauge_Label")[:3] == ["0%", "25%", "50%"]
+    gauge = re.compile(r"SHOW \S*PadMode_rage_Hud_Gauge (\d)")
+    assert "SHOW PadMode_rage_Hud 1" in out and gauge.findall(out)[0] == "1"
+    after = out[out.index(">> shot Maser target"):out.index(">> shot Building")]
+    # the other mode's HUD came up BESIDE it: the bar was not taken down, and it went on filling to ANGRY!
+    assert "SHOW PadMode_maser_Hud 1" in after
+    assert "SHOW PadMode_rage_Hud 0" not in after and "0" not in gauge.findall(after)
+    assert "75%" in _hud_words(after, "Gauge_Label") and "ANGRY!" in _hud_words(after, "Gauge_Label")
+    # its own mode: the bar stays up and full until its end
+    mine = out[out.index(">> shot Building"):]
+    assert "0" not in gauge.findall(mine[:mine.index("] END")])

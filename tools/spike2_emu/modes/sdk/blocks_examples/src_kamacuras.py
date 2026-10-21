@@ -7,23 +7,37 @@ pays its kills again, a boss at the end), re-themed for Kamacuras, whose art is 
 David, PAD-658: "modify the Kamacuras mode to require more to start it and make its shots more obvious."
 
 - TO START IT (was: 30 Top spinner spins, 10 more each time, and it started at once): 50 spins of the Top spinner
-  (100 the second time, 150 the third) light the RIGHT SCOOP, its own corner; the scoop starts it. Nothing counts in a multiball.
+  (100 the second time, 150 the third) light the RIGHT SCOOP, its own corner; the scoop starts it. Nothing counts in
+  a multiball. A note every 10 spins says how many are left (SPIN THE TOP SPINNER / 40 - SPINS TO KAMACURAS).
 - THE MANTISES are far more obvious: a mantis's shot CHASES fast in its ring's colour (far green, near yellow, close
-  red, the closer the faster), the flasher over it blinks, the HUD's line names where every mantis is
-  ("MANTIS AT THE LEFT RAMP"), and each one swoops in with its own clip, screech and a ripple light show centred on
-  its shot. Everything else on the playfield of ours stays dark.
-- THE SWARM: mantises land at the powerlines (FAR, x1), advance every 7 s (6, 5 a wave) to the ramps, the Big loop
+  red, the closer the faster), the HUD names where they are, and each one swoops in with its own clip, screech and
+  a ripple light show. Everything else on the playfield of ours stays dark; a killed mantis's shot goes off at once.
+- THE SWARM: mantises land at the powerlines (FAR, x1), stay 10 s at each shot, advance to the ramps, the Big loop
   or the Building (NEAR, x2), then the Maser, the Godzilla target or the right shield (CLOSE, x4), then strike
-  Godzilla. Up to two at once. A kill pays 1M (+250K a wave) times its closeness.
+  Godzilla. One at a time in wave 1, up to two at once from wave 2. A kill pays 1M (+250K a wave) times its
+  closeness.
 - WAVES: 3, 4, then 5 kills; a cleared wave pays its kills again. Three strikes on Godzilla and the swarm wins.
 - No clock while the waves come (DESTOROYAH's has none either: three strikes end it); THE BIGGEST MANTIS: after
-  wave 3, the Building for 25 s: three hits of 5M; the third is the SUPER JACKPOT, every
-  kill of the mode again.
+  wave 3, the Building for 40 s: three hits of 5M; the third is the SUPER JACKPOT, every kill of the mode again.
+
+SAY THE SHOT (PAD-658 round 3, David: "the shots are not explicit enough and some of the information only flashes on
+the screen very briefly"; "you can't really accomplish much in 10 seconds. 40 seconds is better"):
+- the swarm: the TITLE names the first mantis's shot (SHOOT THE LEFT RAMP) and the LINE the second's (OR THE MASER
+  TARGET); with one on the playfield the line says THE CLOSER IT IS, THE MORE IT PAYS; the counters say WAVE 2 OF
+  3, KILLS 1 OF 4 and the strikes Godzilla can still take;
+- each mantis stays 10 s at a shot, counted from when it got there (was: every mantis moved together every 7, 6,
+  then 5 s, so one that had just landed could move on at once);
+- the biggest mantis: SHOOT THE BUILDING 3 TIMES, SHOOT THE BUILDING AGAIN, SUPER JACKPOT: SHOOT THE BUILDING, HITS
+  2 OF 3, announced once WAVE CLEARED has had its 3 s; its clock is pack.STAGE_S (was 25 s) and a hit keeps
+  pack.CLOCK_FLOOR seconds on it;
+- every note stays 3 s at least (pack.NOTE_S).
+
+Mantis "a" is always the first on the playfield: when it goes and "b" is still there, "b" moves into "a", so the
+title names the one nearest Godzilla (they advance at the same pace).
 """
-from blk import (AND, BALLS, OR, a_show, add, add_time, award, callout, change, clip, clips, div, end, eq, every, ge,
-                 gt, timer_left,
-                 hud, hud_counter, hud_line, hud_title, if_, light, light_insert, light_mode, lt, mul, off, off_insert, on_end,
-                 on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game, shield, show, sound,
+from blk import (AND, OR, a_show, add, award, change, clip, clips, div, end, eq, every, ge, gt, timer_left,
+                 hud, hud_counter, hud_line, hud_title, if_, light, light_insert, lt, mul, off, off_insert, on_end,
+                 on_shot, on_start, on_timer, score, set_, shake, shake_game, shield, show, sound,
                  sounds, step, sub, timer_start, timer_stop, var)
 import pack
 
@@ -32,23 +46,28 @@ GREEN, YELLOW, RED, WHITE, DARK = "#20ff40", "#d0ff00", "#ff1010", "#ffffff", "#
 SPIN, START_SHOT = "Top spinner", pack.CASH_SHOT
 START_INSERTS = ",".join(pack.CASH_INSERTS)
 NEED = pack.need(50, "fought")  # 50 spins, then 100, then 150
-#: the rings, far to close: (shot, the words that name it on the HUD, the flasher or insert beside it)
+#: the rings, far to close: the shots a mantis lands on (the HUD says them in pack.SHOT_WORDS)
 RINGS = (
-    (("Powerline left", "THE LEFT POWERLINE"), ("Powerline center", "THE CENTER POWERLINE"),
-     ("Powerline right", "THE RIGHT POWERLINE")),
-    (("Left ramp", "THE LEFT RAMP"), ("Right ramp", "THE RIGHT RAMP"), ("Big loop", "THE BIG LOOP"),
-     ("Building", "THE BUILDING")),
-    (("Maser target", "THE MASER"), ("Godzilla target", "THE GODZILLA TARGET"),
-     ("Shield target right", "THE RIGHT SHIELD")),
+    ("Powerline left", "Powerline center", "Powerline right"),
+    ("Left ramp", "Right ramp", "Big loop", "Building"),
+    ("Maser target", "Godzilla target", "Shield target right"),
 )
 RING_COLOR = (GREEN, YELLOW, RED)
 RING_PACE = (160, 110, 60)
-RING_WORD = ("FAR", "NEAR", "CLOSE")
-TIMERS = ("advance", "spawn", "lights", "kill", "wave", "boss", "strike", "boss clock")
+WAVES, BOSS_HITS = 3, 3
+NOTE_MS = pack.NOTE_S * 1000                     # a note's time on the glass: the biggest mantis waits it out
+#: PAD-658 round 3: a moving target stays 10 s at least before it moves on its own: a mantis's seconds at its shot
+#: ("a stay", "b stay", counted every second) must pass MOVE_S, so it stays 10 to 11 s
+MOVE_S = 10
+STAGE_MS = pack.STAGE_S * 1000
+FLOOR_MS = pack.CLOCK_FLOOR * 1000
+CLOSER = "THE CLOSER IT IS, THE MORE IT PAYS"
+W = pack.SHOT_WORDS
+TIMERS = ("spawn", "lights", "kill", "wave", "boss", "strike", "boss clock", "next")
 
 
 def every_shot():
-    return [(r, i, s, w) for r, ring in enumerate(RINGS, 1) for i, (s, w) in enumerate(ring, 1)]
+    return [(r, i, s) for r, ring in enumerate(RINGS, 1) for i, s in enumerate(ring, 1)]
 
 
 def at(m, r, i):
@@ -57,26 +76,34 @@ def at(m, r, i):
 
 def kills_counter():
     """KILLS: this wave's kills, out of the kills it needs (3, 4, 5)."""
-    return [if_(eq("wave", w), [hud_counter(2, var("kills"), "OF %d" % (w + 2))]) for w in (1, 2, 3)]
+    return [if_(eq("wave", w), [hud_counter(2, var("kills"), "OF %d" % (w + 2))]) for w in range(1, WAVES + 1)]
+
+
+def promote():
+    """Mantis "a" is the first on the playfield: when it is gone and "b" is not, "b" moves into "a"."""
+    return if_(AND(eq("a ring", 0), gt("b ring", 0)), [
+        set_("a ring", var("b ring")), set_("a at", var("b at")), set_("a stay", var("b stay")), set_("b ring", 0)])
 
 
 def lights():
-    """Every mantis shot chasing in its ring's colour, the rest handed back; the HUD's line says where they are."""
-    out = []
-    for r, i, s, _w in every_shot():
+    """Every mantis shot chasing in its ring's colour, the rest handed back; the title names the first mantis's
+    shot, the line the second's."""
+    out = [promote()]
+    for r, i, s in every_shot():
         out.append(if_(OR(at("a", r, i), at("b", r, i)),
                        [light(s, RING_COLOR[r - 1], "chase", RING_PACE[r - 1])], [off(s)]))
-    words = []
-    for r, i, _s, w in every_shot():
-        words.append(if_(at("a", r, i), [hud_line("MANTIS AT %s" % w)]))
-    out.append(if_(gt("a ring", 0), words, [hud_line("THE NEXT MANTIS IS COMING")]))
+    first = [if_(at("a", r, i), [hud_title("SHOOT THE %s" % W[s])]) for r, i, s in every_shot()]
+    second = [if_(at("b", r, i), [hud_line("OR THE %s" % W[s])]) for r, i, s in every_shot()]
+    out.append(if_(gt("a ring", 0), [*first, if_(gt("b ring", 0), second, [hud_line(CLOSER)])], [
+        if_(gt("wave", WAVES), [hud_title("THE SWARM IS BEATEN"), hud_line("THE BIGGEST MANTIS IS COMING")],
+            [hud_title(NAME), hud_line("THE NEXT MANTIS IS COMING")])]))
     return out
 
 
 def spawn(m):
     """A mantis lands at the next powerline in turn (no random numbers in blocks: left, center, right, ...)."""
     return [set_(m + " ring", 1), change("turn", 1), if_(gt("turn", 3), [set_("turn", 1)]), set_(m + " at", var("turn")),
-            clip("swoop", "behind"), sound("swoop"), show("Swoop")]
+            set_(m + " stay", 0), clip("swoop", "behind"), sound("swoop"), show("Swoop")]
 
 
 def advance(m):
@@ -88,10 +115,35 @@ def advance(m):
         if_(gt(m + " ring", 3), [set_(m + " ring", 0), timer_start("strike", 1)])])]
 
 
+def step_on(m):
+    """A mantis that has stood MOVE_S seconds at its shot moves on."""
+    return if_(gt(m + " stay", MOVE_S), [*advance(m), set_(m + " stay", 0), timer_start("lights", 1)])
+
+
 def kill(m, r):
     return [set_(m + " ring", 0), change("kills", 1), change("all kills", 1),
             set_("kill value", mul(add(1000000, mul(250000, sub(var("wave"), 1))), {1: 1, 2: 2, 3: 4}[r])),
             timer_start("kill", 1)]
+
+
+def floor_clock():
+    """pack.clock_floor() for the biggest mantis's clock (a timer: the mode has no clock of its own)."""
+    return if_(lt(timer_left("boss clock"), FLOOR_MS), [timer_start("boss clock", FLOOR_MS)])
+
+
+def done_lights():
+    """The biggest mantis beaten or gone: the Building no longer counts."""
+    return [off("Building"), off_insert("BUILDING SPOT")]
+
+
+def biggest():
+    """The biggest mantis at the Building, once the third WAVE CLEARED has had its time."""
+    return [set_("boss", 1), timer_start("boss clock", STAGE_MS), set_("boss hits", 0),
+            hud_title("THE BIGGEST MANTIS"), hud_line("SHOOT THE BUILDING %d TIMES" % BOSS_HITS),
+            hud_counter(2, 0, "OF %d" % BOSS_HITS, "HITS"), hud_counter(1, pack.STAGE_S, "TO HIT IT", "SECONDS"),
+            award("THE BIGGEST MANTIS", sub="SHOOT THE BUILDING %d TIMES" % BOSS_HITS, seconds=pack.NOTE_S),
+            light("Building", RED, "chase", 60), light_insert("BUILDING SPOT", RED, "blink", 120),
+            clip("boss", "full"), sound("boss"), show("The biggest")]
 
 
 SHOWS = [
@@ -130,80 +182,83 @@ SHOWS = [
 SCRIPTS = [
     # ---- to start it: the spins, then its scoop ------------------------------------------------------------------
     on_shot(SPIN, *pack.count_up("spins", 1, NEED, "ready", "note at", START_SHOT, GREEN, START_INSERTS,
-                                 "KAMACURAS IS LIT", "SHOOT THE RIGHT SCOOP", "THE MANTISES",
-                                 "SPINS TO LIGHT IT", step=10), when="idle"),
+                                 "KAMACURAS IS LIT", "SHOOT THE RIGHT SCOOP", "SPIN THE TOP SPINNER",
+                                 "SPINS TO KAMACURAS", step=10), when="idle"),
     pack.relight("ready", START_SHOT, GREEN, START_INSERTS),
 
     on_start(*pack.begin(SLUG),
              set_("ready", 0), set_("spins", 0), set_("note at", 0), change("fought", 1),
              set_("wave", 1), set_("kills", 0), set_("all kills", 0), set_("strikes", 0), set_("boss", 0),
              set_("won", 0), set_("wave total", 0), set_("kill total", 0), set_("turn", 0),
-             set_("a ring", 0), set_("b ring", 0), set_("adv ms", 7000),
+             set_("a ring", 0), set_("b ring", 0),
              shield("toward"),
              clip("intro", "full"), clip("loop", "loop"), sound("wave"), show("They come"), shake(600, "strong"),
              hud_counter(1, 1, "OF 3"), hud_counter(2, 0, "OF 3"), hud_counter(3, 3, "STRIKES LEFT"),
-             timer_start("spawn", 1500), timer_start("advance", 8500)),
+             timer_start("spawn", 1500), timer_start("lights", 1)),
 
     # ---- the swarm --------------------------------------------------------------------------------------------------
     on_timer("spawn", if_(eq("boss", 0), [
+        promote(),
         if_(eq("a ring", 0), [*spawn("a")], [if_(AND(eq("b ring", 0), ge("wave", 2)), [*spawn("b")])]),
+        if_(AND(eq("b ring", 0), ge("wave", 2)), [timer_start("spawn", 1200)]),     # from wave 2: a second one
         timer_start("lights", 1)])),
-    on_timer("advance", if_(eq("boss", 0), [
-        *advance("a"), *advance("b"), timer_start("lights", 1),
-        if_(OR(eq("a ring", 0), AND(eq("b ring", 0), ge("wave", 2))), [timer_start("spawn", 1200)]),
-        timer_start("advance", var("adv ms"))])),
+    # each mantis moves on once it has stood its 10 s at its shot; the biggest mantis's seconds count down
+    every(1, if_(eq("boss", 0), [change("a stay", 1), change("b stay", 1), step_on("a"), step_on("b")],
+                 [if_(eq("won", 0), [hud_counter(1, div(add(timer_left("boss clock"), 999), 1000))])])),
     on_timer("lights", if_(eq("boss", 0), lights())),
     *[on_shot(s, if_(eq("boss", 0), [
         if_(at("a", r, i), kill("a", r), [if_(at("b", r, i), kill("b", r))])]))
-      for r, i, s, _w in every_shot() if s != "Building"],
+      for r, i, s in every_shot() if s != "Building"],
     on_shot("Building",
             if_(eq("boss", 0), [if_(at("a", 2, 4), kill("a", 2), [if_(at("b", 2, 4), kill("b", 2))])]),
-            if_(eq("boss", 1), [timer_start("boss", 1)])),
+            if_(AND(eq("boss", 1), eq("won", 0)), [timer_start("boss", 1)])),
     on_timer("kill",
              score(var("kill value")), change("wave total", var("kill value")),
              change("kill total", var("kill value")), *kills_counter(),
-             award("MANTIS DOWN", value=var("kill value")), clip("kill", "behind"), sound("kill"), show("Kill"),
-             shake(250, "medium"), timer_start("lights", 1), timer_start("spawn", 1200),
+             award("MANTIS DOWN", value=var("kill value"), seconds=pack.NOTE_S), clip("kill", "behind"),
+             sound("kill"), show("Kill"), shake(250, "medium"), timer_start("lights", 1), timer_start("spawn", 1200),
              if_(ge("kills", add(2, var("wave"))), [timer_start("wave", 700)])),
     on_timer("strike",
              change("strikes", 1), hud_counter(3, sub(3, var("strikes")), "STRIKES LEFT"),
              clip("escape", "behind"), sound("escape"), show("Strike"), shake(400, "hard"),
-             award("MANTIS STRIKE", value=sub(3, var("strikes")), sub="STRIKES LEFT"),
+             award("MANTIS STRIKE", value=sub(3, var("strikes")), sub="STRIKES LEFT", seconds=pack.NOTE_S),
              if_(ge("strikes", 3), [clip("lost", "full"), sound("lost"), show("Lost"), end()],
                  [timer_start("spawn", 1200)])),
 
-    # ---- a wave cleared --------------------------------------------------------------------------------------------
-    on_timer("wave",
-             score(var("wave total")), award("WAVE CLEARED", value=var("wave total"), sub="ITS KILLS AGAIN", seconds=3),
-             clip("wave", "behind"), sound("wave"), show("Wave cleared"), shake_game("jackpot"),
-             set_("wave total", 0), set_("kills", 0), set_("a ring", 0), set_("b ring", 0), change("wave", 1),
-             change("adv ms", -1000), hud_counter(1, var("wave"), "OF 3"), *kills_counter(), timer_start("lights", 1),
-             if_(gt("wave", 3), [
-                 set_("boss", 1), timer_stop("advance"), timer_stop("spawn"), timer_start("boss clock", 25000),
-                 set_("boss hits", 0),
-                 hud_line("THE BIGGEST MANTIS: SHOOT THE BUILDING"), hud_counter(2, 0, "OF 3", "HITS"),
-                 hud_counter(1, 25, "TO HIT IT", "SECONDS"),
-                 light("Building", RED, "chase", 60), light_insert("BUILDING SPOT", RED, "blink", 120),
-                 clip("boss", "full"), sound("boss"), show("The biggest")],
-                 [timer_start("spawn", 2500)])),
+    # ---- a wave cleared; after the third, the biggest mantis once the note has had its time -------------------------
+    on_timer("wave", if_(gt("wave", WAVES), biggest(), [
+        score(var("wave total")),
+        award("WAVE CLEARED", value=var("wave total"), sub="ITS KILLS AGAIN", seconds=pack.NOTE_S),
+        clip("wave", "behind"), sound("wave"), show("Wave cleared"), shake_game("jackpot"),
+        set_("wave total", 0), set_("kills", 0), set_("a ring", 0), set_("b ring", 0), change("wave", 1),
+        timer_start("lights", 1),
+        if_(gt("wave", WAVES), [timer_stop("spawn"), timer_start("wave", NOTE_MS)],
+            [hud_counter(1, var("wave"), "OF 3"), *kills_counter(), timer_start("spawn", 2500)])])),
 
     # ---- the biggest mantis -------------------------------------------------------------------------------------------
     on_timer("boss",
-             change("boss hits", 1), score(5000000), hud_counter(2, var("boss hits"), "OF 3"),
+             change("boss hits", 1), score(5000000), floor_clock(), hud_counter(2, var("boss hits")),
              shake(450, "hard"), sound("kill"),
-             if_(ge("boss hits", 3), [
-                 set_("won", 1), score(var("kill total")),
+             if_(ge("boss hits", BOSS_HITS), [
+                 set_("won", 1), score(var("kill total")), timer_stop("boss clock"), *done_lights(),
                  award("SWARM DEFEATED", value=var("kill total"), sub="SUPER JACKPOT", seconds=4),
-                 clip("won", "full"), sound("won"), show("Won"), shake_game("multiball_start"), end()],
-                 [award("THE BIG ONE REELS", value=var("boss hits"), sub="OF 3"), clip("kill", "behind")])),
+                 clip("won", "full"), sound("won"), show("Won"), shake_game("multiball_start"),
+                 timer_start("next", NOTE_MS)],
+                 [if_(eq("boss hits", BOSS_HITS - 1), [hud_line("SUPER JACKPOT: SHOOT THE BUILDING")],
+                      [hud_line("SHOOT THE BUILDING AGAIN")]),
+                  award("THE BIG ONE REELS", value=sub(BOSS_HITS, var("boss hits")), sub="MORE AT THE BUILDING",
+                        seconds=pack.NOTE_S),
+                  clip("kill", "behind")])),
 
-    every(1, if_(eq("boss", 1), [hud_counter(1, div(add(timer_left("boss clock"), 999), 1000), "TO HIT IT")])),
+    # the clock out: "won" 2 (no more hits), the note its time, then the end
     on_timer("boss clock", if_(AND(eq("boss", 1), eq("won", 0)), [
-        award("THE BIG ONE ESCAPES", sub="THE SWARM WINS"), clip("lost", "full"), sound("lost"), show("Lost"),
-        set_("strikes", 3), end()])),
+        set_("won", 2), *done_lights(), award("THE BIG ONE ESCAPES", sub="THE SWARM WINS", seconds=pack.NOTE_S),
+        clip("lost", "full"), sound("lost"), show("Lost"), set_("strikes", 3), timer_start("next", NOTE_MS)])),
+    on_timer("next", end()),
     on_end(*pack.finish(), set_("boss", 0), set_("a ring", 0), set_("b ring", 0),
            if_(eq("won", 1), [hud_title("KAMACURAS DEFEATED"), hud_line("THE SWARM IS GONE")],
-               [hud_title("THE MANTISES WIN"), hud_line("THE SWARM TOOK GODZILLA")]),
+               [hud_title("THE MANTISES WIN"),
+                if_(eq("won", 2), [hud_line("THE BIGGEST MANTIS GOT AWAY")], [hud_line("THE SWARM TOOK GODZILLA")])]),
            *[timer_stop(t) for t in TIMERS],
            if_(AND(eq("won", 0), lt("strikes", 3)), [clip("lost", "full"), sound("lost"), show("Lost")])),
 ]
@@ -213,8 +268,8 @@ PROGRAM = {
     "wait_multiball": True, "priority": 180,
     "vars": pack.pack_vars() + [{"name": n, "reset": "game"} for n in ("spins", "ready", "note at", "fought")] + [
         {"name": n, "reset": "mode"} for n in ("wave", "kills", "all kills", "strikes", "boss", "boss hits", "won",
-                                                "wave total", "kill total", "kill value", "turn", "adv ms",
-                                                "a ring", "a at", "b ring", "b at")],
+                                                "wave total", "kill total", "kill value", "turn",
+                                                "a ring", "a at", "a stay", "b ring", "b at", "b stay")],
     "timers": [{"name": n} for n in TIMERS],
     "hud": hud("THE NEXT MANTIS IS COMING",
                counters=[("WAVE", "OF 3", None), ("KILLS", "OF WAVE", None), ("GODZILLA", "STRIKES LEFT", None)],
@@ -230,8 +285,9 @@ EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 4, "titles": ["godzilla_le", "godzilla_pro"], "based_on": "destoroyah.c",
     "about": ("Reworked (PAD-658): DESTOROYAH's waves as Kamacuras, now harder to start (50 Top spinner spins, then "
               "its own right scoop) and with its mantis shots far more obvious (chasing in the ring's colour, the "
-              "HUD naming each one, a swoop clip and light show as each lands). Son of Godzilla (1967) and "
-              "Godzilla: Final Wars (2004)."),
+              "HUD's title and line naming where they are, 10 s at each shot, a swoop clip and light show as each "
+              "lands), then the biggest mantis at the Building for 40 s. Son of Godzilla (1967) and Godzilla: Final "
+              "Wars (2004)."),
     "lost": [],
 }
 
@@ -244,22 +300,36 @@ def _spins(n):
 
 
 _START = ["trigger", "kamacuras.start", "secs", 2]
+_SWEEP = ["shot", "Powerline left", "ms", 300, "shot", "Powerline center", "ms", 300, "shot", "Powerline right",
+          "ms", 300]
+_WAVES = _START + _SWEEP * 40 + ["secs", 4]
 DESK = [
     ("fifty spins then the scoop", _spins(30) + ["shot", "Right scoop", "secs", 1] + _spins(20) +
      ["shot", "Right scoop", "secs", 3],
-     ["Hud_Title: KAMACURAS IS LIT", "[KAMACURAS] START (its lit shot)", "LAMP SELECT CITY 20ff40 chase"]),
-    ("a mantis is obvious, a near kill pays 2x", _START + ["secs", 9, "shot", "Left ramp", "secs", 1],
-     ["Hud_Line: MANTIS AT THE LEFT POWERLINE", "LAMP POWERLINE LEFT 20ff40 chase 160",
-      "Hud_Line: MANTIS AT THE LEFT RAMP", "LAMP LEFT RAMP d0ff00 chase 110", "SCORE +2000000"]),
-    ("a close kill pays 4x", _START + ["secs", 16, "shot", "Maser target", "secs", 1],
-     ["Hud_Line: MANTIS AT THE MASER", "LAMP MASER ff1010 chase 60", "SCORE +4000000"]),
-    ("three waves and the biggest mantis", _START + ["shot", "Powerline left", "ms", 300, "shot", "Powerline center",
-                                                     "ms", 300, "shot", "Powerline right", "ms", 300] * 30 +
-     ["secs", 2, "shot", "Building", "ms", 500, "shot", "Building", "ms", 500, "shot", "Building", "secs", 6],
-     ["Hud_Title: KAMACURAS DEFEATED", "Hud_Award: WAVE CLEARED", "Hud_Line: THE BIGGEST MANTIS: SHOOT THE BUILDING", "LAMP BUILDING ff1010 chase 60",
+     ["Hud_Title: SPIN THE TOP SPINNER", "Hud_Line: 49  -  SPINS TO KAMACURAS", "Hud_Line: 29  -  SPINS TO KAMACURAS",
+      "Hud_Title: KAMACURAS IS LIT", "[KAMACURAS] START (its lit shot)", "LAMP SELECT CITY 20ff40 chase"]),
+    ("a mantis is obvious, a near kill pays 2x", _START + ["secs", 12, "shot", "Left ramp", "secs", 1],
+     ["Hud_Title: SHOOT THE LEFT POWERLINE", "Hud_Line: THE CLOSER IT IS, THE MORE IT PAYS",
+      "LAMP POWERLINE LEFT 20ff40 chase 160", "Hud_Title: SHOOT THE LEFT RAMP", "LAMP LEFT RAMP d0ff00 chase 110",
+      "SCORE +2000000", "Hud_Title: KAMACURAS", "Hud_Line: THE NEXT MANTIS IS COMING"]),
+    ("a close kill pays 4x", _START + ["secs", 22, "shot", "Maser target", "secs", 1],
+     ["Hud_Title: SHOOT THE MASER TARGET", "LAMP MASER ff1010 chase 60", "SCORE +4000000"]),
+    ("two mantises from wave two: the title and the line", _START + _SWEEP * 5 + ["secs", 6],
+     ["Hud_Award: WAVE CLEARED", "Hud_C1_Value: 2", "Hud_C2_Sub: OF 4", "Hud_Title: SHOOT THE LEFT POWERLINE",
+      "Hud_Line: OR THE CENTER POWERLINE"]),
+    ("three waves and the biggest mantis", _WAVES +
+     ["shot", "Building", "ms", 500, "shot", "Building", "ms", 500, "shot", "Building", "secs", 6],
+     ["Hud_Award: WAVE CLEARED", "Hud_Title: THE SWARM IS BEATEN", "Hud_Line: THE BIGGEST MANTIS IS COMING",
+      "Hud_Title: THE BIGGEST MANTIS", "Hud_Line: SHOOT THE BUILDING 3 TIMES", "Hud_C1_Label: SECONDS",
+      "Hud_C2_Label: HITS", "LAMP BUILDING ff1010 chase 60", "Hud_Line: SHOOT THE BUILDING AGAIN",
+      "Hud_Line: SUPER JACKPOT: SHOOT THE BUILDING", "Hud_Award: SWARM DEFEATED", "Hud_Title: KAMACURAS DEFEATED",
       "END (a block)", "lamps held 0"]),
-    ("three strikes and the swarm wins", _START + ["secs", 80],
-     ["Hud_Title: THE MANTISES WIN", "Hud_Award: MANTIS STRIKE", "END (a block)", "lamps held 0"]),
+    ("the biggest mantis escapes", _WAVES + ["secs", 42],
+     ["Hud_Title: THE BIGGEST MANTIS", "Hud_Award: THE BIG ONE ESCAPES", "LAMP OFF BUILDING KAMACURAS",
+      "Hud_Title: THE MANTISES WIN", "Hud_Line: THE BIGGEST MANTIS GOT AWAY", "END (a block)", "lamps held 0"]),
+    ("three strikes and the swarm wins", _START + ["secs", 110],
+     ["Hud_Award: MANTIS STRIKE", "Hud_AwardSub: 2  -  STRIKES LEFT", "Hud_Title: THE MANTISES WIN", "END (a block)",
+      "lamps held 0"]),
 ]
 
 

@@ -4,14 +4,20 @@ three-stage multiball that goes deeper and deeper.
 Godzilla vs. SpaceGodzilla (1994): SpaceGodzilla plants crystal towers across Fukuoka to draw power; Godzilla and
 M.O.G.U.E.R.A. tear them down, break the crystals on his shoulders and cut his power at Fukuoka Tower.
 
-- LIGHT A LOCK at the powerlines: one hit a lock the first time, two the second, three the third (3, 6, 9 hits for
-  the three locks); a note says how many more. Nothing lights or locks in a multiball.
-- LOCK at the Big loop: CRYSTAL 1, 2, 3 (the locks wait across balls). The third: SpaceGodzilla arrives 1.5 s later
-  with a 3-ball multiball and a 15 s ball save; while the game's own mode runs it waits, and the Big loop (chasing
-  purple) starts it.
+- PLANT A CRYSTAL at the Right ramp: one ramp a crystal the first time, two the second, three the third (3, 6, 9
+  ramps for the three); every ramp a note names it and says how many more (RIGHT RAMP, 1  -  MORE TO PLANT A
+  CRYSTAL). Nothing plants in a multiball. PAD-658: the Right ramp alone, so no two modes share a start (the powerlines
+  are KING GHIDORAH's, the Big loop KUMONGA's).
+- CRYSTAL 1, 2, 3 (they wait across balls; THE RIGHT RAMP PLANTS THE NEXT). The third: SpaceGodzilla arrives NOTE_S
+  (3 s) later, once its note is read, with a 3-ball multiball and a 15 s ball save; while the game's own mode runs it
+  waits, and the Right ramp (chasing purple) starts it.
 - STAGE 1, CRYSTAL TOWERS: towers on the Left ramp, the Building and the Right ramp; each JACKPOT (1M, +100,000 a
   jackpot) cracks one, a tower falls after 2 (3 the second multiball, 4 the third). All down lights the SUPER JACKPOT
-  at the Big loop for 20 s: the stage's jackpots summed. Left alone the crystals regrow one stronger.
+  at the Big loop for 20 s (pack.WINDOW_S): the stage's jackpots summed. Left alone the crystals regrow one stronger.
+- EVERY STAGE (PAD-658 round 3): its standing targets chase in its colour and a fallen one goes dark; the line names
+  the ones left (TOPPLE THE TOWERS: RAMPS AND BUILDING, then SHOOT THE LEFT OR RIGHT RAMP, then SHOOT THE RIGHT RAMP),
+  then the super's shot (SUPER JACKPOT: THE BIG LOOP) chasing white; counter 1 counts the hits to go. The next stage
+  lights the moment the super is collected; its title note waits NOTE_S so the super's note is read first.
 - STAGE 2, M.O.G.U.E.R.A.: the shield platform turns toward the player; the three shield targets are SpaceGodzilla's
   shoulder crystals (1.5M a jackpot) and every hit is a SPIRAL GRENADE: +250,000 on every jackpot after it. All
   three broken light the SUPER JACKPOT at the Godzilla target: the stage's sum TWICE.
@@ -22,6 +28,8 @@ M.O.G.U.E.R.A. tear them down, break the crystals on his shoulders and cut his p
 - ENDS with one ball left after 20 s, a drain, a tilt, or one of the game's own modes beginning: the jackpots not
   yet summed in a super pay half again (CRYSTAL SHARDS).
 """
+import itertools
+
 from blk import (AND, BALLS, NOT, OR, RUNNING, a_show, add, award, change, clip, clips, div, end, eq, every, beds,
                  game_show, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_mode, lt, mul, music,
                  multiball, off, on_end, on_shot, on_start, on_timer, score, set_, shake, shake_game, show, shield,
@@ -30,13 +38,14 @@ import pack
 
 SLUG, NAME = "spacegodzilla", "SPACEGODZILLA"
 PURPLE, BLUE, DEEP, WHITE, CYAN, PINK = "#be28ff", "#285aff", "#1e003c", "#ffffff", "#00e6ff", "#ff40c0"
-LOCK_SHOT = "Big loop"
+LOCK_SHOT = "Right ramp"             # PAD-658: where the crystals are planted, and the full set starts
 POWERLINES = ("Powerline left", "Powerline center", "Powerline right")
 SHIELDS = ("Shield target left", "Shield target center", "Shield target right")
 #: the three stages: (title, its three shots, the super's shot, the line, counter 1's label, a jackpot's words,
 #: a target down, the super's words, the stage's colour, its first jackpot)
 STAGES = {
-    1: ("CRYSTAL TOWERS", ("Left ramp", "Building", "Right ramp"), "Big loop", "TOPPLE THE CRYSTAL TOWERS", "TOWERS",
+    1: ("CRYSTAL TOWERS", ("Left ramp", "Building", "Right ramp"), "Big loop", "TOPPLE THE TOWERS: RAMPS AND BUILDING",
+        "TOWERS",
         "CRYSTAL JACKPOT", "A TOWER FALLS", "SUPER JACKPOT: THE BIG LOOP", PURPLE, 1000000),
     2: ("M.O.G.U.E.R.A.", SHIELDS, "Godzilla target", "SPIRAL GRENADES: THE SHIELDS", "SHOULDERS",
         "SPIRAL GRENADE", "CRYSTAL SHATTERS", "SUPER JACKPOT: GODZILLA TARGET", CYAN, 1500000),
@@ -44,9 +53,10 @@ STAGES = {
         "POWER JACKPOT", "POWER CUT", "FUKUOKA TOWER: SHOOT THE BUILDING", BLUE, 2000000),
 }
 HPS = ("hp1", "hp2", "hp3")
-TIMERS = ("line", "arrive", "jp", "window", "next", "lights", "super")
+TIMERS = ("ramp", "arrive", "jp", "window", "next", "lights", "super", "announce")
+SUPER_MS = pack.WINDOW_S * 1000      # the super's window (20 s)
 HP = add(add(var("hp1"), var("hp2")), var("hp3"))
-NEED = pack.need(1, "plays")         # powerline hits a lock: 1 the first time, 2 the second, 3 the third
+NEED = pack.need(1, "plays")         # Right ramps a crystal: 1 the first time, 2 the second, 3 the third
 #: the port's lamp places: the Big loop (where he lands), the Building (Fukuoka Tower), the centre shield
 BL, BLD, SHC = dict(x=195, y=251), dict(x=123, y=202), dict(x=199, y=346)
 
@@ -103,75 +113,103 @@ SHOWS = [
 ]
 
 
-def lock_words(sub_words):
-    return [if_(gt("lit", 1), [award("LOCKS ARE LIT", sub=sub_words, seconds=2)],
-                [award("LOCK IS LIT", sub=sub_words, seconds=2)]), sound("lit")]
-
-
-def powerline():
-    """A powerline hit while it is not running and no multiball: one more toward the next lock (pack.need)."""
-    return [if_(AND(NOT(RUNNING), lt(BALLS, 2), lt(add(var("crystals"), var("lit")), 3)), [
-        change("line hits", 1),
-        if_(ge("line hits", NEED), [set_("line hits", 0), change("lit", 1)] + lock_words("SHOOT THE BIG LOOP"),
-            [award("CRYSTALS GROWING", value=sub(NEED, var("line hits")), sub="MORE TO LIGHT A LOCK",
-                   seconds=2)])])]
+def ramp():
+    """A Right ramp while it is not running and no multiball: one more toward the next crystal (pack.need)."""
+    return [if_(AND(NOT(RUNNING), lt(BALLS, 2), lt(var("crystals"), 3)), [
+        change("ramp hits", 1),
+        if_(ge("ramp hits", NEED), [set_("ramp hits", 0)] + plant(),
+            [award("RIGHT RAMP", value=sub(NEED, var("ramp hits")), sub="MORE TO PLANT A CRYSTAL",
+                   seconds=pack.NOTE_S), sound("lit")])])]
 
 
 def plant():
-    nxt = [if_(gt("lit", 0), [award(w, sub="ANOTHER LOCK IS LIT", seconds=2)],
-               [award(w, sub="POWERLINES LIGHT THE NEXT LOCK", seconds=2)]) for w in ("CRYSTAL 1 PLANTED",
-                                                                                     "CRYSTAL 2 PLANTED")]
+    nxt = [award(w, sub="THE RIGHT RAMP PLANTS THE NEXT", seconds=pack.NOTE_S)
+           for w in ("CRYSTAL 1 PLANTED", "CRYSTAL 2 PLANTED")]
     return [
-        change("lit", -1), change("crystals", 1), sound("lock"), show("Crystal"),
+        change("crystals", 1), sound("lock"), show("Crystal"),
         if_(ge("crystals", 3), [
             set_("ready", 1), light_mode(LOCK_SHOT, PURPLE, "chase"),
-            award("CRYSTAL 3 PLANTED", sub="SPACEGODZILLA ARRIVES", seconds=3),
-            timer_start("arrive", 1500)],
+            award("CRYSTAL 3 PLANTED", sub="SPACEGODZILLA ARRIVES", seconds=pack.NOTE_S),
+            timer_start("arrive", pack.NOTE_S * 1000)],                  # once its note is read
             [if_(eq("crystals", 1), [nxt[0]], [nxt[1]])])]
 
 
-def lights():
-    """The stage's three shots chasing in its colour (faster the nearer each is to breaking), the super's shot
-    chasing white while it is lit and blinking fast in its last 6 s."""
+def either(shots):
+    """The words for shooting any one of ``shots``: SHOOT THE LEFT OR CENTER SHIELD (a noun they share said once),
+    else SHOOT THE LEFT RAMP OR BUILDING."""
+    words = [pack.SHOT_WORDS[s].split() for s in shots]
+    if len(words) > 1 and all(len(w) == 2 for w in words) and len({w[1] for w in words}) == 1:
+        return "SHOOT THE %s %s" % (" OR ".join(w[0] for w in words), words[0][1])
+    return pack.shoot(*shots)
+
+
+def stage_lines(shots, line):
+    """The line naming the stage's targets still standing (one block per set of them): all three the stage's own
+    line, then the ones left by name."""
     out = []
-    for k, (_t, shots, sup, _l, _c, _j, _f, _s, color, _v) in STAGES.items():
+    for up in itertools.product((1, 0), repeat=len(shots)):
+        left = [s for s, u in zip(shots, up) if u]
+        if left:
+            out.append(if_(AND(*[gt(hp, 0) if u else eq(hp, 0) for hp, u in zip(HPS, up)]),
+                           [hud_line(line if len(left) == len(shots) else either(left))]))
+    return out
+
+
+def lights():
+    """The stage's three shots chasing in its colour (faster the nearer each is to breaking; dark once down), the
+    super's shot chasing white while it is lit and blinking fast in its last 6 s; the line names what counts now."""
+    out = []
+    for k, (_t, shots, sup, line, _c, _j, _f, sup_line, color, _v) in STAGES.items():
         body = [if_(eq(hp, 0), [off(s)], [light(s, color, "chase", add(40, mul(60, var(hp))))])
                 for s, hp in zip(shots, HPS)]
         body.append(if_(eq("super lit", 1), [
             if_(lt(timer_left("window"), 6000), [light(sup, WHITE, "blink", 70)],
-                [light(sup, WHITE, "chase", 100)])], [off(sup)]))
+                [light(sup, WHITE, "chase", 100)]), hud_line(sup_line)], [off(sup)] + stage_lines(shots, line)))
         out.append(if_(eq("stage", k), body))
     return out
 
 
 def setup_stage():
-    """A stage begins (the "next" timer): its targets, words, sights and sounds."""
+    """A stage begins (the "next" timer, at once): its targets lit, its title, line and counters; the shields turn.
+    Its note, clip and sound come NOTE_S later (announce)."""
     out = [change("stage", 1), set_("super lit", 0), set_("sum", 0), set_("standing", 3),
            *[set_(hp, add(var("strength"), div(var("stage"), 3))) for hp in HPS]]
     for k, (title, shots, sup, line, label, _j, _f, _s, _c, value) in STAGES.items():
         prev = STAGES.get(k - 1)
-        body = [hud_title(title), hud_line(line), set_("base", add(value, mul(250000, sub(var("plays"), 1)))),
-                hud_counter(1, var("standing"), "STANDING", label),
+        body = [hud_title(title), set_("base", add(value, mul(250000, sub(var("plays"), 1)))),
+                hud_counter(1, HP, "HITS TO GO", label),
                 hud_counter(2, add(var("base"), mul(100000, var("jackpots"))), "STAGE %d OF 3" % k)]
         if prev:
-            body += [off(s) for s in prev[1]] + [off(prev[2]), shake_game("jackpot")]
+            body += [off(s) for s in prev[1]] + [off(prev[2]), timer_start("announce", pack.NOTE_S * 1000)]
         if k == 2:
-            body += [shield("toward"), award(title, sub="BREAK HIS SHOULDER CRYSTALS", seconds=3),
-                     clip("moguera", "behind"), sound("moguera"), show("Moguera")]
-        if k == 3:
-            body += [award(title, sub="CUT HIS POWER", seconds=3), clip("beast", "behind"), sound("beast"),
-                     show("Space beast"), music("beast")]
+            body += [shield("toward")]
         out.append(if_(eq("stage", k), body))
     return out + [timer_start("lights", 1)]
+
+
+def announce():
+    """The stage's note (its title, its line's words: only while none of its jackpots is made yet, so a note the
+    player's own shot just put up stays), clip, sound and show."""
+    out = []
+    for k, (title, _shots, _sup, line, *_r) in STAGES.items():
+        if k == 1:
+            continue
+        body = [shake_game("jackpot"), if_(eq("sum", 0), [award(title, sub=line, seconds=pack.NOTE_S)])]
+        if k == 2:
+            body += [clip("moguera", "behind"), sound("moguera"), show("Moguera")]
+        if k == 3:
+            body += [clip("beast", "behind"), sound("beast"), show("Space beast"), music("beast")]
+        out.append(if_(eq("stage", k), body))
+    return out
 
 
 def jackpot():
     """A target's jackpot (``hit`` = which of the stage's three)."""
     fell = [AND(eq("hit", i), eq(hp, 0)) for i, hp in enumerate(HPS, 1)]
     fell_any = OR(*fell)
-    per_stage_fall = [if_(eq("stage", k), [award(st[6], value=var("got"), sub=st[0], seconds=2)])
+    per_stage_fall = [if_(eq("stage", k), [award(st[6], value=var("got"), sub=st[0], seconds=pack.NOTE_S)])
                       for k, st in STAGES.items()]
-    per_stage_jp = [if_(eq("stage", k), [award(st[5], value=var("got"), seconds=2), clip(c, "behind")])
+    per_stage_jp = [if_(eq("stage", k), [award(st[5], value=var("got"), seconds=pack.NOTE_S), clip(c, "behind")])
                     for (k, st), c in zip(STAGES.items(), ("jackpot", "grenade", "shatter"))]
     return [
         set_("got", add(var("base"), mul(100000, var("jackpots")))),
@@ -182,9 +220,10 @@ def jackpot():
                        shake(450, "strong")] + per_stage_fall,
             per_stage_jp + [sound("jackpot"), show("Jackpot"), shake(250, "medium")]),
         if_(AND(eq("super lit", 0), eq("standing", 0)), [
-            set_("super lit", 1), timer_start("window", 20000), show("Super lit"),
-            award("SUPER JACKPOT IS LIT", value=mul(var("sum"), var("stage")), sub="20 SECONDS", seconds=3),
-            *[if_(eq("stage", k), [hud_line(st[7])]) for k, st in STAGES.items()]]),
+            set_("super lit", 1), timer_start("window", SUPER_MS), show("Super lit"),
+            *[if_(eq("stage", k), [award("SUPER JACKPOT IS LIT", value=mul(var("sum"), var("stage")),
+                                         sub="%s IN %d S" % (pack.SHOT_WORDS[st[2]], pack.WINDOW_S),
+                                         seconds=pack.NOTE_S)]) for k, st in STAGES.items()]]),
         timer_start("lights", 1)]
 
 
@@ -201,7 +240,7 @@ def super_jackpot():
                 [award("SUPER JACKPOT", value=var("got"), sub="THE SUM TWICE", seconds=3)]),
             clip("super", "full"), sound("super"), show("Super"), shake(600, "hard"),
             if_(lt(BALLS, 6), add_ball + [sound("add")]),
-            timer_start("next", 700)])]
+            timer_start("next", 1)])]                                  # the next stage lights at once
 
 
 def target(stage, i):
@@ -211,14 +250,12 @@ def target(stage, i):
 
 SCRIPTS = [
     # ---- light the locks, plant the crystals -------------------------------------------------------------------
-    *[on_shot(s, timer_start("line", 1), when="idle") for s in POWERLINES],
-    on_timer("line", *powerline()),
-    on_shot(LOCK_SHOT, if_(lt(BALLS, 2), [if_(eq("ready", 1), [start()], [if_(gt("lit", 0), plant())])]),
-            when="idle"),
+    on_shot(LOCK_SHOT, if_(lt(BALLS, 2), [if_(eq("ready", 1), [start()], [timer_start("ramp", 1)])]), when="idle"),
+    on_timer("ramp", *ramp()),
     on_timer("arrive", start()),
 
     # ---- the multiball ----------------------------------------------------------------------------------------------
-    on_start(set_("ready", 0), set_("crystals", 0), set_("lit", 0), set_("line hits", 0), change("plays", 1),
+    on_start(set_("ready", 0), set_("crystals", 0), set_("ramp hits", 0), change("plays", 1),
              set_("stage", 0), set_("history", 0), set_("supers", 0), set_("jackpots", 0), set_("won", 0),
              set_("mb secs", 0), set_("strength", add(1, var("plays"))),
              multiball(3, 15),
@@ -227,21 +264,21 @@ SCRIPTS = [
              shake(1000, "strong"),
              timer_start("next", 1)),
     on_timer("next", *setup_stage()),
+    on_timer("announce", *announce()),
     on_timer("lights", *lights()),
     *[on_shot(s, target(1, i)) for i, s in enumerate(STAGES[1][1], 1) if s != "Building"],
     on_shot("Building", target(1, 2), if_(AND(eq("stage", 3), eq("super lit", 1)), [timer_start("super", 1)])),
     *[on_shot(s, target(2, i)) for i, s in enumerate(SHIELDS, 1)],
     *[on_shot(s, target(3, i)) for i, s in enumerate(POWERLINES, 1)],
     on_timer("jp", *jackpot()),
-    on_shot(LOCK_SHOT, if_(AND(eq("stage", 1), eq("super lit", 1)), [timer_start("super", 1)])),
+    on_shot("Big loop", if_(AND(eq("stage", 1), eq("super lit", 1)), [timer_start("super", 1)])),
     on_shot("Godzilla target", if_(AND(eq("stage", 2), eq("super lit", 1)), [timer_start("super", 1)])),
     on_timer("super", *super_jackpot()),
     # the window ran out: the stage's crystals regrow, one stronger (the sum stays for the next super)
     on_timer("window", if_(eq("super lit", 1), [
         set_("super lit", 0), change("strength", 1), set_("standing", 3),
         *[set_(hp, var("strength")) for hp in HPS],
-        award("CRYSTALS REGROW", sub="ONE HIT STRONGER", seconds=2), show("Regrow"), shake(600, "soft"),
-        *[if_(eq("stage", k), [hud_line(st[3])]) for k, st in STAGES.items()],
+        award("CRYSTALS REGROW", sub="ONE HIT STRONGER", seconds=pack.NOTE_S), show("Regrow"), shake(600, "soft"),
         timer_start("lights", 1)])),
     # one ball left after the ball save and a few seconds more; the super's last seconds blink faster
     every(1, change("mb secs", 1), if_(AND(ge("mb secs", 20), lt(BALLS, 2)), [end()]),
@@ -259,13 +296,13 @@ SCRIPTS = [
 PROGRAM = {
     "name": NAME, "seconds": 0, "ends_on_drain": True, "screen": False, "game_modes": "block",
     "wait_multiball": True, "priority": 190,
-    "vars": [{"name": n, "reset": "game"} for n in ("plays", "crystals", "lit", "line hits", "ready")] +
+    "vars": [{"name": n, "reset": "game"} for n in ("plays", "crystals", "ramp hits", "ready")] +
             [{"name": n, "reset": "mode"} for n in ("stage", "base", "strength", "hp1", "hp2", "hp3", "standing",
                                                      "jackpots", "sum", "history", "supers", "super lit", "mb secs",
                                                      "hit", "got", "won")],
     "timers": [{"name": n} for n in TIMERS],
-    "hud": hud("TOPPLE THE CRYSTAL TOWERS",
-               counters=[("TOWERS", "STANDING", var("standing")),
+    "hud": hud(STAGES[1][3],
+               counters=[("TOWERS", "HITS TO GO", HP),
                          ("JACKPOT", "STAGE 1 OF 3", add(var("base"), mul(100000, var("jackpots")))),
                          ("SUPER", "THE SUM", var("sum"))],
                gauge={"label": "CRYSTALS", "kind": "segment", "count": 12, "color": PURPLE, "value": HP}),
@@ -282,16 +319,17 @@ PROGRAM = {
 LOST = [
     "No points while the mode is not running: the C pays 250,000 a crystal times its number (250,000, 500,000, "
     "750,000) as it is planted; the blocks' Score only scores while the mode runs.",
-    "A lit lock does not blink the Big loop purple: the blocks light inserts only while the mode runs, and a mode lit "
-    "at a shot starts on it, so only the full set (three crystals, waiting for the game's mode to end) chases there; "
-    "the notes say LOCK IS LIT and SHOOT THE BIG LOOP.",
+    "The crystals are planted at the Right ramp, not locked at the Big loop after the powerlines light a lock (PAD-658: "
+    "the powerlines are KING GHIDORAH's start, the Big loop KUMONGA's): no lock is lit, and only the full set (three "
+    "crystals, waiting for the game's mode to end) chases purple at the Right ramp.",
     "No badge for the super's 20 s window: the badge counts the mode's own clock, and this multiball has none, so "
     "the window shows as the line (SUPER JACKPOT: THE BIG LOOP) and its shot chasing white, blinking fast in its "
     "last 6 s (looked at once a second).",
     "The super's added ball is asked as a multiball of one more ball than are in play (the blocks have no add-a-ball "
     "block), with its 10 s ball save.",
-    "Another mode of ours running does not stop the powerlines lighting locks or the Big loop planting crystals (the "
-    "blocks cannot tell one of our other modes runs; the C waits for it). A multiball still stops them.",
+    "Another mode of ours running does not stop the Right ramp planting crystals (the blocks cannot tell one of our "
+    "other modes runs; the C waits for it). A multiball still stops it.",
+    "SpaceGodzilla arrives 3 s after the third crystal (PAD-658: its note is read first), where the C took 1.5 s.",
     "The ending's line says how it ended (EVERY SUPER AGAIN after the finale, CRYSTAL SHARDS: HALF THE SUM "
     "otherwise) where the C counted 7 JACKPOTS  -  1 SUPER.",
     "The ending stays up 3 s, the runtime's: the C kept it 10 s.",
@@ -305,10 +343,15 @@ LOST = [
 EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 108, "titles": ["godzilla_le", "godzilla_pro"],
     "based_on": "spacegodzilla.c",
-    "title_alt": {"godzilla_pro": {"shots": {"Shield target center": "Maser target"}}},
-    "about": ("The C example SPACEGODZILLA rebuilt in blocks and taken deeper (PAD-658): powerline hits light the "
-              "locks (one a lock the first time, two the second, three the third), three crystals planted at the "
-              "Big loop start a 3-ball multiball in three stages: CRYSTAL TOWERS (the ramps and the Building, a "
+    # PAD-658: a Pro's centre shield is the Maser target, and its lines say so
+    "title_alt": {"godzilla_pro": {"shots": {"Shield target center": "Maser target"}, "words": {
+        "SHOOT THE CENTER OR RIGHT SHIELD": "SHOOT THE MASER OR RIGHT SHIELD",
+        "SHOOT THE CENTER SHIELD": "SHOOT THE MASER TARGET",
+        "SHOOT THE LEFT OR CENTER SHIELD": "SHOOT THE LEFT SHIELD OR MASER",
+        "SPIRAL GRENADES: THE SHIELDS": "SPIRAL GRENADES: SHIELDS AND MASER"}}},
+    "about": ("The C example SPACEGODZILLA rebuilt in blocks and taken deeper (PAD-658): Right ramps plant the "
+              "crystals (one a crystal the first time, two the second, three the third), and three crystals "
+              "start a 3-ball multiball in three stages: CRYSTAL TOWERS (the ramps and the Building, a "
               "super at the Big loop), M.O.G.U.E.R.A. (the shoulder crystals at the shields, every hit a spiral "
               "grenade raising the jackpots, the super twice its sum at the Godzilla target) and SPACE BEAST (his "
               "own music, the powerlines cut, FUKUOKA TOWER at the Building: three times the sum and every super "
@@ -332,49 +375,49 @@ def _shots(*names, gap=300):
 
 _START = ["trigger", "spacegodzilla.start", "secs", 2]
 _STOP = ["secs", 2, "trigger", "spacegodzilla.stop", "secs", 4, "balls", 1, "secs", 1]
-#: KING GHIDORAH (in the same pack) also counts the powerlines and its notes would cover these: run it once so it
-#: is done for the ball
-_QUIET = ["trigger", "ghidorah_heads.start", "secs", 1, "trigger", "ghidorah_heads.stop", "secs", 5]
 _STAGE1 = _shots("Left ramp", "Left ramp", "Building", "Building", "Right ramp", "Right ramp") + ["secs", 1]
 _STAGE2 = _shots(*[s for s in SHIELDS for _i in (1, 2)]) + ["secs", 1]
 _STAGE3 = _shots(*[s for s in POWERLINES for _i in (1, 2, 3)]) + ["secs", 1]
-_LOCK = _shots("Big loop", gap=600)
+_RAMP = _shots("Right ramp", gap=600)
 DESK = [
-    ("one powerline a lock the first time, two the second",
-     _QUIET + (_shots("Powerline left", gap=600) + _LOCK) * 3 + ["secs", 3] + _STOP +
-     (_shots("Powerline center", "Powerline right", gap=600) + _LOCK) * 3 + ["secs", 7],
-     ["Hud_Title: LOCK IS LIT", "Hud_Title: CRYSTAL 1 PLANTED", "Hud_Title: CRYSTAL 3 PLANTED",
+    ("one Right ramp a crystal the first time, two the second",
+     _RAMP * 3 + ["secs", 7] + _STOP + _RAMP * 6 + ["secs", 7],
+     ["Hud_Title: CRYSTAL 1 PLANTED", "Hud_Line: THE RIGHT RAMP PLANTS THE NEXT", "Hud_Title: CRYSTAL 3 PLANTED",
       "[SPACEGODZILLA] START (a block)", "MULTIBALL 3 balls, save 15 s", "Hud_Title: CRYSTAL TOWERS",
-      "LAMP LEFT RAMP be28ff chase 160", "Hud_Title: CRYSTALS GROWING", "Hud_Line: 1  -  MORE TO LIGHT A LOCK",
+      "Hud_Line: TOPPLE THE TOWERS: RAMPS AND BUILDING", "Hud_C1_Sub: HITS TO GO", "Hud_C1_Value: 6",
+      "LAMP LEFT RAMP be28ff chase 160", "Hud_Title: RIGHT RAMP", "Hud_Line: 1  -  MORE TO PLANT A CRYSTAL",
       "LAMP LEFT RAMP be28ff chase 220"]),        # the second multiball: towers one hit stronger
     ("towers fall, the super is their sum and adds a ball, M.O.G.U.E.R.A. comes",
      _START + _STAGE1 + _shots("Big loop") + ["secs", 5],
-     ["SCORE +1000000", "SCORE +1500000", "Hud_Award: A TOWER FALLS", "Hud_Award: SUPER JACKPOT IS LIT",
+     ["SCORE +1000000", "SCORE +1500000", "Hud_Award: A TOWER FALLS", "Hud_C1_Value: 4",
+      "Hud_Line: SHOOT THE BUILDING OR RIGHT RAMP", "Hud_Line: SHOOT THE RIGHT RAMP", "Hud_C1_Value: 1",
+      "Hud_Award: SUPER JACKPOT IS LIT", "Hud_AwardSub: 7,500,000  -  BIG LOOP IN 20 S",
       "Hud_Line: SUPER JACKPOT: THE BIG LOOP", "SCORE +7500000", "Hud_Award: SUPER JACKPOT",
-      "MULTIBALL 4 balls, save 10 s", "Hud_Title: M.O.G.U.E.R.A.", "SHIELD toward", "Hud_Award: M.O.G.U.E.R.A.",
-      "LAMP SHIELD CENTER 00e6ff chase"]),
+      "MULTIBALL 4 balls, save 10 s", "Hud_Title: M.O.G.U.E.R.A.", "SHIELD toward",
+      "Hud_Line: SPIRAL GRENADES: THE SHIELDS", "Hud_Award: M.O.G.U.E.R.A.",
+      "Hud_AwardSub: SPIRAL GRENADES: THE SHIELDS", "LAMP SHIELD CENTER 00e6ff chase"]),
     ("all three stages: FUKUOKA TOWER pays every super again",
      _START + _STAGE1 + _shots("Big loop") + ["secs", 2] + _STAGE2 + _shots("Godzilla target") + ["secs", 2] +
      _STAGE3 + _shots("Building") + ["secs", 6],
-     ["Hud_Award: SPIRAL GRENADE", "Hud_Award: CRYSTAL SHATTERS", "Hud_Line: SUPER JACKPOT: GODZILLA TARGET",
-      "Hud_Title: SPACE BEAST", "Hud_Award: POWER CUT", "Hud_Line: FUKUOKA TOWER: SHOOT THE BUILDING",
+     ["Hud_Award: SPIRAL GRENADE", "Hud_Line: SHOOT THE CENTER OR RIGHT SHIELD", "Hud_Line: SHOOT THE RIGHT SHIELD",
+      "Hud_Award: CRYSTAL SHATTERS", "Hud_Line: SUPER JACKPOT: GODZILLA TARGET", "Hud_Title: SPACE BEAST",
+      "Hud_Line: CUT HIS POWER: THE POWERLINES", "Hud_Line: SHOOT THE CENTER OR RIGHT POWERLINE",
+      "Hud_Line: SHOOT THE RIGHT POWERLINE", "Hud_Award: POWER CUT", "Hud_Line: FUKUOKA TOWER: SHOOT THE BUILDING",
       "SCORE +140400000", "END (a block)", "Hud_Title: SPACEGODZILLA FALLS", "lamps held 0"]),
     ("left alone the crystals regrow",
      _START + _STAGE1 + ["secs", 21],
      ["Hud_Award: SUPER JACKPOT IS LIT", "LAMP BIG LOOP ffffff blink 70", "Hud_Award: CRYSTALS REGROW",
-      "Hud_Line: TOPPLE THE CRYSTAL TOWERS", "LAMP LEFT RAMP be28ff chase 220"]),
+      "Hud_Line: TOPPLE THE TOWERS: RAMPS AND BUILDING", "LAMP OFF BIG LOOP", "LAMP LEFT RAMP be28ff chase 220"]),
     ("one ball left ends it: half the sum",
      _START + _shots("Left ramp", "Left ramp") + ["secs", 1, "balls", 1, "secs", 22],
      ["SCORE +1100000", "END (a block)", "Hud_Title: SPACEGODZILLA ESCAPES", "Hud_Line: CRYSTAL SHARDS: HALF THE SUM",
       "SCORE +1050000", "lamps held 0"]),
     ("a drain ends it", _START + _shots("Left ramp") + ["secs", 1, "ball_end", "secs", 8],
      ["END (ball ended)", "lamps held 0"]),
-    ("nothing locks in a multiball, a full set waits for the game's mode",
-     ["balls", 2, "secs", 1] + _shots("Powerline left", "Big loop") + ["balls", 1, "secs", 1] +
-     (_shots("Powerline left", gap=600) + _LOCK) * 2 + _shots("Powerline left", gap=600) +
-     ["timed", 1, "secs", 1] + _shots("Big loop") + ["secs", 3, "timed", 0, "secs", 1] + _shots("Big loop") +
-     ["secs", 2],
-     ["not started", "LAMP BIG LOOP be28ff chase", "[SPACEGODZILLA] START (its lit shot)",
+    ("nothing plants in a multiball, a full set waits for the game's mode",
+     ["balls", 2, "secs", 1] + _RAMP + ["balls", 1, "secs", 1] + _RAMP * 2 +
+     ["timed", 1, "secs", 1] + _RAMP + ["secs", 4, "timed", 0, "secs", 1] + _RAMP + ["secs", 2],
+     ["not started", "LAMP RIGHT RAMP be28ff chase", "[SPACEGODZILLA] START (its lit shot)",
       "MULTIBALL 3 balls, save 15 s"]),
 ]
 

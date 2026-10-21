@@ -12,11 +12,11 @@
   }
  },
  "based_on": "",
- "about": "New (PAD-658). Spin the Shield ramp spinner to wake her at the Big loop; four stages (tear the web on the shield platform while she webs it again, cut the strands on every spinner, the sting hurry-up, burn her with Godzilla and Minilla); cash the pot out at the right scoop. Son of Godzilla (1967).",
+ "about": "New (PAD-658). Loop the Big loop to wake her there (3 loops, 6, then 9); four stages, each one's shots named on the line (tear the web on the shield platform while she webs it again, cut the strands on every spinner, the sting hurry-up, burn her with Godzilla and Minilla); cash the pot out at the right scoop. Son of Godzilla (1967).",
  "lost": [],
  "program": {
   "name": "KUMONGA",
-  "seconds": 45,
+  "seconds": 50,
   "ends_on_drain": true,
   "screen": false,
   "game_modes": "block",
@@ -24,7 +24,7 @@
   "priority": 180,
   "vars": [
    {
-    "name": "spins",
+    "name": "loops",
     "reset": "game"
    },
    {
@@ -49,10 +49,6 @@
    },
    {
     "name": "torn",
-    "reset": "mode"
-   },
-   {
-    "name": "regrow ms",
     "reset": "mode"
    },
    {
@@ -115,11 +111,14 @@
    },
    {
     "name": "fire"
+   },
+   {
+    "name": "say"
    }
   ],
   "hud": {
    "on": true,
-   "line": "THE WEB: TEAR THE PURPLE SHOTS",
+   "line": "ANY LIT SHOT: 5 TO GO",
    "counters": [
     {
      "label": "STAGE",
@@ -133,7 +132,7 @@
     },
     {
      "label": "WEBS",
-     "sub": "LEFT",
+     "sub": "TO TEAR",
      "value": null
     }
    ],
@@ -148,7 +147,11 @@
     "kind": "diamond",
     "count": 3,
     "color": "#ff7800",
-    "value": null
+    "value": null,
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
    }
   },
   "bar": {
@@ -580,7 +583,7 @@
    {
     "hat": {
      "kind": "shot",
-     "shot": "Shield ramp spinner",
+     "shot": "Big loop",
      "when": "idle"
     },
     "do": [
@@ -615,7 +618,7 @@
       "then": [
        {
         "op": "change",
-        "var": "spins",
+        "var": "loops",
         "by": {
          "k": "num",
          "v": 1
@@ -628,14 +631,14 @@
          "op": ">=",
          "a": {
           "k": "var",
-          "name": "spins"
+          "name": "loops"
          },
          "b": {
           "k": "op",
           "op": "*",
           "a": {
            "k": "num",
-           "v": 40
+           "v": 3
           },
           "b": {
            "k": "op",
@@ -683,7 +686,7 @@
            "op": ">=",
            "a": {
             "k": "var",
-            "name": "spins"
+            "name": "loops"
            },
            "b": {
             "k": "var",
@@ -693,7 +696,7 @@
           "then": [
            {
             "op": "hud_award",
-            "text": "SPIN THE WEB",
+            "text": "SHOOT THE BIG LOOP",
             "value": {
              "k": "op",
              "op": "-",
@@ -702,7 +705,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 40
+               "v": 3
               },
               "b": {
                "k": "op",
@@ -719,11 +722,11 @@
              },
              "b": {
               "k": "var",
-              "name": "spins"
+              "name": "loops"
              }
             },
             "sub": "MORE TO WAKE KUMONGA",
-            "seconds": 2
+            "seconds": 3
            },
            {
             "op": "set",
@@ -733,11 +736,11 @@
              "op": "+",
              "a": {
               "k": "var",
-              "name": "spins"
+              "name": "loops"
              },
              "b": {
               "k": "num",
-              "v": 10
+              "v": 1
              }
             }
            }
@@ -808,7 +811,7 @@
      },
      {
       "op": "set",
-      "var": "spins",
+      "var": "loops",
       "value": {
        "k": "num",
        "v": 0
@@ -919,71 +922,11 @@
       }
      },
      {
-      "op": "set",
-      "var": "regrow ms",
-      "value": {
-       "k": "num",
-       "v": 10000
-      }
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": ">=",
-       "a": {
-        "k": "var",
-        "name": "fought"
-       },
-       "b": {
-        "k": "num",
-        "v": 2
-       }
-      },
-      "then": [
-       {
-        "op": "set",
-        "var": "regrow ms",
-        "value": {
-         "k": "num",
-         "v": 7000
-        }
-       }
-      ],
-      "else": null
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": ">=",
-       "a": {
-        "k": "var",
-        "name": "fought"
-       },
-       "b": {
-        "k": "num",
-        "v": 3
-       }
-      },
-      "then": [
-       {
-        "op": "set",
-        "var": "regrow ms",
-        "value": {
-         "k": "num",
-         "v": 5000
-        }
-       }
-      ],
-      "else": null
-     },
-     {
       "op": "timer_start",
       "timer": "regrow",
       "ms": {
-       "k": "var",
-       "name": "regrow ms"
+       "k": "num",
+       "v": 20000
       }
      },
      {
@@ -1020,8 +963,8 @@
      },
      {
       "op": "hud_text",
-      "which": "line",
-      "text": "THE WEB: TEAR THE PURPLE SHOTS",
+      "which": "title",
+      "text": "KUMONGA: THE WEB",
       "value": null
      },
      {
@@ -1053,38 +996,21 @@
       "label": "WEBS"
      },
      {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "=",
-       "a": {
-        "k": "var",
-        "name": "web l"
-       },
-       "b": {
-        "k": "num",
-        "v": 1
-       }
-      },
-      "then": [
-       {
-        "op": "light_shot",
-        "shot": "Shield target left",
-        "color": "#b040ff",
-        "pattern": "chase",
-        "rate": {
-         "k": "num",
-         "v": 110
-        }
-       }
-      ],
-      "else": [
-       {
-        "op": "lights_off",
-        "shot": "Shield target left"
-       }
-      ]
-     },
+      "op": "timer_start",
+      "timer": "say",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "say"
+    },
+    "do": [
      {
       "op": "if",
       "cond": {
@@ -1092,7 +1018,7 @@
        "op": "=",
        "a": {
         "k": "var",
-        "name": "web c"
+        "name": "stage"
        },
        "b": {
         "k": "num",
@@ -1101,121 +1027,1652 @@
       },
       "then": [
        {
-        "op": "light_shot",
-        "shot": "Powerline center",
-        "color": "#b040ff",
-        "pattern": "chase",
-        "rate": {
-         "k": "num",
-         "v": 110
-        }
-       }
-      ],
-      "else": [
-       {
-        "op": "lights_off",
-        "shot": "Powerline center"
-       }
-      ]
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "=",
-       "a": {
-        "k": "var",
-        "name": "web r"
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "web l"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target left",
+          "color": "#b040ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Shield target left"
+         }
+        ]
        },
-       "b": {
-        "k": "num",
-        "v": 1
-       }
-      },
-      "then": [
        {
-        "op": "light_shot",
-        "shot": "Shield target right",
-        "color": "#b040ff",
-        "pattern": "chase",
-        "rate": {
-         "k": "num",
-         "v": 110
-        }
-       }
-      ],
-      "else": [
-       {
-        "op": "lights_off",
-        "shot": "Shield target right"
-       }
-      ]
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "=",
-       "a": {
-        "k": "var",
-        "name": "web lr"
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "web c"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Powerline center",
+          "color": "#b040ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Powerline center"
+         }
+        ]
        },
-       "b": {
-        "k": "num",
-        "v": 1
-       }
-      },
-      "then": [
        {
-        "op": "light_shot",
-        "shot": "Left ramp",
-        "color": "#b040ff",
-        "pattern": "chase",
-        "rate": {
-         "k": "num",
-         "v": 110
-        }
-       }
-      ],
-      "else": [
-       {
-        "op": "lights_off",
-        "shot": "Left ramp"
-       }
-      ]
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "=",
-       "a": {
-        "k": "var",
-        "name": "web rr"
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "web r"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Shield target right",
+          "color": "#b040ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Shield target right"
+         }
+        ]
        },
-       "b": {
-        "k": "num",
-        "v": 1
-       }
-      },
-      "then": [
        {
-        "op": "light_shot",
-        "shot": "Right ramp",
-        "color": "#b040ff",
-        "pattern": "chase",
-        "rate": {
-         "k": "num",
-         "v": 110
-        }
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "web lr"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Left ramp",
+          "color": "#b040ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Left ramp"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "web rr"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Right ramp",
+          "color": "#b040ff",
+          "pattern": "chase",
+          "rate": {
+           "k": "num",
+           "v": 110
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "lights_off",
+          "shot": "Right ramp"
+         }
+        ]
+       },
+       {
+        "op": "hud_counter",
+        "counter": 3,
+        "value": {
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "var",
+             "name": "web l"
+            },
+            "b": {
+             "k": "var",
+             "name": "web c"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web r"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "web lr"
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "web rr"
+         }
+        },
+        "sub": "TO TEAR"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "var",
+              "name": "web c"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web r"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web lr"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "web rr"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "ANY LIT SHOT: 3 TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "var",
+              "name": "web c"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web r"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web lr"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "web rr"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "ANY LIT SHOT: 4 TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "var",
+              "name": "web c"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web r"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web lr"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "web rr"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 5
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "ANY LIT SHOT: 5 TO GO",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "var",
+              "name": "web c"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web r"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web lr"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "web rr"
+          }
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "THE WEB IS TORN",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "var",
+               "name": "web l"
+              },
+              "b": {
+               "k": "var",
+               "name": "web c"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web r"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web lr"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web rr"
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web l"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT SHIELD",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "var",
+               "name": "web l"
+              },
+              "b": {
+               "k": "var",
+               "name": "web c"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web r"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web lr"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web rr"
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web c"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE CENTER POWERLINE",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "var",
+               "name": "web l"
+              },
+              "b": {
+               "k": "var",
+               "name": "web c"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web r"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web lr"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web rr"
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web r"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE RIGHT SHIELD",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "var",
+               "name": "web l"
+              },
+              "b": {
+               "k": "var",
+               "name": "web c"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web r"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web lr"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web rr"
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web lr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "var",
+               "name": "web l"
+              },
+              "b": {
+               "k": "var",
+               "name": "web c"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web r"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web lr"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web rr"
+           }
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web rr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE RIGHT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web l"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web c"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT LEFT SHIELD AND CENTER POWERLINE",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web l"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web r"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT SHIELD AND RIGHT SHIELD",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web l"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web lr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT SHIELD AND LEFT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web l"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web rr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT SHIELD AND RIGHT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web c"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web r"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT CENTER POWERLINE AND RIGHT SHIELD",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web c"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web lr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE CENTER POWERLINE AND LEFT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web c"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web rr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT CENTER POWERLINE AND RIGHT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web r"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web lr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE RIGHT SHIELD AND LEFT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web r"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web rr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE RIGHT SHIELD AND RIGHT RAMP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "and",
+         "a": {
+          "k": "and",
+          "a": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "web l"
+               },
+               "b": {
+                "k": "var",
+                "name": "web c"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web r"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web lr"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web rr"
+            }
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "b": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "web lr"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "web rr"
+          },
+          "b": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT BOTH RAMPS",
+          "value": null
+         }
+        ],
+        "else": null
        }
       ],
-      "else": [
-       {
-        "op": "lights_off",
-        "shot": "Right ramp"
-       }
-      ]
+      "else": null
      }
     ]
    },
@@ -1592,6 +3049,14 @@
       }
      },
      {
+      "op": "set_time",
+      "seconds": {
+       "k": "num",
+       "v": 15
+      },
+      "at_least": true
+     },
+     {
       "op": "change",
       "var": "pot",
       "by": {
@@ -1633,47 +3098,6 @@
       "sub": "CASH AT SCOOP"
      },
      {
-      "op": "hud_counter",
-      "counter": 3,
-      "value": {
-       "k": "op",
-       "op": "+",
-       "a": {
-        "k": "op",
-        "op": "+",
-        "a": {
-         "k": "op",
-         "op": "+",
-         "a": {
-          "k": "op",
-          "op": "+",
-          "a": {
-           "k": "var",
-           "name": "web l"
-          },
-          "b": {
-           "k": "var",
-           "name": "web c"
-          }
-         },
-         "b": {
-          "k": "var",
-          "name": "web r"
-         }
-        },
-        "b": {
-         "k": "var",
-         "name": "web lr"
-        }
-       },
-       "b": {
-        "k": "var",
-        "name": "web rr"
-       }
-      },
-      "sub": "TO TEAR"
-     },
-     {
       "op": "clip",
       "clip": "tear",
       "where": "behind"
@@ -1695,6 +3119,14 @@
        "v": 250
       },
       "strength": "medium"
+     },
+     {
+      "op": "timer_start",
+      "timer": "say",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
      },
      {
       "op": "if",
@@ -1750,8 +3182,8 @@
          "k": "var",
          "name": "pot"
         },
-        "sub": "POT",
-        "seconds": 2
+        "sub": "POT: CASH AT RIGHT SCOOP",
+        "seconds": 3
        },
        {
         "op": "timer_start",
@@ -1764,11 +3196,10 @@
       ],
       "else": [
        {
-        "op": "hud_award",
-        "text": "WEB TORN",
-        "value": {
-         "k": "op",
-         "op": "+",
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
          "a": {
           "k": "op",
           "op": "+",
@@ -1779,31 +3210,1313 @@
             "k": "op",
             "op": "+",
             "a": {
-             "k": "var",
-             "name": "web l"
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "var",
+              "name": "web c"
+             }
             },
             "b": {
              "k": "var",
-             "name": "web c"
+             "name": "web r"
             }
            },
            "b": {
             "k": "var",
-            "name": "web r"
+            "name": "web lr"
            }
           },
           "b": {
            "k": "var",
-           "name": "web lr"
+           "name": "web rr"
           }
          },
          "b": {
-          "k": "var",
-          "name": "web rr"
+          "k": "num",
+          "v": 3
          }
         },
-        "sub": "LEFT",
-        "seconds": 2
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "WEB TORN",
+          "value": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "var",
+               "name": "web l"
+              },
+              "b": {
+               "k": "var",
+               "name": "web c"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web r"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web lr"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web rr"
+           }
+          },
+          "sub": "MORE TO TEAR",
+          "seconds": 3
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "var",
+                 "name": "web l"
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web c"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web r"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web lr"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web rr"
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web l"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW THE LEFT SHIELD",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "var",
+                 "name": "web l"
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web c"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web r"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web lr"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web rr"
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web c"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW THE CENTER POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "var",
+                 "name": "web l"
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web c"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web r"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web lr"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web rr"
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web r"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW THE RIGHT SHIELD",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "var",
+                 "name": "web l"
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web c"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web r"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web lr"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web rr"
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web lr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW THE LEFT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "var",
+                 "name": "web l"
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web c"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web r"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web lr"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web rr"
+             }
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web rr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW THE RIGHT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web c"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW LEFT SHIELD AND CENTER POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web r"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW LEFT SHIELD AND RIGHT SHIELD",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web lr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW LEFT SHIELD AND LEFT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web rr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW LEFT SHIELD AND RIGHT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web c"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web r"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW CENTER POWERLINE, RIGHT SHIELD",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web c"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web lr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW CENTER POWERLINE AND LEFT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web c"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web rr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW CENTER POWERLINE AND RIGHT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web r"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web lr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW RIGHT SHIELD AND LEFT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web r"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web rr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW RIGHT SHIELD AND RIGHT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "web l"
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web c"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web r"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web lr"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web rr"
+              }
+             },
+             "b": {
+              "k": "num",
+              "v": 2
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "web lr"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "web rr"
+            },
+            "b": {
+             "k": "num",
+             "v": 1
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WEB TORN",
+            "value": null,
+            "sub": "NOW LEFT RAMP AND RIGHT RAMP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         }
+        ]
        }
       ]
      }
@@ -1834,27 +4547,49 @@
         "op": "if",
         "cond": {
          "k": "cmp",
-         "op": "=",
+         "op": "<",
          "a": {
-          "k": "var",
-          "name": "web l"
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "op",
+            "op": "+",
+            "a": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "web l"
+             },
+             "b": {
+              "k": "var",
+              "name": "web c"
+             }
+            },
+            "b": {
+             "k": "var",
+             "name": "web r"
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "web lr"
+           }
+          },
+          "b": {
+           "k": "var",
+           "name": "web rr"
+          }
          },
          "b": {
           "k": "num",
-          "v": 0
+          "v": 5
          }
         },
         "then": [
-         {
-          "op": "set",
-          "var": "web l",
-          "value": {
-           "k": "num",
-           "v": 1
-          }
-         }
-        ],
-        "else": [
          {
           "op": "if",
           "cond": {
@@ -1862,7 +4597,7 @@
            "op": "=",
            "a": {
             "k": "var",
-            "name": "web c"
+            "name": "web l"
            },
            "b": {
             "k": "num",
@@ -1872,11 +4607,53 @@
           "then": [
            {
             "op": "set",
-            "var": "web c",
+            "var": "web l",
             "value": {
              "k": "num",
              "v": 1
             }
+           },
+           {
+            "op": "hud_award",
+            "text": "KUMONGA WEBS AGAIN",
+            "value": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "var",
+                 "name": "web l"
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web c"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web r"
+               }
+              },
+              "b": {
+               "k": "var",
+               "name": "web lr"
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "web rr"
+             }
+            },
+            "sub": "AT THE LEFT SHIELD",
+            "seconds": 3
            }
           ],
           "else": [
@@ -1887,7 +4664,7 @@
              "op": "=",
              "a": {
               "k": "var",
-              "name": "web r"
+              "name": "web c"
              },
              "b": {
               "k": "num",
@@ -1897,11 +4674,53 @@
             "then": [
              {
               "op": "set",
-              "var": "web r",
+              "var": "web c",
               "value": {
                "k": "num",
                "v": 1
               }
+             },
+             {
+              "op": "hud_award",
+              "text": "KUMONGA WEBS AGAIN",
+              "value": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "op",
+                  "op": "+",
+                  "a": {
+                   "k": "var",
+                   "name": "web l"
+                  },
+                  "b": {
+                   "k": "var",
+                   "name": "web c"
+                  }
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web r"
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "web lr"
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "web rr"
+               }
+              },
+              "sub": "AT THE CENTER POWERLINE",
+              "seconds": 3
              }
             ],
             "else": [
@@ -1912,7 +4731,7 @@
                "op": "=",
                "a": {
                 "k": "var",
-                "name": "web lr"
+                "name": "web r"
                },
                "b": {
                 "k": "num",
@@ -1922,11 +4741,53 @@
               "then": [
                {
                 "op": "set",
-                "var": "web lr",
+                "var": "web r",
                 "value": {
                  "k": "num",
                  "v": 1
                 }
+               },
+               {
+                "op": "hud_award",
+                "text": "KUMONGA WEBS AGAIN",
+                "value": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "op",
+                  "op": "+",
+                  "a": {
+                   "k": "op",
+                   "op": "+",
+                   "a": {
+                    "k": "op",
+                    "op": "+",
+                    "a": {
+                     "k": "var",
+                     "name": "web l"
+                    },
+                    "b": {
+                     "k": "var",
+                     "name": "web c"
+                    }
+                   },
+                   "b": {
+                    "k": "var",
+                    "name": "web r"
+                   }
+                  },
+                  "b": {
+                   "k": "var",
+                   "name": "web lr"
+                  }
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "web rr"
+                 }
+                },
+                "sub": "AT THE RIGHT SHIELD",
+                "seconds": 3
                }
               ],
               "else": [
@@ -1937,7 +4798,7 @@
                  "op": "=",
                  "a": {
                   "k": "var",
-                  "name": "web rr"
+                  "name": "web lr"
                  },
                  "b": {
                   "k": "num",
@@ -1947,292 +4808,164 @@
                 "then": [
                  {
                   "op": "set",
-                  "var": "web rr",
+                  "var": "web lr",
                   "value": {
                    "k": "num",
                    "v": 1
                   }
+                 },
+                 {
+                  "op": "hud_award",
+                  "text": "KUMONGA WEBS AGAIN",
+                  "value": {
+                   "k": "op",
+                   "op": "+",
+                   "a": {
+                    "k": "op",
+                    "op": "+",
+                    "a": {
+                     "k": "op",
+                     "op": "+",
+                     "a": {
+                      "k": "op",
+                      "op": "+",
+                      "a": {
+                       "k": "var",
+                       "name": "web l"
+                      },
+                      "b": {
+                       "k": "var",
+                       "name": "web c"
+                      }
+                     },
+                     "b": {
+                      "k": "var",
+                      "name": "web r"
+                     }
+                    },
+                    "b": {
+                     "k": "var",
+                     "name": "web lr"
+                    }
+                   },
+                   "b": {
+                    "k": "var",
+                    "name": "web rr"
+                   }
+                  },
+                  "sub": "AT THE LEFT RAMP",
+                  "seconds": 3
                  }
                 ],
-                "else": null
+                "else": [
+                 {
+                  "op": "if",
+                  "cond": {
+                   "k": "cmp",
+                   "op": "=",
+                   "a": {
+                    "k": "var",
+                    "name": "web rr"
+                   },
+                   "b": {
+                    "k": "num",
+                    "v": 0
+                   }
+                  },
+                  "then": [
+                   {
+                    "op": "set",
+                    "var": "web rr",
+                    "value": {
+                     "k": "num",
+                     "v": 1
+                    }
+                   },
+                   {
+                    "op": "hud_award",
+                    "text": "KUMONGA WEBS AGAIN",
+                    "value": {
+                     "k": "op",
+                     "op": "+",
+                     "a": {
+                      "k": "op",
+                      "op": "+",
+                      "a": {
+                       "k": "op",
+                       "op": "+",
+                       "a": {
+                        "k": "op",
+                        "op": "+",
+                        "a": {
+                         "k": "var",
+                         "name": "web l"
+                        },
+                        "b": {
+                         "k": "var",
+                         "name": "web c"
+                        }
+                       },
+                       "b": {
+                        "k": "var",
+                        "name": "web r"
+                       }
+                      },
+                      "b": {
+                       "k": "var",
+                       "name": "web lr"
+                      }
+                     },
+                     "b": {
+                      "k": "var",
+                      "name": "web rr"
+                     }
+                    },
+                    "sub": "AT THE RIGHT RAMP",
+                    "seconds": 3
+                   }
+                  ],
+                  "else": null
+                 }
+                ]
                }
               ]
              }
             ]
            }
           ]
-         }
-        ]
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "web l"
          },
-         "b": {
-          "k": "num",
-          "v": 1
-         }
-        },
-        "then": [
          {
-          "op": "light_shot",
-          "shot": "Shield target left",
-          "color": "#b040ff",
-          "pattern": "chase",
-          "rate": {
+          "op": "timer_start",
+          "timer": "say",
+          "ms": {
            "k": "num",
-           "v": 110
+           "v": 1
           }
+         },
+         {
+          "op": "clip",
+          "clip": "web",
+          "where": "behind"
+         },
+         {
+          "op": "sound",
+          "sound": "web",
+          "fallback": ""
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Web"
          }
         ],
-        "else": [
-         {
-          "op": "lights_off",
-          "shot": "Shield target left"
-         }
-        ]
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "web c"
-         },
-         "b": {
-          "k": "num",
-          "v": 1
-         }
-        },
-        "then": [
-         {
-          "op": "light_shot",
-          "shot": "Powerline center",
-          "color": "#b040ff",
-          "pattern": "chase",
-          "rate": {
-           "k": "num",
-           "v": 110
-          }
-         }
-        ],
-        "else": [
-         {
-          "op": "lights_off",
-          "shot": "Powerline center"
-         }
-        ]
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "web r"
-         },
-         "b": {
-          "k": "num",
-          "v": 1
-         }
-        },
-        "then": [
-         {
-          "op": "light_shot",
-          "shot": "Shield target right",
-          "color": "#b040ff",
-          "pattern": "chase",
-          "rate": {
-           "k": "num",
-           "v": 110
-          }
-         }
-        ],
-        "else": [
-         {
-          "op": "lights_off",
-          "shot": "Shield target right"
-         }
-        ]
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "web lr"
-         },
-         "b": {
-          "k": "num",
-          "v": 1
-         }
-        },
-        "then": [
-         {
-          "op": "light_shot",
-          "shot": "Left ramp",
-          "color": "#b040ff",
-          "pattern": "chase",
-          "rate": {
-           "k": "num",
-           "v": 110
-          }
-         }
-        ],
-        "else": [
-         {
-          "op": "lights_off",
-          "shot": "Left ramp"
-         }
-        ]
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "web rr"
-         },
-         "b": {
-          "k": "num",
-          "v": 1
-         }
-        },
-        "then": [
-         {
-          "op": "light_shot",
-          "shot": "Right ramp",
-          "color": "#b040ff",
-          "pattern": "chase",
-          "rate": {
-           "k": "num",
-           "v": 110
-          }
-         }
-        ],
-        "else": [
-         {
-          "op": "lights_off",
-          "shot": "Right ramp"
-         }
-        ]
-       },
-       {
-        "op": "hud_counter",
-        "counter": 3,
-        "value": {
-         "k": "op",
-         "op": "+",
-         "a": {
-          "k": "op",
-          "op": "+",
-          "a": {
-           "k": "op",
-           "op": "+",
-           "a": {
-            "k": "op",
-            "op": "+",
-            "a": {
-             "k": "var",
-             "name": "web l"
-            },
-            "b": {
-             "k": "var",
-             "name": "web c"
-            }
-           },
-           "b": {
-            "k": "var",
-            "name": "web r"
-           }
-          },
-          "b": {
-           "k": "var",
-           "name": "web lr"
-          }
-         },
-         "b": {
-          "k": "var",
-          "name": "web rr"
-         }
-        },
-        "sub": "TO TEAR"
-       },
-       {
-        "op": "clip",
-        "clip": "web",
-        "where": "behind"
-       },
-       {
-        "op": "sound",
-        "sound": "web",
-        "fallback": ""
-       },
-       {
-        "op": "show",
-        "show": "mine",
-        "name": "Web"
-       },
-       {
-        "op": "hud_award",
-        "text": "KUMONGA WEBS AGAIN",
-        "value": {
-         "k": "op",
-         "op": "+",
-         "a": {
-          "k": "op",
-          "op": "+",
-          "a": {
-           "k": "op",
-           "op": "+",
-           "a": {
-            "k": "op",
-            "op": "+",
-            "a": {
-             "k": "var",
-             "name": "web l"
-            },
-            "b": {
-             "k": "var",
-             "name": "web c"
-            }
-           },
-           "b": {
-            "k": "var",
-            "name": "web r"
-           }
-          },
-          "b": {
-           "k": "var",
-           "name": "web lr"
-          }
-         },
-         "b": {
-          "k": "var",
-          "name": "web rr"
-         }
-        },
-        "sub": "LEFT",
-        "seconds": 2
+        "else": null
        },
        {
         "op": "timer_start",
         "timer": "regrow",
         "ms": {
-         "k": "var",
-         "name": "regrow ms"
+         "k": "num",
+         "v": 20000
         }
        }
       ],
@@ -2335,6 +5068,14 @@
           "sub": "CASH AT SCOOP"
          },
          {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 15
+          },
+          "at_least": true
+         },
+         {
           "op": "sound",
           "sound": "tear",
           "fallback": ""
@@ -2351,8 +5092,8 @@
            "k": "var",
            "name": "strands"
           },
-          "sub": "LEFT",
-          "seconds": 2
+          "sub": "MORE TO CUT",
+          "seconds": 3
          }
         ],
         "else": null
@@ -2379,8 +5120,8 @@
            "k": "var",
            "name": "pot"
           },
-          "sub": "POT",
-          "seconds": 2
+          "sub": "POT: CASH AT RIGHT SCOOP",
+          "seconds": 3
          },
          {
           "op": "clip",
@@ -2498,6 +5239,14 @@
           "sub": "CASH AT SCOOP"
          },
          {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 15
+          },
+          "at_least": true
+         },
+         {
           "op": "sound",
           "sound": "tear",
           "fallback": ""
@@ -2514,8 +5263,8 @@
            "k": "var",
            "name": "strands"
           },
-          "sub": "LEFT",
-          "seconds": 2
+          "sub": "MORE TO CUT",
+          "seconds": 3
          }
         ],
         "else": null
@@ -2542,8 +5291,8 @@
            "k": "var",
            "name": "pot"
           },
-          "sub": "POT",
-          "seconds": 2
+          "sub": "POT: CASH AT RIGHT SCOOP",
+          "seconds": 3
          },
          {
           "op": "clip",
@@ -2661,6 +5410,14 @@
           "sub": "CASH AT SCOOP"
          },
          {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 15
+          },
+          "at_least": true
+         },
+         {
           "op": "sound",
           "sound": "tear",
           "fallback": ""
@@ -2677,8 +5434,8 @@
            "k": "var",
            "name": "strands"
           },
-          "sub": "LEFT",
-          "seconds": 2
+          "sub": "MORE TO CUT",
+          "seconds": 3
          }
         ],
         "else": null
@@ -2705,8 +5462,8 @@
            "k": "var",
            "name": "pot"
           },
-          "sub": "POT",
-          "seconds": 2
+          "sub": "POT: CASH AT RIGHT SCOOP",
+          "seconds": 3
          },
          {
           "op": "clip",
@@ -2834,6 +5591,14 @@
         }
        },
        {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
         "op": "clip",
         "clip": "sting",
         "where": "behind"
@@ -2864,7 +5629,7 @@
          "name": "sting"
         },
         "sub": "INTO THE POT",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "timer_start",
@@ -2906,7 +5671,7 @@
         "timer": "fire",
         "ms": {
          "k": "num",
-         "v": 8000
+         "v": 20000
         }
        },
        {
@@ -2917,6 +5682,14 @@
         }
        },
        {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
         "op": "sound",
         "sound": "burn",
         "fallback": ""
@@ -2925,18 +5698,24 @@
         "op": "light_shot",
         "shot": "Right ramp",
         "color": "#ffb000",
-        "pattern": "blink",
+        "pattern": "chase",
         "rate": {
          "k": "num",
          "v": 100
         }
        },
        {
+        "op": "hud_text",
+        "which": "line",
+        "text": "NOW SHOOT THE RIGHT RAMP",
+        "value": null
+       },
+       {
         "op": "hud_award",
         "text": "GODZILLA FIRES",
         "value": null,
         "sub": "NOW MINILLA: THE RIGHT RAMP",
-        "seconds": 2
+        "seconds": 3
        }
       ],
       "else": null
@@ -2988,6 +5767,20 @@
        "k": "num",
        "v": 3000000
       }
+     },
+     {
+      "op": "set_time",
+      "seconds": {
+       "k": "num",
+       "v": 15
+      },
+      "at_least": true
+     },
+     {
+      "op": "hud_text",
+      "which": "line",
+      "text": "SHOOT THE BUILDING, THEN THE RIGHT RAMP",
+      "value": null
      },
      {
       "op": "hud_counter",
@@ -3119,8 +5912,8 @@
          "k": "var",
          "name": "burns"
         },
-        "sub": "OF 3",
-        "seconds": 2
+        "sub": "OF 3: NOW THE BUILDING",
+        "seconds": 3
        }
       ]
      }
@@ -3135,6 +5928,30 @@
      {
       "op": "lights_off",
       "shot": "Right ramp"
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 4
+       }
+      },
+      "then": [
+       {
+        "op": "hud_text",
+        "which": "line",
+        "text": "SHOOT THE BUILDING, THEN THE RIGHT RAMP",
+        "value": null
+       }
+      ],
+      "else": null
      }
     ]
    },
@@ -3170,13 +5987,6 @@
         "by": {
          "k": "num",
          "v": 1
-        }
-       },
-       {
-        "op": "set_time",
-        "seconds": {
-         "k": "num",
-         "v": 45
         }
        },
        {
@@ -3263,8 +6073,14 @@
         "then": [
          {
           "op": "hud_text",
+          "which": "title",
+          "text": "KUMONGA: STRANDS",
+          "value": null
+         },
+         {
+          "op": "hud_text",
           "which": "line",
-          "text": "STRANDS: SPIN EVERY SPINNER",
+          "text": "SPIN ANY SPINNER TO CUT THE STRANDS",
           "value": null
          },
          {
@@ -3283,6 +6099,13 @@
          {
           "op": "timer_stop",
           "timer": "regrow"
+         },
+         {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 45
+          }
          },
          {
           "op": "set",
@@ -3385,6 +6208,16 @@
            "k": "num",
            "v": 200
           }
+         },
+         {
+          "op": "light_shot",
+          "insert": "TOP SPINNER",
+          "color": "#ffffff",
+          "pattern": "blink",
+          "rate": {
+           "k": "num",
+           "v": 200
+          }
          }
         ],
         "else": null
@@ -3406,8 +6239,14 @@
         "then": [
          {
           "op": "hud_text",
+          "which": "title",
+          "text": "KUMONGA: THE STING",
+          "value": null
+         },
+         {
+          "op": "hud_text",
           "which": "line",
-          "text": "THE STING: SHOOT THE BIG LOOP",
+          "text": "SHOOT THE BIG LOOP",
           "value": null
          },
          {
@@ -3438,6 +6277,13 @@
           "label": "STING"
          },
          {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 45
+          }
+         },
+         {
           "op": "lights_off",
           "shot": "Left spinner"
          },
@@ -3452,6 +6298,10 @@
          {
           "op": "lights_off",
           "insert": "LEFT SPINNER"
+         },
+         {
+          "op": "lights_off",
+          "insert": "TOP SPINNER"
          },
          {
           "op": "light_shot",
@@ -3479,8 +6329,14 @@
         "then": [
          {
           "op": "hud_text",
+          "which": "title",
+          "text": "KUMONGA: FIRE",
+          "value": null
+         },
+         {
+          "op": "hud_text",
           "which": "line",
-          "text": "FIRE: BUILDING, THEN RIGHT RAMP",
+          "text": "SHOOT THE BUILDING, THEN THE RIGHT RAMP",
           "value": null
          },
          {
@@ -3505,6 +6361,13 @@
           },
           "sub": "OF 3",
           "label": "BURNS"
+         },
+         {
+          "op": "set_time",
+          "seconds": {
+           "k": "num",
+           "v": 50
+          }
          },
          {
           "op": "light_shot",
@@ -3639,10 +6502,28 @@
       "role": "ten_seconds"
      },
      {
-      "op": "light_shot",
-      "shot": "Right scoop",
-      "color": "#ffffff",
-      "pattern": "hurry"
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": ">=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
+        "op": "light_shot",
+        "shot": "Right scoop",
+        "color": "#ffffff",
+        "pattern": "hurry"
+       }
+      ],
+      "else": null
      }
     ]
    },
@@ -3678,6 +6559,10 @@
      {
       "op": "timer_stop",
       "timer": "fire"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "say"
      },
      {
       "op": "if",

@@ -205,8 +205,12 @@ def add_time(seconds):
     return {"op": "add_time", "seconds": _v(seconds)}
 
 
-def set_time(seconds):
-    return {"op": "set_time", "seconds": _v(seconds)}
+def set_time(seconds, at_least=False):
+    """Set the clock; ``at_least``: Keep at least ``seconds`` on it (up to it when under, else left alone)."""
+    b = {"op": "set_time", "seconds": _v(seconds)}
+    if at_least:
+        b["at_least"] = True
+    return b
 
 
 def multiball(balls, save=0):

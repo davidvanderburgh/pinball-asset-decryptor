@@ -11,16 +11,23 @@
   "godzilla_pro": {
    "shots": {
     "Shield target center": "Maser target"
+   },
+   "words": {
+    "SHOOT THE CENTER OR RIGHT SHIELD": "SHOOT THE MASER OR RIGHT SHIELD",
+    "SHOOT THE CENTER SHIELD": "SHOOT THE MASER TARGET",
+    "SHOOT THE LEFT OR CENTER SHIELD": "SHOOT THE LEFT SHIELD OR MASER",
+    "SPIRAL GRENADES: THE SHIELDS": "SPIRAL GRENADES: SHIELDS AND MASER"
    }
   }
  },
- "about": "The C example SPACEGODZILLA rebuilt in blocks and taken deeper (PAD-658): powerline hits light the locks (one a lock the first time, two the second, three the third), three crystals planted at the Big loop start a 3-ball multiball in three stages: CRYSTAL TOWERS (the ramps and the Building, a super at the Big loop), M.O.G.U.E.R.A. (the shoulder crystals at the shields, every hit a spiral grenade raising the jackpots, the super twice its sum at the Godzilla target) and SPACE BEAST (his own music, the powerlines cut, FUKUOKA TOWER at the Building: three times the sum and every super before). Each super adds a ball. On a Pro the Maser target is the centre shoulder crystal.",
+ "about": "The C example SPACEGODZILLA rebuilt in blocks and taken deeper (PAD-658): Right ramps plant the crystals (one a crystal the first time, two the second, three the third), and three crystals start a 3-ball multiball in three stages: CRYSTAL TOWERS (the ramps and the Building, a super at the Big loop), M.O.G.U.E.R.A. (the shoulder crystals at the shields, every hit a spiral grenade raising the jackpots, the super twice its sum at the Godzilla target) and SPACE BEAST (his own music, the powerlines cut, FUKUOKA TOWER at the Building: three times the sum and every super before). Each super adds a ball. On a Pro the Maser target is the centre shoulder crystal.",
  "lost": [
   "No points while the mode is not running: the C pays 250,000 a crystal times its number (250,000, 500,000, 750,000) as it is planted; the blocks' Score only scores while the mode runs.",
-  "A lit lock does not blink the Big loop purple: the blocks light inserts only while the mode runs, and a mode lit at a shot starts on it, so only the full set (three crystals, waiting for the game's mode to end) chases there; the notes say LOCK IS LIT and SHOOT THE BIG LOOP.",
+  "The crystals are planted at the Right ramp, not locked at the Big loop after the powerlines light a lock (PAD-658: the powerlines are KING GHIDORAH's start, the Big loop KUMONGA's): no lock is lit, and only the full set (three crystals, waiting for the game's mode to end) chases purple at the Right ramp.",
   "No badge for the super's 20 s window: the badge counts the mode's own clock, and this multiball has none, so the window shows as the line (SUPER JACKPOT: THE BIG LOOP) and its shot chasing white, blinking fast in its last 6 s (looked at once a second).",
   "The super's added ball is asked as a multiball of one more ball than are in play (the blocks have no add-a-ball block), with its 10 s ball save.",
-  "Another mode of ours running does not stop the powerlines lighting locks or the Big loop planting crystals (the blocks cannot tell one of our other modes runs; the C waits for it). A multiball still stops them.",
+  "Another mode of ours running does not stop the Right ramp planting crystals (the blocks cannot tell one of our other modes runs; the C waits for it). A multiball still stops it.",
+  "SpaceGodzilla arrives 3 s after the third crystal (PAD-658: its note is read first), where the C took 1.5 s.",
   "The ending's line says how it ended (EVERY SUPER AGAIN after the finale, CRYSTAL SHARDS: HALF THE SUM otherwise) where the C counted 7 JACKPOTS  -  1 SUPER.",
   "The ending stays up 3 s, the runtime's: the C kept it 10 s.",
   "No light show of its own at the start and the end where the game has none (the C falls back on its own when the game's Strobe storm or Blue fade will not play): the blocks play the game's (and the mode's own shows beside).",
@@ -45,11 +52,7 @@
     "reset": "game"
    },
    {
-    "name": "lit",
-    "reset": "game"
-   },
-   {
-    "name": "line hits",
+    "name": "ramp hits",
     "reset": "game"
    },
    {
@@ -123,7 +126,7 @@
   ],
   "timers": [
    {
-    "name": "line"
+    "name": "ramp"
    },
    {
     "name": "arrive"
@@ -142,18 +145,37 @@
    },
    {
     "name": "super"
+   },
+   {
+    "name": "announce"
    }
   ],
   "hud": {
    "on": true,
-   "line": "TOPPLE THE CRYSTAL TOWERS",
+   "line": "TOPPLE THE TOWERS: RAMPS AND BUILDING",
    "counters": [
     {
      "label": "TOWERS",
-     "sub": "STANDING",
+     "sub": "HITS TO GO",
      "value": {
-      "k": "var",
-      "name": "standing"
+      "k": "op",
+      "op": "+",
+      "a": {
+       "k": "op",
+       "op": "+",
+       "a": {
+        "k": "var",
+        "name": "hp1"
+       },
+       "b": {
+        "k": "var",
+        "name": "hp2"
+       }
+      },
+      "b": {
+       "k": "var",
+       "name": "hp3"
+      }
      }
     },
     {
@@ -219,7 +241,11 @@
       "k": "var",
       "name": "hp3"
      }
-    }
+    },
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
    }
   },
   "bar": {
@@ -783,246 +809,7 @@
    {
     "hat": {
      "kind": "shot",
-     "shot": "Powerline left",
-     "when": "idle"
-    },
-    "do": [
-     {
-      "op": "timer_start",
-      "timer": "line",
-      "ms": {
-       "k": "num",
-       "v": 1
-      }
-     }
-    ]
-   },
-   {
-    "hat": {
-     "kind": "shot",
-     "shot": "Powerline center",
-     "when": "idle"
-    },
-    "do": [
-     {
-      "op": "timer_start",
-      "timer": "line",
-      "ms": {
-       "k": "num",
-       "v": 1
-      }
-     }
-    ]
-   },
-   {
-    "hat": {
-     "kind": "shot",
-     "shot": "Powerline right",
-     "when": "idle"
-    },
-    "do": [
-     {
-      "op": "timer_start",
-      "timer": "line",
-      "ms": {
-       "k": "num",
-       "v": 1
-      }
-     }
-    ]
-   },
-   {
-    "hat": {
-     "kind": "timer_done",
-     "timer": "line"
-    },
-    "do": [
-     {
-      "op": "if",
-      "cond": {
-       "k": "and",
-       "a": {
-        "k": "and",
-        "a": {
-         "k": "not",
-         "a": {
-          "k": "running"
-         }
-        },
-        "b": {
-         "k": "cmp",
-         "op": "<",
-         "a": {
-          "k": "balls"
-         },
-         "b": {
-          "k": "num",
-          "v": 2
-         }
-        }
-       },
-       "b": {
-        "k": "cmp",
-        "op": "<",
-        "a": {
-         "k": "op",
-         "op": "+",
-         "a": {
-          "k": "var",
-          "name": "crystals"
-         },
-         "b": {
-          "k": "var",
-          "name": "lit"
-         }
-        },
-        "b": {
-         "k": "num",
-         "v": 3
-        }
-       }
-      },
-      "then": [
-       {
-        "op": "change",
-        "var": "line hits",
-        "by": {
-         "k": "num",
-         "v": 1
-        }
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": ">=",
-         "a": {
-          "k": "var",
-          "name": "line hits"
-         },
-         "b": {
-          "k": "op",
-          "op": "*",
-          "a": {
-           "k": "num",
-           "v": 1
-          },
-          "b": {
-           "k": "op",
-           "op": "+",
-           "a": {
-            "k": "var",
-            "name": "plays"
-           },
-           "b": {
-            "k": "num",
-            "v": 1
-           }
-          }
-         }
-        },
-        "then": [
-         {
-          "op": "set",
-          "var": "line hits",
-          "value": {
-           "k": "num",
-           "v": 0
-          }
-         },
-         {
-          "op": "change",
-          "var": "lit",
-          "by": {
-           "k": "num",
-           "v": 1
-          }
-         },
-         {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": ">",
-           "a": {
-            "k": "var",
-            "name": "lit"
-           },
-           "b": {
-            "k": "num",
-            "v": 1
-           }
-          },
-          "then": [
-           {
-            "op": "hud_award",
-            "text": "LOCKS ARE LIT",
-            "value": null,
-            "sub": "SHOOT THE BIG LOOP",
-            "seconds": 2
-           }
-          ],
-          "else": [
-           {
-            "op": "hud_award",
-            "text": "LOCK IS LIT",
-            "value": null,
-            "sub": "SHOOT THE BIG LOOP",
-            "seconds": 2
-           }
-          ]
-         },
-         {
-          "op": "sound",
-          "sound": "lit",
-          "fallback": ""
-         }
-        ],
-        "else": [
-         {
-          "op": "hud_award",
-          "text": "CRYSTALS GROWING",
-          "value": {
-           "k": "op",
-           "op": "-",
-           "a": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 1
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
-             "a": {
-              "k": "var",
-              "name": "plays"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
-           },
-           "b": {
-            "k": "var",
-            "name": "line hits"
-           }
-          },
-          "sub": "MORE TO LIGHT A LOCK",
-          "seconds": 2
-         }
-        ]
-       }
-      ],
-      "else": null
-     }
-    ]
-   },
-   {
-    "hat": {
-     "kind": "shot",
-     "shot": "Big loop",
+     "shot": "Right ramp",
      "when": "idle"
     },
     "do": [
@@ -1061,182 +848,251 @@
         ],
         "else": [
          {
-          "op": "if",
-          "cond": {
-           "k": "cmp",
-           "op": ">",
+          "op": "timer_start",
+          "timer": "ramp",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "ramp"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "and",
+        "a": {
+         "k": "not",
+         "a": {
+          "k": "running"
+         }
+        },
+        "b": {
+         "k": "cmp",
+         "op": "<",
+         "a": {
+          "k": "balls"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        }
+       },
+       "b": {
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "var",
+         "name": "crystals"
+        },
+        "b": {
+         "k": "num",
+         "v": 3
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "change",
+        "var": "ramp hits",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "ramp hits"
+         },
+         "b": {
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 1
+          },
+          "b": {
+           "k": "op",
+           "op": "+",
            "a": {
             "k": "var",
-            "name": "lit"
+            "name": "plays"
            },
            "b": {
             "k": "num",
-            "v": 0
+            "v": 1
+           }
+          }
+         }
+        },
+        "then": [
+         {
+          "op": "set",
+          "var": "ramp hits",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "change",
+          "var": "crystals",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "sound",
+          "sound": "lock",
+          "fallback": ""
+         },
+         {
+          "op": "show",
+          "show": "mine",
+          "name": "Crystal"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "crystals"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
            }
           },
           "then": [
            {
-            "op": "change",
-            "var": "lit",
-            "by": {
-             "k": "num",
-             "v": -1
-            }
-           },
-           {
-            "op": "change",
-            "var": "crystals",
-            "by": {
+            "op": "set",
+            "var": "ready",
+            "value": {
              "k": "num",
              "v": 1
             }
            },
            {
-            "op": "sound",
-            "sound": "lock",
-            "fallback": ""
+            "op": "light_mode",
+            "shot": "Right ramp",
+            "color": "#be28ff",
+            "pattern": "chase",
+            "insert": ""
            },
            {
-            "op": "show",
-            "show": "mine",
-            "name": "Crystal"
+            "op": "hud_award",
+            "text": "CRYSTAL 3 PLANTED",
+            "value": null,
+            "sub": "SPACEGODZILLA ARRIVES",
+            "seconds": 3
            },
+           {
+            "op": "timer_start",
+            "timer": "arrive",
+            "ms": {
+             "k": "num",
+             "v": 3000
+            }
+           }
+          ],
+          "else": [
            {
             "op": "if",
             "cond": {
              "k": "cmp",
-             "op": ">=",
+             "op": "=",
              "a": {
               "k": "var",
               "name": "crystals"
              },
              "b": {
               "k": "num",
-              "v": 3
+              "v": 1
              }
             },
             "then": [
              {
-              "op": "set",
-              "var": "ready",
-              "value": {
-               "k": "num",
-               "v": 1
-              }
-             },
-             {
-              "op": "light_mode",
-              "shot": "Big loop",
-              "color": "#be28ff",
-              "pattern": "chase",
-              "insert": ""
-             },
-             {
               "op": "hud_award",
-              "text": "CRYSTAL 3 PLANTED",
+              "text": "CRYSTAL 1 PLANTED",
               "value": null,
-              "sub": "SPACEGODZILLA ARRIVES",
+              "sub": "THE RIGHT RAMP PLANTS THE NEXT",
               "seconds": 3
-             },
-             {
-              "op": "timer_start",
-              "timer": "arrive",
-              "ms": {
-               "k": "num",
-               "v": 1500
-              }
              }
             ],
             "else": [
              {
-              "op": "if",
-              "cond": {
-               "k": "cmp",
-               "op": "=",
-               "a": {
-                "k": "var",
-                "name": "crystals"
-               },
-               "b": {
-                "k": "num",
-                "v": 1
-               }
-              },
-              "then": [
-               {
-                "op": "if",
-                "cond": {
-                 "k": "cmp",
-                 "op": ">",
-                 "a": {
-                  "k": "var",
-                  "name": "lit"
-                 },
-                 "b": {
-                  "k": "num",
-                  "v": 0
-                 }
-                },
-                "then": [
-                 {
-                  "op": "hud_award",
-                  "text": "CRYSTAL 1 PLANTED",
-                  "value": null,
-                  "sub": "ANOTHER LOCK IS LIT",
-                  "seconds": 2
-                 }
-                ],
-                "else": [
-                 {
-                  "op": "hud_award",
-                  "text": "CRYSTAL 1 PLANTED",
-                  "value": null,
-                  "sub": "POWERLINES LIGHT THE NEXT LOCK",
-                  "seconds": 2
-                 }
-                ]
-               }
-              ],
-              "else": [
-               {
-                "op": "if",
-                "cond": {
-                 "k": "cmp",
-                 "op": ">",
-                 "a": {
-                  "k": "var",
-                  "name": "lit"
-                 },
-                 "b": {
-                  "k": "num",
-                  "v": 0
-                 }
-                },
-                "then": [
-                 {
-                  "op": "hud_award",
-                  "text": "CRYSTAL 2 PLANTED",
-                  "value": null,
-                  "sub": "ANOTHER LOCK IS LIT",
-                  "seconds": 2
-                 }
-                ],
-                "else": [
-                 {
-                  "op": "hud_award",
-                  "text": "CRYSTAL 2 PLANTED",
-                  "value": null,
-                  "sub": "POWERLINES LIGHT THE NEXT LOCK",
-                  "seconds": 2
-                 }
-                ]
-               }
-              ]
+              "op": "hud_award",
+              "text": "CRYSTAL 2 PLANTED",
+              "value": null,
+              "sub": "THE RIGHT RAMP PLANTS THE NEXT",
+              "seconds": 3
              }
             ]
            }
-          ],
-          "else": null
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "hud_award",
+          "text": "RIGHT RAMP",
+          "value": {
+           "k": "op",
+           "op": "-",
+           "a": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 1
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "plays"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           },
+           "b": {
+            "k": "var",
+            "name": "ramp hits"
+           }
+          },
+          "sub": "MORE TO PLANT A CRYSTAL",
+          "seconds": 3
+         },
+         {
+          "op": "sound",
+          "sound": "lit",
+          "fallback": ""
          }
         ]
        }
@@ -1279,15 +1135,7 @@
      },
      {
       "op": "set",
-      "var": "lit",
-      "value": {
-       "k": "num",
-       "v": 0
-      }
-     },
-     {
-      "op": "set",
-      "var": "line hits",
+      "var": "ramp hits",
       "value": {
        "k": "num",
        "v": 0
@@ -1551,12 +1399,6 @@
         "value": null
        },
        {
-        "op": "hud_text",
-        "which": "line",
-        "text": "TOPPLE THE CRYSTAL TOWERS",
-        "value": null
-       },
-       {
         "op": "set",
         "var": "base",
         "value": {
@@ -1592,10 +1434,26 @@
         "op": "hud_counter",
         "counter": 1,
         "value": {
-         "k": "var",
-         "name": "standing"
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "var",
+           "name": "hp1"
+          },
+          "b": {
+           "k": "var",
+           "name": "hp2"
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "hp3"
+         }
         },
-        "sub": "STANDING",
+        "sub": "HITS TO GO",
         "label": "TOWERS"
        },
        {
@@ -1648,12 +1506,6 @@
         "value": null
        },
        {
-        "op": "hud_text",
-        "which": "line",
-        "text": "SPIRAL GRENADES: THE SHIELDS",
-        "value": null
-       },
-       {
         "op": "set",
         "var": "base",
         "value": {
@@ -1689,10 +1541,26 @@
         "op": "hud_counter",
         "counter": 1,
         "value": {
-         "k": "var",
-         "name": "standing"
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "var",
+           "name": "hp1"
+          },
+          "b": {
+           "k": "var",
+           "name": "hp2"
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "hp3"
+         }
         },
-        "sub": "STANDING",
+        "sub": "HITS TO GO",
         "label": "SHOULDERS"
        },
        {
@@ -1737,34 +1605,16 @@
         "shot": "Big loop"
        },
        {
-        "op": "shake_game",
-        "shake": "jackpot"
+        "op": "timer_start",
+        "timer": "announce",
+        "ms": {
+         "k": "num",
+         "v": 3000
+        }
        },
        {
         "op": "shield",
         "where": "toward"
-       },
-       {
-        "op": "hud_award",
-        "text": "M.O.G.U.E.R.A.",
-        "value": null,
-        "sub": "BREAK HIS SHOULDER CRYSTALS",
-        "seconds": 3
-       },
-       {
-        "op": "clip",
-        "clip": "moguera",
-        "where": "behind"
-       },
-       {
-        "op": "sound",
-        "sound": "moguera",
-        "fallback": ""
-       },
-       {
-        "op": "show",
-        "show": "mine",
-        "name": "Moguera"
        }
       ],
       "else": null
@@ -1788,12 +1638,6 @@
         "op": "hud_text",
         "which": "title",
         "text": "SPACE BEAST",
-        "value": null
-       },
-       {
-        "op": "hud_text",
-        "which": "line",
-        "text": "CUT HIS POWER: THE POWERLINES",
         "value": null
        },
        {
@@ -1832,10 +1676,26 @@
         "op": "hud_counter",
         "counter": 1,
         "value": {
-         "k": "var",
-         "name": "standing"
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "op",
+          "op": "+",
+          "a": {
+           "k": "var",
+           "name": "hp1"
+          },
+          "b": {
+           "k": "var",
+           "name": "hp2"
+          }
+         },
+         "b": {
+          "k": "var",
+          "name": "hp3"
+         }
         },
-        "sub": "STANDING",
+        "sub": "HITS TO GO",
         "label": "POWER"
        },
        {
@@ -1880,15 +1740,137 @@
         "shot": "Godzilla target"
        },
        {
+        "op": "timer_start",
+        "timer": "announce",
+        "ms": {
+         "k": "num",
+         "v": 3000
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "timer_start",
+      "timer": "lights",
+      "ms": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "announce"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 2
+       }
+      },
+      "then": [
+       {
         "op": "shake_game",
         "shake": "jackpot"
        },
        {
-        "op": "hud_award",
-        "text": "SPACE BEAST",
-        "value": null,
-        "sub": "CUT HIS POWER",
-        "seconds": 3
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "sum"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "M.O.G.U.E.R.A.",
+          "value": null,
+          "sub": "SPIRAL GRENADES: THE SHIELDS",
+          "seconds": 3
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "clip",
+        "clip": "moguera",
+        "where": "behind"
+       },
+       {
+        "op": "sound",
+        "sound": "moguera",
+        "fallback": ""
+       },
+       {
+        "op": "show",
+        "show": "mine",
+        "name": "Moguera"
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "stage"
+       },
+       "b": {
+        "k": "num",
+        "v": 3
+       }
+      },
+      "then": [
+       {
+        "op": "shake_game",
+        "shake": "jackpot"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "sum"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "hud_award",
+          "text": "SPACE BEAST",
+          "value": null,
+          "sub": "CUT HIS POWER: THE POWERLINES",
+          "seconds": 3
+         }
+        ],
+        "else": null
        },
        {
         "op": "clip",
@@ -1911,14 +1893,6 @@
        }
       ],
       "else": null
-     },
-     {
-      "op": "timer_start",
-      "timer": "lights",
-      "ms": {
-       "k": "num",
-       "v": 1
-      }
      }
     ]
    },
@@ -2143,12 +2117,396 @@
             }
            }
           ]
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SUPER JACKPOT: THE BIG LOOP",
+          "value": null
          }
         ],
         "else": [
          {
           "op": "lights_off",
           "shot": "Big loop"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "TOPPLE THE TOWERS: RAMPS AND BUILDING",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT RAMP OR BUILDING",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT OR RIGHT RAMP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT RAMP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE BUILDING OR RIGHT RAMP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE BUILDING",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE RIGHT RAMP",
+            "value": null
+           }
+          ],
+          "else": null
          }
         ]
        }
@@ -2370,12 +2728,396 @@
             }
            }
           ]
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SUPER JACKPOT: GODZILLA TARGET",
+          "value": null
          }
         ],
         "else": [
          {
           "op": "lights_off",
           "shot": "Godzilla target"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SPIRAL GRENADES: THE SHIELDS",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT OR CENTER SHIELD",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT OR RIGHT SHIELD",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT SHIELD",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE CENTER OR RIGHT SHIELD",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE CENTER SHIELD",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE RIGHT SHIELD",
+            "value": null
+           }
+          ],
+          "else": null
          }
         ]
        }
@@ -2597,12 +3339,396 @@
             }
            }
           ]
+         },
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "FUKUOKA TOWER: SHOOT THE BUILDING",
+          "value": null
          }
         ],
         "else": [
          {
           "op": "lights_off",
           "shot": "Building"
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "CUT HIS POWER: THE POWERLINES",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT OR CENTER POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT OR RIGHT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE CENTER OR RIGHT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": ">",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": "=",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE CENTER POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "and",
+           "a": {
+            "k": "and",
+            "a": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp1"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            },
+            "b": {
+             "k": "cmp",
+             "op": "=",
+             "a": {
+              "k": "var",
+              "name": "hp2"
+             },
+             "b": {
+              "k": "num",
+              "v": 0
+             }
+            }
+           },
+           "b": {
+            "k": "cmp",
+            "op": ">",
+            "a": {
+             "k": "var",
+             "name": "hp3"
+            },
+            "b": {
+             "k": "num",
+             "v": 0
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE RIGHT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
          }
         ]
        }
@@ -3475,7 +4601,7 @@
            "name": "got"
           },
           "sub": "CRYSTAL TOWERS",
-          "seconds": 2
+          "seconds": 3
          }
         ],
         "else": null
@@ -3503,7 +4629,7 @@
            "name": "got"
           },
           "sub": "M.O.G.U.E.R.A.",
-          "seconds": 2
+          "seconds": 3
          }
         ],
         "else": null
@@ -3531,7 +4657,7 @@
            "name": "got"
           },
           "sub": "SPACE BEAST",
-          "seconds": 2
+          "seconds": 3
          }
         ],
         "else": null
@@ -3561,7 +4687,7 @@
            "name": "got"
           },
           "sub": "",
-          "seconds": 2
+          "seconds": 3
          },
          {
           "op": "clip",
@@ -3594,7 +4720,7 @@
            "name": "got"
           },
           "sub": "",
-          "seconds": 2
+          "seconds": 3
          },
          {
           "op": "clip",
@@ -3627,7 +4753,7 @@
            "name": "got"
           },
           "sub": "",
-          "seconds": 2
+          "seconds": 3
          },
          {
           "op": "clip",
@@ -3709,24 +4835,6 @@
         "name": "Super lit"
        },
        {
-        "op": "hud_award",
-        "text": "SUPER JACKPOT IS LIT",
-        "value": {
-         "k": "op",
-         "op": "*",
-         "a": {
-          "k": "var",
-          "name": "sum"
-         },
-         "b": {
-          "k": "var",
-          "name": "stage"
-         }
-        },
-        "sub": "20 SECONDS",
-        "seconds": 3
-       },
-       {
         "op": "if",
         "cond": {
          "k": "cmp",
@@ -3742,10 +4850,22 @@
         },
         "then": [
          {
-          "op": "hud_text",
-          "which": "line",
-          "text": "SUPER JACKPOT: THE BIG LOOP",
-          "value": null
+          "op": "hud_award",
+          "text": "SUPER JACKPOT IS LIT",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "var",
+            "name": "sum"
+           },
+           "b": {
+            "k": "var",
+            "name": "stage"
+           }
+          },
+          "sub": "BIG LOOP IN 20 S",
+          "seconds": 3
          }
         ],
         "else": null
@@ -3766,10 +4886,22 @@
         },
         "then": [
          {
-          "op": "hud_text",
-          "which": "line",
-          "text": "SUPER JACKPOT: GODZILLA TARGET",
-          "value": null
+          "op": "hud_award",
+          "text": "SUPER JACKPOT IS LIT",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "var",
+            "name": "sum"
+           },
+           "b": {
+            "k": "var",
+            "name": "stage"
+           }
+          },
+          "sub": "GODZILLA TARGET IN 20 S",
+          "seconds": 3
          }
         ],
         "else": null
@@ -3790,10 +4922,22 @@
         },
         "then": [
          {
-          "op": "hud_text",
-          "which": "line",
-          "text": "FUKUOKA TOWER: SHOOT THE BUILDING",
-          "value": null
+          "op": "hud_award",
+          "text": "SUPER JACKPOT IS LIT",
+          "value": {
+           "k": "op",
+           "op": "*",
+           "a": {
+            "k": "var",
+            "name": "sum"
+           },
+           "b": {
+            "k": "var",
+            "name": "stage"
+           }
+          },
+          "sub": "BUILDING IN 20 S",
+          "seconds": 3
          }
         ],
         "else": null
@@ -4248,7 +5392,7 @@
         "timer": "next",
         "ms": {
          "k": "num",
-         "v": 700
+         "v": 1
         }
        }
       ]
@@ -4329,7 +5473,7 @@
         "text": "CRYSTALS REGROW",
         "value": null,
         "sub": "ONE HIT STRONGER",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "show",
@@ -4343,78 +5487,6 @@
          "v": 600
         },
         "strength": "soft"
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "stage"
-         },
-         "b": {
-          "k": "num",
-          "v": 1
-         }
-        },
-        "then": [
-         {
-          "op": "hud_text",
-          "which": "line",
-          "text": "TOPPLE THE CRYSTAL TOWERS",
-          "value": null
-         }
-        ],
-        "else": null
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "stage"
-         },
-         "b": {
-          "k": "num",
-          "v": 2
-         }
-        },
-        "then": [
-         {
-          "op": "hud_text",
-          "which": "line",
-          "text": "SPIRAL GRENADES: THE SHIELDS",
-          "value": null
-         }
-        ],
-        "else": null
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "stage"
-         },
-         "b": {
-          "k": "num",
-          "v": 3
-         }
-        },
-        "then": [
-         {
-          "op": "hud_text",
-          "which": "line",
-          "text": "CUT HIS POWER: THE POWERLINES",
-          "value": null
-         }
-        ],
-        "else": null
        },
        {
         "op": "timer_start",
@@ -4513,7 +5585,7 @@
     "do": [
      {
       "op": "timer_stop",
-      "timer": "line"
+      "timer": "ramp"
      },
      {
       "op": "timer_stop",
@@ -4538,6 +5610,10 @@
      {
       "op": "timer_stop",
       "timer": "super"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "announce"
      },
      {
       "op": "if",

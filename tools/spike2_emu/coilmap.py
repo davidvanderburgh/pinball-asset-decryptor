@@ -784,6 +784,32 @@ HI_IDX = 4 * 96
 HI_READ = HI_OFF + NODES * HI_IDX
 
 
+#: PAD-658: the colour a MODE painted on a one-colour insert, written by the mode runtime (pad_mode_runtime.c
+#: lamp_paint_note) right after the hi plane: magic 'PINT', a gen, then 256 entries of [group, index, r, g, b, on,
+#: 0, 0]. padled.h carries the meaning; tests/test_pad658_show_view.py pins the offset to padled.h and the runtime.
+PAINT_OFF = HI_READ
+PAINT_MAGIC = 0x544E4950
+PAINT_N = 256
+PAINT_READ = PAINT_OFF + 8 + 8 * PAINT_N
+
+
+def paint_tints(data, group_node):
+    """{(node, index): (r, g, b)} - the one-colour inserts a mode holds now, in the colour it painted them; empty
+    when the block has no such plane (an older watch.sh, no mode runtime, a real machine's log). ``group_node``:
+    the title's I/O group -> node board map (the view's GROUP_NODE)."""
+    if data is None or len(data) < PAINT_READ or struct.unpack_from("<I", data, PAINT_OFF)[0] != PAINT_MAGIC:
+        return {}
+    out = {}
+    for k in range(PAINT_N):
+        o = PAINT_OFF + 8 + 8 * k
+        g, i, r, gg, b, on = data[o:o + 6]
+        if on and (r or gg or b):
+            node = group_node.get(g)
+            if node is not None:
+                out[(node, i)] = (r, gg, b)
+    return out
+
+
 def strip_level(data, node, channel):
     """One strip channel's level from a padled block, or None when the block
     cannot say: channels 0..95 are val[], 96..479 version 6's `hi` plane. None

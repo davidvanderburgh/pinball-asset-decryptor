@@ -1338,7 +1338,8 @@ int pm_lights_as(unsigned owner, const char *command)
 #define LAMP_MODES   64
 #define LAMP_SAY_MAX 400
 
-struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; int x, y; };   /* x, y: -1 = not placed */
+struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; int x, y;      /* x, y: -1 = not placed */
+              int grp, gidx; };     /* PAD-658: the comment's "I/O group G index I", -1 = not given */
 static struct lamp lamps[N_LAMPS];
 static int n_lamps;
 
@@ -1402,15 +1403,28 @@ static void lamp_line(const char *s)
     if (!ok) return;
     rest(s, x->name, sizeof x->name);
     x->x = x->y = -1;
+    x->grp = x->gidx = -1;
     {   /* hud-layers: the comment's "at X,Y" (the insert's place on the playfield picture), when given */
         const char *c = s;
-        for (; *c && *c != 10; c++)
+        for (; *c && *c != 10; c++) {
             if (c[0] == 'a' && c[1] == 't' && c[2] == ' ' && c > s && c[-1] == ' ') {
                 const char *q = c + 3;
                 int ok1 = 0, ok2 = 0;
                 long px = (long)number(&q, &ok1), py;
                 if (*q == ',') { q++; py = (long)number(&q, &ok2); if (ok1 && ok2 && (px || py)) { x->x = (int)px; x->y = (int)py; } }
             }
+            /* PAD-658: "I/O group G index I" - the insert's board place, for the emulator's view (lamp_paint_note) */
+            if (c[0] == 'g' && c[1] == 'r' && c[2] == 'o' && c[3] == 'u' && c[4] == 'p' && c[5] == ' ' && c > s && c[-1] == ' ') {
+                const char *q = c + 6;
+                int ok1 = 0, ok2 = 0;
+                long g = (long)number(&q, &ok1), ix;
+                if (ok1 && q[0] == 'i' && q[1] == 'n' && q[2] == 'd' && q[3] == 'e' && q[4] == 'x' && q[5] == ' ') {
+                    q += 6;
+                    ix = (long)number(&q, &ok2);
+                    if (ok2 && g >= 0 && g < 256 && ix >= 0 && ix < 256) { x->grp = (int)g; x->gidx = (int)ix; }
+                }
+            }
+        }
     }
     for (i = 0; x->name[i]; i++)                          /* a trailing comment is not the name */
         if (x->name[i] == '#' && i && (x->name[i - 1] == ' ' || x->name[i - 1] == '\t')) {
@@ -1565,6 +1579,68 @@ static unsigned lamp_prio_of(const struct pm_mode *m)
     return 255;
 }
 
+/* ★ THE COLOUR A MODE PAINTED ON A ONE-COLOUR INSERT, FOR THE EMULATOR'S PLAYFIELD VIEW (PAD-658).
+ *
+ * A single-colour insert takes one level - the colour's brightest part (lamp_write) - so the wire says how bright
+ * it is and nothing of the colour: on the machine it glows in its lens's colour, and the emulator's view, which
+ * knows no lens, drew every such insert on one orange ramp. A blocks mode's light show painted red, blue or green
+ * over the whole playfield came out yellow there, where the Modes tab's preview paints each insert in the show's
+ * colour. So, in the emulator only, the colour is published beside the level: padled.h's paint plane (version 7),
+ * one 8-byte entry per port lamp - its I/O group and index, the colour, on - which the view draws the insert in, at
+ * the brightness the wire carries. The block is the shim's (PAD_LED_SHM, dump/padled, created zeroed by watch.sh
+ * for each run); on a machine there is no such variable and this is never mapped. */
+extern int   open(const char *, int, ...);       /* as at the top: this section is also compiled alone (tests) */
+extern int   close(int);
+extern char *getenv(const char *);
+extern void *mmap(void *, __SIZE_TYPE__, int, int, int, long);
+extern long  lseek(int, long, int);
+#define PAINT_OFF    13500u                /* padled.h: paint_magic, right after version 6's hi plane */
+#define PAINT_MAGIC  0x544e4950u            /* 'PINT' */
+#define PAINT_BYTES  16384u                 /* padled.h PADLED_BYTES: the block the plane needs */
+static unsigned char *lamp_paint_plane;     /* &paint_magic in the block, 0 = none */
+
+static void lamp_paint_map(void)
+{
+    static int tried;
+    const char *path;
+    int fd;
+    void *m;
+    if (lamp_paint_plane || tried) return;
+    tried = 1;
+    path = getenv("PAD_LED_SHM");
+    if (!path || !*path) return;
+    fd = open(path, 2 /* O_RDWR */);
+    if (fd < 0) return;
+    /* a block too small for the plane (an older watch.sh's) is left alone: a page past its end would fault */
+    m = lseek(fd, 0, 2 /* SEEK_END */) >= (long)PAINT_BYTES
+        ? mmap(0, PAINT_BYTES, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, fd, 0) : 0;
+    if (m == (void *)-1) m = 0;
+    close(fd);
+    if (!m) return;
+    lamp_paint_plane = (unsigned char *)m + PAINT_OFF;
+    *(volatile unsigned *)lamp_paint_plane = PAINT_MAGIC;
+}
+
+/* lamp k's entry: on with its colour, or off (the game has it back) */
+static void lamp_paint_note(int k, unsigned rgb, int on)
+{
+    unsigned char *e;
+    struct lamp *x = &lamps[k];
+    lamp_paint_map();
+    if (!lamp_paint_plane || k < 0 || k >= 256 || x->grp < 0) return;
+    e = lamp_paint_plane + 8 + 8u * (unsigned)k;
+    if (e[5] == (on != 0) && (!on || (e[2] == ((rgb >> 16) & 255u) && e[3] == ((rgb >> 8) & 255u) && e[4] == (rgb & 255u))))
+        return;
+    e[5] = 0;                                   /* single writer; a reader takes an entry only while it is on */
+    e[0] = (unsigned char)x->grp;
+    e[1] = (unsigned char)x->gidx;
+    e[2] = (unsigned char)(rgb >> 16);
+    e[3] = (unsigned char)(rgb >> 8);
+    e[4] = (unsigned char)rgb;
+    e[5] = (unsigned char)(on != 0);
+    ((volatile unsigned *)lamp_paint_plane)[1]++;      /* paint_gen */
+}
+
 static void lamp_write(int k, int level_r, int level_g, int level_b)
 {
     struct lamp_held *h = &lamp_held[k];
@@ -1572,6 +1648,9 @@ static void lamp_write(int k, int level_r, int level_g, int level_b)
     int want[3], c;
     if (h->layer < 0) return;
     if (x->mono) {
+        /* PAD-658: the colour beside the level, for the emulator's view (lamp_paint_note) */
+        if (level_r > 0 || level_g > 0 || level_b > 0)
+            lamp_paint_note(k, (unsigned)(level_r & 255) << 16 | (unsigned)(level_g & 255) << 8 | (unsigned)(level_b & 255), 1);
         want[0] = level_r > level_g ? level_r : level_g;
         if (level_b > want[0]) want[0] = level_b;
         want[1] = want[2] = 0;
@@ -1593,6 +1672,7 @@ static void lamp_let_go(int k)
     if (h->layer >= 0)
         for (c = 0; c < 3; c++)
             if (lamps[k].light[c]) lamp_slot_put(lamp_layer[h->layer].group, lamps[k].light[c], 0, 0);
+    if (lamps[k].mono) lamp_paint_note(k, 0, 0);       /* PAD-658: the game has it back */
     h->owner = 0;
     h->flash_until = 0;
     h->flash_only = 0;
@@ -2687,16 +2767,71 @@ static void frame_arm(void)
  * The one surface is shared: a framed award of the game's (the Maser) plays in its place and the loop is
  * played again once the surface is idle; while one of our full-screen clips plays (pm_clip, layer 0) the
  * video field is 0, so the tick's draw of it is not refused. Everything here runs on the display
- * processes' thread (the hooks) or the tick's, which is the same thread (the runtime logs both). */
+ * processes' thread (the hooks) or the tick's, which is the same thread (the runtime logs both).
+ *
+ * PAD-658: NOT ONLY THE CITY. David's SUPER X2 "froze" (emulator, Premium 1.16): it starts on Shield ramp spinner
+ * spins, which bring the game's Mechagodzilla online, so the main-play background is the game's barrier
+ * (Mechagodzilla behind a barrier, "SHOOT TARGETS TO DISABLE BARRIER", its own looped clip on the one surface)
+ * and not the city. The backdrop refused it ("another background"), but the mode's full-screen intro took the
+ * surface from the barrier's clip, and the barrier - its video field the surface - showed the intro's last frame
+ * for the rest of the mode (runs kiryu_r2, vid1: no backdrop line in 51 s, ch0 idle, the glass the same picture
+ * under a counting timer, the game's words over the mode's). So a background of the game's other than the city
+ * takes the backdrop too while the mode that asked keeps the game's modes from starting (no mode of the game's can
+ * be showing there) or through that mode's ending, its own field put back after (bd.was); and wherever ours left
+ * a background of the game's that shows the surface with nothing playing, the game's own looped clip goes back on
+ * it (gbg, below), as the game's own award displays give it back after theirs. */
 static struct {
     char loop[96], once[96];          /* the loop, and a clip to play once in its place first */
     int on, pending, playing_once, lost;
-    unsigned elem, obj;               /* the background element drawing now; the city whose field we set */
+    unsigned elem, obj;               /* the background element drawing now; the one whose field we set */
+    unsigned was;                     /* PAD-658: that field as the game had it (the city: 0) */
     unsigned long since;              /* pm_ms() of the last play */
     unsigned plays, frames;
 } bd;
 static const struct pm_mode *bd_owner;    /* PAD-658: the mode that asked for it (running, or showing a note) */
 static int bd_lingers;                     /* PAD-658: kept behind its mode's ending (pm_end_holding) */
+static const struct pm_mode *block_owner; /* PAD-658: the mode keeping the game's modes from starting (the block section) */
+
+/* PAD-658: THE GAME'S OWN BACKGROUND CLIP BACK. The last looped clip the game played itself (a background's: its
+ * update plays it once, when the background comes up, and never again on its own - after a clip of ours took the
+ * surface the barrier stayed on our last frame), the background element seen showing it, and whether the last
+ * clip on the surface was ours. */
+static struct {
+    char name[96], crop[32];
+    unsigned elem;                    /* the background of the game's seen showing the surface while it played */
+    int ours, due;                    /* the last clip on the surface is ours; give the game's back at once */
+    unsigned long ours_ms;
+    unsigned said;
+} gbg;
+
+static void gbg_ours(void)
+{
+    gbg.ours = 1;
+    gbg.due = 0;
+    gbg.ours_ms = pm_ms();
+}
+
+static void gbg_copy(char *to, unsigned n, const char *from)
+{
+    unsigned i;
+    for (i = 0; from && from[i] && i + 1 < n; i++) to[i] = from[i];
+    to[i] = 0;
+}
+
+/* the clip_play hook, a clip of the game's: name, loop, crop. A looped one is the background's drawing now (the game
+ * plays a background's clip from inside its draw; one that comes up later is put right by gbg_back) */
+static void gbg_seen(const unsigned *r)
+{
+    static unsigned said;
+    gbg.ours = gbg.due = 0;
+    if (!r[0] || !r[1]) return;
+    gbg_copy(gbg.name, sizeof gbg.name, (const char *)(unsigned long)r[0]);
+    gbg_copy(gbg.crop, sizeof gbg.crop, (const char *)(unsigned long)r[2]);
+    gbg.elem = bd.elem;
+    if (pm_in_game() && said++ < 10)
+        say("backdrop: the game's own looped clip \"%s\" (crop %s) - kept, to give back to its background", gbg.name,
+            gbg.crop[0] ? gbg.crop : "none");
+}
 static unsigned char *disp_layered_mgr;   /* the layered display's manager (display priority, below) */
 /* PAD-521: THE BACKDROP ON CLIP V2 (James Bond LE). A build whose clips play on the video bank's own surface
  * (clip v2, below) has no background element to take over, and the game keeps its own videos in front of that
@@ -2743,7 +2878,8 @@ static void bd_release(const char *why)
             ((void (*)(void *))(unsigned long)fn("surface_stop"))(surf);
         say("backdrop: taken away (%s) after %u play(s)", why, bd.plays);
     } else if (bd.obj) {
-        bd_field(bd.obj, 0);
+        bd_field(bd.obj, bd.was);         /* PAD-658: as the game had it (the city: 0) */
+        if (bd.was && gbg.ours) gbg.due = 1;   /* it showed a clip of the game's: that clip back (gbg_back) */
         say("backdrop: taken away (%s) after %u play(s), %u frame(s)", why, bd.plays, bd.frames);
     }
     bd.obj = 0;
@@ -2752,6 +2888,28 @@ static void bd_release(const char *why)
 static void on_backdrop_draw(unsigned *r)
 {
     bd.elem = r[0];
+}
+
+static unsigned bd_video_field(unsigned e)
+{
+    return *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_video_at", 0x54));
+}
+
+static int bd_is_city(unsigned e)
+{
+    return *(unsigned *)(unsigned long)e == data("backdrop_city_vtable");
+}
+
+static unsigned bd_held;                  /* PAD-658: the background the backdrop last played in */
+
+/* PAD-658: may the backdrop go in this background's place? The city always; any other background of the game's
+ * while the mode that asked keeps the game's modes from starting (a qualifying screen like the barrier, never a
+ * running mode of the game's), and the one it already held through that mode's ending (its TOTAL) */
+static int bd_place_ok(unsigned e)
+{
+    if (bd_is_city(e)) return 1;
+    if (block_owner && running == block_owner && bd_owner == running) return 1;
+    return bd_lingers && e == bd_held;
 }
 
 static void bd_play(unsigned e)
@@ -2769,12 +2927,51 @@ static void bd_play(unsigned e)
     disp_clip_ours = 0;
     bd.playing_once = once;
     if (once) bd.once[0] = 0;
+    if (bd.obj != e) bd.was = bd_is_city(e) ? 0 : bd_video_field(e);   /* PAD-658: put back as it was */
     bd_field(e, (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_surface"))());
-    bd.obj = e;
+    bd.obj = bd_held = e;
     bd.pending = bd.lost = 0;
     bd.since = pm_ms();
     if (bd.plays++ < 60)
-        say("backdrop: \"%s\" %s behind the HUD, in the city 0x%08x's place", was, once ? "once" : "looped", e);
+        say("backdrop: \"%s\" %s behind the HUD, in the %s 0x%08x's place", was, once ? "once" : "looped",
+            bd_is_city(e) ? "city" : "game's background", e);
+}
+
+/* PAD-658: a background of the game's that shows the surface (its video field is the surface: not the city) is
+ * noted as the one the game's own looped clip is for while that clip plays; when the surface it shows is left with
+ * nothing playing after a clip of ours - or ours is still on it after the backdrop was taken away (`due`) - the
+ * game's clip goes back on it, looped, as the game played it */
+static void gbg_back(unsigned e)
+{
+    unsigned surf = (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_surface"))();
+    int playing = bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2), due = gbg.due;
+    if (!e || !surf || bd_video_field(e) != surf) return;      /* a background with no clip of its own (the city) */
+    if (!gbg.ours) {                      /* the game's own clip on it (or nothing of ours since) */
+        if (playing && gbg.name[0]) gbg.elem = e;
+        return;
+    }
+    if (clip.on || !gbg.name[0] || gbg.elem != e) return;
+    if (!due && (playing || pm_ms() - gbg.ours_ms < 500)) return;   /* ours still plays there (or was just asked) */
+    disp_clip_ours = 1;                   /* (the hook: not a clip of the game's taking the surface from ours) */
+    ((void (*)(const char *, int, const char *))(unsigned long)fn("clip_play"))(gbg.name, 1, gbg.crop[0] ? gbg.crop : 0);
+    disp_clip_ours = 0;
+    gbg.ours = gbg.due = 0;               /* (after: the hook marked it ours) */
+    if (gbg.said++ < 20)
+        say("backdrop: the game's own clip \"%s\" back on its background 0x%08x (ours %s)", gbg.name, e,
+            due ? "was taken away from it" : "had ended there, its last frame on the glass");
+}
+
+/* PAD-658: once per background, which one it is and whether the backdrop goes there */
+static void bd_other_said(unsigned e, int ok)
+{
+    static unsigned last, n;
+    if (e == last || n >= 20) return;
+    last = e;
+    n++;
+    say("backdrop: the background is not the city (0x%08x, vtable 0x%08x, its clip field 0x%08x) - %s", e,
+        *(unsigned *)(unsigned long)e, bd_video_field(e),
+        ok ? "the mode's clip goes in its place (it keeps the game's modes from starting, or it is its ending)"
+           : "the game's stays (the mode asking does not keep the game's modes from starting)");
 }
 
 /* PAD-353: the game's foreground words are never hidden. PAD-301 emptied the scene_show of a layered
@@ -2798,11 +2995,13 @@ static void on_scene_show(unsigned *r)
         return;
     }
     if (!e || r[0] != *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18))) return;
-    if (!bd.on || *(unsigned *)(unsigned long)e != data("backdrop_city_vtable")) {
+    if (bd.on && !bd_is_city(e)) bd_other_said(e, bd_place_ok(e));
+    if (!bd.on || !bd_place_ok(e)) {
         if (bd.obj) bd_release(!bd.on ? "the mode ended it" : "another background");
+        gbg_back(e);                   /* PAD-658: the game's own clip back where ours left it */
         return;
     }
-    if (bd.obj && bd.obj != e) bd_release("the city changed");
+    if (bd.obj && bd.obj != e) bd_release("the background changed");
     if (clip.on) {                     /* our full-screen clip (layer 0) plays: the tick draws it over all */
         if (bd.obj) bd_release("a full-screen clip of ours plays");
         bd.pending = 1;
@@ -2820,7 +3019,7 @@ static void on_scene_show(unsigned *r)
         if (pm_ms() - bd.since < 1500) return;          /* still starting */
     }
     if (bd.lost && bd_surface_state() == playing) {      /* the game's clip on the surface: the city */
-        if (bd.obj) { bd_field(bd.obj, 0); bd.obj = 0; }
+        if (bd.obj) { bd_field(bd.obj, bd.was); bd.obj = 0; }   /* (PAD-658: as the game had it) */
         return;
     }
     bd_play(e);                        /* asked, a one-shot or the game's clip over: play (again) */
@@ -3364,6 +3563,8 @@ static void on_clip_play(unsigned *r)
     const char *name = (const char *)(unsigned long)r[0];
     unsigned i;
     if (!disp_clip_ours) bd_clip_lost();      /* hud-layers: the backdrop is played again after it */
+    if (disp_clip_ours) gbg_ours();           /* PAD-658: ours took the one surface (a full-screen clip, the backdrop) */
+    else gbg_seen(r);                         /* PAD-658: the game's own (a background's, when it loops) */
     if (disp_clip_ours || !clip.on) return;
     for (i = 0; name && name[i] && i + 1 < sizeof disp_lost_name; i++) disp_lost_name[i] = name[i];
     disp_lost_name[i] = 0;

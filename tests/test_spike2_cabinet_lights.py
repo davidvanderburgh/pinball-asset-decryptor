@@ -714,7 +714,7 @@ def _extract(src, name):
 
 #: John Wick LE 1.02, a traced game (PAD-420 lights run): LONG bitmap frames,
 #: the form a strip is repainted in bulk. node 2 is the expressive-lighting
-#: blades; node 9 a playfield insert board, left as it was.
+#: blades; node 9 a playfield insert board (a mode's light show holds its inserts this way, PAD-658).
 JW_LONG = {
     "blades_bank0": "824eb6c008e000ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff"
                     "00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff00ffff010100",
@@ -817,8 +817,8 @@ def test_a_strip_s_long_frames_are_read_once_the_title_has_settled(publish_bin):
                "send", "2", "1", JW_LONG["blades_bank1"],
                "send", "2", "1", JW_LONG["blades_bank2"],
                *sum((["q", "2", str(c)] for c in probe), []),
-               # an insert board's long frame is left to the older shapes, as before
-               "send", "9", "1", JW_LONG["insert_node9"], "q", "9", "11", "stats")
+               # PAD-658: an insert board's long frame lands too (lamps 11 and 77 on, 75 off)
+               "send", "9", "1", JW_LONG["insert_node9"], "q", "9", "11", "q", "9", "75", "q", "9", "77", "stats")
     assert out[0] == "PUB 0" and out[1] == "LVL 0"
     assert "settled=0" in out[2] and "moves=0" in out[2]
     # the first 199 calls only vote (the sample is 200, the long frame was one)
@@ -828,12 +828,12 @@ def test_a_strip_s_long_frames_are_read_once_the_title_has_settled(publish_bin):
     assert out[5:8] == ["PUB 1", "PUB 1", "PUB 1"]
     assert out[8:8 + len(probe)] == ["LVL %d" % want[c] for c in probe]
     rest = out[8 + len(probe):]
-    assert rest[0] == "PUB 0" and rest[1] == "LVL 0"
+    assert rest[0:4] == ["PUB 1", "LVL 255", "LVL 0", "LVL 255"]
     # levels only: the announcer's moves and notes did not move for any of it
     m = lambda s, k: re.search(r"%s=(\d+)" % k, s).group(1)   # noqa: E731
-    assert m(rest[2], "moves") == m(before, "moves")
-    assert m(rest[2], "notes") == m(before, "notes")
-    assert int(m(rest[2], "decoded")) == int(m(before, "decoded")) + 3
+    assert m(rest[4], "moves") == m(before, "moves")
+    assert m(rest[4], "notes") == m(before, "notes")
+    assert int(m(rest[4], "decoded")) == int(m(before, "decoded")) + 4
 
 
 @pytest.mark.skipif(CC is None, reason="no C compiler on this host")

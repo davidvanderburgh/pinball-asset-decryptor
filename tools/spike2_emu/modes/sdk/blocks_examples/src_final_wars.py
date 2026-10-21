@@ -10,16 +10,25 @@ Kaiser power reaches Godzilla, and he rises.
   (LEDGER below). A round counts on the next shot and clears the ledger. ONE round lights FINAL WARS the first time,
   TWO the second, THREE the third (pack.need); then it is lit at the Building (gold, pulsing) and stays lit.
 - START: the lit Building. Never beside the game's own battle or multiball: it waits, still lit.
-- Every value is worth the MULTIPLIER (1 to 4: a phase finished with 10 s or more on its clock carries +1 up) times
-  the start (x2 the second time FINAL WARS runs, x3 the third). Every phase's clock is 3 s shorter each start.
-- PHASE 1, INVASION (25 s): the Left ramp, the Right ramp and the Big loop blink orange: 3,000,000 each, then out.
-- PHASE 2, MONSTER X (25 s): one target is lit purple and moves every 3 s (2.3, 1.6 s on later starts) among the
-  three powerlines and the Godzilla target (in turn: the C picks at random); hit it 3 times: 5M, 10M, 15M.
-- PHASE 3, KEIZER GHIDORAH (25 s): Godzilla's POWER (10) drains one every 2 s (1.6, 1.2 s); break the three
-  gravity beams at the Maser target, the Godzilla target and the Pop bumper (6M each); the Mecha lane is Ozaki's
-  KAISER POWER (+3). Power gone: THE XILIENS WIN.
-- PHASE 4, GODZILLA RISES (20 s, a 2-ball multiball, its own music): the ramps and the Big loop are JACKPOTS (5M),
-  the Building is the SUPER JACKPOT: 30,000,000 + 1,000,000 a second left + 5,000,000 a jackpot. GODZILLA WINS.
+- Every value is worth the MULTIPLIER (1 to 4: a phase finished within pack.WINDOW_S (20) s of its clock carries +1
+  up) times the start (x2 the second time FINAL WARS runs, x3 the third).
+- EVERY PHASE'S CLOCK is pack.STAGE_S (40 s), the same on every start (round 3, David: "you can't really accomplish
+  much in 10 seconds. 40 seconds is better"; the C's 25 s, 3 s shorter each start, is gone). The phase's title names
+  it, the line names the shots to make, a made shot goes dark at once, and the note a phase ends on stays
+  pack.NOTE_S (3) s - QUICK! MULTIPLIER UP when it was quick, else what comes next.
+- PHASE 1, INVASION: the Left ramp, the Right ramp and the Big loop blink orange: 3,000,000 each, then out. The line:
+  SHOOT THE RAMPS AND THE BIG LOOP, then the ones left (SHOOT THE RIGHT RAMP AND THE BIG LOOP ... SHOOT THE BIG LOOP).
+- PHASE 2, MONSTER X: one target is lit purple and moves on every 10 s (MOVE_S: the brief's "a moving target stays
+  10 s at least"; the C's 3 s, 2.3 s, 1.6 s) and when hit, among the three powerlines and the Godzilla target (in
+  turn: the C picks at random); the line follows it (SHOOT THE CENTER POWERLINE); hit it 3 times: 5M, 10M, 15M.
+- PHASE 3, KEIZER GHIDORAH: Godzilla's POWER (10) drains one every 3 s (three quarters of the clock, as the C's 20 s
+  of 25; its 1.6 s and 1.2 s on later starts gone); break the three gravity beams at the Maser target, the Godzilla
+  target and the Pop bumper (6M each: the line names the ones left); the Mecha lane is Ozaki's KAISER POWER (+3, the
+  POWER counter says MECHA LANE +3). Power gone: THE XILIENS WIN.
+- PHASE 4, GODZILLA RISES (a 2-ball multiball, its own music): the ramps and the Big loop are JACKPOTS (5M), the
+  Building is the SUPER JACKPOT: 30,000,000 + 500,000 a second left (up to 20,000,000, as the C's 1,000,000 a
+  second of its 20 s) + 5,000,000 a jackpot (the line: JACKPOTS:
+  RAMPS, BIG LOOP, THEN BUILDING). GODZILLA WINS: every light goes out, its note stays 3 s, then the end.
 - ADD TIME: any Shield target adds 3 s, three times a phase (the shields pulse green while add-time is left).
 - ENDS: the super jackpot (won), a phase's clock or the power gone (THE XILIENS WIN: 2,000,000 a phase reached), a
   drain, a tilt.
@@ -27,8 +36,9 @@ Kaiser power reaches Godzilla, and he rises.
 """
 from blk import (AND, LIT, NOT, OR, SECS_LEFT, a_show, add, add_time, award, beds, change, clip, clips,
                  end, eq, every, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert,
-                 light_mode, lt, mul, multiball, music, off, off_insert, on_any_shot, on_drain, on_end, on_shot, on_start, on_timer, score, set_,
-                 set_time, shake, shake_game, shield, show, sound, sounds, step, sub, timer_start, timer_stop, var)
+                 light_mode, lt, mul, multiball, music, off, off_insert, on_any_shot, on_drain, on_end, on_shot,
+                 on_start, on_timer, score, set_, set_time, shake, shake_game, shield, show, sound, sounds, step, sub,
+                 timer_left, timer_start, timer_stop, var)
 import pack
 
 SLUG, NAME = "final_wars", "FINAL WARS"
@@ -39,8 +49,7 @@ START_SHOT = "Building"
 BUILDING_XY, MECHA_XY, MASER_XY, GZ_XY, POP_XY = (123, 202), (282, 393), (51, 417), (89, 260), (251, 413)
 CITIES = (("done 1", "Left ramp", "LEFT RAMP"), ("done 2", "Right ramp", "RIGHT RAMP"),
           ("done 3", "Big loop", "BIG LOOP"))
-TARGETS = (("Powerline left", "POWERLINE L"), ("Powerline center", "POWERLINE C"),
-           ("Powerline right", "POWERLINE R"), ("Godzilla target", "GODZILLA"))
+TARGETS = ("Powerline left", "Powerline center", "Powerline right", "Godzilla target")
 BEAMS = (("done 1", "Maser target"), ("done 2", "Godzilla target"), ("done 3", "Pop bumper"))
 KAISER_SHOT = "Mecha exit bottom"
 SHIELDS = ("Shield target left", "Shield target center", "Shield target right")
@@ -51,10 +60,19 @@ PLAYED = [m + " played" for m in LEDGER_MODES]
 WON = [m + " won" for m in LEDGER_MODES]
 LEDGER = PLAYED + WON
 TIMERS = ("lights", "saved", "hit", "move", "next", "drain")
-MORE = sub(var("wars"), 1)                    # 0 the first time FINAL WARS runs, 1 the second ...
-PHASE_SECS = sub(25, mul(3, MORE))
-MOVE_MS = sub(3000, mul(700, MORE))
-DRAIN_MS = sub(2000, mul(400, MORE))
+PHASE_S = pack.STAGE_S                        # every phase's clock, every start
+#: the brief's rule 5: a moving target stays 10 s at least before it moves on its own (no pack constant: local)
+MOVE_S = 10
+#: a phase done within pack.WINDOW_S seconds of its clock carries the multiplier up
+QUICK_LEFT = pack.STAGE_S - pack.WINDOW_S
+#: Godzilla's 10 power drain over three quarters of the phase's clock (the C: 20 s of 25), one every 3 s
+POWER_MS = pack.STAGE_S * 75
+SW = pack.SHOT_WORDS
+
+
+def note(text, value=None, sub="", seconds=pack.NOTE_S):
+    """An award that stays pack.NOTE_S seconds at least (the brief's rule 3)."""
+    return award(text, value=value, sub=sub, seconds=max(seconds, pack.NOTE_S))
 
 
 def worth(points):
@@ -62,7 +80,8 @@ def worth(points):
     return mul(mul(points, var("mult")), var("wars"))
 
 
-SUPER = worth(add(add(30000000, mul(1000000, SECS_LEFT)), mul(5000000, var("hits"))))
+#: 30M + a share of 20M for the seconds left (the C's 1M a second of its 20 s: 500,000 a second of 40) + 5M a jackpot
+SUPER = worth(add(add(30000000, mul(20000000 // PHASE_S, SECS_LEFT)), mul(5000000, var("hits"))))
 
 
 def _sum(names):
@@ -136,61 +155,110 @@ SHOWS = [
 ]
 
 
-def phase1_line():
-    """SAVE and the cities still to save (the C writes the list; the blocks pick one of the seven lines)."""
-    def leaf(l, r, b):
-        names = [w for done, (_v, _s, w) in zip((l, r, b), CITIES) if not done]
-        return [hud_line("SAVE  " + "  ".join(names))] if names else []
+def by_left(flags, leaf, skip=None):
+    """One leaf per set of shots still to make: ``flags`` their done variables, ``leaf(left)`` the blocks for the
+    indices still 0 (``skip``: the one just made, known 1). Local (the brief: no new pack helper)."""
+    idx = [i for i in range(len(flags)) if i != skip]
 
-    def by(i, picked):
-        if i == 3:
-            return leaf(*picked)
-        v = CITIES[i][0]
-        return [if_(eq(v, 0), by(i + 1, picked + (0,)), by(i + 1, picked + (1,)))]
-    return by(0, ())
+    def walk(k, left):
+        if k == len(idx):
+            return leaf(left)
+        i = idx[k]
+        return [if_(eq(flags[i], 0), walk(k + 1, left + [i]), walk(k + 1, left))]
+    return walk(0, [])
+
+
+CITY_FLAGS = [v for v, _s, _w in CITIES]
+BEAM_FLAGS = [v for v, _s in BEAMS]
+
+
+def city_words(left):
+    """Phase 1's line: the cities still to save, by the playfield's names."""
+    shots = [CITIES[i][1] for i in left]
+    if len(shots) == 3:
+        return "SHOOT THE RAMPS AND THE BIG LOOP"
+    if shots == ["Left ramp", "Right ramp"]:
+        return "SHOOT THE LEFT AND RIGHT RAMPS"
+    if len(shots) == 2:
+        return "SHOOT THE %s AND THE %s" % (SW[shots[0]], SW[shots[1]])
+    return pack.shoot(shots[0])
+
+
+def beam_words(left):
+    """Phase 3's line: the beams still standing, by the playfield's names."""
+    shots = [BEAMS[i][1] for i in left]
+    if len(shots) == 3:
+        return "HIT MASER, GODZILLA TARGETS, POP BUMPERS"
+    if shots == ["Maser target", "Godzilla target"]:
+        return "HIT THE MASER AND GODZILLA TARGETS"
+    if len(shots) == 2:
+        return "HIT THE %s AND %s" % (SW[shots[0]], SW[shots[1]])
+    return pack.shoot(shots[0], verb="HIT THE")
+
+
+def quick_note(text, value, normal):
+    """The note a phase ends on: QUICK! MULTIPLIER UP when it took pack.WINDOW_S seconds or less (and the multiplier
+    is under x4: "next" carries it up), else ``normal`` - what comes next."""
+    return [if_(AND(ge(SECS_LEFT, QUICK_LEFT), lt("mult", 4)),
+                [set_("quick", 1), note(text, value=value, sub="QUICK! MULTIPLIER UP")],
+                [set_("quick", 0), note(text, value=value, sub=normal)])]
+
+
+def made_note(text, value, items, flags, i, done):
+    """A city saved / a beam broken: 2 TO GO, NOW THE <last one>, or (the last) the phase's own ending note."""
+    def leaf(left):
+        if not left:
+            return quick_note(text, value, done)
+        if len(left) == 2:
+            return [note(text, value=value, sub="2 TO GO")]
+        return [note(text, value=value, sub="NOW THE " + SW[items[left[0]]])]
+    return by_left(flags, leaf, skip=i)
 
 
 def lights():
-    """What every phase lights (the C's show_lamps / show), run by the "lights" timer after every change."""
+    """What every phase lights and says (the C's show_lamps / show), run by the "lights" timer after every change:
+    what counts is lit, what is made goes dark, the line names the shots."""
     return [
         if_(eq("phase", 1), [
             *[if_(eq(v, 0), [light(s, ORANGE, "hurry")], [off(s)]) for v, s, _w in CITIES],
-            *phase1_line(),
+            *by_left(CITY_FLAGS, lambda left: [hud_line(city_words(left))] if left else []),
             hud_counter(2, var("left"), "TO SAVE", "CITIES"),
         ]),
         if_(eq("phase", 2), [
             *[off(s) for _v, s, _w in CITIES],
-            *[if_(eq("monster x", i), [light(s, PURPLE, "blink", 150), hud_line("HIT MONSTER X AT " + w)], [off(s)])
-              for i, (s, w) in enumerate(TARGETS, 1)],
+            *[if_(eq("monster x", i), [light(s, PURPLE, "blink", 150)], [off(s)]) for i, s in enumerate(TARGETS, 1)],
+            *pack.line_follows("monster x", TARGETS),
             hud_counter(2, var("hits"), "OF 3 HITS", "MONSTER X"),
         ]),
         if_(eq("phase", 3), [
-            *[off(s) for s, _w in TARGETS],
+            *[off(s) for s in TARGETS],
             *[if_(eq(v, 0), [light(s, FW_GOLD, "chase", 110)], [off(s)]) for v, s in BEAMS],
             light_insert("MECHA LANE", KAISER, "pulse", 900),
-            hud_line("BREAK GHIDORAH'S BEAMS", value=var("left")),
-            hud_counter(2, var("power"), "OF 10", "POWER"),
+            *by_left(BEAM_FLAGS, lambda left: [hud_line(beam_words(left))] if left else []),
+            hud_counter(2, var("power"), "MECHA LANE +3", "POWER"),
         ]),
         if_(eq("phase", 4), [
             *[off(s) for _v, s in BEAMS], off_insert("MECHA LANE"),
             *[light(s, RED, "chase", 80) for _v, s, _w in CITIES],
-            light(START_SHOT, GOLD, "hurry"), hud_line("RAMPS AND LOOP, THEN THE BUILDING"),
+            light(START_SHOT, GOLD, "hurry"), hud_line("JACKPOTS: RAMPS, BIG LOOP, THEN BUILDING"),
             hud_counter(2, SUPER, "BUILDING", "SUPER"),
         ]),
         if_(lt("adds", 3), [light(s, GREEN, "pulse", 1200) for s in SHIELDS], [off(s) for s in SHIELDS]),
     ]
 
 
-def city(v, shot, words):
-    """A city saved in phase 1, a jackpot in phase 4."""
+def city(i):
+    """A city saved in phase 1 (dark at once; the note says what is left), a jackpot in phase 4."""
+    v, shot, words = CITIES[i]
     return on_shot(shot,
                    if_(AND(eq("phase", 1), eq(v, 0)), [
-                       set_(v, 1), score(worth(3000000)),
-                       award(words + " SAVED", value=worth(3000000), sub="A CITY SAVED", seconds=1),
+                       set_(v, 1), off(shot), score(worth(3000000)), pack.clock_floor(),
+                       *made_note(words + " SAVED", worth(3000000), [s for _v, s, _w in CITIES], CITY_FLAGS, i,
+                                  "NOW MONSTER X"),
                        show("City saved"), shake(250, "soft"), timer_start("saved", 1)]),
-                   if_(eq("phase", 4), [
-                       change("hits", 1), score(worth(5000000)),
-                       award("JACKPOT", value=worth(5000000), sub="NOW THE BUILDING", seconds=2),
+                   if_(AND(eq("phase", 4), eq("won", 0)), [
+                       change("hits", 1), score(worth(5000000)), pack.clock_floor(),
+                       note("JACKPOT", value=worth(5000000), sub="NOW THE BUILDING"),
                        clip("jackpot", "behind"), sound("jackpot"), show("Jackpot"), shake(400, "strong")]))
 
 
@@ -199,20 +267,18 @@ def move_on():
     return [change("monster x", 1), if_(gt("monster x", 4), [set_("monster x", 1)])]
 
 
-def beam(v, shot):
-    """A gravity beam broken in phase 3 (the Godzilla target is also a Monster X place in phase 2)."""
+def beam(i):
+    """A gravity beam broken in phase 3 (dark at once; the note says what is left). The Godzilla target is also a
+    Monster X place in phase 2."""
+    v, shot = BEAMS[i]
     phase2 = []
-    for i, (s, _w) in enumerate(TARGETS, 1):
+    for k, s in enumerate(TARGETS, 1):
         if s == shot:
-            phase2 = [if_(AND(eq("phase", 2), eq("monster x", i)), [timer_start("hit", 1)])]
+            phase2 = [if_(AND(eq("phase", 2), eq("monster x", k), lt("hits", 3)), [timer_start("hit", 1)])]
     return on_shot(shot, *phase2, if_(AND(eq("phase", 3), eq(v, 0)), [
-        set_(v, 1), score(worth(6000000)),
-        award("BEAM BROKEN", value=worth(6000000), sub="KEIZER GHIDORAH REELS", seconds=2),
+        set_(v, 1), off(shot), score(worth(6000000)), pack.clock_floor(),
+        *made_note("BEAM BROKEN", worth(6000000), [s for _v, s in BEAMS], BEAM_FLAGS, i, "NOW GODZILLA RISES"),
         show("Beam broken"), shake(500, "strong"), timer_start("saved", 1)]))
-
-
-def phase_award(words, normal, quick_words="QUICK! THE MULTIPLIER IS UP"):
-    return if_(eq("quick", 1), [award(words, sub=quick_words, seconds=3)], [award(words, sub=normal, seconds=3)])
 
 
 SCRIPTS = [
@@ -222,8 +288,8 @@ SCRIPTS = [
             *[set_(n, 0) for n in LEDGER], change("rounds", 1),
             if_(ge("rounds", ROUNDS), [
                 set_("ready", 1), light_mode(START_SHOT, GOLD, "pulse"),
-                award("FINAL WARS IS LIT", sub="SHOOT THE BUILDING", seconds=4)],
-                [award("FINAL WARS", value=sub(ROUNDS, var("rounds")), sub="MORE ROUNDS TO LIGHT IT", seconds=4)])]),
+                note("FINAL WARS IS LIT", sub="SHOOT THE BUILDING", seconds=4)],
+                [note("FINAL WARS", value=sub(ROUNDS, var("rounds")), sub="MORE ROUNDS TO LIGHT IT", seconds=4)])]),
         if_(AND(eq("ready", 1), NOT(LIT)), [light_mode(START_SHOT, GOLD, "pulse")]),
         when="idle"),
 
@@ -231,70 +297,72 @@ SCRIPTS = [
     on_start(*pack.begin(SLUG), *[set_(n, 0) for n in LEDGER], set_("ready", 0), set_("rounds", 0), change("wars", 1),
              set_("phase", 1), set_("adds", 0), set_("won", 0), set_("drained", 0), set_("hits", 0), set_("quick", 0),
              set_("monster x", 1), set_("left", 3), set_("mult", 1), set_("power", 10),
-             *[set_(v, 0) for v, _s, _w in CITIES], set_time(PHASE_SECS),
+             *[set_(v, 0) for v, _s, _w in CITIES], set_time(PHASE_S),
              shield("toward"), show("Invasion"), shake_game("big_hit"),
              clip("intro", "full"), clip("loop", "loop"),
-             hud_title("GODZILLA: FINAL WARS"), hud_counter(1, 1, "INVASION"),
-             award("PHASE 1: INVASION", sub="SAVE THE CITIES", seconds=3),
+             hud_title("PHASE 1: INVASION"), hud_counter(1, 1, "INVASION"),
+             note("GODZILLA: FINAL WARS", sub="SHOOT THE RAMPS AND THE BIG LOOP"),
              timer_start("lights", 1)),
     on_timer("lights", *lights()),
 
-    # ---- phase 1: invasion (and phase 4's jackpots) -------------------------------------------------------------------
-    *[city(v, s, w) for v, s, w in CITIES],
+    # ---- phase 1: invasion (and phase 4's jackpots); phase 3's beams ----------------------------------------------
+    *[city(i) for i in range(len(CITIES))],
     on_timer("saved", change("left", -1),
-             if_(le("left", 0), [timer_start("next", 700)], [timer_start("lights", 1)])),
+             if_(le("left", 0), [timer_stop("drain"), off_insert("MECHA LANE"), timer_start("next", 700)],
+                 [timer_start("lights", 1)])),
 
     # ---- phase 2: Monster X -------------------------------------------------------------------------------------------
-    *[on_shot(s, if_(AND(eq("phase", 2), eq("monster x", i)), [timer_start("hit", 1)]))
-      for i, (s, _w) in enumerate(TARGETS, 1) if s != "Godzilla target"],
-    on_timer("hit", change("hits", 1), score(worth(mul(5000000, var("hits")))), show("Monster X hit"),
+    *[on_shot(s, if_(AND(eq("phase", 2), eq("monster x", i), lt("hits", 3)), [timer_start("hit", 1)]))
+      for i, s in enumerate(TARGETS, 1) if s != "Godzilla target"],
+    on_timer("hit", change("hits", 1), score(worth(mul(5000000, var("hits")))), pack.clock_floor(), show("Monster X hit"),
              shake(350, "medium"),
-             if_(ge("hits", 3), [award("MONSTER X FALLS", value=worth(15000000), sub="NOW KEIZER GHIDORAH"),
-                                 timer_stop("move"), timer_start("next", 700)], [
-                 award("MONSTER X HIT", value=var("hits"), sub="OF 3", seconds=1),
-                 *move_on(), timer_start("move", MOVE_MS), timer_start("lights", 1)])),
-    on_timer("move", if_(eq("phase", 2), [*move_on(), timer_start("move", MOVE_MS), timer_start("lights", 1)])),
+             if_(ge("hits", 3), [timer_stop("move"), *[off(s) for s in TARGETS],
+                                 *quick_note("MONSTER X FALLS", worth(15000000), "NOW KEIZER GHIDORAH"),
+                                 timer_start("next", 700)], [
+                 *move_on(), timer_start("move", MOVE_S * 1000), timer_start("lights", 1),
+                 *[if_(eq("monster x", i), [note("MONSTER X HIT", sub="NOW THE " + SW[s])])
+                   for i, s in enumerate(TARGETS, 1)]])),
+    on_timer("move", if_(eq("phase", 2), [*move_on(), timer_start("move", MOVE_S * 1000), timer_start("lights", 1)])),
 
     # ---- phase 3: Keizer Ghidorah's beams, Ozaki's Kaiser power --------------------------------------------------------
-    *[beam(v, s) for v, s in BEAMS],
-    on_shot(KAISER_SHOT, if_(eq("phase", 3), [
-        change("power", 3), if_(gt("power", 10), [set_("power", 10)]), score(worth(1000000)),
-        award("KAISER POWER", value=var("power"), sub="GODZILLA'S POWER", seconds=2),
+    *[beam(i) for i in range(len(BEAMS))],
+    on_shot(KAISER_SHOT, if_(AND(eq("phase", 3), gt("left", 0)), [
+        change("power", 3), if_(gt("power", 10), [set_("power", 10)]), score(worth(1000000)), pack.clock_floor(),
+        note("KAISER POWER", value=var("power"), sub="GODZILLA'S POWER"),
         clip("power", "behind"), show("Kaiser power"), shake(200, "soft"), timer_start("lights", 1)])),
-    on_timer("drain", if_(eq("phase", 3), [
-        change("power", -1), hud_counter(2, var("power"), "OF 10"),
+    on_timer("drain", if_(AND(eq("phase", 3), gt("left", 0)), [
+        change("power", -1), hud_counter(2, var("power"), "MECHA LANE +3"),
         if_(le("power", 0), [end()], [
             if_(eq("power", 3), [sound("beam"), show("Weakening"),
-                                 award("GODZILLA WEAKENS", sub="KAISER POWER AT THE MECHA LANE", seconds=2)]),
-            timer_start("drain", DRAIN_MS)])])),
+                                 note("GODZILLA WEAKENS", sub="KAISER POWER AT THE MECHA LANE")]),
+            timer_start("drain", POWER_MS)])])),
 
-    # ---- phase 4: Godzilla rises, the super jackpot ----------------------------------------------------------------
+    # ---- phase 4: Godzilla rises, the super jackpot (every light out, its note up 3 s, then the end) --------------------
     on_shot(START_SHOT, if_(AND(eq("phase", 4), eq("won", 0)), [
-        set_("won", 1), score(SUPER), award("SUPER JACKPOT", value=SUPER, sub="GODZILLA WINS", seconds=4),
-        clip("super", "behind"), sound("super"), show("Super"), shake(1000, "hard"), timer_start("next", 1500)])),
+        set_("won", 1), score(SUPER), off("*"), note("SUPER JACKPOT", value=SUPER, sub="GODZILLA WINS", seconds=4),
+        clip("super", "behind"), sound("super"), show("Super"), shake(1000, "hard"),
+        timer_start("next", pack.NOTE_S * 1000)])),
     every(1, if_(eq("phase", 4), [hud_counter(2, SUPER, "BUILDING")])),
 
-    # ---- the next phase (a quick phase carries the multiplier up) ----------------------------------------------------
+    # ---- the next phase, named by the title (a quick phase carries the multiplier up) -------------------------------
     on_timer("next", if_(eq("won", 1), [end()], [
-        set_("quick", 0), if_(AND(ge(SECS_LEFT, 10), lt("mult", 4)), [change("mult", 1), set_("quick", 1)]),
-        change("phase", 1), set_("adds", 0), set_time(PHASE_SECS), clip("phase", "behind"),
+        if_(eq("quick", 1), [change("mult", 1)]), set_("quick", 0),
+        change("phase", 1), set_("adds", 0), set_time(PHASE_S), clip("phase", "behind"),
         if_(eq("phase", 2), [
-            set_("hits", 0), timer_start("move", MOVE_MS), sound("phase1"), clip("loop2", "loop"), show("Phase won"),
-            shake_game("jackpot"), hud_counter(1, 2, "MONSTER X"),
-            phase_award("PHASE 2: MONSTER X", "HIT MONSTER X 3 TIMES")]),
+            set_("hits", 0), timer_start("move", MOVE_S * 1000), sound("phase1"), clip("loop2", "loop"),
+            show("Phase won"), shake_game("jackpot"), hud_title("PHASE 2: MONSTER X"), hud_counter(1, 2, "MONSTER X")]),
         if_(eq("phase", 3), [
-            set_("left", 3), *[set_(v, 0) for v, _s in BEAMS], set_("power", 10), timer_start("drain", DRAIN_MS),
+            set_("left", 3), *[set_(v, 0) for v, _s in BEAMS], set_("power", 10), timer_start("drain", POWER_MS),
             sound("phase2"), clip("keizer", "behind"), clip("loop3", "loop"), show("Keizer"), shake_game("jackpot"),
-            hud_counter(1, 3, "GHIDORAH"), phase_award("KEIZER GHIDORAH", "PHASE 3: BREAK HIS GRAVITY BEAMS")]),
+            hud_title("PHASE 3: KEIZER GHIDORAH"), hud_counter(1, 3, "GHIDORAH")]),
         if_(eq("phase", 4), [
-            set_time(sub(20, mul(3, MORE))), timer_stop("drain"), set_("hits", 0), multiball(2, 10),
-            music("rises"), clip("rises", "behind"), show("Godzilla rises"), shake(1000, "strong"),
-            hud_counter(1, 4, "THE FINAL"), phase_award("GODZILLA RISES", "PHASE 4: JACKPOTS, THEN THE BUILDING")]),
+            set_("hits", 0), multiball(2, 10), music("rises"), clip("rises", "behind"), show("Godzilla rises"),
+            shake(1000, "strong"), hud_title("PHASE 4: GODZILLA RISES"), hud_counter(1, 4, "THE FINAL")]),
         timer_start("lights", 1)])),
 
-    # ---- add time at the shields ----------------------------------------------------------------------------------
-    *[on_shot(s, if_(AND(lt("adds", 3), lt("phase", 5)), [
-        change("adds", 1), add_time(3), award("SHIELDS", sub="+3 SECONDS", seconds=1), timer_start("lights", 1)]))
+    # ---- add time at the shields (not while a phase hands over, nor after the super) --------------------------------
+    *[on_shot(s, if_(AND(lt("adds", 3), eq(timer_left("next"), 0)), [
+        change("adds", 1), add_time(3), note("SHIELDS", sub="+3 SECONDS"), timer_start("lights", 1)]))
       for s in SHIELDS],
 
     # ---- the end ---------------------------------------------------------------------------------------------------
@@ -302,7 +370,7 @@ SCRIPTS = [
     on_end(*pack.finish(), *[timer_stop(t) for t in TIMERS],
            if_(eq("won", 1), [clip("won", "full"), hud_title("GODZILLA WINS"), hud_line("THE XILIENS ARE BEATEN")], [
                set_("pay", mul(2000000, var("phase"))), score(var("pay")),
-               award("THE XILIENS WIN", value=var("pay"), sub="FOR THE FIGHT", seconds=3),
+               note("THE XILIENS WIN", value=var("pay"), sub="FOR THE FIGHT", seconds=3),
                clip("lost", "full"), show("Xiliens win"), shake_game("rumble"), hud_title("THE XILIENS WIN"),
                if_(eq("power", 0), [hud_line("KEIZER GHIDORAH DRAINED HIM")], [hud_line("2,000,000 A PHASE")]),
                if_(eq("drained", 0), [sound("lost", fallback="time_up")])]),
@@ -310,15 +378,15 @@ SCRIPTS = [
 ]
 
 PROGRAM = {
-    "name": NAME, "seconds": 25, "ends_on_drain": True, "screen": False, "game_modes": "block",
+    "name": NAME, "seconds": PHASE_S, "ends_on_drain": True, "screen": False, "game_modes": "block",
     "wait_multiball": True, "priority": 190,
     "vars": [{"name": n, "reset": "game", "shared": True} for n in LEDGER] + [
         {"name": n, "reset": "game"} for n in ("wars", "rounds", "ready")] + [
         {"name": n, "reset": "mode"} for n in ("phase", "left", "done 1", "done 2", "done 3", "monster x", "hits",
                                                 "adds", "won", "drained", "mult", "power", "quick", "pay")],
     "timers": [{"name": n} for n in TIMERS],
-    "hud": hud("SAVE THE CITIES",
-               counters=[("PHASE", "INVASION", var("phase")), ("TARGETS", "OF 3", None),
+    "hud": hud("SHOOT THE RAMPS AND THE BIG LOOP",
+               counters=[("PHASE", "INVASION", var("phase")), ("CITIES", "TO SAVE", None),
                          ("ADD TIME", "SHIELDS +3 SEC", sub(3, var("adds")))],
                timer=("FINAL WARS", "xilien"),
                gauge={"label": "MULTIPLIER", "kind": "diamond", "count": 4, "color": "#ff3c00",
@@ -338,13 +406,21 @@ EXAMPLE = {
     "title_alt": {"godzilla_pro": {"shots": {"Shield target center": None}}},
     "about": ("The C example FINAL WARS rebuilt in blocks and taken deeper (PAD-658): a round of KING GHIDORAH, "
               "OXYGEN DESTROYER and MASER BARRAGE played (or two of them won) lights it at the Building the first "
-              "time, two rounds the second, three the third. Four timed phases: save the cities, hit the moving "
-              "Monster X, break Keizer Ghidorah's three beams before Godzilla's power drains (the Mecha lane "
-              "recharges it), and GODZILLA RISES, a 2-ball multiball with jackpots and the Building super jackpot. "
-              "A quick phase carries the multiplier up (to x4); shields add time."),
+              "time, two rounds the second, three the third. Four phases of 40 s each: save the cities (the ramps "
+              "and the Big loop), hit the moving Monster X (the line names its target), break Keizer Ghidorah's "
+              "three beams at the Maser target, the Godzilla target and the pop bumpers before Godzilla's power "
+              "drains (the Mecha lane recharges it), and GODZILLA RISES, a 2-ball multiball with jackpots at the "
+              "ramps and the Big loop and the Building super jackpot. A phase done within 20 s carries the "
+              "multiplier up (to x4); shields add time."),
     "lost": [
         "No randomness in blocks: Monster X moves to the next target in turn (Powerline left, center, right, the "
-        "Godzilla target, round again) every 3 s and when hit, where the C picked another target at random.",
+        "Godzilla target, round again) every 10 s and when hit, where the C picked another target at random every "
+        "3 s (2.3 s, 1.6 s on later starts).",
+        "Every phase has 40 s on every start and Godzilla's power drains one every 3 s (PAD-658's round 3: time "
+        "to do it); the C gave each phase 25 s (20 s the last), 3 s shorter each start, and drained the power every "
+        "2 s (1.6 s, 1.2 s). A quick phase is one done within 20 s (the C: 10 s or more left of 25).",
+        "A new phase is named by the HUD's title (PHASE 2: MONSTER X ...), not by a note over the one the phase "
+        "before ended on: that note (QUICK! MULTIPLIER UP, or what comes next) stays its 3 s.",
         "The ledger is six shared variables (ghidorah / oxygen / maser played and won) the blocks KING GHIDORAH, "
         "OXYGEN DESTROYER and MASER BARRAGE set; the C modes' own ledger (kit_ledger) is a different store, so the "
         "C versions of those modes do not light this blocks version, nor the other way round.",
@@ -375,26 +451,33 @@ _P2 = ["shot", "Powerline left", "ms", 300, "shot", "Powerline center", "ms", 30
 _P3 = ["shot", "Maser target", "ms", 300, "shot", "Godzilla target", "ms", 300, "shot", "Pop bumper", "secs", 3]
 DESK = [
     ("won phase by phase", _START + _P1 + _P2 + _P3 + ["shot", "Left ramp", "ms", 500, "shot", "Building", "secs", 6],
-     ["Hud_Award: PHASE 2: MONSTER X", "Hud_AwardSub: QUICK! THE MULTIPLIER IS UP", "Hud_Award: MONSTER X FALLS",
-      "Hud_Award: KEIZER GHIDORAH", "Hud_Award: BEAM BROKEN", "Hud_Award: GODZILLA RISES", "MULTIBALL 2",
-      "Hud_Award: JACKPOT", "Hud_Award: SUPER JACKPOT", "Hud_C2_Label: SUPER", "own clip super", "SHIELD toward",
-      "Hud_Title: GODZILLA WINS", "lamps held 0"]),
-    ("monster x moves", _START + _P1 + ["secs", 3.5, "lamps"],
+     ["Hud_Title: PHASE 1: INVASION", "Hud_Line: SHOOT THE RAMPS AND THE BIG LOOP",
+      "Hud_Line: SHOOT THE RIGHT RAMP AND THE BIG LOOP", "Hud_AwardSub: 3,000,000  -  2 TO GO",
+      "Hud_AwardSub: 3,000,000  -  NOW THE BIG LOOP", "Hud_Award: BIG LOOP SAVED",
+      "Hud_AwardSub: 3,000,000  -  QUICK! MULTIPLIER UP", "Hud_Title: PHASE 2: MONSTER X",
+      "Hud_Line: SHOOT THE LEFT POWERLINE", "Hud_Award: MONSTER X HIT", "Hud_AwardSub: NOW THE CENTER POWERLINE",
+      "Hud_Line: SHOOT THE RIGHT POWERLINE", "Hud_Award: MONSTER X FALLS", "Hud_Title: PHASE 3: KEIZER GHIDORAH",
+      "Hud_Line: HIT MASER, GODZILLA TARGETS, POP BUMPERS", "Hud_Line: HIT THE GODZILLA TARGET AND POP BUMPERS",
+      "Hud_Line: HIT THE POP BUMPERS", "Hud_Award: BEAM BROKEN", "Hud_Title: PHASE 4: GODZILLA RISES", "MULTIBALL 2",
+      "Hud_Line: JACKPOTS: RAMPS, BIG LOOP, THEN BUILDING", "Hud_Award: JACKPOT", "Hud_Award: SUPER JACKPOT",
+      "Hud_C2_Label: SUPER", "own clip super", "SHIELD toward", "Hud_Title: GODZILLA WINS", "lamps held 0"]),
+    ("monster x moves", _START + _P1 + ["secs", 9.5, "lamps"],
      ["LAMP POWERLINE LEFT aa00ff blink 150", "LAMP POWERLINE CENTER aa00ff blink 150",
-      "Hud_Line: HIT MONSTER X AT POWERLINE C", "Hud_C2_Label: CITIES", "Hud_C2_Label: MONSTER X"]),
-    ("keizer drains godzilla's power", _START + _P1 + _P2 + ["secs", 23],
-     ["Hud_Line: BREAK GHIDORAH'S BEAMS 3", "Hud_C2_Label: POWER", "Hud_Award: GODZILLA WEAKENS",
+      "Hud_Line: SHOOT THE CENTER POWERLINE", "Hud_C2_Label: CITIES", "Hud_C2_Label: MONSTER X"]),
+    ("keizer drains godzilla's power", _START + _P1 + _P2 + ["secs", 31],
+     ["Hud_Line: HIT MASER, GODZILLA TARGETS, POP BUMPERS", "Hud_C2_Label: POWER", "Hud_Award: GODZILLA WEAKENS",
       "END (a block)", "Hud_Title: THE XILIENS WIN", "Hud_Line: KEIZER GHIDORAH DRAINED HIM", "SCORE +6000000",
       "lamps held 0"]),
     ("kaiser power at the mecha lane", _START + _P1 + _P2 + ["secs", 6, "shot", "Mecha exit bottom", "secs", 4],
      ["Hud_Award: KAISER POWER", "Hud_C2_Value: 10", "own clip power", "LAMP MECHA LANE 40a0ff pulse 900"]),
-    ("shields add time then the clock", _START + ["shot", "Shield target left", "ms", 300] * 4 + ["secs", 40],
+    ("a slow phase keeps the multiplier", _START + ["secs", 21] + _P1,
+     ["Hud_AwardSub: 3,000,000  -  NOW MONSTER X", "Hud_Title: PHASE 2: MONSTER X"]),
+    ("shields add time then the clock", _START + ["shot", "Shield target left", "ms", 300] * 4 + ["secs", 50],
      ["Hud_Award: SHIELDS", "WORDS PadMode_final_wars_Hud_C3_Value: 0", "END (time ran out)", "own sound lost",
       "own clip lost", "Hud_Title: THE XILIENS WIN", "SCORE +2000000", "lamps held 0"]),
     ("a drain", _START + ["shot", "Left ramp", "secs", 2, "ball_end", "secs", 4],
      ["END (ball ended)", "own clip lost", "lamps held 0"]),
 ]
-
 
 def _played(slug):
     return ["trigger", slug + ".start", "secs", 1, "trigger", slug + ".stop", "secs", 2]
@@ -409,15 +492,16 @@ if not _named or {"ghidorah_heads", "oxygen_destroyer", "maser_barrage"} <= set(
     DESK.append(("one round lights it, two the second time",
                  _ROUND + ["shot", "Building", "secs", 2, "trigger", "final_wars.stop", "secs", 5] + _ROUND +
                  ["shot", "Building", "secs", 2] + _ROUND + ["shot", "Building", "secs", 2],
-                 ["Hud_Award: FINAL WARS IS LIT", "[FINAL WARS] START (its lit shot)", "END (trigger file)",
-                  "Hud_AwardSub: 1  -  MORE ROUNDS TO LIGHT IT"]))
+                 ["Hud_Title: FINAL WARS IS LIT", "Hud_Line: SHOOT THE BUILDING", "[FINAL WARS] START (its lit shot)",
+                  "END (trigger file)", "Hud_Line: 1  -  MORE ROUNDS TO LIGHT IT"]))
 #: the same mode as a Godzilla Pro 1.16 gets it: two shields add the time
 DESK_PRO = [
     ("the Pro's two shields add time", _START + ["shot", "Shield target left", "ms", 300,
                                                  "shot", "Shield target right", "ms", 300] * 2 + ["secs", 5],
-     ["Hud_Award: SHIELDS", "WORDS PadMode_final_wars_Hud_C3_Value: 0", "LAMP LEFT RAMP ff5000 blink 700"]),
+     ["Hud_Award: SHIELDS", "WORDS PadMode_final_wars_Hud_C3_Value: 0", "LAMP LEFT RAMP ff5000 blink"]),
     ("won phase by phase on the Pro", _START + _P1 + _P2 + _P3 + ["shot", "Left ramp", "ms", 500,
                                                                   "shot", "Building", "secs", 6],
-     ["Hud_Award: BEAM BROKEN", "MULTIBALL 2", "Hud_Award: SUPER JACKPOT", "Hud_Title: GODZILLA WINS",
+     ["Hud_Line: SHOOT THE LEFT POWERLINE", "Hud_Line: HIT MASER, GODZILLA TARGETS, POP BUMPERS",
+      "Hud_Award: BEAM BROKEN", "MULTIBALL 2", "Hud_Award: SUPER JACKPOT", "Hud_Title: GODZILLA WINS",
       "lamps held 0"]),
 ]

@@ -10,13 +10,15 @@
  "title_alt": {
   "godzilla_pro": {}
  },
- "about": "The C example OXYGEN DESTROYER rebuilt in blocks and taken deeper (PAD-658): 25 Left spinner spins start it (50 the second time, 75 the third). Four stages: the C's hurry-up (20,000,000 draining over 25 s, the Left ramp collects it into the pot, the Godzilla target holds it off), the dive (hit the moving sonar ping 3 times), the descent (spin the Left spinner 20 times to lower the device), and Serizawa's choice (the Right ramp in 15 s: the pot twice over and 25M). Cash the pot out at the right scoop after any stage; the clock or a drain pays a quarter of it.",
+ "about": "The C example OXYGEN DESTROYER rebuilt in blocks and taken deeper (PAD-658): 25 Left spinner spins start it (50 the second time, 75 the third). Four stages of 40 s each: the C's hurry-up (20,000,000 draining over the stage, the Left ramp collects it into the pot, the Godzilla target holds it off), the dive (hit the moving sonar ping 3 times: the line names its target), the descent (spin the Left spinner 20 times to lower the device), and Serizawa's choice (the Right ramp: the pot twice over and 25M). Cash the pot out at the right scoop after any stage; the clock or a drain pays a quarter of it.",
  "lost": [
+  "Every stage has 40 s on every start (PAD-658's round 3: time to do it): the C's hurry-up drained 20,000,000 over 25 s (800,000 a second), and round 2 gave the dive and the descent 30 s and Serizawa's choice 15 s; the sonar ping moved every 3 s (2.3 s, 1.6 s on later starts), now every 10 s.",
+  "A new stage is named by the HUD's title (STAGE 2: THE DIVE ...), not by a note over the one the stage before ended on (COLLECTED, GODZILLA FOUND, ON THE SEA BED): that note stays its 3 s.",
   "The value falls on a timer the blocks keep in milliseconds, but the clock the HUD badge shows is whole seconds: a hold-off puts the clock to the next whole second above the value's time (the C counted both from one drain, and a stalled frame drained at most 100 ms).",
   "The Godzilla target has no 250 ms debounce: a ball rattling on the captive ball can use up two hold-offs (the C counted one hit a quarter second); a spinner's spins count each one, as the C's did.",
   "The Left ramp blinks faster as the mode's clock runs down (the blocks' Hurry pattern) and changes colour once a second; the C's blink followed the value itself, every tick, with a flicker in the last 3 s.",
   "No random numbers in blocks: the sonar ping moves in turn (Powerline left, center, right, the Big loop).",
-  "The middle counter is the HURRY-UP, then the POT; the C showed a COLLECTED counter beside the super jackpot. Its gauge is one blue, where the C's ten segments went from deep to pale blue, and a note says SPINS TO GO with the number under it where the C said 24 SPINS TO GO.",
+  "The middle counter is the HURRY-UP, then the POT; the C showed a COLLECTED counter beside the super jackpot. Its gauge is one blue, where the C's ten segments went from deep to pale blue, and the spins' note says OXYGEN DESTROYER over 20  -  LEFT SPINNER SPINS TO GO on the first spin, every 5 to go and the last 3, where the C said 24 SPINS TO GO on every spin.",
   "The ending title (GODZILLA IS GONE, THE DIVERS SURFACE, GODZILLA ESCAPES or THE OXYGEN IS GONE) and its total stay up 3 s, the runtime's: the C kept them 10 s, with OXYGEN DESTROYER TOTAL under the total.",
   "The cooldown is 15 s on a timer that a new ball clears (the C kept each player's own across balls), and a start from the tab's Start mode now counts toward the 3 a game.",
   "The countdown's 5, 4, 3, 2, 1 callouts are gone (the blocks say only ten seconds and time up).",
@@ -25,7 +27,7 @@
  ],
  "program": {
   "name": "OXYGEN DESTROYER",
-  "seconds": 25,
+  "seconds": 40,
   "ends_on_drain": true,
   "screen": false,
   "game_modes": "block",
@@ -118,7 +120,7 @@
   ],
   "hud": {
    "on": true,
-   "line": "SHOOT THE LEFT RAMP",
+   "line": "LEFT RAMP COLLECTS  GODZILLA TARGET +2 S",
    "counters": [
     {
      "label": "STAGE",
@@ -149,12 +151,12 @@
          },
          "b": {
           "k": "num",
-          "v": 2
+          "v": 2000
          }
         },
         "b": {
          "k": "num",
-         "v": 25
+         "v": 40000
         }
        },
        "b": {
@@ -200,12 +202,12 @@
        },
        "b": {
         "k": "num",
-        "v": 2499
+        "v": 3999
        }
       },
       "b": {
        "k": "num",
-       "v": 2500
+       "v": 4000
       }
      },
      "b": {
@@ -226,16 +228,20 @@
         },
         "b": {
          "k": "num",
-         "v": 2
+         "v": 3
         }
        },
        "b": {
         "k": "num",
-        "v": 3
+        "v": 4
        }
       }
      }
-    }
+    },
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
    }
   },
   "bar": {
@@ -925,46 +931,190 @@
           "then": [
            {
             "op": "hud_award",
-            "text": "1 SPIN TO GO",
+            "text": "OXYGEN DESTROYER",
             "value": null,
-            "sub": "OXYGEN DESTROYER",
-            "seconds": 2
+            "sub": "1 MORE LEFT SPINNER SPIN",
+            "seconds": 3
            }
           ],
           "else": [
            {
-            "op": "hud_award",
-            "text": "SPINS TO GO",
-            "value": {
-             "k": "op",
-             "op": "-",
+            "op": "if",
+            "cond": {
+             "k": "or",
              "a": {
-              "k": "op",
-              "op": "*",
+              "k": "or",
               "a": {
-               "k": "num",
-               "v": 25
-              },
-              "b": {
-               "k": "op",
-               "op": "+",
+               "k": "cmp",
+               "op": "=",
                "a": {
                 "k": "var",
-                "name": "ran game"
+                "name": "spins"
                },
                "b": {
                 "k": "num",
                 "v": 1
                }
+              },
+              "b": {
+               "k": "cmp",
+               "op": "<=",
+               "a": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "num",
+                  "v": 25
+                 },
+                 "b": {
+                  "k": "op",
+                  "op": "+",
+                  "a": {
+                   "k": "var",
+                   "name": "ran game"
+                  },
+                  "b": {
+                   "k": "num",
+                   "v": 1
+                  }
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "spins"
+                }
+               },
+               "b": {
+                "k": "num",
+                "v": 3
+               }
               }
              },
              "b": {
-              "k": "var",
-              "name": "spins"
+              "k": "cmp",
+              "op": "=",
+              "a": {
+               "k": "op",
+               "op": "-",
+               "a": {
+                "k": "op",
+                "op": "-",
+                "a": {
+                 "k": "op",
+                 "op": "*",
+                 "a": {
+                  "k": "num",
+                  "v": 25
+                 },
+                 "b": {
+                  "k": "op",
+                  "op": "+",
+                  "a": {
+                   "k": "var",
+                   "name": "ran game"
+                  },
+                  "b": {
+                   "k": "num",
+                   "v": 1
+                  }
+                 }
+                },
+                "b": {
+                 "k": "var",
+                 "name": "spins"
+                }
+               },
+               "b": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "op",
+                 "op": "/",
+                 "a": {
+                  "k": "op",
+                  "op": "-",
+                  "a": {
+                   "k": "op",
+                   "op": "*",
+                   "a": {
+                    "k": "num",
+                    "v": 25
+                   },
+                   "b": {
+                    "k": "op",
+                    "op": "+",
+                    "a": {
+                     "k": "var",
+                     "name": "ran game"
+                    },
+                    "b": {
+                     "k": "num",
+                     "v": 1
+                    }
+                   }
+                  },
+                  "b": {
+                   "k": "var",
+                   "name": "spins"
+                  }
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 5
+                 }
+                },
+                "b": {
+                 "k": "num",
+                 "v": 5
+                }
+               }
+              },
+              "b": {
+               "k": "num",
+               "v": 0
+              }
              }
             },
-            "sub": "OXYGEN DESTROYER",
-            "seconds": 2
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "OXYGEN DESTROYER",
+              "value": {
+               "k": "op",
+               "op": "-",
+               "a": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 25
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "ran game"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "spins"
+               }
+              },
+              "sub": "LEFT SPINNER SPINS TO GO",
+              "seconds": 3
+             }
+            ],
+            "else": null
            }
           ]
          }
@@ -1081,7 +1231,7 @@
       "timer": "oxygen",
       "ms": {
        "k": "num",
-       "v": 25000
+       "v": 40000
       }
      },
      {
@@ -1107,13 +1257,13 @@
       "op": "hud_award",
       "text": "OXYGEN DESTROYER",
       "value": null,
-      "sub": "COLLECT IT BEFORE IT IS GONE",
+      "sub": "COLLECT IT AT THE LEFT RAMP",
       "seconds": 3
      },
      {
       "op": "hud_text",
       "which": "line",
-      "text": "LEFT RAMP COLLECTS - CAPTIVE BALL HOLDS",
+      "text": "LEFT RAMP COLLECTS  GODZILLA TARGET +2 S",
       "value": null
      },
      {
@@ -1161,15 +1311,30 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "stage"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "stage"
+        },
+        "b": {
+         "k": "num",
+         "v": 1
+        }
        },
        "b": {
-        "k": "num",
-        "v": 1
+        "k": "cmp",
+        "op": ">",
+        "a": {
+         "k": "timer_left",
+         "timer": "oxygen"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
        }
       },
       "then": [
@@ -1196,12 +1361,12 @@
              },
              "b": {
               "k": "num",
-              "v": 2
+              "v": 2000
              }
             },
             "b": {
              "k": "num",
-             "v": 25
+             "v": 40000
             }
            },
            "b": {
@@ -1251,12 +1416,12 @@
                },
                "b": {
                 "k": "num",
-                "v": 2
+                "v": 2000
                }
               },
               "b": {
                "k": "num",
-               "v": 25
+               "v": 40000
               }
              },
              "b": {
@@ -1310,15 +1475,30 @@
       "cond": {
        "k": "and",
        "a": {
-        "k": "cmp",
-        "op": "=",
+        "k": "and",
         "a": {
-         "k": "var",
-         "name": "stage"
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
         },
         "b": {
-         "k": "num",
-         "v": 1
+         "k": "cmp",
+         "op": ">",
+         "a": {
+          "k": "timer_left",
+          "timer": "oxygen"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
         }
        },
        "b": {
@@ -1378,7 +1558,7 @@
          },
          "b": {
           "k": "num",
-          "v": 25000
+          "v": 40000
          }
         },
         "then": [
@@ -1387,7 +1567,7 @@
           "var": "t",
           "value": {
            "k": "num",
-           "v": 25000
+           "v": 40000
           }
          }
         ],
@@ -1428,8 +1608,8 @@
         "op": "hud_award",
         "text": "HELD OFF",
         "value": null,
-        "sub": "+2 SECONDS",
-        "seconds": 1
+        "sub": "+2 SECONDS  -  NOW THE LEFT RAMP",
+        "seconds": 3
        },
        {
         "op": "hud_counter",
@@ -1551,12 +1731,12 @@
            },
            "b": {
             "k": "num",
-            "v": 2
+            "v": 2000
            }
           },
           "b": {
            "k": "num",
-           "v": 25
+           "v": 40000
           }
          },
          "b": {
@@ -1589,12 +1769,12 @@
            },
            "b": {
             "k": "num",
-            "v": 2
+            "v": 2000
            }
           },
           "b": {
            "k": "num",
-           "v": 25
+           "v": 40000
           }
          },
          "b": {
@@ -1637,7 +1817,7 @@
          "k": "var",
          "name": "pot"
         },
-        "sub": "CASH AT SCOOP",
+        "sub": "AT RIGHT SCOOP",
         "label": "POT"
        },
        {
@@ -1960,6 +2140,102 @@
         ]
        },
        {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "ping"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE LEFT POWERLINE",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "ping"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE CENTER POWERLINE",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "ping"
+         },
+         "b": {
+          "k": "num",
+          "v": 3
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE RIGHT POWERLINE",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "ping"
+         },
+         "b": {
+          "k": "num",
+          "v": 4
+         }
+        },
+        "then": [
+         {
+          "op": "hud_text",
+          "which": "line",
+          "text": "SHOOT THE BIG LOOP",
+          "value": null
+         }
+        ],
+        "else": null
+       },
+       {
         "op": "show",
         "show": "mine",
         "name": "Sonar"
@@ -1968,32 +2244,8 @@
         "op": "timer_start",
         "timer": "ping",
         "ms": {
-         "k": "op",
-         "op": "-",
-         "a": {
-          "k": "num",
-          "v": 3000
-         },
-         "b": {
-          "k": "op",
-          "op": "*",
-          "a": {
-           "k": "num",
-           "v": 700
-          },
-          "b": {
-           "k": "op",
-           "op": "-",
-           "a": {
-            "k": "var",
-            "name": "ran game"
-           },
-           "b": {
-            "k": "num",
-            "v": 1
-           }
-          }
-         }
+         "k": "num",
+         "v": 10000
         }
        }
       ],
@@ -2338,6 +2590,14 @@
         }
        },
        {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
         "op": "hud_counter",
         "counter": 3,
         "value": {
@@ -2411,8 +2671,8 @@
            "k": "var",
            "name": "pot"
           },
-          "sub": "POT",
-          "seconds": 2
+          "sub": "NOW THE LEFT SPINNER",
+          "seconds": 3
          },
          {
           "op": "timer_start",
@@ -2433,16 +2693,6 @@
           "op": "show",
           "show": "mine",
           "name": "Sonar"
-         },
-         {
-          "op": "hud_award",
-          "text": "SONAR CONTACT",
-          "value": {
-           "k": "var",
-           "name": "pings"
-          },
-          "sub": "OF 3",
-          "seconds": 2
          },
          {
           "op": "change",
@@ -2611,35 +2861,207 @@
           ]
          },
          {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE CENTER POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE RIGHT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE BIG LOOP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "SONAR CONTACT",
+            "value": null,
+            "sub": "NOW THE LEFT POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "SONAR CONTACT",
+            "value": null,
+            "sub": "NOW THE CENTER POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "SONAR CONTACT",
+            "value": null,
+            "sub": "NOW THE RIGHT POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "SONAR CONTACT",
+            "value": null,
+            "sub": "NOW THE BIG LOOP",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
           "op": "timer_start",
           "timer": "ping",
           "ms": {
-           "k": "op",
-           "op": "-",
-           "a": {
-            "k": "num",
-            "v": 3000
-           },
-           "b": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 700
-            },
-            "b": {
-             "k": "op",
-             "op": "-",
-             "a": {
-              "k": "var",
-              "name": "ran game"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
-           }
+           "k": "num",
+           "v": 10000
           }
          }
         ]
@@ -2756,8 +3178,8 @@
            "k": "var",
            "name": "pot"
           },
-          "sub": "POT",
-          "seconds": 2
+          "sub": "NOW THE RIGHT RAMP",
+          "seconds": 3
          },
          {
           "op": "show",
@@ -2964,6 +3386,10 @@
         }
        },
        {
+        "op": "lights_off",
+        "shot": "*"
+       },
+       {
         "op": "hud_award",
         "text": "SUPER JACKPOT",
         "value": {
@@ -3041,43 +3467,7 @@
         "timer": "next",
         "ms": {
          "k": "num",
-         "v": 1500
-        }
-       }
-      ],
-      "else": null
-     }
-    ]
-   },
-   {
-    "hat": {
-     "kind": "seconds_left",
-     "seconds": 3
-    },
-    "do": [
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "=",
-       "a": {
-        "k": "var",
-        "name": "stage"
-       },
-       "b": {
-        "k": "num",
-        "v": 4
-       }
-      },
-      "then": [
-       {
-        "op": "light_shot",
-        "shot": "Right ramp",
-        "color": "#ffffff",
-        "pattern": "blink",
-        "rate": {
-         "k": "num",
-         "v": 80
+         "v": 3000
         }
        }
       ],
@@ -3092,29 +3482,62 @@
     },
     "do": [
      {
-      "op": "callout",
-      "role": "ten_seconds"
-     },
-     {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": ">=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "stage"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "won"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
        },
        "b": {
-        "k": "num",
-        "v": 2
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "cashed"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
        }
       },
       "then": [
        {
-        "op": "light_shot",
-        "shot": "Right scoop",
-        "color": "#ffffff",
-        "pattern": "hurry"
+        "op": "callout",
+        "role": "ten_seconds"
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": ">=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
+        },
+        "then": [
+         {
+          "op": "light_shot",
+          "shot": "Right scoop",
+          "color": "#ffffff",
+          "pattern": "hurry"
+         }
+        ],
+        "else": null
        }
       ],
       "else": null
@@ -3280,7 +3703,7 @@
           "op": "set_time",
           "seconds": {
            "k": "num",
-           "v": 30
+           "v": 40
           }
          },
          {
@@ -3309,8 +3732,8 @@
          },
          {
           "op": "hud_text",
-          "which": "line",
-          "text": "SONAR: HIT THE PING",
+          "which": "title",
+          "text": "STAGE 2: THE DIVE",
           "value": null
          },
          {
@@ -3322,13 +3745,6 @@
           },
           "sub": "OF 3",
           "label": "CONTACTS"
-         },
-         {
-          "op": "hud_award",
-          "text": "THE DIVE",
-          "value": null,
-          "sub": "STAGE 2: FIND GODZILLA BY SONAR",
-          "seconds": 3
          },
          {
           "op": "clip",
@@ -3473,35 +3889,107 @@
           ]
          },
          {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE LEFT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE CENTER POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 3
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE RIGHT POWERLINE",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ping"
+           },
+           "b": {
+            "k": "num",
+            "v": 4
+           }
+          },
+          "then": [
+           {
+            "op": "hud_text",
+            "which": "line",
+            "text": "SHOOT THE BIG LOOP",
+            "value": null
+           }
+          ],
+          "else": null
+         },
+         {
           "op": "timer_start",
           "timer": "ping",
           "ms": {
-           "k": "op",
-           "op": "-",
-           "a": {
-            "k": "num",
-            "v": 3000
-           },
-           "b": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 700
-            },
-            "b": {
-             "k": "op",
-             "op": "-",
-             "a": {
-              "k": "var",
-              "name": "ran game"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
-           }
+           "k": "num",
+           "v": 10000
           }
          }
         ],
@@ -3526,7 +4014,7 @@
           "op": "set_time",
           "seconds": {
            "k": "num",
-           "v": 30
+           "v": 40
           }
          },
          {
@@ -3583,8 +4071,14 @@
          },
          {
           "op": "hud_text",
+          "which": "title",
+          "text": "STAGE 3: THE DESCENT",
+          "value": null
+         },
+         {
+          "op": "hud_text",
           "which": "line",
-          "text": "LOWER IT: THE LEFT SPINNER",
+          "text": "SPIN THE LEFT SPINNER (LEFT RAMP: 5)",
           "value": null
          },
          {
@@ -3596,13 +4090,6 @@
           },
           "sub": "TO GO",
           "label": "FATHOMS"
-         },
-         {
-          "op": "hud_award",
-          "text": "THE DESCENT",
-          "value": null,
-          "sub": "STAGE 3: LOWER THE DEVICE",
-          "seconds": 3
          },
          {
           "op": "clip",
@@ -3651,7 +4138,7 @@
           "op": "set_time",
           "seconds": {
            "k": "num",
-           "v": 15
+           "v": 40
           }
          },
          {
@@ -3665,6 +4152,12 @@
          {
           "op": "music",
           "bed": "finale"
+         },
+         {
+          "op": "hud_text",
+          "which": "title",
+          "text": "STAGE 4: SERIZAWA'S CHOICE",
+          "value": null
          },
          {
           "op": "hud_text",
@@ -3723,13 +4216,6 @@
           "label": "SUPER"
          },
          {
-          "op": "hud_award",
-          "text": "SERIZAWA'S CHOICE",
-          "value": null,
-          "sub": "STAGE 4: SET IT OFF AT THE RIGHT RAMP",
-          "seconds": 3
-         },
-         {
           "op": "clip",
           "clip": "choice",
           "where": "behind"
@@ -3738,11 +4224,7 @@
           "op": "light_shot",
           "shot": "Right ramp",
           "color": "#ffffff",
-          "pattern": "blink",
-          "rate": {
-           "k": "num",
-           "v": 150
-          }
+          "pattern": "hurry"
          }
         ],
         "else": null

@@ -934,6 +934,7 @@ struct kit_hud {
     unsigned long note_left, off_since;    /* PAD-658: a note's time still to show, held while it waits */
     unsigned long checked_at;              /* PAD-390: the last look at the scene's HUD group */
     unsigned begun;                        /* PAD-413: pm_begun() when its mode last ran, or it was last down */
+    int beside;                            /* PAD-658: its meter is a corner bar - up BESIDE another pack HUD */
 };
 
 /* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
@@ -1115,6 +1116,10 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
     if (!h->metering) h->want_gauge = -1;
     kit_hud_award(h, ms, big, sub);
     if (!h->up) kit_hud_show(h, 1);
+    else if (h->beside && kit_hud_up != h) {        /* PAD-658: a corner meter's note has the middle for its time */
+        if (kit_hud_up) kit_hud_show(kit_hud_up, 0);
+        kit_hud_up = h;
+    }
     h->noting = 1;
     h->hide_at = h->metering ? 0 : pm_ms() + ms;
     return 1;
@@ -1125,7 +1130,11 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
  * edge, `level` pips lit, and its label, nothing in the middle. Call it every tick while it should show, and
  * with level -1 to take it down. It is the politest thing on the glass: it waits while another pack HUD is up (a
  * mode, a total, a note), a note or a mode of the pack takes its place at once, and it comes back by itself once
- * they are gone. A note of its own (kit_hud_note) goes in the award line above it and the meter stays. */
+ * they are gone. A note of its own (kit_hud_note) goes in the award line above it and the meter stays.
+ * PAD-658: a corner bar (`beside`, the top-right POWERUP-style meter, PAD-416) shares the glass instead (David:
+ * "it should always be shown (whenever the HUD is shown)"): it comes up beside another pack HUD without taking its
+ * place, nothing of another HUD's covers it, and only its own notes make it the pack's HUD (for their time). With
+ * its own mode's HUD up (the mode, its TOTAL) a corner meter's level and label still follow. */
 static KIT_UNUSED void kit_hud_meter(struct kit_hud *h, int level, const char *label)
 {
     int k;
@@ -1138,8 +1147,11 @@ static KIT_UNUSED void kit_hud_meter(struct kit_hud *h, int level, const char *l
         }
         return;
     }
-    if (h->up && !h->noting) return;                 /* the mode itself has its HUD */
-    if (kit_hud_up && kit_hud_up != h) return;       /* another pack HUD is up: wait for it */
+    if (h->up && !h->noting) {                       /* the mode itself has its HUD */
+        if (h->beside) kit_hud_gauge(h, level, label);   /* PAD-658: a corner meter follows on (its TOTAL) */
+        return;
+    }
+    if (kit_hud_up && kit_hud_up != h && !h->beside) return;   /* another pack HUD is up: wait for it */
     h->want_gauge = level;
     if (label) kit_copy(h->want_glabel, sizeof h->want_glabel, label);
     if (h->up && h->metering) return;
@@ -1149,7 +1161,11 @@ static KIT_UNUSED void kit_hud_meter(struct kit_hud *h, int level, const char *l
     if (!h->up) {
         h->want_award[0] = h->want_awardsub[0] = 0;
         h->award_until = 0;
-        kit_hud_show(h, 1);
+        if (h->beside) {                             /* PAD-658: up beside whatever else is, in no one's place */
+            h->up = 1;
+            h->hide_at = 0;
+            if (h->group) pm_show(h->group, 1);
+        } else kit_hud_show(h, 1);
     }
     h->noting = 1;
     h->metering = 1;
@@ -1227,6 +1243,7 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     if (h->award_until && pm_ms() >= h->award_until) {
         h->award_until = 0;
         h->want_award[0] = h->want_awardsub[0] = 0;
+        if (h->beside && h->metering && kit_hud_up == h) kit_hud_up = 0;   /* PAD-658: its note is over, the bar stays */
     }
     if (!h->found || !h->up) return;
     /* PAD-353: a display of the game's has the screen (an award, a mode's start screen): its words are where

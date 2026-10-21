@@ -91,7 +91,8 @@ SAY = {
                                                                colour(b.get("color")), PATTERN_WORDS.get(b.get("pattern"), "")),
     "unlight_mode": lambda b: "Put out the light of %s" % (b.get("mode") or "this mode"),
     "add_time": lambda b: "Add %s s to the clock" % val(b.get("seconds")),
-    "set_time": lambda b: "Set the clock to %s s" % val(b.get("seconds")),
+    "set_time": lambda b: ("Keep at least %s s on the clock" if b.get("at_least") else "Set the clock to %s s")
+    % val(b.get("seconds")),
     "multiball": lambda b: "%s-ball multiball, ball save %s s" % (b.get("balls"), b.get("save", 0)),
     "game_wizard": lambda b: "%s the game's %s" % ("Start" if b.get("how") == "start" else "Light", b.get("name") or "mini-wizard"),
     "hold": lambda b: "Hold the %s for %s" % (b.get("what") or "magnet", _ms(b.get("ms"))),

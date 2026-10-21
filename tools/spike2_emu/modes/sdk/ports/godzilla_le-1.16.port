@@ -318,7 +318,7 @@ lamp 296          0              FIGHTER RIGHT 2  # lamp 109, I/O group 6 index 
 lamp 297          0              FIGHTER RIGHT 3  # lamp 110, I/O group 6 index 11, at 215,566
 lamp 298          0x8000000      MASER  # lamp 111, I/O group 6 index 62, at 51,417
 lamp 299          0              MASER READY  # lamp 112, I/O group 6 index 63, at 67,425
-lamp 300,301,302  0x800000000    LEFT SPINNER  # lamp 113, I/O group 6 index 56, at 55,373
+lamp 300,301,302  0x800000200    LEFT SPINNER  # PAD-658: + the Left spinner shot (0x200); lamp 113, I/O group 6 index 56, at 55,373
 lamp 303          0              TANK 1  # lamp 114, I/O group 6 index 55, at 69,391
 lamp 304          0              ADV RAMPAGE  # lamp 115, I/O group 6 index 54, at 77,405
 lamp 305          0              RODAN  # lamp 116, I/O group 6 index 41, at 178,421
@@ -330,7 +330,7 @@ lamp 314          0              SAUCER  # lamp 121, I/O group 6 index 8, at 225
 lamp 315          0              ATTACK MECHA  # lamp 122, I/O group 6 index 23, at 200,381
 lamp 316          0              TANK 6  # lamp 123, I/O group 6 index 22, at 227,394
 lamp 317          0x2000000000   SELECT CITY  # lamp 124, I/O group 6 index 21, at 236,380
-lamp 318,319,320  0x4000000000   MECHA LANE  # lamp 125, I/O group 6 index 24, at 282,393
+lamp 318,319,320  0x14000000000  MECHA LANE  # PAD-658: + the Mecha exit bottom shot (0x10000000000); lamp 125, I/O group 6 index 24, at 282,393
 lamp 321,322,323  0x40           POP BUMPER  # lamp 126, I/O group 6 index 42, at 251,413
 lamp 324,325,326  0x80000000     SHIELD LEFT  # lamp 127, I/O group 6 index 31, at 189,335
 lamp 327,328,329  0x100000000    SHIELD CENTER  # lamp 128, I/O group 6 index 34, at 199,346
@@ -355,7 +355,7 @@ lamp 351          0x80000        MAGNA GRAB  # lamp 146, I/O group 7 index 44, a
 lamp 352          0              TANK 3  # lamp 147, I/O group 7 index 43, at 95,276
 lamp 353          0              ATTACK BRIDGE  # lamp 148, I/O group 7 index 42, at 102,292
 lamp 354,355,356  0xc00000       BUILDING  # lamp 149, I/O group 7 index 76, at 123,202
-lamp 357,358,359  0x1800         TOP SPINNER  # lamp 150, I/O group 7 index 67, at 165,207
+lamp 357,358,359  0x3800         TOP SPINNER  # PAD-658: + the Top spinner shot (0x2000); lamp 150, I/O group 7 index 67, at 165,207
 lamp 360          0x10000000     POWERLINE LEFT  # lamp 151, I/O group 7 index 79, at 104,219
 lamp 361          0              LITE DESTRUCTION JACKPOT  # lamp 152, I/O group 7 index 71, at 124,220
 lamp 362          0x20000000     POWERLINE CENTER  # lamp 153, I/O group 7 index 70, at 144,216

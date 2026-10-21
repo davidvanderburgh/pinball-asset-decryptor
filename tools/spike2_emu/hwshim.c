@@ -12763,12 +12763,24 @@ static int led_wide_publish(unsigned node, unsigned cmd,
          * closes exactly. Read as LEVELS ONLY (led_strip_levels) and only after
          * the vote: the frame still votes no above, exactly as it always did,
          * so the verdict is drawn from the same frames; nothing that counts
-         * toward the light-show announcer sees it; and an insert board (1, 8,
-         * 9) is left exactly as before - its long frames still fall through to
-         * the godzilla shapes in led_publish. */
-        if (bank >= 0 && !led_insert_node(node) && led_wide_settled() && led_shm
+         * toward the light-show announcer sees it.
+         *
+         * ★ AND THE INSERT BOARDS' TOO (PAD-658). A blocks mode's light show
+         * paints every placed insert each tick (83 on Godzilla), and the game
+         * sends that many held lamps as LONG bitmap frames - so on a title
+         * whose verdict is in (Godzilla LE 1.16: 200 of 200) the show reached
+         * the boards and never the view: the long frames fell through to the
+         * godzilla shapes, which refuse or misread them, and David saw no show
+         * at all on the playfield. The same levels-only read as the strips -
+         * the announcer's moves and notes untouched - and the lamps marked as
+         * the wide layer's, as a short frame's are, so a base `cmd 70` does
+         * not put them back. */
+        if (bank >= 0 && led_wide_settled() && led_shm
                 && led_wide_long(cmd, body, blen)
                 && led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+            if (led_insert_node(node) && bank == 0)
+                for (i = 0; i < cnt; i++)
+                    if (node < 16 && idx[i] < 96) led_wide_owns[node][idx[i]] = 1;
             led_strip_levels(node, bank, idx, val, cnt);
             if (led_shm_len >= 8192) led_shm->wide_decoded++;
             return 1;

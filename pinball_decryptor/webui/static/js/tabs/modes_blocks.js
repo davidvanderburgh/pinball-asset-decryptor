@@ -70,8 +70,11 @@ const TIP = {
   timer: "The badge on the left edge counting the mode's clock down, with its label and icon (a mode with no clock has none).",
   gauge: "Pips on the right edge, lit up to a number: a gauge of how far along the mode is.",
   gaugeFollows: "How many pips are lit, kept up to date by itself. Empty: a Fill the gauge block sets it.",
+  gaugeBar: "A meter in the top-right corner, in the manner of the game's own POWERUP meter in the top left: it fills to a PERCENT (0-100), the percent under its two words, its full word at 100.",
+  gaugeMeter: "Show it while the mode is not running too, beside any other mode's HUD: a meter of how near the mode is to starting (a rage meter). It needs a value to follow.",
   hudAward: "A big line, and a smaller one under it, for a moment (a jackpot). Before the mode starts it is a note shown alone, when no other mode's HUD is up. With no HUD it shows on the mode's own screen (the big line only), and an End the mode after it lets it show before the TOTAL. It shows points, it does not score them: add a Score block for that.",
   setTime: "Puts the mode's clock at this many seconds, up or down (0 = time is up). Put up, a When that many seconds are left does not run again.",
+  atLeast: "A good shot keeps the mode going: the clock goes back up to this many seconds when it has run under it, and is left alone when it has more (the examples use 15 on every successful shot).",
   shared: "Shared with the other modes: every mode with a variable of this name reads and writes the same number, so one mode can be lit by what another did (played it, won it). It resets each ball or each game.",
   timers: "A timer counts down in milliseconds, apart from the mode's clock: start it from a block (any value, so a window can get shorter), and a When it runs out script runs the moment it does. A ball ending stops every timer.",
   timerStart: "Starts the timer (again, if it runs) at this many milliseconds: 1000 = one second. Any value: a variable makes a window that shrinks.",
@@ -157,7 +160,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
   return [
     ["Mode", [{ op: "start_mode" }, { op: "light_mode", shot: litShot(ch), insert: "", color: "#ffd000", pattern: "blink" },
       { op: "unlight_mode", mode: "" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
-      { op: "set_time", seconds: num(10) },
+      { op: "set_time", seconds: num(10) }, { op: "set_time", seconds: num(15), at_least: true },
       { op: "multiball", balls: 2, save: 10 },
       { op: "game_wizard", name: ((ch.game_wizards || [])[0] || {}).name || "", how: "light" }]],
     // PAD-395: the mechanisms the form's Magnet, Scoop and Other mechanisms hold (greyed where the game cannot)
@@ -202,7 +205,8 @@ export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode
   shake: "mech", shake_game: "mech" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
-const GAUGES = [["diamond", "diamonds"], ["segment", "a bar of segments"], ["spike", "spikes"]];
+const GAUGES = [["diamond", "diamonds"], ["segment", "a bar of segments"], ["spike", "spikes"],
+  ["bar", "a meter in the top-right corner"]];      // PAD-658: PAD-416's POWERUP-style meter
 
 // ------------------------------------------------------------------ the program, by path
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -414,7 +418,9 @@ function StmtBody({ b, path, ed }) {
     }
     case "lights_off": return html`<span class="bk-w" ...${tip(TIP.handBack)}>Hand back the lights of</span><${LightPick} b=${b} path=${path} ed=${ed} every />`;
     case "add_time": return html`<span class="bk-w" ...${tip(TIP.addTime)}>Add</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
-    case "set_time": return html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
+    case "set_time": return b.at_least   // PAD-658: Keep at least N seconds on the clock
+      ? html`<span class="bk-w" ...${tip(TIP.atLeast)}>Keep at least</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds on the clock</span>`
+      : html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
       <span class="bk-w">balls, ball save</span><${Num} value=${b.save} width=${44} onChange=${(v) => set("save", v)} /><span class="bk-w">s</span>`;
     case "log": return html`<span class="bk-w">Write</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="a line" /><span class="bk-w">in the log</span>`;
@@ -619,7 +625,7 @@ export function hatLabel(h) {
 }
 
 export function stmtLabel(b) {
-  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: "Set the clock", multiball: "Multiball",
+  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball",
     score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound", music: "Play the music",
@@ -707,8 +713,17 @@ function Hud({ prog, ed }) {
         <span class="bk-w">of</span><${Num} value=${gauge.count} width=${40} onChange=${(v) => ed.set(at_("gauge", "count"), v)} />
         <${Pick} value=${gauge.kind} options=${GAUGES} onChange=${(v) => ed.set(at_("gauge", "kind"), v)} />
         <input type="color" class="bk-color" value=${gauge.color || "#ff7800"} onInput=${(e) => ed.set(at_("gauge", "color"), e.target.value)} ...${tip("The lit pips' color")} />
-        <span class="bk-w" ...${tip(TIP.gaugeFollows)}>lit to</span><${Slot} kind="num" value=${gauge.value} path=${at_("gauge", "value")} ed=${ed} empty="(set by a block)" />` : null}
+        <span class="bk-w" ...${tip(gauge.kind === "bar" ? TIP.gaugeBar : TIP.gaugeFollows)}>${gauge.kind === "bar" ? "filled to (percent)" : "lit to"}</span><${Slot} kind="num" value=${gauge.value} path=${at_("gauge", "value")} ed=${ed} empty="(set by a block)" />
+        <${Check} checked=${!!gauge.meter} label="before it starts too" title=${TIP.gaugeMeter} onChange=${(v) => ed.set(at_("gauge", "meter"), v)} />` : null}
     </div>
+    ${gauge.on && gauge.kind === "bar" ? html`<div class="bk-line">
+      <span class="bk-w" ...${tip(TIP.gaugeBar)}>Its words</span>
+      <${Text} value=${(gauge.words || [])[0] || ""} max=${16} width=${110} onChange=${(v) => ed.set(at_("gauge", "words"), [v, (gauge.words || [])[1] || ""])} placeholder="GODZILLA" />
+      <${Text} value=${(gauge.words || [])[1] || ""} max=${16} width=${110} onChange=${(v) => ed.set(at_("gauge", "words"), [(gauge.words || [])[0] || "", v])} placeholder="RAGE" />
+      <span class="bk-w">full, it says</span>
+      <${Text} value=${gauge.full} max=${16} width=${110} onChange=${(v) => ed.set(at_("gauge", "full"), v)} placeholder="100%" />
+      <${Pick} value=${gauge.icon || "rage"} options=${icons} onChange=${(v) => ed.set(at_("gauge", "icon"), v)} title="Its icon" />
+    </div>` : null}
   </div>`;
 }
 

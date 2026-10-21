@@ -7,13 +7,15 @@
   "godzilla_pro"
  ],
  "based_on": "ghidorah_heads.c",
- "about": "The C example KING GHIDORAH rebuilt in blocks, three stages deep. Powerline hits in one ball start it (each powerline once, twice the second time, three times the third). THE HEADS is the C's battle: only the lit head (two shots each) takes damage, it turns, a wounded head grows back, each sever pays into the pot; THE WINGS: hit the Big loop and the Mecha lane in turn to ground him; THE FINAL BLOW: the Maser's super jackpot and the pot twice over. Cash the pot at the right scoop once the heads are off; failing pays a quarter.",
+ "about": "The C example KING GHIDORAH rebuilt in blocks, three stages deep. Powerline hits in one ball start it (each powerline once, twice the second time, three times the third). THE HEADS is the C's battle: only the lit head (two shots each, lit gold and named on the line) takes damage, it turns, a wounded head grows back, each sever pays into the pot; THE WINGS: hit the Big loop and the Mecha lane in turn to ground him; THE FINAL BLOW: the Maser's super jackpot and the pot twice over. Cash the pot at the right scoop once the heads are off; failing pays a quarter.",
  "lost": [
   "The heads' shots have no 250 ms debounce: a ball rattling on a target is several hits (the C counted one hit a quarter second per shot).",
   "A start from the tab's Start mode now counts as the ball's and the game's start too (the C counted only the three powerlines).",
   "When a run will not count (it already ran this ball) the powerlines say nothing; the C logged why once. The C ran at most twice a game; the blocks any number of times, each start costing more.",
   "The HUD shows a severed head's health as 0, where the C showed X; in the final blow the counters are the POT, the SUPER JACKPOT and the STAGE, where the C hid all but the super jackpot; and the gauge counts the stages, where the C's counted the severed heads.",
-  "Awards say their numbers under the words: LEFT HEAD over 5,000,000  -  SEVERED  +10 SECONDS, where the C said LEFT HEAD SEVERED over 5,000,000   +10 SECONDS; a head growing back says LEFT HEAD over GROWS BACK, where the C said LEFT HEAD REGROWS. A glancing blow says HIT THE LIT HEAD, where the C named it.",
+  "Awards say their numbers under the words: LEFT HEAD over 5,000,000  -  SEVERED  +10 SECONDS, where the C said LEFT HEAD SEVERED over 5,000,000   +10 SECONDS; a head growing back says LEFT HEAD over GROWS BACK, where the C said LEFT HEAD REGROWS. A hit on the lit head says AGAIN: and its two shots under LEFT HEAD -2, where the C said the points; a glancing blow names the lit head's two shots (NOW: BUILDING OR CENTER POWERLINE), where the C named the head. Every note stays 3 s at least, where the C showed a hit's 1.3 s, a glancing blow's 1.2 s and a head growing back 1.8 s.",
+  "The HUD's line names the lit head's two shots (SHOOT THE LEFT RAMP OR LEFT POWERLINE), where the C said SHOOT THE LEFT HEAD.",
+  "The lit head turns every 14 s (12 s the second time, 10 s the third) and a wound grows back after 28 s (24 s, 20 s), where the C turned it every 8 s and grew a wound back after 10 s (PAD-658: a moving target stays 10 s at least, a window 20 s). A wounded head that is not lit stays dark, where the C pulsed it green: only the lit head takes damage, so only its shots are lit.",
   "The ending title (GHIDORAH DEFEATED, GHIDORAH FLEES or GHIDORAH ESCAPES) and its total stay up 3 s, the runtime's: the C kept them 10 s, with KING GHIDORAH TOTAL under the total.",
   "The lit head moves on its own timer, and moves a tick after a sever (the C moved it in the same tick); its inserts change a tick after a hit too.",
   "The countdown's 5, 4, 3, 2, 1 callouts are gone (the blocks say only ten seconds and time up).",
@@ -153,7 +155,7 @@
   ],
   "hud": {
    "on": true,
-   "line": "SHOOT THE LIT HEAD",
+   "line": "SHOOT THE LEFT RAMP OR LEFT POWERLINE",
    "counters": [
     {
      "label": "LEFT HEAD",
@@ -185,7 +187,11 @@
     "value": {
      "k": "var",
      "name": "stage"
-    }
+    },
+    "meter": false,
+    "words": [],
+    "full": "",
+    "icon": "rage"
    }
   },
   "bar": {
@@ -702,40 +708,6 @@
         "op": "if",
         "cond": {
          "k": "cmp",
-         "op": "<=",
-         "a": {
-          "k": "var",
-          "name": "pl left"
-         },
-         "b": {
-          "k": "var",
-          "name": "starts"
-         }
-        },
-        "then": [
-         {
-          "op": "change",
-          "var": "pl left",
-          "by": {
-           "k": "num",
-           "v": 1
-          }
-         },
-         {
-          "op": "change",
-          "var": "pl hits",
-          "by": {
-           "k": "num",
-           "v": 1
-          }
-         }
-        ],
-        "else": null
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
          "op": ">=",
          "a": {
           "k": "var",
@@ -769,38 +741,145 @@
         ],
         "else": [
          {
-          "op": "hud_award",
-          "text": "POWERLINE HITS",
-          "value": {
-           "k": "op",
-           "op": "-",
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
            "a": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 3
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
-             "a": {
-              "k": "var",
-              "name": "starts"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
+            "k": "var",
+            "name": "pl left"
            },
            "b": {
             "k": "var",
-            "name": "pl hits"
+            "name": "starts"
            }
           },
-          "sub": "TO SUMMON GHIDORAH",
-          "seconds": 2
+          "then": [
+           {
+            "op": "change",
+            "var": "pl left",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "pl hits",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">=",
+             "a": {
+              "k": "var",
+              "name": "pl hits"
+             },
+             "b": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 3
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "start_mode"
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_award",
+              "text": "POWERLINE HITS",
+              "value": {
+               "k": "op",
+               "op": "-",
+               "a": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 3
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "starts"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "pl hits"
+               }
+              },
+              "sub": "TO SUMMON GHIDORAH",
+              "seconds": 3
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "ANOTHER POWERLINE",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 3
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "pl hits"
+             }
+            },
+            "sub": "TO SUMMON GHIDORAH",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -835,40 +914,6 @@
         "op": "if",
         "cond": {
          "k": "cmp",
-         "op": "<=",
-         "a": {
-          "k": "var",
-          "name": "pl center"
-         },
-         "b": {
-          "k": "var",
-          "name": "starts"
-         }
-        },
-        "then": [
-         {
-          "op": "change",
-          "var": "pl center",
-          "by": {
-           "k": "num",
-           "v": 1
-          }
-         },
-         {
-          "op": "change",
-          "var": "pl hits",
-          "by": {
-           "k": "num",
-           "v": 1
-          }
-         }
-        ],
-        "else": null
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
          "op": ">=",
          "a": {
           "k": "var",
@@ -902,38 +947,145 @@
         ],
         "else": [
          {
-          "op": "hud_award",
-          "text": "POWERLINE HITS",
-          "value": {
-           "k": "op",
-           "op": "-",
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
            "a": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 3
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
-             "a": {
-              "k": "var",
-              "name": "starts"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
+            "k": "var",
+            "name": "pl center"
            },
            "b": {
             "k": "var",
-            "name": "pl hits"
+            "name": "starts"
            }
           },
-          "sub": "TO SUMMON GHIDORAH",
-          "seconds": 2
+          "then": [
+           {
+            "op": "change",
+            "var": "pl center",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "pl hits",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">=",
+             "a": {
+              "k": "var",
+              "name": "pl hits"
+             },
+             "b": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 3
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "start_mode"
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_award",
+              "text": "POWERLINE HITS",
+              "value": {
+               "k": "op",
+               "op": "-",
+               "a": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 3
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "starts"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "pl hits"
+               }
+              },
+              "sub": "TO SUMMON GHIDORAH",
+              "seconds": 3
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "ANOTHER POWERLINE",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 3
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "pl hits"
+             }
+            },
+            "sub": "TO SUMMON GHIDORAH",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -968,40 +1120,6 @@
         "op": "if",
         "cond": {
          "k": "cmp",
-         "op": "<=",
-         "a": {
-          "k": "var",
-          "name": "pl right"
-         },
-         "b": {
-          "k": "var",
-          "name": "starts"
-         }
-        },
-        "then": [
-         {
-          "op": "change",
-          "var": "pl right",
-          "by": {
-           "k": "num",
-           "v": 1
-          }
-         },
-         {
-          "op": "change",
-          "var": "pl hits",
-          "by": {
-           "k": "num",
-           "v": 1
-          }
-         }
-        ],
-        "else": null
-       },
-       {
-        "op": "if",
-        "cond": {
-         "k": "cmp",
          "op": ">=",
          "a": {
           "k": "var",
@@ -1035,38 +1153,145 @@
         ],
         "else": [
          {
-          "op": "hud_award",
-          "text": "POWERLINE HITS",
-          "value": {
-           "k": "op",
-           "op": "-",
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "<=",
            "a": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 3
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
-             "a": {
-              "k": "var",
-              "name": "starts"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
+            "k": "var",
+            "name": "pl right"
            },
            "b": {
             "k": "var",
-            "name": "pl hits"
+            "name": "starts"
            }
           },
-          "sub": "TO SUMMON GHIDORAH",
-          "seconds": 2
+          "then": [
+           {
+            "op": "change",
+            "var": "pl right",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "change",
+            "var": "pl hits",
+            "by": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">=",
+             "a": {
+              "k": "var",
+              "name": "pl hits"
+             },
+             "b": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 3
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             }
+            },
+            "then": [
+             {
+              "op": "start_mode"
+             }
+            ],
+            "else": [
+             {
+              "op": "hud_award",
+              "text": "POWERLINE HITS",
+              "value": {
+               "k": "op",
+               "op": "-",
+               "a": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 3
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "starts"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "pl hits"
+               }
+              },
+              "sub": "TO SUMMON GHIDORAH",
+              "seconds": 3
+             }
+            ]
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "ANOTHER POWERLINE",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 3
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "pl hits"
+             }
+            },
+            "sub": "TO SUMMON GHIDORAH",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -1232,57 +1457,7 @@
        "op": "-",
        "a": {
         "k": "num",
-        "v": 9500
-       },
-       "b": {
-        "k": "op",
-        "op": "*",
-        "a": {
-         "k": "num",
-         "v": 1500
-        },
-        "b": {
-         "k": "var",
-         "name": "starts"
-        }
-       }
-      }
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "cmp",
-       "op": "<",
-       "a": {
-        "k": "var",
-        "name": "turn ms"
-       },
-       "b": {
-        "k": "num",
-        "v": 4000
-       }
-      },
-      "then": [
-       {
-        "op": "set",
-        "var": "turn ms",
-        "value": {
-         "k": "num",
-         "v": 4000
-        }
-       }
-      ],
-      "else": null
-     },
-     {
-      "op": "set",
-      "var": "regrow ms",
-      "value": {
-       "k": "op",
-       "op": "-",
-       "a": {
-        "k": "num",
-        "v": 12000
+        "v": 16000
        },
        "b": {
         "k": "op",
@@ -1305,11 +1480,61 @@
        "op": "<",
        "a": {
         "k": "var",
+        "name": "turn ms"
+       },
+       "b": {
+        "k": "num",
+        "v": 10000
+       }
+      },
+      "then": [
+       {
+        "op": "set",
+        "var": "turn ms",
+        "value": {
+         "k": "num",
+         "v": 10000
+        }
+       }
+      ],
+      "else": null
+     },
+     {
+      "op": "set",
+      "var": "regrow ms",
+      "value": {
+       "k": "op",
+       "op": "-",
+       "a": {
+        "k": "num",
+        "v": 32000
+       },
+       "b": {
+        "k": "op",
+        "op": "*",
+        "a": {
+         "k": "num",
+         "v": 4000
+        },
+        "b": {
+         "k": "var",
+         "name": "starts"
+        }
+       }
+      }
+     },
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "<",
+       "a": {
+        "k": "var",
         "name": "regrow ms"
        },
        "b": {
         "k": "num",
-        "v": 4000
+        "v": 20000
        }
       },
       "then": [
@@ -1318,7 +1543,7 @@
         "var": "regrow ms",
         "value": {
          "k": "num",
-         "v": 4000
+         "v": 20000
         }
        }
       ],
@@ -1409,7 +1634,7 @@
      {
       "op": "hud_text",
       "which": "line",
-      "text": "SHOOT THE LEFT HEAD",
+      "text": "SHOOT THE LEFT RAMP OR LEFT POWERLINE",
       "value": null
      },
      {
@@ -1561,6 +1786,14 @@
             }
            },
            {
+            "op": "set_time",
+            "seconds": {
+             "k": "num",
+             "v": 15
+            },
+            "at_least": true
+           },
+           {
             "op": "shake",
             "ms": {
              "k": "num",
@@ -1572,8 +1805,8 @@
             "op": "hud_award",
             "text": "LEFT HEAD -2",
             "value": null,
-            "sub": "2,000,000",
-            "seconds": 1
+            "sub": "AGAIN: LEFT RAMP OR LEFT POWERLINE",
+            "seconds": 3
            },
            {
             "op": "timer_start",
@@ -1603,11 +1836,37 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "GLANCING BLOW",
-          "value": null,
-          "sub": "HIT THE LIT HEAD",
-          "seconds": 1
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "lit"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: BUILDING OR CENTER POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: RIGHT RAMP OR RIGHT POWERLINE",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -1740,6 +1999,14 @@
             }
            },
            {
+            "op": "set_time",
+            "seconds": {
+             "k": "num",
+             "v": 15
+            },
+            "at_least": true
+           },
+           {
             "op": "shake",
             "ms": {
              "k": "num",
@@ -1751,8 +2018,8 @@
             "op": "hud_award",
             "text": "MIDDLE HEAD -2",
             "value": null,
-            "sub": "2,000,000",
-            "seconds": 1
+            "sub": "AGAIN: BUILDING OR CENTER POWERLINE",
+            "seconds": 3
            },
            {
             "op": "timer_start",
@@ -1782,11 +2049,37 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "GLANCING BLOW",
-          "value": null,
-          "sub": "HIT THE LIT HEAD",
-          "seconds": 1
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "lit"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: LEFT RAMP OR LEFT POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: RIGHT RAMP OR RIGHT POWERLINE",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -1919,6 +2212,14 @@
             }
            },
            {
+            "op": "set_time",
+            "seconds": {
+             "k": "num",
+             "v": 15
+            },
+            "at_least": true
+           },
+           {
             "op": "shake",
             "ms": {
              "k": "num",
@@ -1930,8 +2231,8 @@
             "op": "hud_award",
             "text": "RIGHT HEAD -2",
             "value": null,
-            "sub": "2,000,000",
-            "seconds": 1
+            "sub": "AGAIN: RIGHT RAMP OR RIGHT POWERLINE",
+            "seconds": 3
            },
            {
             "op": "timer_start",
@@ -1961,11 +2262,37 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "GLANCING BLOW",
-          "value": null,
-          "sub": "HIT THE LIT HEAD",
-          "seconds": 1
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "lit"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: LEFT RAMP OR LEFT POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: BUILDING OR CENTER POWERLINE",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -2098,11 +2425,19 @@
             }
            },
            {
+            "op": "set_time",
+            "seconds": {
+             "k": "num",
+             "v": 15
+            },
+            "at_least": true
+           },
+           {
             "op": "hud_award",
             "text": "LEFT HEAD -1",
             "value": null,
-            "sub": "1,000,000",
-            "seconds": 1
+            "sub": "AGAIN: LEFT RAMP OR LEFT POWERLINE",
+            "seconds": 3
            },
            {
             "op": "timer_start",
@@ -2132,11 +2467,37 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "GLANCING BLOW",
-          "value": null,
-          "sub": "HIT THE LIT HEAD",
-          "seconds": 1
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "lit"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: BUILDING OR CENTER POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: RIGHT RAMP OR RIGHT POWERLINE",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -2269,11 +2630,19 @@
             }
            },
            {
+            "op": "set_time",
+            "seconds": {
+             "k": "num",
+             "v": 15
+            },
+            "at_least": true
+           },
+           {
             "op": "hud_award",
             "text": "MIDDLE HEAD -1",
             "value": null,
-            "sub": "1,000,000",
-            "seconds": 1
+            "sub": "AGAIN: BUILDING OR CENTER POWERLINE",
+            "seconds": 3
            },
            {
             "op": "timer_start",
@@ -2303,11 +2672,37 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "GLANCING BLOW",
-          "value": null,
-          "sub": "HIT THE LIT HEAD",
-          "seconds": 1
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "lit"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: LEFT RAMP OR LEFT POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: RIGHT RAMP OR RIGHT POWERLINE",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -2440,11 +2835,19 @@
             }
            },
            {
+            "op": "set_time",
+            "seconds": {
+             "k": "num",
+             "v": 15
+            },
+            "at_least": true
+           },
+           {
             "op": "hud_award",
             "text": "RIGHT HEAD -1",
             "value": null,
-            "sub": "1,000,000",
-            "seconds": 1
+            "sub": "AGAIN: RIGHT RAMP OR RIGHT POWERLINE",
+            "seconds": 3
            },
            {
             "op": "timer_start",
@@ -2474,11 +2877,37 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "GLANCING BLOW",
-          "value": null,
-          "sub": "HIT THE LIT HEAD",
-          "seconds": 1
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "lit"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: LEFT RAMP OR LEFT POWERLINE",
+            "seconds": 3
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "GLANCING BLOW",
+            "value": null,
+            "sub": "NOW: BUILDING OR CENTER POWERLINE",
+            "seconds": 3
+           }
+          ]
          }
         ]
        }
@@ -2551,7 +2980,7 @@
         "text": "LEFT HEAD",
         "value": null,
         "sub": "GROWS BACK: FINISH IT",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "sound",
@@ -2653,7 +3082,7 @@
         "text": "MIDDLE HEAD",
         "value": null,
         "sub": "GROWS BACK: FINISH IT",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "sound",
@@ -2755,7 +3184,7 @@
         "text": "RIGHT HEAD",
         "value": null,
         "sub": "GROWS BACK: FINISH IT",
-        "seconds": 2
+        "seconds": 3
        },
        {
         "op": "sound",
@@ -3071,7 +3500,7 @@
          {
           "op": "hud_text",
           "which": "line",
-          "text": "SHOOT THE LEFT HEAD",
+          "text": "SHOOT THE LEFT RAMP OR LEFT POWERLINE",
           "value": null
          }
         ],
@@ -3094,7 +3523,7 @@
            {
             "op": "hud_text",
             "which": "line",
-            "text": "SHOOT THE MIDDLE HEAD",
+            "text": "SHOOT THE BUILDING OR CENTER POWERLINE",
             "value": null
            }
           ],
@@ -3102,7 +3531,7 @@
            {
             "op": "hud_text",
             "which": "line",
-            "text": "SHOOT THE RIGHT HEAD",
+            "text": "SHOOT THE RIGHT RAMP OR RIGHT POWERLINE",
             "value": null
            }
           ]
@@ -3250,51 +3679,12 @@
           ],
           "else": [
            {
-            "op": "if",
-            "cond": {
-             "k": "cmp",
-             "op": "<",
-             "a": {
-              "k": "var",
-              "name": "hp l"
-             },
-             "b": {
-              "k": "num",
-              "v": 3
-             }
-            },
-            "then": [
-             {
-              "op": "light_shot",
-              "shot": "Left ramp",
-              "color": "#00ff3c",
-              "pattern": "pulse",
-              "rate": {
-               "k": "num",
-               "v": 1200
-              }
-             },
-             {
-              "op": "light_shot",
-              "shot": "Powerline left",
-              "color": "#00ff3c",
-              "pattern": "pulse",
-              "rate": {
-               "k": "num",
-               "v": 1200
-              }
-             }
-            ],
-            "else": [
-             {
-              "op": "lights_off",
-              "shot": "Left ramp"
-             },
-             {
-              "op": "lights_off",
-              "shot": "Powerline left"
-             }
-            ]
+            "op": "lights_off",
+            "shot": "Left ramp"
+           },
+           {
+            "op": "lights_off",
+            "shot": "Powerline left"
            },
            {
             "op": "hud_counter",
@@ -3450,51 +3840,12 @@
           ],
           "else": [
            {
-            "op": "if",
-            "cond": {
-             "k": "cmp",
-             "op": "<",
-             "a": {
-              "k": "var",
-              "name": "hp m"
-             },
-             "b": {
-              "k": "num",
-              "v": 3
-             }
-            },
-            "then": [
-             {
-              "op": "light_shot",
-              "shot": "Building",
-              "color": "#00ff3c",
-              "pattern": "pulse",
-              "rate": {
-               "k": "num",
-               "v": 1200
-              }
-             },
-             {
-              "op": "light_shot",
-              "shot": "Powerline center",
-              "color": "#00ff3c",
-              "pattern": "pulse",
-              "rate": {
-               "k": "num",
-               "v": 1200
-              }
-             }
-            ],
-            "else": [
-             {
-              "op": "lights_off",
-              "shot": "Building"
-             },
-             {
-              "op": "lights_off",
-              "shot": "Powerline center"
-             }
-            ]
+            "op": "lights_off",
+            "shot": "Building"
+           },
+           {
+            "op": "lights_off",
+            "shot": "Powerline center"
            },
            {
             "op": "hud_counter",
@@ -3650,51 +4001,12 @@
           ],
           "else": [
            {
-            "op": "if",
-            "cond": {
-             "k": "cmp",
-             "op": "<",
-             "a": {
-              "k": "var",
-              "name": "hp r"
-             },
-             "b": {
-              "k": "num",
-              "v": 3
-             }
-            },
-            "then": [
-             {
-              "op": "light_shot",
-              "shot": "Right ramp",
-              "color": "#00ff3c",
-              "pattern": "pulse",
-              "rate": {
-               "k": "num",
-               "v": 1200
-              }
-             },
-             {
-              "op": "light_shot",
-              "shot": "Powerline right",
-              "color": "#00ff3c",
-              "pattern": "pulse",
-              "rate": {
-               "k": "num",
-               "v": 1200
-              }
-             }
-            ],
-            "else": [
-             {
-              "op": "lights_off",
-              "shot": "Right ramp"
-             },
-             {
-              "op": "lights_off",
-              "shot": "Powerline right"
-             }
-            ]
+            "op": "lights_off",
+            "shot": "Right ramp"
+           },
+           {
+            "op": "lights_off",
+            "shot": "Powerline right"
            },
            {
             "op": "hud_counter",
@@ -3915,6 +4227,14 @@
         }
        },
        {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
         "op": "sound",
         "sound": "sever",
         "fallback": ""
@@ -3975,7 +4295,7 @@
           "timer": "next",
           "ms": {
            "k": "num",
-           "v": 700
+           "v": 3000
           }
          }
         ],
@@ -4131,6 +4451,14 @@
         }
        },
        {
+        "op": "set_time",
+        "seconds": {
+         "k": "num",
+         "v": 15
+        },
+        "at_least": true
+       },
+       {
         "op": "change",
         "var": "pot",
         "by": {
@@ -4194,14 +4522,6 @@
         "name": "Wing hit"
        },
        {
-        "op": "timer_start",
-        "timer": "lights",
-        "ms": {
-         "k": "num",
-         "v": 1
-        }
-       },
-       {
         "op": "if",
         "cond": {
          "k": "cmp",
@@ -4224,6 +4544,18 @@
          }
         },
         "then": [
+         {
+          "op": "lights_off",
+          "shot": "Big loop"
+         },
+         {
+          "op": "lights_off",
+          "shot": "Mecha exit bottom"
+         },
+         {
+          "op": "lights_off",
+          "insert": "MECHA LANE"
+         },
          {
           "op": "hud_award",
           "text": "GHIDORAH FALLS",
@@ -4253,36 +4585,106 @@
           "timer": "next",
           "ms": {
            "k": "num",
-           "v": 700
+           "v": 3000
           }
          }
         ],
         "else": [
          {
-          "op": "hud_award",
-          "text": "WING HIT",
-          "value": {
-           "k": "op",
-           "op": "*",
+          "op": "timer_start",
+          "timer": "lights",
+          "ms": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
            "a": {
             "k": "var",
-            "name": "value"
+            "name": "wing last"
            },
            "b": {
-            "k": "op",
-            "op": "+",
-            "a": {
-             "k": "var",
-             "name": "wings"
-            },
-            "b": {
-             "k": "num",
-             "v": 1
-            }
+            "k": "num",
+            "v": 1
            }
           },
-          "sub": "NOW THE OTHER WING",
-          "seconds": 2
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WING HIT",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "var",
+              "name": "value"
+             },
+             "b": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "var",
+               "name": "wings"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            },
+            "sub": "NOW THE MECHA LANE",
+            "seconds": 3
+           }
+          ],
+          "else": null
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "wing last"
+           },
+           "b": {
+            "k": "num",
+            "v": 2
+           }
+          },
+          "then": [
+           {
+            "op": "hud_award",
+            "text": "WING HIT",
+            "value": {
+             "k": "op",
+             "op": "*",
+             "a": {
+              "k": "var",
+              "name": "value"
+             },
+             "b": {
+              "k": "op",
+              "op": "+",
+              "a": {
+               "k": "var",
+               "name": "wings"
+              },
+              "b": {
+               "k": "num",
+               "v": 1
+              }
+             }
+            },
+            "sub": "NOW THE BIG LOOP",
+            "seconds": 3
+           }
+          ],
+          "else": null
          },
          {
           "op": "clip",
@@ -4320,27 +4722,50 @@
       "cond": {
        "k": "and",
        "a": {
-        "k": "cmp",
-        "op": "=",
+        "k": "and",
         "a": {
-         "k": "var",
-         "name": "stage"
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
         },
         "b": {
-         "k": "num",
-         "v": 2
+         "k": "cmp",
+         "op": "!=",
+         "a": {
+          "k": "var",
+          "name": "wing last"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
         }
        },
        "b": {
         "k": "cmp",
-        "op": "!=",
+        "op": "<",
         "a": {
          "k": "var",
-         "name": "wing last"
+         "name": "wings"
         },
         "b": {
-         "k": "num",
-         "v": 1
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 3
+         },
+         "b": {
+          "k": "var",
+          "name": "starts"
+         }
         }
        }
       },
@@ -4378,27 +4803,50 @@
       "cond": {
        "k": "and",
        "a": {
-        "k": "cmp",
-        "op": "=",
+        "k": "and",
         "a": {
-         "k": "var",
-         "name": "stage"
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "stage"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
         },
         "b": {
-         "k": "num",
-         "v": 2
+         "k": "cmp",
+         "op": "!=",
+         "a": {
+          "k": "var",
+          "name": "wing last"
+         },
+         "b": {
+          "k": "num",
+          "v": 2
+         }
         }
        },
        "b": {
         "k": "cmp",
-        "op": "!=",
+        "op": "<",
         "a": {
          "k": "var",
-         "name": "wing last"
+         "name": "wings"
         },
         "b": {
-         "k": "num",
-         "v": 2
+         "k": "op",
+         "op": "+",
+         "a": {
+          "k": "num",
+          "v": 3
+         },
+         "b": {
+          "k": "var",
+          "name": "starts"
+         }
         }
        }
       },
@@ -4558,7 +5006,7 @@
           "op": "set_time",
           "seconds": {
            "k": "num",
-           "v": 30
+           "v": 40
           }
          },
          {
@@ -4619,7 +5067,7 @@
           "op": "hud_award",
           "text": "GHIDORAH FLIES",
           "value": null,
-          "sub": "HIT ONE WING, THEN THE OTHER",
+          "sub": "BIG LOOP AND MECHA LANE, IN TURN",
           "seconds": 3
          },
          {
@@ -4643,13 +5091,13 @@
           "op": "set_time",
           "seconds": {
            "k": "num",
-           "v": 15
+           "v": 40
           }
          },
          {
           "op": "hud_text",
           "which": "line",
-          "text": "FINAL BLOW: SHOOT THE MASER",
+          "text": "FINAL BLOW: SHOOT THE MASER TARGET",
           "value": null
          },
          {
@@ -4701,7 +5149,7 @@
           "op": "hud_award",
           "text": "THE FINAL BLOW",
           "value": null,
-          "sub": "THE MASER: THE SUPER JACKPOT",
+          "sub": "SUPER JACKPOT: THE MASER TARGET",
           "seconds": 3
          },
          {

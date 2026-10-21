@@ -258,7 +258,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Form modes | 64 per project (blocks and C modes not counted) |
 | Running at once | 1 |
 | Clock | up to 600 seconds (0 = no clock) |
-| Blocks mode | 48 scripts, 400 blocks, nested at most 10 deep |
+| Blocks mode | 48 scripts, 600 blocks, nested at most 10 deep |
 | Variables | 24 per mode, names up to 24 characters |
 | Timers | 8 per mode, up to 600 seconds each |
 | Numbers | whole numbers |

@@ -7,24 +7,30 @@ costs more each start), stages with their own shots (EHoH), a multiplier carried
 on, and failing still pays.
 
 - LIGHT IT: 60 spins of the Shield ramp spinner (the Mechagodzilla spinner) start it at once; 120 the next time, then
-  180 (a note every 10 spins says how many are left). A start that has to wait (a multiball, one of the game's
-  modes) waits for the next spin.
+  180 (a note every 10 spins says how many are left and SHOOT THE SPINNER). A start that has to wait (a multiball,
+  one of the game's modes) waits for the next spin.
 - STAGE 1, ABSOLUTE ZERO (the C's rule): the ramps, the Building and the Big loop charge 15%, the Maser 10%, each
-  Shield target 8%, every spin 1%; each charging shot pays 750,000 (a spin 10,000) and puts a clock under 15 s back
-  to 15. From 100% the Godzilla target (the captive ball) or the Action button fires: 10M times the multiplier into
-  the POT. PUSH IT: 200% x2, 300% x3, 400% x4; from 200% the reactor overheats: 12 s to fire (10 s the second time,
-  8 s the third), again at each 100% more; run out and Kiryu VENTS (the charge back to 0). The multiplier it fired at
-  is CARRIED UP into the next stages.
+  Shield target 8% (all of them lit ice blue: CHARGE IT: SHOOT ANY LIT SHOT), every spin 1%; each charging shot pays
+  750,000 (a spin 10,000) and puts a clock under 15 s back to 15. From 100% the Godzilla target (the captive ball) or
+  the Action button fires (chasing white: FIRE: GODZILLA TARGET): 10M times the multiplier into the POT. PUSH IT:
+  200% x2, 300% x3, 400% x4; from 200% the reactor overheats: 20 s to fire (pack.WINDOW_S, every time), again at each
+  100% more, the line counting it down (OVERHEATING: GODZILLA TARGET IN 18); run out and Kiryu VENTS (the charge back
+  to 0). The multiplier it fired at is CARRIED UP into the next stages.
 - STAGE 2, THE ARSENAL: three weapons, each its own shot and colour: the MASER CANNONS at the Maser target (red),
   the MISSILES at the Big loop (orange), the WRIST BLADE at the Building (white). Each fired pays more than the last
-  (5M, 10M, 15M times the multiplier) into the pot.
-- STAGE 3, THE GRAPPLE: the Mecha lane grabs Godzilla (8 s, 6 s, 4 s the more Kiryu has fought); the Big loop
+  (5M, 10M, 15M times the multiplier) into the pot, and goes dark; the line names the ones left (SHOOT THE BIG LOOP
+  OR BUILDING).
+- STAGE 3, THE GRAPPLE: the Mecha lane grabs Godzilla (20 s to carry him, pack.WINDOW_S, every time); the Big loop
   carries him out to sea: 8M, 16M, 24M times the multiplier into the pot. Three carries light POINT BLANK at the
-  captive ball: the pot twice and 25M times the multiplier. KIRYU WINS.
-- CASH OUT: after stage 1 or 2 the right scoop chases white: it pays the pot. The clock (40 s a stage, 35 s and 30 s
-  the more Kiryu has fought) or a drain pays a quarter of it; a clock that runs out at 100% or more in stage 1 fires
-  the cannon on its own (x1, 10M).
+  Godzilla target (the captive ball): the pot twice and 25M times the multiplier. KIRYU WINS.
+- A STAGE DONE: the next stage's shots light at once (its line names them, its counter starts) and it is announced
+  once the note of the shot that ended the last has had its NOTE_S.
+- CASH OUT: after stage 1 or 2 the right scoop chases white: it pays the pot. The clock (pack.STAGE_S, 40 s, a stage;
+  the grapple's seven shots 50 s; never shorter the more Kiryu has fought) or a drain pays a quarter of it; a clock
+  that runs out at 100% or more in stage 1 fires the cannon on its own (x1, 10M).
 """
+import itertools
+
 from blk import (AND, OR, SECS_LEFT, a_show, add, award, beds, callout, change, clip, clips, div, end, eq, every, game_show,
                  ge, gt, hud, hud_counter, hud_line, hud_title, if_, light, lt, mul, music, ne, off, on_end, on_shot,
                  on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game, shield, show, sound, sounds, start,
@@ -42,11 +48,24 @@ CHARGE = (("Left ramp", 15), ("Right ramp", 15), ("Building", 15), ("Big loop", 
 WEAPONS = (("w1", "Maser target", "MASER CANNONS", RED), ("w2", "Big loop", "MISSILE VOLLEY", ORANGE),
            ("w3", "Building", "WRIST BLADE", WHITE))
 SHOT_VALUE, SPIN_VALUE, FIRE_VALUE = 750000, 10000, 10000000
-CHARGE_MAX, FLOOR = 400, 15
+CHARGE_MAX = 400
 NEED = pack.need(60, "plays")             # 60 spins, then 120, then 180 (David: SUPER X2 starts at 60)
 MAGNA = dict(x=89, y=260)                 # the MAGNA GRAB insert (the captive ball), the port's lamp place
 LANE_XY = dict(x=282, y=393)              # the MECHA LANE insert: Kiryu's own lane (the Mechagodzilla at its top)
-TIMERS = ("charge", "lamps", "heat", "fire", "next", "grab", "weapon")
+TIMERS = ("charge", "lamps", "heat", "fire", "next", "grab", "weapon", "up")
+#: stage 1's lit shots: every one that charges (the spinner has no light of its own to light)
+CHARGE_LIT = tuple(s for s, _p in CHARGE)
+#: PAD-658 round 3: a stage's clock (the grapple's seven shots longer), the overheat and the grab windows
+CLOCK = {1: pack.STAGE_S, 2: pack.STAGE_S, 3: pack.STAGE_S + 10}
+HEAT_MS = GRAB_MS = pack.WINDOW_S * 1000
+#: what the line says: every one names the shot by the playfield's name
+LINE_CHARGE = "CHARGE IT: SHOOT ANY LIT SHOT"                 # every charging shot is lit (more than 3)
+LINE_FIRE = "FIRE: GODZILLA TARGET  -  OR CHARGE ON"
+LINE_HOT = "OVERHEATING: GODZILLA TARGET IN"                  # + the overheat's seconds
+LINE_ARSENAL = "SHOOT MASER TARGET, BIG LOOP, BUILDING"       # all three weapons still to fire
+LINE_GRAB = "THE GRAPPLE: " + pack.shoot(LANE)
+LINE_CARRY = "CARRY HIM: " + pack.shoot("Big loop")
+LINE_POINT_BLANK = "POINT BLANK: " + pack.shoot("Godzilla target")
 
 SHOWS = [
     a_show("Online",                                                    # Kiryu's eyes light up
@@ -103,37 +122,54 @@ def pot_up(points):
     return [change("pot", points), hud_counter(2, var("pot"), "CASH AT SCOOP")]
 
 
+def arsenal_line():
+    """Stage 2's line: the weapons still to fire, by their shots (one block per set of them left)."""
+    out = []
+    for done in itertools.product((0, 1), repeat=len(WEAPONS)):
+        left = [s for (_f, s, _w, _c), d in zip(WEAPONS, done) if not d]
+        if left:
+            out.append(if_(AND(*[eq(f, d) for (f, _s, _w, _c), d in zip(WEAPONS, done)]),
+                           [hud_line(LINE_ARSENAL if len(left) == len(WEAPONS) else pack.shoot(*left))]))
+    return out
+
+
 def lamps():
-    """The inserts and the HUD's words for where it is (the C's show_lamps and show, then each stage's shots)."""
+    """The inserts and the HUD's words for where it is (the C's show_lamps and show, then each stage's shots). Lit =
+    counts (PAD-658): the charging shots while they charge, the fire shots only while they fire (or point blank),
+    each weapon until it is fired, the lane or the loop as the grapple goes."""
     tl = timer_left("heat")
     return [
         if_(AND(eq("stage", 1), lt("charge", CHARGE_MAX)),
-            [light(s, ICE, "blink", 500) for s, _p in CHARGE], [off(s) for s, _p in CHARGE]),
-        if_(eq("stage", 1), [
+            [light(s, ICE, "blink", 500) for s in CHARGE_LIT], [off(s) for s in CHARGE_LIT]),
+        if_(AND(eq("stage", 1), gt("mult", 0)), [
             set_("heat ms", 100), if_(gt(tl, 3000), [set_("heat ms", 200)]), if_(gt(tl, 4000), [set_("heat ms", 400)]),
             if_(gt(tl, 8000), [set_("heat ms", 700)]),
-            if_(gt("mult", 0), [
-                if_(gt(tl, 0), [light(s, HOT, "blink", var("heat ms")) for s in FIRE_SHOTS],
-                    [light(s, WHITE, "chase", 120) for s in FIRE_SHOTS])],
-                [off(s) for s in FIRE_SHOTS]),
-            if_(gt(tl, 0), [hud_line("OVERHEATING! FIRE NOW", value=div(add(tl, 999), 1000))], [
-                if_(gt("mult", 0), [hud_line("FIRE: THE CAPTIVE BALL  -  OR CHARGE ON")],
-                    [hud_line("CHARGE THE ABSOLUTE ZERO: LIT SHOTS")])]),
+            if_(gt(tl, 0), [light(s, HOT, "blink", var("heat ms")) for s in FIRE_SHOTS],
+                [light(s, WHITE, "chase", 120) for s in FIRE_SHOTS])], [
+            # point blank: the Godzilla target alone; any other time the fire shots do nothing and are dark
+            if_(AND(eq("stage", 3), ge("carries", 3)), [off("Action button"), light("Godzilla target", WHITE, "chase", 60)],
+                [off(s) for s in FIRE_SHOTS])]),
+        if_(eq("stage", 1), [
+            if_(gt(tl, 0), [hud_line(LINE_HOT, value=div(add(tl, 999), 1000))], [
+                if_(gt("mult", 0), [hud_line(LINE_FIRE)], [hud_line(LINE_CHARGE)])]),
             hud_counter(1, var("charge"), "PERCENT"),
             if_(ge("charge", CHARGE_MAX), [set_("pips", 10)],
                 [set_("pips", div(sub(var("charge"), mul(var("mult"), 100)), 10))]),
         ]),
-        if_(eq("stage", 2), [if_(eq(f, 0), [light(s, c, "chase", 110)], [off(s)]) for f, s, _w, c in WEAPONS]),
+        if_(eq("stage", 2), [if_(eq(f, 0), [light(s, c, "chase", 110)], [off(s)]) for f, s, _w, c in WEAPONS]
+            + arsenal_line()),
         if_(eq("stage", 3), [
-            if_(ge("carries", 3), [off(LANE), off("Big loop"), light("Godzilla target", WHITE, "chase", 60)], [
-                if_(gt(timer_left("grab"), 0), [off(LANE), light("Big loop", "#ffc000", "chase", 80)],
-                    [light(LANE, ICE, "chase", 120), off("Big loop")])])]),
+            if_(ge("carries", 3), [off(LANE), off("Big loop"), hud_line(LINE_POINT_BLANK)], [
+                if_(gt(timer_left("grab"), 0), [off(LANE), light("Big loop", "#ffc000", "chase", 80), hud_line(LINE_CARRY)],
+                    [light(LANE, ICE, "chase", 120), off("Big loop"), hud_line(LINE_GRAB)])])]),
     ]
 
 
 def charged():
     """A charging hit's percent ("pct") into the charge, and what passing each 100% does (the C's charge_by)."""
-    words = [if_(eq("mult", m), [award("X%d  -  %d%%" % (m, m * 100), sub="THE REACTOR OVERHEATS")])
+    words = [if_(eq("mult", m), [award("X%d  -  %d%%" % (m, m * 100),
+                                       sub="OVERHEATING: GODZILLA TARGET IN %d S" % pack.WINDOW_S,
+                                       seconds=pack.NOTE_S)])
              for m in (2, 3, 4)]
     return [
         if_(lt("charge", CHARGE_MAX), [
@@ -141,11 +177,12 @@ def charged():
             set_("mult", div(var("charge"), 100)),
             if_(ne("mult", var("was")), [
                 set_("was", var("mult")), set_("x", var("mult")), hud_counter(3, var("x"), "CARRIED UP"),
-                if_(eq("mult", 1), [award("ABSOLUTE ZERO", sub="READY: THE CAPTIVE BALL", seconds=3),
+                if_(eq("mult", 1), [award("ABSOLUTE ZERO", sub="FIRE: " + pack.shoot("Godzilla target"),
+                                          seconds=pack.NOTE_S),
                                     sound("ready"), clip("ready", "behind")],
                     words + [sound("charge"), clip("charge", "behind")]),
                 show("Charge"), shake(300, "soft"),
-                if_(ge("charge", 200), [timer_start("heat", var("heat max")),
+                if_(ge("charge", 200), [timer_start("heat", HEAT_MS),
                                         if_(eq("mult", 2), [sound("overheat"), clip("overheat", "behind")])]),
             ]),
         ]),
@@ -153,16 +190,29 @@ def charged():
     ]
 
 
-def setup_stage():
-    """What each stage lights and says as it begins (run by the "next" timer once the stage before is done)."""
+def next_stage():
+    """A stage done (the "up" timer): the next one's shots light and its line names them at once, its clock, its
+    counter, the cash out; its announcement waits NOTE_S (the "next" timer) so the note of the shot that ended the
+    last one stays on the glass."""
     return [
+        change("stage", 1),
+        if_(eq("stage", 3), [set_time(CLOCK[3]), hud_counter(1, 0, "OF 3", "CARRIES")],
+            [set_time(CLOCK[2]), hud_counter(1, 0, "OF 3", "WEAPONS")]),
+        *pack.cash_out_lit(), timer_start("lamps", 1), timer_start("next", pack.NOTE_S * 1000),
+    ]
+
+
+def announce():
+    """The stage's title note, its clip and sound (NOTE_S after it began; the note only while nothing of the stage is
+    made yet, so a note the player's own shot just put up stays)."""
+    return [
+        show("Stage up"), shake_game("jackpot"),
         if_(eq("stage", 2), [
-            hud_line("THE ARSENAL: FIRE EVERY WEAPON"), hud_counter(1, 0, "OF 3", "WEAPONS"),
-            award("THE ARSENAL", sub="MASERS, MISSILES, THE BLADE", seconds=3),
+            if_(eq("volleys", 0), [award("THE ARSENAL", sub="MASER TARGET, BIG LOOP, BUILDING", seconds=pack.NOTE_S)]),
             clip("arsenal", "behind"), sound("volley")]),
         if_(eq("stage", 3), [
-            hud_line("THE GRAPPLE: THE MECHA LANE"), hud_counter(1, 0, "OF 3", "CARRIES"),
-            award("THE GRAPPLE", sub="GRAB HIM AT THE MECHA LANE", seconds=3),
+            if_(AND(eq("carries", 0), eq(timer_left("grab"), 0)), [
+                award("THE GRAPPLE", sub="GRAB HIM AT THE MECHA LANE", seconds=pack.NOTE_S)]),
             clip("grapple", "behind"), sound("grapple"), music("grapple")]),
     ]
 
@@ -173,7 +223,7 @@ SCRIPTS = [
             if_(lt("spins", NEED), [change("spins", 1)]),
             if_(ge("spins", NEED), [start()], [
                 if_(ge("spins", "note at"), [
-                    award("SPINS TO KIRYU", value=sub(NEED, var("spins")), sub="KIRYU IS BEING BUILT"),
+                    award("SPINS TO KIRYU", value=sub(NEED, var("spins")), sub=pack.shoot(SPIN), seconds=pack.NOTE_S),
                     set_("note at", add(var("spins"), 10))])]),
             when="idle"),
 
@@ -182,18 +232,16 @@ SCRIPTS = [
              set_("stage", 1), set_("charge", 0), set_("mult", 0), set_("was", 0), set_("x", 1), set_("pips", 0),
              set_("pot", 0), set_("won", 0), set_("cashed", 0), set_("volleys", 0), set_("carries", 0),
              set_("w1", 0), set_("w2", 0), set_("w3", 0),
-             # each time harder: a shorter overheat, a shorter clock, a shorter grab
-             set_("heat max", sub(14000, mul(2000, var("plays")))),
-             set_("clock", sub(45, mul(5, var("plays")))), if_(lt("clock", 30), [set_("clock", 30)]),
-             set_time(var("clock")),
+             # PAD-658 round 3: the same clock, overheat and grab every start (it was 40/35/30 s, 12/10/8 s, 8/6/4 s:
+             # too short to do much in); each start still costs more spins
              shield("toward"), game_show("Strobe burst"), clip("intro", "full"), clip("loop", "loop"),
              show("Online"), shake(800, "strong"),
-             award("KIRYU ONLINE", sub="CHARGE THE ABSOLUTE ZERO", seconds=3),
+             award("KIRYU ONLINE", sub=LINE_CHARGE, seconds=pack.NOTE_S),
              hud_counter(1, 0, "PERCENT", "CHARGE"), hud_counter(2, 0, "CASH AT SCOOP"), hud_counter(3, 1, "CARRIED UP"),
              timer_start("lamps", 1)),
 
     # ---- stage 1: charge ------------------------------------------------------------------------------------------
-    *[on_shot(s, if_(eq("stage", 1), [score(SHOT_VALUE), if_(lt(SECS_LEFT, FLOOR), [set_time(FLOOR)]),
+    *[on_shot(s, if_(eq("stage", 1), [score(SHOT_VALUE), pack.clock_floor(),
                                        set_("pct", p), timer_start("charge", 1)]))
       for s, p in CHARGE if s not in ("Big loop", "Building", "Maser target")],
     on_shot(SPIN, if_(eq("stage", 1), [score(SPIN_VALUE), set_("pct", 1), timer_start("charge", 1)])),
@@ -204,7 +252,7 @@ SCRIPTS = [
     # ---- the reactor ran too hot: it vents ------------------------------------------------------------------------
     on_timer("heat", if_(eq("stage", 1), [
         set_("charge", 0), set_("mult", 0), set_("was", 0), set_("x", 1), hud_counter(3, 1, "CARRIED UP"),
-        award("KIRYU VENTS", sub="THE CHARGE IS LOST", seconds=3), show("Vent"), sound("overheat"),
+        award("KIRYU VENTS", sub="CHARGE AGAIN: ANY LIT SHOT", seconds=pack.NOTE_S), show("Vent"), sound("overheat"),
         shake(500, "medium"), clip("overheat", "behind"), timer_start("lamps", 1)])),
 
     # ---- fire: the captive ball or the action button ----------------------------------------------------------------
@@ -220,11 +268,11 @@ SCRIPTS = [
              *[if_(eq("mult", m), [award("ABSOLUTE ZERO X%d" % m, value=mul(FIRE_VALUE, m), sub="INTO THE POT",
                                          seconds=4)]) for m in (1, 2, 3, 4)],
              show("Absolute zero"), sound("fire"), clip("fire", "full"), shake(600, "hard"),
-             timer_start("next", 700)),
+             timer_start("up", 1)),
 
     # ---- stage 2: the arsenal (the Big loop, the Building and the Maser charge in stage 1) ----------------------------
     *[on_shot(s,
-              if_(eq("stage", 1), [score(SHOT_VALUE), if_(lt(SECS_LEFT, FLOOR), [set_time(FLOOR)]),
+              if_(eq("stage", 1), [score(SHOT_VALUE), pack.clock_floor(),
                                    set_("pct", dict(CHARGE)[s]), timer_start("charge", 1)]),
               if_(AND(eq("stage", 2), eq(f, 0)), [set_(f, 1), set_("pct", i), timer_start("weapon", 1)]),
               *([if_(AND(eq("stage", 3), gt(timer_left("grab"), 0)), [timer_stop("grab"), timer_start("weapon", 1)])]
@@ -232,35 +280,35 @@ SCRIPTS = [
       for i, (f, s, _w, _c) in enumerate(WEAPONS, 1)],
     on_timer("weapon",
              if_(eq("stage", 2), [
-                 change("volleys", 1), score(1000000), *pot_up(mul(mul(5000000, var("x")), var("volleys"))),
+                 change("volleys", 1), score(1000000), pack.clock_floor(), *pot_up(mul(mul(5000000, var("x")), var("volleys"))),
                  hud_counter(1, var("volleys"), "OF 3"),
-                 *[if_(eq("pct", i), [award(w, value=mul(mul(5000000, var("x")), var("volleys")), sub="INTO THE POT")])
+                 *[if_(eq("pct", i), [award(w, value=mul(mul(5000000, var("x")), var("volleys")), sub="INTO THE POT",
+                                            seconds=pack.NOTE_S)])
                    for i, (_f, _s, w, _c) in enumerate(WEAPONS, 1)],
                  clip("volley", "behind"), sound("volley"), show("Volley"), shake(300, "medium"),
-                 if_(ge("volleys", 3), [timer_start("next", 700)])]),
+                 if_(ge("volleys", 3), [timer_start("up", 1)])]),
              # stage 3: a carry out to sea
              if_(eq("stage", 3), [
-                 change("carries", 1), score(2000000), *pot_up(mul(mul(8000000, var("x")), var("carries"))),
+                 change("carries", 1), score(2000000), pack.clock_floor(), *pot_up(mul(mul(8000000, var("x")), var("carries"))),
                  hud_counter(1, var("carries"), "OF 3"),
-                 award("OUT TO SEA", value=mul(mul(8000000, var("x")), var("carries")), sub="INTO THE POT"),
-                 clip("charge", "behind"), sound("fire"), show("Carry"), shake(400, "hard"),
-                 if_(ge("carries", 3), [hud_line("POINT BLANK: THE CAPTIVE BALL")])]),
+                 award("OUT TO SEA", value=mul(mul(8000000, var("x")), var("carries")), sub="INTO THE POT",
+                       seconds=pack.NOTE_S),
+                 clip("charge", "behind"), sound("fire"), show("Carry"), shake(400, "hard")]),
              timer_start("lamps", 1)),
 
     # ---- stage 3: the grapple ---------------------------------------------------------------------------------------
     on_shot(LANE, if_(AND(eq("stage", 3), lt("carries", 3), eq(timer_left("grab"), 0)), [
-        timer_start("grab", sub(10000, mul(2000, var("plays")))),
-        award("KIRYU GRABS HIM", sub="CARRY HIM: THE BIG LOOP"),
+        timer_start("grab", GRAB_MS), pack.clock_floor(),
+        award("KIRYU GRABS HIM", sub="CARRY HIM: THE BIG LOOP", seconds=pack.NOTE_S),
         clip("grapple", "behind"), sound("grapple"), show("Grapple"), shake(500, "strong"),
         timer_start("lamps", 1)])),
-    on_timer("grab", if_(eq("stage", 3), [award("HE BREAKS FREE", sub="GRAB HIM AGAIN"), sound("overheat"),
+    on_timer("grab", if_(eq("stage", 3), [award("HE BREAKS FREE", sub="GRAB HIM AGAIN: THE MECHA LANE",
+                                                seconds=pack.NOTE_S), sound("overheat"),
                                           timer_start("lamps", 1)])),
 
-    # ---- a stage done: on to the next, or cash out --------------------------------------------------------------------
-    on_timer("next",
-             if_(eq("cashed", 1), [end()], [
-                 change("stage", 1), set_time(var("clock")), show("Stage up"), shake_game("jackpot"),
-                 *pack.cash_out_lit(), *setup_stage(), timer_start("lamps", 1)])),
+    # ---- a stage done: the next one lights at once, its announcement waits out the last note; or cash out ----------
+    on_timer("up", *next_stage()),
+    on_timer("next", if_(eq("cashed", 1), [end()], announce())),
     on_shot(pack.CASH_SHOT,
             if_(AND(ge("stage", 2), eq("won", 0), eq("cashed", 0)), [
                 set_("cashed", 1), score(var("pot")),
@@ -287,14 +335,14 @@ SCRIPTS = [
 ]
 
 PROGRAM = {
-    "name": NAME, "seconds": 40, "ends_on_drain": True, "screen": False, "game_modes": "block",
+    "name": NAME, "seconds": CLOCK[1], "ends_on_drain": True, "screen": False, "game_modes": "block",
     "wait_multiball": True, "priority": 180,
     "vars": [{"name": n, "reset": "game"} for n in ("spins", "plays", "note at")] + [
-        {"name": n, "reset": "mode"} for n in ("stage", "charge", "pct", "mult", "was", "x", "heat ms", "heat max",
-                                                "pips", "pot", "clock", "won", "cashed", "volleys", "carries",
+        {"name": n, "reset": "mode"} for n in ("stage", "charge", "pct", "mult", "was", "x", "heat ms",
+                                                "pips", "pot", "won", "cashed", "volleys", "carries",
                                                 "w1", "w2", "w3")],
     "timers": [{"name": n} for n in TIMERS],
-    "hud": hud("CHARGE THE ABSOLUTE ZERO: LIT SHOTS",
+    "hud": hud(LINE_CHARGE,
                counters=[("CHARGE", "PERCENT", None),            # set by the blocks: each stage counts its own
                          ("POT", "CASH AT SCOOP", var("pot")),
                          ("MULTIPLIER", "CARRIED UP", var("x"))],
@@ -321,7 +369,9 @@ EXAMPLE = {
               "2. On a Pro the spinner is the Right spinner."),
     "lost": [
         "The badge always counts the stage's clock: while the reactor overheats the C counted the overheat's "
-        "12 s there instead. The overheat's seconds now ride on the line (OVERHEATING! FIRE NOW 9).",
+        "12 s there instead. The overheat's seconds now ride on the line (OVERHEATING: GODZILLA TARGET IN 18).",
+        "The overheat gives 20 s to fire every time (PAD-658: room to do it), where the C gave 12 s.",
+        "The Action button fires too, lit with the Godzilla target, but the line names only the Godzilla target.",
         "The counters show bare numbers: CHARGE 109 where the C showed 109%, MULTIPLIER 2 where it showed X2.",
         "The gauge stays one ice blue labelled CHARGE: the C shaded its ten pips from blue to white and relabelled "
         "it OVERHEAT while overheating and FIRED after the shot.",
@@ -365,28 +415,46 @@ DESK = [
     ("sixty spins the first time, a hundred and twenty the second",
      _shots(SPIN, 60) + ["secs", 1, "trigger", "kiryu.stop", "secs", 4] + _shots(SPIN, 119) + ["secs", 2] +
      _shots(SPIN, 1) + ["secs", 2],
-     ["Hud_Title: SPINS TO KIRYU", "Hud_Line: 59  -  KIRYU IS BEING BUILT", "[KIRYU] START (a block)",
-      "Hud_Line: 119  -  KIRYU IS BEING BUILT", "Hud_Line: 9  -  KIRYU IS BEING BUILT", "SHIELD toward"]),
+     ["Hud_Title: SPINS TO KIRYU", "Hud_Line: 59  -  SHOOT THE SPINNER", "[KIRYU] START (a block)",
+      "Hud_Line: 119  -  SHOOT THE SPINNER", "Hud_Line: 9  -  SHOOT THE SPINNER", "SHIELD toward"]),
+    # the fire shot goes dark once it has fired; the arsenal lights at once, its note waits out the fire's
     ("charge and fire: into the pot, the arsenal is next", _START + _FIRE + ["secs", 5],
-     ["Hud_Award: ABSOLUTE ZERO", "Hud_Line: FIRE: THE CAPTIVE BALL  -  OR CHARGE ON", "SCORE +750000",
-      "SCORE +2000000", "Hud_Award: ABSOLUTE ZERO X1", "Hud_AwardSub: 10,000,000  -  INTO THE POT",
-      "Hud_Line: THE ARSENAL: FIRE EVERY WEAPON", "LAMP SELECT CITY ffffff chase", "LAMP MASER ff1010 chase"]),
+     ["Hud_Line: CHARGE IT: SHOOT ANY LIT SHOT", "Hud_Award: ABSOLUTE ZERO",
+      "Hud_AwardSub: FIRE: SHOOT THE GODZILLA TARGET", "Hud_Line: FIRE: GODZILLA TARGET  -  OR CHARGE ON",
+      "LAMP MAGNA GRAB ffffff chase 120", "SCORE +750000", "SCORE +2000000", "Hud_Award: ABSOLUTE ZERO X1",
+      "Hud_AwardSub: 10,000,000  -  INTO THE POT", "LAMP OFF MAGNA GRAB", "Hud_C1_Label: WEAPONS",
+      "Hud_Line: SHOOT MASER TARGET, BIG LOOP, BUILDING", "Hud_Award: THE ARSENAL",
+      "Hud_AwardSub: MASER TARGET, BIG LOOP, BUILDING", "LAMP SELECT CITY ffffff chase", "LAMP MASER ff1010 chase"]),
     ("cash out after the cannon", _START + _FIRE + ["shot", "Right scoop", "secs", 5],
      ["Hud_Title: KIRYU RETURNS TO BASE", "SCORE +10000000", "END (a block)", "lamps held 0"]),
+    # 19 s into the overheat it still fires (x2)
+    ("the overheat gives 20 s to fire",
+     _START + _SET * 2 + ["shot", "Left ramp", "secs", 19, "shot", "Godzilla target", "secs", 2],
+     ["Hud_Award: X2  -  200%", "Hud_AwardSub: OVERHEATING: GODZILLA TARGET IN 20 S",
+      "Hud_Line: OVERHEATING: GODZILLA TARGET IN 20", "LAMP MAGNA GRAB ff2800 blink",
+      "Hud_Award: ABSOLUTE ZERO X2", "Hud_AwardSub: 20,000,000  -  INTO THE POT"]),
     ("overheat vents the charge", _START + _SET * 2 + ["shot", "Left ramp", "secs", 42],
-     ["Hud_Award: X2  -  200%", "Hud_AwardSub: THE REACTOR OVERHEATS", "Hud_Line: OVERHEATING! FIRE NOW",
-      "Hud_Award: KIRYU VENTS", "Hud_Line: CHARGE THE ABSOLUTE ZERO: LIT SHOTS", "END (time ran out)",
+     ["Hud_Award: X2  -  200%", "Hud_Award: KIRYU VENTS", "Hud_AwardSub: CHARGE AGAIN: ANY LIT SHOT",
+      "Hud_Line: CHARGE IT: SHOOT ANY LIT SHOT", "LAMP OFF MAGNA GRAB", "END (time ran out)",
       "Hud_Title: KIRYU IS DOWN"]),
     ("push to x3, the arsenal, the grapple, point blank",
      _START + _SET * 3 + ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "secs", 1,
                           "shot", "Action button", "secs", 2] + _ARSENAL + _GRAPPLE +
      ["shot", "Godzilla target", "secs", 6],
      ["Hud_Award: X3  -  300%", "Hud_Award: ABSOLUTE ZERO X3", "Hud_Award: MASER CANNONS",
-      "Hud_AwardSub: 30,000,000  -  INTO THE POT", "Hud_Award: WRIST BLADE", "Hud_Line: THE GRAPPLE: THE MECHA LANE",
-      "Hud_Award: KIRYU GRABS HIM", "Hud_Award: OUT TO SEA", "Hud_Line: POINT BLANK: THE CAPTIVE BALL",
-      "LAMP MAGNA GRAB ffffff chase 60", "END (a block)", "Hud_Title: KIRYU WINS", "lamps held 0"]),
-    ("the grab runs out", _START + _FIRE + _ARSENAL + ["shot", LANE, "secs", 10],
-     ["Hud_Award: KIRYU GRABS HIM", "Hud_Award: HE BREAKS FREE"]),
+      "Hud_Line: SHOOT THE BIG LOOP OR BUILDING", "Hud_Line: SHOOT THE BUILDING",
+      "Hud_AwardSub: 30,000,000  -  INTO THE POT", "Hud_Award: WRIST BLADE", "Hud_C1_Label: CARRIES",
+      "Hud_Timer_Num: 50", "Hud_Line: THE GRAPPLE: SHOOT THE MECHA LANE", "Hud_Award: KIRYU GRABS HIM",
+      "Hud_Line: CARRY HIM: SHOOT THE BIG LOOP", "Hud_Award: OUT TO SEA",
+      "Hud_Line: POINT BLANK: SHOOT THE GODZILLA TARGET", "LAMP MAGNA GRAB ffffff chase 60", "END (a block)",
+      "Hud_Title: KIRYU WINS", "lamps held 0"]),
+    # 19 s into the grab the Big loop still carries him
+    ("the grab holds him 20 s", _START + _FIRE + _ARSENAL + ["shot", LANE, "secs", 19, "shot", "Big loop", "secs", 1],
+     ["Hud_Award: KIRYU GRABS HIM", "Hud_Line: CARRY HIM: SHOOT THE BIG LOOP", "LAMP BIG LOOP ffc000 chase 80",
+      "Hud_Award: OUT TO SEA"]),
+    ("the grab runs out", _START + _FIRE + _ARSENAL + ["shot", LANE, "secs", 22],
+     ["Hud_Award: KIRYU GRABS HIM", "Hud_Award: HE BREAKS FREE", "Hud_AwardSub: GRAB HIM AGAIN: THE MECHA LANE",
+      "Hud_Line: THE GRAPPLE: SHOOT THE MECHA LANE"]),
     ("the clock fires it at x1", _START + _SET + ["shot", "Left ramp", "secs", 45],
      ["Hud_Award: ABSOLUTE ZERO", "SCORE +10000000", "END (time ran out)", "Hud_Title: KIRYU FIRES ON ITS OWN",
       "lamps held 0"]),
@@ -403,5 +471,5 @@ DESK_PRO = [
     ("charge without the centre shield and fire",
      _START + [x for s, _p in CHARGE if s != "Shield target center" for x in ("shot", s, "ms", 300)] +
      ["shot", "Left ramp", "ms", 300, "shot", "Right spinner", "secs", 1, "shot", "Godzilla target", "secs", 2],
-     ["Hud_Award: ABSOLUTE ZERO X1", "Hud_Line: THE ARSENAL: FIRE EVERY WEAPON"]),
+     ["Hud_Award: ABSOLUTE ZERO X1", "Hud_Line: SHOOT MASER TARGET, BIG LOOP, BUILDING", "LAMP OFF MAGNA GRAB"]),
 ]

@@ -1146,6 +1146,24 @@ def fixture_color(vals):
             m / 255.0)
 
 
+def tinted(vals, F, tints):
+    """A one-colour fixture's values as the colour a MODE painted it (PAD-658), else ``vals`` as they are.
+
+    The wire gives a single-colour insert one level and no colour, so it is drawn on the orange ramp above - and a
+    blocks mode's light show, red or blue over the whole playfield, read as yellow dots here while the Modes tab's
+    preview paints every insert in the show's colour. The mode runtime publishes the colour it painted
+    (coilmap.paint_tints, padled's paint plane): such an insert becomes R/G/B at the WIRE's level - the hue from
+    the mode, the brightness (and so the timing) from what the game actually sent the board."""
+    if not tints or set(vals) != {"W"}:
+        return vals
+    tint = tints.get(F["channels"]["W"])
+    v = vals.get("W") or 0
+    if not tint or not v:
+        return vals
+    m = max(tint)
+    return {c: t * v // m for c, t in zip("RGB", tint)}
+
+
 #: How a level (0..1) becomes a marker. Both floors are deliberate: a lamp at
 #: 15% duty is ON and must read as on, so the dimmest marker is still 60% of
 #: full size and 45% blended in, not a ghost. sqrt because the eye is not
@@ -3756,7 +3774,7 @@ class Field(LedRing):
         emulator is there), d only once the shim has stamped its magic."""
         try:
             with open(LED_PATH, "rb") as f:
-                raw = f.read(max(PADLED_DRIVE_READ, PADLED_HI_READ))
+                raw = f.read(max(PADLED_DRIVE_READ, PADLED_HI_READ, coilmap.PAINT_READ))
         except OSError:
             return None, None
         if len(raw) < LED_HDR or struct.unpack_from("<I", raw, 0)[0] != PADLED_MAGIC:
@@ -3803,8 +3821,9 @@ class Field(LedRing):
         decoded state moves - the honest picture rate - not tween frames."""
         lit = 0
         changed = 0
+        tints = coilmap.paint_tints(d, GROUP_NODE)
         for F in self.fixtures:
-            rgb, level = fixture_color(self._chan_vals(F, d, now))
+            rgb, level = fixture_color(tinted(self._chan_vals(F, d, now), F, tints))
             if rgb:
                 lit += 1
             st = (rgb, level)

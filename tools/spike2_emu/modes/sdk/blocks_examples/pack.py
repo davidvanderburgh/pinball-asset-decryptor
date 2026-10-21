@@ -8,15 +8,60 @@
   ends 1.5 s after it (its "next" timer, with "cashed" set), so the game handling that same scoop with the mode
   still running gives no award of its own over the clip (emulator run a2: an ADVANCE TANKS took the glass).
 - EACH START COSTS MORE: twice the first count the second time, three times the third (need()).
+- THE CLOCK ON A GOOD SHOT. A successful shot (one that hits, cuts, scores or moves the mode on) puts a clock that
+  has run under CLOCK_FLOOR seconds back up to it (David, PAD-658: "successful shots reset the countdown timer to 15
+  seconds (if it's below 15)... make it consistent"): clock_floor(), one block every mode with a clock uses.
 - THE QUALIFYING NOTE. A mode's count toward its start shows as a note on the HUD every few hits ("12 MORE TO WAKE
   KING CAESAR"), and nothing counts while a multiball runs (David's rule for PAD-379's meter, applied to all).
+- SAY THE SHOT (David, PAD-658: "the shots are not explicit enough and some of the information only flashes on the
+  screen very briefly... use obvious lighting and text cues that the user understands"):
+  - the HUD's line names what to shoot NOW by the playfield's own names (SHOT_WORDS; shoot(), line_follows()), never
+    a colour ("the green jackpot") or a story's name ("the moving heart") alone; a moving shot's line moves with it;
+  - what counts is lit, and only that: lit in the mode's colour, the one that pays most chasing; a made shot goes off;
+  - a note stays NOTE_S seconds at least, and says what next where it can;
+  - a stage's clock is STAGE_S, a window inside it (a follow-up shot, a hurry-up, a combo) WINDOW_S at least (David:
+    "you can't really accomplish much in 10 seconds. 40 seconds is better").
 """
-from blk import (AND, BALLS, NOT, LIT, add, award, change, eq, ge, if_, light, light_insert, light_mode, lt, mul,
-                 off, off_insert, on_any_shot, scoop_hold, set_, sub, var)
+from blk import (AND, BALLS, NOT, LIT, add, award, change, eq, ge, hud_line, if_, light, light_insert, light_mode,
+                 lt, mul, off, off_insert, on_any_shot, scoop_hold, set_, set_time, sub, var)
 
 CASH_SHOT = "Right scoop"
 CASH_INSERTS = ("SELECT CITY", "SCOOP BB-BATTLE", "SCOOP BB-GODZILLA PWR UP", "SCOOP BB-SUMMON ALLY")
 WHITE = "#ffffff"
+CLOCK_FLOOR = 15                                     # David: every mode the same
+NOTE_S = 3                                           # a note on the glass, at least
+STAGE_S = 40                                         # a stage's clock
+WINDOW_S = 20                                        # a window inside a stage, at least
+
+#: the shots as the line says them: the playfield's (and the emulator's switch list's) names
+SHOT_WORDS = {
+    "Left ramp": "LEFT RAMP", "Right ramp": "RIGHT RAMP", "Big loop": "BIG LOOP", "Building": "BUILDING",
+    "Godzilla target": "GODZILLA TARGET", "Maser target": "MASER TARGET", "Mecha exit bottom": "MECHA LANE",
+    "Mecha exit top": "TOP OF THE MECHA", "Powerline left": "LEFT POWERLINE", "Powerline center": "CENTER POWERLINE",
+    "Powerline right": "RIGHT POWERLINE", "Shield target left": "LEFT SHIELD", "Shield target center": "CENTER SHIELD",
+    "Shield target right": "RIGHT SHIELD", "Pop bumper": "POP BUMPERS", "Right scoop": "RIGHT SCOOP",
+    "Slingshot": "SLINGSHOTS", "Left spinner": "LEFT SPINNER", "Top spinner": "TOP SPINNER",
+    "Shield ramp spinner": "SPINNER", "Right spinner": "SPINNER", "Skill shot": "SKILL SHOT",
+    "Left return lane": "LEFT INLANE", "Right return lane": "RIGHT INLANE",
+}
+
+
+def shoot(*shots, verb="SHOOT THE"):
+    """The words for shooting ``shots``: SHOOT THE LEFT RAMP; SHOOT THE LEFT RAMP OR BIG LOOP."""
+    return "%s %s" % (verb, " OR ".join(SHOT_WORDS[s] for s in shots))
+
+
+def line_follows(name, shots, verb="SHOOT THE", after="", value=None, first=1):
+    """The line naming the shot a moving target is at: ``name`` holds its place (``first`` = shots[0]), so the line
+    moves with the light: one block per place."""
+    return [if_(eq(name, i), [hud_line("%s %s%s" % (verb, SHOT_WORDS[s], after), value)])
+            for i, s in enumerate(shots, first)]
+
+
+def clock_floor():
+    """A successful shot: the clock back up to CLOCK_FLOOR seconds when it has run under it (one block: Keep at least
+    15 seconds on the clock)."""
+    return set_time(CLOCK_FLOOR, at_least=True)
 
 
 def cash_out_lit():
@@ -46,10 +91,10 @@ def count_up(count, by, need, ready, note_at, start_shot, color, inserts, lit_wo
         if_(ge(count, need), [
             set_(ready, 1),
             light_mode(start_shot, color, "chase", insert=inserts),
-            award(lit_words, sub=lit_sub, seconds=3),
+            award(lit_words, sub=lit_sub, seconds=NOTE_S),
         ], [
             if_(ge(count, note_at), [
-                award(note_words, value=sub(need, count), sub=more_sub, seconds=2),
+                award(note_words, value=sub(need, count), sub=more_sub, seconds=NOTE_S),
                 set_(note_at, add(count, step)),
             ]),
         ]),

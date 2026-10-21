@@ -147,7 +147,8 @@ export function stmtWords(b, ch = {}) {
     case "light_mode": return `Light the mode at ${b.shot || "?"} (${colorWord(b.color)}, ${PATTERN_WORDS[b.pattern] || b.pattern || ""})`;
     case "unlight_mode": return `Put out the light of ${((ch.modes || []).find((m) => m.slug === b.mode) || {}).name || b.mode || "this mode"}`;
     case "add_time": return `Add ${valWords(b.seconds)} seconds`;
-    case "set_time": return `Set the clock to ${valWords(b.seconds)} seconds`;
+    case "set_time": return b.at_least ? `Keep at least ${valWords(b.seconds)} seconds on the clock`   // PAD-658
+      : `Set the clock to ${valWords(b.seconds)} seconds`;
     case "multiball": return `Multiball of ${b.balls} balls, ball save ${b.save || 0} s`;
     case "game_wizard": return `${b.how === "start" ? "Start" : "Light"} the game's ${b.name || "mini-wizard"}`;
     case "hold": return `Hold the ${b.what || "magnet"} for ${msWords(b.ms)}${b.clock === "wait" ? ", its clock waiting until it lets go" : ""}`;

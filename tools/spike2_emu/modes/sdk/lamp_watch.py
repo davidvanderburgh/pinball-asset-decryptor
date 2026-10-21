@@ -34,7 +34,7 @@ import sys
 import time
 
 VAL_OFF, NODES, IDX, MAGIC = 20, 16, 96, 0x44454C50
-LAMP_RE = re.compile(r"^lamp\s+([\d,]+)\s+(0x[0-9a-fA-F]+|\d+)\s+(.*?)\s+#\s*lamp\s+[\d+]+,\s*I/O group\s+(\d+)\s+index\s+(\d+)")
+LAMP_RE = re.compile(r"^lamp\s+([\d,]+)\s+(0x[0-9a-fA-F]+|\d+)\s+(.*?)\s+#(?:[^#]*?;)?\s*lamp\s+[\d+]+,\s*I/O group\s+(\d+)\s+index\s+(\d+)")
 
 
 def port_lamps(port):

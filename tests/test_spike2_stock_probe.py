@@ -82,7 +82,7 @@ def test_lamp_watch_reads_the_port_and_a_block(tmp_path):
     lw = _load("lamp_watch")
     lamps = {name: (mask, node, ch, w) for name, mask, node, ch, w in lw.port_lamps(PORT)}
     assert lamps["LEFT RAMP"] == (0x100000, 9, 48, 3)
-    assert lamps["TOP SPINNER"] == (0x1800, 9, 67, 3)
+    assert lamps["TOP SPINNER"] == (0x3800, 9, 67, 3)            # PAD-658: + the Top spinner shot
     assert lamps["TANK 1"][1:] == (8, 55, 1)
     assert "TANK 6" in lw.default_names(lw.port_lamps(PORT))
     block = bytearray(8192)

@@ -371,17 +371,35 @@ def identify(path):
 
     linux = [(idx, start) for idx, ptype, start, _c in parts
              if ptype in LINUX_TYPES]
+    listed = []
     for idx, start in linux:
         names = _ls(path, start * SECTOR)
         if names is None:
             guessed = True
             continue
+        listed.append((start * SECTOR, names))
+    # THE GAMES PARTITION IS THE ONE THAT HOLDS A GAME, asked first and by the
+    # strict rule (/spk AND a title directory with a `game` in it). PAD-659: a
+    # card whose OS partition also carried /spk had that OS called "games" by
+    # the looser rules below, so the emulator mounted p2, found no game in it
+    # ("mounted, but no directory in it holds a game ELF") and the boot-menu
+    # check read the same p2 as the rootfs. None of the 60 factory cards has
+    # /spk on p2, so the old answers there are unchanged.
+    for off, _names in listed:
+        if _title_dirs(path, off):
+            out["games"] = off
+            break
+    for off, names in listed:
+        if off == out.get("games"):
+            continue
         # A rootfs is an OS: it has the directories a chroot needs. A games
         # partition has the package tree and the title directories instead.
-        if {"lib", "usr"} <= names and "spk" not in names:
-            out.setdefault("rootfs", start * SECTOR)
+        # /spk beside /lib and /usr no longer disqualifies it once the games
+        # partition has been found on its own (above).
+        if {"lib", "usr"} <= names and ("spk" not in names or "games" in out):
+            out.setdefault("rootfs", off)
         elif "spk" in names or not ({"lib", "usr", "etc"} & names):
-            out.setdefault("games", start * SECTOR)
+            out.setdefault("games", off)
 
     if guessed or ("rootfs" not in out and linux):
         # Order is the fallback and nothing more: p2 rootfs, p3 games is what

@@ -32,6 +32,7 @@ CLOCK_FLOOR = 15                                     # David: every mode the sam
 NOTE_S = 3                                           # a note on the glass, at least
 STAGE_S = 40                                         # a stage's clock
 WINDOW_S = 20                                        # a window inside a stage, at least
+ONE_BALL = lt(BALLS, 2)                              # no multiball: the only time a start's count counts (PAD-669)
 
 #: the shots as the line says them: the playfield's (and the emulator's switch list's) names
 SHOT_WORDS = {
@@ -86,7 +87,7 @@ def count_up(count, by, need, ready, note_at, start_shot, color, inserts, lit_wo
              step=5):
     """One qualifying hit: ``by`` more toward ``need`` (not in a multiball, not once ready); at ``need`` the mode is
     lit at ``start_shot``; every ``step`` a note says how many are left."""
-    return [if_(AND(lt(BALLS, 2), eq(ready, 0)), [
+    return [if_(AND(ONE_BALL, eq(ready, 0)), [
         change(count, by),
         if_(ge(count, need), [
             set_(ready, 1),

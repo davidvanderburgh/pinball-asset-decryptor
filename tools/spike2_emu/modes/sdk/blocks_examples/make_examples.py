@@ -112,6 +112,11 @@ def _wsl_path(p):
     return "/mnt/" + p[0].lower() + p[2:]
 
 
+def _missing(want, out):
+    """The wanted lines the run's output lacks; a line written "!..." is wanted NOT to be there (PAD-669)."""
+    return [w for w in want if ((w[1:] in out) if w.startswith("!") else (w not in out))]
+
+
 def desk(slugs, examples):
     """Build every example's C into ONE desk harness (as a card carries them) and play each one's scenarios."""
     if os.name == "nt":
@@ -148,7 +153,7 @@ def desk(slugs, examples):
             log = os.path.join(work, "%s_%s.txt" % (ex["slug"], what.replace(" ", "_")))
             with open(log, "w") as f:
                 f.write(r.stdout + r.stderr)
-            missing = [w for w in want if w not in r.stdout]
+            missing = _missing(want, r.stdout)
             ok = r.returncode == 0 and not missing
             bad += not ok
             print("%-12s %-40s %s%s" % (ex["slug"], what, "ok" if ok else "FAILED", "" if ok else
@@ -179,7 +184,7 @@ def desk(slugs, examples):
             log = os.path.join(pdir, "%s_%s.txt" % (ex["slug"], what.replace(" ", "_")))
             with open(log, "w") as f:
                 f.write(r.stdout + r.stderr)
-            missing = [w for w in want if w not in r.stdout]
+            missing = _missing(want, r.stdout)
             ok = r.returncode == 0 and not missing
             bad += not ok
             print("%-12s %-40s %s%s" % (ex["slug"], "PRO " + what, "ok" if ok else "FAILED", "" if ok else

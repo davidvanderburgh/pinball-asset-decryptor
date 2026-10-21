@@ -7,11 +7,11 @@ costs more each start), stages with their own shots (EHoH), a multiplier carried
 on, and failing still pays.
 
 - LIGHT IT: 60 spins of the Shield ramp spinner (the Mechagodzilla spinner) start it at once; 120 the next time, then
-  180 (a note every 10 spins says how many are left and SHOOT THE SPINNER). A start that has to wait (a multiball,
-  one of the game's modes) waits for the next spin.
+  180 (a note every 10 spins says how many are left and SHOOT THE SPINNER). No spin counts in a multiball
+  (PAD-669). A start that has to wait (a multiball, one of the game's modes) waits for the next spin.
 - STAGE 1, ABSOLUTE ZERO (the C's rule): the ramps, the Building and the Big loop charge 15%, the Maser 10%, each
-  Shield target 8% (all of them lit ice blue: CHARGE IT: SHOOT ANY LIT SHOT), every spin 1%; each charging shot pays
-  750,000 (a spin 10,000) and puts a clock under 15 s back to 15. From 100% the Godzilla target (the captive ball) or
+  Shield target 8%, every spin 1% (all of them lit ice blue, the spinner's ATTACK MECHA insert too, PAD-669: CHARGE
+  IT: SHOOT ANY LIT SHOT); each charging shot pays 750,000 (a spin 10,000) and puts a clock under 15 s back to 15. From 100% the Godzilla target (the captive ball) or
   the Action button fires (chasing white: FIRE: GODZILLA TARGET): 10M times the multiplier into the POT. PUSH IT:
   200% x2, 300% x3, 400% x4; from 200% the reactor overheats: 20 s to fire (pack.WINDOW_S, every time), again at each
   100% more, the line counting it down (OVERHEATING: GODZILLA TARGET IN 18); run out and Kiryu VENTS (the charge back
@@ -53,8 +53,9 @@ NEED = pack.need(60, "plays")             # 60 spins, then 120, then 180 (David:
 MAGNA = dict(x=89, y=260)                 # the MAGNA GRAB insert (the captive ball), the port's lamp place
 LANE_XY = dict(x=282, y=393)              # the MECHA LANE insert: Kiryu's own lane (the Mechagodzilla at its top)
 TIMERS = ("charge", "lamps", "heat", "fire", "next", "grab", "weapon", "up")
-#: stage 1's lit shots: every one that charges (the spinner has no light of its own to light)
-CHARGE_LIT = tuple(s for s, _p in CHARGE)
+#: stage 1's lit shots: every one that charges, the spinner too (PAD-669: its insert is ATTACK MECHA, the one the
+#: game's Ebirah battle lights for it; the port had tied it to no shot, so the spinner stayed dark)
+CHARGE_LIT = tuple(s for s, _p in CHARGE) + (SPIN,)
 #: PAD-658 round 3: a stage's clock (the grapple's seven shots longer), the overheat and the grab windows
 CLOCK = {1: pack.STAGE_S, 2: pack.STAGE_S, 3: pack.STAGE_S + 10}
 HEAT_MS = GRAB_MS = pack.WINDOW_S * 1000
@@ -219,12 +220,15 @@ def announce():
 
 SCRIPTS = [
     # ---- light it: every spin of the Mechagodzilla spinner, a note every 10 ------------------------------------
+    # (PAD-669: no spin counts in a multiball; one counted out but held off starts it on the next spin)
     on_shot(SPIN,
-            if_(lt("spins", NEED), [change("spins", 1)]),
-            if_(ge("spins", NEED), [start()], [
-                if_(ge("spins", "note at"), [
-                    award("SPINS TO KIRYU", value=sub(NEED, var("spins")), sub=pack.shoot(SPIN), seconds=pack.NOTE_S),
-                    set_("note at", add(var("spins"), 10))])]),
+            if_(ge("spins", NEED), [start()], [if_(pack.ONE_BALL, [
+                change("spins", 1),
+                if_(ge("spins", NEED), [start()], [
+                    if_(ge("spins", "note at"), [
+                        award("SPINS TO KIRYU", value=sub(NEED, var("spins")), sub=pack.shoot(SPIN),
+                              seconds=pack.NOTE_S),
+                        set_("note at", add(var("spins"), 10))])])])]),
             when="idle"),
 
     # ---- Kiryu online --------------------------------------------------------------------------------------------
@@ -412,6 +416,9 @@ _FIRE = _SET + ["shot", "Left ramp", "secs", 1, "shot", "Godzilla target", "secs
 _ARSENAL = ["shot", "Maser target", "ms", 400, "shot", "Big loop", "ms", 400, "shot", "Building", "secs", 2]
 _GRAPPLE = ["shot", LANE, "ms", 500, "shot", "Big loop", "ms", 600] * 3 + ["secs", 1]
 DESK = [
+    # PAD-669: a multiball's spins count for nothing: back to one ball, 11 more say 49 to go, no start
+    ("no spin counts in a multiball", ["balls", 2] + _shots(SPIN, 60) + ["balls", 1, "secs", 1] + _shots(SPIN, 11) + ["secs", 2],
+     ["Hud_Line: 49  -  SHOOT THE SPINNER", "![KIRYU] START (a block)"]),
     ("sixty spins the first time, a hundred and twenty the second",
      _shots(SPIN, 60) + ["secs", 1, "trigger", "kiryu.stop", "secs", 4] + _shots(SPIN, 119) + ["secs", 2] +
      _shots(SPIN, 1) + ["secs", 2],
@@ -420,6 +427,7 @@ DESK = [
     # the fire shot goes dark once it has fired; the arsenal lights at once, its note waits out the fire's
     ("charge and fire: into the pot, the arsenal is next", _START + _FIRE + ["secs", 5],
      ["Hud_Line: CHARGE IT: SHOOT ANY LIT SHOT", "Hud_Award: ABSOLUTE ZERO",
+      "LAMP ATTACK MECHA 8cdcff blink 500",   # PAD-669: the spinner charges, so it is lit
       "Hud_AwardSub: FIRE: SHOOT THE GODZILLA TARGET", "Hud_Line: FIRE: GODZILLA TARGET  -  OR CHARGE ON",
       "LAMP MAGNA GRAB ffffff chase 120", "SCORE +750000", "SCORE +2000000", "Hud_Award: ABSOLUTE ZERO X1",
       "Hud_AwardSub: 10,000,000  -  INTO THE POT", "LAMP OFF MAGNA GRAB", "Hud_C1_Label: WEAPONS",
@@ -471,5 +479,6 @@ DESK_PRO = [
     ("charge without the centre shield and fire",
      _START + [x for s, _p in CHARGE if s != "Shield target center" for x in ("shot", s, "ms", 300)] +
      ["shot", "Left ramp", "ms", 300, "shot", "Right spinner", "secs", 1, "shot", "Godzilla target", "secs", 2],
-     ["Hud_Award: ABSOLUTE ZERO X1", "Hud_Line: SHOOT MASER TARGET, BIG LOOP, BUILDING", "LAMP OFF MAGNA GRAB"]),
+     ["LAMP ATTACK MECHA 8cdcff blink 500", "Hud_Award: ABSOLUTE ZERO X1",
+      "Hud_Line: SHOOT MASER TARGET, BIG LOOP, BUILDING", "LAMP OFF MAGNA GRAB"]),
 ]

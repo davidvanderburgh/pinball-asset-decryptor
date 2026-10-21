@@ -224,6 +224,7 @@ class EmulateTab(TabService):
         self._docker_engine = None
         self._docker_report_next = False
         self._setup = None
+        self._rt_last = None         # the last runtime.status() the poll read
         self._setup_busy = False
         self._setup_fixing = False
         self._setup_restart_check = False
@@ -248,6 +249,12 @@ class EmulateTab(TabService):
         self._spike3 = None
         self._spike3_why = ""
         self._spike3_probed = None
+        #: PAD-659: the picked file is a disk tool's backup of a card (a
+        #: Macrium .mrimgx), not a card image: what to say about it, "" when
+        #: it is not one.  Read off the loop at pick time; ``start()``
+        #: refuses with it instead of the rig's "no MBR signature".
+        self._backup = ""
+        self._backup_probed = None
         self._mains_note = ""       # PAD-173: what this game does about 50 Hz
         self._mains_key = None
         # PAD-519: the editions the picked card's game takes, read off its binary
@@ -306,7 +313,7 @@ class EmulateTab(TabService):
             slots_sum=("The slots appear with the next status poll."
                        if sys.platform == "win32" else
                        "Slot management is available on Windows (WSL)."),
-            game=None, which=None, mains_note="",
+            game=None, which=None, mains_note="", not_card="",
             assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
             cache=None, rename=None)
         self._run_label(False, False)
@@ -421,6 +428,7 @@ class EmulateTab(TabService):
         self._bind_assets()
         self._select_probe_kick()
         self._spike3_kick()
+        self._backup_kick()
         if no_rig() or self._stopped:
             return
         if sys.platform == "darwin":
@@ -485,6 +493,7 @@ class EmulateTab(TabService):
     def _on_card_changed(self, *_a):
         self.set(game=self._card_game())
         self._slots_paint()
+        self._backup_kick()
         self._spike3_kick()
         self._precache_kick()
         self._select_probe_kick()
@@ -578,6 +587,40 @@ class EmulateTab(TabService):
             self._post(self._spike3_apply, path, is3, why)
 
         self._thread(run)
+
+    # -- is the picked file a backup of a card, not one? (PAD-659) -------
+    def _backup_kick(self):
+        """Read, off the loop, whether the picked file is a disk tool's
+        backup of a card (Macrium, Acronis, a zip...) rather than the card's
+        bytes.  Said on the card panel the moment it is picked: the rig only
+        found out at Start, as "no MBR signature" deep in its log."""
+        path = self._card()
+        if path == self._backup_probed:
+            return
+        self._backup_probed = path
+        self._backup = ""
+        self.set(not_card="")
+        if not path:
+            return
+
+        def run():
+            from ...core.backup_image import reason
+            try:
+                why = reason(path)
+            except Exception:                            # noqa: BLE001
+                why = ""
+            if why:
+                self._post(self._backup_apply, path, why)
+
+        self._thread(run)
+
+    def _backup_apply(self, path, why):
+        if path != self._backup_probed:
+            return
+        self._backup = why
+        # the chip read a "title" off the backup's file name: there is none
+        self.set(not_card=why, game=None)
+        self._log("[emulate] " + why)
 
     def _spike3_apply(self, path, is3, why):
         if path != self._spike3_probed:
@@ -1265,6 +1308,9 @@ class EmulateTab(TabService):
                          "registered again — press “Set up emulator…” above, "
                          "which does that and makes it survive the next "
                          "restart.")
+        # the root offer (PAD-659) waits on these facts; the runtime state
+        # usually came first, with the status poll
+        self._runtime_apply(self._rt_last)
         if rig.setup_settled(facts):
             self.set(setup_btn=False, setup_msg="")
             return
@@ -1392,14 +1438,26 @@ class EmulateTab(TabService):
     def _runtime_apply(self, rt):
         if rt is None:
             return
+        self._rt_last = rt
         state, detail = rt
-        if state not in rig._runtime_ui.UNPROMPTED and state != "foreign":
+        ui = rig._runtime_ui
+        if (state == "absent" and ui.can_install()
+                and (self._setup or {}).get("user") == "root"):
+            # PAD-659: this PC's own WSL logs in as root (the app's own
+            # installer leaves Ubuntu that way), so its game window is
+            # black; the app's Linux has an ordinary user and is one button.
+            text = ui.root_notice()
+            self.set(rt_msg=text, rt_btn=True, rt_label=ui.INSTALL_LABEL)
+            if not self._rt_noted:
+                self._rt_noted = True
+                self.log("[emulate] " + " ".join(text.split()))
+            return
+        if state not in ui.UNPROMPTED and state != "foreign":
             self.set(rt_btn=False, rt_msg="")
             return
-        text = rig._runtime_ui.notice(state, detail)
-        self.set(rt_msg=text,
-                 rt_btn=bool(state in rig._runtime_ui.UNPROMPTED
-                             and rig._runtime_ui.can_install()))
+        text = ui.notice(state, detail)
+        self.set(rt_msg=text, rt_label="Update emulator Linux…",
+                 rt_btn=bool(state in ui.UNPROMPTED and ui.can_install()))
         if not self._rt_noted:
             self._rt_noted = True
             self.log("[emulate] " + " ".join(text.split()))
@@ -1413,7 +1471,9 @@ class EmulateTab(TabService):
         if no_rig():
             self.log("[emulate] " + NO_RIG_TEXT)
             return False
-        self.set(rt_enabled=False, rt_label="Updating…")
+        self.set(rt_enabled=False, rt_label=(
+            "Installing…" if self.get("rt_label") == rig._runtime_ui.INSTALL_LABEL
+            else "Updating…"))
         self._rt_pct = -10
         say = lambda m: self._log("[emulate] %s" % m)       # noqa: E731
 
@@ -1430,13 +1490,15 @@ class EmulateTab(TabService):
                         self._offer_from_file, exc))
                 if state == "ready":
                     self._ensure_data_disk()
+                    # the setup facts were the old distro's (a root login,
+                    # PAD-659): ask the one the emulator runs in now
+                    self._post(self._setup_recheck)
             except Exception as exc:                     # noqa: BLE001
                 self._log("[emulate] %s" % exc)
             finally:
                 self._rt_noted = False
                 runtime.invalidate()
-                self._post(lambda: self.set(rt_enabled=True,
-                                            rt_label="Update emulator Linux…"))
+                self._post(lambda: self.set(rt_enabled=True))
 
         self._thread(work)
         return True
@@ -2559,6 +2621,9 @@ class EmulateTab(TabService):
             # be a second launcher (must survive #0)
             self._refuse_start("the emulator is already running: stop it "
                                "first, then try again.")
+            return
+        if self._backup and self._backup_probed == self._card():
+            self._refuse_start(self._backup)
             return
         if not rig.rig_available():
             self._refuse_start("the emulator is not set up on this PC; use "

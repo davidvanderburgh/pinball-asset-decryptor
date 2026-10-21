@@ -1043,7 +1043,7 @@ def test_windows_installer_hands_a_failed_package_to_the_rigs_repair(tmp_path):
     (fake / "fakewsl.py").write_text(
         "import sys, os\n"
         "a = sys.argv[1:]\n"
-        "while a and a[0] in ('-u', 'root', '--'):\n"
+        "while a and a[0] in ('-u', 'root', '--', '-e'):\n"
         "    a.pop(0)\n"
         "if a and a[0] == 'wslpath':\n"
         "    print('/mnt/c/rig/setupfix.sh')\n"
@@ -2572,3 +2572,240 @@ def test_the_window_shows_itself_whatever_it_was_started_with():
     loaded = src[src.index("def _on_loaded():"):]
     loaded = loaded[:loaded.index("win.events.loaded")]
     assert 'sys.platform == "win32"' in loaded and "win.show()" in loaded
+
+
+# --- PAD-661: an Ubuntu that logs in as root -------------------------------
+
+WSL_USER_SH = INSTALLER / "wsl_default_user.sh"
+
+#: Fake system commands for wsl_default_user.sh, so it runs without root and
+#: without touching the machine's own accounts.  passwd/group live in $T.
+_USER_STUBS = r"""
+T=$(mktemp -d); mkdir -p "$T/bin" "$T/sudoers.d"
+cat > "$T/bin/id" <<'EOF'
+#!/bin/bash
+[ "$1" = -u ] && [ -z "$2" ] && { echo 0; exit; }
+awk -F: -v n="$2" '$1 == n { print $3; f=1 } END { exit !f }' "$T/passwd"
+EOF
+cat > "$T/bin/getent" <<'EOF'
+#!/bin/bash
+f="$T/$1"; [ -z "$2" ] && { cat "$f"; exit; }
+grep "^$2:" "$f"
+EOF
+cat > "$T/bin/adduser" <<'EOF'
+#!/bin/bash
+for n; do :; done
+echo "$n:x:1000:1000::/home/$n:/bin/bash" >> "$T/passwd"; echo "adduser $*" >> "$T/log"
+EOF
+cat > "$T/bin/usermod" <<'EOF'
+#!/bin/bash
+echo "usermod $*" >> "$T/log"
+EOF
+cat > "$T/bin/visudo" <<'EOF'
+#!/bin/bash
+grep -q 'NOPASSWD:ALL$' "$2"
+EOF
+chmod +x "$T"/bin/*
+export T PATH="$T/bin:$PATH" PAD_WSL_CONF="$T/wsl.conf" PAD_SUDOERS_D="$T/sudoers.d"
+printf 'root:x:0:0:root:/root:/bin/bash\ngames:x:5:60:games:/usr/games:/usr/sbin/nologin\n' > "$T/passwd"
+printf 'adm:x:4:\nsudo:x:27:\ncdrom:x:24:\n' > "$T/group"
+printf '[boot]\nsystemd=true\n' > "$T/wsl.conf"
+"""
+
+
+def _run_user_sh(setup, win_user):
+    """wsl_default_user.sh under the stubs; *setup* edits $T first.  Fed on
+    stdin, like test_shell_script_parses, so any bash on PATH can run it."""
+    script = (_USER_STUBS + setup + "\ncat > \"$T/s.sh\" <<'PADEOF'\n"
+              + WSL_USER_SH.read_text(encoding="utf-8") + "PADEOF\n"
+              + 'bash "$T/s.sh" "%s"; echo "rc=$?"\n' % win_user
+              + 'echo "--- conf"; cat "$T/wsl.conf"; echo "--- log"; '
+                'cat "$T/log" 2>/dev/null; echo "--- sudoers"; '
+                'cat "$T"/sudoers.d/* 2>/dev/null; rm -rf "$T"\n')
+    r = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                       capture_output=True, timeout=120)
+    return (r.stdout.decode("utf-8", "replace")
+            + r.stderr.decode("utf-8", "replace"))
+
+
+@pytest.mark.skipif(not HAS_BASH,
+                    reason="no working bash (WSL launcher without a distro?)")
+def test_a_root_only_ubuntu_gets_the_user_its_first_boot_would_have_made():
+    """★ --no-launch skips Ubuntu's "create a default Unix user" step, and a
+    distro with no user logs in as root, where the emulator's window is black
+    (PAD-659).  The script makes the user wsl-setup would have: the Windows
+    name its way, its groups (only the ones this distro has), sudo, and the
+    [user] default=, keeping what wsl.conf already says."""
+    out = _run_user_sh("", "David Vanderburgh")
+    assert "rc=0" in out, out
+    assert "PADUSER=david_vanderburgh 1000" in out, out
+    assert "made the user david_vanderburgh" in out, out
+    conf = out.split("--- conf")[1].split("--- log")[0]
+    assert "[boot]\nsystemd=true" in conf, conf
+    assert "[user]\ndefault=david_vanderburgh" in conf, conf
+    log = out.split("--- log")[1]
+    for g in ("adm", "sudo", "cdrom"):
+        assert "usermod -aG %s david_vanderburgh" % g in log, log
+    assert "plugdev" not in log, "a group this distro lacks was asked for:\n" + log
+    assert "david_vanderburgh ALL=(ALL) NOPASSWD:ALL" in out.split("--- sudoers")[1], out
+
+
+@pytest.mark.skipif(not HAS_BASH,
+                    reason="no working bash (WSL launcher without a distro?)")
+def test_a_persons_own_account_is_adopted_never_replaced():
+    """A user who already exists is the login, exactly as wsl-setup adopts
+    one - no second account, no sudo rule written for somebody else's."""
+    out = _run_user_sh(
+        "echo 'alice:x:1000:1000::/home/alice:/bin/bash' >> \"$T/passwd\"",
+        "david")
+    assert "PADUSER=alice 1000" in out and "found the user alice" in out, out
+    assert "adduser" not in out.split("--- log")[1], out
+    assert "NOPASSWD" not in out.split("--- sudoers")[1], out
+
+
+@pytest.mark.skipif(not HAS_BASH,
+                    reason="no working bash (WSL launcher without a distro?)")
+@pytest.mark.parametrize("win_user", ["\u0410\u0434\u043c\u0438\u043d", "games", "1234"],
+                         ids=["cyrillic", "system-name", "digits"])
+def test_a_windows_name_linux_cannot_use_becomes_pad(win_user):
+    """Nothing Linux accepts (Cyrillic, all digits) or a system account's
+    name ("games") is not handed to adduser: the user is called pad."""
+    out = _run_user_sh("", win_user)
+    assert "PADUSER=pad 1000" in out, out
+
+
+@pytest.mark.skipif(not HAS_BASH,
+                    reason="no working bash (WSL launcher without a distro?)")
+def test_a_default_somebody_chose_in_wsl_conf_is_left_alone():
+    out = _run_user_sh(
+        "printf '[user]\\ndefault=bob\\n' >> \"$T/wsl.conf\"", "david")
+    conf = out.split("--- conf")[1].split("--- log")[0]
+    assert conf.count("default=") == 1 and "default=bob" in conf, conf
+
+
+def test_the_installer_ships_and_runs_the_user_step():
+    iss = ISS.read_text(encoding="utf-8", errors="replace")
+    assert re.search(r'Source:\s*"wsl_default_user\.sh"', iss), (
+        "wsl_default_user.sh is not installed beside install_prerequisites.ps1")
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    call = ps1.index("if ($wslAvailable -and $ubuntuFound) { Set-WslOrdinaryUser }")
+    assert call > ps1.index('Write-Step "Checking for an apt-based WSL distro..."'), (
+        "the user step runs before the distro has been found")
+
+
+def test_windows_paths_reach_wslpath_without_a_shell():
+    """★ `wsl -- wslpath -a C:\\PAD\\x.sh` hands the line to bash, and wsl.exe
+    quotes only an argument with a space in it, so a path without one arrived
+    as "C:PADx.sh" (measured on WSL 2.6).  Every wslpath call uses -e."""
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    code = [ln for ln in ps1.splitlines() if not ln.lstrip().startswith("#")]
+    calls = [ln for ln in code if "wslpath" in ln]
+    assert calls, "no wslpath call found"
+    for ln in calls:
+        assert re.search(r"\s-e\s+wslpath\b", ln), ln
+
+
+def _run_ordinary_user_step(tmp_path, login, pad_distro=False, manage=True):
+    """Set-WslOrdinaryUser against a fake wsl.exe whose default login is
+    *login* until --manage (or the restart after the registry write) moves
+    it to the user the script reports."""
+    ps1 = PS1.read_text(encoding="utf-8")
+    block = ps1[ps1.index("function Set-WslOrdinaryUser"):
+                ps1.index("# --- Firmware virtualization probe")]
+    (tmp_path / "block.ps1").write_text(block, encoding="utf-8")
+    (tmp_path / "wsl_default_user.sh").write_text("#!/bin/bash\n")
+    fake = tmp_path / "fakewsl"
+    fake.mkdir()
+    (fake / "login.txt").write_text(login)
+    (fake / "fakewsl.py").write_text(
+        "import sys, os\n"
+        "d = os.path.dirname(os.path.abspath(__file__))\n"
+        "st = os.path.join(d, 'login.txt')\n"
+        "a = sys.argv[1:]\n"
+        "open(os.path.join(d, 'calls.txt'), 'a').write(' '.join(a) + '\\n')\n"
+        "if a[:1] == ['--help']:\n"
+        "    print(%r)\n"
+        "elif a[:1] == ['--manage']:\n"
+        "    open(st, 'w').write(a[3])\n"
+        "elif a[:1] == ['--terminate']:\n"
+        "    p = os.path.join(d, 'pending.txt')\n"
+        "    if os.path.exists(p): open(st, 'w').write(open(p).read())\n"
+        "elif a[-2:] == ['id', '-un'] and '-u' not in a:\n"
+        "    print(open(st).read())\n"
+        "elif 'wslpath' in a:\n"
+        "    print('/mnt/c/app/wsl_default_user.sh')\n"
+        "elif 'bash' in a:\n"
+        "    print('made the user david'); print('PADUSER=david 1000')\n"
+        "    open(os.path.join(d, 'pending.txt'), 'w').write('david')\n"
+        % ("--set-default-user <Username>" if manage else "--list"),
+        encoding="utf-8")
+    (fake / "wsl.cmd").write_text(
+        '@echo off\r\n"%s" "%%~dp0fakewsl.py" %%*\r\n' % sys.executable,
+        encoding="ascii")
+    # The Unix stub of the same fake, for pwsh on the macOS / Linux runners.
+    wsl_sh = fake / "wsl"
+    wsl_sh.write_text('#!/bin/sh\nexec "%s" "%s" "$@"\n'
+                      % (sys.executable, (fake / "fakewsl.py").as_posix()),
+                      encoding="ascii")
+    try:
+        wsl_sh.chmod(0o755)
+    except OSError:
+        pass
+    harness = r"""
+$env:PATH = "{fake}" + [IO.Path]::PathSeparator + $env:PATH
+function Write-Step($m)      {{ Write-Host "=== $m ===" }}
+function Write-Installed($n) {{ Write-Host "INSTALLED: $n" }}
+function Write-FAIL($n)      {{ Write-Host "MISSING: $n" }}
+function Get-WslDefaultDistro {{ @{{ Name = "Ubuntu-24.04"; Version = 2 }} }}
+# The registry fallback writes to a key no test may touch.
+function Set-ItemProperty {{ Write-Host "REGISTRY: $args" }}
+function Get-ChildItem {{ }}
+$script:PadDistro = {pad}
+. "{block}"
+Set-WslOrdinaryUser
+""".format(fake=str(fake).replace("\\", "\\\\"),
+           pad='"PAD-Runtime"' if pad_distro else "$null",
+           block=str(tmp_path / "block.ps1").replace("\\", "\\\\"))
+    hf = tmp_path / "harness.ps1"
+    hf.write_text(harness, encoding="utf-8")
+    r = subprocess.run([_powershell(), "-NoProfile", "-ExecutionPolicy",
+                        "Bypass", "-File", str(hf)],
+                       capture_output=True, timeout=180)
+    calls = fake / "calls.txt"
+    return (r.stdout.decode("utf-8", "replace")
+            + r.stderr.decode("utf-8", "replace"),
+            calls.read_text() if calls.exists() else "",
+            (fake / "login.txt").read_text())
+
+
+@pytest.mark.skipif(_powershell() is None, reason="no PowerShell")
+def test_the_installer_makes_a_root_login_ubuntu_log_in_as_its_user(tmp_path):
+    said, calls, login = _run_ordinary_user_step(tmp_path, "root")
+    assert "INSTALLED: Ubuntu-24.04 user account 'david'" in said, said + calls
+    assert "--manage Ubuntu-24.04 --set-default-user david" in calls, calls
+    assert login == "david"
+    assert "--terminate" not in calls, (
+        "--manage takes effect at once; stopping the distro is not needed:\n"
+        + calls)
+
+
+@pytest.mark.skipif(_powershell() is None, reason="no PowerShell")
+def test_an_older_wsl_gets_the_login_through_the_registry(tmp_path):
+    """No --set-default-user on this wsl.exe: DefaultUid is written, and the
+    distro is stopped so its next start reads it."""
+    said, calls, login = _run_ordinary_user_step(tmp_path, "root",
+                                                 manage=False)
+    assert "--manage" not in calls, calls
+    assert "--terminate Ubuntu-24.04" in calls, calls
+    assert "INSTALLED: Ubuntu-24.04 user account 'david'" in said, said + calls
+
+
+@pytest.mark.skipif(_powershell() is None, reason="no PowerShell")
+@pytest.mark.parametrize("login,pad", [("alice", False), ("root", True)],
+                         ids=["has-a-user", "app-runtime"])
+def test_a_distro_that_logs_in_as_somebody_is_not_touched(tmp_path, login, pad):
+    said, calls, after = _run_ordinary_user_step(tmp_path, login,
+                                                 pad_distro=pad)
+    assert "bash" not in calls and "--manage" not in calls, calls
+    assert "INSTALLED" not in said and "MISSING" not in said, said
+    assert after == login

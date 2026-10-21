@@ -174,7 +174,7 @@ def probe_input(mfr, manufacturers, path):
     res = {"path": path, "exists": False, "game": None, "era": "",
            "caption": None, "others": [], "audio_supported": True,
            "decode_applies": False, "decode_label": "",
-           "chain_applies": False, "size": None}
+           "chain_applies": False, "size": None, "backup": ""}
     if mfr is None:
         res["audio_supported"] = False
         return res
@@ -227,6 +227,11 @@ def probe_input(mfr, manufacturers, path):
             continue
         if g:
             res["others"].append((m, g))
+    if not res["others"]:
+        # nobody reads it: a disk tool's backup of a card is worth naming,
+        # "Not recognized" alone sent the user round in circles (PAD-659)
+        from ..core.backup_image import reason
+        res["backup"] = reason(path)
     return res
 
 

@@ -547,6 +547,10 @@ switches and the playfield all work perfectly. The tab says so, and
 says the cure — give the distro an ordinary user account and make it
 the default — and the renderer's own Mesa complaint is carried to
 the log pane instead of ending up in a file the app never shows.
+When the emulator's own Linux isn't installed yet, the notice also
+offers **Install emulator Linux…**: it installs that Linux, whose
+default user is an ordinary one, so the window draws without your
+own distro being touched, and the setup check then runs again in it.
 Nothing is changed for you: which user a run starts as is a WSL
 setting, and a guessed one is easy to get wrong in a way that trades
 a black window for a renderer that can't start at all.

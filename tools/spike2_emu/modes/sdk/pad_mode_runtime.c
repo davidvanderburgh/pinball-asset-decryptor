@@ -9401,6 +9401,8 @@ static void chg_scores_picked(unsigned slot, const char *name, const struct pm_m
     chg_hs.game = chg_game_now();
 }
 
+static void chg_page_back(void);                                 /* PAD-660, below */
+
 /* the end-of-game high scores, wrapped: in a mode's challenge game its challenge's entry is the mode's for the call */
 static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
@@ -9411,6 +9413,7 @@ static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
     long n, m;
     int slot = chg_hs.slot, changed = 0;
     chg_hs.slot = -1;                                            /* one game's, once */
+    chg_page_back();                                             /* PAD-660: never an attract page's record here */
     if (slot >= 0 && chg_hs.game == chg_game_now()) {
         pm_snprintf(key, sizeof key, "challenge_scores_cat_%d", slot);
         ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))(
@@ -9458,6 +9461,160 @@ static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
     return ret;
 }
 
+/* ---- PAD-660: the modes' challenge champions in the attract mode ------------------------------------------------
+ * luvthatapex (Bond LE): a mode's challenge high score (PAD-640) was kept, but the attract mode's high score pages
+ * showed only the game's own champions (CHAOS AT CRAB KEY CHALLENGE / CHAMPION / initials / score, ...). The attract
+ * mode runs a list of pages, each in a process of its own (Bond LE's list 0x7a6864: {shown?, page} pairs), one per
+ * champion category; a page reads its champion ONCE, before its first frame - the record (initials, and its check),
+ * the entry's score text and its title (a message: HMSS CHALLENGE) - then draws frames, yielding between them, until
+ * its time is up. The port names (portchallenge.page_lines):
+ *   site  challenge_page        the LAST challenge's champion page (wrapped: hook_wrap)
+ *   site  challenge_page_text   the game's message text lookup (wrapped: the title)
+ *   site  challenge_page_yield  the game's frame yield (hooked: puts the game's record back)
+ *   value challenge_page_cat    its category; value challenge_page_title: its title's message id
+ * The wrapped page runs the game's own page first, as it was; then, in the same process, the game's page again for
+ * each mode on the challenge list with a champion of its own in CHG_SCORES: the category's entry points at a copy of
+ * the mode's record and the title message says the mode's name (with the game's " CHALLENGE" after it when it fits)
+ * - until the page's first yield, where the game's record is put back. The page reads nothing of the record after
+ * that, and nothing else of the game's runs before it (the pages are processes of the game's own, one at a time), so
+ * the game's record is never read or written for a mode's page, and a page cut short (a flipper, a game start) is cut
+ * at a yield, when it is already back. The game's own pages and their order are unchanged; the modes' follow its
+ * last challenge champion's, and only while the game shows its champions at all (the same adjustment). */
+#define CHG_PAGES_MAX 8
+static void (*chg_page_game)(void);
+static const char *(*chg_page_text_game)(unsigned, unsigned, unsigned, unsigned);
+static unsigned *volatile chg_page_ent;           /* the entry pointed at a mode's record, until the page's first yield */
+static unsigned chg_page_was;
+static const unsigned *chg_page_cur;               /* the game's current process (its yield's list head + 4) */
+static unsigned chg_page_proc;                     /* the page's process, while its record is ours */
+static unsigned chg_page_title_id;
+static char chg_page_title[48];
+static unsigned char chg_page_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
+
+/* the game's record back in the category's entry (the page's first yield, or a page that never drew a frame) */
+static void chg_page_back(void)
+{
+    unsigned *ent = chg_page_ent;
+    if (!ent) return;
+    ent[0] = chg_page_was;
+    chg_page_ent = 0;
+}
+
+/* the game runs its processes on threads of their own, one at a time: another process's yield while the page sets up
+ * is not the page's (the first rig run put the title back before the page read it) - only the page's own puts it back */
+static void chg_page_yield(unsigned *r)
+{
+    (void)r;
+    if (chg_page_ent && *chg_page_cur == chg_page_proc) chg_page_back();
+}
+
+/* the title message, while a mode's page reads it */
+static const char *chg_page_text(unsigned id, unsigned r1, unsigned r2, unsigned r3)
+{
+    if (chg_page_ent && id == chg_page_title_id) return chg_page_title;
+    return chg_page_text_game(id, r1, r2, r3);
+}
+
+/* a mode's page title: its name, and the game's title's " CHALLENGE" after it when the game's has one and the two fit
+ * in the longest of the game's (27: CHAOS AT CRAB KEY CHALLENGE) (tests lift it verbatim) */
+static void chg_page_title_of(char *out, unsigned cap, const char *name, const char *game_title)
+{
+    static const char tail[] = " CHALLENGE";
+    unsigned n = 0, g = 0, t = sizeof tail - 1, k;
+    while (name[n]) n++;
+    while (game_title && game_title[g]) g++;
+    for (k = 0; k < n && k + 1 < cap; k++) out[k] = name[k];
+    out[k] = 0;
+    if (g < t || n + t > 27 || k + t + 1 > cap) return;
+    for (k = 0; k < t; k++) if (game_title[g - t + k] != tail[k]) return;
+    if (n >= t - 1) {                                            /* the name says CHALLENGE itself */
+        for (k = 0; k + 1 < t && name[n - (t - 1) + k] == tail[k + 1]; k++) ;
+        if (k + 1 == t) return;
+    }
+    for (k = 0; k < t; k++) out[n + k] = tail[k];
+    out[n + t] = 0;
+}
+
+/* the names on the game's challenge list now that a mode holds (a taken one's menu name, or its mode's; the modes'
+ * own), upper case as PAD-640 files them, each once: n of them in names[] */
+static int chg_page_names(char names[][40], int cap)
+{
+    int n = 0, i, k, s;
+    char w[40];
+    for (s = 0; s < CHALLENGE_OWN + N_OWN_CHALLENGE && n < cap; s++) {
+        const char *name = 0;
+        if (s < pm_challenge_slots() && s < N_CHALLENGE && challenge_fn[s] && challenge_by[s])
+            name = challenge_title[s][0] ? challenge_title[s] : challenge_by[s]->name;
+        else if (s >= CHALLENGE_OWN && own_challenge[s - CHALLENGE_OWN].fn)
+            name = own_challenge[s - CHALLENGE_OWN].name;
+        if (!name || !*name) continue;
+        challenge_words(w, name);
+        for (i = 0; i < n && !str_eq(names[i], w); i++) ;
+        if (i < n) continue;
+        for (k = 0; k < 40; k++) names[n][k] = w[k];
+        n++;
+    }
+    return n;
+}
+
+/* the last challenge champion page, wrapped: the game's own, then each mode's champion in the same page */
+static void chg_page_wrap(void)
+{
+    static char b[CHG_SCORES_MAX];
+    static char names[CHG_PAGES_MAX][40];
+    static int said;
+    unsigned *ent;
+    long n;
+    int i, k;
+    chg_page_game();                                             /* the game's own page, as it was */
+    n = pm_read_file(CHG_SCORES, b, sizeof b);
+    if (n <= 0) return;
+    k = chg_page_names(names, CHG_PAGES_MAX);
+    for (i = 0; i < k; i++) {
+        if (!chg_rec_find(b, n, names[i], chg_page_rec) || !*(uint64_t *)(chg_page_rec + 72)) continue;
+        ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))(
+            (unsigned)pm_port_value("challenge_page_cat", 0), 0);
+        if (!ent || !maps_has((unsigned long)ent, 28, MAP_R)) return;
+        chg_page_title_of(chg_page_title, sizeof chg_page_title, names[i], chg_page_text_game(chg_page_title_id, 0, 0, 0));
+        if (said < 2 * CHG_PAGES_MAX) {
+            said++;
+            say("challenge scores: the attract mode shows %s's champion (%llu, %s) under \"%s\"", names[i],
+                (unsigned long long)*(uint64_t *)(chg_page_rec + 72), (const char *)chg_page_rec + 32, chg_page_title);
+        }
+        chg_page_was = ent[0];
+        chg_page_proc = *chg_page_cur;
+        chg_page_ent = ent;
+        ent[0] = (unsigned)(unsigned long)chg_page_rec;
+        chg_page_game();
+        chg_page_back();                                         /* a page that never drew a frame */
+    }
+}
+
+static void chg_page_arm(void)
+{
+    static const char *const s[] = { "challenge_page", "challenge_page_text", "challenge_page_yield", 0 };
+    int k;
+    for (k = 0; s[k]; k++) if (!site(s[k])) return;                 /* a port without them: silent */
+    chg_page_title_id = (unsigned)pm_port_value("challenge_page_title", 0);
+    for (k = 0; s[k]; k++) if (!fn(s[k])) break;
+    if (!s[k]) {                                                 /* movw/movt r3 <the process list>: current at +4 */
+        const unsigned *y = (const unsigned *)(unsigned long)fn("challenge_page_yield");
+        unsigned head = ((y[0] >> 4 & 0xF000) | (y[0] & 0xFFF)) | ((y[1] >> 4 & 0xF000) | (y[1] & 0xFFF)) << 16;
+        chg_page_cur = maps_has(head + 4u, 4, MAP_R) ? (const unsigned *)(unsigned long)(head + 4u) : 0;
+    }
+    /* the yield first and the page last: a page is never wrapped without its put-back */
+    if (s[k] || !chg_page_cur || !chg_page_title_id || pm_port_value("challenge_page_cat", 0) <= 0
+        || !hook(fn("challenge_page_yield"), chg_page_yield)
+        || !(chg_page_text_game = (const char *(*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(
+                 fn("challenge_page_text"), (void *)chg_page_text))
+        || !(chg_page_game = (void (*)(void))hook_wrap(fn("challenge_page"), (void *)chg_page_wrap))) {
+        say("challenge scores: the attract mode's champion pages could not be wrapped - a mode's champion is kept, not shown");
+        return;
+    }
+    say("challenge scores: the attract mode shows a mode's challenge champion after the game's (category %ld's page)",
+        pm_port_value("challenge_page_cat", 0));
+}
+
 static void chg_scores_arm(void)
 {
     if (!site("challenge_scores") || !site("challenge_score_entry")) return;
@@ -9468,6 +9625,7 @@ static void chg_scores_arm(void)
         return;
     }
     say("challenge scores: a mode's challenge game keeps its own high score (%s)", CHG_SCORES);
+    chg_page_arm();                                              /* PAD-660 */
 }
 
 /* ---- round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract; Bond LE/Pro 1.06)

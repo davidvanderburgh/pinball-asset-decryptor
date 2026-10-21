@@ -203,7 +203,7 @@ def test_a_mode_s_colour_on_a_one_colour_insert_is_named_not_drawn(pf, monkeypat
     assert r == g == bl and r > 128                                                   # white, lifted; not red
     tip = view.describe("led", 0)
     assert "MASER   (one colour)" in tip and "value 128" in tip
-    assert "drawn white: set its colour under INSERT COLOURS" in tip
+    assert "its colour not set (white): see INSERT COLOURS" in tip
     assert "a mode asks for #ff0000" in tip and "glows in its own colour" in tip
     with open(pf.LED_PATH, "wb") as f:
         f.write(_led_block(pf, {(8, 3): 128}))                                         # no mode holds it
@@ -236,7 +236,7 @@ def test_the_insert_colours_table_is_edited_from_the_page_and_kept_per_title(pf,
     assert view.tick(0.0)["fx"][0][:3] == [255, 255, 255]
     assert ctl.api_lens("MASER", "#FF2000") == "#ff2000"
     assert view.tick(0.0)["fx"][0][:3] == [255, 32, 0]                                # redrawn at once
-    assert "drawn #ff2000, as set under INSERT COLOURS" in view.describe("led", 0)
+    assert "its colour #ff2000, as set under INSERT COLOURS" in view.describe("led", 0)
     st = pf.load_state()
     assert st["lens_colours"] == {"godzilla_le": {"MASER": "#ff2000"}}
     assert pf.lens_colours("godzilla_pro") == {}                                      # another title: its own
@@ -248,10 +248,39 @@ def test_the_insert_colours_table_is_edited_from_the_page_and_kept_per_title(pf,
     assert ctl.api_lens("MASER", "not a colour") == ""
 
 
+def test_all_rgb_draws_a_mode_s_colour_on_a_one_colour_insert_and_real_leds_does_not(pf, monkeypatch):
+    """PAD-668: the picture's Real LEDs / All RGB switch. Real LEDs (the default) draws a single-colour insert a
+    mode paints in its own colour; All RGB draws it in the mode's colour at the wire's level (PAD-658's view), as
+    the Modes tab's preview does. Kept for the next run; RGB inserts and unheld inserts are the same either way."""
+    import coilmap
+    ctl = _one_colour_field(pf, monkeypatch)
+    view = ctl.view
+    assert ctl.state("main")["view"]["insert_look"] == "real"
+    b = bytearray(16384)
+    b[:pf.PADLED_READ] = _led_block(pf, {(8, 3): 255, (8, 4): 255})
+    struct.pack_into("<I", b, coilmap.PAINT_OFF, coilmap.PAINT_MAGIC)
+    b[coilmap.PAINT_OFF + 8:coilmap.PAINT_OFF + 14] = bytes((6, 3, 255, 0, 0, 1))     # MASER painted red
+    with open(pf.LED_PATH, "wb") as f:
+        f.write(bytes(b))
+    frame = view.tick(0.0)
+    assert frame["fx"][0][:3] == [255, 255, 255] and frame["fx"][2][:3] == [255, 255, 255]
+    assert ctl.api_insert_look("rgb") == "rgb"
+    frame = view.tick(0.0)
+    assert frame["fx"][0][:3] == [255, 0, 0]                                          # the mode's red
+    assert 2 not in frame["fx"]                                                       # BRIDGE: no mode, unchanged
+    assert "drawn #ff0000, the mode's colour (All RGB)" in view.describe("led", 0)
+    assert pf.load_state()["insert_look"] == "rgb"
+    assert pf.Playfield().state("main")["view"]["insert_look"] == "rgb"              # the next run
+    assert ctl.api_insert_look("real") == "real"
+    assert view.tick(0.0)["fx"][0][:3] == [255, 255, 255]
+    assert ctl.api_insert_look("nonsense") == "real"
+
+
 def test_the_page_has_the_insert_colours_table():
     js = open(os.path.join(RIG, "pfpage", "pf.js"), encoding="utf-8").read()
     assert 'function lensPanel(rows)' in js and 'api("lens", name, pick.value)' in js
     assert 'api("lens", name, null)' in js and "markInserts(fids)" in js
+    assert 'api("insert_look", k)' in js and '"Real LEDs"' in js and '"All RGB"' in js
 
 
 def test_the_page_script_parses():

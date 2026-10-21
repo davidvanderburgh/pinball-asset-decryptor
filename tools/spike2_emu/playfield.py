@@ -947,6 +947,36 @@ def art_look():
     return look if look in ART_LOOKS else ART_LOOKS[0]
 
 
+#: PAD-668: how inserts take a mode's colours - "real" (as the machine: a
+#: single-colour insert glows in its own colour, from INSERT COLOURS, else
+#: white) or "rgb" (as if every insert were RGB: a single-colour insert a mode
+#: holds is drawn in the colour the mode painted, PAD-658's view)
+INSERT_LOOKS = ("real", "rgb")
+
+
+def insert_look():
+    """The picture's Real LEDs / All RGB switch (PAD-668), Real LEDs until it
+    is first switched; kept in the state file like the X-ray switch."""
+    look = load_state().get("insert_look")
+    return look if look in INSERT_LOOKS else INSERT_LOOKS[0]
+
+
+def tinted(vals, F, tints):
+    """A single-colour fixture's values as the colour a MODE painted it, else
+    ``vals`` as they are - the All RGB look (PAD-668; PAD-658 drew this
+    always). The hue from the mode (coilmap.paint_tints, padled's paint
+    plane), the brightness - and so the timing - from what the game actually
+    sent the board."""
+    if not tints or set(vals) != {"W"}:
+        return vals
+    tint = tints.get(F["channels"]["W"])
+    v = vals.get("W") or 0
+    if not tint or not v:
+        return vals
+    m = max(tint)
+    return {c: t * v // m for c, t in zip("RGB", tint)}
+
+
 #: PAD-668: a single-colour insert's colour until the user sets one: white,
 #: "colour not known" (see fixture_color)
 LENS_DEFAULT = (255, 255, 255)
@@ -1197,7 +1227,8 @@ def fixture_color(vals, lens=None):
     known", where the old orange ramp read as "this insert is yellow". The
     same holds while a MODE lights one: the mode's colour reaches the board as
     one level, so PAD-658's painting it in the show's colour showed what the
-    machine cannot; the colour asked for is in its tooltip instead.
+    machine cannot; the colour asked for is in its tooltip instead, and the
+    picture's All RGB switch draws it that way on request (tinted).
     """
     if "W" in vals:
         v = vals.get("W") or 0
@@ -3566,6 +3597,7 @@ class Field(LedRing):
                 self.chan_fix.setdefault(key, []).append(F)
 
         self.sw_rows = list(self.switches)
+        self.insert_look = insert_look()        # PAD-668
         # PAD-500: the cabinet's own lights, in a column left of the art
         self.cab = CabinetLights(expression_on())
         self._sw_named = None
@@ -3595,6 +3627,7 @@ class Field(LedRing):
             "info": self.info,
             "art": "art" if self.art else None,
             "look": art_look(),
+            "insert_look": self.insert_look,
             "base": list(self.base or (313, 710)),
             "fixtures": [[F["fid"], round(F["x"], 2), round(F["y"], 2)]
                          for F in self.fixtures],
@@ -3626,10 +3659,11 @@ class Field(LedRing):
             out.append([name, "#%02x%02x%02x" % rgb if rgb else "", rows[name]])
         return out
 
-    def lens_changed(self, name):
-        """Redraw an insert whose colour the user just changed."""
+    def lens_changed(self, name=None):
+        """Redraw an insert whose colour the user just changed (every insert:
+        None)."""
         for F in self.fixtures:
-            if F["name"] == name:
+            if name is None or F["name"] == name:
                 F["state"] = None
 
     def cab_spec(self):
@@ -3735,13 +3769,19 @@ class Field(LedRing):
             # one-colour insert shows its lens's colour whatever it asks
             asked = coilmap.paint_tints(self.last, GROUP_NODE).get((node, idx))
             lens = lens_of(d["name"])
+            if asked and self.insert_look == "rgb":
+                asks = ("\ndrawn #%02x%02x%02x, the mode's colour (All RGB);"
+                        "\non the machine it glows in its own colour" % asked)
+            elif asked:
+                asks = ("\na mode asks for #%02x%02x%02x; one colour, so it"
+                        "\nglows in its own colour on the machine" % asked)
+            else:
+                asks = ""
             return ("LED  %s   (one colour)\n%s\nvalue %s\n%s%s"
                     % (d["name"], where(node, idx), fmt(vals.get("W")),
-                       "drawn #%02x%02x%02x, as set under INSERT COLOURS" % lens
-                       if lens else "drawn white: set its colour under INSERT COLOURS",
-                       "\na mode asks for #%02x%02x%02x; one colour, so it"
-                       "\nglows in its own colour on the machine" % asked
-                       if asked else ""))
+                       "its colour #%02x%02x%02x, as set under INSERT COLOURS" % lens
+                       if lens else "its colour not set (white): see INSERT COLOURS",
+                       asks))
         lines = ["LED  %s   (RGB fixture)" % d["name"]]
         for chan in "RGB":
             if chan in d["channels"]:
@@ -3903,9 +3943,11 @@ class Field(LedRing):
         decoded state moves - the honest picture rate - not tween frames."""
         lit = 0
         changed = 0
+        tints = (coilmap.paint_tints(d, GROUP_NODE)
+                 if self.insert_look == "rgb" else None)
         for F in self.fixtures:
-            rgb, level = fixture_color(self._chan_vals(F, d, now),
-                                       lens_of(F["name"]))
+            rgb, level = fixture_color(
+                tinted(self._chan_vals(F, d, now), F, tints), lens_of(F["name"]))
             if rgb:
                 lit += 1
             st = (rgb, level)
@@ -5020,6 +5062,23 @@ class Playfield:
             v.lens_changed(name)
         rgb = lens_of(name)
         return "#%02x%02x%02x" % rgb if rgb else ""
+
+    def api_insert_look(self, look):
+        """PAD-668: the picture's Real LEDs / All RGB switch, kept for the
+        next run; every insert is drawn again in the new look."""
+        look = look if look in INSERT_LOOKS else INSERT_LOOKS[0]
+        try:
+            st = load_state()
+            st["insert_look"] = look
+            with open(STATE, "w") as f:
+                json.dump(st, f, indent=1)
+        except Exception:                                   # noqa: BLE001
+            pass
+        v = self.view
+        if v is not None and hasattr(v, "insert_look"):
+            v.insert_look = look
+            v.lens_changed(None)
+        return look
 
     def api_art_look(self, look):
         """PAD-628: the picture's X-ray / Drawing switch, kept for the next

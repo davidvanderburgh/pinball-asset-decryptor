@@ -259,7 +259,7 @@ def test_made_state_travels_apart_from_the_markers():
         art=None, base=(313, 710), fixtures=[], coils=[], coil_drawn={},
         info=[],
         sw_rows=[dict(id=53, x=250, y=357, name="Right Scoop")],
-        trough=None, _dot_drawn={53: True}, shaker=None,
+        trough=None, _dot_drawn={53: True}, shaker=None, insert_look="real",
         # PAD-500's cabinet column, on a title with no cabinet lights
         cab=types.SimpleNamespace(spec=list, panel=lambda: None, dyn=dict))
     ns.cab_spec = types.MethodType(pf.Field.cab_spec, ns)

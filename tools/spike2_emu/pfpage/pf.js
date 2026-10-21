@@ -498,9 +498,33 @@ function startMain() {
       };
       shown();
     }
+    // PAD-668: how inserts take a mode's colours - as the machine has its LEDs,
+    // or as if every insert were RGB (what the Modes tab's preview shows)
+    let insLook = V.insert_look === "rgb" ? "rgb" : "real";
+    const insBox = el("div", "pf-look pf-inslook");
+    const insPick = {};
+    for (const [k, label, words] of [
+      ["real", "Real LEDs", "As the machine: an RGB insert in the colour the game gives it; a single-colour "
+        + "insert only gets brighter or dimmer and glows in its own colour (INSERT COLOURS in the side panel; "
+        + "white = not set)"],
+      ["rgb", "All RGB", "As if every insert were RGB: a single-colour insert is drawn in the colour it was "
+        + "asked for, where the view knows it - the machine cannot show that"],
+    ]) {
+      insPick[k] = btn(label, () => {
+        insPick[k].blur();              // never keep the keyboard: the space bar is the Action Button
+        if (insLook === k) return;
+        insLook = k;
+        for (const q in insPick) insPick[q].classList.toggle("on", q === insLook);
+        api("insert_look", k);
+      });
+      insPick[k].title = words;
+      insPick[k].classList.toggle("on", k === insLook);
+      insBox.append(insPick[k]);
+    }
     const cv = el("canvas");
     stage.append(cv);
     if (lookBox) stage.append(lookBox);
+    stage.append(insBox);
     const overlay = el("div", "pf-overlay");
     let trough = null;
     if (V.trough) { trough = troughStrip(V.trough, D.trough); overlay.append(trough.el); }

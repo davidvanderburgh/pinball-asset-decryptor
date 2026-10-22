@@ -384,6 +384,23 @@ def unpack_tail(blob, count, key, iv, md_off=0):
 # --------------------------------------------------------------------------
 # appending records
 # --------------------------------------------------------------------------
+#: The appended records a grow leaves room for, in steps of this many
+#: (:func:`grow_slots`).
+GROW_SLOTS = 64
+
+
+def grow_slots(n):
+    """The records' room a grow of *n* appended records lays its bodies past:
+    *n* rounded up to :data:`GROW_SLOTS` (PAD-677).  A body's offset is part
+    of everything the firmware's chain derives from it, so with room for
+    exactly *n* every body moved whenever a mode gained or lost one sound, and
+    every appended sound (a mode's three songs) was encoded again for it.  The
+    room past the array is never read: the header names the array and each
+    record its own body."""
+    n = int(n)
+    return -(-n // GROW_SLOTS) * GROW_SLOTS if n > 0 else 0
+
+
 #: ``src`` is the record the appended copy is made from when it is not ``idx``
 #: itself: a sound an earlier build already grew plays its appended record, so
 #: growing it again copies that one (PAD-593).
@@ -453,7 +470,9 @@ def plan_grow_records(directory, edits, body_pad=BODY_PAD, file_size=None):
 
     new_count = directory.count + len(edits)
     md_off = grow_md_off(directory.md_off, directory.count, file_size)
-    off = md_off + tail_len(new_count) + body_pad
+    # the bodies start past room for grow_slots() records, not just these:
+    # one more or one fewer appended sound leaves every body where it was
+    off = md_off + tail_len(directory.count + grow_slots(len(edits))) + body_pad
     appended = []
     places = []
     for n, e in enumerate(edits):

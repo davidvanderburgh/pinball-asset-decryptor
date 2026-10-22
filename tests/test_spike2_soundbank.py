@@ -76,8 +76,9 @@ def test_plan_bank_lays_each_body_behind_its_pad_and_the_directory_last():
         SB.BankEdit(1147, rec_b, 0x20, 0x50, 500),
     ])
     assert [(p.idx, p.new_idx) for p in places] == [(1898, 0), (1147, 1)]
-    # the fragment table (2 fragments of 5 slots) and the 16-byte data block come first
-    tables = 2 * SB.DEFAULT_STRIDE * SB.FRAG_SLOT + 16
+    # the fragment table and the 16-byte data block come first, the bodies past room for
+    # MD.GROW_SLOTS fragments of 5 slots, not just these 2 (PAD-677)
+    tables = MD.GROW_SLOTS * SB.DEFAULT_STRIDE * SB.FRAG_SLOT + 16
     assert places[0].body_off == MD.align16(SB.HDR_LEN + tables) + MD.BODY_PAD
     assert places[1].body_off == places[0].body_off + 1000 + MD.BODY_PAD
     assert d.count == 2

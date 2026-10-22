@@ -8738,16 +8738,35 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             if progress:
                                 progress(84, 100, "Decoding the replaced sounds "
                                          "from the finished bank...")
-                            try:
-                                _verify_final_patches(
-                                    gr_path, img_path, audio_patches, params,
-                                    np, log, cancel, no_restore=pathA_applied,
-                                    no_scrap_offsets=_appended_body_offsets(
-                                        audio_patches, grow_places,
-                                        last_only=not _family))
-                            except Exception as e:
-                                log("Final-bytes check skipped (%s)." % e,
-                                    "info")
+                            _scrap_offs = _appended_body_offsets(
+                                audio_patches, grow_places,
+                                last_only=not _family)
+                            # PAD-677: the very bytes the last build decoded
+                            # here are decoded the same way again, so what it
+                            # said is said again instead
+                            _checked = _FinalCheckCache.open(
+                                assets_dir, gr_path, stock_ident,
+                                audio_patches, params, pathA_applied,
+                                _scrap_offs)
+                            if _checked is not None and _checked.replay(log):
+                                pass
+                            else:
+                                _said = []
+
+                                def _tee(msg, level="info", *a, **k):
+                                    _said.append((msg, level))
+                                    log(msg, level, *a, **k)
+                                try:
+                                    _verify_final_patches(
+                                        gr_path, img_path, audio_patches,
+                                        params, np, _tee, cancel,
+                                        no_restore=pathA_applied,
+                                        no_scrap_offsets=_scrap_offs)
+                                    if _checked is not None and not cancel():
+                                        _checked.store(_said)
+                                except Exception as e:
+                                    log("Final-bytes check skipped (%s)." % e,
+                                        "info")
                             _stage_done(log, "the final decode check of every "
                                         "replaced sound "
                                         "(PAD_STERN_SKIP_FINAL_VERIFY=1 skips "
@@ -15305,15 +15324,150 @@ def _image_identity(img_path):
     return h.digest()
 
 
+#: Bump when what the audio caches keep changes in a way
+#: :func:`_audio_encoder_fingerprint` cannot see (a data file, a tool outside
+#: the code it digests): every kept encode is then made again.
+_AUDIO_ENCODER_REV = 1
+
+#: The modules whose every line can shape an encode, a derive, the restore or
+#: the bank a cached audio result stands for, digested whole by
+#: :func:`_audio_encoder_fingerprint` (``spike2.*`` and ``bank_build``).
+_AUDIO_ENCODER_MODULES = (
+    "spike2/__init__.py", "spike2/category.py", "spike2/codec.py",
+    "spike2/elf.py", "spike2/emulator.py", "spike2/locate.py",
+    "spike2/masterdir.py", "spike2/parallel.py", "spike2/rbtree.py",
+    "spike2/soundbank.py", "bank_build.py")
+
+#: The functions of THIS module that make what the audio caches keep; every
+#: function, class and constant of this module they reach is digested with
+#: them (:func:`_code_closure_digest`).
+_AUDIO_ENCODER_ROOTS = (
+    "_encode_cat0_sounds", "_encode_cat0_serial", "_encode_mono",
+    "_encode_stereo", "_stock_render", "_level_ref_render", "_recovery_valid",
+    "_chain_encode_appended", "_chain_encoded", "_extended_row",
+    "_stage_grown_image", "_grown_body_bytes", "_derive_grown",
+    "_restore_masterdir_consumed", "_assert_param_integrity",
+    "_integrity_rows", "_build_sound_banks", "_repoint_descriptors",
+    "_verify_final_patches")
+
+_encoder_print = []
+
+
+def _const_repr(c):
+    """A constant as text that is the same in every run: a frozenset's order
+    follows the string hash seed, so its members are sorted; any other
+    object (a sentinel default, a lock) is named by its type, its repr
+    carrying an address that differs run to run."""
+    if isinstance(c, (frozenset, set)):
+        return "{%s}" % ",".join(sorted(_const_repr(x) for x in c))
+    if isinstance(c, (tuple, list)):
+        return "(%s)" % ",".join(_const_repr(x) for x in c)
+    if isinstance(c, dict):
+        return "{%s}" % ",".join(sorted("%s:%s" % (_const_repr(k), _const_repr(v))
+                                        for k, v in c.items()))
+    if c is None or c is Ellipsis or isinstance(c, (bool, int, float, complex,
+                                                    str, bytes)):
+        return repr(c)
+    return "<%s>" % type(c).__qualname__
+
+
+def _code_closure_digest(module, roots):
+    """An md5 over the code of the functions *roots* of *module* and of every
+    function, class (its methods) and plain constant of *module* they name,
+    followed name by name.  The bytecode, names and constants are digested,
+    never line numbers or comments, so an edit elsewhere in the module leaves
+    it alone and an edit to anything the roots reach changes it."""
+    import types
+    h = hashlib.md5()
+    g = vars(module)
+    done = set()
+    todo = list(roots)
+
+    def code(co):
+        h.update(co.co_code)
+        h.update(repr((co.co_names, co.co_varnames, co.co_freevars,
+                       co.co_cellvars, co.co_argcount,
+                       co.co_kwonlyargcount)).encode())
+        for c in co.co_consts:
+            if isinstance(c, types.CodeType):
+                code(c)
+            else:
+                h.update(_const_repr(c).encode())
+        for n in co.co_names:
+            if n not in done and n in g:
+                todo.append(n)
+
+    while todo:
+        name = todo.pop()
+        if name in done:
+            continue
+        done.add(name)
+        obj = g.get(name)
+        h.update(b"\0" + name.encode() + b"\0")
+        if isinstance(obj, types.FunctionType):
+            if obj.__module__ != module.__name__:
+                continue
+            code(obj.__code__)
+            h.update(_const_repr(obj.__defaults__).encode())
+        elif isinstance(obj, type) and obj.__module__ == module.__name__:
+            for k, v in sorted(vars(obj).items()):
+                f = getattr(v, "__func__", v)
+                fs = ([f] if isinstance(f, types.FunctionType) else
+                      [x for x in (v.fget, v.fset, v.fdel) if x is not None]
+                      if isinstance(v, property) else None)
+                if fs is not None:
+                    h.update(k.encode())
+                    for x in fs:
+                        code(x.__code__)
+                elif not k.startswith("__"):
+                    h.update(("%s=%s" % (k, _const_repr(v))).encode())
+        elif isinstance(obj, (int, float, str, bytes, tuple, frozenset)):
+            h.update(_const_repr(obj).encode())
+    return h.hexdigest()
+
+
+def _audio_encoder_fingerprint():
+    """What the audio caches' kept results are a function of in this app's
+    own code (PAD-677): :data:`_AUDIO_ENCODER_REV`, the files of
+    :data:`_AUDIO_ENCODER_MODULES`, the functions of this module that encode
+    (:data:`_AUDIO_ENCODER_ROOTS` and all they reach), and the Python, numpy
+    and unicorn they run on.  It used to be the app's version, so every
+    update encoded every sound of every project again (20-30 minutes on a
+    James Bond project with its modes' music) for a release that changed
+    nothing in the encoder (this fingerprint changed 3 times in the 38
+    releases v1.223.1 to v1.238.1, each a change to ``spike2``).  The
+    version stands in when any of it cannot be read.  Worked out once a run."""
+    if _encoder_print:
+        return _encoder_print[0]
+    try:
+        import numpy
+        import unicorn
+        h = hashlib.md5(b"audio-encoder %d " % _AUDIO_ENCODER_REV)
+        h.update(repr((sys.version_info[:2], numpy.__version__,
+                       getattr(unicorn, "__version__", ""))).encode())
+        here = os.path.dirname(os.path.abspath(__file__))
+        for rel in _AUDIO_ENCODER_MODULES:
+            with open(os.path.join(here, *rel.split("/")), "rb") as f:
+                h.update(rel.encode() + b"\0" + hashlib.sha1(f.read()).digest())
+        h.update(_code_closure_digest(sys.modules[__name__],
+                                      _AUDIO_ENCODER_ROOTS).encode())
+        out = "enc-" + h.hexdigest()
+    except Exception:                                   # noqa: BLE001
+        from ... import __version__
+        out = "app-" + __version__
+    _encoder_print.append(out)
+    return out
+
+
 def _audio_cache_base_key(gr_path, img_ident):
     """What every cached audio result depends on besides the sound itself:
     the card's identity (md5 of ``game_real`` plus the sound bank's
     :func:`_image_identity`), every ``PAD_STERN_*`` env var that shapes an
     encode (toggles that only pick a path through the write are excluded,
-    see :attr:`_AudioBodyCache._PATH_ONLY`), and the app version.  Shared by
-    the per-sound body cache and the verified-set cache so the two can never
-    disagree about what "the same build" means."""
-    from ... import __version__
+    see :attr:`_AudioBodyCache._PATH_ONLY`), and the encoder's own code
+    (:func:`_audio_encoder_fingerprint`; the app version until PAD-677).
+    Shared by the per-sound body cache and the verified-set cache so the two
+    can never disagree about what "the same build" means."""
     h = hashlib.md5()
     with open(_lp(gr_path), "rb") as f:
         h.update(f.read())
@@ -15322,7 +15476,7 @@ def _audio_cache_base_key(gr_path, img_ident):
                  if k.startswith("PAD_STERN_")
                  and k not in _AudioBodyCache._PATH_ONLY)
     h.update(repr(env).encode())
-    h.update(__version__.encode())
+    h.update(_audio_encoder_fingerprint().encode())
     return h.hexdigest()
 
 
@@ -15520,10 +15674,85 @@ class _FinalAudioCache:
             pass
 
 
+class _FinalCheckCache:
+    """What the final decode check (:func:`_verify_final_patches`) said about
+    a finished bank, under ``<assets>/.write_cache/audio_checked.bin``
+    (PAD-677).
+
+    The check decodes every replaced sound from the finished bytes and only
+    reports; on a James Bond project with its modes' songs it was 52 of the
+    81 seconds of an Emulate Start whose sounds nothing had changed, decoding
+    the bytes the Start before had decoded.  It is a function of the card and
+    the encoder (:func:`_audio_cache_base_key`), the bodies going in, the
+    table they are decoded on and which bodies it looks for a scrap of the
+    stock sound in, so when all of those are the last check's, its lines are
+    said again.  One entry; ``PAD_STERN_AUDIO_CACHE=0`` turns it off with the
+    other audio caches."""
+
+    _MAGIC = b"PADFC1\n"
+
+    def __init__(self, path, key):
+        self.path, self.key = path, key
+
+    @classmethod
+    def open(cls, assets_dir, gr_path, stock_ident, patches, params,
+             no_restore, scrap_offsets):
+        """The cache for this check, or ``None`` (no project folder, the audio
+        caches turned off, or anything about it that cannot be worked out)."""
+        if (not assets_dir or stock_ident is None or not patches
+                or os.environ.get("PAD_STERN_AUDIO_CACHE") == "0"):
+            return None
+        try:
+            h = hashlib.md5(_audio_cache_base_key(gr_path, stock_ident).encode())
+            for off in sorted(patches):
+                h.update(b"%d:%d:" % (off, len(patches[off])))
+                h.update(hashlib.md5(patches[off]).digest())
+            for p in sorted(params, key=lambda r: int(r["idx"])):
+                h.update(pickle.dumps(sorted(p.items(), key=lambda kv: str(kv[0])), 4))
+            h.update(repr((bool(no_restore), sorted(scrap_offsets or ()))).encode())
+            d = os.path.join(assets_dir, ".write_cache")
+            os.makedirs(d, exist_ok=True)
+            return cls(os.path.join(d, "audio_checked.bin"), h.hexdigest())
+        except Exception:                               # noqa: BLE001
+            return None
+
+    def replay(self, log):
+        """Say the kept check's lines again; False when there is none for
+        this key."""
+        try:
+            with open(self.path, "rb") as f:
+                if f.read(len(self._MAGIC)) != self._MAGIC:
+                    return False
+                if f.readline().strip() != self.key.encode():
+                    return False
+                lines = pickle.load(f)
+        except (OSError, EOFError, ValueError, pickle.UnpicklingError):
+            return False
+        if not isinstance(lines, list):
+            return False
+        for msg, level in lines:
+            log(msg, level)
+        log("Final-bytes check: the finished bank holds exactly the bytes the "
+            "last build decoded, so its check above is not run again "
+            "(PAD_STERN_AUDIO_CACHE=0 runs it).", "info")
+        return True
+
+    def store(self, lines):
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                f.write(self._MAGIC)
+                f.write(self.key.encode() + b"\n")
+                pickle.dump([(str(m), str(lv)) for m, lv in lines], f, 4)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+
 #: Bump whenever the grow, the chain encode, the re-point or the restore
 #: changes what it writes for the same inputs: a kept grown-bank result from
 #: before the change would otherwise replay bytes the new code never makes.
-_GROWN_CACHE_REV = 1
+_GROWN_CACHE_REV = 2      # PAD-677: longest first, bodies past grow_slots()
 
 
 def _grown_cache_sounds(assets_dir, audio_edits, grows, gains, loop_idx, own_used):
@@ -17576,9 +17805,10 @@ def _grown_bank_bytes(md_off, count, bodies):
     one record per entry of *bodies* (appended body sizes in bytes): the record
     array at *md_off* gains that many records and each body follows it behind
     its zero pad, as :func:`~.spike2.masterdir.plan_grow_records` lays them
-    out."""
+    out (the bodies past room for :func:`~.spike2.masterdir.grow_slots`
+    records)."""
     from .spike2 import masterdir as MD
-    return (md_off + MD.tail_len(count + len(bodies))
+    return (md_off + MD.tail_len(count + MD.grow_slots(len(bodies)))
             + sum(MD.BODY_PAD + b for b in bodies))
 
 
@@ -17767,6 +17997,21 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
     return kept
 
 
+def _chain_order(grows):
+    """The order the appended records of *grows* (``{idx: (room, want)}``)
+    take in the bank: the longest first, then by idx (PAD-677).
+
+    The firmware's decode is one forward chain over the records, so what a
+    record is encoded on depends on every record before it and on none after.
+    In idx order a mode's new six-second sound could land before its three
+    songs, and every one of them was encoded again (minutes each, the
+    20-30 minutes a James Bond project waited at each Emulate Start).  Longest
+    first, the songs are ahead of the short sounds a person adds and changes
+    most, so those cost the seconds their own encodes take and the songs are
+    reused (:class:`_ChainBodyCache`)."""
+    return sorted(grows, key=lambda i: (-int(grows[i][1]), int(i)))
+
+
 def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
     """Build the sound bank a longer replacement needs, and return
     ``(staged_path, placements)``.
@@ -17806,7 +18051,7 @@ def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
         emu.boot()
         d = MD.read_directory(img_path, emu)
         edits = []
-        for idx in sorted(grows):
+        for idx in _chain_order(grows):
             _room, want = grows[idx]
             p = byidx[idx]
             # PAD-593: a sound an earlier build grew plays its appended

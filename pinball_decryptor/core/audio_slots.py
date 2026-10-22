@@ -274,20 +274,44 @@ def audio_cache(assets_dir):
     return AudioCache(assets_dir)
 
 
+_staging_print = []
+
+
+def _staging_code():
+    """What a sound's staging is a function of in this app's own code: the
+    files of this module and of :mod:`.audio`, which converts.  It was the
+    app's version, so every update converted every replaced sound again
+    though those two files changed twice from v1.200.0 to v1.237.0 (PAD-677).
+    The version stands in when they cannot be read."""
+    if not _staging_print:
+        import hashlib
+        try:
+            from . import audio
+            h = hashlib.sha1()
+            for path in (__file__, audio.__file__):
+                with open(path, "rb") as f:
+                    h.update(f.read())
+            _staging_print.append("code-" + h.hexdigest()[:16])
+        except (OSError, TypeError, AttributeError):
+            from .. import __version__
+            _staging_print.append(__version__)
+    return _staging_print[0]
+
+
 def _audio_recipe(slot, rep, orig, trim):
     """Everything that decides what staging *rep* into *slot* makes: the
     source's path, size and modification time, the stock sound it is
-    matched to (its ``.orig/`` snapshot), the trim, and this app's version
-    (a new version converts once more, in case it converts differently)."""
+    matched to (its ``.orig/`` snapshot), the trim, and the code that
+    converts (:func:`_staging_code`; a release that changes it converts once
+    more, in case it converts differently)."""
     import hashlib
     import json
-    from .. import __version__
     try:
         st = os.stat(rep)
         ost = os.stat(orig)
     except (OSError, TypeError):
         return None
-    blob = json.dumps([__version__, os.path.normcase(os.path.abspath(rep)),
+    blob = json.dumps([_staging_code(), os.path.normcase(os.path.abspath(rep)),
                        st.st_size, st.st_mtime_ns, ost.st_size,
                        ost.st_mtime_ns, slot.ext, bool(trim)])
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()

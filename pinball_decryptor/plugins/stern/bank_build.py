@@ -86,14 +86,15 @@ def plan_spill(grows, bankable, byidx, img_path, limit=None, start=()):
 
 def bank_edits(spilled, byidx, directory):
     """The :class:`.soundbank.BankEdit` list for *spilled* grows (``{idx:
-    (room, want)}``) in idx order: each sound's host record out of *directory*
+    (room, want)}``) longest first: each sound's host record out of *directory*
     (``image.bin``'s), its length and the body its longer copy takes.  A host
     an earlier build already grew plays its appended record (``shadows``), the
     one *byidx* describes, so that is the record copied (PAD-593)."""
     from . import engine as E
     from .spike2.emulator import BLOCK
     out = []
-    for idx in sorted(spilled):
+    # longest first, as image.bin's appended records (PAD-677, E._chain_order)
+    for idx in E._chain_order(spilled):
         _room, want = spilled[idx]
         p = byidx[idx]
         src = idx if p.get("shadows") is None else int(p["shadows"])

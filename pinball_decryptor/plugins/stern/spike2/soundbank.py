@@ -252,6 +252,16 @@ def _tables_len(n, stride):
     return n * stride * FRAG_SLOT + 16
 
 
+def _bodies_start(nfrag, stride):
+    """Where a bank's first body starts: past the header and room for the
+    fragment table of :func:`~.masterdir.grow_slots` fragments, not just
+    *nfrag*, behind its zero pad (PAD-677: a mode's added sound no longer
+    moves every body of the bank, so the others' kept encodes still fit).
+    The room past the table and its data block is never read: the header
+    names both and each record its own body."""
+    return MD.align16(HDR_LEN + _tables_len(MD.grow_slots(nfrag), stride)) + MD.BODY_PAD
+
+
 def bank_bytes(bodies, stride=DEFAULT_STRIDE, aliases=0):
     """What a bank with the appended *bodies* (byte sizes) measures: the
     header, the fragment table, each body behind its zero pad, the
@@ -261,8 +271,8 @@ def bank_bytes(bodies, stride=DEFAULT_STRIDE, aliases=0):
     bodies = list(bodies)
     n = len(bodies)
     nfrag = n + int(aliases)
-    body_end = (MD.align16(HDR_LEN + _tables_len(nfrag, stride))
-                + sum(MD.BODY_PAD + b for b in bodies))
+    body_end = (_bodies_start(nfrag, stride)
+                + sum(MD.BODY_PAD + b for b in bodies) - MD.BODY_PAD)
     return (MD.align16(MD.align16(body_end + MD.BODY_PAD) + nfrag * DESC_SLOT)
             + sid_map_len(n) + MD.tail_len(n))
 
@@ -391,7 +401,7 @@ def plan_bank(edits, stride=DEFAULT_STRIDE, aliases=()):
             % ", ".join("0x%08x" % v for v in sorted(xors)))
     aliases = [int(i) for i in aliases or ()]
     nfrag = len(edits) + len(aliases)
-    off = MD.align16(HDR_LEN + _tables_len(nfrag, stride)) + MD.BODY_PAD
+    off = _bodies_start(nfrag, stride)
     records, places = [], []
     for n, e in enumerate(edits):
         word = MD._u32(e.record, 16) ^ (e.old_length & 0xffffffff) ^ (e.new_length & 0xffffffff)

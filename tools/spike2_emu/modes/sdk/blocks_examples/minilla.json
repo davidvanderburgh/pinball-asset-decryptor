@@ -35,8 +35,8 @@
     "reset": "game"
    },
    {
-    "name": "plunge",
-    "reset": "game"
+    "name": "in play",
+    "reset": "ball"
    },
    {
     "name": "stage",
@@ -601,23 +601,6 @@
   "scripts": [
    {
     "hat": {
-     "kind": "event",
-     "event": "ball_start",
-     "when": "any"
-    },
-    "do": [
-     {
-      "op": "set",
-      "var": "plunge",
-      "value": {
-       "k": "num",
-       "v": 1
-      }
-     }
-    ]
-   },
-   {
-    "hat": {
      "kind": "shot",
      "shot": "Mecha exit top",
      "when": "idle"
@@ -630,20 +613,20 @@
        "op": "=",
        "a": {
         "k": "var",
-        "name": "plunge"
+        "name": "in play"
        },
        "b": {
         "k": "num",
-        "v": 1
+        "v": 0
        }
       },
       "then": [
        {
         "op": "set",
-        "var": "plunge",
+        "var": "in play",
         "value": {
          "k": "num",
-         "v": 0
+         "v": 1
         }
        }
       ],
@@ -825,10 +808,10 @@
     "do": [
      {
       "op": "set",
-      "var": "plunge",
+      "var": "in play",
       "value": {
        "k": "num",
-       "v": 0
+       "v": 1
       }
      }
     ]

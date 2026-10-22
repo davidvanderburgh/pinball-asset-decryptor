@@ -35,7 +35,7 @@ import itertools
 
 from blk import (AND, BALLS, a_show, add, award, callout, change, clip, clips, div, end, eq, every, ge,
                  gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, lt, mul, multiball, off,
-                 on_any_shot, on_end, on_event, on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game, show, sound,
+                 on_any_shot, on_end, on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game, show, sound,
                  sounds, step, sub, timer_left, timer_start, timer_stop, var)
 import pack
 
@@ -206,15 +206,15 @@ def dad_or_son(which, other):
 
 SCRIPTS = [
     # ---- up the lane: lit at the top of the Mecha lane ------------------------------------------------------------
-    # PAD-675 (David: "every plunge increments the necessary switch"): a ball served to the shooter lane passes the
-    # top of the Mecha lane on its way in; the first one after it is the plunge, not a shot (any other shot of his
-    # first means the plunge went elsewhere)
-    on_event("ball_start", set_("plunge", 1)),
-    on_shot(TOP, if_(eq("plunge", 1), [set_("plunge", 0)],
+    # PAD-675 (David: "every plunge increments the necessary switch"): a ball plunged passes the top of the Mecha lane
+    # on its way in; the first one of a ball is the plunge, not a shot (any other shot of his first means the plunge
+    # went elsewhere). "in play" is a ball's: 0 again each ball and each game (the game's ball-start event comes
+    # before the blocks see a new game, whose reset would wipe a flag that event set: emulator, ball 1)
+    on_shot(TOP, if_(eq("in play", 0), [set_("in play", 1)],
                      notes_stay(pack.count_up("calls", 1, NEED, "ready", "note at", TOP, GREEN, "MECHA LANE",
                                               "MINILLA IS LIT", "SHOOT THE MECHA LANE TO THE TOP",
                                               pack.SHOT_WORDS[TOP], "MORE TO WAKE MINILLA", step=1))), when="idle"),
-    on_any_shot(set_("plunge", 0), when="any"),
+    on_any_shot(set_("in play", 1), when="any"),
     pack.relight("ready", TOP, GREEN, "MECHA LANE"),
 
     # ---- he hatches --------------------------------------------------------------------------------------------------
@@ -325,7 +325,7 @@ SCRIPTS = [
 PROGRAM = {
     "name": NAME, "seconds": CLOCK[1], "ends_on_drain": True, "screen": False, "game_modes": "block",
     "wait_multiball": True, "priority": 180,
-    "vars": pack.pack_vars() + [{"name": n, "reset": "game"} for n in ("calls", "ready", "note at", "grown", "plunge")] + [
+    "vars": pack.pack_vars() + [{"name": n, "reset": "game"} for n in ("calls", "ready", "note at", "grown")] + [{"name": "in play", "reset": "ball"}] + [
         {"name": n, "reset": "mode"} for n in ("stage", "pot", "rings", "ring value", "ray value", "gabara",
                                                 "gabara at", "mb on", "dad", "son", "hugs", "won", "cashed")] + [
         {"name": v, "reset": "mode"} for v, _s in RINGS],
@@ -360,11 +360,14 @@ _STAGE4 = ["balls", 2, "secs", 2, "shot", "Godzilla target", "ms", 400, "shot", 
            "shot", "Building", "ms", 400, "shot", "Right ramp", "ms", 400, "balls", 1, "secs", 2]
 _TOP = ["shot", "Mecha exit top", "ms", 400]
 DESK = [
-    ("six shots the first time, twelve the second", _TOP * 6 + ["shot", "Mecha exit top", "secs", 2, "trigger", "minilla.stop",
+    # PAD-675: each ball's first Mecha exit top is its plunge: _TOP * 7 is the plunge and six
+    ("the plunge is not a shot", _TOP * 6 + ["secs", 2],
+     ["Hud_Line: 5  -  MORE TO WAKE MINILLA", "Hud_Line: 1  -  MORE TO WAKE MINILLA"]),
+    ("six shots the first time, twelve the second", _TOP * 7 + ["shot", "Mecha exit top", "secs", 2, "trigger", "minilla.stop",
                                                                 "secs", 4] + _TOP * 11 + ["secs", 3] + _TOP + ["secs", 2],
      ["[MINILLA] START (its lit shot)", "END (trigger file)", "Hud_Title: TOP OF THE MECHA",
       "Hud_Line: 1  -  MORE TO WAKE MINILLA", "Hud_Title: MINILLA IS LIT"]),
-    ("up the lane lights it", _TOP * 6 + ["shot", "Mecha exit top", "secs", 2],
+    ("up the lane lights it", _TOP * 7 + ["shot", "Mecha exit top", "secs", 2],
      ["Hud_Title: MINILLA IS LIT", "[MINILLA] START (its lit shot)", "LAMP MECHA LANE 40ff60 chase",
       "Hud_Award: MINILLA HATCHES", "Hud_Line: SHOOT THE RAMPS, BIG LOOP OR BUILDING"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 + _STAGE4 + ["secs", 6],

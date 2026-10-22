@@ -731,3 +731,6 @@ data  challenge_scores_count 0x0059a048
 value challenge_scores_cat   1
 # PAD-663: HIGHEST SCORES' list page: a mode's challenge champion is listed alone on it after the game's
 site  challenge_list_page   0x00029d58 0xe3063f4c 0xe3403076
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x002b4a80 0xe92d4ff0 0xe24dd0bc

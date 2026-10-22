@@ -45,6 +45,18 @@ _TURN_BASE = 100
 _MODE_TURN_BASE = 1000
 #: PAD-641: the most sounds the flipper buttons play in attract (sound_modes.ATTRACT_MAX)
 _ATTRACT_MAX = 16
+#: PAD-641 round 2: the times between two of them the menu offers (sound_modes.ATTRACT_GAPS)
+_ATTRACT_GAPS = (0, 10, 30, 60, 120, 300)
+
+
+def _gap_words(s):
+    """A time between two flipper sounds in words: "30 seconds", "1 minute", "2 minutes"."""
+    s = int(s)
+    if s and s % 60 == 0:
+        return "1 minute" if s == 60 else "%d minutes" % (s // 60)
+    return "1 second" if s == 1 else "%d seconds" % s
+
+
 #: PAD-641: what the Attract flipper sounds button says it does
 _ATTRACT_TIP = ("Sounds the machine plays when a flipper button is pressed in attract mode (no game "
                 "being played), one after another, in place of the game's own sound there. Each "
@@ -254,6 +266,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._mode_turn_levels = {}
         # PAD-641: the sounds the flipper buttons play in attract ([path, ...]), the same record
         self._attract = []
+        self._attract_gap = 0            # PAD-641 round 2: seconds between two of them (0: any time)
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -2742,6 +2755,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         attract = raw.get("attract")
         self._attract = ([f for f in attract if isinstance(f, str) and f.strip()][:_ATTRACT_MAX]
                          if isinstance(attract, (list, tuple)) else [])
+        from ...plugins.stern.sound_modes import clean_gap
+        self._attract_gap = clean_gap(raw.get("attract_gap")) if self._attract else 0
 
     def _modes_json(self):
         names = list(self._mode_names)
@@ -2789,6 +2804,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                 out["mode_turn_levels"] = ml
         if self._attract:
             out["attract"] = list(self._attract)
+            if self._attract_gap:
+                out["attract_gap"] = int(self._attract_gap)
         return out
 
     def _mode_level(self, rel, m):
@@ -3343,9 +3360,14 @@ class AudioTab(FindOriginalsMixin, TabService):
         tip = [_ATTRACT_TIP]
         if names:
             tip.append("In turn: " + "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + ".")
+        if self._attract_gap:
+            tip.append("At most one every %s." % _gap_words(self._attract_gap))
         if self._attract_why():
             tip.append(self._attract_why())
-        return {"files": names, "why": self._attract_why(), "max": _ATTRACT_MAX, "tip": tip}
+        return {"files": names, "why": self._attract_why(), "max": _ATTRACT_MAX, "tip": tip,
+                "gap": int(self._attract_gap),
+                "gaps": [{"s": g, "label": "Any time" if not g else "At most one every %s" % _gap_words(g)}
+                         for g in sorted(set(_ATTRACT_GAPS) | {int(self._attract_gap)})]}
 
     @rpc
     def attract_action(self, action):
@@ -3361,6 +3383,17 @@ class AudioTab(FindOriginalsMixin, TabService):
             if why:
                 compat.messagebox.showinfo("Attract flipper sounds", why)
             return bool(why)
+        if kind == "gap":                   # PAD-641 round 2: the time between two of them
+            from ...plugins.stern.sound_modes import clean_gap
+            g = clean_gap(arg)
+            if not self._attract or g == self._attract_gap:
+                return False
+            self._attract_gap = g
+            self.log("Replace Audio: the flipper buttons play %s in attract mode."
+                     % ("a sound at any press, once the last one has played" if not g
+                        else "at most one sound every %s" % _gap_words(g)), "info")
+            self._attract_changed()
+            return True
         if kind == "add":
             if why or len(self._attract) >= _ATTRACT_MAX or not self._scan_dir:
                 return False

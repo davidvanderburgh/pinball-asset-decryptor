@@ -465,3 +465,6 @@ value switch_flags_at       26
 value switch_polarity_at    28
 #   the drain's edges are not this port's shots (they keep their own route): only the flipper buttons' sounds in attract use it
 value switch_edge_shots     0
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x0035601c 0xe92d4ff0 0xe24dd0bc

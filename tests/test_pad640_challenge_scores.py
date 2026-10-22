@@ -203,7 +203,9 @@ def test_the_wrap_points_the_entry_at_the_modes_record_and_puts_it_back():
     assert swap < call < back                          # the game's own record is pointed back to before anything else
     assert "chg_hs.on = 0;" in body.split("if (on && ", 1)[0]       # one game's, once (PAD-663: a flag, not slot -1)
     arm = _host()._lift(src, "static void chg_scores_arm(void)")
-    assert "hook_wrap(fn(\"challenge_scores\")" in arm
+    # PAD-641 round 2: wrapped once, shared with the attract flipper sounds (scores_wrap hands the call on)
+    assert "scores_wrap_arm()" in arm and "chg_scores_game = scores_orig" in arm
+    assert "hook_wrap(at, (void *)scores_wrap)" in _host()._lift(src, "static int scores_wrap_arm(void)")
     assert "chg_picked(own_challenge[k].by, 0, own_challenge[k].name);" in src      # an own one plays as challenge 0's
     assert "chg_picked(challenge_by[n], n, challenge_title[n]);" in src
 

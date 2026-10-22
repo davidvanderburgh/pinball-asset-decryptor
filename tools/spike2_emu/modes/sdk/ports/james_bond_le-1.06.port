@@ -940,3 +940,6 @@ data  challenge_scores_table 0x007c3980
 data  challenge_scores_count 0x005f7f08
 # PAD-663: HIGHEST SCORES, whose first entry a mode's challenge game goes in as the mode's own record
 value challenge_scores_cat   1
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x004e87dc 0xe92d4ff0 0xe24dd0bc

@@ -12530,5 +12530,14 @@
 "Could not keep those words: {}": "Ces mots n'ont pas pu être gardés : {}",
 "Could not keep that: {}": "Cela n'a pas pu être gardé : {}",
 "Could not save it: {}": "Impossible de l'enregistrer : {}",
-"Web page": "Page web"
+"Web page": "Page web",
+"Time between sounds": "Temps entre les sons",
+"At most one every {} seconds": "Au plus un toutes les {} secondes",
+"At most one every {} minute": "Au plus un par {} minute",
+"At most one every {} minutes": "Au plus un toutes les {} minutes",
+"At most one every {} seconds.": "Au plus un toutes les {} secondes.",
+"At most one every {} minute.": "Au plus un par {} minute.",
+"At most one every {} minutes.": "Au plus un toutes les {} minutes.",
+"**Time between sounds** spaces them out: any time, or at most one every {} seconds up to one every {} minutes; a press before then plays nothing.": "**Temps entre les sons** les espace : à tout moment, ou au plus un toutes les {} secondes jusqu'à un toutes les {} minutes ; un appui avant cela ne joue rien.",
+"They do not play while the game takes the initials for a high score.": "Ils ne jouent pas pendant que le jeu demande les initiales d'un meilleur score."
 }

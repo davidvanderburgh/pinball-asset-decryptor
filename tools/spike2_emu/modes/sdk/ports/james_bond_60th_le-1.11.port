@@ -554,3 +554,6 @@ site show_6               0x00041b50 0xe92d4010 0xe3a00028   # 67 lights in its 
 text show_name_6          Small chase
 text show_kind_6          accent
 value show_secs_6         2
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x001ca984 0xe92d4ff0 0xe24dd0bc

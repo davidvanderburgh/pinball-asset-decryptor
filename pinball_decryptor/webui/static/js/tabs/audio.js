@@ -429,6 +429,10 @@ function AttractButton({ a, running }) {
     : [{ label: "Add a sound…", icon: "plus", disabled: running || n >= a.max,
          title: n >= a.max ? `At most ${a.max} sounds` : "Choose a sound file the flipper buttons play in attract mode",
          onClick: () => call("audio.attract_action", "add") }];
+  // PAD-641 round 2: at most one every so often
+  if (n && !a.why) items.push({ label: "Time between sounds", icon: "info",
+    submenu: (a.gaps || []).map((g) => ({ label: g.label, checked: g.s === a.gap,
+      onClick: () => call("audio.attract_action", `gap:${g.s}`) })) });
   if (n) items.push({ sep: true });
   (a.files || []).forEach((f, i) => {
     if (!a.why) items.push({ label: `Play sound ${i + 1} (${f})`, icon: "play", onClick: () => call("audio.attract_action", `play:${i + 1}`) });

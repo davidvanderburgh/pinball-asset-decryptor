@@ -10227,6 +10227,33 @@ static void chg_pages_arm(void)
                "(%d page function%s)", n, n == 1 ? "" : "s");
 }
 
+/* PAD-641 round 2: the game's end-of-game high scores are wrapped ONCE (site challenge_scores), for two users: a mode's
+ * challenge game (PAD-640, chg_scores_on) and the attract flipper sounds, which must not play while a new high score's
+ * initials are entered - the flipper buttons pick the letters there, and the call runs until the initials are in
+ * (Bond LE 1.06, PAD-663's rig: the call began at the game over, ENTER INITIALS showed, it returned after the Starts).
+ * chg_scores_running is 1 for the whole call, whoever wrapped it. */
+static unsigned (*scores_orig)(unsigned, unsigned, unsigned, unsigned);
+static int chg_scores_on;
+static unsigned scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned ret;
+    if (chg_scores_on) return chg_scores_wrap(r0, r1, r2, r3);
+    chg_scores_running = 1;
+    ret = scores_orig(r0, r1, r2, r3);
+    chg_scores_running = 0;
+    return ret;
+}
+
+/* wrap it, once; 1 when it is. `site game_scores` is the same function on every build (portchallenge.game_scores);
+ * `site challenge_scores` only where a mode's challenge game keeps its own score */
+static int scores_wrap_arm(void)
+{
+    unsigned at = fn("challenge_scores") ? fn("challenge_scores") : fn("game_scores");
+    if (!scores_orig && at)
+        scores_orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(at, (void *)scores_wrap);
+    return scores_orig != 0;
+}
+
 static void chg_scores_arm(void)
 {
     long check_at = pm_port_value("challenge_record_check_at", 88), score_at = pm_port_value("challenge_record_score_at", 72);
@@ -10240,9 +10267,8 @@ static void chg_scores_arm(void)
     chg_rec_check_at = (unsigned)check_at;                       /* PAD-663: the build's own record layout */
     chg_rec_score_at = (unsigned)score_at;
     chg_rec_score_size = (unsigned)score_size;
-    if (!fn("challenge_scores") || !fn("challenge_score_entry")
-        || !(chg_scores_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn("challenge_scores"),
-                                                                                              (void *)chg_scores_wrap))) {
+    if (!fn("challenge_scores") || !fn("challenge_score_entry") || !scores_wrap_arm()
+        || !(chg_scores_game = scores_orig)) {
         say("challenge scores: the game's end-of-game high scores could not be wrapped - a mode's challenge game files its score under the game's challenge");
         return;
     }
@@ -10251,6 +10277,7 @@ static void chg_scores_arm(void)
             || !(chg_gate_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)hook_call(
                      fn("challenge_scores_gate"), (void *)chg_gate_wrap))))
         say("challenge scores: the end-of-game gate could not be wrapped - a mode's challenge game may also file under the game's");
+    chg_scores_on = 1;                                           /* PAD-641 round 2: through scores_wrap */
     say("challenge scores: a mode's challenge game keeps its own high score (%s)", CHG_SCORES);
     chg_page_arm();                                              /* PAD-660 */
     chg_pages_arm();                                             /* PAD-663 */
@@ -11755,6 +11782,7 @@ static void bsid_line(const char *ms, const char *slot, const char *ids, const c
 #define ATT_NOSTEAL_MS  1000                /* PAD-645: the game's own request at a press steals no channel */
 #define ATT_QUIET_MS    500                 /* after a flipper button's edge in attract: the game's own sound */
 #define ATT_QUIET_LOOK  60                  /* after its worker call: its record's lookups */
+#define ATT_MENU_MS     600                 /* round 2: the start menu runs a hooked point every frame: up this long after */
 static struct {
     unsigned request, n, next, sw[2], attract_bit, plays;
     unsigned char key[8];
@@ -11770,6 +11798,10 @@ static struct {
     unsigned char quiet[8];
     volatile unsigned long edge_at, quiet_until;
     volatile unsigned quiet_req, quiets;
+    unsigned gap_ms;                        /* PAD-641 round 2: an agap line: at least this long between two */
+    unsigned hs_skips;                      /* round 2: presses while the game's high scores took initials */
+    volatile unsigned long menu_ms;         /* round 2: the game's start menu was last seen running then */
+    unsigned menu_skips;
 } att = { .cur = -1 };
 static int att_bad;
 
@@ -11801,6 +11833,15 @@ static void att_file(const char *ks, const char *keys, const char *mss)
     if (!ok || !ok2 || k < 1 || k > ATT_FILES || !ms || !key_hex(keys, att.host[k - 1])) { att_bad++; return; }
     att.ms[k - 1] = ms;
     if (k > att.n) att.n = k;
+}
+
+static void att_gap_line(const char *ms)
+{
+    const char *p = ms;
+    int ok;
+    unsigned v = (unsigned)number(&p, &ok);
+    if (ok) att.gap_ms = v;
+    else att_bad++;
 }
 
 static void att_quiet_line(const char *ks)
@@ -11865,6 +11906,14 @@ static int att_lookup(unsigned *r)
     return 1;
 }
 
+/* PAD-641 round 2: when the next press may play - once this one has had its length, and (agap) not before the
+ * project's time between two has passed since it began */
+static unsigned long att_next(unsigned long now, unsigned ms)
+{
+    unsigned long d = (unsigned long)ms + ATT_GAP;
+    return now + (att.gap_ms > d ? att.gap_ms : d);
+}
+
 /* every edge of the switch drain (the game's thread): a flipper button pressed in attract */
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask)
 {
@@ -11873,7 +11922,17 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     int k;
     if (id != att.sw[0] && id != att.sw[1]) return;
     if (!(mask & att.attract_bit) || pm_in_game()) return;   /* attract only: not a game, a tilt, a menu */
+    if (chg_scores_running) {                           /* PAD-641 round 2: a high score's initials are being entered */
+        if (att.hs_skips++ < 4)
+            say("attract flipper sounds: switch %u while the game takes a high score's initials - no sound", id);
+        return;
+    }
     now = pm_ms();
+    if (att.menu_ms && (long)(now - att.menu_ms) < ATT_MENU_MS) {   /* round 2: the buttons step the start menu */
+        if (att.menu_skips++ < 4)
+            say("attract flipper sounds: switch %u while the game's start menu is up - no sound", id);
+        return;
+    }
     att.edge_at = now;                                  /* PAD-645: the game's own sound comes at either edge */
     closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
     if ((level & 1u) != closed) {                       /* the release */
@@ -11883,7 +11942,7 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
              * channel before ours looked its record up, or cut it: stop it and play ours again */
             if (pm_sound_active(att.quiet_req)) pm_sound_stop(att.quiet_req);
             att.swap_until = now + att.ms[att.cur] + 1000;
-            att.until = now + att.ms[att.cur] + ATT_GAP;
+            att.until = att_next(now, att.ms[att.cur]);
             pm_sound(att.request);
             if (att.freed++ < 20)
                 say("attract flipper sounds: the game's own request %u took the channel first - file %d again at the "
@@ -11906,12 +11965,23 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     att.quiet_req = 0;
     att.looked = 0;
     att.swap_until = now + att.ms[k] + 1000;
-    att.until = now + att.ms[k] + ATT_GAP;
+    att.until = att_next(now, att.ms[k]);
     att.cur = k;
     att.plays++;
     pm_sound(att.request);
     say("attract flipper sounds: switch %u pressed in attract - file %d of %u (%u ms) on request %u", id, k + 1,
         att.n, att.ms[k], att.request);
+}
+
+/* PAD-641 round 2: the game's start menu (both flipper buttons held in attract: CHOOSE YOUR MODE OF PLAY) is stepped
+ * with the flipper buttons, so they play nothing while it is up. It runs `site challenge_menu_pick` (Bond's) or
+ * `site challenge_menu` (PAD-619's generic menus: the loop's every-frame point) on every frame; each gets a hook of
+ * its own here that only notes the time - hook() chains onto a site the challenge menu hooks as well, either order.
+ * Emulator, Bond LE 1.06 before this: 4 of 4 presses stepping the menu each played a sound. */
+static void att_menu_seen(unsigned *r)
+{
+    (void)r;
+    att.menu_ms = pm_ms() | 1;
 }
 
 /* from sndm_arm: the switch drain's hook (shared with the shots from switches) and the record lookup's
@@ -11952,6 +12022,17 @@ static void att_arm(void)
             "that can be hooked");
     }
     att_live = 1;
+    {   /* PAD-641 round 2: and not while the game's start menu is up */
+        static const char *const menu_sites[] = { "challenge_menu_pick", "challenge_menu", 0 };
+        int i, hooked = 0;
+        for (i = 0; menu_sites[i]; i++)
+            if (site(menu_sites[i]) && fn(menu_sites[i]) && hook(fn(menu_sites[i]), att_menu_seen)) hooked++;
+        if (hooked) say("attract flipper sounds: not while the game's start menu is up (%d of its points hooked)", hooked);
+    }
+    /* PAD-641 round 2: and not while a high score's initials are entered (the game's end-of-game high scores) */
+    if ((!site("challenge_scores") && !site("game_scores")) || !scores_wrap_arm())
+        say("attract flipper sounds: the port has no end-of-game high scores that can be wrapped - they may also play "
+            "while a high score's initials are entered");
     /* PAD-645: a card with no modes never reaches the gate's sound log: /dump/soundlog.on here too, so a
      * proof run says what the game itself plays at a press in attract */
     if (fn("sound_worker") && pm_trigger("soundlog.on")
@@ -11963,6 +12044,7 @@ static void att_arm(void)
         "switch_edge 0x%08x and sound_lookup 0x%08x are hooked%s", att.n, att.request, att.sw[0], att.sw[1],
         att.attract_bit, e->addr, fn("sound_lookup"), att.has_quiet ? "; the game's own sound at a press plays "
         "a silence (sound_worker)" : "");
+    if (att.gap_ms) say("attract flipper sounds: at most one every %u ms (agap)", att.gap_ms);
 }
 
 static void sndm_line(char *s)
@@ -12013,6 +12095,10 @@ static void sndm_line(char *s)
     }
     if (n >= 4 && str_eq(f[0], "attract")) {
         att_line(f[1], f[2], f[3]);
+        return;
+    }
+    if (n >= 2 && str_eq(f[0], "agap")) {      /* PAD-641 round 2 */
+        att_gap_line(f[1]);
         return;
     }
     if (n >= 2 && str_eq(f[0], "aquiet")) {    /* PAD-645 */

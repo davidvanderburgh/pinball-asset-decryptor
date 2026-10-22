@@ -677,6 +677,13 @@ def merge(drafts, refs, tgt, game, version, family):
     if challenges:
         body += ["", "# ---- the game's Challenge list (PAD-615, portchallenge.py): each challenge's own start on the "
                      "ball's start event ----"] + challenges
+    # PAD-641 round 2: the game's end-of-game high scores on every build (the attract flipper sounds keep quiet while a
+    # high score's initials are entered)
+    scores = [line for line in portchallenge.missing_from(portchallenge.game_scores(b), "\n".join(body))
+              if not line.startswith("#")] if b else []
+    if scores:
+        body += ["", "# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials "
+                     "are in) ----"] + scores
     return body, provenance, missing, notes
 
 

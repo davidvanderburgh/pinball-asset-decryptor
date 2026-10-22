@@ -11431,10 +11431,16 @@ def _attract_lines(params, used, modes, log):
         u["lines"] = 1
     if not files:
         return None
+    if getattr(modes, "attract_gap", 0):
+        files_gap = int(modes.attract_gap) * 1000      # PAD-641 round 2: the time between two
+    else:
+        files_gap = 0
     out = {"request": int(plan["request"]), "key": key, "switches": list(plan["switches"]),
            "files": files}
     if quiet:
         out["quiet"] = quiet
+    if files_gap:
+        out["gap_ms"] = files_gap
     return out
 
 

@@ -585,3 +585,6 @@ site  challenge_pages_0     0x0001ff2c 0xe92d4ff0 0xe1a08002
 site  challenge_pages_1     0x00057ff0 0xe3043340 0xe340304c
 # PAD-663: an 800x480 one-screen cabinet: a mode's champion title past this many characters is its name alone
 value challenge_page_title_max 18
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x00118494 0xe92d4ff0 0xe24dd0bc

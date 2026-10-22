@@ -105,7 +105,7 @@ def test_blocks_playfield_gives_the_picture_and_the_inserts(tmp_path, monkeypatc
         assert got["art"].startswith("data:image/png;base64,")
         got_art = got["art"]
         ramp = next(i for i in got["inserts"] if i["name"] == "RIGHT RAMP")
-        assert ramp == {"name": "RIGHT RAMP", "x": 199, "y": 189, "shots": ["Right ramp"]}
+        assert ramp == {"name": "RIGHT RAMP", "x": 199, "y": 189, "mono": False, "shots": ["Right ramp"]}   # PAD-668: an RGB insert
         assert len(got["inserts"]) == 81
         # a card of another game: the inserts still, no picture, and why
         monkeypatch.setattr(tab.ModesTab, "_title_card", lambda self, project: (

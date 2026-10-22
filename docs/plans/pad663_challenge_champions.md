@@ -112,3 +112,16 @@ Diagnostics added: a start-menu pick of a mode's own challenge that is not playe
 the cursor is no longer ours; the ball started in no challenge game). TMNT's cursor does not start on the first entry,
 so the job stepped past ours and back onto STANDARD; the job now steps until the runtime says ours is picked.
 
+John Wick 1.02 (fixed): the bus is called from more than one thread, and when the challenge's ball end rode a bus call
+on another thread John Wick's game logic stopped for good (its log ends at the call, its video runs on). The call is
+made from a bus call on the game-logic thread only (the tick's), from the tick only when none comes within a second.
+
+## Result
+
+Final sweep on the finished runtime (C:/tmp/PAD-663/rb_final, kit/jobfinal.sh): all 46 newest builds with a
+challenge a mode can take play a mode's challenge game to its end, keep the mode's own champion, show it on the
+attract mode, and leave the game's own records unchanged (44 on the first pass; Avengers LE's rig never booted and
+Mando LE's last initials press started a new game - both passed on a rerun). Every ball end came from a bus call on
+the game-logic thread. After merging main: Avengers Pro, The Beatles, Bond LE, John Wick Pro and Star Wars ELG again,
+all pass. Before/after pictures: C:/tmp/PAD-663/shots.
+

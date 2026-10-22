@@ -1062,6 +1062,13 @@ def test_the_hud_is_the_examples_hud_in_the_assets_file(tmp_path):
         assert f.read() == g.read()
     with open(path, encoding="utf-8") as f:
         assert '#include "intricate_kit.h"' in f.read()
+    # PAD-680: an app whose kit alone changed gives it to the mode before a build, its C unchanged
+    with open(os.path.join(folder, BM.KIT_FILE), "w", encoding="utf-8") as f:
+        f.write("/* an older app's kit */\n")
+    assert BM.refresh(project) == []
+    with open(os.path.join(folder, BM.KIT_FILE), encoding="utf-8") as f, \
+            open(os.path.join(SDK, "examples", BM.KIT_FILE), encoding="utf-8") as g:
+        assert f.read() == g.read()
     # switched off: no HUD in the assets, and the C no longer includes the kit
     p["hud"]["on"] = False
     BM.save(project, slug, p)

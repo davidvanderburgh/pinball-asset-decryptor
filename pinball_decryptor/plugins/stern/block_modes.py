@@ -694,14 +694,14 @@ def refresh(project):
             continue
         folder = MP.mode_folder(project, slug)
         src = os.path.join(folder, slug + ".c")
+        if program["hud"]["on"]:
+            _copy_kit(folder)                           # PAD-680: a fix in the kit alone reaches the mode too
         try:
             with open(src, "r", encoding="utf-8") as f:
                 if f.read() == text:
                     continue
         except OSError:
             pass
-        if program["hud"]["on"]:
-            _copy_kit(folder)
         _write(src, text)
         out.append(slug)
     return out

@@ -170,6 +170,10 @@ int pm_sound_sid(unsigned request, unsigned sid);
  * the port has no sound_lookup site (then do NOT play: the carrier would play its own line). */
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms);
 int pm_sound_fade(unsigned request, unsigned ms);
+/* PAD-678: `steps` (1/3 dB each) more taken off every voice playing `request`, on top of its own volume, ramped
+ * over `ms`; steps 0 ramps it back. As the game ducks its music under a clip's sound. Ends by itself when the
+ * request stops or a pm_sound_fade starts on it. 1 = done; 0 when it does not play or the port has no voice offsets. */
+int pm_sound_duck(unsigned request, unsigned steps, unsigned ms);
 int pm_sound_playing(unsigned *requests, unsigned *buses, int max);
 /* PAD-415: the game's own hit sounds, a rising run the port names (`value hit_sound_<n>`, n from 1, low to high: on
  * Godzilla its eight pitched orchestra hits), so every hit of a mode is heard - while one of ours runs the game's

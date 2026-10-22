@@ -1205,6 +1205,89 @@ static void sound_fades_tick(void)
     }
 }
 
+/* ---- PAD-678: a request ducked under another, the way the game ducks its music -------------
+ * The game's mixer takes "duck group" levels off a voice that listens to the group, and a sound's
+ * own descriptor raises a group while it plays (Bond LE 1.06, read and emulator-measured: its music
+ * listens to group 0, a speech line raises it 20 steps, a clip's effect sound 48). pm_sound_duck
+ * takes `steps` more off every voice playing `request` (on top of the voice's own volume step),
+ * ramped over `ms`; steps 0 ramps it back. The voice's own step is read when a duck starts and
+ * again whenever the descriptor has set it anew (a restart), so the duck never moves the base. */
+#define DUCKS_MAX 4
+static struct { unsigned request; int base, from, to, now; unsigned long t0, ms; } ducks[DUCKS_MAX];
+
+static int fading(unsigned request)
+{
+    int i;
+    for (i = 0; i < FADES_MAX; i++) if (fades[i].request == request) return 1;
+    return 0;
+}
+
+/* every voice of every channel playing `request` to volume step `step` exactly */
+static void set_voices(unsigned request, int step)
+{
+    long o_req = pm_port_value("sound_channel_request", -1), o_voices = pm_port_value("sound_channel_voices", -1),
+         o_vp = pm_port_value("sound_channel_voice_ptrs", -1), o_vol = pm_port_value("sound_voice_volume", -1),
+         n_ch = pm_port_value("sound_channel_count", 8);
+    int i, b;
+    if (!sound_channel(0) || o_req < 0 || o_voices < 0 || o_vp < 0 || o_vol < 0) return;
+    if (step > 255) step = 255;
+    if (step < 0) step = 0;
+    for (i = 0; i < n_ch; i++) {
+        unsigned char *c = sound_channel(i);
+        unsigned bits;
+        if (!c || !(bits = c[o_voices]) || *(unsigned short *)(c + o_req) != request) continue;
+        for (b = 0; b < 8; b++) {
+            unsigned char *v;
+            if (!(bits >> b & 1u)) continue;
+            v = (unsigned char *)(unsigned long)*(unsigned *)(c + o_vp + 4 * b);
+            if (v) *(unsigned short *)(v + o_vol) = (unsigned short)step;
+        }
+    }
+}
+
+int pm_sound_duck(unsigned request, unsigned steps, unsigned ms)
+{
+    int i, free_i = -1, base;
+    if (!request || steps > 255) return 0;
+    for (i = 0; i < DUCKS_MAX; i++) {
+        if (ducks[i].request == request) { free_i = i; break; }
+        if (!ducks[i].request && free_i < 0) free_i = i;
+    }
+    if (free_i < 0) return 0;
+    if (ducks[free_i].request != request) {
+        if (!steps) return 1;                        /* nothing ducked: nothing to bring back */
+        if ((base = fade_voices(request, -1)) < 0) return 0;     /* not playing, or no voice offsets */
+        ducks[free_i].base = base;
+        ducks[free_i].now = 0;
+    }
+    if (ducks[free_i].request == request && ducks[free_i].to == (int)steps) return 1;
+    ducks[free_i].from = ducks[free_i].now;
+    ducks[free_i].to = (int)steps;
+    ducks[free_i].t0 = pm_ms();
+    ducks[free_i].ms = ms;
+    ducks[free_i].request = request;
+    return 1;
+}
+
+/* every tick, after the fades: a fade or a stop ends a duck (the fade starts from where the duck is) */
+static void sound_ducks_tick(void)
+{
+    unsigned long now = pm_ms(), el;
+    int i, step;
+    for (i = 0; i < DUCKS_MAX; i++) {
+        unsigned r = ducks[i].request;
+        if (!r) continue;
+        if (fading(r) || !pm_sound_active(r)) { ducks[i].request = 0; continue; }
+        step = fade_voices(r, -1);
+        if (step >= 0 && step != ducks[i].base + ducks[i].now) ducks[i].base = step;   /* set anew: a restart */
+        el = now - ducks[i].t0;
+        ducks[i].now = el >= ducks[i].ms ? ducks[i].to
+                     : ducks[i].from + (int)((ducks[i].to - ducks[i].from) * (long)el / (long)ducks[i].ms);
+        set_voices(r, ducks[i].base + ducks[i].now);
+        if (!ducks[i].now && !ducks[i].to) ducks[i].request = 0;      /* all the way back */
+    }
+}
+
 /* The play chain resolves a request to an 8-byte container key and looks it up (item 130);
  * while armed, the lookup hook points it at OUR key. A handoff between two threads that
  * fails closed: at worst one callout plays the stock sound. */
@@ -8771,6 +8854,7 @@ static void on_tick(unsigned *r)
     clip_tick();
     sb_tick();                                /* PAD-521: the status bar held */
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
+    sound_ducks_tick();                       /* PAD-678: a duck after the fades, which end it */
     sound_swaps_tick();                       /* item 163: swapped carrier keys come back */
     events_deliver();
     event_census();                           /* PAD-420: `value event_census 1` */

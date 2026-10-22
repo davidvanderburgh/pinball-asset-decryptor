@@ -863,6 +863,7 @@ static struct {
     unsigned after_request, after_game; /* after an end: once ours has faded, */
     unsigned long after_due;            /*   put the carrier's list back and the game's music on */
     unsigned silenced[4];               /* the game's music requests faded under ours (logged once) */
+    int ducked, duck_said;              /* PAD-678: ours is down under a call of the mode's; said so once */
 } music;
 
 static void own_music_after_tick(void)
@@ -1039,6 +1040,7 @@ static void own_sounds_start(struct slot *M)
     music.swap = own_swap_of(S, S->music);
     music.game = 0;
     for (i = 0; i < 4; i++) music.silenced[i] = 0;
+    music.ducked = music.duck_said = 0;
     if (S->music_sid)
         pm_log("own sound: music %u plays its own bed, sound id %u%s", S->music, S->music_sid,
                pm_sound_sid(S->music, S->music_sid) ? "" : " - NOT pointed (no request table in the port), the carrier's own record plays");
@@ -1094,6 +1096,42 @@ static int mode_call(struct slot *M, unsigned request)
     return 0;
 }
 
+/* PAD-678 (luvthatapex, Bond LE 1.06): the mode's music goes down under its own calls - a film clip's
+ * sound most of all - as the game's music does under its clips. Measured on Bond LE 1.06 (read off
+ * every descriptor, then in the emulator): the game's music listens to duck group 0, a speech line
+ * raises it 20 steps (6.7 dB) and a clip's effect sound 48 (16 dB); a call of ours plays a speech
+ * carrier's descriptor, so the music went down only 20 steps under a film clip's sound. While a call
+ * of the mode's own plays, the music takes MUSIC_DUCK_STEPS more (20 + 28 = the game's 48), down
+ * over 150 ms and back over 400 ms, as the game's ramps go (no click). A call of the mode's that
+ * IS its music never ducks it. */
+#define MUSIC_DUCK_STEPS   28
+#define MUSIC_DUCK_DOWN_MS 150
+#define MUSIC_DUCK_UP_MS   400
+
+static int own_call_sounds(const struct own_sounds *S)
+{
+    unsigned calls[3];
+    int i;
+    calls[0] = S->start; calls[1] = S->shot; calls[2] = S->end;
+    for (i = 0; i < 3; i++)
+        if (calls[i] && calls[i] != S->music && pm_sound_active(calls[i])) return 1;
+    return 0;
+}
+
+static void own_music_duck(struct own_sounds *S)
+{
+    int want = own_call_sounds(S) && pm_sound_active(S->music);
+    if (want == music.ducked) return;
+    if (want && !pm_sound_duck(S->music, MUSIC_DUCK_STEPS, MUSIC_DUCK_DOWN_MS)) return;   /* no voice offsets */
+    if (!want) pm_sound_duck(S->music, 0, MUSIC_DUCK_UP_MS);
+    music.ducked = want;
+    if (want && !music.duck_said) {
+        music.duck_said = 1;
+        pm_log("own sound: music %u goes down %u steps (%u.%u dB) under the mode's own calls", S->music,
+               MUSIC_DUCK_STEPS, MUSIC_DUCK_STEPS / 3, MUSIC_DUCK_STEPS % 3 * 10 / 3);
+    }
+}
+
 static void own_sounds_tick(struct slot *M, unsigned ticks)
 {
     struct own_sounds *S = &own_sounds[M->index];
@@ -1104,6 +1142,7 @@ static void own_sounds_tick(struct slot *M, unsigned ticks)
         if (pm_ms() >= music.start_due) own_music_start_now();
         return;
     }
+    own_music_duck(S);
     if (ticks % POLL_TICKS != 0) return;
     if (music.swap) pm_sound_swap(S->music, music.swap, music.swap + 8, -1, 0);   /* held while the mode runs */
     /* the mode's music is the only music: any request of the game's music class (priority 1)

@@ -473,6 +473,29 @@ def test_mode_file_c_plays_its_own_bed_and_never_cuts_a_sound():
     assert "if (p < 0 || p >= (int)prio) return 0;" in try_ and "pm_sound_fade(reqs[i], 60);" in try_
 
 
+def test_the_mode_music_ducks_under_its_own_calls():
+    """PAD-678 (Bond LE 1.06, emulator-measured): a call's speech carrier ducks the music 20 steps, the
+    game's own clip sounds 48, so a mode's music takes 28 more while one of its own calls plays - in a
+    form mode (mode_file.c) and in a code or Blocks mode (pad_mode_assets.h) - ramped down and back, and
+    the runtime's duck ends with a fade or a stop and never moves the voice's own volume."""
+    h = open(os.path.join(SDK, "pad_mode.h"), encoding="utf-8").read()
+    c = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    decl = "int pm_sound_duck(unsigned request, unsigned steps, unsigned ms);"
+    assert decl in h and decl[:-1] + chr(10) + "{" in c
+    tick = c[c.index("static void on_tick(unsigned *r)"):]
+    assert tick.index("sound_fades_tick();") < tick.index("sound_ducks_tick();") < tick.index("m->tick();")
+    ducks = c[c.index("static void sound_ducks_tick(void)"):]
+    ducks = ducks[:ducks.index(chr(10) + "}" + chr(10))]
+    assert "if (fading(r) || !pm_sound_active(r)) { ducks[i].request = 0; continue; }" in ducks
+    assert "set_voices(r, ducks[i].base + ducks[i].now);" in ducks
+    for path, steps, call, music in (("mode_file.c", "#define MUSIC_DUCK_STEPS   28", "own_music_duck(S);",
+                                      "pm_sound_duck(S->music, 0, MUSIC_DUCK_UP_MS)"),
+                                     ("pad_mode_assets.h", "#define PA_MUSIC_DUCK_STEPS   28", "pa_music_duck(a);",
+                                      "pm_sound_duck(a->music, 0, PA_MUSIC_DUCK_UP_MS)")):
+        text = open(os.path.join(SDK, path), encoding="utf-8").read()
+        assert steps in text and call in text and music in text, path
+
+
 def test_mode_file_c_fades_a_call_out_at_its_stop():
     """A call whose own sound is over is faded (40 ms) before it is stopped, never cut (item 150
     follow-up: a stop mid-sample is a click)."""

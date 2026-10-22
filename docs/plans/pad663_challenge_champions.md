@@ -103,3 +103,12 @@ not a change; the runtime puts every entry back as a game starts); a game the la
 to its end; points are added in the challenge ball (John Wick's switch names are not the job's, its player scored 0
 and a 0 never beats a fresh record); Godzilla LE takes the pick at the next ball's start, so its first ball is drained.
 
+Found on the small screens (fixed): Star Wars Home Edition and Jurassic Park The Pin draw on an 800x480 panel (a
+reported fact, tools/spike2_emu/display2.py REPORTED_PANELS - in no game program), and "PAD CHALLENGE CHAMPION" ran off
+both edges of the HIGHEST SCORES page our page repeats. A build whose program carries one of those titles gets `value
+challenge_page_title_max 18`; past it the title is the mode's name alone (as past 27 on the full cabinets).
+
+Diagnostics added: a start-menu pick of a mode's own challenge that is not played says why (the menu's entry under
+the cursor is no longer ours; the ball started in no challenge game). TMNT's cursor does not start on the first entry,
+so the job stepped past ours and back onto STANDARD; the job now steps until the runtime says ours is picked.
+

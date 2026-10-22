@@ -640,6 +640,7 @@ carrier at its bed while it runs:
 |---|---|
 | make a request play ONE sound id | `pm_sound_sid(request, sid)`; `pm_sound_sid(request, 0)` puts the request's own list back. 1 = done; 0 without the port's request table |
 | fade a request out, then stop it | `pm_sound_fade(request, ms)` - linear in dB (the codec's volume step, 1/3 dB each, on every voice of every channel playing it) down to -86 dB, then the stop, in silence. Without the port's `value sound_channel_*` / `sound_voice_volume` lines it stops at once. `pm_sound` on a request still fading ends that fade first |
+| duck a request under another (PAD-678) | `pm_sound_duck(request, steps, ms)` - takes `steps` more (1/3 dB each) off every voice playing it, on top of its own volume, ramped over `ms`; `steps` 0 ramps it back. A stop or a `pm_sound_fade` ends it. A mode file's music goes down 28 steps this way while one of its own calls plays: the game's speech carriers already duck it 20, and the game's own clip sounds duck its music 48 (Bond LE 1.06, measured) |
 | see what plays | `pm_sound_playing(requests, buses, max)` - the request and bus bits (0x01 music, 0x02 voice) of every channel playing; -1 without `data sound_channels` |
 
 The mode file says it with a second number: `music 125 618` = carrier 125 playing bed sid 618.

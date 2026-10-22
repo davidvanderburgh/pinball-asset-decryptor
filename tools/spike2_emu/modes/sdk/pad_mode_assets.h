@@ -145,6 +145,7 @@ struct pa_music_state {
     unsigned bus1[4];                     /* what held the music bus at the last look (logged on a change) */
     int nbus1;
     unsigned long check_due;              /* after the end: look at the music bus once, then */
+    int ducked, duck_said;                /* PAD-678: ours is down under a call of the mode's; said so once */
 };
 __attribute__((weak, visibility("hidden"))) struct pa_music_state pa_music;
 
@@ -557,6 +558,7 @@ static PA_UNUSED void pa_music_begin(struct pa_assets *a)
     pa_music.owner = a->folder;
     pa_music.game = 0;
     for (i = 0; i < 4; i++) pa_music.silenced[i] = 0;
+    pa_music.ducked = pa_music.duck_said = 0;
     a->music_restarts = 0;
     if (a->music_sid)
         pm_log("own sound: music %u plays its own bed, sound id %u%s", a->music, a->music_sid,
@@ -599,6 +601,30 @@ static PA_UNUSED void pa_music_bus_note(const unsigned *reqs, const unsigned *bu
     pm_log("own sound: the music bus %s: %s", when ? when : "now holds", m ? words : "nothing");
 }
 
+/* PAD-678: the mode's music goes down under its own calls - a film clip's sound most of all - as the game's
+ * music does under its clips (mode_file.c's own_music_duck says what was measured: a call's speech carrier ducks
+ * the music 20 steps, the game's own clip sounds 48, so ours takes PA_MUSIC_DUCK_STEPS more while a call plays). */
+#define PA_MUSIC_DUCK_STEPS   28
+#define PA_MUSIC_DUCK_DOWN_MS 150
+#define PA_MUSIC_DUCK_UP_MS   400
+
+static PA_UNUSED void pa_music_duck(struct pa_assets *a)
+{
+    unsigned i;
+    int want = 0;
+    for (i = 0; i < a->n_calls && !want; i++)
+        if (a->calls[i].request && a->calls[i].request != a->music && pm_sound_active(a->calls[i].request)) want = 1;
+    want = want && pm_sound_active(a->music);
+    if (want == pa_music.ducked) return;
+    if (want && !pm_sound_duck(a->music, PA_MUSIC_DUCK_STEPS, PA_MUSIC_DUCK_DOWN_MS)) return;   /* no voice offsets */
+    if (!want) pm_sound_duck(a->music, 0, PA_MUSIC_DUCK_UP_MS);
+    pa_music.ducked = want;
+    if (want && !pa_music.duck_said) {
+        pa_music.duck_said = 1;
+        pm_log("own sound: music %u goes down %u steps under the mode's own calls", a->music, PA_MUSIC_DUCK_STEPS);
+    }
+}
+
 static PA_UNUSED void pa_music_under(struct pa_assets *a)
 {
     unsigned reqs[8], buses[8];
@@ -608,6 +634,7 @@ static PA_UNUSED void pa_music_under(struct pa_assets *a)
         if (pm_ms() >= pa_music.start_due) pa_music_start_now();
         return;
     }
+    pa_music_duck(a);
     if (pm_ms() < a->next_poll) return;
     a->next_poll = pm_ms() + PA_POLL_MS;
     if (pa_music.swap) pm_sound_swap(a->music, pa_music.swap, pa_music.swap + 8, -1, 0);   /* held while it runs */

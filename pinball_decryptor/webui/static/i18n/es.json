@@ -12472,6 +12472,7 @@
 "With an AI agent": "Con un agente de IA",
 "Say what the mode should do. Make it and copy for an agent makes the mode, then copies what to tell the agent: its file, the SDK's guide, and this.": "Di qué debe hacer el modo. Crearlo y copiar para un agente crea el modo y luego copia lo que hay que decirle al agente: su archivo, la guía del SDK y esto.",
 "Or start from an example in C": "O empieza desde un ejemplo en C",
+"Or start from the example": "O empieza con el ejemplo",
 "No example in C for this game.": "No hay ejemplo en C para este juego.",
 "Open MODE_SDK.md, the SDK's guide": "Abrir MODE_SDK.md, la guía del SDK",
 "A playground: a form mode can't have rules of its own. For more, make it from Blocks.": "Para trastear: un modo de formulario no puede tener reglas propias. Para más, créalo con Bloques.",

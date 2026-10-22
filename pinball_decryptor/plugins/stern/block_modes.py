@@ -875,9 +875,17 @@ def new_blocks_mode(project, name, shots=(), example=None):
     return slug, path
 
 
+#: PAD-675: the one blocks example New mode offers, on every game: the starter above on the shots the form mode of
+#: the same name uses (the port's example start shot, then a ramp as its jackpot)
+BASIC_EXAMPLE = "TARGET RUSH"
+BASIC_ABOUT = ("A small, whole mode to start from: three hits on one shot start it, every shot scores more than the "
+               "last, a lit jackpot shot adds time, and a callout at ten seconds left.")
+
+
 # ---- the blocks examples (PAD-658) ---------------------------------------------------------------
-#: Whole modes made of blocks, offered by the wizard's Blocks step on the titles each names: the SDK's C examples
-#: rebuilt in blocks (what each lost is in its ``lost``) and new ones. One JSON file each in the SDK's
+#: Whole modes made of blocks for Godzilla: the SDK's C examples rebuilt in blocks (what each lost is in its ``lost``)
+#: and new ones. PAD-675: the block compiler's test material (make_examples.py --desk plays every one), no longer
+#: offered by the wizard, whose one blocks example is BASIC_EXAMPLE. One JSON file each in the SDK's
 #: ``blocks_examples`` folder: {"name", "slug", "order", "titles" (game_dir prefixes), "about", "based_on" (the C
 #: example it was rebuilt from, or ""), "lost" [sentences], "program" (blocks.json; its clips, sounds and music
 #: are files named after their cue: <cue>.mp4, <cue>.wav, music.wav), "recipe" (film_recipes.json's shape: where

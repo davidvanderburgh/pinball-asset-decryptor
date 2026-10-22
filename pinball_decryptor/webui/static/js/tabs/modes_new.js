@@ -123,7 +123,7 @@ function NameField({ id, name, setName, ask }) {
   </div>`;
 }
 
-// PAD-658: the blocks examples for this card's title: new modes, and the C examples rebuilt in blocks
+// PAD-658: the blocks examples for this card's title (PAD-675: just TARGET RUSH, on every game)
 function BlocksExamples({ s, onExample }) {
   const all = s.blocks_examples || [];
   if (!all.length) return null;
@@ -134,7 +134,7 @@ function BlocksExamples({ s, onExample }) {
             ? ["What the blocks lost against its C:", ...x.lost.map((l) => "- " + l)] : [] })}><${Icon} name="blocks" /><span class="ellip">${x.name}</span><${Icon} name="right" /></button>`)}</div>
     </div>` : null;
   return html`<div class="nmw-cols">
-    <div class="stack nmw-col">${group("Or start from a new mode in blocks", all.filter((x) => !x.based_on))}</div>
+    <div class="stack nmw-col">${group("Or start from the example", all.filter((x) => !x.based_on))}</div>
     <div class="stack nmw-col">${group("Or one of the C examples, in blocks", all.filter((x) => x.based_on))}</div>
   </div>`;
 }

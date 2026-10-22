@@ -330,6 +330,10 @@ def test_the_runtime_ends_a_challenge_ball_and_starts_nothing_after():
     assert "__sync_bool_compare_and_swap(&chg_end_owed, 1, 0)" in now and "(1, 1)" in now
     disp = src[src.index("static void on_event_dispatch(unsigned *r)\n{"):]
     assert 'chg_end_ball_now("the game\'s bus call")' in disp[:disp.index("\n}\n")]
+    # PAD-663: only from a bus call on the game-logic thread (John Wick 1.02 stopped when ended from another)
+    assert "chg_end_owed && chg_game_tid && syscall(SYS_GETTID) == chg_game_tid" in disp[:disp.index("\n}\n")]
+    tick = src[src.index("static void on_tick(unsigned *r)\n{"):]
+    assert "if (!chg_game_tid) chg_game_tid = syscall(SYS_GETTID);" in tick[:tick.index("\n}\n")]
     assert 'chg_end_ball_now("the tick")' in src
     veto = src[src.index("static int challenge_veto("):]
     veto = veto[:veto.index("\n}\n")]

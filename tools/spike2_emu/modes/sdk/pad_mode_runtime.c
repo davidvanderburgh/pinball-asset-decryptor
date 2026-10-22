@@ -882,6 +882,7 @@ static void chg_began(void);
 static void chg_mode_ended(int was_taker);
 static volatile int chg_end_owed;           /* PAD-663: the challenge's "end this ball now", owed to the game's next bus call */
 static volatile unsigned long chg_end_owed_ms;
+static volatile long chg_game_tid;          /* PAD-663: the game-logic thread (the tick's), where the game's processes run */
 static void chg_end_ball_now(const char *from);
 
 int pm_begin(void)
@@ -8757,6 +8758,7 @@ static void on_tick(unsigned *r)
     const struct pm_mode *m;
     (void)r;
     note_thread("tick", &said);
+    if (!chg_game_tid) chg_game_tid = syscall(SYS_GETTID);
     /* init runs HERE, on the first tick, and never from the loader's constructor: at
      * load the game's main() has not run, its managers do not exist yet, and the first
      * version of this runtime crashed the game at boot calling a scene lookup from init
@@ -10728,7 +10730,9 @@ static void on_event_dispatch(unsigned *r)
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
-    if (chg_end_owed) chg_end_ball_now("the game's bus call");       /* PAD-663: from a process of the game's */
+    /* PAD-663: from a process of the game's - a bus call on the game-logic thread only: the bus is called from other
+     * threads too, and John Wick 1.02's logic stopped for good when the ball was ended from one of those */
+    if (chg_end_owed && chg_game_tid && syscall(SYS_GETTID) == chg_game_tid) chg_end_ball_now("the game's bus call");
     /* PAD-619: a new game forgets the last one's - not a pick from this very ball's start (Batman 66 1.13 dispatches
      * the ball's start before the game's) */
     if (challenge_game_id >= 0 && r[0] == (unsigned)challenge_game_id && pm_ms() - challenge_ours_ms > 2000)

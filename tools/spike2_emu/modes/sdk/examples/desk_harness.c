@@ -608,6 +608,12 @@ int pm_sound_fade(unsigned request, unsigned ms)
     snd_drop(request);
     return was;
 }
+/* PAD-678's music duck: the desk has no voice offsets, so a mode's music is never ducked here */
+int pm_sound_duck(unsigned request, unsigned steps, unsigned ms)
+{
+    (void)request; (void)steps; (void)ms;
+    return 0;
+}
 int pm_sound_sid(unsigned request, unsigned sid)
 {
     printf("%6lu SID %u %u\n", now_ms, request, sid);

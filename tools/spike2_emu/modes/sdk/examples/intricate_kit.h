@@ -936,6 +936,9 @@ struct kit_hud {
     unsigned long checked_at;              /* PAD-390: the last look at the scene's HUD group */
     unsigned begun;                        /* PAD-413: pm_begun() when its mode last ran, or it was last down */
     int beside;                            /* PAD-658: its meter is a corner bar - up BESIDE another pack HUD */
+    /* PAD-680: the newest note asked for while the game's mode had the middle, shown once it is free */
+    char pend_big[KIT_HUD_WORDS], pend_sub[KIT_HUD_WORDS];
+    unsigned pend_ms, pend_player;
 };
 
 /* The pack's HUD that is up now: a HUD coming up takes the place of the one showing (a mode's TOTAL
@@ -1108,8 +1111,17 @@ static KIT_UNUSED int kit_hud_note(struct kit_hud *h, unsigned ms, const char *b
     /* PAD-390 (David's Premium, 2026-10-05: MELTDOWN IS READY during the game's multiball, a SPACEGODZILLA lock
      * while one of the game's modes ran): a note's line IS the award line, in the middle, so it has no place to
      * step aside to - while the game's mode or multiball has the middle it is not shown (a meter's gauge at the
-     * edge stays; a note already up waits in kit_hud_tick, its time held) */
-    if (pm_aside() && !h->metering) return 0;
+     * edge stays; a note already up waits in kit_hud_tick, its time held). PAD-680: and the newest one waits for
+     * the middle - on Godzilla a battle has it most of a ball, and a note dropped then was progress never shown */
+    if (pm_aside() && !h->metering) {
+        if (!h->pend_ms) pm_log("hud %s: its note waits for the game's mode to give the middle back", h->slug);
+        kit_copy(h->pend_big, sizeof h->pend_big, big ? big : "");
+        kit_copy(h->pend_sub, sizeof h->pend_sub, sub ? sub : "");
+        h->pend_ms = ms ? ms : 1;
+        h->pend_player = pm_player();
+        return 0;
+    }
+    h->pend_ms = 0;                              /* a newer note than the one waiting */
     if (h->up && !h->noting) return 0;
     h->want_title[0] = h->want_line[0] = 0;
     for (k = 0; k < 3; k++) kit_hud_counter(h, k, 0, 0, 0);
@@ -1245,6 +1257,12 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
         h->award_until = 0;
         h->want_award[0] = h->want_awardsub[0] = 0;
         if (h->beside && h->metering && kit_hud_up == h) kit_hud_up = 0;   /* PAD-658: its note is over, the bar stays */
+    }
+    if (h->pend_ms && !pm_aside()) {             /* PAD-680: the middle is back: the newest note it waited with */
+        unsigned ms = h->pend_ms;
+        h->pend_ms = 0;
+        if (pm_in_game() && pm_player() == h->pend_player && kit_hud_note(h, ms, h->pend_big, h->pend_sub))
+            pm_log("hud %s: its note shows - the game's mode gave the middle back", h->slug);
     }
     if (!h->found || !h->up) return;
     /* PAD-353: a display of the game's has the screen (an award, a mode's start screen): its words are where

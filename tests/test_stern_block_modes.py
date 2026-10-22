@@ -560,8 +560,8 @@ def test_a_start_waits_out_a_multiball_and_the_next_one_after_it_starts_it(tmp_p
     ], seconds=0, wait_multiball=True)
     out = play(tmp_path, p, "balls", 2, "shot", "Left ramp", "multiball", 1, "balls", 1, "shot", "Left ramp",
                "multiball", 0, "shot", "Left ramp")
-    # PAD-675: while the multiball runs the mode is out of play - its idle scripts do not run at all
-    assert out.count("] cannot\n") == 0 and out.count("] can\n") == 1
+    # PAD-680: through the multiball its idle scripts run on (they count, note and show); only the start waits it out
+    assert out.count("] cannot\n") == 2 and out.count("] can\n") == 1
     assert out.count("START (a block)") == 1
     assert out.index("START (a block)") > out.index(">> multiball 0")
     # without the option a multiball does not stop it
@@ -795,7 +795,7 @@ def test_give_way_waits_for_the_games_mode_and_ends_when_one_begins(tmp_path):
     out = play(tmp_path, prog(GATE, seconds=0, game_modes="give_way"),
                "battle", 1, "shot", "Building", "battle", 0, "balls", 2, "shot", "Building", "balls", 1,
                "shot", "Building", "shot", "Maser target", "timed", 1, "secs", 0.5, "shot", "Maser target")
-    assert "not started" not in out                              # PAD-675: in the battle it is out of play
+    assert "not started" in out                                  # PAD-680: the battle's Building counts, then waits
     assert out.count("START (a block)") == 1                     # the third Building: none running
     assert "gives way - one of the game's modes starting ends it" in out
     assert "END (the game's own mode began)" in out
@@ -803,7 +803,7 @@ def test_give_way_waits_for_the_games_mode_and_ends_when_one_begins(tmp_path):
     assert "BLOCK" not in out
 
 
-# ---- PAD-675: out of play while another mode runs; a switch hit counts ----------------------------------------
+# ---- PAD-675/680: counting through the game's modes, starting after them; a switch hit counts -----------------
 COUNT = [{"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [
     {"op": "change", "var": "n", "by": num(1)},
     {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "var", "name": "n"}, "b": num(2)},
@@ -811,13 +811,14 @@ COUNT = [{"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [
 NV = [{"name": "n", "reset": "game"}]
 
 
-def test_a_mode_that_waits_the_games_modes_out_counts_nothing_while_one_runs(tmp_path):
-    # David's machine (PAD-675): a lit mode's inserts flashed through a battle. Two Buildings in the battle count
-    # nothing; after it, two more start it
+def test_a_mode_that_waits_the_games_modes_out_counts_through_one_and_starts_after_it(tmp_path):
+    # David's machine (PAD-680): with nothing counted in a battle, and on Godzilla one runs most of a ball, no mode
+    # ever showed its progress. Two Buildings in the battle count (the start waits it out); after it, one starts it
     out = play(tmp_path, prog(COUNT, NV, seconds=5, game_modes="block"),
                "battle", 1, "shot", "Building", "shot", "Building", "secs", 1, "battle", 0, "secs", 1,
                "shot", "Building", "secs", 1)
-    assert "START" not in out
+    assert "still ready" in out
+    assert out.count("START (a block)") == 1 and out.index("START (a block)") > out.index(">> battle 0")
     out = play(tmp_path, prog(COUNT, NV, seconds=5, game_modes="block"),
                "battle", 1, "shot", "Building", "battle", 0, "secs", 1, "shot", "Building", "shot", "Building")
     assert out.count("START (a block)") == 1
@@ -879,7 +880,7 @@ def test_start_mode_now_does_not_wait_for_the_games_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_DUMP", str(dump))
     out = play(tmp_path, prog(GATE, seconds=0, game_modes="give_way"), "timed", 1, "shot", "Building",
                "trigger", "blk.start", "secs", 1)
-    assert "not started" not in out                              # PAD-675: out of play, the Building counts nothing
+    assert "not started" in out                                  # PAD-680: the Building counts, its start waits
     assert "START (trigger file)" in out
 
 
@@ -1704,7 +1705,7 @@ def test_a_lit_mode_waits_out_the_games_own_modes_as_its_mini_wizards_do(tmp_pat
     p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
              seconds=5, game_modes="give_way")
     out = play(tmp_path, p, "way", 0, "shot", "Left ramp", "way", 1, "shot", "Left ramp")
-    assert "still ready" not in out                              # PAD-675: out of play, the shot counts nothing
+    assert "still ready" in out                                  # PAD-680: the shot counts, its start waits
     assert out.count("START (a block)") == 1 and out.index("START (a block)") > out.index(">> way 1")
     out = play(tmp_path, dict(p, game_modes="stack"), "way", 0, "shot", "Left ramp")
     assert "START (a block)" in out

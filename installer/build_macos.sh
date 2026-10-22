@@ -220,6 +220,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.text_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_from_card" \
     --hidden-import "pinball_decryptor.plugins.stern.playfield_art" \
+    --hidden-import "pinball_decryptor.plugins.stern.insert_colours" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_script" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_mode_tables" \

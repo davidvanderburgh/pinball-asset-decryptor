@@ -7,7 +7,7 @@
   "godzilla_pro"
  ],
  "based_on": "ghidorah_heads.c",
- "about": "The C example KING GHIDORAH rebuilt in blocks, three stages deep. Powerline hits in one ball start it (each powerline once, twice the second time, three times the third). THE HEADS is the C's battle: only the lit head (two shots each, lit gold and named on the line) takes damage, it turns, a wounded head grows back, each sever pays into the pot; THE WINGS: hit the Big loop and the Mecha lane in turn to ground him; THE FINAL BLOW: the Maser's super jackpot and the pot twice over. Cash the pot at the right scoop once the heads are off; failing pays a quarter.",
+ "about": "The C example KING GHIDORAH rebuilt in blocks, three stages deep. Powerline hits in one ball start it (each powerline twice, four times the second time, six times the third). THE HEADS is the C's battle: only the lit head (two shots each, lit gold and named on the line) takes damage, it turns, a wounded head grows back, each sever pays into the pot; THE WINGS: hit the Big loop and the Mecha lane in turn to ground him; THE FINAL BLOW: the Maser's super jackpot and the pot twice over. Cash the pot at the right scoop once the heads are off; failing pays a quarter.",
  "lost": [
   "The heads' shots have no 250 ms debounce: a ball rattling on a target is several hits (the C counted one hit a quarter second per shot).",
   "A start from the tab's Start mode now counts as the ball's and the game's start too (the C counted only the three powerlines).",
@@ -718,7 +718,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 3
+           "v": 6
           },
           "b": {
            "k": "op",
@@ -758,14 +758,30 @@
             "op": "if",
             "cond": {
              "k": "cmp",
-             "op": "<=",
+             "op": "<",
              "a": {
               "k": "var",
               "name": "pl left"
              },
              "b": {
-              "k": "var",
-              "name": "starts"
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 2
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
              }
             },
             "then": [
@@ -799,7 +815,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 3
+                 "v": 6
                 },
                 "b": {
                  "k": "op",
@@ -832,7 +848,7 @@
                   "op": "*",
                   "a": {
                    "k": "num",
-                   "v": 3
+                   "v": 6
                   },
                   "b": {
                    "k": "op",
@@ -870,7 +886,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 3
+                 "v": 6
                 },
                 "b": {
                  "k": "op",
@@ -941,7 +957,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 3
+           "v": 6
           },
           "b": {
            "k": "op",
@@ -981,14 +997,30 @@
             "op": "if",
             "cond": {
              "k": "cmp",
-             "op": "<=",
+             "op": "<",
              "a": {
               "k": "var",
               "name": "pl center"
              },
              "b": {
-              "k": "var",
-              "name": "starts"
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 2
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
              }
             },
             "then": [
@@ -1022,7 +1054,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 3
+                 "v": 6
                 },
                 "b": {
                  "k": "op",
@@ -1055,7 +1087,7 @@
                   "op": "*",
                   "a": {
                    "k": "num",
-                   "v": 3
+                   "v": 6
                   },
                   "b": {
                    "k": "op",
@@ -1093,7 +1125,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 3
+                 "v": 6
                 },
                 "b": {
                  "k": "op",
@@ -1164,7 +1196,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 3
+           "v": 6
           },
           "b": {
            "k": "op",
@@ -1204,14 +1236,30 @@
             "op": "if",
             "cond": {
              "k": "cmp",
-             "op": "<=",
+             "op": "<",
              "a": {
               "k": "var",
               "name": "pl right"
              },
              "b": {
-              "k": "var",
-              "name": "starts"
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 2
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "starts"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
              }
             },
             "then": [
@@ -1245,7 +1293,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 3
+                 "v": 6
                 },
                 "b": {
                  "k": "op",
@@ -1278,7 +1326,7 @@
                   "op": "*",
                   "a": {
                    "k": "num",
-                   "v": 3
+                   "v": 6
                   },
                   "b": {
                    "k": "op",
@@ -1316,7 +1364,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 3
+                 "v": 6
                 },
                 "b": {
                  "k": "op",

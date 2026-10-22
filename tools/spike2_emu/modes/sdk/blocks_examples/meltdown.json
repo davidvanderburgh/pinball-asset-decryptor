@@ -14,7 +14,7 @@
    }
   }
  },
- "about": "The C example MELTDOWN rebuilt in blocks and taken deeper: captive ball hits (10, then 20, then 30) light a 3-ball multiball where the core heats by itself and with every jackpot (x1 to x5) and the shields cool it; three stages with their own jackpot shots and music (BURNING GODZILLA's four jackpot shots and the moving heart that pays double, DESTOROYAH's spiral ray at one ramp then the other, JUNIOR at the Big loop and the Mecha lane), the line naming the shots and moving with them; each meltdown's super at the Building worth the jackpots paid x2, x3, x4 and taking it a stage further.",
+ "about": "The C example MELTDOWN rebuilt in blocks and taken deeper: captive ball hits (15, then 30, then 45) light a 3-ball multiball where the core heats by itself and with every jackpot (x1 to x5) and the shields cool it; three stages with their own jackpot shots and music (BURNING GODZILLA's four jackpot shots and the moving heart that pays double, DESTOROYAH's spiral ray at one ramp then the other, JUNIOR at the Big loop and the Mecha lane), the line naming the shots and moving with them; each meltdown's super at the Building worth the jackpots paid x2, x3, x4 and taking it a stage further.",
  "lost": [
   "No randomness in blocks: the HEART starts at the Left ramp and moves in turn (Left ramp, Right ramp, Building, Big loop) every 10 s and when hit, where the C picked another shot at random every 8 s (PAD-658: a moving target stays 10 s at least).",
   "The HUD's line names the shots (RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP, moving with the heart), where the C said SHOOT RED SHOTS  -  THE HEART PAYS DOUBLE, and from CRITICAL SHIELDS COOL THE CORE  -  OR RIDE THE HEAT (the HOT and CRITICAL notes say the shields cool it, where the C's said JACKPOTS ARE WORTH MORE); the heart chases white, where the C blinked it faster in the heat's colour. Every note stays 3 s at least (the C's level notes 1.8 s, cadmium 1.5 s, the add-a-ball 2 s), a jackpot's naming the next shot (2X AT THE RIGHT RAMP); the captive ball's note says GODZILLA TARGET, where the C's said CAPTIVE BALL.",
@@ -771,7 +771,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 10
+           "v": 15
           },
           "b": {
            "k": "op",
@@ -846,7 +846,7 @@
                "op": "*",
                "a": {
                 "k": "num",
-                "v": 10
+                "v": 15
                },
                "b": {
                 "k": "op",
@@ -889,7 +889,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 10
+                 "v": 15
                 },
                 "b": {
                  "k": "op",
@@ -927,7 +927,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 10
+               "v": 15
               },
               "b": {
                "k": "op",
@@ -961,7 +961,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 10
+               "v": 15
               },
               "b": {
                "k": "op",

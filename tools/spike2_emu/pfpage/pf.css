@@ -86,10 +86,8 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .pf-look .btn:first-child { border-radius: 5px 0 0 5px; }
 .pf-look .btn:last-child { border-radius: 0 5px 5px 0; margin-left: -1px; }
 .pf-look .btn.on { color: var(--ink); border-color: var(--ink-3); position: relative; }
-.pf-overlay { position: absolute; left: 6px; right: 6px; bottom: 6px; display: flex; flex-wrap: wrap-reverse; align-items: flex-end; justify-content: space-between; gap: 6px; pointer-events: none; }
-.pf-overlay > * { pointer-events: auto; }
-.pf-acts { display: flex; flex-wrap: wrap-reverse; justify-content: flex-end; gap: 4px; margin-left: auto; }
-.pf-acts .btn { background: rgba(34,38,43,.92); }
+/* PAD-668: the Real LEDs / All RGB switch, top left */
+.pf-look.pf-inslook { right: auto; left: 6px; }
 
 /* the trough, when it is the control (no key panel) */
 .pf-trough { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px 3px; background: rgba(16,16,16,.92); border: 1px solid #3a3a3a; border-radius: 6px; }
@@ -105,7 +103,6 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 /* ---------------------------------------------------------------- schematic */
 .pf-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2); flex-wrap: wrap; }
 .pf-bar .txt { font: 12px var(--mono); color: var(--ink-2); margin-right: auto; }
-.pf-strip { flex: 0 0 auto; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .pf-schem { flex: 1 1 auto; min-height: 0; display: flex; gap: 0; }
 .pf-grid { flex: 0 0 auto; overflow-y: auto; padding: 10px 12px 10px 12px; border-right: 1px solid var(--line); background: var(--field); columns: 152px auto; column-gap: 14px; max-width: 520px; }
 .pf-grid .note { font: 12px var(--mono); color: #7a7a7a; white-space: pre-line; }
@@ -166,6 +163,10 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .kp-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .kp-btns .btn { background: #33507a; border-color: #456ba1; color: #eaf2ff; }
 .kp-btns .btn:hover:not(:disabled) { background: #456ba1; }
+/* PAD-668: the ball controls before the key panel comes, in the side panel */
+.pf-balls .kp-btns { grid-template-columns: repeat(2, 1fr); }
+.pf-balls .pf-trough { display: flex; flex-wrap: wrap; }
+.pf-balls .pf-trough .cap { white-space: normal; }
 .kp-btns .btn:disabled { background: #2a2e35; border-color: #2a2e35; color: #6b7280; opacity: 1; }
 .kp-wide { width: 100%; background: #33507a; border-color: #456ba1; color: #eaf2ff; }
 .kp-wide:hover:not(:disabled) { background: #456ba1 !important; }
@@ -247,3 +248,15 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .pf-cabp .kp-kv { padding: 0; }
 .pf-cabp .opt { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-2); cursor: pointer; }
 .pf-cabp .opt input { accent-color: var(--accent); margin: 0; }
+
+/* PAD-668: the INSERT COLOURS table - a single-colour insert's own colour */
+.pf-lens > summary .cnt { margin-left: auto; font-weight: 400; color: var(--ink-3); letter-spacing: 0; }
+.pf-lens > .body { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 8px; }
+.pf-lens .note { font-size: 11px; color: #8a93a2; }
+.pf-lens .list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; }
+.pf-lens .r { display: flex; align-items: center; gap: 6px; padding: 1px 2px; border-radius: 3px; }
+.pf-lens .r:hover { background: rgba(255,255,255,.05); }
+.pf-lens .r input[type=color] { width: 22px; height: 16px; padding: 0; border: 1px solid var(--line); border-radius: 3px; background: none; cursor: pointer; flex: 0 0 auto; }
+.pf-lens .r .k { flex: 1 1 auto; font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-lens .r.set .k { color: var(--ink); }
+.pf-lens .r .x { flex: 0 0 auto; padding: 0 5px; height: 16px; line-height: 14px; font-size: 12px; }

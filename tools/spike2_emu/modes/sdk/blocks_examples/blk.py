@@ -128,6 +128,11 @@ def on_any_shot(*do, when="running"):
     return {"hat": {"kind": "any_shot", "when": when}, "do": list(do)}
 
 
+def on_switch(*do, when="idle"):
+    """PAD-675: every playfield switch's own hit (the game's 0x1 dispatch), as the C modes counted them."""
+    return {"hat": {"kind": "switch", "when": when}, "do": list(do)}
+
+
 def every(seconds, *do):
     return {"hat": {"kind": "every", "seconds": int(seconds)}, "do": list(do)}
 

@@ -84,11 +84,20 @@ class Sim:
         for s in self.scripts:
             h = s.get("hat") or {}
             if h.get("kind") == "shot" and h.get("shot") == name and self._when(h) \
-                    or h.get("kind") == "any_shot" and self._when(h):
+                    or h.get("kind") in ("any_shot", "switch") and self._when(h):   # PAD-675: a shot's switch too
                 self.run(s.get("do"))
         if not self.running and was_lit == name and self.lit == name:
             self.start()
         return self.starts > before
+
+    def switches(self, n=1):
+        """PAD-675: ``n`` playfield switch hits that are no shot (a slingshot, a pop)."""
+        for _ in range(int(n)):
+            self._steps = 0
+            for s in self.scripts:
+                h = s.get("hat") or {}
+                if h.get("kind") == "switch" and self._when(h):
+                    self.run(s.get("do"))
 
     def advance(self, ms):
         """``ms`` of the game go by: timers run out, Every hats tick, the clock runs down."""

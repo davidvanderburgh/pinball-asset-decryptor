@@ -78,7 +78,7 @@ def pick_art(listing, game_dir):
 
 
 def insert_places(port_path):
-    """``[{name, shot (mask), x, y}]`` of every port ``lamp`` line placed on the playfield picture (``at X,Y``,
+    """``[{name, shot (mask), x, y, mono}]`` of every port ``lamp`` line placed on the playfield picture (``at X,Y``,
     not 0,0), in the port's order. A missing port gives []."""
     from . import mode_project as MP
     out = []
@@ -98,8 +98,9 @@ def insert_places(port_path):
         x, y = int(m.group(1)), int(m.group(2))
         if x <= 0 and y <= 0:
             continue
-        name, _ids, mask = lamp
-        out.append({"name": name, "shot": mask, "x": x, "y": y})
+        name, ids, mask = lamp
+        # PAD-668: one light id = a single-colour insert (it glows in its own colour, whatever a show asks)
+        out.append({"name": name, "shot": mask, "x": x, "y": y, "mono": sum(1 for i in ids if i) == 1})
     return out
 
 

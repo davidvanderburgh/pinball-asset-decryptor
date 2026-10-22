@@ -56,7 +56,7 @@ BUILDING = dict(x=123, y=202)
 SHIELDS = dict(x=199, y=346)
 POWERLINES = dict(x=144, y=216)
 TIMERS = ("ramp", "cut", "lamps", "burn", "grow", "next")
-NEED = pack.need(4, "plays")                    # 4 Left ramps, then 8, then 12
+NEED = pack.need(6, "plays")                    # 6 Left ramps, then 12, then 18 (PAD-675: was 4)
 SW = pack.SHOT_WORDS
 #: a petal burns for 5M times the petals burnt (+2.5M a petal each time she has come back), and the sap
 PETAL = add(5000000, mul(2500000, sub(var("plays"), 1)))
@@ -358,8 +358,8 @@ EXAMPLE = {
     "title_alt": {"godzilla_pro": {"shots": {"Shield target center": "Godzilla target"},
                                    "shows": {"Playfield wave": "Wide yellow and white strobe"},
                                    "words": PRO_WORDS}},
-    "about": ("The C example BIOLLANTE rebuilt in blocks and taken deeper (PAD-658): four Left ramps start her (8 the "
-              "second time, 12 the third) and every shot feeds the SAP JACKPOT. Four stages: THE ROSE (cut the "
+    "about": ("The C example BIOLLANTE rebuilt in blocks and taken deeper (PAD-658): six Left ramps start her (12 the "
+              "second time, 18 the third) and every shot feeds the SAP JACKPOT. Four stages: THE ROSE (cut the "
               "Shield and Powerline vine banks to collect the sap x1, x2 into the pot), ROSE ABLAZE (burn the lit "
               "petal as Godzilla's ray moves across the ramps and the Big loop), REGROWTH (cut all six vines while "
               "she grows them back), then her BEAST form: the final blow at the Building, the pot twice over. 40 s "
@@ -432,14 +432,14 @@ _STAGE1 = _shots("Slingshot", 2) + _SHIELDS + _POWER + ["secs", 1]
 _STAGE2 = ["shot", "Left ramp", "ms", 500, "shot", "Big loop", "ms", 500, "shot", "Right ramp", "secs", 2]
 _STAGE3 = _SHIELDS + _POWER + ["secs", 2]
 DESK = [
-    # PAD-669: a multiball's Left ramps count for nothing: back to one ball, 1 more says 3 to go, no start
-    ("no ramp counts in a multiball", ["balls", 2] + _shots("Left ramp", 4) + ["balls", 1, "secs", 1] + _shots("Left ramp", 1) + ["secs", 2],
-     ["Hud_Line: 3  -  SHOOT THE LEFT RAMP", "![BIOLLANTE] START (a block)"]),
-    ("four Left ramps the first time, eight the second",
-     _shots("Left ramp", 4) + ["secs", 1, "trigger", "biollante.stop", "secs", 4] +
-     _shots("Left ramp", 7) + ["secs", 2] + _shots("Left ramp", 1) + ["secs", 2],
-     ["Hud_Title: RAMPS TO BIOLLANTE", "Hud_Line: 3  -  SHOOT THE LEFT RAMP", "[BIOLLANTE] START (a block)",
-      "Hud_Line: 7  -  SHOOT THE LEFT RAMP", "Hud_Line: 1  -  SHOOT THE LEFT RAMP", "SHIELD toward"]),
+    # PAD-669: a multiball's Left ramps count for nothing: back to one ball, 1 more says 5 to go, no start
+    ("no ramp counts in a multiball", ["balls", 2] + _shots("Left ramp", 6) + ["balls", 1, "secs", 1] + _shots("Left ramp", 1) + ["secs", 2],
+     ["Hud_Line: 5  -  SHOOT THE LEFT RAMP", "![BIOLLANTE] START (a block)"]),
+    ("six Left ramps the first time, twelve the second",
+     _shots("Left ramp", 6) + ["secs", 1, "trigger", "biollante.stop", "secs", 4] +
+     _shots("Left ramp", 11) + ["secs", 2] + _shots("Left ramp", 1) + ["secs", 2],
+     ["Hud_Title: RAMPS TO BIOLLANTE", "Hud_Line: 5  -  SHOOT THE LEFT RAMP", "[BIOLLANTE] START (a block)",
+      "Hud_Line: 11  -  SHOOT THE LEFT RAMP", "Hud_Line: 1  -  SHOOT THE LEFT RAMP", "SHIELD toward"]),
     ("stage one then cash out", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
      ["Hud_Line: SHIELDS: 3 TO GO  POWERLINES: 3 TO GO", "Hud_Line: SHIELDS: 2 TO GO  POWERLINES: 3 TO GO",
       "Hud_Line: SHIELDS: 1 TO GO  POWERLINES: 3 TO GO", "Hud_Award: SAP JACKPOT X1",
@@ -475,8 +475,8 @@ DESK = [
 ]
 #: the same mode as a Pro gets it (title_alt): the Godzilla target is the shield bank's middle vine
 DESK_PRO = [
-    ("four Left ramps and the Pro's shield bank, then cash out",
-     _shots("Left ramp", 4) + ["secs", 1] + _shots("Slingshot", 2) + _PRO_SHIELDS + _POWER +
+    ("six Left ramps and the Pro's shield bank, then cash out",
+     _shots("Left ramp", 6) + ["secs", 1] + _shots("Slingshot", 2) + _PRO_SHIELDS + _POWER +
      ["secs", 1, "shot", "Right scoop", "secs", 5],
      ["[BIOLLANTE] START (a block)", "Hud_Line: SHIELDS+GODZILLA: 1  POWERLINES: 3 TO GO", "Hud_Award: SAP JACKPOT X1",
       "Hud_AwardSub: 500,000  -  INTO THE POT", "Hud_Award: THE ROSE IS CUT", "Hud_Title: BIOLLANTE RETREATS",

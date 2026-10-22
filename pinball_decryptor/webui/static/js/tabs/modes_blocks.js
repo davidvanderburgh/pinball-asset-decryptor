@@ -134,6 +134,7 @@ export function hatTemplates(ch, timers) {
   return [
     { kind: "mode_start" }, { kind: "mode_end" },
     { kind: "shot", shot, when: "running" }, { kind: "any_shot", when: "running" },
+    { kind: "switch", when: "idle" },                // PAD-675: every playfield switch's hit
     { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 },
     { kind: "ball_end" }, { kind: "event", event: ev, when: "any" },
     { kind: "timer_done", timer: (timers[0] || {}).name || "" },
@@ -594,6 +595,7 @@ export function HatBody({ h, path, ed }) {
     case "ball_end": return html`<span class="bk-w b">When the ball drains</span>`;
     case "shot": return html`<span class="bk-w b">When</span><${ShotPick} value=${h.shot} ed=${ed} onChange=${(v) => set("shot", v)} /><span class="bk-w b">is made</span>${when}`;
     case "any_shot": return html`<span class="bk-w b">When any shot is made</span>${when}`;
+    case "switch": return html`<span class="bk-w b">When any playfield switch is hit</span>${when}`;
     case "every": return html`<span class="bk-w b">Every</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds while it runs</span>`;
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
     case "event": return html`<span class="bk-w b">When</span><${Pick} value=${h.event} options=${(ed.ch.events || []).map((x) => [x.name, x.label])} onChange=${(v) => set("event", v)} />${when}`;
@@ -619,7 +621,7 @@ export function Script({ s, si, n, ed }) {
 // ------------------------------------------------------------------ the palette
 export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
-    any_shot: "When any shot is made", every: "Every N seconds", seconds_left: "When N seconds are left",
+    any_shot: "When any shot is made", switch: "When any playfield switch is hit", every: "Every N seconds", seconds_left: "When N seconds are left",
     ball_end: "When the ball drains", event: "When the game does…", timer_done: "When a timer runs out",
     challenge: "When the player picks a challenge" }[h.kind] || h.kind;
 }

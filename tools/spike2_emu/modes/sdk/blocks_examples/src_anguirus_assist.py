@@ -1,6 +1,7 @@
-"""ANGUIRUS (PAD-658): the SDK's C example anguirus_assist.c rebuilt in blocks and taken deeper - a mode that STACKS
-with the game's own battle on purpose: Godzilla's oldest ally joins it, charges his spikes, rolls, bites, and calls
-the allies in; or he goes home with the pot.
+"""ANGUIRUS (PAD-658): the SDK's C example anguirus_assist.c rebuilt in blocks and taken deeper: Godzilla's oldest
+ally comes, charges his spikes, rolls, bites, and calls the allies in; or he goes home with the pot. PAD-675 (David:
+"make sure that all modes are run in isolation"): he no longer joins the game's own battle - he is a mode of his own,
+held off by the game's modes and holding them off, on a clock.
 
 Destroy All Monsters (1968): at Mt. Fuji Anguirus charges King Ghidorah, clamps his jaws on a neck, and with Godzilla
 and the others pins the three heads down; afterwards he is home on Monsterland. Godzilla: Final Wars (2004): he rolls
@@ -9,9 +10,9 @@ into battle as a ball of spikes. On the playfield he is the ANGUIRUS insert, amo
 After Lyman Sheats: a call that costs more each time (Metallica's Sparky), stages with their own shots, a grip that
 slips when left alone (KING GHIDORAH's heads), a hurry-up finale, a pot you cash out or put at risk.
 
-- THE CALL: Shield target hits while he is away call him: 3 the first time, 6 the second, 9 the third (a note on
-  every hit says how many are left). Ready, he JOINS one of the game's own modes (the C: a kaiju battle) while one
-  ball is in play, on its next shot; once per battle (a shot with none running gets him ready for the next one).
+- THE CALL: Shield target hits while no mode runs call him: 8 the first time, 16 the second, 24 the third (a note
+  on every hit says how many are left); the last one starts him. Held off (one of the game's modes or multiballs),
+  the next shield hit once it is over starts him. 90 s on his clock.
 - STAGE 1, SPIKES: each Shield target (left, center, right) charges one spike: 500,000, and 1M to the pot. A spike
   to charge blinks orange; a charged one goes dark (it no longer counts) and the SPIKES gauge fills.
 - STAGE 2, ROLLING ATTACK: the Big loop chases cyan: 4,000,000 (and as much to the pot); each Big loop within 20 s
@@ -20,13 +21,12 @@ slips when left alone (KING GHIDORAH's heads), a hurry-up finale, a pot you cash
   alone 20 s he is shaken off: one bite lost. Three bites.
 - STAGE 4, ALLIES ATTACK: the Building, a hurry-up from 30M down 1M a second to 10M: the pot twice over and the
   hurry-up. He has won.
-- CASH OUT: after any stage the right scoop chases white: the pot, and he goes home. The game's mode ending pays half
-  the pot; a drain a quarter.
+- CASH OUT: after any stage the right scoop chases white: the pot, and he goes home. His clock running out or a
+  drain pays a quarter of the pot.
 
 SAY THE SHOT (PAD-658 round 3, David: "the shots are not explicit enough and some of the information only flashes on
-the screen very briefly"; "you can't really accomplish much in 10 seconds. 40 seconds is better"). While the battle
-runs his counters are hidden (the battle's own are in their places, PAD-347) and his title and line take the award
-line between his awards, so:
+the screen very briefly"; "you can't really accomplish much in 10 seconds. 40 seconds is better"). His title and line take
+the award line between his awards, so:
 - his TITLE says the stage's count (CHARGE HIS SPIKES, 3 ROLLS TO GO, 2 BITES TO GO, ALLIES ATTACK) and his LINE the
   shot by the playfield's names (HIT THE CENTER AND RIGHT SHIELDS, SHOOT THE BIG LOOP, SHOOT THE RIGHT RAMP, SHOOT
   THE BUILDING: 24,000,000); the "say" timer writes both whenever something changes;
@@ -55,8 +55,8 @@ AX, AY = 186, 439                     # the ANGUIRUS insert (the allies the scoo
 SX, SY = 199, 346                     # the SHIELD CENTER insert's place: the C's KIT_AT_SHIELDS
 BX, BY = 123, 202                     # the BUILDING
 TIMERS = ("enter", "roll", "charged", "next", "grip", "bite", "say")
-#: the call: 3 shield hits the first time, 6 the second, 9 the third
-NEED = pack.need(3, "joins")
+#: the call: 8 shield hits the first time, 16 the second, 24 the third
+NEED = pack.need(8, "joins")          # PAD-675: was 3
 #: a note's time on the glass: the next stage waits it out (a stage's last note is up a second longer, so his title and
 #: line, which take the award line between notes, do not flash up between it and the next stage's note)
 NOTE_MS = pack.NOTE_S * 1000
@@ -204,19 +204,15 @@ SCRIPTS = [
     # ---- the call: shield hits while he is away; ready, he joins the game's own mode ---------------------------------
     *[on_shot(s, if_(AND(lt(BALLS, 2), eq("ready", 0)), [
         change("calls", 1),
-        if_(ge("calls", NEED), [
-            set_("ready", 1),
-            award("ANGUIRUS IS READY", sub="HE JOINS THE NEXT BATTLE", seconds=pack.NOTE_S)], [
-            award("SHIELD HITS", value=sub(NEED, var("calls")), sub="MORE TO CALL ANGUIRUS", seconds=pack.NOTE_S)])]),
+        if_(ge("calls", NEED), [set_("ready", 1), start()], [
+            award("SHIELD HITS", value=sub(NEED, var("calls")), sub="MORE TO CALL ANGUIRUS", seconds=pack.NOTE_S)])],
+        [if_(eq("ready", 1), [start()])]),                 # held off: the next shield hit starts him
         when="idle") for _v, s in SPIKES],
-    on_any_shot(if_(AND(STOCK, lt(BALLS, 2)), [
-        if_(AND(eq("joined", 0), eq("ready", 1)), [set_("joined", 1), start()])], [set_("joined", 0)]),
-        when="idle"),
 
     # ---- he joins ----------------------------------------------------------------------------------------------------------
-    on_start(set_("joined", 1), set_("ready", 0), set_("calls", 0), change("joins", 1),
+    on_start(set_("ready", 0), set_("calls", 0), change("joins", 1),
              set_("stage", 1), set_("pot", 0), set_("rolling", 0), set_("rolls", 0), set_("entered", 0),
-             set_("bites", 0), set_("won", 0), set_("cashed", 0), set_("left", 0),
+             set_("bites", 0), set_("won", 0), set_("cashed", 0),
              *[set_(v, 0) for v, _s in SPIKES],
              *shield_lights(), light_insert("ANGUIRUS", AMBER, "pulse", 700),
              timer_start("enter", 2000), timer_start("say", 1)),
@@ -296,31 +292,27 @@ SCRIPTS = [
           if_(AND(eq("stage", 2), eq("rolling", 1)), [
               if_(le(timer_left("roll"), HURRY_BLINK_MS), [light(ROLL_SHOT, CYAN, "blink", 100)])]),
           if_(AND(eq("stage", 4), eq("won", 0)), [
-              if_(gt("hurry", 10000000), [change("hurry", -1000000)]), timer_start("say", 1)]),
-          if_(NOT(STOCK), [set_("left", 1), end()])),
+              if_(gt("hurry", 10000000), [change("hurry", -1000000)]), timer_start("say", 1)])),
 
     # the ending: the runtime's TOTAL shows his points under the title that says how it ended
     on_end(*[timer_stop(t) for t in TIMERS], set_("rolling", 0), set_("stage", 0),
            if_(eq("won", 1), [hud_title("ANGUIRUS TRIUMPHS"), hud_line("THE POT TWICE AND THE HURRY-UP"),
                               clip("won", "full")]),
            if_(eq("cashed", 1), [hud_title("ANGUIRUS GOES HOME"), hud_line("THE POT IS CASHED OUT")]),
-           if_(AND(eq("won", 0), eq("cashed", 0), eq("left", 1)), [
-               score(div(var("pot"), 2)), hud_title("HE LEAVES WITH IT"), hud_line("HALF THE POT"),
-               clip("won", "full"), show("Going home")]),
-           if_(AND(eq("won", 0), eq("cashed", 0), eq("left", 0)), [
+           if_(AND(eq("won", 0), eq("cashed", 0)), [
                score(div(var("pot"), 4)), hud_title("ANGUIRUS FALLS"), hud_line("A QUARTER OF THE POT"),
                clip("lost", "full"), show("Embers"), shake(800, "soft")])),
 ]
 
 PROGRAM = {
-    "name": NAME, "seconds": 0, "ends_on_drain": True, "screen": False, "game_modes": "stack",
-    "wait_multiball": False, "priority": 0,
-    "vars": [{"name": n, "reset": "game"} for n in ("joined", "ready", "calls", "joins")] + [
+    "name": NAME, "seconds": 90, "ends_on_drain": True, "screen": False, "game_modes": "block",
+    "wait_multiball": True, "priority": 180,
+    "vars": [{"name": n, "reset": "game"} for n in ("ready", "calls", "joins")] + [
         {"name": n, "reset": "mode"} for n in ("stage", "pot", "rolling", "roll value", "rolls", "entered", "bites",
-                                                "bite at", "hurry", "won", "cashed", "left")] + [
+                                                "bite at", "hurry", "won", "cashed")] + [
         {"name": v, "reset": "mode"} for v, _s in SPIKES],
     "timers": [{"name": n} for n in TIMERS],
-    "hud": hud(" ", counters=[], timer=None,
+    "hud": hud(" ", counters=[], timer=("ANGUIRUS", "radiation"),
                gauge={"label": "SPIKES", "kind": "spike", "count": 3, "color": "#ff7800", "value": charged()}),
     "bar": {"on": False}, "info": {"on": False},
     "clips": clips("intro", "spike", "roll", "won", "lost", "bite", "allies", "cashout"),
@@ -363,28 +355,14 @@ EXAMPLE = {
     # the Pro has two shields (left, right): its Maser target is the third spike, so the call and the charge play the
     # same (three different targets to charge, all on the way up the left and right)
     "title_alt": {"godzilla_pro": {"shots": {"Shield target center": "Maser target"}, "words": _pro_words()}},
-    "about": ("The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (3, then 6, then 9) and "
-              "he joins the game's own battle; four stages (charge the spikes at the shields, three rolling attacks "
+    "about": ("The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (8, then 16, then 24), a "
+              "mode of his own for 90 s; four stages (charge the spikes at the shields, three rolling attacks "
               "at the Big loop, 20 s apart at most, three bites at the chasing ramp, the allies' hurry-up at the "
               "Building), his title saying what is left and his line the shot; cash the pot out at the right scoop "
               "after any stage. Destroy All Monsters (1968) and Final Wars (2004)."),
     "lost": [
-        "He joins on the first shot after one of the game's own modes begins (blocks only look at a shot), where "
-        "the C looked twice a second; and blocks cannot tell a battle from the game's other modes: he joins any "
-        "of its modes while one ball is in play (its multiballs are left out), where the C joined only kaiju "
-        "battles.",
-        "He leaves within a second of the game's mode ending (an Every second check) and his award shows at once; "
-        "the C waited for the battle's own total screen first, then kept his 4 s in view.",
-        "Ended while the battle still runs (a stop, another of our modes), his total shows under the runtime's "
-        "ANGUIRUS TOTAL: the C put ANGUIRUS RETREATS under it.",
-        "While the battle runs his counters are hidden (the battle's own are in their places), so his title says "
-        "what is left of the stage (3 ROLLS TO GO) and his line the shot (SHOOT THE BIG LOOP), in the award line "
-        "between his awards: the C said the stage with its awards alone.",
-        "His screen is not shared in moments: with the HUD on he holds display priority 180 the whole time he runs, "
-        "where the C held it only for each moment (entrance, a spike, the roll, a rolling attack) and gave the "
-        "battle its own displays between them.",
-        "His entrance (clip, music, words) comes a fixed 2 s after he joins; the C waited until the battle's start "
-        "screen had gone (up to 12 s). His music starts as he joins, not with the entrance.",
+        "PAD-675: he is a mode of his own, held off by the game's modes and holding them off, 90 s on his clock; the "
+        "C joined the game's kaiju battles and left with them (half the pot).",
         "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls; from THE BITE on it stays "
         "full. A charged spike's shield goes dark (it no longer counts; the gauge shows the charge), where the C "
         "lit it solid.",
@@ -407,35 +385,33 @@ def build():
 
 
 _SH = ["shot", "Shield target left", "ms", 400]
-_CALL3 = _SH * 3 + ["secs", 1]
-_JOIN = ["battle", 1, "secs", 1, "shot", "Slingshot", "secs", 3]
+#: PAD-675: eight shield hits call him, and the eighth starts him; his entrance 2 s on
+_CALL3 = _SH * 8 + ["secs", 3]
+_JOIN = []
 #: the three spikes, then the 3 s SPIKES CHARGED holds the glass before the rolling attack is lit
 _CHARGE = ["shot", "Shield target left", "ms", 400, "shot", "Shield target center", "ms", 400,
            "shot", "Shield target right", "secs", 4]
 _ROLLS = ["shot", "Big loop", "secs", 2] * 3 + ["secs", 2]
 _BITES = ["shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Left ramp", "secs", 2]
 DESK = [
-    ("three shield hits call him, six the second time",
-     _CALL3 + _JOIN + ["battle", 0, "secs", 6, "shot", "Slingshot", "secs", 1] + _SH * 5 + ["secs", 1, "battle", 1,
-                                                                                          "secs", 1, "shot",
-                                                                                          "Slingshot", "secs", 2]
-     + _SH + ["secs", 1, "shot", "Slingshot", "secs", 3],
-     ["Hud_Title: ANGUIRUS IS READY", "[ANGUIRUS] START", "END (a block)", "Hud_Line: 1  -  MORE TO CALL ANGUIRUS",
-      "Hud_Line: 5  -  MORE TO CALL ANGUIRUS"]),
+    ("eight shield hits call him, sixteen the second time",
+     _CALL3 + ["ball_end", "secs", 8] + _SH * 15 + ["secs", 1] + _SH + ["secs", 3],
+     ["Hud_Line: 1  -  MORE TO CALL ANGUIRUS", "[ANGUIRUS] START", "END (ball ended)",
+      "Hud_Line: 15  -  MORE TO CALL ANGUIRUS", "Hud_Line: 1  -  MORE TO CALL ANGUIRUS"]),
     ("the spikes: his title, his line and the shields", _CALL3 + _JOIN + ["lamps", "shot", "Shield target left", "secs", 4],
-     ["Hud_Award: ANGUIRUS JOINS", "Hud_Award: CHARGE HIS SPIKES",
-      "Hud_AwardSub: HIT THE LEFT, CENTER AND RIGHT SHIELDS", "HELD SHIELD LEFT ff5000 blink 400",
+     ["Hud_Award: ANGUIRUS JOINS", "Hud_Title: CHARGE HIS SPIKES",
+      "Hud_Line: HIT THE LEFT, CENTER AND RIGHT SHIELDS", "HELD SHIELD LEFT ff5000 blink 400",
       "LAMP OFF SHIELD LEFT", "Hud_Award: SPIKE CHARGED", "Hud_AwardSub: HIT THE CENTER AND RIGHT SHIELDS"]),
     ("all four stages and the allies win", _CALL3 + _JOIN + _CHARGE + ["lamps", "secs", 3] + _ROLLS +
      ["secs", 3] + _BITES + ["secs", 7, "shot", "Building", "secs", 6],
      ["Hud_Award: ANGUIRUS JOINS", "Hud_Award: SPIKES CHARGED",
-      "Hud_Award: ROLLING ATTACK LIT", "Hud_AwardSub: SHOOT THE BIG LOOP", "Hud_Award: 3 ROLLS TO GO",
+      "Hud_Award: ROLLING ATTACK LIT", "Hud_AwardSub: SHOOT THE BIG LOOP", "Hud_Title: 3 ROLLS TO GO",
       "SCORE +4000000", "Hud_AwardSub: 4,000,000  -  BIG LOOP AGAIN TO DOUBLE", "SCORE +8000000", "SCORE +16000000",
       "Hud_Award: THE BITE", "Hud_AwardSub: SHOOT THE LEFT RAMP", "LAMP LEFT RAMP ffb000 chase 90",
-      "Hud_Award: 3 BITES TO GO",
+      "Hud_Title: 3 BITES TO GO",
       "Hud_AwardSub: 8,000,000  -  NOW THE RIGHT RAMP", "Hud_Award: THE NECK IS PINNED",
       "Hud_Award: ALLIES ATTACK", "Hud_AwardSub: 30,000,000  -  SHOOT THE BUILDING",
-      "Hud_AwardSub: SHOOT THE BUILDING: 27,000,000", "Hud_Award: ANGUIRUS TRIUMPHS", "SCORE +158000000",
+      "Hud_Line: SHOOT THE BUILDING: 27,000,000", "Hud_Award: ANGUIRUS TRIUMPHS", "SCORE +158000000",
       "own clip won", "END (a block)", "lamps held 0"]),
     ("the roll runs out, then cash out", _CALL3 + _JOIN + _CHARGE + ["secs", 16, "lamps", "secs", 6, "lamps",
                                                                      "shot", "Right scoop", "secs", 4],
@@ -444,14 +420,14 @@ DESK = [
       "LAMP SELECT CITY ffffff chase", "Hud_Award: ANGUIRUS GOES HOME", "SCORE +3000000", "own clip cashout",
       "END (a block)", "lamps held 0"]),
     ("shaken off in the bite", _CALL3 + _JOIN + _CHARGE + _ROLLS + ["shot", "Left ramp", "secs", 25],
-     ["Hud_Award: BITE", "Hud_Award: 2 BITES TO GO", "Hud_AwardSub: SHOOT THE RIGHT RAMP", "Hud_Award: SHAKEN OFF",
-      "Hud_AwardSub: 0  -  BITES HELD", "Hud_Award: 3 BITES TO GO"]),
-    ("the battle ends: half the pot", _CALL3 + _JOIN + _CHARGE + ["battle", 0, "secs", 6],
-     ["Hud_Title: HE LEAVES WITH IT", "SCORE +1500000", "END (a block)", "lamps held 0"]),
-    ("no battle no join", _CALL3 + ["shot", "Slingshot", "secs", 2, "battle", 1, "secs", 1, "shot", "Slingshot",
-                                    "secs", 1],
-     ["[ANGUIRUS] START"]),
-    ("a drain mid battle", _CALL3 + _JOIN + ["shot", "Shield target left", "secs", 1, "ball_end", "secs", 7,
+     ["Hud_Award: BITE", "Hud_Title: 2 BITES TO GO", "Hud_Line: SHOOT THE RIGHT RAMP", "Hud_Award: SHAKEN OFF",
+      "Hud_AwardSub: 0  -  BITES HELD", "Hud_Title: 3 BITES TO GO"]),
+    ("his clock runs out: a quarter of the pot", _CALL3 + _CHARGE + ["secs", 90],
+     ["END (time ran out)", "Hud_Title: ANGUIRUS FALLS", "SCORE +750000", "lamps held 0"]),
+    ("a battle holds him off: he counts nothing in it",
+     _SH * 7 + ["battle", 1, "secs", 1] + _SH * 3 + ["secs", 1, "battle", 0, "secs", 1] + _SH + ["secs", 3],
+     ["Hud_Line: 1  -  MORE TO CALL ANGUIRUS", "[ANGUIRUS] START"]),
+    ("a drain", _CALL3 + _JOIN + ["shot", "Shield target left", "secs", 1, "ball_end", "secs", 7,
                                              "shot", "Slingshot", "secs", 1],
      ["END (ball ended)", "own clip lost", "SCORE +250000", "lamps held 0"]),
 ]
@@ -464,7 +440,7 @@ DESK_PRO = [
      ["[ANGUIRUS] START", "Hud_Award: SPIKES CHARGED", "Hud_Award: ROLLING ATTACK LIT", "SCORE +16000000",
       "Hud_Award: THE BITE"]),
     ("the pro's lines name its maser", _CALL3 + _JOIN + ["shot", "Shield target left", "secs", 4],
-     ["Hud_AwardSub: HIT THE SHIELDS AND THE MASER TARGET", "Hud_AwardSub: HIT THE MASER TARGET AND RIGHT SHIELD"]),
-    ("the pro calls him with the maser too", ["shot", "Maser target", "ms", 400] * 3 + ["secs", 1] + _JOIN,
-     ["Hud_Title: ANGUIRUS IS READY", "[ANGUIRUS] START"]),
+     ["Hud_Line: HIT THE SHIELDS AND THE MASER TARGET", "Hud_AwardSub: HIT THE MASER TARGET AND RIGHT SHIELD"]),
+    ("the pro calls him with the maser too", ["shot", "Maser target", "ms", 400] * 8 + ["secs", 1],
+     ["[ANGUIRUS] START"]),
 ]

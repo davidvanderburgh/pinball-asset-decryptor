@@ -65,6 +65,7 @@ export function hatWords(h = {}, ch = {}) {
     case "ball_end": return "When the ball drains";
     case "shot": return `When ${h.shot || "a shot"} is made${when}`;
     case "any_shot": return `When any shot is made${when}`;
+    case "switch": return `When any playfield switch is hit${when}`;
     case "every": return `Every ${h.seconds} seconds while it runs`;
     case "seconds_left": return `When ${h.seconds} seconds are left`;
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
@@ -210,7 +211,7 @@ export function ruleLines(stack, ch = {}, depth = 0) {
 
 // ------------------------------------------------------------------ Story: the mode's life (PAD-614)
 // A shot, any-shot or game-event rule has a "when" (not running / runs / any time): the Story moves it between boxes
-export const MOVABLE = new Set(["shot", "any_shot", "event"]);
+export const MOVABLE = new Set(["shot", "any_shot", "switch", "event"]);
 
 // Where each rule sits: waiting / running / any (a movable rule's when), start / end (on the arrows), drain (the
 // ball drains), and the clock's rules inside running

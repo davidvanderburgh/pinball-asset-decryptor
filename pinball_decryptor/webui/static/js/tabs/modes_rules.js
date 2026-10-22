@@ -165,7 +165,7 @@ export function StoryView({ c, pg }) {
   const prog = pg.prog;
   const st = storyOf(prog);
   const arrows = storyArrows(prog, ed.ch);
-  const shotKinds = ["shot", "any_shot", "event"];
+  const shotKinds = ["shot", "any_shot", "switch", "event"];
   const things = [...(prog.vars || []).map((v) => `${v.name} (a variable)`), ...(prog.timers || []).map((t) => `${t.name} (a timer)`)];
   return html`<div class="rv-scroll st-view">
     <div class="st-flow">

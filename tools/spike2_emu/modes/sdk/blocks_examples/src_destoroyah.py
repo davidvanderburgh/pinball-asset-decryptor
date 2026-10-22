@@ -498,7 +498,7 @@ DESK = [
      ["shot", SPIN, "ms", 60] * 50 + ["secs", 4, "trigger", "destoroyah.stop", "secs", 4] +
      ["shot", SPIN, "ms", 60] * 95 + ["secs", 4] + ["shot", SPIN, "ms", 60] * 5 + ["secs", 4],
      # his early notes are KAMACURAS's glass on a full card (the same spinner): the last 5 are his once she is lit
-     ["Hud_Title: SPIN THE TOP SPINNER", "[DESTOROYAH] START (a block)", "Hud_Line: 5  -  SPINS TO DESTOROYAH", "LAMP POWERLINE LEFT ffc800 blink 700",
+     ["Hud_Award: SPIN THE TOP SPINNER", "[DESTOROYAH] START (a block)", "Hud_AwardSub: 5  -  SPINS TO DESTOROYAH", "LAMP POWERLINE LEFT ffc800 blink 700",
       "SHIELD toward"]),
     ("the title and the line name the aggregates", _START + ["secs", 5],
      ["Hud_Title: SHOOT THE LEFT POWERLINE", "Hud_Line: OR THE CENTER POWERLINE",

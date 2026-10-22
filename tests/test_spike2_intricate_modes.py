@@ -348,12 +348,34 @@ def test_ghidorah_waits_for_the_games_own_battle_and_runs_once_a_ball(harness):
     assert has(out, g, "not counted - it already ran twice this game")
 
 
+def test_the_progress_panel_lists_every_modes_latest_note_newest_first(harness):
+    """PAD-680: the pack's progress panel (PadMode_Progress) - a line a mode, the newest note's at the top, the
+    words a note's big line and its leading number; a mode that starts loses its line and takes the panel down."""
+    out = play(harness, "shot", "Powerline left", "secs", 2, "shot", "Maser target", "secs", 2,
+               "shot", "Left ramp", "secs", 2, "shot", "Maser target", "secs", 2, "shot", "Maser target", "secs", 2)
+    def slot(seg, slug):                 # the slot the mode's badge was last shown in within a stretch of the run
+        hits = re.findall(r"PadMode_Progress_S(\d)_%s 1" % slug, seg)
+        return hits[-1] if hits else None
+    masers = [m.start() for m in re.finditer(r">> shot Maser target", out)]
+    a = out[out.index(">> shot Powerline left"):masers[0]]
+    b = out[masers[0]:out.index(">> shot Left ramp")]
+    c = out[out.index(">> shot Left ramp"):masers[1]]
+    d = out[masers[1]:masers[2]]
+    assert slot(a, "ghidorah_heads") == "1"
+    assert slot(b, "maser_barrage") == "1" and slot(b, "ghidorah_heads") == "2"
+    assert slot(c, "biollante") in ("1", "2") and int(slot(c, "ghidorah_heads")) >= 3   # others note on a ramp too
+    assert slot(d, "maser_barrage") == "1"                                           # its badge moves up with its note
+    assert re.search(r"WORDS PadMode_Progress_S\d_Num: 5$", c, re.M)   # a code mode's number leads its big line
+    after = out[out.index("[MASER BARRAGE] START"):]
+    assert "SHOW PadMode_Progress 0" in after and re.search(r"PadMode_Progress_S\d_maser_barrage 0", after)
+
+
 def test_ghidorah_counts_the_powerlines_on_its_hud_until_it_starts(harness):
     out = play(harness, "shot", "Powerline left", "secs", 1, "shot", "Powerline right", "secs", 3)
     s = "ghidorah_heads"
     first = _at(out, "[KING GHIDORAH] powerlines 1 of 3")
-    assert _soon(hud_at(out, s, "Title", "POWERLINES 1 OF 3"), first)
-    assert hud_said(out, s, "Title", "POWERLINES 2 OF 3") and hud_said(out, s, "Line", "KING GHIDORAH")
+    assert _soon(hud_at(out, s, "Award", "POWERLINES 1 OF 3"), first)
+    assert hud_said(out, s, "Award", "POWERLINES 2 OF 3") and hud_said(out, s, "AwardSub", "KING GHIDORAH")
     second = _at(out, "[KING GHIDORAH] powerlines 2 of 3")
     assert any(second + 1950 <= t <= second + 2050 for t in _hid(out, s))    # a note, then hidden again
     assert not has(out, "KING GHIDORAH", "START")
@@ -377,8 +399,8 @@ def test_oxygen_destroyer_starts_on_25_left_spinner_spins_and_not_on_the_godzill
     o, s = "OXYGEN DESTROYER", "oxygen_destroyer"
     out = play(harness, *SPINS[:48], "secs", 1, *GT, *GT, *GT, "secs", 1, "shot", "Left spinner", "secs", 1)
     assert has(out, o, "Left spinner 5 of 25 (player 1)") and has(out, o, "Left spinner 20 of 25 (player 1)")
-    assert hud_said(out, s, "Title", "24 SPINS TO GO") and hud_said(out, s, "Title", "1 SPIN TO GO")
-    assert hud_said(out, s, "Line", "OXYGEN DESTROYER")
+    assert hud_said(out, s, "Award", "24 SPINS TO GO") and hud_said(out, s, "Award", "1 SPIN TO GO")
+    assert hud_said(out, s, "AwardSub", "OXYGEN DESTROYER")
     starts = [int(t) for t in re.findall(r"^\s*(\d+) \[OXYGEN DESTROYER\] START", out, re.M)]
     gts = [int(t) for t in re.findall(r"^\s*(\d+) >> shot Godzilla target", out, re.M)]
     spins = [int(t) for t in re.findall(r"^\s*(\d+) >> shot Left spinner", out, re.M)]
@@ -466,7 +488,7 @@ def test_maser_barrage_starts_on_the_maser_target_never_on_the_skill_shot(harnes
     out = play(harness, "shot", "Maser target", "ms", 300, "shot", "Maser target", "ms", 300, "shot", "Maser target",
                "secs", 1)
     assert has(out, "MASER BARRAGE", "START (Maser target)")
-    assert hud_said(out, "maser_barrage", "Title", "MASER 1 OF 3") and hud_said(out, "maser_barrage", "Title", "MASER 2 OF 3")
+    assert hud_said(out, "maser_barrage", "Award", "MASER 1 OF 3") and hud_said(out, "maser_barrage", "Award", "MASER 2 OF 3")
 
 
 def test_a_step_that_counts_puts_a_short_clock_back_to_ten_seconds(harness):
@@ -495,8 +517,8 @@ def test_final_wars_lights_from_the_other_three_and_is_played_phase_by_phase(har
     f, s = "FINAL WARS", "final_wars"
     assert out.index("FINAL WARS IS LIT") < out.index("[FINAL WARS] START")
     assert has(out, f, "FINAL WARS IS LIT for player 1 (3 of 3 played, 0 won)")
-    note = hud_at(out, s, "Title", "FINAL WARS IS LIT")
-    assert note and note < _at(out, "[FINAL WARS] START") and hud_said(out, s, "Line", "SHOOT THE BUILDING")
+    note = hud_at(out, s, "Award", "FINAL WARS IS LIT")
+    assert note and note < _at(out, "[FINAL WARS] START") and hud_said(out, s, "AwardSub", "SHOOT THE BUILDING")
     assert has(out, f, "START (Building): player 1")
     assert has(out, f, "PHASE 1 (INVASION): 25 s")
     assert has(out, f, "ADD TIME: Shield target left +3 s (1 of 3 this phase)")
@@ -640,25 +662,24 @@ def test_a_note_is_not_shown_while_the_games_mode_has_the_middle(harness):
     out = play(harness, "battle", 1, "secs", 1, "shot", "Powerline left", "secs", 2, "battle", 0, "secs", 1)
     t0, t1 = _at(out, ">> battle 1"), _at(out, ">> battle 0")
     assert has(out, "KING GHIDORAH", "powerlines 1 of 3 (player 1)")
-    assert not [ms for ms, w in hud(out, "ghidorah_heads", "Title") if t0 <= ms < t1 and w == "POWERLINES 1 OF 3"]
+    assert not [ms for ms, w in hud(out, "ghidorah_heads", "Award") if t0 <= ms < t1 and w == "POWERLINES 1 OF 3"]
 
 
-def test_a_note_up_when_the_games_mode_begins_waits_off_the_glass(harness):
-    """a note already up when one of the game's modes begins: its words are blanked (the HUD says why)"""
+def test_a_note_up_when_the_games_mode_begins_stays_on_the_glass(harness):
+    """PAD-680: a note already up when one of the game's modes begins stays up for its time (PAD-390 blanked it)"""
     out = play(harness, "shot", "Powerline left", "secs", 0.5, "battle", 1, "secs", 1)
     t = _at(out, ">> battle 1")
-    assert [ms for ms, w in hud(out, "ghidorah_heads", "Title") if ms < t and w == "POWERLINES 1 OF 3"]
-    assert has(out, "KING GHIDORAH",
-               "hud ghidorah_heads: its note waits while the game's mode has the middle of the screen")
-    blank = [ms for ms, w in hud(out, "ghidorah_heads", "Title") if ms >= t and w.strip() == ""]
-    assert blank and blank[0] <= t + 100
+    assert [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms < t and w == "POWERLINES 1 OF 3"]
+    assert not has(out, "KING GHIDORAH", "its note waits")
+    blank = [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms >= t and w.strip() == ""]
+    assert not [b for b in blank if b < t + 900]                        # its 1.5 s run on through the battle
 
 
 def test_the_final_wars_note_waits_for_another_modes_total_to_go(harness):
     out = play(harness, "trigger", "final_wars.light", "trigger", "oxygen_destroyer.start", "secs", 9,
                "trigger", "oxygen_destroyer.stop", "secs", 12)
     end_ms = int(re.search(r"^\s*(\d+) \[OXYGEN DESTROYER\] END", out, re.M).group(1))
-    note = hud_at(out, "final_wars", "Title", "FINAL WARS IS LIT")
+    note = hud_at(out, "final_wars", "Award", "FINAL WARS IS LIT")
     assert note, "the note never showed"
     assert note >= end_ms + 9900      # after OXYGEN DESTROYER's total (10 s), not over it
     hidden = [t for t in _hid(out, "oxygen_destroyer") if t > end_ms]
@@ -1336,11 +1357,11 @@ def test_meltdown_ten_captive_ball_hits_make_it_ready_and_the_next_starts_a_thre
     for k in range(1, 11):
         assert has(out, "MELTDOWN", "captive ball %d of 10 (player 1)" % k)
     for left in range(1, 10):                                          # each hit says how many are left
-        assert hud_said(out, s, "Title", "%d MORE FOR MELTDOWN" % left)
+        assert hud_said(out, s, "Award", "%d MORE FOR MELTDOWN" % left)
     ready = _at(out, "[MELTDOWN] MELTDOWN IS READY for player 1")
     assert ready == hits[9]
-    assert _soon(hud_at(out, s, "Title", "MELTDOWN IS READY"), ready)
-    assert hud_said(out, s, "Line", "HIT THE CAPTIVE BALL")
+    assert _soon(hud_at(out, s, "Award", "MELTDOWN IS READY"), ready)
+    assert hud_said(out, s, "AwardSub", "HIT THE CAPTIVE BALL")
     start = _at(out, "[MELTDOWN] START")
     assert start == hits[10]                                           # the eleventh hit, not the tenth
     assert _at(out, "MULTIBALL 3 balls, save 15 s") == start
@@ -1945,7 +1966,7 @@ def test_spacegodzilla_locks_get_harder_to_light_each_multiball(harness):
     # a powerline that lights a lock is also one of KING GHIDORAH's three: its "POWERLINES 1 OF 3" has the HUD for a
     # moment, so the crystals' words show on a Big loop a little later
     out = play(harness, "shot", "Powerline left", "secs", 3, *SG_LOOP, "secs", 1)
-    assert hud_said(out, "spacegodzilla", "Title", "CRYSTAL 1 PLANTED")
+    assert hud_said(out, "spacegodzilla", "Award", "CRYSTAL 1 PLANTED")
 
 
 def test_spacegodzilla_towers_fall_the_super_is_the_sum_and_adds_a_ball(harness):
@@ -1993,7 +2014,7 @@ def test_kiryu_starts_on_thirty_mechagodzilla_spins_then_forty(harness):
     assert len(starts) == 2
     assert has(out, "KIRYU", "START (the Mechagodzilla spinner): player 1, 40 s") and has(out, "KIRYU", "next time 40 spins")
     assert has(out, "KIRYU", "Shield ramp spinner 40 of 40 (player 1)")
-    assert hud_said(out, "kiryu", "Title", "29 SPINS TO KIRYU") and hud_said(out, "kiryu", "Title", "1 SPIN TO KIRYU")
+    assert hud_said(out, "kiryu", "Award", "29 SPINS TO KIRYU") and hud_said(out, "kiryu", "Award", "1 SPIN TO KIRYU")
 
 
 def test_kiryu_charges_on_lit_shots_and_fires_at_the_captive_ball(harness):
@@ -2043,7 +2064,7 @@ def test_biollante_starts_on_six_ramps_then_eight(harness):
                *(["shot", "Right ramp", "ms", 300] * 8), "secs", 1)
     assert len(re.findall(r"\[BIOLLANTE\] START \(the ramps\)", out)) == 2
     assert has(out, "BIOLLANTE", "ramps 8 of 8 (player 1)") and has(out, "BIOLLANTE", "next time 8 ramps")
-    assert hud_said(out, "biollante", "Title", "5 RAMPS TO BIOLLANTE")
+    assert hud_said(out, "biollante", "Award", "5 RAMPS TO BIOLLANTE")
 
 
 def test_biollante_every_switch_feeds_the_sap_three_banks_bring_the_beast_and_the_final_blow(harness):
@@ -2125,7 +2146,7 @@ def test_a_meter_gives_way_to_another_modes_note_and_comes_back(harness):
     """kit_hud_meter (GODZILLA ANGRY's rage) is the politest thing on the glass: KING GHIDORAH's qualification note
     takes the place at once, and the meter is back when the note is gone."""
     out = play(harness, "secs", 1, *(["raw", "0x1"] * 10), "secs", 1, "shot", "Powerline left", "secs", 3)
-    note = hud_at(out, "ghidorah_heads", "Title", "POWERLINES 1 OF 3")
+    note = hud_at(out, "ghidorah_heads", "Award", "POWERLINES 1 OF 3")
     assert note is not None
     gone = [t for t in _hid(out, "godzilla_angry") if t <= note + 20]
     assert gone, "the meter did not give way"
@@ -2305,7 +2326,7 @@ def test_a_pack_mode_beginning_takes_the_glass_and_stops_the_last_ones_ending_cl
 def test_a_qualification_note_gives_way_to_a_mode_beginning(harness_plain):
     out = play(harness_plain, *(["raw", "0x20000", "tick", 1] * 3), "ms", 100, "trigger", "plain.start", "secs", 1)
     began = _at(out, "[PLAIN] START")
-    assert hud_said(out, "kiryu", "Title", "27 SPINS TO KIRYU")
+    assert hud_said(out, "kiryu", "Award", "27 SPINS TO KIRYU")
     assert has(out, "KIRYU", "hud kiryu: another mode began - its note gives way")
     assert _soon([t for t in _hid(out, "kiryu") if t >= began][0], began)
 

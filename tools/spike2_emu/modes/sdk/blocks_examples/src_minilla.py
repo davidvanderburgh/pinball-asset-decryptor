@@ -362,13 +362,13 @@ _TOP = ["shot", "Mecha exit top", "ms", 400]
 DESK = [
     # PAD-675: each ball's first Mecha exit top is its plunge: _TOP * 7 is the plunge and six
     ("the plunge is not a shot", _TOP * 6 + ["secs", 2],
-     ["Hud_Line: 5  -  MORE TO WAKE MINILLA", "Hud_Line: 1  -  MORE TO WAKE MINILLA"]),
+     ["Hud_AwardSub: 5  -  MORE TO WAKE MINILLA", "Hud_AwardSub: 1  -  MORE TO WAKE MINILLA"]),
     ("six shots the first time, twelve the second", _TOP * 7 + ["shot", "Mecha exit top", "secs", 2, "trigger", "minilla.stop",
                                                                 "secs", 4] + _TOP * 11 + ["secs", 3] + _TOP + ["secs", 2],
-     ["[MINILLA] START (its lit shot)", "END (trigger file)", "Hud_Title: TOP OF THE MECHA",
-      "Hud_Line: 1  -  MORE TO WAKE MINILLA", "Hud_Title: MINILLA IS LIT"]),
+     ["[MINILLA] START (its lit shot)", "END (trigger file)", "Hud_Award: TOP OF THE MECHA",
+      "Hud_AwardSub: 1  -  MORE TO WAKE MINILLA", "Hud_Award: MINILLA IS LIT"]),
     ("up the lane lights it", _TOP * 7 + ["shot", "Mecha exit top", "secs", 2],
-     ["Hud_Title: MINILLA IS LIT", "[MINILLA] START (its lit shot)", "LAMP MECHA LANE 40ff60 chase",
+     ["Hud_Award: MINILLA IS LIT", "[MINILLA] START (its lit shot)", "LAMP MECHA LANE 40ff60 chase",
       "Hud_Award: MINILLA HATCHES", "Hud_Line: SHOOT THE RAMPS, BIG LOOP OR BUILDING"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 + _STAGE4 + ["secs", 6],
      ["Hud_Line: SHOOT RIGHT RAMP, BIG LOOP OR BUILDING", "Hud_Line: SHOOT THE BIG LOOP OR BUILDING",

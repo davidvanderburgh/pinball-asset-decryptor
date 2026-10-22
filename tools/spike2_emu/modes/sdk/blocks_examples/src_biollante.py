@@ -434,12 +434,12 @@ _STAGE3 = _SHIELDS + _POWER + ["secs", 2]
 DESK = [
     # PAD-669: a multiball's Left ramps count for nothing: back to one ball, 1 more says 5 to go, no start
     ("no ramp counts in a multiball", ["balls", 2] + _shots("Left ramp", 6) + ["balls", 1, "secs", 1] + _shots("Left ramp", 1) + ["secs", 2],
-     ["Hud_Line: 5  -  SHOOT THE LEFT RAMP", "![BIOLLANTE] START (a block)"]),
+     ["Hud_AwardSub: 5  -  SHOOT THE LEFT RAMP", "![BIOLLANTE] START (a block)"]),
     ("six Left ramps the first time, twelve the second",
      _shots("Left ramp", 6) + ["secs", 1, "trigger", "biollante.stop", "secs", 4] +
      _shots("Left ramp", 11) + ["secs", 2] + _shots("Left ramp", 1) + ["secs", 2],
-     ["Hud_Title: RAMPS TO BIOLLANTE", "Hud_Line: 5  -  SHOOT THE LEFT RAMP", "[BIOLLANTE] START (a block)",
-      "Hud_Line: 11  -  SHOOT THE LEFT RAMP", "Hud_Line: 1  -  SHOOT THE LEFT RAMP", "SHIELD toward"]),
+     ["Hud_Award: RAMPS TO BIOLLANTE", "Hud_AwardSub: 5  -  SHOOT THE LEFT RAMP", "[BIOLLANTE] START (a block)",
+      "Hud_AwardSub: 11  -  SHOOT THE LEFT RAMP", "Hud_AwardSub: 1  -  SHOOT THE LEFT RAMP", "SHIELD toward"]),
     ("stage one then cash out", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
      ["Hud_Line: SHIELDS: 3 TO GO  POWERLINES: 3 TO GO", "Hud_Line: SHIELDS: 2 TO GO  POWERLINES: 3 TO GO",
       "Hud_Line: SHIELDS: 1 TO GO  POWERLINES: 3 TO GO", "Hud_Award: SAP JACKPOT X1",

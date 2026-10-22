@@ -403,19 +403,19 @@ _WINGS = ["shot", "Big loop", "ms", 600, "shot", "Mecha exit bottom", "ms", 600]
 DESK = [
     # PAD-669: a multiball's powerline hits count for nothing: back to one ball, 1 more says 5 to go, no start
     ("no hit counts in a multiball", ["balls", 2] + POWER6 + ["balls", 1, "secs", 1] + ["shot", "Powerline left"] + ["secs", 2],
-     ["Hud_Line: 5  -  TO SUMMON GHIDORAH", "![KING GHIDORAH] START (a block)"]),
+     ["Hud_AwardSub: 5  -  TO SUMMON GHIDORAH", "![KING GHIDORAH] START (a block)"]),
     # the Left powerline a third time does not count: ANOTHER POWERLINE
     ("the powerlines start it", ["shot", "Powerline left", "secs", 1, "shot", "Powerline left", "secs", 1] + POWER6 +
      ["secs", 5],
-     ["Hud_Title: POWERLINE HITS", "Hud_Line: 5  -  TO SUMMON GHIDORAH", "Hud_Title: ANOTHER POWERLINE",
-      "Hud_Line: 1  -  TO SUMMON GHIDORAH",
+     ["Hud_Award: POWERLINE HITS", "Hud_AwardSub: 5  -  TO SUMMON GHIDORAH", "Hud_Award: ANOTHER POWERLINE",
+      "Hud_AwardSub: 1  -  TO SUMMON GHIDORAH",
       "[KING GHIDORAH] START (a block)", "Hud_Award: GHIDORAH ATTACKS", "Hud_Line: SHOOT THE LEFT RAMP OR LEFT POWERLINE",
       "Hud_C1_Sub: >> LIT <<", "LAMP LEFT RAMP ffaa00 blink 700", "LAMP POWERLINE LEFT ffaa00 blink 700"]),
     # the next ball: each powerline twice does not start it again this game, four times does
     ("six hits the first time, twelve the second", POWER6 + ["trigger", "ghidorah_heads.stop", "secs", 4, "ball_end",
                                                              "secs", 2] + POWER6 + POWER6 + ["secs", 2],
-     ["[KING GHIDORAH] START (a block)", "END (trigger file)", "Hud_Line: 3  -  TO SUMMON GHIDORAH",
-      "Hud_Line: 1  -  TO SUMMON GHIDORAH"]),
+     ["[KING GHIDORAH] START (a block)", "END (trigger file)", "Hud_AwardSub: 3  -  TO SUMMON GHIDORAH",
+      "Hud_AwardSub: 1  -  TO SUMMON GHIDORAH"]),
     ("the heads, then cash out", POWER6 + _SEVER_ALL + ["secs", 7, "shot", "Right scoop", "secs", 5],
      ["SCORE +2000000", "SCORE +250000", "Hud_Award: LEFT HEAD -2", "Hud_AwardSub: AGAIN: LEFT RAMP OR LEFT POWERLINE",
       "Hud_Award: GLANCING BLOW", "Hud_AwardSub: NOW: LEFT RAMP OR LEFT POWERLINE",

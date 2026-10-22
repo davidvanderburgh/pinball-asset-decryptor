@@ -388,9 +388,9 @@ _SHOT3 = ["shot", AIM, "secs", 2, "shot", TARGET, "secs", 2]
 DESK = [
     # PAD-669: a multiball's Maser hits count for nothing: back to one ball, 1 more says 4 to go, no start
     ("no hit counts in a multiball", ["balls", 2] + MASER5 + ["balls", 1, "secs", 1] + _M + ["secs", 2],
-     ["Hud_Line: 4  -  MORE TO OPEN FIRE", "![MASER BARRAGE] START (a block)"]),
+     ["Hud_AwardSub: 4  -  MORE TO OPEN FIRE", "![MASER BARRAGE] START (a block)"]),
     ("five Maser hits start it", _M * 4 + ["shot", START_SHOT, "secs", 5],
-     ["Hud_Title: MASER TARGET", "Hud_Line: 4  -  MORE TO OPEN FIRE", "Hud_Line: 1  -  MORE TO OPEN FIRE",
+     ["Hud_Award: MASER TARGET", "Hud_AwardSub: 4  -  MORE TO OPEN FIRE", "Hud_AwardSub: 1  -  MORE TO OPEN FIRE",
       "[MASER BARRAGE] START (a block)", "Hud_Line: SHOOT THE LEFT RAMP", "LAMP LEFT RAMP 005aff blink 500",
       "Hud_C1_Sub: JACKPOT 5M", "Hud_C3_Label: BARRAGES", "Hud_C3_Sub: OF 2"]),
     # PAD-658: only the next shot lit, the line counting its window down; 19 s on, the window still holds
@@ -400,8 +400,8 @@ DESK = [
     # the next ball: five hits do not start it again this game, ten do
     ("five hits the first time, ten the second", MASER5 + ["trigger", "maser_barrage.stop", "secs", 4, "ball_end",
                                                            "secs", 2] + _M * 7 + ["secs", 1] + _M * 3 + ["secs", 2],
-     ["[MASER BARRAGE] START (a block)", "END (trigger file)", "Hud_Line: 3  -  MORE TO OPEN FIRE",
-      "Hud_Line: 1  -  MORE TO OPEN FIRE"]),
+     ["[MASER BARRAGE] START (a block)", "END (trigger file)", "Hud_AwardSub: 3  -  MORE TO OPEN FIRE",
+      "Hud_AwardSub: 1  -  MORE TO OPEN FIRE"]),
     ("a barrage, then the chain breaks", MASER5 +
      ["shot", "Right ramp", "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Building",
       "secs", 1, "shot", "Left ramp", "secs", 21, "shot", "Left ramp", "secs", 1],

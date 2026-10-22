@@ -726,11 +726,48 @@ def bar_gauge(p, ids, g, gauge, sec, textures):
     return gk
 
 
+#: PAD-680: the pack's progress panel - a column of badges at the right edge under the stock rage meter, each the
+#: badge a mode's timer wears (its panel lettered with its label, its icon disc) with the shots it still needs as the
+#: number (David: "make it an image like we do for when the mode timer is running and it just countdowns the shots
+#: needed, with a logo for King Kong or something on it ... that way we can show a handful of them at the same
+#: time"). Each slot holds every mode's badge, hidden; the kit shows one and writes the slot's number
+#: (intricate_kit.h, kit_prog_tick). Slots are a badge tall apart (TIMER2_DY); the right column is clear of the
+#: game's own words outside its battles, when the kit takes the panel down (slot 3 touches the live city's POWER
+#: label by a few pixels).
+PROGRESS_GROUP = "PadMode_Progress"
+PROGRESS_SLOTS = 4
+PROGRESS_X, PROGRESS_Y, PROGRESS_DY = 1160.0, 100.0, TIMER2_DY
+
+
+def progress_group(p, ids, huds, art, textures):
+    """The Sprite group ``PadMode_Progress`` (bytes): PROGRESS_SLOTS slot groups ``_S<k>``, each with a badge group
+    ``_S<k>_<slug>`` (panel + icon) a mode and the slot's number text ``_S<k>_Num``. A badge's geometry is the timer
+    badge's (hud_group): the panel at (-21, 267), the icon at (0, 281.8), the number at (68.6, 295.4) in its group."""
+    badges = {}
+    for slug, spec in huds:
+        spec, timer = spec or {}, (spec or {}).get("timer") or {}
+        title = spec.get("title") or spec.get("name") or slug.upper()
+        badges[slug] = (badge_panel(art["panel"], art["font"], timer.get("label") or title),
+                        badge_disc(art["disc"], icon(timer.get("icon") or "xilien")))
+    slots = []
+    for k in range(PROGRESS_SLOTS):
+        sk = "%s_S%d" % (PROGRESS_GROUP, k + 1)
+        kids = [_group_node(p, ids, "%s_%s" % (sk, slug), [
+                    _bitmap_node(p, ids, "%s_%s_Panel" % (sk, slug), panel, -21.0, 267.0, textures),
+                    _bitmap_node(p, ids, "%s_%s_Icon" % (sk, slug), disc, 0.0, 281.8, textures)])
+                for slug, (panel, disc) in badges.items()]
+        kids.append(_text_node(p, ids, sk + "_Num", "00", (p.font[0], p.font[1]), 68.6, 295.4,
+                               (18.0, -2.0, 98.0, 67.2), tail=tuple(p.text_tail)))
+        slots.append(_group_node(p, ids, sk, kids, PROGRESS_X + 21.0, PROGRESS_Y - 267.0 + PROGRESS_DY * k))
+    return _group_node(p, ids, PROGRESS_GROUP, slots)
+
+
 def build_huds(p, data, huds, font_scene):
     """(library entry, [group bytes], {slug: hud_names}) for ``huds`` = [(slug, spec)] in the profiled
     scene ``data`` (``p`` its profile, rebased when ``data`` has grown): the game font carried from
-    ``font_scene`` (the bytes of :data:`GAME_FONT_SCENE`) and one HUD group per mode. Called by
-    :func:`scene_write.add_screens`, which splices them in with the screens and clips in one pass."""
+    ``font_scene`` (the bytes of :data:`GAME_FONT_SCENE`), one HUD group per mode and (PAD-680) the pack's
+    progress panel. Called by :func:`scene_write.add_screens`, which splices them in with the screens and
+    clips in one pass."""
     if not p.scene_id.startswith("32e6ae28"):
         raise HudError("a mode's HUD goes in Godzilla's slide-outs scene 32e6ae28, not %s" % p.label)
     base = p.first_free_id + FONT_BASE_GAP
@@ -748,6 +785,8 @@ def build_huds(p, data, huds, font_scene):
             raise HudError("the HUD scene already has %s" % name)
         groups.append(hud_group(p, ids, slug, spec or {}, fonts, art, textures))
         names[slug] = hud_names(slug)
+    if huds and SW.string(PROGRESS_GROUP) not in data:
+        groups.append(progress_group(p, ids, huds, art, textures))
     # No byte search for the ids (a screen's seven are checked that way): two thousand FLAG|id words
     # meet the textures' random bytes. The profile's first_free_id is above every id the file uses,
     # and ours start FONT_BASE_GAP past it, clear of the screens' (7 each) and a graft's.

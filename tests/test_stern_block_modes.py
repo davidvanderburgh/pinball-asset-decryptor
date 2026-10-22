@@ -560,8 +560,8 @@ def test_a_start_waits_out_a_multiball_and_the_next_one_after_it_starts_it(tmp_p
     ], seconds=0, wait_multiball=True)
     out = play(tmp_path, p, "balls", 2, "shot", "Left ramp", "multiball", 1, "balls", 1, "shot", "Left ramp",
                "multiball", 0, "shot", "Left ramp")
-    # PAD-675: while the multiball runs the mode is out of play - its idle scripts do not run at all
-    assert out.count("] cannot\n") == 0 and out.count("] can\n") == 1
+    # PAD-680: through the multiball its idle scripts run on (they count, note and show); only the start waits it out
+    assert out.count("] cannot\n") == 2 and out.count("] can\n") == 1
     assert out.count("START (a block)") == 1
     assert out.index("START (a block)") > out.index(">> multiball 0")
     # without the option a multiball does not stop it
@@ -795,7 +795,7 @@ def test_give_way_waits_for_the_games_mode_and_ends_when_one_begins(tmp_path):
     out = play(tmp_path, prog(GATE, seconds=0, game_modes="give_way"),
                "battle", 1, "shot", "Building", "battle", 0, "balls", 2, "shot", "Building", "balls", 1,
                "shot", "Building", "shot", "Maser target", "timed", 1, "secs", 0.5, "shot", "Maser target")
-    assert "not started" not in out                              # PAD-675: in the battle it is out of play
+    assert "not started" in out                                  # PAD-680: the battle's Building counts, then waits
     assert out.count("START (a block)") == 1                     # the third Building: none running
     assert "gives way - one of the game's modes starting ends it" in out
     assert "END (the game's own mode began)" in out
@@ -803,7 +803,7 @@ def test_give_way_waits_for_the_games_mode_and_ends_when_one_begins(tmp_path):
     assert "BLOCK" not in out
 
 
-# ---- PAD-675: out of play while another mode runs; a switch hit counts ----------------------------------------
+# ---- PAD-675/680: counting through the game's modes, starting after them; a switch hit counts -----------------
 COUNT = [{"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [
     {"op": "change", "var": "n", "by": num(1)},
     {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "var", "name": "n"}, "b": num(2)},
@@ -811,13 +811,14 @@ COUNT = [{"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [
 NV = [{"name": "n", "reset": "game"}]
 
 
-def test_a_mode_that_waits_the_games_modes_out_counts_nothing_while_one_runs(tmp_path):
-    # David's machine (PAD-675): a lit mode's inserts flashed through a battle. Two Buildings in the battle count
-    # nothing; after it, two more start it
+def test_a_mode_that_waits_the_games_modes_out_counts_through_one_and_starts_after_it(tmp_path):
+    # David's machine (PAD-680): with nothing counted in a battle, and on Godzilla one runs most of a ball, no mode
+    # ever showed its progress. Two Buildings in the battle count (the start waits it out); after it, one starts it
     out = play(tmp_path, prog(COUNT, NV, seconds=5, game_modes="block"),
                "battle", 1, "shot", "Building", "shot", "Building", "secs", 1, "battle", 0, "secs", 1,
                "shot", "Building", "secs", 1)
-    assert "START" not in out
+    assert "still ready" in out
+    assert out.count("START (a block)") == 1 and out.index("START (a block)") > out.index(">> battle 0")
     out = play(tmp_path, prog(COUNT, NV, seconds=5, game_modes="block"),
                "battle", 1, "shot", "Building", "battle", 0, "secs", 1, "shot", "Building", "shot", "Building")
     assert out.count("START (a block)") == 1
@@ -879,7 +880,7 @@ def test_start_mode_now_does_not_wait_for_the_games_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_DUMP", str(dump))
     out = play(tmp_path, prog(GATE, seconds=0, game_modes="give_way"), "timed", 1, "shot", "Building",
                "trigger", "blk.start", "secs", 1)
-    assert "not started" not in out                              # PAD-675: out of play, the Building counts nothing
+    assert "not started" in out                                  # PAD-680: the Building counts, its start waits
     assert "START (trigger file)" in out
 
 
@@ -1061,6 +1062,13 @@ def test_the_hud_is_the_examples_hud_in_the_assets_file(tmp_path):
         assert f.read() == g.read()
     with open(path, encoding="utf-8") as f:
         assert '#include "intricate_kit.h"' in f.read()
+    # PAD-680: an app whose kit alone changed gives it to the mode before a build, its C unchanged
+    with open(os.path.join(folder, BM.KIT_FILE), "w", encoding="utf-8") as f:
+        f.write("/* an older app's kit */\n")
+    assert BM.refresh(project) == []
+    with open(os.path.join(folder, BM.KIT_FILE), encoding="utf-8") as f, \
+            open(os.path.join(SDK, "examples", BM.KIT_FILE), encoding="utf-8") as g:
+        assert f.read() == g.read()
     # switched off: no HUD in the assets, and the C no longer includes the kit
     p["hud"]["on"] = False
     BM.save(project, slug, p)
@@ -1197,10 +1205,10 @@ def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
          "seconds": 2}]})
     out = play(tmp_path, p, "shot", "Big loop", "secs", 3, slug="maser")
     note = out[out.index(">> shot Big loop"):]
-    # PAD-658: a note is lettered where the game letters its own mode titles, not over its live screen's words
-    assert "Hud_Title: MASER" in note and "Hud_Line: 1  -  TEST MODE" in note
+    # PAD-680: a note is in the award line, in the middle, as the code modes' were (PAD-658 had it in the title place)
+    assert "Hud_Award: MASER" in note and "Hud_AwardSub: 1  -  TEST MODE" in note
     assert "SHOW PadMode_maser_Hud 1" in note and "SHOW PadMode_maser_Hud 0" in note
-    assert "Hud_Award:  " in note                  # the award line stays clear
+    assert "Hud_Title: MASER" not in note
 
 
 def test_keep_at_least_puts_the_clock_up_only_when_it_is_under(tmp_path):
@@ -1218,22 +1226,20 @@ def test_keep_at_least_puts_the_clock_up_only_when_it_is_under(tmp_path):
     assert _hud_words(out[out.rindex(">> shot Big loop"):], "Timer_Num")[0] == "15"   # 10 s left: up to 15
 
 
-def test_a_note_waits_out_a_display_of_the_games(tmp_path):
-    """PAD-658 (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER CANNON CHARGING): with no mode running a note
-    still keeps off a display of the game's, and shows its whole time once that is gone."""
+def test_a_note_shows_at_once_over_a_display_of_the_games(tmp_path):
+    """PAD-680 (David, after PAD-658's notes waited out the game's displays: "i almost never saw on-screen progress
+    towards modes"): the game puts a screen up for nearly every shot, so a note shows at once, over it, for its time."""
     p = maser_hud()
     p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
         {"op": "hud_award", "text": "MASER", "value": {"k": "hits", "shot": "Big loop"}, "sub": "",
          "seconds": 2}]})
     out = play(tmp_path, p, "covered", 1, "shot", "Big loop", "secs", 4, "covered", 0, "secs", 3, slug="maser")
     under = out[out.index(">> shot Big loop"):out.index(">> covered 0")]
-    assert "its words wait while a display of the game's has the screen" in under
-    assert "Hud_Title: MASER" not in under and "SHOW PadMode_maser_Hud 0" not in under   # held, not timed out
-    after = out[out.index(">> covered 0"):]
-    assert "its words are back" in after and "Hud_Title: MASER" in after
-    back = _at(out, ">> covered 0")
-    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_maser_Hud 0", after, re.M)]
-    assert hidden and 1900 <= hidden[0] - back <= 2100, (back, hidden)
+    assert "its words wait while a display" not in under
+    assert "Hud_Award: MASER" in under
+    shot = _at(out, ">> shot Big loop")
+    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_maser_Hud 0", under, re.M)]
+    assert hidden and 1900 <= hidden[0] - shot <= 2100, (shot, hidden)
 
 
 def test_a_clip_behind_the_hud_as_the_mode_ends_plays_full_screen(tmp_path, monkeypatch):
@@ -1307,6 +1313,57 @@ def test_a_drain_takes_the_loop_with_its_total(tmp_path, monkeypatch):
     out = play(tmp_path, p, "shot", "Building", "secs", 2, "ball_end", "secs", 8)
     on = _at(out, "BALL END goes on")
     assert abs(_at(out, "BACKDROP OFF") - on) <= 40
+
+
+def _noting_prog():
+    p = maser_hud()
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "change", "var": "loops", "by": num(1)},
+        {"op": "hud_award", "text": "LOOPS", "value": var("loops"), "sub": "TO GO", "seconds": 3}]})
+    p["vars"].append({"name": "loops", "reset": "game"})
+    return p
+
+
+def test_a_note_asked_for_in_the_games_battle_shows_at_once(tmp_path):
+    """PAD-680 (David's card: no "3 more for KING KONG" - the game's own modes had the middle 39% of a game, and PAD-390
+    held every note through them): a note shows at once during the game's battles and modes too, as before PAD-390."""
+    out = play(tmp_path, _noting_prog(), "battle", 1, "secs", 0.5, "shot", "Big loop", "secs", 4,
+               "shot", "Big loop", "secs", 1, "battle", 0, "secs", 1)
+    battle = out[out.index(">> battle 1"):out.index(">> battle 0")]
+    assert "Hud_AwardSub: 1  -  TO GO" in battle and "Hud_AwardSub: 2  -  TO GO" in battle
+    assert "its note waits" not in out and "SHOW PadMode_blk_Hud 1" in battle
+
+
+def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
+    """PAD-680 (David's Premium: the game's timed modes held the middle 39% of a game and every note waited or
+    went): a mode's latest note stands on the pack's progress panel (PadMode_Progress, built into the HUD scene)
+    as one line, its number after it, until the mode starts; the panel is down during the game's battles and
+    while one of ours runs, and a game over clears it."""
+    out = play(tmp_path, _noting_prog(), "shot", "Big loop", "secs", 4, "shot", "Big loop", "secs", 1,
+               "battle", 1, "secs", 1, "battle", 0, "secs", 1, "shot", "Maser target", "secs", 1)
+    assert "progress panel found: 4 badge slot(s)" in out
+    assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in out[:out.index(">> shot Big loop")]     # its badges hidden at the find
+    first = out[out.index(">> shot Big loop"):out.rindex(">> shot Big loop")]
+    assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 1" in first and "WORDS PadMode_Progress_S1_Num: 1" in first
+    assert "SHOW PadMode_Progress 1" in first
+    assert "WORDS PadMode_Progress_S1_Num: 2" in out[out.rindex(">> shot Big loop"):]   # its badge, its newest note
+    battle = out[out.index(">> battle 1"):out.index(">> battle 0")]
+    assert "SHOW PadMode_Progress 0" in battle and "progress panel down for now" in battle
+    assert "SHOW PadMode_Progress 1" in out[out.index(">> battle 0"):out.index(">> shot Maser target")]
+    started = out[out.index(">> shot Maser target"):]
+    assert "START (a block)" in started and "SHOW PadMode_Progress 0" in started
+    assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in started and "WORDS PadMode_Progress_S1_Num:  " in started
+
+
+def test_every_note_under_a_display_of_the_games_shows_at_once(tmp_path):
+    """PAD-680 (emulator, the same shots on the 2026-10-07 code-mode card and on the blocks card: a note after 8 of 15
+    shots against 4): each note shows at once over the game's shot screen, the second as the first."""
+    out = play(tmp_path, _noting_prog(), "covered", 1, "shot", "Big loop", "secs", 4, "covered", 0, "secs", 1,
+               "covered", 1, "shot", "Big loop", "secs", 1, "covered", 0, "secs", 1)
+    first = out[out.index(">> shot Big loop"):out.index(">> covered 0")]
+    second = out[out.rindex(">> covered 1"):out.rindex(">> covered 0")]
+    assert "Hud_AwardSub: 1  -  TO GO" in first and "Hud_AwardSub: 2  -  TO GO" in second
+    assert "its words wait while a display" not in out
 
 
 def test_a_note_shows_over_the_modes_loop(tmp_path, monkeypatch):
@@ -1704,7 +1761,7 @@ def test_a_lit_mode_waits_out_the_games_own_modes_as_its_mini_wizards_do(tmp_pat
     p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
              seconds=5, game_modes="give_way")
     out = play(tmp_path, p, "way", 0, "shot", "Left ramp", "way", 1, "shot", "Left ramp")
-    assert "still ready" not in out                              # PAD-675: out of play, the shot counts nothing
+    assert "still ready" in out                                  # PAD-680: the shot counts, its start waits
     assert out.count("START (a block)") == 1 and out.index("START (a block)") > out.index(">> way 1")
     out = play(tmp_path, dict(p, game_modes="stack"), "way", 0, "shot", "Left ramp")
     assert "START (a block)" in out

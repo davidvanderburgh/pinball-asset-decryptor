@@ -91,13 +91,15 @@ def test_a_note_over_a_screen_of_the_games_goes_in_the_award_line(harness):
     assert has(out, "KING GHIDORAH", "hud ghidorah_heads: a screen of the game's has its words up - the note in the award line")
 
 
-def test_a_note_up_when_the_games_words_come_moves_to_the_award_line(harness):
+def test_a_note_up_when_the_games_words_come_stays_in_the_award_line(harness):
+    # PAD-680: a progress note is in the award line from the start (no longer the title place PAD-658 gave it), so
+    # the game's words coming leave it where it is, shown on through them
     out = play(harness, "shot", "Powerline left", "secs", 0.5, "words", 1, "secs", 1)
     t = _at(out, ">> words 1")
-    assert [ms for ms, w in hud(out, "ghidorah_heads", "Title") if ms < t and w == "POWERLINES 1 OF 3"]
-    moved = [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms >= t and w == "POWERLINES 1 OF 3"]
-    blank = [ms for ms, w in hud(out, "ghidorah_heads", "Title") if ms >= t and w.strip() == ""]
-    assert moved and moved[0] <= t + 100 and blank and blank[0] <= t + 100
+    award = hud(out, "ghidorah_heads", "Award")
+    assert [ms for ms, w in award if ms < t and w == "POWERLINES 1 OF 3"]
+    assert not [ms for ms, w in award if ms >= t and w.strip() == ""]
+    assert not [ms for ms, w in hud(out, "ghidorah_heads", "Title") if w == "POWERLINES 1 OF 3"]
 
 
 def test_a_running_mode_of_the_kit_steps_aside_and_runs_on(harness):

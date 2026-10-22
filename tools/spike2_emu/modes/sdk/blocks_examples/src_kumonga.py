@@ -339,8 +339,8 @@ _STAGE4 = ["shot", "Building", "ms", 500, "shot", "Right ramp", "ms", 500] * 3 +
 DESK = [
     ("six loops light it, the next one wakes her",
      ["shot", "Big loop", "secs", 1] * 6 + ["shot", "Big loop", "secs", 2],
-     ["Hud_Title: SHOOT THE BIG LOOP", "Hud_Line: 5  -  MORE TO WAKE KUMONGA", "Hud_Line: 1  -  MORE TO WAKE KUMONGA",
-      "Hud_Title: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)", "SHIELD toward",
+     ["Hud_Award: SHOOT THE BIG LOOP", "Hud_AwardSub: 5  -  MORE TO WAKE KUMONGA", "Hud_AwardSub: 1  -  MORE TO WAKE KUMONGA",
+      "Hud_Award: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)", "SHIELD toward",
       "Hud_Title: KUMONGA: THE WEB", "Hud_Line: ANY LIT SHOT: 5 TO GO"]),
     # her regrowth is a window (20 s): the torn Left ramp webbed again
     ("the web grows back", _START + ["shot", "Left ramp", "secs", pack.WINDOW_S + 3],
@@ -372,7 +372,7 @@ def build():
 #: PAD-658: as a Pro gets it - the spinner on the shield ramp is the Pro's Right spinner, and its shields are fixed
 DESK_PRO = [
     ("six loops light it on the Pro", ["shot", "Big loop", "secs", 1] * 6 + ["shot", "Big loop", "secs", 2],
-     ["Hud_Title: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)"]),
+     ["Hud_Award: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)"]),
     ("the web on the fixed shields", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
      ["Hud_Title: KUMONGA RETREATS", "SCORE +20000000"]),
 ]

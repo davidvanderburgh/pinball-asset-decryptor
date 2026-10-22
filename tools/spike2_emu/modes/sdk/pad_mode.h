@@ -148,8 +148,13 @@ int pm_sound_stop(unsigned request);     /* stop every channel playing it; 1 if 
  * Sets the request's priority and flags (-1 leaves one as it is) and returns the old pair as
  * priority << 8 | flags, or -1 when the port has no request table (data sound_requests) or
  * the record does not look like one. Only for a request the game never plays itself, such
- * as the carrier of a sound of your own. */
+ * as the carrier of a sound of your own - and give it back with pm_sound_priority_stock once
+ * your sound is over (PAD-682: a carrier can still be one the game plays where no census
+ * reached; Bond LE's music carrier 94 is Bird One Multiball's music). */
 int pm_sound_priority(unsigned request, int priority, int flags);
+/* PAD-682: the card's own priority and flags back on `request` (as pm_sound_priority first found them; a swap still
+ * armed on it puts those back too when it lapses). Returns the pair it had, or -1 without a request table. */
+int pm_sound_priority_stock(unsigned request);
 /* Item 150 follow-up (MODE_SDK.md "A music bed of your own"):
  * pm_sound_sid points `request` at ONE sound id until it is called again with sid 0, which puts
  * the request's own list back. The one music carrier plays a different bed for every mode this

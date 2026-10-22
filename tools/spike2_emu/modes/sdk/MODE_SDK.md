@@ -619,6 +619,7 @@ yours at the carriers' stock priority 2 is dropped while any other speech plays.
 | To... | Call |
 |---|---|
 | change how a request competes | `pm_sound_priority(request, priority, flags)` - -1 leaves one as it is; returns the old `priority << 8 \| flags`, or -1 without `data sound_requests` / `sound_request_count` in the port |
+| give a request its own priority and flags back (PAD-682) | `pm_sound_priority_stock(request)` - as `pm_sound_priority` first found them, also on a swap still armed on it; a mode's music carrier gets them back once its music has faded at the end, since a carrier can still be one the game plays (Bond LE 1.06: 94 is Bird One Multiball's music, and with its steal flag left cleared the game's next music could not take the bus from it) |
 
 start and end calls to priority 4, shot calls to priority 3, all three without the steal flag
 since the item 150 follow-up (with it, an equal-priority sound cut them mid-sound), and the music
